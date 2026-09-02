@@ -6,7 +6,7 @@ Implement ATI in small, reviewable increments. Every PR must preserve repository
 
 Do not allow coding agents to invent major architecture contrary to the authoritative documentation.
 
-## PR 1 — Repository bootstrap and development environment
+## PR 1 — Repository bootstrap and development environment [DONE]
 
 Deliver:
 
@@ -22,7 +22,7 @@ Deliver:
 - CI baseline;
 - SPDX/license files.
 
-## PR 2 — Frontend themes and user preference
+## PR 2 — Frontend themes and user preference [DONE]
 
 Deliver:
 
@@ -42,7 +42,7 @@ Theme styling must preserve the explicit visual separation between evidence,
 research context, and ATI assessment. The `wargames` look may draw on generic
 1980s terminal aesthetics but must not copy protected movie assets.
 
-## PR 3 — Core domain model
+## PR 3 — Core domain model [DONE]
 
 Implement typed domain models/enums for:
 
