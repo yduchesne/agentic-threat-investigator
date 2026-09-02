@@ -43,8 +43,7 @@ Before considering work complete, run the repository canonical quality command, 
 
 Do not make a quality gate pass by weakening configuration, adding broad suppressions, skipping tests, or deleting assertions without independent justification.
 
-The
-Pyt n code must use type hints.
+- Source code must use type hints.
 
 ## Tests
 
@@ -59,3 +58,5 @@ Integration tests use isolated PostgreSQL + pgvector storage and must never use 
 When implementation intentionally changes a confirmed contract, update the relevant authoritative document in the same PR.
 
 Do not add speculative functionality to documentation or implementation.
+
+- Python interfaces, modules, public funtions and methods must have docstrings.
