@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ati}
+      POSTGRES_USER: ${POSTGRES_USER:-ati}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "${ATI_POSTGRES_HOST_PORT:-54320}:5432"
+    volumes:
+      - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/postgres/data:/var/lib/postgresql/data"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [ati]
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [ati]
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
+    command: ["uvicorn", "agentic_threat_investigator.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    ports: ["8000:8000"]
+    networks: [ati]
+
+  worker:
+    build: .
+    command: ["python", "-c", "print('ATI worker bootstrap')"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [ati]
+
+  scheduler:
+    build: .
+    command: ["python", "-c", "print('ATI scheduler bootstrap')"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [ati]
+
+  frontend:
+    build: ./frontend
+    depends_on: [api]
+    ports: ["8080:80"]
+    networks: [ati]
+
+networks:
+  ati:
+    driver: bridge
