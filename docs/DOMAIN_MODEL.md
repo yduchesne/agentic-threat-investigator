@@ -3,14 +3,14 @@
 ## User preferences
 
 ```python
-class UiLook(str, Enum):
+class UiTheme(str, Enum):
     DARKNITE = "darknite"
     BRIGHTLIGHT = "brightlight"
     WARGAMES = "wargames"
 
 class UserPreferences(BaseModel):
     user_id: UUID
-    ui_look: UiLook = UiLook.DARKNITE
+    ui_theme: UiTheme = UiTheme.DARKNITE
 ```
 
 `UserPreferences` is the typed, mutable collection of presentation preferences
@@ -23,7 +23,7 @@ A separate preference ID is intentionally unnecessary. The preference row is
 created transactionally with its User so application code does not need to
 interpret a missing row as a second preference state.
 
-`DARKNITE` is the domain and database default. `ui_look` is a typed column, not
+`DARKNITE` is the domain and database default. `ui_theme` is a typed column, not
 an arbitrary string or unstructured user-attributes dictionary. Updating it
 changes presentation only and has no effect on evidence, research, assessment,
 authorization, or investigation behavior.
@@ -33,7 +33,7 @@ restoration consistency; normal application queries exclude preferences whose
 User is deleted. Preference changes are ordinary authenticated application
 mutations and do not permit the frontend to write directly to persistence.
 
-An alternative would be to place `ui_look` directly on User. That is simpler
+An alternative would be to place `ui_theme` directly on User. That is simpler
 while it is the only preference and makes the one-to-one invariant implicit.
 ATI uses the requested separate `UserPreferences` aggregate to keep mutable
 presentation configuration out of authentication identity. The
