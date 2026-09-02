@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-threat-investigator"
+version = "0.1.0"
+description = "An open-source threat investigation workbench."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "AGPL-3.0-only" }
+authors = [{ name = "Agentic Threat Investigator contributors" }]
+dependencies = [
+  "alembic>=1.14,<2",
+  "fastapi>=0.115,<1",
+  "pydantic-settings>=2.6,<3",
+  "psycopg[binary]>=3.2,<4",
+  "sqlalchemy>=2.0,<3",
+  "uvicorn[standard]>=0.32,<1",
+]
+
+[dependency-groups]
+dev = [
+  "black>=24.10,<26",
+  "isort>=5.13,<6",
+  "mypy>=1.13,<2",
+  "pylint>=3.3,<4",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+  "pytest-asyncio>=0.24,<1",
+  "pre-commit>=4,<5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_threat_investigator"]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+mypy_path = "src"
+
+[tool.pylint.main]
+py-version = "3.12"
+source-roots = ["src"]
+load-plugins = []
+fail-under = 10.0
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+markers = [
+  "unit: fast isolated tests",
+  "integration: tests requiring external services",
+  "provider_contract: provider contract tests",
+]
+addopts = "--strict-markers"
+asyncio_mode = "strict"
+
+[tool.coverage.run]
+source = ["agentic_threat_investigator"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+
+[tool.uv]
+default-groups = ["dev"]

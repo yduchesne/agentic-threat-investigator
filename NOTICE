@@ -1,0 +1,8 @@
+Agentic Threat Investigator (ATI)
+
+Copyright (C) 2026 Agentic Threat Investigator contributors.
+ATI is licensed under the GNU Affero General Public License, version 3,
+only. See LICENSE.
+
+Third-party dependencies retain their own licenses. External data sources
+are not bundled; see docs/LICENSING.md for attribution and usage guidance.
