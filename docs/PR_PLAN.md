@@ -6,7 +6,7 @@ Implement ATI in small, reviewable increments. Every PR must preserve repository
 
 Do not allow coding agents to invent major architecture contrary to the authoritative documentation.
 
-## PR 1 — Repository bootstrap and development environment
+## PR 1 — Repository bootstrap and development environment [DONE]
 
 Deliver:
 
@@ -22,7 +22,7 @@ Deliver:
 - CI baseline;
 - SPDX/license files.
 
-## PR 2 — Core domain model
+## PR 2 — Core domain model [DONE]
 
 Implement typed domain models/enums for:
 
@@ -36,7 +36,7 @@ Implement typed domain models/enums for:
 
 No infrastructure coupling.
 
-## PR 3 — Database migrations and repository contracts
+## PR 3 — Database migrations and repository contracts [DONE]
 
 Deliver:
 
