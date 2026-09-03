@@ -6,12 +6,15 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 command -v uv >/dev/null || { echo "uv is required; run ./install.sh" >&2; exit 1; }
 command -v podman >/dev/null || { echo "podman is required; run ./install.sh" >&2; exit 1; }
-if podman compose version >/dev/null 2>&1; then
-  COMPOSE=(podman compose)
-elif command -v podman-compose >/dev/null 2>&1; then
+# Prefer the native podman-compose provider: the `podman compose` wrapper may
+# delegate to Docker Compose, which requires the Podman socket to be running
+# and fails under rootless Podman when it is not.
+if command -v podman-compose >/dev/null 2>&1; then
   COMPOSE=(podman-compose)
+elif podman compose version >/dev/null 2>&1; then
+  COMPOSE=(podman compose)
 else
-  echo "podman compose (or podman-compose) is required; run ./install.sh" >&2; exit 1
+  echo "podman-compose (or podman compose with a working provider) is required; run ./install.sh" >&2; exit 1
 fi
 
 # Isolation guarantees (docs/TESTING.md): unique Compose project, unique test
