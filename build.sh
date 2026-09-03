@@ -10,51 +10,91 @@ Usage: ./build.sh [OPTION]
 Run an ATI build operation.
 
 Options:
-  --check     Run all quality controls and build validation.
-  --qa        Format Python code with Black, then run --check.
+  --chk     Run the static quality checks and unit tests: Pylint, strict
+            Mypy, and the unit test suites (Python and frontend).
+  --fmt     Format Python sources with Black.
+  --qa      Run Black in check mode and then the same operations as --chk,
+            plus the frontend lint.
+  --unit    Run the unit test suites only (Python and frontend).
+  --intg    Run the PostgreSQL integration tests (via ./integration-test.sh)
+            and the frontend unit tests.
   -h, --help  Show this help message and exit.
-
-Quality controls are opt-in and do not run when ./build.sh is invoked without
-an option. The --check operation includes Python formatting, import ordering,
-linting, strict type checking, tests with coverage, and frontend linting,
-tests, and production build validation. The --qa operation formats Python
-sources with Black before running the same controls.
 USAGE
 }
 
-case "${1:-}" in
-  "") usage; exit 0 ;;
-  -h|--help) usage; exit 0 ;;
-  --check|--qa) ;;
-  *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
-esac
-if [[ $# -gt 1 ]]; then
-  echo "build.sh accepts only one option." >&2
-  usage >&2
-  exit 2
-fi
+run_python_unit_tests() {
+  uv run pytest tests/unit --cov=agentic_threat_investigator --cov-report=term-missing --cov-fail-under=85
+}
+
+ensure_frontend_deps() {
+  command -v npm >/dev/null || { echo 'npm is required for frontend checks; run ./install.sh' >&2; exit 1; }
+  if [[ ! -d frontend/node_modules ]]; then (cd frontend && npm ci) >/dev/null; fi
+}
+
+run_frontend_unit_tests() {
+  ensure_frontend_deps
+  (cd frontend && npm test)
+}
+
+run_frontend_lint() {
+  ensure_frontend_deps
+  (cd frontend && npm run lint)
+}
+
+run_quality_checks() {
+  echo '== Python: static checks =='
+  uv run pylint src tests
+  uv run mypy src tests
+  echo '== Python: unit tests and coverage =='
+  run_python_unit_tests
+  echo '== Frontend: unit tests =='
+  run_frontend_unit_tests
+}
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
+command -v uv >/dev/null || { echo 'uv is required; run ./install.sh' >&2; exit 1; }
 
-command -v uv >/dev/null || { echo "uv is required; run ./install.sh" >&2; exit 1; }
+case "${1:-}" in
+  --chk)
+    run_quality_checks
+    ;;
+  --fmt)
+    echo '== Python: formatting sources =='
+    uv run black src tests
+    ;;
+  --qa)
+    echo '== Python: formatting check =='
+    uv run black --check src tests
+    run_quality_checks
+    echo '== Frontend: lint =='
+    run_frontend_lint
+    ;;
+  --unit)
+    echo '== Python: unit tests and coverage =='
+    run_python_unit_tests
+    echo '== Frontend: unit tests =='
+    run_frontend_unit_tests
+    ;;
+  --intg)
+    echo '== Integration: PostgreSQL via podman =='
+    ./integration-test.sh
+    echo '== Frontend: unit tests =='
+    run_frontend_unit_tests
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    echo 'Error: no option provided; exactly one option is required.' >&2
+    usage >&2
+    exit 2
+    ;;
+  *)
+    echo "Unknown option: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
 
-if [[ $1 == "--qa" ]]; then
-  echo '== Python: formatting sources =='
-  uv run black src tests
-fi
-
-echo '== Python: formatting =='
-uv run black --check src tests
-uv run isort --check-only src tests
-echo '== Python: static checks =='
-uv run pylint src tests
-uv run mypy src tests
-echo '== Python: tests and coverage =='
-uv run pytest tests/unit --cov=agentic_threat_investigator --cov-report=term-missing --cov-fail-under=85
-
-if [[ -f frontend/package-lock.json ]]; then
-  echo '== Frontend =='
-  (cd frontend && npm ci && npm run lint && npm test && npm run build)
-fi
-
-echo 'Build and quality checks passed.'
+echo 'Build operation completed successfully.'

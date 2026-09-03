@@ -16,9 +16,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: uv sync --locked
-      - run: npm ci
-        working-directory: frontend
-      - run: ./build.sh --check
+      # frontend dependencies are installed by ./build.sh --qa itself when
+      # node_modules is absent; no standalone `npm ci` step is needed.
+      - run: ./build.sh --qa
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -31,10 +31,12 @@ jobs:
         with: { python-version: '3.12' }
       - uses: astral-sh/setup-uv@v5
         with: { version: '0.5.30' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
       # ubuntu-latest ships podman and a docker-compose CLI plugin. The native
       # podman-compose is installed explicitly (pinned to the validated
-      # version) so the test harness does not delegate to Docker Compose,
+      # version) so the integration stage does not delegate to Docker Compose,
       # which requires the Podman socket and fails under rootless Podman.
       - run: uv tool install podman-compose==1.0.6
       - run: uv sync --locked
-      - run: ./integration-test.sh
+      - run: ./build.sh --intg

@@ -67,4 +67,4 @@ cd "$ROOT_DIR"
 uv sync --locked
 if have npm && [[ -f frontend/package-lock.json ]]; then (cd frontend && npm ci); fi
 if have pre-commit; then pre-commit install; else uv run pre-commit install; fi
-printf 'Installation complete. Run ./build.sh --check to validate the project.\n'
+printf 'Installation complete. Run ./build.sh --qa to validate the project.\n'

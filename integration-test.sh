@@ -78,10 +78,19 @@ echo "== Applying Alembic migrations =="
 uv run alembic upgrade head
 
 echo "== Running integration tests =="
-# The authoritative 85% coverage gate is enforced by build.sh --check on the
+# The authoritative 85% coverage gate is enforced by build.sh --qa on the
 # unit suite; the integration suite validates database behavior against real
 # PostgreSQL, so coverage is reported without a standalone threshold here.
 uv run pytest tests/integration -m integration \
   --cov=agentic_threat_investigator --cov-report=term-missing --cov-fail-under=0
 
-echo "Integration tests passed."
+echo "== Building frontend production bundle =="
+# The deployable frontend artifact is only produced after the integration
+# tests have succeeded: type-checking and bundling run here, so a failing
+# integration run never yields a deployable dist/ bundle.
+command -v npm >/dev/null || { echo 'npm is required for the frontend build; run ./install.sh' >&2; exit 1; }
+if [[ ! -d frontend/node_modules ]]; then (cd frontend && npm ci) >/dev/null; fi
+(cd frontend && npm run build)
+
+echo "Integration tests passed; frontend production bundle built."
+
