@@ -196,7 +196,7 @@ ATI-owned containers run as non-root where practical.
 ATI does not require:
 
 - privileged containers;
-- Docker socket access;
+- Podman socket access;
 - host networking;
 - arbitrary host mounts;
 - unnecessary Linux capabilities.

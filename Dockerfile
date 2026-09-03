@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.12-slim
+FROM docker.io/library/python:3.12-slim
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src

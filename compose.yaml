@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:0.8.0-pg16
+    image: docker.io/pgvector/pgvector:0.8.1-pg18
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ati}
       POSTGRES_USER: ${POSTGRES_USER:-ati}
@@ -8,7 +8,7 @@ services:
     ports:
       - "${ATI_POSTGRES_HOST_PORT:-54320}:5432"
     volumes:
-      - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/postgres/data:/var/lib/postgresql/data"
+      - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/postgres/data:/var/lib/postgresql"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s

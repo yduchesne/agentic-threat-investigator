@@ -241,7 +241,7 @@ No observability backend is required for correct execution.
 - React + TypeScript.
 - React Flow.
 - Leaflet.
-- Docker Compose for local deployment.
+- Podman Compose for local deployment.
 
 ## Configuration architecture
 

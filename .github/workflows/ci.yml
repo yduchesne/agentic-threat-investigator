@@ -22,3 +22,17 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: astral-sh/setup-uv@v5
+        with: { version: '0.5.30' }
+      # ubuntu-latest ships podman; podman-compose provides the compose
+      # implementation that `podman compose` delegates to.
+      - run: uv tool install podman-compose
+      - run: uv sync --locked
+      - run: ./integration-test.sh

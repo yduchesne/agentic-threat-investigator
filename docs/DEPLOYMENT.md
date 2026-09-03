@@ -2,7 +2,7 @@
 
 ## v0.1 deployment target
 
-ATI v0.1 deploys locally with Docker Compose.
+ATI v0.1 deploys locally with Podman Compose.
 
 Containers are disposable. Durable data is not.
 
@@ -11,7 +11,7 @@ Containers are disposable. Durable data is not.
 ```text
 Host
  |
- +-- Docker Compose
+ +-- Podman Compose
  |    +-- ati-frontend
  |    +-- ati-api
  |    +-- ati-worker
@@ -87,9 +87,9 @@ This avoids container/network naming conflicts and accidental data sharing acros
 
 ## Data safety
 
-`docker compose down` must be safe for durable ATI data.
+`podman compose down` must be safe for durable ATI data.
 
-Persistent application data must not depend on Docker-managed anonymous/named-volume lifecycle.
+Persistent application data must not depend on Podman-managed anonymous/named-volume lifecycle.
 
 A deliberately destructive command such as:
 
@@ -169,7 +169,7 @@ A development override such as `compose.dev.yaml` may provide:
 - frontend dev server;
 - developer ports.
 
-Frontend developers may optionally run the frontend dev server on the host while Docker provides backend/database services.
+Frontend developers may optionally run the frontend dev server on the host while Podman provides backend/database services.
 
 ## Configuration
 
@@ -196,7 +196,7 @@ Do not commit `.env` or credentials.
 
 Use a private Compose network.
 
-Services address one another by Docker DNS names, not `localhost`.
+Services address one another by Podman network DNS names, not `localhost`.
 
 Host exposure:
 
@@ -263,7 +263,8 @@ Policy:
 - pinned supported Python version;
 - pinned supported Node version;
 - pinned PostgreSQL/pgvector image;
-- Docker Compose v2;
+- Podman with a Compose provider (`podman compose` via `podman-compose`, or an
+  external Compose implementation wired to the Podman socket);
 - committed Python lockfile;
 - committed frontend lockfile.
 

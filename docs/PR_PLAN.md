@@ -16,7 +16,7 @@ Deliver:
 - committed `uv.lock`;
 - Black/isort/Pylint/Mypy/Pytest/pytest-cov/pre-commit;
 - canonical `make quality` or equivalent;
-- Docker Compose baseline;
+- Podman Compose baseline;
 - backend/frontend skeletons;
 - environment configuration;
 - CI baseline;

@@ -34,7 +34,7 @@ Unit tests are kept under `tests/unit/` and integration tests under
 ./integration-test.sh
 ```
 
-The local runtime is Docker Compose-based. Configure `ATI_DATA_DIR` and the
+The local runtime is Podman Compose-based. Configure `ATI_DATA_DIR` and the
 other values in `.env.example` in a local `.env` before using Compose.
 
 ATI is early-stage software; domain, persistence, provider, and agent features
