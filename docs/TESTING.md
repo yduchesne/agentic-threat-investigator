@@ -118,17 +118,13 @@ Test infrastructure such as fake providers, scenario builders, repositories, `Fa
 
 Pytest owns automated Python testing.
 
-Tests are organized into separate roots:
+Tests are organized into:
 
-- `tests/unit/` — unit tests;
-- `tests/integration/` — integration tests;
+- unit tests;
+- integration tests;
 - provider contract tests;
 - database/migration tests;
 - deterministic scenario-support tests.
-
-The default quality command runs only `tests/unit/`. Integration tests are run
-explicitly with `./integration-test.sh` so they cannot be collected as part of
-the unit-test run.
 
 Suggested markers:
 
@@ -294,7 +290,6 @@ Critical deterministic logic should receive especially strong coverage:
 - monitoring diff logic.
 
 Coverage is a diagnostic and quality gate, not a substitute for meaningful tests.
-The minimum unit-test coverage threshold is 85 percent.
 
 ## Pre-commit
 
@@ -312,10 +307,10 @@ CI remains authoritative.
 
 ## Canonical quality command
 
-The repository exposes one documented executable script:
+The repository exposes one documented command, for example:
 
 ```bash
-./build.sh --check
+make quality
 ```
 
 It should run the required source-quality/test checks in a stable order, conceptually:
@@ -395,3 +390,11 @@ A change is not complete until:
 4. strict typing is preserved;
 5. behavioral evaluation expectations are updated when agent semantics intentionally change;
 6. authoritative documentation is updated for deliberate contract changes.
+
+## Configuration tests
+
+Configuration tests must cover default/profile selection, shallow override semantics, invalid and missing profiles, malformed modules, non-mutation of input dictionaries, deterministic logging, and recursive sensitive-value redaction. Tests inject an environment mapping rather than mutating global process environment where practical. See `CONFIGURATION.md`.
+
+## Batch persistence and history tests
+
+Integration tests against pinned PostgreSQL 18 must exercise composite-array input, `unnest` staging with ordinality, temporary-table reconciliation, INSERT/UPDATE/UNCHANGED/CONFLICT outcomes, optimistic version conflict detection, set-based version allocation/history insertion, and large batches up to the configured application boundary. Tests must prove UNCHANGED rows receive no new version/history. JSONB diff tests cover scalar changes, additions/removals, missing versus JSON null, nested objects as atomic top-level values, excluded metadata fields, and empty diffs. No SQLite substitute is acceptable for these behaviors.
