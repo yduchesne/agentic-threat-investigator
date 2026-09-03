@@ -6,32 +6,6 @@ ATI v0.1 deploys locally with Docker Compose.
 
 Containers are disposable. Durable data is not.
 
-## Eventual production web deployment
-
-The frontend is a browser-based React application. "Desktop-first" describes
-the initial screen-size and interaction design; it does not require native
-desktop packaging. The frontend can eventually be served as a web application,
-with a reverse proxy serving its static assets and routing `/api/v1` requests
-to FastAPI.
-
-Public or multi-user production hosting is outside the confirmed v0.1 local
-deployment target. A future production deployment must define and validate, at
-minimum:
-
-- TLS termination and trusted-proxy behavior;
-- secure sessions, CSRF protection, authentication, and authorization;
-- trusted-host and CORS policies;
-- secrets management and credential rotation;
-- request rate, body-size, and timeout limits;
-- private database networking with no public PostgreSQL exposure;
-- durable backup, restore, monitoring, and operational logging procedures;
-- scaling and availability behavior for API, worker, and scheduler services;
-- an appropriate way for network users to obtain corresponding source as
-  required by AGPL-3.0-only.
-
-These requirements must be specified before treating the Docker Compose
-baseline as a production deployment architecture.
-
 ## Runtime topology
 
 ```text
@@ -305,17 +279,25 @@ Use explicit safeguards such as a test database name and unique Compose project.
 
 ## Developer commands
 
-The repository exposes simple documented script commands, for example:
+The repository should expose simple documented commands, for example:
 
 ```text
-./install.sh
-./build.sh
-
-docker compose up -d
-docker compose down
-docker compose run --rm migrate
+make up
+make down
+make migrate
+make test
+make integration-test
+make quality
+make backup
+make restore
 ```
 
-The exact runtime commands may grow as features are implemented, but developers
-and coding agents should have a single documented script command surface for
-installation and quality validation.
+The exact implementation may be Make/scripts, but developers and coding agents should have a single documented command surface.
+
+## Configuration profiles
+
+All ATI processes use the profile mechanism defined in `CONFIGURATION.md`. `ATI_CONFIG_PROFILE` selects the profile and defaults to `default`. Compose manifests should make the selected profile explicit where appropriate. Source-controlled profile modules contain no production secrets; secrets are supplied through deliberate runtime mechanisms.
+
+## Database baseline update
+
+ATI v0.1 targets a pinned PostgreSQL 18 image plus a verified compatible pgvector release. Batch size is an operational configuration value (for example `db_batch_size`) enforced by the application before composite-array submission to PostgreSQL; the exact default is benchmark-driven.

@@ -122,34 +122,85 @@ either commit together or not at all.
 
 Transactions must remain short.
 
-## Batch repositories
+## Batch persistence
 
-Batch repositories expose set-oriented `upsert_batch`.
+ATI assumes every batch may be large. Every batch persistence operation therefore follows one canonical PostgreSQL path; there is no alternate small-batch JSONB/CTE path.
 
-Implementation uses PostgreSQL stored functions.
+- The application enforces a configurable maximum batch size (for example `db_batch_size`) before invoking PostgreSQL.
+- The canonical Python-to-PostgreSQL transport is an array of a resource-specific PostgreSQL composite input type.
+- Stored functions expand the composite array with `unnest(... ) WITH ORDINALITY` into temporary staging tables.
+- Temporary tables are always used for batch input and reconciliation/work state.
+- The database performs current-state lookup, INSERT/UPDATE/UNCHANGED/CONFLICT classification, version allocation, diff generation, target mutation, history insertion, and result classification set-wise.
+- Python repositories are thin: normalize/serialize the batch, invoke the stored function, and deserialize the result.
+- Row-level triggers are not used for versioning or history. PL/pgSQL row loops are not used where set operations suffice.
+- The database may enforce a defensive hard ceiling larger than the application-configured batch size.
 
-Small/medium batches:
+### Composite-array input contract
 
-```text
-Python batch
- -> JSONB
- -> stored function
- -> INSERT ... ON CONFLICT / set-based merge
+Each batch resource defines a dedicated input composite type rather than using the target table row type. Database-owned fields such as `version`, `created_at`, `updated_at`, and deletion metadata are not caller inputs. Parallel arrays are not used because they introduce positional coupling.
+
+Conceptually:
+
+```sql
+CREATE TYPE ati.entity_batch_item AS (
+    id uuid,
+    entity_type text,
+    canonical_value text,
+    display_name text,
+    attributes jsonb,
+    content_hash bytea
+);
+
+CREATE FUNCTION ati.upsert_entities(
+    p_items ati.entity_batch_item[]
+) ...;
 ```
 
-Large batches may use:
+The stored function immediately stages the input set using `unnest(p_items) WITH ORDINALITY`. Ordinality may be retained for deterministic result/error correlation.
+
+### Reconciliation pipeline
 
 ```text
-COPY -> staging table -> merge
+composite[] input
+ -> UNNEST WITH ORDINALITY
+ -> temporary input table
+ -> join current target rows
+ -> temporary reconciliation/change table
+ -> classify INSERT / UPDATE / UNCHANGED / CONFLICT
+ -> allocate versions for changed rows only
+ -> compute old/new state and diff
+ -> set-based final target mutation
+ -> set-based immutable history insertion
+ -> batch result
 ```
 
-Batch results distinguish:
+For existing rows, reconciliation captures the observed current version. Final mutation verifies that the target version still equals that observed version; otherwise the row is classified as `CONFLICT` rather than silently overwritten. `UNCHANGED` rows receive no new version and no history record.
 
-- INSERTED
-- UPDATED
-- UNCHANGED
+### Domain resource versioning and history
 
-`content_hash` prevents unnecessary updates and downstream reprocessing.
+Every persisted ATI domain resource has a database-assigned `version BIGINT`. Versions are allocated from a dedicated sequence per resource table. They are monotonically increasing table-wide revisions, not per-object contiguous counters; sequence gaps are acceptable.
+
+Every successful CREATE, UPDATE, or semantic soft DELETE creates an immutable `domain_object_history` entry in the same transaction containing object type/id/version, operation, complete post-operation `state JSONB`, `diff JSONB`, actor/request/investigation correlation where applicable, and `occurred_at`. Immutable resources normally receive only CREATE history. History/infrastructure tables are not themselves historized.
+
+### JSONB diff
+
+PostgreSQL has JSONB primitives but no native general `jsonb_diff(old,new)` operation. ATI therefore owns a small versioned SQL helper such as `ati_jsonb_diff(old_state, new_state, excluded_keys)`.
+
+The v0.1 diff is shallow/top-level and represented as:
+
+```json
+{
+  "score": {"old": 20, "new": 30}
+}
+```
+
+The implementation uses native JSONB expansion/aggregation primitives and a full key comparison so additions and removals are represented. Missing keys versus JSON `null` must be handled deliberately and covered by tests. Nested JSON values are treated atomically at the top-level field: a changed nested object records its complete old/new values rather than recursively diffing it.
+
+The complete post-operation state remains authoritative; the diff is a query/debug convenience. Database-maintained metadata such as `version` and selected timestamps may be excluded from the human-readable diff while remaining present in the complete state snapshot. Diff generation occurs only after a row is already known to have semantically changed (for example through `content_hash` or relational comparisons).
+
+### PostgreSQL baseline
+
+ATI targets PostgreSQL 18 with a compatible pgvector release. PostgreSQL 18 `OLD`/`NEW` support in DML `RETURNING` may be used to capture authoritative pre/post mutation state where appropriate, while stored functions and temporary tables remain the consistency boundary. Exact DML patterns must be integration-tested against the pinned PostgreSQL 18 image.
 
 ## SourceRecord
 

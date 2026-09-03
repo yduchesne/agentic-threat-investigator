@@ -1,0 +1,432 @@
+# Agentic Threat Investigator — Configuration
+
+## Purpose
+
+ATI uses source-controlled configuration profiles to define runtime settings for different execution environments.
+
+Configuration is kept under the backend `config` subpackage. A profile is selected with the `ATI_CONFIG_PROFILE` environment variable. The profile mechanism is deliberately simple, deterministic, testable, and independent of the application framework.
+
+The core rule is:
+
+> ATI always starts from the default configuration. If a non-default configuration profile is selected, that profile overrides the default configuration. The resulting merged configuration is the application configuration for that process.
+
+## Package layout
+
+```text
+backend/src/ati/config/
+├── __init__.py
+├── config_default.py
+├── config_local.py
+├── config_dev.py
+├── config_prod.py
+└── config_utils.py
+```
+
+Additional profiles may use the same naming convention:
+
+```text
+config_<profile>.py
+```
+
+The strings `default`, `local`, `dev`, `prod`, and similar values are called **configuration profiles**.
+
+## Profile selection
+
+The desired profile is selected through:
+
+```text
+ATI_CONFIG_PROFILE
+```
+
+Examples:
+
+```bash
+ATI_CONFIG_PROFILE=local
+ATI_CONFIG_PROFILE=dev
+ATI_CONFIG_PROFILE=prod
+```
+
+If `ATI_CONFIG_PROFILE` is absent or blank, ATI uses `default`.
+
+The default configuration is always loaded first. If the selected profile is `default`, no additional module is loaded. Otherwise:
+
+```text
+default CONFIG
+      +
+selected profile CONFIG
+      ↓
+final CONFIG
+```
+
+A profile overrides only the settings it explicitly defines.
+
+Profiles do not implicitly inherit from other non-default profiles.
+
+## Configuration modules
+
+Every configuration profile module must expose a module-level variable named exactly:
+
+```python
+CONFIG
+```
+
+Example:
+
+```python
+CONFIG: dict = {
+    "db_batch_size": 100,
+}
+```
+
+A profile file should contain configuration data and only minimal code required to construct that data.
+
+## Configuration value types
+
+Configuration values are not limited to strings. For example:
+
+```python
+CONFIG: dict[str, object] = {
+    "db_batch_size": 100,
+    "feature_enabled": True,
+    "provider_timeout_seconds": 10.0,
+}
+```
+
+Accordingly, configuration utilities should use value typing compatible with heterogeneous configuration values rather than `Dict[str, str]`.
+
+Conceptually:
+
+```python
+from typing import Any
+
+Config = dict[str, Any]
+```
+
+## `override`
+
+`config_utils.py` provides:
+
+```python
+def override(
+    original_config: Config,
+    override_config: Config,
+) -> Config:
+    ...
+```
+
+The function:
+
+1. creates a new dictionary;
+2. copies every setting from `original_config`;
+3. applies every setting from `override_config`;
+4. returns the new dictionary.
+
+Values in `override_config` replace values having the same key in `original_config`.
+
+Neither argument is mutated.
+
+The v0.1 override operation is **shallow**. Nested dictionaries are replaced as values rather than recursively merged unless a future explicit requirement changes this contract.
+
+## `load_config`
+
+`config_utils.py` also provides `load_config`.
+
+Conceptually:
+
+```python
+import os
+from collections.abc import Mapping
+
+def load_config(
+    env: Mapping[str, str] = os.environ,
+) -> Config:
+    ...
+```
+
+The supplied mapping represents environment variables.
+
+The function performs:
+
+```text
+read ATI_CONFIG_PROFILE
+        ↓
+missing / blank?
+        ├── yes → profile = "default"
+        └── no  → normalize and validate profile
+        ↓
+load config_default.CONFIG
+        ↓
+profile == "default"?
+        ├── yes → return copy of default CONFIG
+        └── no
+              ↓
+      load config_<profile>.CONFIG
+              ↓
+      override(default, profile)
+              ↓
+      log selected profile and redacted final configuration
+              ↓
+      return merged configuration
+```
+
+The environment mapping is injectable so configuration loading can be tested without mutating process-global environment state.
+
+## Profile name validation
+
+`ATI_CONFIG_PROFILE` must not be treated as an arbitrary Python module path.
+
+Before dynamic import, validate the profile name against a restricted grammar, initially:
+
+```text
+^[a-z][a-z0-9_]*$
+```
+
+Valid examples:
+
+```text
+default
+local
+dev
+prod
+test
+ci
+staging_us
+```
+
+Invalid examples:
+
+```text
+../prod
+ati.other.module
+config-prod
+/dev/null
+```
+
+The implementation constructs the module name internally as:
+
+```text
+ati.config.config_<profile>
+```
+
+This prevents path traversal or arbitrary module-import behavior through `ATI_CONFIG_PROFILE`.
+
+## Missing profiles
+
+If the selected profile module does not exist, configuration loading fails immediately.
+
+ATI must not silently fall back to `default`.
+
+A dedicated exception is preferred, for example:
+
+```python
+class ConfigProfileNotFoundError(RuntimeError):
+    ...
+```
+
+Import errors raised *inside* an existing configuration module must not be misreported as “profile not found.” They represent genuine configuration-module failures and should retain their underlying cause.
+
+## Configuration module validation
+
+After importing a profile module, ATI verifies that:
+
+1. the module exposes `CONFIG`;
+2. `CONFIG` is a dictionary;
+3. configuration keys are strings.
+
+A malformed configuration module must fail startup rather than being partially accepted.
+
+## Logging
+
+Configuration loading must be observable.
+
+At startup ATI logs at least:
+
+- the selected configuration profile;
+- whether the default profile alone or default-plus-override was loaded;
+- the loaded profile module name;
+- the final effective configuration after sensitive-value redaction.
+
+Example conceptual events:
+
+```text
+configuration.profile_selected profile=dev
+configuration.module_loaded module=ati.config.config_default
+configuration.module_loaded module=ati.config.config_dev
+configuration.loaded profile=dev
+```
+
+Configuration logging must work during early startup before the full application logging subsystem is necessarily initialized. Use standard Python logging and avoid dependencies on application services.
+
+The final configuration should be logged in a deterministic form suitable for debugging.
+
+## Sensitive-value redaction
+
+ATI must never knowingly log sensitive configuration values.
+
+Before logging effective configuration, classify keys case-insensitively using a conservative set of sensitive-name markers.
+
+Initial markers should include at least:
+
+```text
+secret
+password
+passwd
+token
+api_key
+apikey
+private_key
+credential
+credentials
+auth
+cookie
+session
+```
+
+If a configuration key contains one of these markers, replace its value in logs with:
+
+```text
+<redacted>
+```
+
+Examples:
+
+```text
+db_password       → <redacted>
+THREATFOX_API_KEY → <redacted>
+langsmith_token   → <redacted>
+client_secret     → <redacted>
+private_key_path  → <redacted>
+```
+
+The original in-memory configuration value is not modified. Redaction applies only to the representation sent to logs.
+
+The marker list is intentionally conservative.
+
+## Nested values
+
+If configuration values contain nested mappings or sequences, redaction must recurse through them rather than checking only top-level keys.
+
+For example:
+
+```python
+{
+    "provider": {
+        "username": "ati",
+        "password": "secret-value",
+    }
+}
+```
+
+must be logged as:
+
+```python
+{
+    "provider": {
+        "username": "ati",
+        "password": "<redacted>",
+    }
+}
+```
+
+## Environment variables and configuration values
+
+`ATI_CONFIG_PROFILE` selects the source-controlled profile.
+
+The profile mechanism itself does not imply that arbitrary environment variables automatically override arbitrary configuration keys.
+
+Environment-driven secret injection or explicit environment-to-setting mappings must be deliberately defined rather than inferred from matching names.
+
+## Configuration loading lifecycle
+
+Configuration should be loaded once during process bootstrap and then injected into application components.
+
+Application/domain code should not repeatedly call `load_config()` or access `os.environ` directly.
+
+Preferred flow:
+
+```text
+process startup
+    ↓
+load_config()
+    ↓
+validate application configuration
+    ↓
+construct dependencies
+    ↓
+run API / worker / scheduler / migration process
+```
+
+## Process consistency
+
+The same profile mechanism applies to ATI processes including:
+
+- API;
+- worker;
+- scheduler;
+- migration tooling where application configuration is required.
+
+Each process receives `ATI_CONFIG_PROFILE` through its environment.
+
+## Configuration and secrets
+
+Source-controlled profile modules must not contain actual credentials or secrets.
+
+Files such as:
+
+```text
+config_default.py
+config_dev.py
+config_prod.py
+```
+
+may define defaults, names, URLs, limits, feature settings, and references to secret mechanisms, but repository-committed code must not contain production secrets.
+
+Secret provisioning remains an external runtime concern.
+
+## Testing requirements
+
+Unit tests for `override` must cover:
+
+- empty dictionaries;
+- no overlapping keys;
+- overlapping keys;
+- immutability of both inputs;
+- heterogeneous values;
+- shallow replacement semantics.
+
+Unit tests for `load_config` must cover:
+
+- missing `ATI_CONFIG_PROFILE`;
+- blank profile;
+- explicit `default`;
+- valid profile override;
+- missing profile module;
+- invalid profile name;
+- module without `CONFIG`;
+- `CONFIG` having the wrong type;
+- import failure inside an existing profile module;
+- deterministic merging.
+
+Logging/redaction tests must cover:
+
+- selected-profile logging;
+- effective-config logging;
+- case-insensitive sensitive names;
+- all supported sensitive-name markers;
+- nested mappings;
+- nested lists/sequences;
+- confirmation that the original configuration is not modified.
+
+## Implementation invariants
+
+1. `default` is always the base profile.
+2. A non-default profile overrides only `default`.
+3. `ATI_CONFIG_PROFILE` selects the profile.
+4. Missing or blank `ATI_CONFIG_PROFILE` means `default`.
+5. An unknown profile is an error; no silent fallback occurs.
+6. Profile names cannot specify arbitrary import paths.
+7. Every profile module exposes `CONFIG`.
+8. `override` returns a new dictionary and does not mutate its inputs.
+9. Effective configuration is logged with sensitive values redacted.
+10. Actual secrets are never committed to configuration profile modules.
+11. Application components receive loaded configuration through bootstrap/dependency construction rather than independently reading environment variables.

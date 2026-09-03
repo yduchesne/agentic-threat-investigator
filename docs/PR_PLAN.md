@@ -6,7 +6,7 @@ Implement ATI in small, reviewable increments. Every PR must preserve repository
 
 Do not allow coding agents to invent major architecture contrary to the authoritative documentation.
 
-## PR 1 — Repository bootstrap and development environment [DONE]
+## PR 1 — Repository bootstrap and development environment
 
 Deliver:
 
@@ -22,27 +22,7 @@ Deliver:
 - CI baseline;
 - SPDX/license files.
 
-## PR 2 — Frontend themes and user preference [DONE]
-
-Deliver:
-
-- a theme foundation based on semantic design tokens;
-- three predefined looks:
-  - `darknite` — black-background default theme;
-  - `brightlight` — white-background theme;
-  - `wargames` — 1980s terminal-inspired green foreground and lines on a black background;
-- `darknite` as the default for users without a stored preference;
-- a user-accessible theme switcher;
-- persistence of the selected theme in a `user_preference` table;
-- typed application boundaries for reading and updating theme preference;
-- accessible contrast, focus indicators, and reduced-motion behavior across themes;
-- deterministic tests for default selection, switching, and preference persistence.
-
-Theme styling must preserve the explicit visual separation between evidence,
-research context, and ATI assessment. The `wargames` look may draw on generic
-1980s terminal aesthetics but must not copy protected movie assets.
-
-## PR 3 — Core domain model [DONE]
+## PR 2 — Core domain model
 
 Implement typed domain models/enums for:
 
@@ -56,7 +36,7 @@ Implement typed domain models/enums for:
 
 No infrastructure coupling.
 
-## PR 4 — Database migrations and repository contracts
+## PR 3 — Database migrations and repository contracts
 
 Deliver:
 
@@ -68,7 +48,7 @@ Deliver:
 - soft-delete conventions;
 - integration-test database.
 
-## PR 5 — Local identity/authentication
+## PR 4 — Local identity/authentication
 
 Deliver:
 
@@ -79,7 +59,7 @@ Deliver:
 - CSRF/session protections;
 - admin invariant.
 
-## PR 6 — Audit and history
+## PR 5 — Audit and history
 
 Deliver:
 
@@ -88,7 +68,7 @@ Deliver:
 - transactional audit behavior;
 - actor/system semantics.
 
-## PR 7 — PostgreSQL batch persistence
+## PR 6 — PostgreSQL batch persistence
 
 Deliver:
 
@@ -99,7 +79,7 @@ Deliver:
 - inserted/updated/unchanged result;
 - integration tests.
 
-## PR 8 — Batch source/ingestion framework
+## PR 7 — Batch source/ingestion framework
 
 Deliver:
 
@@ -110,7 +90,7 @@ Deliver:
 - normalization versioning;
 - source cache behavior.
 
-## PR 9 — MITRE ATT&CK ingestion
+## PR 8 — MITRE ATT&CK ingestion
 
 Deliver:
 
@@ -119,7 +99,7 @@ Deliver:
 - idempotent update behavior;
 - provenance.
 
-## PR 10 — Documents/chunks/embeddings
+## PR 9 — Documents/chunks/embeddings
 
 Deliver:
 
@@ -128,7 +108,7 @@ Deliver:
 - embedding abstraction/config metadata;
 - pgvector indexing.
 
-## PR 11 — RAG retrieval
+## PR 10 — RAG retrieval
 
 Deliver:
 
@@ -138,7 +118,7 @@ Deliver:
 - metadata filtering;
 - retrieval evaluation fixtures.
 
-## PR 12 — Live provider framework + RDAP + Google DNS
+## PR 11 — Live provider framework + RDAP + Google DNS
 
 Deliver:
 
@@ -151,7 +131,7 @@ Deliver:
 
 This PR establishes the first domain-to-IP discovery path.
 
-## PR 13 — Remaining v0.1 live sources
+## PR 12 — Remaining v0.1 live sources
 
 Deliver:
 
@@ -162,7 +142,7 @@ Deliver:
 - URLhaus;
 - source-specific normalization/tests.
 
-## PR 14 — Investigation persistence and relationship construction
+## PR 13 — Investigation persistence and relationship construction
 
 Deliver:
 
@@ -173,7 +153,7 @@ Deliver:
 - discovered-entity processing;
 - atomic provider-result persistence.
 
-## PR 15 — LangGraph skeleton
+## PR 14 — LangGraph skeleton
 
 Deliver:
 
@@ -184,7 +164,7 @@ Deliver:
 - typed transitions;
 - deterministic FakeLlmClient path.
 
-## PR 16 — Evidence Analyst
+## PR 15 — Evidence Analyst
 
 Deliver:
 
@@ -195,7 +175,7 @@ Deliver:
 - evidence-reference validation;
 - analytical regression tests.
 
-## PR 17 — Adaptive pivots and stopping
+## PR 16 — Adaptive pivots and stopping
 
 Deliver:
 
@@ -206,7 +186,7 @@ Deliver:
 - stop reasons;
 - canonical trajectory tests.
 
-## PR 18 — Threat Research RAG Agent
+## PR 17 — Threat Research RAG Agent
 
 Deliver:
 
@@ -216,7 +196,7 @@ Deliver:
 - grounded synthesis;
 - RAG evaluation suite.
 
-## PR 19 — Report Writer and API
+## PR 18 — Report Writer and API
 
 Deliver:
 
@@ -226,7 +206,7 @@ Deliver:
 - evidence/relationship/research/assessment/report/timeline/geolocation resources;
 - pagination/errors/idempotency/concurrency behavior.
 
-## PR 20 — Frontend analyst workbench
+## PR 19 — Frontend analyst workbench
 
 Deliver:
 
@@ -242,7 +222,7 @@ Deliver:
 
 Maintain explicit visual separation between evidence, research context, and assessment.
 
-## PR 21 — Monitors, diffs, findings
+## PR 20 — Monitors, diffs, findings
 
 Deliver:
 
@@ -254,7 +234,7 @@ Deliver:
 - Finding;
 - findings inbox/workflow.
 
-## PR 22 — System/jobs/admin UI
+## PR 21 — System/jobs/admin UI
 
 Deliver:
 
@@ -263,7 +243,7 @@ Deliver:
 - monitor administration;
 - relevant health/config visibility.
 
-## PR 23 — Evaluation and release hardening
+## PR 22 — Evaluation and release hardening
 
 Deliver:
 
@@ -288,3 +268,11 @@ Before completion:
 5. preserve architectural boundaries;
 6. update authoritative documentation when a contract intentionally changes;
 7. do not weaken quality gates to make a PR pass.
+
+## Latest persistence/configuration requirements
+
+PR 1 includes the `ati.config` package, profile modules, `config_utils`, `ATI_CONFIG_PROFILE` loading, robust configuration logging/redaction, tests, and `CONFIGURATION.md`.
+
+PR 3 establishes PostgreSQL 18 as the database baseline, domain-resource version columns/sequences, immutable domain-object history schema, and versioned SQL-function conventions.
+
+PR 6 implements the canonical batch path: application-bounded arrays of resource-specific PostgreSQL composite types, `unnest ... WITH ORDINALITY`, temporary staging/work tables for every batch, set-oriented INSERT/UPDATE/UNCHANGED/CONFLICT reconciliation, optimistic version checks, version allocation, shallow `ati_jsonb_diff`, final target mutations, and immutable history insertion. It must not introduce row-level history/version triggers, Python-side reconciliation, or an alternate small-batch path.

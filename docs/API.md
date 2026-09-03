@@ -270,3 +270,7 @@ Within `/api/v1`:
 ## No implementation leakage
 
 Public responses do not expose internal identifiers such as LangGraph checkpoint IDs, reducer names, raw tool-call internals, ORM metadata, or model-provider implementation state unless a future explicit debug interface is designed.
+
+## Resource versions and history
+
+Persisted domain resources expose their database-assigned `version` where relevant. Mutable-resource writes use expected-version semantics and return HTTP 409 on detected concurrent modification. Semantic DELETE is soft deletion and produces a new version/history record. Resource-history endpoints may expose immutable post-operation snapshots and diffs without exposing secrets or internal persistence mechanics.

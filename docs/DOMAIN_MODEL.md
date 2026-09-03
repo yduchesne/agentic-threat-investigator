@@ -1,45 +1,5 @@
 # Agentic Threat Investigator — Domain Model
 
-## User preferences
-
-```python
-class UiTheme(str, Enum):
-    DARKNITE = "darknite"
-    BRIGHTLIGHT = "brightlight"
-    WARGAMES = "wargames"
-
-class UserPreferences(BaseModel):
-    user_id: UUID
-    ui_theme: UiTheme = UiTheme.DARKNITE
-```
-
-`UserPreferences` is the typed, mutable collection of presentation preferences
-for one user. Each User has exactly one `UserPreferences` instance, and each
-`UserPreferences` instance belongs to exactly one User.
-
-Persistence enforces this one-to-one relationship by using `user_id` as both
-the `user_preference` table's primary key and a foreign key to the User table.
-A separate preference ID is intentionally unnecessary. The preference row is
-created transactionally with its User so application code does not need to
-interpret a missing row as a second preference state.
-
-`DARKNITE` is the domain and database default. `ui_theme` is a typed column, not
-an arbitrary string or unstructured user-attributes dictionary. Updating it
-changes presentation only and has no effect on evidence, research, assessment,
-authorization, or investigation behavior.
-
-User preferences remain associated with a soft-deleted User for historical and
-restoration consistency; normal application queries exclude preferences whose
-User is deleted. Preference changes are ordinary authenticated application
-mutations and do not permit the frontend to write directly to persistence.
-
-An alternative would be to place `ui_theme` directly on User. That is simpler
-while it is the only preference and makes the one-to-one invariant implicit.
-ATI uses the requested separate `UserPreferences` aggregate to keep mutable
-presentation configuration out of authentication identity. The
-shared-primary-key design keeps the separate model's one-to-one invariant
-explicit without introducing another identifier.
-
 ## Entity
 
 ```python
@@ -352,3 +312,9 @@ A pivot is allowed only when semantically relevant, evidence-backed, not already
 The LLM may propose only existing root/discovered entity IDs. Deterministic application policy authorizes execution.
 
 Every autonomous pivot must have a provenance chain to user input or observed evidence.
+
+## Persisted resource versions and history
+
+Every persisted ATI domain resource exposes a database-assigned `version`. A new version is created only for a successful CREATE, semantic UPDATE, or soft DELETE. `UNCHANGED` persistence outcomes do not change version. Version numbers are monotonically increasing table-wide revisions and need not be contiguous for an individual object.
+
+Domain-object history records the complete state after each mutation plus a shallow JSONB diff. This is distinct from `AuditEvent`: history answers how state evolved; audit answers who attempted/performed a business or security action and its outcome.
