@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import (
 from agentic_threat_investigator.app.persistence import UnitOfWork
 from agentic_threat_investigator.config import Settings
 
+from .identity_repositories import (
+    PostgresCredentialRepository,
+    PostgresSessionRepository,
+    PostgresUserRepository,
+)
 from .repositories import PostgresEntityRepository
 
 
@@ -27,6 +32,9 @@ class PostgresUnitOfWork(UnitOfWork):
         self.session = self._session_factory()
         await self.session.begin()
         self.entities = PostgresEntityRepository(self.session)
+        self.users = PostgresUserRepository(self.session)
+        self.credentials = PostgresCredentialRepository(self.session)
+        self.sessions = PostgresSessionRepository(self.session)
         return self
 
     async def __aexit__(
