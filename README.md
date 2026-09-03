@@ -15,26 +15,34 @@ On a supported Linux distribution, run:
 
 This installs missing development prerequisites, `uv`, Python dependencies,
 frontend dependencies, and the pre-commit hook. Run the deterministic quality
-and test suite with:
-
-```bash
-./build.sh --check
-```
-
-To format Python sources with Black before running the same checks:
+suite (formatting check, Pylint, strict Mypy, unit tests, and frontend lint)
+with:
 
 ```bash
 ./build.sh --qa
 ```
 
+To format Python sources with Black:
+
+```bash
+./build.sh --fmt
+```
+
 Unit tests are kept under `tests/unit/` and integration tests under
-`tests/integration/`. Run integration tests separately with:
+`tests/integration/`. The integration tests provision an isolated PostgreSQL
+container via Podman and therefore require `podman` and `podman-compose`
+(installed by `./install.sh`); after the integration tests succeed, the
+frontend production bundle is built (`tsc` type-check plus `vite build`).
+Other build operations include `--chk` (quality checks and unit tests without
+the formatting check), `--unit` (unit tests only), and `--intg` (integration
+tests plus frontend tests). To run only the PostgreSQL integration suite and
+frontend build by itself:
 
 ```bash
 ./integration-test.sh
 ```
 
-The local runtime is Docker Compose-based. Configure `ATI_DATA_DIR` and the
+The local runtime is Podman Compose-based. Configure `ATI_DATA_DIR` and the
 other values in `.env.example` in a local `.env` before using Compose.
 
 ATI is early-stage software; domain, persistence, provider, and agent features

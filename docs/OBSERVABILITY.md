@@ -79,7 +79,7 @@ Tracing failures are non-fatal.
 
 ## Future open-source replacement
 
-The architecture plans for a Docker-deployed open-source observability backend.
+The architecture plans for a Podman-deployed open-source observability backend.
 
 OpenTelemetry is the preferred portability layer.
 

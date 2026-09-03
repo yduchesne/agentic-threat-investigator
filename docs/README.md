@@ -15,7 +15,7 @@ This directory contains the confirmed v0.1 product and engineering specification
 - `API.md` — `/api/v1` REST contract.
 - `FRONTEND.md` — exact v0.1 frontend scope.
 - `SECURITY.md` — authentication, authorization, audit, secrets, and agent/tool security.
-- `DEPLOYMENT.md` — Docker Compose local deployment and development environment.
+- `DEPLOYMENT.md` — Podman Compose local deployment and development environment.
 - `OBSERVABILITY.md` — LangSmith-first, provider-neutral observability architecture.
 - `LICENSING.md` — AGPL and third-party attribution/licensing policy.
 - `PR_PLAN.md` — implementation sequence.

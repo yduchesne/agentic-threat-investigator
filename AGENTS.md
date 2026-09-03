@@ -24,7 +24,7 @@ Major product/architecture decisions are already defined. Do not replace them wi
 - RAG provides threat context, not live IOC facts.
 - Geolocation is approximate context, not maliciousness evidence.
 - PostgreSQL + pgvector is the v0.1 persistence/vector platform.
-- Local deployment uses Docker Compose with durable host bind mounts.
+- Local deployment uses Podman Compose with durable host bind mounts.
 - LangSmith is optional observability, not a functional dependency.
 - API contracts do not leak LangGraph/provider/ORM/LLM implementation internals.
 
