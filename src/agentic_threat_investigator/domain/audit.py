@@ -2,12 +2,15 @@
 """Framework-independent immutable security audit records."""
 
 import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from agentic_threat_investigator.domain.immutable_json import FrozenDict, freeze_mapping
 
 
 class AuditOutcome(str, Enum):
@@ -39,14 +42,23 @@ _FORBIDDEN = re.compile(
 _URN = re.compile(r"^urn:ati:action:[a-z0-9_]+(?::[a-z0-9_]+)+$")
 
 
-def sanitize_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
-    """Validate and copy metadata while rejecting secret-bearing keys."""
+def sanitize_metadata(metadata: dict[str, Any] | None) -> FrozenDict:
+    """Recursively validate and freeze metadata without secret-bearing keys."""
     if metadata is None:
-        return {}
-    for key in metadata:
-        if _FORBIDDEN.search(key):
-            raise ValueError(f"forbidden audit metadata key: {key}")
-    return dict(metadata)
+        return FrozenDict()
+
+    def scan(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, nested_value in value.items():
+                if isinstance(key, str) and _FORBIDDEN.search(key):
+                    raise ValueError(f"forbidden audit metadata key: {key}")
+                scan(nested_value)
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            for nested_value in value:
+                scan(nested_value)
+
+    scan(metadata)
+    return freeze_mapping(metadata)
 
 
 class AuditEvent(BaseModel):
@@ -84,6 +96,6 @@ class AuditEvent(BaseModel):
 
     @field_validator("metadata")
     @classmethod
-    def validate_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def validate_metadata(cls, value: dict[str, Any]) -> FrozenDict:
         """Apply the defense-in-depth metadata minimization guard."""
         return sanitize_metadata(value)

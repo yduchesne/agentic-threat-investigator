@@ -68,7 +68,7 @@ Deliver:
 - transactional audit behavior;
 - actor/system semantics.
 
-## PR 6 — PostgreSQL batch persistence
+## PR 6 — PostgreSQL batch persistence [DONE]
 
 Deliver:
 

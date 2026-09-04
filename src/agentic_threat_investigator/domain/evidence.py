@@ -13,9 +13,10 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agentic_threat_investigator.domain.entities import EntityType
+from agentic_threat_investigator.domain.immutable_json import FrozenDict, freeze_mapping
 
 
 class EvidenceType(str, Enum):
@@ -32,7 +33,9 @@ class EvidenceType(str, Enum):
 
 
 class EntityRef(BaseModel):
-    """A lightweight reference to an entity by identity or raw value."""
+    """A lightweight immutable reference to an entity by identity or raw value."""
+
+    model_config = ConfigDict(frozen=True)
 
     id: UUID | None = None
     type: EntityType
@@ -46,6 +49,8 @@ class Evidence(BaseModel):
     ``retrieved_at`` is when ATI retrieved the information.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     id: UUID | None = None
     investigation_id: UUID
     type: EvidenceType
@@ -57,3 +62,15 @@ class Evidence(BaseModel):
     retrieved_at: datetime
     facts: dict[str, Any] = Field(default_factory=dict)
     raw_payload: dict[str, Any] | None = None
+
+    @field_validator("facts", mode="after")
+    @classmethod
+    def freeze_facts(cls, value: dict[str, Any]) -> FrozenDict:
+        """Store normalized facts as a deeply immutable JSON object."""
+        return freeze_mapping(value)
+
+    @field_validator("raw_payload", mode="after")
+    @classmethod
+    def freeze_raw_payload(cls, value: dict[str, Any] | None) -> FrozenDict | None:
+        """Store raw source data as a deeply immutable JSON object."""
+        return None if value is None else freeze_mapping(value)

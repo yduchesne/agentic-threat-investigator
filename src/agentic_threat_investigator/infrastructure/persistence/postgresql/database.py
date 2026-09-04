@@ -16,9 +16,6 @@ from agentic_threat_investigator.app.persistence import UnitOfWork
 from agentic_threat_investigator.app.persistence.repositories import (
     AuditEventRepository,
     CredentialRepository,
-    EvidenceRepository,
-    RelationshipObservationRepository,
-    RelationshipRepository,
     SessionRepository,
     UserRepository,
 )
@@ -30,6 +27,11 @@ from .identity_repositories import (
     PostgresCredentialRepository,
     PostgresSessionRepository,
     PostgresUserRepository,
+)
+from .relationship_repositories import (
+    PostgresEvidenceRepository,
+    PostgresRelationshipObservationRepository,
+    PostgresRelationshipRepository,
 )
 from .repositories import PostgresEntityRepository
 
@@ -45,9 +47,11 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         self._batch_size = batch_size
         self.session: AsyncSession | None = None
         self.entities = cast(PostgresEntityRepository, None)
-        self.relationships = cast(RelationshipRepository, None)
-        self.relationship_observations = cast(RelationshipObservationRepository, None)
-        self.evidence = cast(EvidenceRepository, None)
+        self.relationships = cast(PostgresRelationshipRepository, None)
+        self.relationship_observations = cast(
+            PostgresRelationshipObservationRepository, None
+        )
+        self.evidence = cast(PostgresEvidenceRepository, None)
         self.users = cast(UserRepository, None)
         self.credentials = cast(CredentialRepository, None)
         self.sessions = cast(SessionRepository, None)
@@ -69,6 +73,11 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         self.users = PostgresUserRepository(self.session)
         self.credentials = PostgresCredentialRepository(self.session)
         self.sessions = PostgresSessionRepository(self.session)
+        self.relationships = PostgresRelationshipRepository(self.session)
+        self.relationship_observations = PostgresRelationshipObservationRepository(
+            self.session
+        )
+        self.evidence = PostgresEvidenceRepository(self.session)
         self.audit_events = PostgresAuditEventRepository(self.session)
         return self
 
@@ -90,10 +99,15 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             await session.close()
             self.session = None
             self.entities = cast(PostgresEntityRepository, None)
-            self.users = cast(UserRepository, None)
-            self.credentials = cast(CredentialRepository, None)
-            self.sessions = cast(SessionRepository, None)
-            self.audit_events = cast(AuditEventRepository, None)
+            self.users = cast(PostgresUserRepository, None)
+            self.credentials = cast(PostgresCredentialRepository, None)
+            self.sessions = cast(PostgresSessionRepository, None)
+            self.relationships = cast(PostgresRelationshipRepository, None)
+            self.relationship_observations = cast(
+                PostgresRelationshipObservationRepository, None
+            )
+            self.evidence = cast(PostgresEvidenceRepository, None)
+            self.audit_events = cast(PostgresAuditEventRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

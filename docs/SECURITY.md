@@ -84,16 +84,27 @@ Logout, user disablement, soft deletion, and password change revoke applicable s
 
 Because v0.1 uses cookie authentication, state-changing requests require CSRF protection.
 
-Use SameSite plus Origin/Referer validation and a CSRF token strategy.
+Use SameSite plus Origin/Referer validation and a CSRF token strategy. The
+expected origin is the configured public base URL, never the Host-derived
+request URL. Origin takes precedence over Referer; either is compared as a
+normalized scheme, host, and effective port, so Referer paths are accepted.
+Invalid origins and invalid configuration fail closed.
 
 ## Login protection
 
 - generic login failure message;
-- bounded rate limiting;
+- bounded rate limiting keyed by normalized username and client address;
 - no username-enumeration disclosure;
+- every credential failure performs one password verification, using a dummy
+  hash when no credential exists (including disabled/deleted accounts);
 - audit success/failure;
 - normalized usernames;
 - no unnecessarily complex permanent account-lockout scheme.
+
+Client address is taken from the server-populated request client, not
+user-supplied forwarding headers. Deployments behind a TLS-terminating proxy
+must configure trusted proxy handling (for example uvicorn
+`--proxy-headers` with a pinned `--forwarded-allow-ips`).
 
 ## Administrator invariant
 
@@ -171,6 +182,9 @@ Audit metadata must never contain:
 - raw provider payloads;
 - secret-bearing prompts;
 - hidden chain-of-thought.
+
+Metadata keys are checked recursively. Accepted JSON metadata is defensively
+snapshotted and recursively immutable after event validation.
 
 ## LLM/tool security
 

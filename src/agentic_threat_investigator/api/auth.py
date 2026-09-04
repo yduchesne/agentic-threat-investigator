@@ -4,12 +4,13 @@
 # The module-level dependency is replaced by application bootstrap.
 # pylint: disable=global-statement,too-many-arguments,too-many-positional-arguments,broad-exception-caught
 import secrets
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import (
     APIRouter,
     Cookie,
     Depends,
+    FastAPI,
     Header,
     HTTPException,
     Request,
@@ -22,29 +23,28 @@ from agentic_threat_investigator.app.identity import (
     AuthenticationError,
     AuthenticationService,
     CsrfError,
+    RateLimitedError,
     validate_csrf,
 )
-from agentic_threat_investigator.config import get_settings
 from agentic_threat_investigator.domain.audit import AuditAction, AuditOutcome
 from agentic_threat_investigator.domain.identity import User
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
-_authentication: AuthenticationService | None = None
 COOKIE_NAME = "ati_session"
 CSRF_COOKIE = "ati_csrf"
 
 
-def configure_authentication(service: AuthenticationService) -> None:
-    """Install the application service during process dependency construction."""
-    global _authentication
-    _authentication = service
+def install_authentication(app: FastAPI, service: AuthenticationService) -> None:
+    """Install authentication on one application instance."""
+    app.state.authentication = service
 
 
-def _service() -> AuthenticationService:
-    """Return configured authentication or fail safely."""
-    if _authentication is None:
+def _service(request: Request) -> AuthenticationService:
+    """Resolve the request application's authentication service."""
+    service = getattr(request.app.state, "authentication", None)
+    if service is None:
         raise HTTPException(status_code=503, detail="authentication is unavailable")
-    return _authentication
+    return cast(AuthenticationService, service)
 
 
 class LoginRequest(BaseModel):
@@ -83,11 +83,21 @@ class LoginResponse(BaseModel):
 async def login(
     payload: LoginRequest,
     response: Response,
+    request: Request,
     service: Annotated[AuthenticationService, Depends(_service)],
 ) -> LoginResponse:
     """Authenticate and issue HttpOnly session and CSRF cookies."""
     try:
-        user, token = await service.login(payload.username, payload.password)
+        user, token = await service.login(
+            payload.username,
+            payload.password,
+            client_address=request.client.host if request.client else None,
+        )
+    except RateLimitedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts.",
+        ) from exc
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
@@ -96,7 +106,7 @@ async def login(
         COOKIE_NAME,
         token,
         httponly=True,
-        secure=get_settings().session_cookie_secure,
+        secure=request.app.state.settings.session_cookie_secure,
         samesite="lax",
         path="/",
     )
@@ -104,7 +114,7 @@ async def login(
         CSRF_COOKIE,
         secrets.token_urlsafe(32),
         httponly=False,
-        secure=get_settings().session_cookie_secure,
+        secure=request.app.state.settings.session_cookie_secure,
         samesite="lax",
         path="/",
     )
@@ -128,7 +138,7 @@ async def logout(
                 x_csrf_token,
                 request.headers.get("origin"),
                 request.headers.get("referer"),
-                str(request.base_url).rstrip("/"),
+                request.app.state.settings.public_base_url,
             )
         except CsrfError as exc:
             try:

@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class RelationshipType(str, Enum):
@@ -48,6 +48,8 @@ class Relationship(BaseModel):
 
 class RelationshipObservation(BaseModel):
     """A historical, append-oriented record of when/why a relationship was observed."""
+
+    model_config = ConfigDict(frozen=True)
 
     id: UUID
     relationship_id: UUID

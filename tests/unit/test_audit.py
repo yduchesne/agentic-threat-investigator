@@ -107,9 +107,31 @@ def test_audit_validation_and_minimization() -> None:
             outcome=AuditOutcome.FAILURE,
             metadata={"session_token": "secret"},
         )
+    with pytest.raises(ValueError, match="forbidden"):
+        AuditEvent(
+            action=AuditAction.AUTH_LOGIN,
+            outcome=AuditOutcome.FAILURE,
+            metadata={"request": {"authorization": "secret"}},
+        )
     with pytest.raises(ValueError, match="timezone-aware"):
         AuditEvent(
             action=AuditAction.AUTH_LOGIN,
             outcome=AuditOutcome.SUCCESS,
             occurred_at=__import__("datetime").datetime(2020, 1, 1),
         )
+
+
+def test_audit_metadata_is_deeply_immutable() -> None:
+    """Nested audit metadata cannot be changed after validation."""
+    original = {"request": {"attempt": 1}}
+    event = AuditEvent(
+        action=AuditAction.AUTH_LOGIN,
+        outcome=AuditOutcome.FAILURE,
+        metadata=original,
+    )
+    original["request"]["attempt"] = 2
+
+    with pytest.raises(TypeError, match="immutable"):
+        event.metadata["request"]["attempt"] = 3
+
+    assert event.metadata["request"]["attempt"] == 1

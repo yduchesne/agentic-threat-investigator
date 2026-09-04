@@ -58,6 +58,7 @@ class EntityRef(BaseModel):
     value: str
 
 class Evidence(BaseModel):
+    model_config = ConfigDict(frozen=True)
     id: UUID | None = None
     investigation_id: UUID
     type: EvidenceType
@@ -72,6 +73,8 @@ class Evidence(BaseModel):
 ```
 
 Evidence is an immutable observation from a source about one primary subject.
+Its subject and nested JSON facts/raw payload are defensively snapshotted and
+recursively immutable, not merely protected from top-level field assignment.
 
 Provider-specific scores remain normalized facts. ATI analytical confidence belongs in Assessment.
 
@@ -106,6 +109,7 @@ class Relationship(BaseModel):
 
 ```python
 class RelationshipObservation(BaseModel):
+    model_config = ConfigDict(frozen=True)
     id: UUID
     relationship_id: UUID
     evidence_id: UUID
@@ -118,7 +122,7 @@ class RelationshipObservation(BaseModel):
 
 Relationship identity is unique by source entity, relationship URN, and target entity.
 
-A Relationship is the durable semantic edge. RelationshipObservation records when and why ATI observed or imported the assertion.
+A Relationship is the durable semantic edge. RelationshipObservation records when and why ATI observed or imported the assertion and is frozen after validation.
 
 Historical relationships are not deleted merely because they are no longer current.
 

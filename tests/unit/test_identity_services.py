@@ -1,9 +1,10 @@
 """Deterministic tests for local authentication security primitives."""
 
 # Test doubles intentionally implement narrow async repository seams.
-# pylint: disable=missing-class-docstring,missing-function-docstring,too-few-public-methods,unused-argument,not-callable,not-an-iterable
+# pylint: disable=missing-class-docstring,missing-function-docstring,too-few-public-methods,unused-argument,not-callable,not-an-iterable,too-many-arguments,too-many-positional-arguments
 
 from datetime import datetime, timedelta, timezone
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -14,10 +15,13 @@ from agentic_threat_investigator.app.identity import (
     AuthenticationService,
     CsrfError,
     InMemoryRateLimiter,
+    NullAuditEmitter,
     SessionTokenService,
     normalize_username,
     validate_csrf,
 )
+from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
+from agentic_threat_investigator.domain.audit import AuditEvent
 from agentic_threat_investigator.domain.identity import (
     Credential,
     Session,
@@ -45,6 +49,31 @@ class Credentials:
         return self.credential
 
 
+class AuditEvents:
+    """Accept transactional events for the focused service tests."""
+
+    async def append(self, event: AuditEvent) -> AuditEvent:
+        return event
+
+
+class LegacyUnitOfWork:
+    """Minimal transaction boundary for the focused service tests."""
+
+    def __init__(
+        self, users: "Users", credentials: "Credentials", sessions: "Sessions"
+    ) -> None:
+        self.users = users
+        self.credentials = credentials
+        self.sessions = sessions
+        self.audit_events = AuditEvents()
+
+    async def __aenter__(self) -> "LegacyUnitOfWork":
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
 class Sessions:
     def __init__(self) -> None:
         self.sessions: dict[bytes, Session] = {}
@@ -68,6 +97,22 @@ class Sessions:
         return None
 
 
+def authentication_service(
+    users: Users,
+    credentials: Credentials,
+    sessions: Sessions,
+    hasher: Argon2idPasswordHasher,
+    tokens: SessionTokenService,
+    limiter: InMemoryRateLimiter,
+) -> AuthenticationService:
+    """Construct the service through its UnitOfWork ABC dependency."""
+
+    def factory() -> UnitOfWork:
+        return cast(UnitOfWork, LegacyUnitOfWork(users, credentials, sessions))
+
+    return AuthenticationService(factory, hasher, tokens, limiter, NullAuditEmitter())
+
+
 @pytest.mark.asyncio
 async def test_authentication_lifecycle_and_failures() -> None:
     now = datetime.now(timezone.utc)
@@ -81,7 +126,7 @@ async def test_authentication_lifecycle_and_failures() -> None:
             password_changed_at=now,
         )
     )
-    service = AuthenticationService(
+    service = authentication_service(
         users,
         credentials,
         sessions,
@@ -114,7 +159,7 @@ async def test_expired_session_is_rejected() -> None:
         last_seen_at=now,
     )
     sessions.sessions[digest] = old
-    service = AuthenticationService(
+    service = authentication_service(
         Users(user),
         Credentials(None),
         sessions,
@@ -124,7 +169,7 @@ async def test_expired_session_is_rejected() -> None:
     )
     assert await service.validate_session(token) is None
     assert await service.validate_session("missing") is None
-    limited = AuthenticationService(
+    limited = authentication_service(
         Users(user),
         Credentials(None),
         sessions,

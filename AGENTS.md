@@ -46,6 +46,7 @@ Additionally:
 - Do not make a quality gate pass by weakening configuration, adding broad suppressions, skipping tests, or deleting       '
   assertions without independent justification.
 - Source code must use type hints.
+- Keep generated Python bytecode out of source control; `__pycache__/` directories under `src/` must remain ignored and must never be committed.
 - We are leveraging async IO for application code. Unit tests, integration tests should use async io as well.
 
 ## Tests

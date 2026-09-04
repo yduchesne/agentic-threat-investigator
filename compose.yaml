@@ -28,7 +28,7 @@ services:
   api:
     build: .
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
+      ATI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
     command: ["uvicorn", "agentic_threat_investigator.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
