@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Shared isolated PostgreSQL fixtures for repository integration tests."""
+"""Shared isolated PostgreSQL fixtures for repository integration tests.
+
+Fixture arguments intentionally reuse fixture names; pytest resolves them by
+name, while Pylint otherwise treats them as shadowed module-level functions.
+"""
+
+# pylint: disable=redefined-outer-name
 
 import os
 from collections.abc import AsyncIterator, Callable, Iterator

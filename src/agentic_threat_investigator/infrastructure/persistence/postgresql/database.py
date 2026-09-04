@@ -30,7 +30,8 @@ from .identity_repositories import (
 from .repositories import PostgresEntityRepository
 
 
-class PostgresUnitOfWork(UnitOfWork):
+class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attributes
+    # The UoW deliberately exposes one repository per persistence boundary.
     """Expose one SQLAlchemy transaction to all repositories."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:

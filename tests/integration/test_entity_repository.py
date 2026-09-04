@@ -1,17 +1,23 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """PostgreSQL integration coverage for canonical entity persistence."""
 
+from collections.abc import Callable
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 
 from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
+    PostgresUnitOfWork,
+)
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_entity_upsert_canonicalizes_and_records_history(uow_factory) -> None:
+async def test_entity_upsert_canonicalizes_and_records_history(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
     """Create/update/no-op/delete use database revisions and immutable history."""
     entity_id = uuid4()
     async with uow_factory() as uow:
@@ -48,6 +54,7 @@ async def test_entity_upsert_canonicalizes_and_records_history(uow_factory) -> N
             )
             is not None
         )
+        assert uow.session is not None
         history = await uow.session.execute(
             text(
                 """SELECT operation FROM ati.domain_object_history
