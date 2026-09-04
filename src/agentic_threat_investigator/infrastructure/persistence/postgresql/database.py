@@ -28,6 +28,10 @@ from .identity_repositories import (
     PostgresSessionRepository,
     PostgresUserRepository,
 )
+from .rag_repositories import (
+    PostgresDocumentChunkRepository,
+    PostgresDocumentRepository,
+)
 from .relationship_repositories import (
     PostgresEvidenceRepository,
     PostgresRelationshipObservationRepository,
@@ -62,6 +66,8 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         self.audit_events = cast(AuditEventRepository, None)
         self.source_records = cast(PostgresSourceRecordRepository, None)
         self.ingestion_checkpoints = cast(PostgresIngestionCheckpointRepository, None)
+        self.documents = cast(PostgresDocumentRepository, None)
+        self.document_chunks = cast(PostgresDocumentChunkRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -87,6 +93,10 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             self.session, self._batch_size
         )
         self.ingestion_checkpoints = PostgresIngestionCheckpointRepository(self.session)
+        self.documents = PostgresDocumentRepository(self.session, self._batch_size)
+        self.document_chunks = PostgresDocumentChunkRepository(
+            self.session, self._batch_size
+        )
         return self
 
     async def __aexit__(
@@ -120,6 +130,8 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             self.ingestion_checkpoints = cast(
                 PostgresIngestionCheckpointRepository, None
             )
+            self.documents = cast(PostgresDocumentRepository, None)
+            self.document_chunks = cast(PostgresDocumentChunkRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

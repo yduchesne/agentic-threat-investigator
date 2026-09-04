@@ -12,7 +12,7 @@
 - [PR 7 — SecretsResolver implementation and integration \[DONE\]](#pr-7-secretsresolver-implementation-and-integration)
 - [PR 8 — Batch source/ingestion framework \[DONE\]](#pr-8-batch-sourceingestion-framework)
 - [PR 9 — MITRE ATT&CK ingestion \[DONE\]](#pr-9-mitre-attck-ingestion-done)
-- [PR 10 — Documents/chunks/embeddings](#pr-10-documentschunksembeddings)
+- [PR 10 — Documents/chunks/embeddings \[DONE\]](#pr-10-documentschunksembeddings-done)
 - [PR 11 — RAG retrieval](#pr-11-rag-retrieval)
 - [PR 12 — Live provider framework + RDAP + Google DNS](#pr-12-live-provider-framework-rdap-google-dns)
 - [PR 13 — Remaining v0.1 live sources](#pr-13-remaining-v01-live-sources)
@@ -143,7 +143,7 @@ Deliver:
 - idempotent update behavior;
 - provenance.
 
-## PR 10 — Documents/chunks/embeddings
+## PR 10 — Documents/chunks/embeddings [DONE]
 
 Deliver:
 

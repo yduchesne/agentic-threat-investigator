@@ -20,7 +20,7 @@ from agentic_threat_investigator.domain.immutable_json import (
 )
 
 
-def _utc_timestamp(value: datetime | None) -> datetime | None:
+def validate_utc_timestamp(value: datetime | None) -> datetime | None:
     """Validate and normalize a timestamp to timezone-aware UTC."""
     if value is None:
         return None
@@ -52,13 +52,13 @@ def semantic_source_record_payload(
     return {
         "canonical_payload": values["canonical_payload"],
         "normalization_version": values["normalization_version"],
-        "observed_at": _timestamp_text(values.get("observed_at")),
-        "published_at": _timestamp_text(values.get("published_at")),
+        "observed_at": canonical_timestamp_text(values.get("observed_at")),
+        "published_at": canonical_timestamp_text(values.get("published_at")),
         "record_type": values["record_type"],
     }
 
 
-def _timestamp_text(value: Any) -> str | None:
+def canonical_timestamp_text(value: Any) -> str | None:
     """Render an already validated timestamp in its canonical UTC form."""
     if value is None:
         return None
@@ -109,9 +109,9 @@ class SourceRecord(BaseModel):
 
     _validate_observed_at = field_validator(
         "observed_at", "published_at", mode="after"
-    )(_utc_timestamp)
+    )(validate_utc_timestamp)
     _validate_retrieved_at = field_validator("retrieved_at", mode="after")(
-        _utc_timestamp
+        validate_utc_timestamp
     )
 
     @field_validator("source_id", "source_record_id", "record_type")

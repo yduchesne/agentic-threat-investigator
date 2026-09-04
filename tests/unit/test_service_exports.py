@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests pinning the application service compatibility exports."""
 
+from agentic_threat_investigator import app
 from agentic_threat_investigator.app import identity
 from agentic_threat_investigator.app.services import (
     authentication,
@@ -8,6 +9,14 @@ from agentic_threat_investigator.app.services import (
     rate_limit,
     session,
 )
+
+
+def test_document_indexing_contracts_are_public() -> None:
+    """PR 10 application ports and service are available from the public API."""
+    assert app.EmbeddingClient.__name__ == "EmbeddingClient"
+    assert app.DocumentBuilder.__name__ == "DocumentBuilder"
+    assert app.DocumentIndexingService.__name__ == "DocumentIndexingService"
+    assert app.TokenBoundedChunker.__name__ == "TokenBoundedChunker"
 
 
 def test_authentication_service_reexports_identity_symbols() -> None:

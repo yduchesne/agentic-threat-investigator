@@ -8,6 +8,7 @@ from _pytest.monkeypatch import MonkeyPatch
 from pydantic import ValidationError
 
 from agentic_threat_investigator.config import (
+    EmbeddingSettings,
     Settings,
     ensure_test_database_safe,
     get_settings,
@@ -50,6 +51,33 @@ def test_typed_validation_is_not_silenced() -> None:
     """Invalid profile values fail typed settings construction."""
     with pytest.raises(ValidationError):
         settings_from_config({"db_batch_size": "many"})
+
+
+def test_embedding_settings_match_fixed_schema_dimension() -> None:
+    """Embedding metadata is typed and rejects a DDL dimension mismatch."""
+    embedding = EmbeddingSettings(
+        dimension=1536,
+        provider="hashing",
+        model_version=1,
+        model="ati-hashing-v1",
+    )
+    settings = settings_from_config(
+        {
+            "embedding": embedding,
+            "embedding_batch_size": 32,
+            "rag_chunk_target_tokens": 200,
+            "rag_chunk_max_tokens": 400,
+        }
+    )
+    assert isinstance(settings.embedding, EmbeddingSettings)
+    assert settings.embedding_batch_size == 32
+    with pytest.raises(ValidationError, match="1536"):
+        EmbeddingSettings(
+            dimension=8,
+            provider="hashing",
+            model_version=1,
+            model="ati-hashing-v1",
+        )
 
 
 def test_get_settings_is_cached(monkeypatch: MonkeyPatch) -> None:

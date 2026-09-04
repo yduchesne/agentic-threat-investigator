@@ -7,10 +7,33 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agentic_threat_investigator.config.config_utils import Config, load_config
+
+DOCUMENT_CHUNK_EMBEDDING_DIMENSION = 1536
+
+
+class EmbeddingSettings(BaseModel):
+    """Configured embedding representation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    dimension: int = Field(ge=1)
+    provider: str
+    model_version: int = Field(ge=1)
+    model: str
+
+    @model_validator(mode="after")
+    def validate_embedding_contract(self) -> "EmbeddingSettings":
+        """Reject blank identifiers and dimensions incompatible with the DDL."""
+        if not self.provider.strip() or not self.model.strip():
+            raise ValueError("embedding provider and model must not be blank")
+        if self.dimension != DOCUMENT_CHUNK_EMBEDDING_DIMENSION:
+            raise ValueError(
+                f"embedding dimension must be {DOCUMENT_CHUNK_EMBEDDING_DIMENSION}"
+            )
+        return self
 
 
 class Settings(BaseSettings):
@@ -27,6 +50,12 @@ class Settings(BaseSettings):
     database_pool_size: int = 5
     database_max_overflow: int = 10
     db_batch_size: int = 100
+    embedding: EmbeddingSettings = EmbeddingSettings(
+        provider="hashing", model="ati-hashing-v1", model_version=1, dimension=1536
+    )
+    embedding_batch_size: int = Field(default=64, ge=1)
+    rag_chunk_target_tokens: int = Field(default=400, ge=1)
+    rag_chunk_max_tokens: int = Field(default=800, ge=1)
     data_dir: Path = Path("/var/lib/ati")
     database_test_guard: bool = True
     database_test_url_pattern: str = "ati-test"
@@ -38,6 +67,15 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     bootstrap_admin_username: str | None = None
     bootstrap_admin_password: str | None = None
+
+    @model_validator(mode="after")
+    def validate_chunk_bounds(self) -> "Settings":
+        """Require the target chunk size not to exceed the hard maximum."""
+        if self.rag_chunk_target_tokens > self.rag_chunk_max_tokens:
+            raise ValueError(
+                "rag_chunk_target_tokens must not exceed rag_chunk_max_tokens"
+            )
+        return self
 
     @field_validator("data_dir")
     @classmethod

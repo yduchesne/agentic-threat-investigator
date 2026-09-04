@@ -2,6 +2,7 @@
 """PostgreSQL adapters for source records and ingestion checkpoints."""
 
 from collections.abc import Sequence
+from uuid import UUID
 
 from psycopg.types.json import Jsonb
 from sqlalchemy import text
@@ -75,6 +76,26 @@ class PostgresSourceRecordRepository(SourceRecordRepository):
             SourceRecordBatchResult(row[0], row[1], row[2], BatchOutcome(row[3]))
             for row in result.fetchall()
         ]
+
+    async def get_by_id(self, record_id: UUID) -> SourceRecord | None:
+        """Look up a current normalized record by internal UUID."""
+        result = await self._session.execute(
+            text(
+                """
+            SELECT id, source_id, source_record_id, record_type,
+                   normalization_version, observed_at, published_at, retrieved_at,
+                   canonical_payload, raw_payload, content_hash, metadata
+            FROM ati.source_record WHERE id=:id
+        """
+            ),
+            {"id": record_id},
+        )
+        row = result.mappings().first()
+        if row is None:
+            return None
+        values = dict(row)
+        values["content_hash"] = bytes(row["content_hash"]).hex()
+        return SourceRecord(**values)
 
     async def get_by_identity(
         self, source_id: str, source_record_id: str

@@ -3,6 +3,7 @@
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -70,6 +71,12 @@ async def test_insert_unchanged_update_and_history(
     assert updated[0].outcome is BatchOutcome.UPDATED
     assert updated[0].version > inserted[0].version
     assert history_count == 2
+
+    async with uow_factory() as uow:
+        by_id = await uow.source_records.get_by_id(inserted[0].record_id)
+        missing = await uow.source_records.get_by_id(uuid4())
+    assert by_id is not None and by_id.canonical_payload["value"] == "two"
+    assert missing is None
 
 
 @pytest.mark.asyncio
