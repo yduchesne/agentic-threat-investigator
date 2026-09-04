@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
+from agentic_threat_investigator.domain.documents import Document, DocumentChunk
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.identity import Credential, Session, User
@@ -108,6 +109,71 @@ class IngestionCheckpoint:
             raise ValueError("checkpoint value must not be blank")
 
 
+@dataclass(frozen=True)
+class DocumentBatchItem:
+    """One document and optional optimistic expectation."""
+
+    document: Document
+    expected_version: int | None = None
+
+
+@dataclass(frozen=True)
+class DocumentBatchResult:
+    """Database result for one document ordinal."""
+
+    ordinal: int
+    document_id: UUID
+    version: int
+    outcome: BatchOutcome
+
+
+@dataclass(frozen=True)
+class DocumentChunkBatchItem:
+    """One embedded chunk submitted for replacement."""
+
+    chunk: DocumentChunk
+
+
+@dataclass(frozen=True)
+class DocumentChunkBatchResult:
+    """Database result for one chunk ordinal."""
+
+    ordinal: int
+    chunk_id: UUID
+    version: int
+    outcome: BatchOutcome
+
+
+class DocumentRepository(ABC):
+    """Repository for versioned narrative documents."""
+
+    @abstractmethod
+    async def upsert_batch(
+        self, items: Sequence[DocumentBatchItem]
+    ) -> list[DocumentBatchResult]:
+        """Persist a bounded batch through the canonical database function."""
+
+    @abstractmethod
+    async def get_by_identity(
+        self, source_id: str, source_record_id: str
+    ) -> Document | None:
+        """Return a visible document by durable source identity."""
+
+
+class DocumentChunkRepository(ABC):
+    """Repository for replaceable document chunks."""
+
+    @abstractmethod
+    async def replace_batch(
+        self, document_ids: Sequence[UUID], items: Sequence[DocumentChunkBatchItem]
+    ) -> list[DocumentChunkBatchResult]:
+        """Physically replace complete chunk sets for the supplied documents."""
+
+    @abstractmethod
+    async def list_by_document(self, document_id: UUID) -> list[DocumentChunk]:
+        """Return current chunks in sequence order."""
+
+
 class SourceRecordRepository(ABC):
     """Repository for normalized source records."""
 
@@ -122,6 +188,10 @@ class SourceRecordRepository(ABC):
         self, source_id: str, source_record_id: str
     ) -> SourceRecord | None:
         """Return the current record for an external source identity."""
+
+    @abstractmethod
+    async def get_by_id(self, record_id: UUID) -> SourceRecord | None:
+        """Return a current source record by its internal identifier."""
 
 
 class IngestionCheckpointRepository(ABC):
@@ -344,6 +414,8 @@ class UnitOfWork(ABC):  # pragma: no cover
     audit_events: AuditEventRepository
     source_records: SourceRecordRepository
     ingestion_checkpoints: IngestionCheckpointRepository
+    documents: DocumentRepository
+    document_chunks: DocumentChunkRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:

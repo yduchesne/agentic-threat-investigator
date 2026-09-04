@@ -24,6 +24,8 @@ EXPECTED_TABLES = {
     "audit_event",
     "source_record",
     "ingestion_checkpoint",
+    "document",
+    "document_chunk",
     "alembic_version",
 }
 
@@ -37,6 +39,8 @@ EXPECTED_SEQUENCES = {
     "user_version_seq",
     "audit_event_version_seq",
     "source_record_version_seq",
+    "document_version_seq",
+    "document_chunk_version_seq",
 }
 
 EXPECTED_FUNCTIONS = {
@@ -44,6 +48,8 @@ EXPECTED_FUNCTIONS = {
     "upsert_entity",
     "upsert_entities",
     "upsert_source_records",
+    "upsert_documents",
+    "replace_document_chunks",
 }
 
 
@@ -110,6 +116,35 @@ async def test_upgrade_head_installs_expected_schema() -> None:
     # The migration search path installs extensions into the ati schema so all
     # database objects, including pgvector support, live there.
     assert {"vector", "pgcrypto"} <= extensions
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_rag_schema_has_cosine_hnsw_index_and_composites() -> None:
+    """RAG persistence installs both composites and the cosine HNSW index."""
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            types = {
+                row[0]
+                for row in await connection.execute(
+                    text(
+                        "SELECT typname FROM pg_type t JOIN pg_namespace n "
+                        "ON n.oid=t.typnamespace WHERE n.nspname='ati'"
+                    )
+                )
+            }
+            index_definition = await connection.scalar(
+                text(
+                    "SELECT indexdef FROM pg_indexes WHERE schemaname='ati' "
+                    "AND indexname='document_chunk_embedding_hnsw_idx'"
+                )
+            )
+    finally:
+        await engine.dispose()
+    assert {"document_batch_item", "document_chunk_batch_item"} <= types
+    assert index_definition and "hnsw" in index_definition
+    assert "vector_cosine_ops" in index_definition
 
 
 @pytest.mark.asyncio

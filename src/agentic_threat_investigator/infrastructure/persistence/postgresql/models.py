@@ -6,17 +6,37 @@ minimum public-method rule does not apply to them.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 from uuid import UUID
 
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.types import UserDefinedType
 
 
 class Base(DeclarativeBase):  # pylint: disable=too-few-public-methods
     """Base for ATI ORM mappings."""
+
+
+class Vector1536(UserDefinedType[Any]):  # pylint: disable=too-few-public-methods
+    """SQLAlchemy DDL representation of ATI's fixed pgvector dimension."""
+
+    cache_ok = True
+
+    @property
+    def python_type(self) -> type[tuple[float, ...]]:
+        """Return the application-neutral Python representation type."""
+        return tuple
+
+    def _with_collation(self, _collation: str) -> Self:
+        """Return self because pgvector does not support text collation."""
+        return self
+
+    def get_col_spec(self, **_kwargs: Any) -> str:
+        """Render the PostgreSQL fixed-dimension vector type."""
+        return "vector(1536)"
 
 
 class AuditEventRow(Base):  # pylint: disable=too-few-public-methods
@@ -83,6 +103,54 @@ class SourceRecordRow(Base):  # pylint: disable=too-few-public-methods
     version: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DocumentRow(Base):  # pylint: disable=too-few-public-methods
+    """Current versioned narrative document state."""
+
+    __tablename__ = "document"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    source_id: Mapped[str] = mapped_column(String)
+    source_record_id: Mapped[str] = mapped_column(String)
+    document_type: Mapped[str] = mapped_column(String)
+    title: Mapped[str | None] = mapped_column(String)
+    source_url: Mapped[str | None] = mapped_column(String)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    content: Mapped[str] = mapped_column(String)
+    normalization_version: Mapped[int]
+    chunking_version: Mapped[int]
+    content_hash: Mapped[bytes] = mapped_column(BYTEA)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
+
+class DocumentChunkRow(Base):  # pylint: disable=too-few-public-methods
+    """Current replaceable pgvector indexing artifact."""
+
+    __tablename__ = "document_chunk"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    document_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("ati.document.id")
+    )
+    sequence: Mapped[int]
+    text: Mapped[str] = mapped_column(String)
+    token_count: Mapped[int]
+    embedding: Mapped[Any] = mapped_column(Vector1536())
+    embedding_provider: Mapped[str] = mapped_column(String)
+    embedding_model: Mapped[str] = mapped_column(String)
+    embedding_model_version: Mapped[int]
+    embedding_dimension: Mapped[int]
+    content_hash: Mapped[bytes] = mapped_column(BYTEA)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class IngestionCheckpointRow(Base):  # pylint: disable=too-few-public-methods

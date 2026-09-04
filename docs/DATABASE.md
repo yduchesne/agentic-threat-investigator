@@ -296,6 +296,10 @@ Chunks retain:
 - embedding model/version;
 - metadata.
 
+Documents are identified by `(source_id, source_record_id)` and reference the source record through that same composite key. They also retain derived `content`, document type (the source `record_type` vocabulary), and an explicit `chunking_version`; the document semantic hash covers document type, title, source URL, published time, content, normalization/chunking versions, and metadata; source identity, retrieval time, and internal identity are excluded.
+
+Chunks are identified by `(document_id, sequence)`. They are replaceable indexing artifacts: replacement physically rebuilds the complete set, allocates chunk versions, and writes no `domain_object_history` rows or soft-delete state. Each chunk stores embedding provider/model/version/dimension and a semantic hash covering its text, token count, metadata, identity, and embedding metadata (not the vector). The vector column is fixed at dimension 1536 and has an HNSW cosine index.
+
 Embedding configuration stores provider/model/version/dimension sufficiently to support controlled re-embedding.
 
 ## Authentication persistence
