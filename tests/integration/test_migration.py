@@ -22,6 +22,8 @@ EXPECTED_TABLES = {
     "credential",
     "session",
     "audit_event",
+    "source_record",
+    "ingestion_checkpoint",
     "alembic_version",
 }
 
@@ -34,9 +36,15 @@ EXPECTED_SEQUENCES = {
     "assessment_version_seq",
     "user_version_seq",
     "audit_event_version_seq",
+    "source_record_version_seq",
 }
 
-EXPECTED_FUNCTIONS = {"ati_jsonb_diff", "upsert_entity", "upsert_entities"}
+EXPECTED_FUNCTIONS = {
+    "ati_jsonb_diff",
+    "upsert_entity",
+    "upsert_entities",
+    "upsert_source_records",
+}
 
 
 def _test_engine() -> AsyncEngine:

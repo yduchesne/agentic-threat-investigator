@@ -4,6 +4,7 @@
 
 import logging
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from pydantic import field_validator
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
     database_pool_size: int = 5
     database_max_overflow: int = 10
     db_batch_size: int = 100
+    data_dir: Path = Path("/var/lib/ati")
     database_test_guard: bool = True
     database_test_url_pattern: str = "ati-test"
     session_absolute_expiry_seconds: int = 28800
@@ -36,6 +38,19 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     bootstrap_admin_username: str | None = None
     bootstrap_admin_password: str | None = None
+
+    @field_validator("data_dir")
+    @classmethod
+    def validate_data_dir(cls, value: Path) -> Path:
+        """Require an absolute deployment data root."""
+        if not value.is_absolute():
+            raise ValueError("data_dir must be an absolute path")
+        return value
+
+    @property
+    def datasets_dir(self) -> Path:
+        """Return the filesystem object-store root below the data directory."""
+        return self.data_dir / "datasets"
 
     @field_validator("public_base_url")
     @classmethod

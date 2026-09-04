@@ -61,6 +61,43 @@ class EntityRow(Base):  # pylint: disable=too-few-public-methods
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
+class SourceRecordRow(Base):  # pylint: disable=too-few-public-methods
+    """Current normalized state for one external source identity."""
+
+    __tablename__ = "source_record"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    source_id: Mapped[str] = mapped_column(String)
+    source_record_id: Mapped[str] = mapped_column(String)
+    record_type: Mapped[str] = mapped_column(String)
+    normalization_version: Mapped[int]
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    canonical_payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    content_hash: Mapped[bytes] = mapped_column(BYTEA)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class IngestionCheckpointRow(Base):  # pylint: disable=too-few-public-methods
+    """Mutable operational progress for one artifact and normalizer version."""
+
+    __tablename__ = "ingestion_checkpoint"
+    __table_args__ = {"schema": "ati"}
+    source_id: Mapped[str] = mapped_column(String, primary_key=True)
+    artifact_uri: Mapped[str] = mapped_column(String, primary_key=True)
+    normalization_version: Mapped[int] = mapped_column(primary_key=True)
+    checkpoint: Mapped[str | None] = mapped_column(String)
+    complete: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class UserRow(Base):  # pylint: disable=too-few-public-methods
     """Database row for a local user."""
 

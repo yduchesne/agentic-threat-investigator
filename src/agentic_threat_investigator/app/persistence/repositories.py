@@ -16,6 +16,7 @@ from datetime import datetime
 from enum import Enum
 from types import TracebackType
 from typing import Self
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
@@ -26,6 +27,7 @@ from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
 )
+from agentic_threat_investigator.domain.source import SourceRecord
 
 
 class BatchOutcome(str, Enum):
@@ -57,6 +59,89 @@ class EntityBatchResult:
     entity_id: UUID
     version: int
     outcome: BatchOutcome
+
+
+@dataclass(frozen=True)
+class SourceRecordBatchItem:
+    """One normalized source record and optional optimistic expectation."""
+
+    record: SourceRecord
+    expected_version: int | None = None
+
+
+@dataclass(frozen=True)
+class SourceRecordBatchResult:
+    """Authoritative database result correlated by input ordinal."""
+
+    ordinal: int
+    record_id: UUID
+    version: int
+    outcome: BatchOutcome
+
+
+@dataclass(frozen=True)
+class IngestionCheckpoint:
+    """Opaque resumable progress scoped to one artifact and normalizer."""
+
+    source_id: str
+    artifact_uri: str
+    normalization_version: int
+    checkpoint: str | None
+    complete: bool = False
+
+    def __post_init__(self) -> None:
+        """Reject unsafe or ambiguous operational checkpoint identities."""
+        if not self.source_id.strip():
+            raise ValueError("checkpoint source_id must not be blank")
+        parsed = urlsplit(self.artifact_uri)
+        if (
+            not parsed.scheme
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError(
+                "checkpoint artifact_uri must be absolute and credential-free"
+            )
+        if self.normalization_version < 1:
+            raise ValueError("checkpoint normalization_version must be positive")
+        if self.checkpoint is not None and not self.checkpoint:
+            raise ValueError("checkpoint value must not be blank")
+
+
+class SourceRecordRepository(ABC):
+    """Repository for normalized source records."""
+
+    @abstractmethod
+    async def upsert_batch(
+        self, items: Sequence[SourceRecordBatchItem]
+    ) -> list[SourceRecordBatchResult]:
+        """Persist a bounded batch through the canonical database function."""
+
+    @abstractmethod
+    async def get_by_identity(
+        self, source_id: str, source_record_id: str
+    ) -> SourceRecord | None:
+        """Return the current record for an external source identity."""
+
+
+class IngestionCheckpointRepository(ABC):
+    """Repository for operational ingestion progress."""
+
+    @abstractmethod
+    async def get(
+        self, source_id: str, artifact_uri: str, normalization_version: int
+    ) -> IngestionCheckpoint | None:
+        """Read the latest checkpoint for one artifact identity."""
+
+    @abstractmethod
+    async def put(self, checkpoint: IngestionCheckpoint) -> None:
+        """Store progress in the caller's transaction."""
+
+    @abstractmethod
+    async def reset(
+        self, source_id: str, artifact_uri: str, normalization_version: int
+    ) -> None:
+        """Clear progress for exactly one artifact identity."""
 
 
 class AuditEventRepository(
@@ -257,6 +342,8 @@ class UnitOfWork(ABC):  # pragma: no cover
     credentials: CredentialRepository
     sessions: SessionRepository
     audit_events: AuditEventRepository
+    source_records: SourceRecordRepository
+    ingestion_checkpoints: IngestionCheckpointRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:

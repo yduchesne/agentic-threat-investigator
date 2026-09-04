@@ -1,172 +1,147 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Unit tests for the structured batch source ports."""
+"""Unit tests for artifact and structured batch-source contracts."""
 
 import dataclasses
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from agentic_threat_investigator.app.sources import (
     CHECKPOINTING,
+    ArtifactReference,
+    ArtifactReferenceError,
     BatchSource,
+    ObjectStore,
     SourceBatch,
-    SourceCache,
     SourceCapability,
 )
-from agentic_threat_investigator.domain.source import (
-    SourceRecord,
-    source_record_content_hash,
-)
+from agentic_threat_investigator.domain.source import SourceRecord
 
 
-def _record(source_id: str = "feed-a") -> SourceRecord:
-    """Build one valid record fixture for the given source."""
+def _record(source_id: str = "feed-a", version: int = 1) -> SourceRecord:
+    """Support the test record behavior."""
     return SourceRecord(
         source_id=source_id,
         source_record_id="rec-1",
         record_type="observation",
-        normalization_version=1,
+        normalization_version=version,
         retrieved_at=datetime(2026, 1, 1, tzinfo=UTC),
         canonical_payload={"value": "example.com"},
     )
 
 
-def test_checkpointing_capability_constant() -> None:
-    """The exported constant is the matching capability enum member."""
-    assert CHECKPOINTING is SourceCapability.CHECKPOINTING
-    assert CHECKPOINTING.value == "checkpointing"
+def _artifact(**overrides: object) -> ArtifactReference:
+    """Support the test artifact behavior."""
+    values: dict[str, object] = {
+        "source_id": "feed-a",
+        "uri": "file:///datasets/feed-a/input.json",
+        "retrieved_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "metadata": {"headers": {"etag": "one"}, "parts": [1, 2]},
+    }
+    values.update(overrides)
+    return ArtifactReference(**values)  # type: ignore[arg-type]
 
 
-def test_source_batch_defaults_and_immutability() -> None:
-    """Batches default to no checkpoint/incompleteness and stay immutable."""
-    batch = SourceBatch(records=(_record(),))
-    assert batch.checkpoint is None
-    assert batch.complete is False
+def test_artifact_reference_normalizes_time_and_freezes_metadata() -> None:
+    """Verify artifact reference normalizes time and freezes metadata."""
+    artifact = _artifact(
+        retrieved_at=datetime(2026, 1, 1, 2, tzinfo=UTC) + timedelta(hours=1)
+    )
+    assert artifact.retrieved_at.tzinfo is UTC
+    with pytest.raises(TypeError):
+        artifact.metadata["new"] = 1  # type: ignore[index]
+    with pytest.raises(TypeError):
+        artifact.metadata["headers"]["etag"] = "two"
     with pytest.raises(dataclasses.FrozenInstanceError):
-        batch.complete = True  # type: ignore[misc]
+        artifact.uri = "file:///other"  # type: ignore[misc]
 
 
-def test_source_batch_requires_records() -> None:
-    """Empty batches are rejected."""
-    with pytest.raises(ValueError, match="at least one record"):
-        SourceBatch(records=())
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"source_id": " "}, "source_id"),
+        ({"uri": "relative.json"}, "lowercase scheme"),
+        ({"uri": "FILE:///input.json"}, "lowercase scheme"),
+        ({"uri": "s3://user:secret@bucket/key"}, "credentials"),
+        ({"retrieved_at": datetime(2026, 1, 1)}, "timezone-aware"),
+        ({"content_hash": "ABC"}, "SHA-256"),
+        ({"content_hash": "g" * 64}, "SHA-256"),
+    ],
+)
+def test_artifact_reference_rejects_invalid_values(
+    overrides: dict[str, object], message: str
+) -> None:
+    """Verify artifact reference rejects invalid values."""
+    with pytest.raises(ArtifactReferenceError, match=message):
+        _artifact(**overrides)
 
 
-def test_source_batch_requires_one_source() -> None:
-    """Records from different sources never share one batch."""
-    with pytest.raises(ValueError, match="one source"):
-        SourceBatch(records=(_record("feed-a"), _record("feed-b")))
+def test_artifact_reference_accepts_expected_digest() -> None:
+    """Verify artifact reference accepts expected digest."""
+    assert _artifact(content_hash="a" * 64).content_hash == "a" * 64
 
 
-class _RecordingSource(BatchSource):
-    # Minimal fake: the port intentionally exposes a single operation.
-    # pylint: disable=too-few-public-methods
+def test_source_batch_is_immutable_and_exposes_identity() -> None:
+    """Verify source batch is immutable and exposes identity."""
+    batch = SourceBatch((_record(),), checkpoint="next", complete=True)
+    assert batch.source_id == "feed-a"
+    assert batch.normalization_version == 1
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        batch.complete = False  # type: ignore[misc]
 
-    """Fake source that yields one batch and records its checkpoint argument."""
+
+@pytest.mark.parametrize(
+    ("records", "checkpoint", "message"),
+    [
+        ((), None, "at least one"),
+        ((_record(), _record("feed-b")), None, "one source"),
+        ((_record(), _record(version=2)), None, "one normalization"),
+        ((_record(),), "", "must not be blank"),
+    ],
+)
+def test_source_batch_rejects_invalid_content(
+    records: tuple[SourceRecord, ...], checkpoint: str | None, message: str
+) -> None:
+    """Verify source batch rejects invalid content."""
+    with pytest.raises(ValueError, match=message):
+        SourceBatch(records, checkpoint=checkpoint)
+
+
+class _Source(BatchSource):  # pylint: disable=too-few-public-methods
+    """Test helper for Source."""
 
     source_id = "feed-a"
+    normalization_version = 1
     capabilities = frozenset({CHECKPOINTING})
 
-    def __init__(self) -> None:
-        self.seen_checkpoint: str | None = None
-
-    def batches(self, checkpoint: str | None = None) -> AsyncIterator[SourceBatch]:
-        """Yield one single-source batch after remembering the checkpoint."""
+    def batches(
+        self, artifact: ArtifactReference, checkpoint: str | None = None
+    ) -> AsyncIterator[SourceBatch]:
+        """Support the test batches behavior."""
 
         async def generate() -> AsyncIterator[SourceBatch]:
-            """Produce the single fake batch."""
-            self.seen_checkpoint = checkpoint
-            yield SourceBatch(
-                records=(_record(),), checkpoint="cursor-1", complete=True
-            )
+            """Support the test generate behavior."""
+            assert artifact.source_id == self.source_id
+            assert checkpoint == "before"
+            yield SourceBatch((_record(),), checkpoint="after", complete=True)
 
         return generate()
 
 
 @pytest.mark.asyncio
-async def test_batch_source_yields_normalized_batches() -> None:
-    """A concrete source streams batches and advertises capabilities."""
-
-    source = _RecordingSource()
-
-    batches = [batch async for batch in source.batches("cursor-0")]
-
-    assert source.seen_checkpoint == "cursor-0"
-    assert source.capabilities == frozenset({SourceCapability.CHECKPOINTING})
-    assert len(batches) == 1
-    assert batches[0].checkpoint == "cursor-1"
-    assert batches[0].complete is True
-    assert batches[0].records[0].source_id == "feed-a"
+async def test_batch_source_receives_artifact_and_checkpoint() -> None:
+    """Verify batch source receives artifact and checkpoint."""
+    batches = [batch async for batch in _Source().batches(_artifact(), "before")]
+    assert batches[0].checkpoint == "after"
+    assert CHECKPOINTING is SourceCapability.CHECKPOINTING
 
 
-def test_batch_source_cannot_be_instantiated_directly() -> None:
-    """The port stays abstract: retrieval must be implemented per source."""
-    # Deliberate negative check: the port must not be instantiable.
+def test_ports_are_abstract() -> None:
+    """Verify ports are abstract."""
     with pytest.raises(TypeError):
         # pylint: disable-next=abstract-class-instantiated
         BatchSource()  # type: ignore[abstract]
-
-
-class _FakeCache(SourceCache):
-    """In-memory cache used to exercise the port's default alias."""
-
-    def __init__(self) -> None:
-        self._entries: dict[str, bytes] = {}
-
-    async def read(self, key: str) -> bytes | None:
-        """Return the stored bytes for a key."""
-        return self._entries.get(key)
-
-    async def write(self, key: str, content: bytes) -> Path:
-        """Store bytes and report the logical cache path."""
-        self._entries[key] = content
-        return Path(key)
-
-    async def remove(self, key: str) -> None:
-        """Drop one stored key when present."""
-        self._entries.pop(key, None)
-
-
-@pytest.mark.asyncio
-async def test_source_cache_get_delegates_to_read() -> None:
-    """The compatibility alias reads through the implementing port."""
-
-    cache = _FakeCache()
-
-    await cache.write("k.bin", b"payload")
-
-    assert await cache.get("k.bin") == b"payload"
-    assert await cache.get("absent.bin") is None
-
-
-@pytest.mark.asyncio
-async def test_source_cache_roundtrip_through_the_port() -> None:
-    """Write, read, and remove behave as one artifact lifecycle."""
-
-    cache = _FakeCache()
-
-    path = await cache.write("k.bin", b"payload")
-    assert path == Path("k.bin")
-    assert await cache.read("k.bin") == b"payload"
-    await cache.remove("k.bin")
-    assert await cache.read("k.bin") is None
-
-
-def test_source_cache_cannot_be_instantiated_directly() -> None:
-    """The cache port stays abstract."""
-    # Deliberate negative check: the port must not be instantiable.
     with pytest.raises(TypeError):
         # pylint: disable-next=abstract-class-instantiated
-        SourceCache()  # type: ignore[abstract]
-
-
-def test_batch_records_carry_semantic_hashes() -> None:
-    """Records inside a batch are validated domain models."""
-
-    batch = SourceBatch(records=(_record(),))
-
-    record = batch.records[0]
-    assert record.content_hash == source_record_content_hash(record)
+        ObjectStore()  # type: ignore[abstract]

@@ -108,7 +108,7 @@ Deliver:
 - inserted/updated/unchanged result;
 - integration tests.
 
-## PR 7 — SecretsResolver implementation and integration
+## PR 7 — SecretsResolver implementation and integration [DONE]
 
 Deliver:
 
@@ -123,7 +123,7 @@ Deliver:
 
 This PR prepares credential wiring for subsequent provider and batch PRs.
 
-## PR 8 — Batch source/ingestion framework
+## PR 8 — Batch source/ingestion framework [DONE]
 
 Deliver:
 
@@ -132,7 +132,7 @@ Deliver:
 - checkpoints/capabilities;
 - IngestionService;
 - normalization versioning;
-- source cache behavior.
+- URI-oriented ObjectStore artifact behavior.
 
 ## PR 9 — MITRE ATT&CK ingestion
 

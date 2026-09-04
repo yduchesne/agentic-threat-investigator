@@ -63,6 +63,8 @@ async def reset_application_data(
 ) -> AsyncIterator[None]:
     """Clear all mutable application rows while retaining the migrated schema."""
     tables = (
+        "ingestion_checkpoint",
+        "source_record",
         "session",
         "credential",
         '"user"',

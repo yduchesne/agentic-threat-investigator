@@ -37,6 +37,10 @@ services:
 
   worker:
     build: .
+    environment:
+      ATI_DATA_DIR: /var/lib/ati
+    volumes:
+      - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/datasets:/var/lib/ati/datasets:ro"
     command: ["python", "-c", "print('ATI worker bootstrap')"]
     depends_on:
       migrate: { condition: service_completed_successfully }
