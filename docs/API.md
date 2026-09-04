@@ -1,5 +1,34 @@
 # Agentic Threat Investigator — REST API Contract
 
+## Table of contents
+
+- [Principles](#principles)
+- [DTO boundary](#dto-boundary)
+- [Authentication](#authentication)
+- [Investigations](#investigations)
+- [Investigation subresources](#investigation-subresources)
+- [Evidence](#evidence)
+- [Relationships](#relationships)
+- [Assessment](#assessment)
+- [Research](#research)
+- [Timeline](#timeline)
+- [Map/geolocation](#mapgeolocation)
+- [Monitors](#monitors)
+- [Findings](#findings)
+- [Administration](#administration)
+- [Resource identifiers](#resource-identifiers)
+- [Pagination](#pagination)
+- [Filtering](#filtering)
+- [Errors](#errors)
+- [Idempotency](#idempotency)
+- [Optimistic concurrency](#optimistic-concurrency)
+- [Soft deletion](#soft-deletion)
+- [Authorization](#authorization)
+- [Progress updates](#progress-updates)
+- [Versioning](#versioning)
+- [No implementation leakage](#no-implementation-leakage)
+- [Resource versions and history](#resource-versions-and-history)
+
 ## Principles
 
 ATI exposes stable domain resources and asynchronous investigation workflows.

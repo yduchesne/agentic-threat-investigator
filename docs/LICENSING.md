@@ -1,5 +1,20 @@
 # Agentic Threat Investigator — Licensing and Attribution
 
+## Table of contents
+
+- [ATI license](#ati-license)
+- [Source headers](#source-headers)
+- [Repository licensing files](#repository-licensing-files)
+- [Third-party code](#third-party-code)
+- [External data and service terms](#external-data-and-service-terms)
+- [Data bundling](#data-bundling)
+- [Runtime attribution](#runtime-attribution)
+- [Evidence provenance](#evidence-provenance)
+- [Dependencies](#dependencies)
+- [Network-use notice](#network-use-notice)
+- [Contributions](#contributions)
+- [CI checks](#ci-checks)
+
 ## ATI license
 
 Agentic Threat Investigator source code is licensed under:

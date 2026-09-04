@@ -1,5 +1,35 @@
 # Agentic Threat Investigator — Architecture
 
+## Table of contents
+
+- [Architectural objective](#architectural-objective)
+- [High-level architecture](#high-level-architecture)
+- [Layering](#layering)
+  - [Domain](#domain)
+  - [Application](#application)
+  - [Infrastructure](#infrastructure)
+  - [Agents](#agents)
+  - [API](#api)
+  - [Frontend](#frontend)
+- [Core architectural rule](#core-architectural-rule)
+- [Asynchronous investigation execution](#asynchronous-investigation-execution)
+- [LangGraph topology](#langgraph-topology)
+- [Agent boundaries](#agent-boundaries)
+- [Provider architecture](#provider-architecture)
+- [Relationship construction](#relationship-construction)
+- [RAG](#rag)
+- [Persistence](#persistence)
+- [Transactions](#transactions)
+- [Batch ingestion](#batch-ingestion)
+- [Geospatial](#geospatial)
+- [Observability](#observability)
+- [Technology baseline](#technology-baseline)
+- [Configuration architecture](#configuration-architecture)
+- [Batch persistence responsibility boundary](#batch-persistence-responsibility-boundary)
+- [Batch artifact storage boundary](#batch-artifact-storage-boundary)
+- [Secrets boundary](#secrets-boundary)
+- [Batch artifact acquisition and storage evolution](#batch-artifact-acquisition-and-storage-evolution)
+
 ## Architectural objective
 
 ATI separates domain semantics, application orchestration, infrastructure adapters, persistence, agent behavior, and presentation so that external providers, LLMs, tracing systems, and deployment details can change without altering the core investigation model.
@@ -250,3 +280,83 @@ Runtime configuration follows `CONFIGURATION.md`. `ATI_CONFIG_PROFILE` selects a
 ## Batch persistence responsibility boundary
 
 Batch persistence always uses resource-specific PostgreSQL composite arrays as the bounded application-to-database transport and temporary tables inside set-oriented stored functions. ATI assumes batches may be large; there is no small-batch alternate path. The application enforces a configurable maximum batch size. PostgreSQL owns reconciliation, concurrency checks, version allocation, JSONB diff generation, target mutation, immutable history creation, and outcome classification. Python repositories must not duplicate this logic. Row-level history/version triggers are prohibited.
+
+## Batch artifact storage boundary
+
+Batch ingestion separates acquisition, storage, and interpretation. BatchSource consumes an artifact through an abstract ObjectStore using a URI and is unaware of how the artifact was acquired. v0.1 provides filesystem-backed object storage; cloud object-store implementations are future extensions.
+
+A future Downloader is a producer-side acquisition abstraction. A later producer/consumer topology may use a distributed event log to announce artifact availability while retaining the artifact itself in filesystem/object storage.
+
+## Secrets boundary
+
+Secret acquisition is abstracted through `SecretsResolver`. v0.1 uses `EnvVarSecretsResolver`. Secret resolution occurs in the application composition/bootstrap layer; constructed providers receive resolved credentials rather than depending on the resolver itself.
+
+
+## Batch artifact acquisition and storage evolution
+
+The architectural dependency direction is:
+
+```text
+v0.1
+
+manual acquisition
+      ↓
+FileSystemObjectStore
+      ↓
+artifact URI
+      ↓
+BatchSource
+      ↓
+SourceRecord
+      ↓
+batch repository
+```
+
+A `BatchSource` consumes an already-present artifact. It does not perform HTTP downloads, authenticate to the upstream publisher, or decide where artifacts are stored.
+
+Artifact locations are represented by URIs. Canonical examples are:
+
+```text
+file:///var/lib/ati/datasets/mitre-attack/enterprise-attack.json
+s3://ati-datasets/mitre-attack/enterprise-attack.json
+```
+
+The URI identifies the resource; it never carries credentials. URI-scheme resolution selects the appropriate `ObjectStore` implementation outside the `BatchSource`. The source must not contain `if scheme == "file"` / `if scheme == "s3"` storage branching.
+
+For v0.1 the only required storage implementation is `FileSystemObjectStore`, rooted operationally beneath:
+
+```text
+${ATI_DATA_DIR}/datasets/<source>/
+```
+
+A future `Downloader` is a producer-side abstraction:
+
+```text
+external publisher
+      ↓
+Downloader
+      ↓
+ObjectStore
+      ↓
+artifact URI
+```
+
+A still-later distributed topology may introduce a producer/consumer layer and distributed event log such as Kafka:
+
+```text
+Downloader
+      ↓
+ObjectStore
+      ↓
+ArtifactAvailable event
+      ↓
+distributed event log
+      ↓
+consumer
+      ↓
+BatchSource
+```
+
+The event log carries artifact metadata/reference information such as source ID, artifact URI, content hash, and retrieval timestamp. Bulk datasets remain in filesystem/object storage and are not transported as event payloads.
+
+Secret acquisition remains orthogonal to all of the above. `SecretsResolver` resolves credentials during bootstrap/composition; storage implementations, downloaders, and providers receive only the credentials they require.

@@ -1,5 +1,24 @@
 # Agentic Threat Investigator — Agent Design
 
+## Table of contents
+
+- [Objective](#objective)
+- [Agent roles](#agent-roles)
+  - [Investigation Coordinator](#investigation-coordinator)
+  - [Infrastructure Collector](#infrastructure-collector)
+  - [Threat Intelligence Collector](#threat-intelligence-collector)
+  - [Threat Research / Context Agent](#threat-research-context-agent)
+  - [Evidence Analyst](#evidence-analyst)
+  - [Report Writer](#report-writer)
+- [Provider contract](#provider-contract)
+- [Provider failure behavior](#provider-failure-behavior)
+- [Pivot policy](#pivot-policy)
+- [LLM contract](#llm-contract)
+- [Prompt-injection resistance](#prompt-injection-resistance)
+- [LLM failure](#llm-failure)
+- [RAG contract](#rag-contract)
+- [Observable reasoning](#observable-reasoning)
+
 ## Objective
 
 ATI uses agents for interpretation, prioritization, synthesis, and bounded investigative decision-making. Deterministic code retains control of persistence, provider applicability, policy enforcement, budgets, and invariants.

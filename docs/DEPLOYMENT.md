@@ -1,5 +1,31 @@
 # Agentic Threat Investigator — Local Deployment and Development Environment
 
+## Table of contents
+
+- [v0.1 deployment target](#v01-deployment-target)
+- [Runtime topology](#runtime-topology)
+- [Persistent host root](#persistent-host-root)
+- [Environment isolation](#environment-isolation)
+- [Data safety](#data-safety)
+- [PostgreSQL](#postgresql)
+- [Database migrations](#database-migrations)
+- [Backend image](#backend-image)
+- [API and worker](#api-and-worker)
+- [Scheduler](#scheduler)
+- [Frontend development](#frontend-development)
+- [Configuration](#configuration)
+- [Networking](#networking)
+- [Health](#health)
+- [Logging](#logging)
+- [DB-IP](#db-ip)
+- [Source cache](#source-cache)
+- [Backup/restore](#backuprestore)
+- [Runtime versions](#runtime-versions)
+- [Test environment isolation](#test-environment-isolation)
+- [Developer commands](#developer-commands)
+- [Configuration profiles](#configuration-profiles)
+- [Database baseline update](#database-baseline-update)
+
 ## v0.1 deployment target
 
 ATI v0.1 deploys locally with Podman Compose.

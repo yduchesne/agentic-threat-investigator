@@ -1,5 +1,26 @@
 # Agentic Threat Investigator — Data Sources
 
+## Table of contents
+
+- [Source policy](#source-policy)
+- [Live/local evidence sources](#livelocal-evidence-sources)
+  - [IPinfo Lite](#ipinfo-lite)
+  - [RDAP](#rdap)
+  - [Google Public DNS](#google-public-dns)
+  - [DB-IP City Lite](#db-ip-city-lite)
+  - [AbuseIPDB](#abuseipdb)
+  - [ThreatFox](#threatfox)
+  - [URLhaus](#urlhaus)
+- [Structured batch sources](#structured-batch-sources)
+  - [MITRE ATT&CK](#mitre-attck)
+  - [CISA Known Exploited Vulnerabilities](#cisa-known-exploited-vulnerabilities)
+- [Narrative RAG corpus](#narrative-rag-corpus)
+- [Deferred sources](#deferred-sources)
+- [Batch ingestion model](#batch-ingestion-model)
+- [Live evidence model](#live-evidence-model)
+- [Source cache](#source-cache)
+- [Data bundling](#data-bundling)
+
 ## Source policy
 
 v0.1 uses only free, relevant data sources suitable for the open-source product's intended use. Access terms, attribution, and redistribution rights must be verified independently before release.

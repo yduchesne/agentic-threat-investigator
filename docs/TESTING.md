@@ -1,5 +1,33 @@
 # Agentic Threat Investigator — Testing and Engineering Quality
 
+## Table of contents
+
+- [Purpose](#purpose)
+- [Quality contract](#quality-contract)
+- [Python project management](#python-project-management)
+- [Formatting](#formatting)
+- [Imports](#imports)
+- [Linting](#linting)
+- [Static typing](#static-typing)
+- [Pytest test categories](#pytest-test-categories)
+- [Unit tests](#unit-tests)
+- [Provider contract tests](#provider-contract-tests)
+- [Database integration tests](#database-integration-tests)
+- [Migration tests](#migration-tests)
+- [Test isolation](#test-isolation)
+- [Synthetic fixtures](#synthetic-fixtures)
+- [Fake implementations](#fake-implementations)
+- [Scenario factory](#scenario-factory)
+- [Coverage](#coverage)
+- [Pre-commit](#pre-commit)
+- [Canonical quality command](#canonical-quality-command)
+- [No quality-gate bypass](#no-quality-gate-bypass)
+- [CI quality gate](#ci-quality-gate)
+- [Frontend quality](#frontend-quality)
+- [Definition of done](#definition-of-done)
+- [Configuration tests](#configuration-tests)
+- [Batch persistence and history tests](#batch-persistence-and-history-tests)
+
 ## Purpose
 
 This document defines ATI's conventional software testing and source-quality requirements.

@@ -1,5 +1,29 @@
 # Agentic Threat Investigator — Security Design
 
+## Table of contents
+
+- [Authentication](#authentication)
+- [User model](#user-model)
+- [Passwords](#passwords)
+- [Bootstrap administrator](#bootstrap-administrator)
+- [Sessions](#sessions)
+- [CSRF](#csrf)
+- [Login protection](#login-protection)
+- [Administrator invariant](#administrator-invariant)
+- [Actor context](#actor-context)
+- [Authorization](#authorization)
+- [Audit](#audit)
+- [Audit data minimization](#audit-data-minimization)
+- [LLM/tool security](#llmtool-security)
+- [Prompt injection](#prompt-injection)
+- [Secrets](#secrets)
+- [Container security](#container-security)
+- [Data deletion](#data-deletion)
+- [Geolocation safety](#geolocation-safety)
+- [Future external identity](#future-external-identity)
+- [Secret resolution and artifact URIs](#secret-resolution-and-artifact-uris)
+- [Secret-handling rules](#secret-handling-rules)
+
 ## Authentication
 
 v0.1 uses local username/password authentication with server-side sessions.
@@ -229,3 +253,22 @@ The UI and reports describe IP geolocation as approximate. It must not be repres
 ## Future external identity
 
 The domain User model is designed so a future external identity mapping can reference the same user concept without changing domain ownership/audit semantics. External identity integration is not part of v0.1.
+
+## Secret resolution and artifact URIs
+
+ATI abstracts secret retrieval through `SecretsResolver`; v0.1 provides only `EnvVarSecretsResolver`. Secrets are resolved at application bootstrap and must not be logged, committed to profile modules, persisted in investigation data, or embedded in artifact URIs. Providers receive only the credentials they require.
+
+
+## Secret-handling rules
+
+The following rules apply to configuration, providers, storage, and future acquisition components:
+
+- `SecretsResolver` is the abstraction for secret retrieval.
+- `EnvVarSecretsResolver` is the only required v0.1 implementation.
+- Configuration profiles contain secret reference names, not secret values.
+- Secret resolution occurs during bootstrap/composition.
+- Providers should receive resolved credentials rather than a `SecretsResolver`.
+- Missing required secrets fail startup clearly.
+- Resolved secret values must not be logged, included in effective-configuration dumps, persisted in evidence/history/audit/timeline data, or exposed in errors.
+- Artifact URIs identify locations only and must never embed credentials.
+- Redaction is defense in depth; code must not rely on redaction as permission to place secrets into ordinary configuration/log structures.
