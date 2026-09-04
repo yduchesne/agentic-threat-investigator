@@ -207,6 +207,9 @@ tempCodeRunnerFile.py
 frontend/node_modules/
 frontend/dist/
 
+# Locally acquired third-party dataset artifacts
+/data/datasets/
+
 # Ruff stuff:
 .ruff_cache/
 
