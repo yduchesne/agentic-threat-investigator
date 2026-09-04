@@ -32,7 +32,9 @@ class EntityRow(Base):  # pylint: disable=too-few-public-methods
     display_name: Mapped[str | None] = mapped_column(String)
     attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     content_hash: Mapped[bytes | None] = mapped_column(BYTEA)
-    version: Mapped[int] = mapped_column(BigInteger)
+    version: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("nextval('ati.entity_version_seq')")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -55,7 +57,9 @@ class UserRow(Base):  # pylint: disable=too-few-public-methods
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
-    version: Mapped[int] = mapped_column(BigInteger)
+    version: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("nextval('ati.user_version_seq')")
+    )
 
 
 class CredentialRow(Base):  # pylint: disable=too-few-public-methods

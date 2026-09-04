@@ -4,10 +4,11 @@
 # SQLAlchemy's dynamic func namespace is incorrectly flagged by pylint.
 # pylint: disable=not-callable
 
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import CursorResult, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.identity import normalize_username
@@ -50,9 +51,48 @@ class PostgresUserRepository(UserRepository):
 
     async def create(self, user: User) -> User:
         """Insert a user in the current transaction."""
-        self.session.add(UserRow(**user.model_dump()))
+        normalized = normalize_username(user.username)
+        row = UserRow(
+            id=user.id,
+            username=normalized,
+            display_name=user.display_name,
+            role=user.role.value,
+            enabled=user.enabled,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+            deleted_at=user.deleted_at,
+            deleted_by_actor_id=user.deleted_by_actor_id,
+        )
+        self.session.add(row)
         await self.session.flush()
-        return user
+        await self.session.execute(
+            text(
+                """
+                INSERT INTO ati.domain_object_history
+                    (object_type, object_id, version, operation, state, diff)
+                VALUES ('user', :id, :version, 'CREATE', CAST(:state AS jsonb), '{}'::jsonb)
+            """
+            ),
+            {
+                "id": row.id,
+                "version": row.version,
+                "state": json.dumps(
+                    {
+                        "id": str(row.id),
+                        "username": row.username,
+                        "display_name": row.display_name,
+                        "role": row.role,
+                        "enabled": row.enabled,
+                        "created_at": row.created_at.isoformat(),
+                        "updated_at": row.updated_at.isoformat(),
+                        "version": row.version,
+                        "deleted_at": None,
+                        "deleted_by_actor_id": None,
+                    }
+                ),
+            },
+        )
+        return _user(row)
 
     async def get_by_username(self, username: str) -> User | None:
         """Find a live user by normalized username."""
@@ -116,11 +156,13 @@ class PostgresCredentialRepository(CredentialRepository):
         self, user_id: UUID, password_hash: str, changed_at: datetime
     ) -> Credential:
         """Replace a credential."""
-        await self.session.execute(
+        result = await self.session.execute(
             update(CredentialRow)
             .where(CredentialRow.user_id == user_id)
             .values(password_hash=password_hash, password_changed_at=changed_at)
         )
+        if not isinstance(result, CursorResult) or result.rowcount != 1:
+            raise ValueError("credential not found")
         return Credential(
             user_id=user_id, password_hash=password_hash, password_changed_at=changed_at
         )
@@ -174,7 +216,15 @@ class PostgresSessionRepository(SessionRepository):
             .values(revoked_at=datetime.now(timezone.utc))
         )
 
-    async def touch(self, session_id: UUID, seen_at: object) -> None:
+    async def revoke_by_user_id(self, user_id: UUID) -> None:
+        """Revoke every active session for the specified user."""
+        await self.session.execute(
+            update(SessionRow)
+            .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
+            .values(revoked_at=datetime.now(timezone.utc))
+        )
+
+    async def touch(self, session_id: UUID, seen_at: datetime) -> None:
         """Update last-seen time after validation."""
         await self.session.execute(
             update(SessionRow)

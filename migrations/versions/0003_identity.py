@@ -16,9 +16,10 @@ def upgrade() -> None:
         display_name text, role text NOT NULL CHECK (role IN ('admin','analyst')),
         enabled boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now(), deleted_at timestamptz,
-        deleted_by_actor_id uuid, version bigint NOT NULL
+        deleted_by_actor_id uuid, version bigint NOT NULL DEFAULT nextval('ati.user_version_seq')
       );
       CREATE UNIQUE INDEX user_username_idx ON ati."user" (username);
+      CREATE INDEX user_session_lookup_idx ON ati."user" (id) WHERE deleted_at IS NULL;
       CREATE TABLE ati.credential (
         user_id uuid PRIMARY KEY REFERENCES ati."user"(id),
         password_hash text NOT NULL, password_changed_at timestamptz NOT NULL
