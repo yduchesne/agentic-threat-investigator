@@ -2,12 +2,20 @@
 """Thin PostgreSQL repository adapters for stable identity resources."""
 
 import json
+from collections.abc import Sequence
 from uuid import UUID
 
+from psycopg.types.json import Jsonb
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentic_threat_investigator.app.persistence.repositories import EntityRepository
+from agentic_threat_investigator.app.persistence.repositories import (
+    BatchOutcome,
+    BatchSizeLimitExceededError,
+    EntityBatchItem,
+    EntityBatchResult,
+    EntityRepository,
+)
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
 
 from .models import EntityRow
@@ -16,8 +24,9 @@ from .models import EntityRow
 class PostgresEntityRepository(EntityRepository):
     """Persist entities through the PostgreSQL transaction supplied by a UoW."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, batch_size: int = 100) -> None:
         self._session = session
+        self._batch_size = batch_size
 
     @staticmethod
     def _to_domain(row: EntityRow) -> Entity:
@@ -78,6 +87,45 @@ class PostgresEntityRepository(EntityRepository):
         if row is None:  # pragma: no cover - the function and transaction are atomic
             raise RuntimeError("entity write returned no row")
         return self._to_domain(row)
+
+    async def upsert_batch(
+        self, items: Sequence[EntityBatchItem]
+    ) -> list[EntityBatchResult]:
+        """Serialize and submit a bounded batch to the canonical SQL function."""
+        if len(items) > self._batch_size:
+            raise BatchSizeLimitExceededError(
+                f"entity batch contains {len(items)} items; limit is {self._batch_size}"
+            )
+        composite_items = []
+        for item_number, item in enumerate(items, start=1):
+            entity = item.entity
+            composite_items.append(
+                (
+                    item_number,
+                    entity.id,
+                    entity.type.value,
+                    canonicalize(entity.type, entity.value),
+                    entity.display_name,
+                    Jsonb(entity.attributes),
+                    entity.content_hash,
+                    item.expected_version,
+                )
+            )
+        result = await self._session.execute(
+            text(
+                "SELECT ordinal, id, version, outcome FROM ati.upsert_entities(:items)"
+            ),
+            {"items": composite_items},
+        )
+        return [
+            EntityBatchResult(
+                ordinal=row[0],
+                entity_id=row[1],
+                version=row[2],
+                outcome=BatchOutcome(row[3]),
+            )
+            for row in result.fetchall()
+        ]
 
     async def soft_delete(
         self,

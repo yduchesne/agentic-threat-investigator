@@ -2,6 +2,10 @@
 
 from .repositories import (
     AuditEventRepository,
+    BatchOutcome,
+    BatchSizeLimitExceededError,
+    EntityBatchItem,
+    EntityBatchResult,
     EntityRepository,
     EvidenceRepository,
     RelationshipObservationRepository,
@@ -11,6 +15,10 @@ from .repositories import (
 
 __all__ = [
     "AuditEventRepository",
+    "BatchOutcome",
+    "BatchSizeLimitExceededError",
+    "EntityBatchItem",
+    "EntityBatchResult",
     "EntityRepository",
     "EvidenceRepository",
     "RelationshipObservationRepository",

@@ -10,7 +10,10 @@ public-method rule does not apply to them.
 # pylint: disable=too-many-arguments
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from types import TracebackType
 from typing import Self
 from uuid import UUID
@@ -23,6 +26,37 @@ from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
 )
+
+
+class BatchOutcome(str, Enum):
+    """Classification returned by a database batch write."""
+
+    INSERTED = "INSERTED"
+    UPDATED = "UPDATED"
+    UNCHANGED = "UNCHANGED"
+    CONFLICT = "CONFLICT"
+
+
+class BatchSizeLimitExceededError(ValueError):
+    """Raised when a batch exceeds the configured application limit."""
+
+
+@dataclass(frozen=True)
+class EntityBatchItem:
+    """An entity and its optional optimistic-concurrency expectation."""
+
+    entity: Entity
+    expected_version: int | None = None
+
+
+@dataclass(frozen=True)
+class EntityBatchResult:
+    """Authoritative result for one item in an entity batch."""
+
+    ordinal: int
+    entity_id: UUID
+    version: int
+    outcome: BatchOutcome
 
 
 class AuditEventRepository(
@@ -65,6 +99,12 @@ class EntityRepository(ABC):  # pragma: no cover
         self, entity: Entity, *, expected_version: int | None = None
     ) -> Entity:
         """Create or update the entity and return it with its allocated version."""
+
+    @abstractmethod
+    async def upsert_batch(
+        self, items: Sequence[EntityBatchItem]
+    ) -> list[EntityBatchResult]:
+        """Persist a bounded entity batch through the database batch function."""
 
     @abstractmethod
     async def soft_delete(

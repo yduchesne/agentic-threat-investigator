@@ -209,7 +209,7 @@ download
  -> downstream processing only for changed records
 ```
 
-Small/medium batches may use JSONB stored-function input. Large ingestion may use COPY to staging followed by set-based merge.
+The canonical path is the bounded resource-specific PostgreSQL composite-array transport described in DATABASE.md; PostgreSQL expands it into temporary staging tables and performs the set-based merge. There is no alternate small-batch path.
 
 ## Geospatial
 
