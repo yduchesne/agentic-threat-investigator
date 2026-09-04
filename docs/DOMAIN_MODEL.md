@@ -1,5 +1,17 @@
 # Agentic Threat Investigator — Domain Model
 
+## Table of contents
+
+- [Entity](#entity)
+- [Evidence](#evidence)
+- [Relationships](#relationships)
+- [Assessment](#assessment)
+- [Geolocation](#geolocation)
+- [Investigation state](#investigation-state)
+- [Stopping](#stopping)
+- [Pivot behavior](#pivot-behavior)
+- [Persisted resource versions and history](#persisted-resource-versions-and-history)
+
 ## Entity
 
 ```python

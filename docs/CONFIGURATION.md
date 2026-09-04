@@ -1,5 +1,30 @@
 # Agentic Threat Investigator — Configuration
 
+## Table of contents
+
+- [Purpose](#purpose)
+- [Package layout](#package-layout)
+- [Profile selection](#profile-selection)
+- [Configuration modules](#configuration-modules)
+- [Configuration value types](#configuration-value-types)
+- [`override`](#override)
+- [`load_config`](#load_config)
+- [Profile name validation](#profile-name-validation)
+- [Missing profiles](#missing-profiles)
+- [Configuration module validation](#configuration-module-validation)
+- [Logging](#logging)
+- [Sensitive-value redaction](#sensitive-value-redaction)
+- [Nested values](#nested-values)
+- [Environment variables and configuration values](#environment-variables-and-configuration-values)
+- [Configuration loading lifecycle](#configuration-loading-lifecycle)
+- [Process consistency](#process-consistency)
+- [Authentication settings](#authentication-settings)
+- [Configuration and secrets](#configuration-and-secrets)
+- [Testing requirements](#testing-requirements)
+- [Implementation invariants](#implementation-invariants)
+- [Secret resolution](#secret-resolution)
+- [SecretsResolver contract](#secretsresolver-contract)
+
 ## Purpose
 
 ATI uses source-controlled configuration profiles to define runtime settings for different execution environments.
@@ -445,3 +470,86 @@ Logging/redaction tests must cover:
 9. Effective configuration is logged with sensitive values redacted.
 10. Actual secrets are never committed to configuration profile modules.
 11. Application components receive loaded configuration through bootstrap/dependency construction rather than independently reading environment variables.
+
+## Secret resolution
+
+Configuration profiles and secret acquisition are separate concerns. Source-controlled profile modules must not contain secret values.
+
+ATI defines a `SecretsResolver` ABC for resolving secrets by logical/name reference. The only required v0.1 implementation is `EnvVarSecretsResolver`, which obtains secret values from the process environment. Application bootstrap/composition resolves required secrets and passes the resulting credentials to providers or infrastructure components; providers should not depend directly on a SecretsResolver.
+
+Configuration may contain a secret reference such as `ATI_ABUSEIPDB_API_KEY`, but resolved secret values must never be included in effective-configuration logging. Missing required secrets fail clearly at bootstrap. Future resolvers may target managed secret stores without changing provider contracts.
+
+
+## SecretsResolver contract
+
+The secret-resolution abstraction is intentionally small and independent of configuration-profile loading.
+
+Conceptually:
+
+```python
+from abc import ABC, abstractmethod
+
+class SecretsResolver(ABC):
+    @abstractmethod
+    def get(self, name: str) -> str | None:
+        ...
+
+    def require(self, name: str) -> str:
+        value = self.get(name)
+        if value is None:
+            raise SecretNotFoundError(name)
+        return value
+```
+
+The only v0.1 implementation is:
+
+```python
+import os
+from collections.abc import Mapping
+
+class EnvVarSecretsResolver(SecretsResolver):
+    def __init__(self, env: Mapping[str, str] = os.environ):
+        self._env = env
+
+    def get(self, name: str) -> str | None:
+        return self._env.get(name)
+```
+
+The injectable environment mapping is required for deterministic unit testing without mutating process-global environment state.
+
+A configuration profile stores only a secret reference/name, never the secret value itself. For example:
+
+```python
+CONFIG: dict = {
+    "abuseipdb": {
+        "enabled": True,
+        "api_key_secret": "ATI_ABUSEIPDB_API_KEY",
+    },
+}
+```
+
+During bootstrap/composition:
+
+```text
+loaded configuration
+      +
+SecretsResolver
+      ↓
+resolve required secret reference
+      ↓
+construct provider/infrastructure component
+```
+
+Prefer:
+
+```python
+AbuseIPDBProvider(
+    api_key=secrets.require(config["abuseipdb"]["api_key_secret"])
+)
+```
+
+over passing `SecretsResolver` into the provider. Providers consume resolved credentials and remain independent of secret-storage infrastructure.
+
+Future implementations may include managed secret stores (for example cloud secret managers or Vault), but those are not v0.1 requirements and must not alter provider contracts.
+
+Secret reference names may appear in configuration diagnostics. Resolved values must never be logged. Missing required secrets fail clearly during bootstrap.

@@ -1,5 +1,31 @@
 # Agentic Threat Investigator — Database and Persistence
 
+## Table of contents
+
+- [Database](#database)
+- [Persistence categories](#persistence-categories)
+  - [Immutable observations](#immutable-observations)
+  - [Stable identities](#stable-identities)
+  - [Versioned analytical outputs](#versioned-analytical-outputs)
+  - [Mutable operational records](#mutable-operational-records)
+- [Soft deletion](#soft-deletion)
+- [Historical relationships](#historical-relationships)
+- [Evidence](#evidence)
+- [Transactions and Unit of Work](#transactions-and-unit-of-work)
+- [Batch persistence](#batch-persistence)
+  - [Composite-array input contract](#composite-array-input-contract)
+  - [Reconciliation pipeline](#reconciliation-pipeline)
+  - [Domain resource versioning and history](#domain-resource-versioning-and-history)
+  - [JSONB diff](#jsonb-diff)
+  - [PostgreSQL baseline](#postgresql-baseline)
+- [SourceRecord](#sourcerecord)
+- [Migrations](#migrations)
+- [RAG persistence](#rag-persistence)
+- [Authentication persistence](#authentication-persistence)
+- [Audit persistence](#audit-persistence)
+- [Time](#time)
+- [Indexing principles](#indexing-principles)
+
 ## Database
 
 PostgreSQL is ATI's authoritative datastore. pgvector provides vector search for the RAG corpus.

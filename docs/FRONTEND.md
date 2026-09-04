@@ -1,5 +1,26 @@
 # Agentic Threat Investigator — Frontend Scope
 
+## Table of contents
+
+- [Objective](#objective)
+- [Primary screens](#primary-screens)
+  - [Investigations](#investigations)
+  - [Investigation Detail](#investigation-detail)
+  - [Findings](#findings)
+  - [Monitors](#monitors)
+  - [System / Admin](#system-admin)
+- [Investigation Overview](#investigation-overview)
+- [Evidence](#evidence)
+- [Relationships](#relationships)
+- [Map](#map)
+- [Research](#research)
+- [Timeline](#timeline)
+- [Report](#report)
+- [Investigation creation](#investigation-creation)
+- [Progress](#progress)
+- [Explicit exclusions](#explicit-exclusions)
+- [Visual semantic rule](#visual-semantic-rule)
+
 ## Objective
 
 The v0.1 frontend is a desktop-first analyst workbench focused on investigation visibility, provenance, relationships, geography, monitoring, and conclusions.

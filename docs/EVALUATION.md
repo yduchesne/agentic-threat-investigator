@@ -1,5 +1,42 @@
 # Agentic Threat Investigator — Evaluation
 
+## Table of contents
+
+- [Purpose](#purpose)
+- [Evaluation layers](#evaluation-layers)
+  - [1. Deterministic invariant evaluations](#1-deterministic-invariant-evaluations)
+  - [2. Agent-level behavioral evaluations](#2-agent-level-behavioral-evaluations)
+  - [3. End-to-end trajectory evaluations](#3-end-to-end-trajectory-evaluations)
+  - [4. Model-assisted quality evaluations](#4-model-assisted-quality-evaluations)
+- [Repository-owned evaluation assets](#repository-owned-evaluation-assets)
+- [Evaluation scenario model](#evaluation-scenario-model)
+- [Observable action vocabulary](#observable-action-vocabulary)
+- [Coordinator evaluations](#coordinator-evaluations)
+- [Infrastructure Collector evaluations](#infrastructure-collector-evaluations)
+- [Threat Intelligence Collector evaluations](#threat-intelligence-collector-evaluations)
+- [Threat Research Agent evaluations](#threat-research-agent-evaluations)
+  - [Retrieval evaluation](#retrieval-evaluation)
+  - [Synthesis evaluation](#synthesis-evaluation)
+- [Evidence Analyst evaluations](#evidence-analyst-evaluations)
+- [Report Writer evaluations](#report-writer-evaluations)
+- [End-to-end trajectory evaluation](#end-to-end-trajectory-evaluation)
+  - [Outcome correctness](#outcome-correctness)
+  - [Trajectory correctness](#trajectory-correctness)
+  - [Trajectory efficiency](#trajectory-efficiency)
+- [Scenario families](#scenario-families)
+- [Adversarial evaluations](#adversarial-evaluations)
+- [Evaluator architecture](#evaluator-architecture)
+- [LLM-as-judge policy](#llm-as-judge-policy)
+- [Baselines and regression metadata](#baselines-and-regression-metadata)
+- [v0.1 release gates](#v01-release-gates)
+- [Flakiness and stochastic models](#flakiness-and-stochastic-models)
+- [CI and execution tiers](#ci-and-execution-tiers)
+  - [Every PR](#every-pr)
+  - [Scheduled or pre-release](#scheduled-or-pre-release)
+  - [Optional/manual](#optionalmanual)
+- [LangSmith integration](#langsmith-integration)
+- [Initial evaluation corpus size](#initial-evaluation-corpus-size)
+
 ## Purpose
 
 ATI treats evaluation as a first-class subsystem.

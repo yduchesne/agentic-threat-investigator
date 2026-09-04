@@ -1,6 +1,8 @@
 # Agentic Threat Investigator — Authoritative Documentation
 
-This directory contains the confirmed v0.1 product and engineering specifications for Agentic Threat Investigator (ATI).
+## Table of contents
+
+- [Documents](#documents)
 
 ## Documents
 

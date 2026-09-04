@@ -1,5 +1,24 @@
 # Agentic Threat Investigator — Product Specification
 
+## Table of contents
+
+- [Purpose](#purpose)
+- [Core product question](#core-product-question)
+- [v0.1 goals](#v01-goals)
+- [v0.1 use cases](#v01-use-cases)
+  - [IOC investigation](#ioc-investigation)
+  - [Maliciousness assessment](#maliciousness-assessment)
+  - [Infrastructure profiling](#infrastructure-profiling)
+  - [Relationship discovery](#relationship-discovery)
+  - [Threat-context research](#threat-context-research)
+  - [Next-step investigation](#next-step-investigation)
+  - [Reporting](#reporting)
+  - [Correlation and history](#correlation-and-history)
+  - [Monitoring](#monitoring)
+- [Canonical v0.1 flow](#canonical-v01-flow)
+- [Explicit v0.1 boundaries](#explicit-v01-boundaries)
+- [Product principles](#product-principles)
+
 ## Purpose
 
 Agentic Threat Investigator (ATI) is an open-source, analyst-oriented threat investigation system demonstrating production-quality agentic engineering applied to cybersecurity.

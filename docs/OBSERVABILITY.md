@@ -1,5 +1,22 @@
 # Agentic Threat Investigator — Observability
 
+## Table of contents
+
+- [Principle](#principle)
+- [Observability layers](#observability-layers)
+- [Internal abstraction](#internal-abstraction)
+- [LangSmith v0.1](#langsmith-v01)
+- [Future open-source replacement](#future-open-source-replacement)
+- [Correlation](#correlation)
+- [Provider telemetry](#provider-telemetry)
+- [LLM telemetry](#llm-telemetry)
+- [RAG telemetry](#rag-telemetry)
+- [Data minimization](#data-minimization)
+- [Structured logging](#structured-logging)
+- [Metrics vocabulary](#metrics-vocabulary)
+- [Evaluation portability](#evaluation-portability)
+- [Failure behavior](#failure-behavior)
+
 ## Principle
 
 ATI emits structured application telemetry and agent/LLM traces through internal observability abstractions.

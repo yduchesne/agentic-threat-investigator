@@ -1,5 +1,34 @@
 # Agentic Threat Investigator — Implementation / PR Plan
 
+## Table of contents
+
+- [Delivery principle](#delivery-principle)
+- [PR 1 — Repository bootstrap and development environment \[DONE\]](#pr-1-repository-bootstrap-and-development-environment-done)
+- [PR 2 — Core domain model \[DONE\]](#pr-2-core-domain-model-done)
+- [PR 3 — Database migrations and repository contracts \[DONE\]](#pr-3-database-migrations-and-repository-contracts-done)
+- [PR 4 — Local identity/authentication \[DONE\]](#pr-4-local-identityauthentication-done)
+- [PR 5 — Audit and history \[DONE\]](#pr-5-audit-and-history-done)
+- [PR 6 — PostgreSQL batch persistence \[DONE\]](#pr-6-postgresql-batch-persistence-done)
+- [PR 7 — SecretsResolver implementation and integration](#pr-7-secretsresolver-implementation-and-integration)
+- [PR 8 — Batch source/ingestion framework](#pr-8-batch-sourceingestion-framework)
+- [PR 9 — MITRE ATT&CK ingestion](#pr-9-mitre-attck-ingestion)
+- [PR 10 — Documents/chunks/embeddings](#pr-10-documentschunksembeddings)
+- [PR 11 — RAG retrieval](#pr-11-rag-retrieval)
+- [PR 12 — Live provider framework + RDAP + Google DNS](#pr-12-live-provider-framework-rdap-google-dns)
+- [PR 13 — Remaining v0.1 live sources](#pr-13-remaining-v01-live-sources)
+- [PR 14 — Investigation persistence and relationship construction](#pr-14-investigation-persistence-and-relationship-construction)
+- [PR 15 — LangGraph skeleton](#pr-15-langgraph-skeleton)
+- [PR 16 — Evidence Analyst](#pr-16-evidence-analyst)
+- [PR 17 — Adaptive pivots and stopping](#pr-17-adaptive-pivots-and-stopping)
+- [PR 18 — Threat Research RAG Agent](#pr-18-threat-research-rag-agent)
+- [PR 19 — Report Writer and API](#pr-19-report-writer-and-api)
+- [PR 20 — Frontend analyst workbench](#pr-20-frontend-analyst-workbench)
+- [PR 21 — Monitors, diffs, findings](#pr-21-monitors-diffs-findings)
+- [PR 22 — System/jobs/admin UI](#pr-22-systemjobsadmin-ui)
+- [PR 23 — Evaluation and release hardening](#pr-23-evaluation-and-release-hardening)
+- [Every PR](#every-pr)
+- [Latest persistence/configuration requirements](#latest-persistenceconfiguration-requirements)
+
 ## Delivery principle
 
 Implement ATI in small, reviewable increments. Every PR must preserve repository quality gates and add tests appropriate to the new behavior.
@@ -68,7 +97,7 @@ Deliver:
 - transactional audit behavior;
 - actor/system semantics.
 
-## PR 6 — PostgreSQL batch persistence
+## PR 6 — PostgreSQL batch persistence [DONE]
 
 Deliver:
 
@@ -79,7 +108,22 @@ Deliver:
 - inserted/updated/unchanged result;
 - integration tests.
 
-## PR 7 — Batch source/ingestion framework
+## PR 7 — SecretsResolver implementation and integration
+
+Deliver:
+
+- `SecretsResolver` ABC with `get`/`require` semantics and `SecretNotFoundError`;
+- `EnvVarSecretsResolver` with an injectable environment mapping for deterministic tests;
+- bootstrap/composition-time resolution with clear failure on missing required secrets;
+- configuration carrying secret reference names only (for example `ATI_ABUSEIPDB_API_KEY`), never secret values;
+- resolved credentials passed into provider/infrastructure construction; providers must not depend directly on `SecretsResolver`;
+- confirmation that resolved secret values are never logged, persisted, or embedded in artifact URIs;
+- `.env.example` documentation of required secret variables without real credentials;
+- deterministic unit tests without live keys.
+
+This PR prepares credential wiring for subsequent provider and batch PRs.
+
+## PR 8 — Batch source/ingestion framework
 
 Deliver:
 
@@ -90,7 +134,7 @@ Deliver:
 - normalization versioning;
 - source cache behavior.
 
-## PR 8 — MITRE ATT&CK ingestion
+## PR 9 — MITRE ATT&CK ingestion
 
 Deliver:
 
@@ -99,7 +143,7 @@ Deliver:
 - idempotent update behavior;
 - provenance.
 
-## PR 9 — Documents/chunks/embeddings
+## PR 10 — Documents/chunks/embeddings
 
 Deliver:
 
@@ -108,7 +152,7 @@ Deliver:
 - embedding abstraction/config metadata;
 - pgvector indexing.
 
-## PR 10 — RAG retrieval
+## PR 11 — RAG retrieval
 
 Deliver:
 
@@ -118,7 +162,7 @@ Deliver:
 - metadata filtering;
 - retrieval evaluation fixtures.
 
-## PR 11 — Live provider framework + RDAP + Google DNS
+## PR 12 — Live provider framework + RDAP + Google DNS
 
 Deliver:
 
@@ -131,7 +175,7 @@ Deliver:
 
 This PR establishes the first domain-to-IP discovery path.
 
-## PR 12 — Remaining v0.1 live sources
+## PR 13 — Remaining v0.1 live sources
 
 Deliver:
 
@@ -142,7 +186,7 @@ Deliver:
 - URLhaus;
 - source-specific normalization/tests.
 
-## PR 13 — Investigation persistence and relationship construction
+## PR 14 — Investigation persistence and relationship construction
 
 Deliver:
 
@@ -153,7 +197,7 @@ Deliver:
 - discovered-entity processing;
 - atomic provider-result persistence.
 
-## PR 14 — LangGraph skeleton
+## PR 15 — LangGraph skeleton
 
 Deliver:
 
@@ -164,7 +208,7 @@ Deliver:
 - typed transitions;
 - deterministic FakeLlmClient path.
 
-## PR 15 — Evidence Analyst
+## PR 16 — Evidence Analyst
 
 Deliver:
 
@@ -175,7 +219,7 @@ Deliver:
 - evidence-reference validation;
 - analytical regression tests.
 
-## PR 16 — Adaptive pivots and stopping
+## PR 17 — Adaptive pivots and stopping
 
 Deliver:
 
@@ -186,7 +230,7 @@ Deliver:
 - stop reasons;
 - canonical trajectory tests.
 
-## PR 17 — Threat Research RAG Agent
+## PR 18 — Threat Research RAG Agent
 
 Deliver:
 
@@ -196,7 +240,7 @@ Deliver:
 - grounded synthesis;
 - RAG evaluation suite.
 
-## PR 18 — Report Writer and API
+## PR 19 — Report Writer and API
 
 Deliver:
 
@@ -206,7 +250,7 @@ Deliver:
 - evidence/relationship/research/assessment/report/timeline/geolocation resources;
 - pagination/errors/idempotency/concurrency behavior.
 
-## PR 19 — Frontend analyst workbench
+## PR 20 — Frontend analyst workbench
 
 Deliver:
 
@@ -222,7 +266,7 @@ Deliver:
 
 Maintain explicit visual separation between evidence, research context, and assessment.
 
-## PR 20 — Monitors, diffs, findings
+## PR 21 — Monitors, diffs, findings
 
 Deliver:
 
@@ -234,7 +278,7 @@ Deliver:
 - Finding;
 - findings inbox/workflow.
 
-## PR 21 — System/jobs/admin UI
+## PR 22 — System/jobs/admin UI
 
 Deliver:
 
@@ -243,7 +287,7 @@ Deliver:
 - monitor administration;
 - relevant health/config visibility.
 
-## PR 22 — Evaluation and release hardening
+## PR 23 — Evaluation and release hardening
 
 Deliver:
 
@@ -271,7 +315,7 @@ Before completion:
 
 ## Latest persistence/configuration requirements
 
-PR 1 includes the `ati.config` package, profile modules, `config_utils`, `ATI_CONFIG_PROFILE` loading, robust configuration logging/redaction, tests, and `CONFIGURATION.md`.
+PR 1 delivers the initial environment configuration as a single typed settings module, `src/agentic_threat_investigator/config.py`, based on pydantic-settings: `Settings`, a cached `get_settings()` accessor, and `ensure_test_database_safe`, which fails closed when an integration-test database URL lacks the isolated test marker. The profile-based configuration system described in `CONFIGURATION.md` (`ati.config` profile modules, `ATI_CONFIG_PROFILE` selection, `config_utils`, sensitive-value redaction, and its tests) is not yet implemented and must be delivered by a subsequent PR.
 
 PR 3 establishes PostgreSQL 18 as the database baseline, domain-resource version columns/sequences, immutable domain-object history schema, and versioned SQL-function conventions.
 
