@@ -152,7 +152,7 @@ Deliver:
 - embedding abstraction/config metadata;
 - pgvector indexing.
 
-## PR 11 — RAG retrieval
+## PR 11 — RAG retrieval [DONE]
 
 Deliver:
 

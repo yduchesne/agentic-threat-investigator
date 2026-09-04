@@ -1,0 +1,234 @@
+{
+  "fixture_set_id": "ati-synthetic-research-retrieval",
+  "fixture_set_version": 1,
+  "vector_dimension": 1536,
+  "corpus": [
+    {
+      "id": "chunk-loader",
+      "document_id": "doc-loader",
+      "source_id": "urn:ati:synthetic:advisories",
+      "source_record_id": "adv-001",
+      "document_type": "advisory",
+      "text": "A synthetic loader creates a scheduled task for persistence.",
+      "vector_label": "axis-0"
+    },
+    {
+      "id": "chunk-task",
+      "document_id": "doc-task",
+      "source_id": "urn:ati:synthetic:techniques",
+      "source_record_id": "tech-001",
+      "document_type": "technique",
+      "text": "Scheduled task creation is a synthetic persistence technique.",
+      "vector_label": "axis-0-near"
+    },
+    {
+      "id": "chunk-network",
+      "document_id": "doc-network",
+      "source_id": "urn:ati:synthetic:advisories",
+      "source_record_id": "adv-002",
+      "document_type": "advisory",
+      "text": "A synthetic network note discusses unrelated traffic.",
+      "vector_label": "axis-1"
+    },
+    {
+      "id": "chunk-report",
+      "document_id": "doc-report",
+      "source_id": "urn:ati:synthetic:reports",
+      "source_record_id": "report-001",
+      "document_type": "report",
+      "text": "A synthetic report also describes scheduled task persistence.",
+      "vector_label": "axis-0-best"
+    }
+  ],
+  "setup_variants": [
+    {
+      "id": "chunk-incompatible",
+      "document_id": "doc-incompatible",
+      "source_id": "urn:ati:synthetic:advisories",
+      "source_record_id": "adv-old",
+      "document_type": "advisory",
+      "text": "An incompatible synthetic vector would otherwise rank first.",
+      "vector_label": "axis-0-best",
+      "embedding_model_version": 2
+    },
+    {
+      "id": "chunk-deleted",
+      "document_id": "doc-deleted",
+      "source_id": "urn:ati:synthetic:advisories",
+      "source_record_id": "adv-deleted",
+      "document_type": "advisory",
+      "text": "A deleted synthetic document would otherwise rank first.",
+      "vector_label": "axis-0-best",
+      "deleted": true
+    }
+  ],
+  "cases": [
+    {
+      "id": "top-k-mrr",
+      "version": 1,
+      "query": "loader persistence",
+      "query_vector_label": "axis-0",
+      "k": 2,
+      "source_ids": [],
+      "document_types": [],
+      "expected_relevant_chunk_ids": [
+        "chunk-loader"
+      ],
+      "expected_source_ids": [
+        "urn:ati:synthetic:advisories"
+      ],
+      "expected_source_max_rank": 1,
+      "forbidden_chunk_ids": [],
+      "expected_metrics": {
+        "recall_at_k": 1.0,
+        "precision_at_k": 0.5,
+        "mrr": 1.0
+      }
+    },
+    {
+      "id": "multiple-relevant-recall",
+      "version": 1,
+      "query": "scheduled task",
+      "query_vector_label": "axis-0",
+      "k": 3,
+      "source_ids": [],
+      "document_types": [],
+      "expected_relevant_chunk_ids": [
+        "chunk-loader",
+        "chunk-task"
+      ],
+      "expected_source_ids": [
+        "urn:ati:synthetic:advisories",
+        "urn:ati:synthetic:techniques"
+      ],
+      "forbidden_chunk_ids": [],
+      "expected_metrics": {
+        "recall_at_k": 1.0,
+        "precision_at_k": 0.6666666666666666,
+        "mrr": 1.0
+      }
+    },
+    {
+      "id": "source-filter",
+      "version": 1,
+      "query": "scheduled task report",
+      "query_vector_label": "axis-0",
+      "k": 5,
+      "source_ids": [
+        "urn:ati:synthetic:advisories"
+      ],
+      "document_types": [],
+      "expected_relevant_chunk_ids": [
+        "chunk-loader"
+      ],
+      "expected_source_ids": [
+        "urn:ati:synthetic:advisories"
+      ],
+      "forbidden_chunk_ids": [
+        "chunk-task",
+        "chunk-report"
+      ],
+      "expected_metrics": null
+    },
+    {
+      "id": "document-type-filter",
+      "version": 1,
+      "query": "scheduled task",
+      "query_vector_label": "axis-0",
+      "k": 5,
+      "source_ids": [],
+      "document_types": [
+        "technique"
+      ],
+      "expected_relevant_chunk_ids": [
+        "chunk-task"
+      ],
+      "expected_source_ids": [
+        "urn:ati:synthetic:techniques"
+      ],
+      "forbidden_chunk_ids": [
+        "chunk-loader",
+        "chunk-report"
+      ],
+      "expected_metrics": null
+    },
+    {
+      "id": "combined-filter",
+      "version": 1,
+      "query": "scheduled task",
+      "query_vector_label": "axis-0",
+      "k": 5,
+      "source_ids": [
+        "urn:ati:synthetic:advisories"
+      ],
+      "document_types": [
+        "advisory"
+      ],
+      "expected_relevant_chunk_ids": [
+        "chunk-loader"
+      ],
+      "expected_source_ids": [
+        "urn:ati:synthetic:advisories"
+      ],
+      "forbidden_chunk_ids": [
+        "chunk-task",
+        "chunk-report"
+      ],
+      "expected_metrics": null
+    },
+    {
+      "id": "retrieval-gap",
+      "version": 1,
+      "query": "missing material",
+      "query_vector_label": "axis-2",
+      "k": 5,
+      "source_ids": [
+        "urn:ati:synthetic:missing"
+      ],
+      "document_types": [],
+      "expected_relevant_chunk_ids": [],
+      "expected_source_ids": [],
+      "forbidden_chunk_ids": [],
+      "expected_retrieval_gap": true,
+      "expected_metrics": null
+    },
+    {
+      "id": "embedding-version-isolation",
+      "version": 1,
+      "query": "incompatible vector",
+      "query_vector_label": "axis-0",
+      "k": 5,
+      "source_ids": [],
+      "document_types": [],
+      "expected_relevant_chunk_ids": [
+        "chunk-loader"
+      ],
+      "expected_source_ids": [
+        "urn:ati:synthetic:advisories"
+      ],
+      "forbidden_chunk_ids": [
+        "chunk-incompatible"
+      ],
+      "expected_metrics": null
+    },
+    {
+      "id": "deleted-parent",
+      "version": 1,
+      "query": "deleted document",
+      "query_vector_label": "axis-0",
+      "k": 5,
+      "source_ids": [],
+      "document_types": [],
+      "expected_relevant_chunk_ids": [
+        "chunk-loader"
+      ],
+      "expected_source_ids": [
+        "urn:ati:synthetic:advisories"
+      ],
+      "forbidden_chunk_ids": [
+        "chunk-deleted"
+      ],
+      "expected_metrics": null
+    }
+  ]
+}
