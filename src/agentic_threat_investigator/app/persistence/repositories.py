@@ -7,19 +7,21 @@ public-method rule does not apply to them.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from types import TracebackType
 from typing import Self
 from uuid import UUID
 
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
+from agentic_threat_investigator.domain.identity import Credential, Session, User
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
 )
 
 
-class EntityRepository(ABC):
+class EntityRepository(ABC):  # pragma: no cover
     """Repository for canonical, soft-deletable entities."""
 
     @abstractmethod
@@ -45,7 +47,7 @@ class EntityRepository(ABC):
         """Soft-delete the entity and return its post-deletion state."""
 
 
-class RelationshipRepository(ABC):
+class RelationshipRepository(ABC):  # pragma: no cover
     """Repository for stable relationship identities."""
 
     @abstractmethod
@@ -76,7 +78,9 @@ class RelationshipRepository(ABC):
         """Soft-delete the relationship and return its post-deletion state."""
 
 
-class RelationshipObservationRepository(ABC):  # pylint: disable=too-few-public-methods
+class RelationshipObservationRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
     """Append-only relationship observation repository."""
 
     @abstractmethod
@@ -86,7 +90,9 @@ class RelationshipObservationRepository(ABC):  # pylint: disable=too-few-public-
         """Append a new immutable observation row."""
 
 
-class EvidenceRepository(ABC):  # pylint: disable=too-few-public-methods
+class EvidenceRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
     """Append-only evidence repository."""
 
     @abstractmethod
@@ -94,7 +100,79 @@ class EvidenceRepository(ABC):  # pylint: disable=too-few-public-methods
         """Insert a new immutable evidence observation."""
 
 
-class UnitOfWork(ABC):
+class UserRepository(ABC):  # pylint: disable=too-few-public-methods  # pragma: no cover
+    """Repository for local users."""
+
+    @abstractmethod
+    async def create(self, user: User) -> User:
+        """Create a user."""
+
+    @abstractmethod
+    async def get_by_username(self, username: str) -> User | None:
+        """Find a normalized, non-deleted user."""
+
+    @abstractmethod
+    async def get_by_id(self, user_id: UUID) -> User | None:
+        """Find a user by identifier."""
+
+    @abstractmethod
+    async def count(self) -> int:
+        """Return the number of users, including soft-deleted users."""
+
+    @abstractmethod
+    async def count_enabled_admins(self, *, excluding: UUID | None = None) -> int:
+        """Count enabled, non-deleted administrators transactionally."""
+
+
+class CredentialRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
+    """Repository for password credentials."""
+
+    @abstractmethod
+    async def create(
+        self, user_id: UUID, password_hash: str, changed_at: datetime
+    ) -> Credential:
+        """Create a password credential."""
+
+    @abstractmethod
+    async def replace(
+        self, user_id: UUID, password_hash: str, changed_at: datetime
+    ) -> Credential:
+        """Replace a password credential."""
+
+    @abstractmethod
+    async def get_by_user_id(self, user_id: UUID) -> Credential | None:
+        """Return a user's credential."""
+
+
+class SessionRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
+    """Repository for revocable sessions."""
+
+    @abstractmethod
+    async def create(self, session: Session) -> Session:
+        """Persist a session."""
+
+    @abstractmethod
+    async def get_by_token_hash(self, token_hash: bytes) -> Session | None:
+        """Find a session by its token digest."""
+
+    @abstractmethod
+    async def revoke(self, session_id: UUID) -> None:
+        """Revoke a session."""
+
+    @abstractmethod
+    async def revoke_by_token_hash(self, token_hash: bytes) -> None:
+        """Revoke a session by token digest."""
+
+    @abstractmethod
+    async def touch(self, session_id: UUID, seen_at: object) -> None:
+        """Update last-seen metadata."""
+
+
+class UnitOfWork(ABC):  # pragma: no cover
     """Transaction boundary; repositories never commit themselves."""
 
     entities: EntityRepository

@@ -367,6 +367,21 @@ The same profile mechanism applies to ATI processes including:
 
 Each process receives `ATI_CONFIG_PROFILE` through its environment.
 
+## Authentication settings
+
+The local authentication profile may define the following settings (environment
+variables use the corresponding `ATI_` prefix):
+
+- `ATI_SESSION_ABSOLUTE_EXPIRY_SECONDS` (default `28800`);
+- `ATI_SESSION_IDLE_TIMEOUT_SECONDS` (optional);
+- `ATI_SESSION_COOKIE_SECURE` (set `true` when served over HTTPS);
+- `ATI_LOGIN_RATE_LIMIT_MAXIMUM` and `ATI_LOGIN_RATE_LIMIT_WINDOW_SECONDS`;
+- `ATI_BOOTSTRAP_ADMIN_USERNAME` and `ATI_BOOTSTRAP_ADMIN_PASSWORD`.
+
+Bootstrap credentials are used only when the database contains no users. They
+are hashed immediately and changing these settings cannot reset an existing
+account. Password values are always redacted from configuration logging.
+
 ## Configuration and secrets
 
 Source-controlled profile modules must not contain actual credentials or secrets.

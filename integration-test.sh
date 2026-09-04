@@ -22,7 +22,48 @@ fi
 # developer ATI_DATA_DIR bind mount. The guard in the test suite additionally
 # rejects any DATABASE_URL that is not unmistakably a test database.
 TEST_ID="ati-test-$(date +%s)-$$"
-TEST_PORT=$(shuf -i 55536-60999 -n 1)
+
+# Remove stale containers created by this integration harness only. Never
+# disturb unrelated developer containers or services.
+cleanup_stale_ati_test_containers() {
+  local container project
+  while read -r container; do
+    [ -n "$container" ] || continue
+    project=$(podman inspect --format '{{ index .Config.Labels "io.podman.compose.project" }}' "$container" 2>/dev/null || true)
+    case "$project" in
+      ati-test-*)
+        echo "== Removing stale ATI test container $container ($project) =="
+        podman rm -f "$container" >/dev/null
+        ;;
+    esac
+  done < <(podman ps -aq --filter label=io.podman.compose.project)
+}
+
+port_is_available() {
+  uv run python - "$1" <<'PY'
+import socket
+import sys
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("0.0.0.0", int(sys.argv[1])))
+    except OSError:
+        raise SystemExit(1)
+PY
+}
+
+cleanup_stale_ati_test_containers
+for _ in $(seq 1 30); do
+  TEST_PORT=$(shuf -i 55536-60999 -n 1)
+  if port_is_available "$TEST_PORT"; then
+    break
+  fi
+  echo "Port $TEST_PORT is already in use; selecting another port."
+  TEST_PORT=""
+done
+[ -n "$TEST_PORT" ] || { echo "could not find an available integration-test port" >&2; exit 1; }
+
 export COMPOSE_PROJECT_NAME="$TEST_ID"
 export POSTGRES_DB="$TEST_ID"
 export POSTGRES_USER=ati

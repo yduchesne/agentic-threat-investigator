@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     database_max_overflow: int = 10
     database_test_guard: bool = True
     database_test_url_pattern: str = "ati-test"
+    session_absolute_expiry_seconds: int = 28800
+    session_idle_timeout_seconds: int | None = None
+    session_cookie_secure: bool = False
+    login_rate_limit_maximum: int = 5
+    login_rate_limit_window_seconds: int = 60
+    bootstrap_admin_username: str | None = None
+    bootstrap_admin_password: str | None = None
 
 
 def ensure_test_database_safe(

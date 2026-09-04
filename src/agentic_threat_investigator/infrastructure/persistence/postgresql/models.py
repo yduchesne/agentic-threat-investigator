@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, String, text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -37,6 +37,53 @@ class EntityRow(Base):  # pylint: disable=too-few-public-methods
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
+
+class UserRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for a local user."""
+
+    __tablename__ = "user"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    username: Mapped[str] = mapped_column(String, unique=True)
+    display_name: Mapped[str | None] = mapped_column(String)
+    role: Mapped[str] = mapped_column(String)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    version: Mapped[int] = mapped_column(BigInteger)
+
+
+class CredentialRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for a user's password credential."""
+
+    __tablename__ = "credential"
+    __table_args__ = {"schema": "ati"}
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("ati.user.id"), primary_key=True
+    )
+    password_hash: Mapped[str] = mapped_column(String)
+    password_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SessionRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for a revocable server-side session."""
+
+    __tablename__ = "session"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("ati.user.id")
+    )
+    token_hash: Mapped[bytes] = mapped_column(BYTEA, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RelationshipRow(Base):  # pylint: disable=too-few-public-methods

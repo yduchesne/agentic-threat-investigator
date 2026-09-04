@@ -4,9 +4,11 @@
 
 from fastapi import FastAPI
 
+from agentic_threat_investigator.api.auth import router as auth_router
 from agentic_threat_investigator.config import get_settings
 
 app = FastAPI(title=get_settings().app_name, version="0.1.0")
+app.include_router(auth_router)
 
 
 @app.get("/health/live", tags=["health"])
