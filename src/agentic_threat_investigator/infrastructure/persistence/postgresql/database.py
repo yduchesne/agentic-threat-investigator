@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
 
 from agentic_threat_investigator.app.persistence import UnitOfWork
 from agentic_threat_investigator.app.persistence.repositories import (
+    AuditEventRepository,
     CredentialRepository,
     EvidenceRepository,
     RelationshipObservationRepository,
@@ -22,6 +23,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 from agentic_threat_investigator.config import Settings
 
+from .audit_repositories import PostgresAuditEventRepository
 from .identity_repositories import (
     PostgresCredentialRepository,
     PostgresSessionRepository,
@@ -44,6 +46,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         self.users = cast(UserRepository, None)
         self.credentials = cast(CredentialRepository, None)
         self.sessions = cast(SessionRepository, None)
+        self.audit_events = cast(AuditEventRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -54,6 +57,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         self.users = PostgresUserRepository(self.session)
         self.credentials = PostgresCredentialRepository(self.session)
         self.sessions = PostgresSessionRepository(self.session)
+        self.audit_events = PostgresAuditEventRepository(self.session)
         return self
 
     async def __aexit__(
@@ -77,6 +81,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             self.users = cast(UserRepository, None)
             self.credentials = cast(CredentialRepository, None)
             self.sessions = cast(SessionRepository, None)
+            self.audit_events = cast(AuditEventRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

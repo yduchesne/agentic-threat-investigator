@@ -2,13 +2,15 @@
 """User administration use cases and administrator safety policy."""
 
 # Exception types intentionally expose one semantic operation.
-# pylint: disable=too-few-public-methods
+# pylint: disable=too-few-public-methods,too-many-arguments,too-many-positional-arguments
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from agentic_threat_investigator.app.audit import AuditEmitter
 from agentic_threat_investigator.app.identity import PasswordHasher, normalize_username
-from agentic_threat_investigator.domain.identity import User, UserRole
+from agentic_threat_investigator.domain.audit import AuditAction, AuditOutcome
+from agentic_threat_investigator.domain.identity import ActorContext, User, UserRole
 
 
 class AdministratorInvariantError(ValueError):
@@ -18,8 +20,15 @@ class AdministratorInvariantError(ValueError):
 class BootstrapAdminService:
     """Create exactly one configured bootstrap administrator."""
 
-    def __init__(self, users: Any, credentials: Any, hasher: PasswordHasher) -> None:
+    def __init__(
+        self,
+        users: Any,
+        credentials: Any,
+        hasher: PasswordHasher,
+        audit: AuditEmitter | None = None,
+    ) -> None:
         self.users, self.credentials, self.hasher = users, credentials, hasher
+        self.audit = audit
 
     async def ensure(self, username: str | None, password: str | None) -> User | None:
         """Create the bootstrap account only while the user table is empty."""
@@ -35,6 +44,14 @@ class BootstrapAdminService:
         )
         await self.users.create(user)
         await self.credentials.create(user.id, self.hasher.hash(password), now)
+        if self.audit is not None:
+            await self.audit.emit(
+                AuditAction.USER_CREATE,
+                AuditOutcome.SUCCESS,
+                ActorContext.system(),
+                object_type="user",
+                object_id=user.id,
+            )
         return user
 
 
@@ -42,7 +59,12 @@ class UserAdministrationService:
     """Enforce authorization and the at-least-one-admin invariant."""
 
     def __init__(
-        self, users: Any, credentials: Any, sessions: Any, hasher: PasswordHasher
+        self,
+        users: Any,
+        credentials: Any,
+        sessions: Any,
+        hasher: PasswordHasher,
+        audit: AuditEmitter | None = None,
     ) -> None:
         self.users, self.credentials, self.sessions, self.hasher = (
             users,
@@ -50,6 +72,7 @@ class UserAdministrationService:
             sessions,
             hasher,
         )
+        self.audit = audit
 
     @staticmethod
     def require_admin(actor: User) -> None:
@@ -72,3 +95,10 @@ class UserAdministrationService:
         now = datetime.now(timezone.utc)
         await self.credentials.replace(user_id, self.hasher.hash(new_password), now)
         await self.sessions.revoke_by_user_id(user_id)
+        if self.audit is not None:
+            await self.audit.emit(
+                AuditAction.USER_CHANGE_PASSWORD,
+                AuditOutcome.SUCCESS,
+                object_type="user",
+                object_id=user_id,
+            )

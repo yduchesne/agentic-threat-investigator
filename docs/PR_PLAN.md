@@ -48,7 +48,7 @@ Deliver:
 - soft-delete conventions;
 - integration-test database.
 
-## PR 4 — Local identity/authentication
+## PR 4 — Local identity/authentication [DONE]
 
 Deliver:
 
@@ -59,7 +59,7 @@ Deliver:
 - CSRF/session protections;
 - admin invariant.
 
-## PR 5 — Audit and history
+## PR 5 — Audit and history [DONE]
 
 Deliver:
 

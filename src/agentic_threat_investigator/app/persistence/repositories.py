@@ -6,12 +6,16 @@ narrow single-operation interfaces are intentional, so the Pylint minimum
 public-method rule does not apply to them.
 """
 
+# Filtered audit listing deliberately exposes several independent query fields.
+# pylint: disable=too-many-arguments
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 from types import TracebackType
 from typing import Self
 from uuid import UUID
 
+from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.identity import Credential, Session, User
@@ -19,6 +23,32 @@ from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
 )
+
+
+class AuditEventRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
+    """Append-only repository for immutable audit events."""
+
+    @abstractmethod
+    async def append(self, event: AuditEvent) -> AuditEvent:
+        """Append an event in the caller's transaction."""
+
+    @abstractmethod
+    async def list_events(
+        self,
+        *,
+        actor_id: UUID | None = None,
+        action: str | None = None,
+        outcome: AuditOutcome | None = None,
+        object_type: str | None = None,
+        object_id: UUID | None = None,
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AuditEvent]:
+        """Return bounded events matching the supplied filters."""
 
 
 class EntityRepository(ABC):  # pragma: no cover
@@ -186,6 +216,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     users: UserRepository
     credentials: CredentialRepository
     sessions: SessionRepository
+    audit_events: AuditEventRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:
