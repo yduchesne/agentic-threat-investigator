@@ -21,7 +21,7 @@ from agentic_threat_investigator.domain.relationships import (
 )
 
 
-class EntityRepository(ABC):
+class EntityRepository(ABC):  # pragma: no cover
     """Repository for canonical, soft-deletable entities."""
 
     @abstractmethod
@@ -47,7 +47,7 @@ class EntityRepository(ABC):
         """Soft-delete the entity and return its post-deletion state."""
 
 
-class RelationshipRepository(ABC):
+class RelationshipRepository(ABC):  # pragma: no cover
     """Repository for stable relationship identities."""
 
     @abstractmethod
@@ -78,7 +78,9 @@ class RelationshipRepository(ABC):
         """Soft-delete the relationship and return its post-deletion state."""
 
 
-class RelationshipObservationRepository(ABC):  # pylint: disable=too-few-public-methods
+class RelationshipObservationRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
     """Append-only relationship observation repository."""
 
     @abstractmethod
@@ -88,7 +90,9 @@ class RelationshipObservationRepository(ABC):  # pylint: disable=too-few-public-
         """Append a new immutable observation row."""
 
 
-class EvidenceRepository(ABC):  # pylint: disable=too-few-public-methods
+class EvidenceRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
     """Append-only evidence repository."""
 
     @abstractmethod
@@ -96,7 +100,7 @@ class EvidenceRepository(ABC):  # pylint: disable=too-few-public-methods
         """Insert a new immutable evidence observation."""
 
 
-class UserRepository(ABC):  # pylint: disable=too-few-public-methods
+class UserRepository(ABC):  # pylint: disable=too-few-public-methods  # pragma: no cover
     """Repository for local users."""
 
     @abstractmethod
@@ -120,7 +124,9 @@ class UserRepository(ABC):  # pylint: disable=too-few-public-methods
         """Count enabled, non-deleted administrators transactionally."""
 
 
-class CredentialRepository(ABC):  # pylint: disable=too-few-public-methods
+class CredentialRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
     """Repository for password credentials."""
 
     @abstractmethod
@@ -140,7 +146,9 @@ class CredentialRepository(ABC):  # pylint: disable=too-few-public-methods
         """Return a user's credential."""
 
 
-class SessionRepository(ABC):  # pylint: disable=too-few-public-methods
+class SessionRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
     """Repository for revocable sessions."""
 
     @abstractmethod
@@ -164,7 +172,7 @@ class SessionRepository(ABC):  # pylint: disable=too-few-public-methods
         """Update last-seen metadata."""
 
 
-class UnitOfWork(ABC):
+class UnitOfWork(ABC):  # pragma: no cover
     """Transaction boundary; repositories never commit themselves."""
 
     entities: EntityRepository

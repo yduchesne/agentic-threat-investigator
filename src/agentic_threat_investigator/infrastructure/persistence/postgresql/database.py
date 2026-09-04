@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Async SQLAlchemy engine, sessions, and UnitOfWork implementation."""
 
-from typing import Self
+from typing import Self, cast
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -11,6 +11,11 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from agentic_threat_investigator.app.persistence import UnitOfWork
+from agentic_threat_investigator.app.persistence.repositories import (
+    CredentialRepository,
+    SessionRepository,
+    UserRepository,
+)
 from agentic_threat_investigator.config import Settings
 
 from .identity_repositories import (
@@ -27,6 +32,9 @@ class PostgresUnitOfWork(UnitOfWork):
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
         self.session: AsyncSession | None = None
+        self.users = cast(UserRepository, None)
+        self.credentials = cast(CredentialRepository, None)
+        self.sessions = cast(SessionRepository, None)
 
     async def __aenter__(self) -> Self:
         self.session = self._session_factory()
