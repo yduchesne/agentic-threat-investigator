@@ -139,22 +139,28 @@ ATI assumes every batch may be large. Every batch persistence operation therefor
 
 Each batch resource defines a dedicated input composite type rather than using the target table row type. Database-owned fields such as `version`, `created_at`, `updated_at`, and deletion metadata are not caller inputs. Parallel arrays are not used because they introduce positional coupling.
 
-Conceptually:
+Conceptually (the entity contract also carries an optional optimistic-concurrency expectation and caller ordinal):
 
 ```sql
 CREATE TYPE ati.entity_batch_item AS (
+    ordinal bigint,
     id uuid,
     entity_type text,
     canonical_value text,
     display_name text,
     attributes jsonb,
-    content_hash bytea
+    content_hash bytea,
+    expected_version bigint
 );
 
 CREATE FUNCTION ati.upsert_entities(
     p_items ati.entity_batch_item[]
-) ...;
+) RETURNS TABLE(ordinal bigint, id uuid, version bigint, outcome text) ...;
 ```
+
+Outcomes are `INSERTED`, `UPDATED`, `UNCHANGED`, and `CONFLICT`. A stale
+`expected_version` produces `CONFLICT` without mutation, version allocation, or
+history insertion; the caller may roll back the surrounding unit of work.
 
 The stored function immediately stages the input set using `unnest(p_items) WITH ORDINALITY`. Ordinality may be retained for deterministic result/error correlation.
 

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_pool_size: int = 5
     database_max_overflow: int = 10
+    db_batch_size: int = 100
     database_test_guard: bool = True
     database_test_url_pattern: str = "ati-test"
     session_absolute_expiry_seconds: int = 28800
