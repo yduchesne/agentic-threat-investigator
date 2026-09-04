@@ -17,6 +17,8 @@ def test_document_indexing_contracts_are_public() -> None:
     assert app.DocumentBuilder.__name__ == "DocumentBuilder"
     assert app.DocumentIndexingService.__name__ == "DocumentIndexingService"
     assert app.TokenBoundedChunker.__name__ == "TokenBoundedChunker"
+    assert app.ResearchRetriever.__name__ == "ResearchRetriever"
+    assert app.ResearchRetrievalError.__name__ == "ResearchRetrievalError"
 
 
 def test_authentication_service_reexports_identity_symbols() -> None:

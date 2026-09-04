@@ -317,6 +317,12 @@ source diversity where appropriate
 
 Scenario expectations may explicitly identify relevant ATT&CK/CISA source material.
 
+The repository-owned synthetic retrieval cases are versioned in
+`evals/fixtures/research/retrieval_cases.json`. Production-independent metric
+helpers implement Recall@k, Precision@k, reciprocal rank, and expected-source
+rank with deterministic duplicate and empty-result behavior. These fixtures do
+not establish release thresholds; thresholds remain empirical.
+
 ### Synthesis evaluation
 
 Evaluate:

@@ -242,14 +242,16 @@ RAG supplies contextual research for already discovered concepts.
 
 ```python
 class ResearchQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
     investigation_id: UUID
     query: str
     entity_ids: list[UUID] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
     document_types: list[str] = Field(default_factory=list)
-    max_results: int = 8
+    max_results: int = Field(default=8, ge=1, le=100)
 
 class RetrievedChunk(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
     chunk_id: UUID
     document_id: UUID
     source_id: str
@@ -263,6 +265,13 @@ class RetrievedChunk(BaseModel):
 class ResearchRetriever(ABC):
     async def retrieve(self, query: ResearchQuery) -> list[RetrievedChunk]: ...
 ```
+
+The PostgreSQL retriever searches only visible chunks whose provider, model,
+model version, and dimension match the query embedding. Non-empty `source_ids`
+and `document_types` filters are combined with AND; `entity_ids` remain
+contextual subjects and are not a document filter. Results are ordered by
+pgvector cosine distance and expose `1 - distance` in `[-1, 1]`; an empty
+compatible corpus returns `[]`. Retrieved text is untrusted context.
 
 Every material factual research claim must cite retrieved chunks.
 

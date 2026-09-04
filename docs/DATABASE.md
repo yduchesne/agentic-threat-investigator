@@ -302,6 +302,12 @@ Chunks are identified by `(document_id, sequence)`. They are replaceable indexin
 
 Embedding configuration stores provider/model/version/dimension sufficiently to support controlled re-embedding.
 
+PR 11 retrieval joins current chunks to visible documents, filters all four
+embedding identity fields plus optional source/type predicates, and performs
+bounded top-k ordering with the pgvector cosine-distance operator. The database
+performs ranking; Python does not load or reorder the corpus. No compatible
+rows produces an empty result.
+
 ## Authentication persistence
 
 Domain user and credentials are separate.

@@ -10,6 +10,7 @@ from .documents import (
 from .entities import Entity, EntityType
 from .evidence import EntityRef, Evidence, EvidenceType
 from .relationships import Relationship, RelationshipObservation, RelationshipType
+from .research import ResearchQuery, RetrievedChunk
 from .source import SourceRecord, source_record_content_hash
 
 __all__ = [
@@ -28,4 +29,6 @@ __all__ = [
     "EmbeddingModelInfo",
     "document_content_hash",
     "document_chunk_content_hash",
+    "ResearchQuery",
+    "RetrievedChunk",
 ]

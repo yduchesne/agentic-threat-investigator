@@ -22,6 +22,7 @@ from .ingestion import (
     IngestionService,
     IngestionSummary,
 )
+from .research import ResearchRetrievalError, ResearchRetriever
 from .sources import (
     CHECKPOINTING,
     ArtifactReference,
@@ -45,6 +46,8 @@ __all__ = [
     "EmbeddingClient",
     "EmbeddingError",
     "EmbeddingInputError",
+    "ResearchRetrievalError",
+    "ResearchRetriever",
     "TokenBoundedChunker",
     "ArtifactReference",
     "ArtifactReferenceError",
