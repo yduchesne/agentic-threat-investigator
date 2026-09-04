@@ -2,7 +2,7 @@
 """Contract-pinned local authentication endpoints."""
 
 # The module-level dependency is replaced by application bootstrap.
-# pylint: disable=global-statement,too-many-arguments,too-many-positional-arguments
+# pylint: disable=global-statement,too-many-arguments,too-many-positional-arguments,broad-exception-caught
 import secrets
 from typing import Annotated
 
@@ -25,6 +25,7 @@ from agentic_threat_investigator.app.identity import (
     validate_csrf,
 )
 from agentic_threat_investigator.config import get_settings
+from agentic_threat_investigator.domain.audit import AuditAction, AuditOutcome
 from agentic_threat_investigator.domain.identity import User
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
@@ -130,6 +131,12 @@ async def logout(
                 str(request.base_url).rstrip("/"),
             )
         except CsrfError as exc:
+            try:
+                await service.audit.emit(
+                    AuditAction.AUTH_CSRF_REJECTED, AuditOutcome.DENIED
+                )
+            except Exception:  # audit failure must not alter the security response
+                pass
             raise HTTPException(
                 status_code=403, detail="CSRF validation failed"
             ) from exc

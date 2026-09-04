@@ -262,9 +262,9 @@ Sessions use opaque high-entropy tokens. The database stores a cryptographic has
 
 ## Audit persistence
 
-AuditEvent is append-only and immutable.
+AuditEvent is append-only and immutable. It is stored in `ati.audit_event` with a database-assigned table-wide `version`, UTC occurrence time, actor snapshot, optional object/correlation identifiers, and minimized JSONB metadata. `actor_id` intentionally has no foreign key: the reserved SYSTEM actor is not a user row, and audit records must remain readable after user soft deletion. Known lookup paths are indexed by actor/time, action/time, and object/time. The actor column is not a foreign key, and audit rows are not duplicated into `domain_object_history`: audit answers who attempted an action, while history answers how a resource changed.
 
-Security-relevant successful mutations and their audit event should commit transactionally together.
+Security-relevant successful mutations and their audit event should commit transactionally together. Failed or denied operations that do not commit use an independent transaction.
 
 Denied/failed events use an appropriate independent audit transaction when the primary mutation does not commit.
 

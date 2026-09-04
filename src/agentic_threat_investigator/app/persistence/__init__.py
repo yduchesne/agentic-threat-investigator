@@ -1,6 +1,7 @@
 """Application persistence contracts."""
 
 from .repositories import (
+    AuditEventRepository,
     EntityRepository,
     EvidenceRepository,
     RelationshipObservationRepository,
@@ -9,6 +10,7 @@ from .repositories import (
 )
 
 __all__ = [
+    "AuditEventRepository",
     "EntityRepository",
     "EvidenceRepository",
     "RelationshipObservationRepository",

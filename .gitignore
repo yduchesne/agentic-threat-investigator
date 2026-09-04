@@ -223,6 +223,8 @@ __marimo__/
 
 # Plan files
 
+.plan/
+.plans/
 *.plan.md
 *.PLAN.md
 

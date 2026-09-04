@@ -21,6 +21,7 @@ EXPECTED_TABLES = {
     "user",
     "credential",
     "session",
+    "audit_event",
     "alembic_version",
 }
 
@@ -32,6 +33,7 @@ EXPECTED_SEQUENCES = {
     "investigation_version_seq",
     "assessment_version_seq",
     "user_version_seq",
+    "audit_event_version_seq",
 }
 
 EXPECTED_FUNCTIONS = {"ati_jsonb_diff", "upsert_entity"}
@@ -100,6 +102,46 @@ async def test_upgrade_head_installs_expected_schema() -> None:
     # The migration search path installs extensions into the ati schema so all
     # database objects, including pgvector support, live there.
     assert {"vector", "pgcrypto"} <= extensions
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_audit_schema_contract() -> None:
+    """Audit persistence has its immutable columns, check, and indexes."""
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            check = await connection.scalar(
+                text(
+                    """
+                SELECT pg_get_constraintdef(con.oid)
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                WHERE ns.nspname = 'ati' AND rel.relname = 'audit_event'
+                  AND con.contype = 'c'
+            """
+                )
+            )
+            indexes = {
+                row[0]
+                for row in await connection.execute(
+                    text(
+                        """
+                    SELECT indexname FROM pg_indexes
+                    WHERE schemaname = 'ati' AND tablename = 'audit_event'
+                """
+                    )
+                )
+            }
+    finally:
+        await engine.dispose()
+    assert check and "success" in check and "failure" in check and "denied" in check
+    assert {
+        "audit_event_actor_time_idx",
+        "audit_event_action_time_idx",
+        "audit_event_object_time_idx",
+    } <= indexes
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from argon2 import PasswordHasher as ArgonPasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
+from agentic_threat_investigator.domain.audit import AuditAction, AuditOutcome
 from agentic_threat_investigator.domain.identity import ActorContext, Session, User
 
 
@@ -104,16 +105,24 @@ class AuditEmitter(ABC):
 
     @abstractmethod
     async def emit(
-        self, action: str, outcome: str, actor: ActorContext | None = None
+        self,
+        action: str | AuditAction,
+        outcome: str | AuditOutcome,
+        actor: ActorContext | None = None,
+        **kwargs: object,
     ) -> None:
         """Emit a minimized security event."""
 
 
 class NullAuditEmitter(AuditEmitter):
-    """Default no-op emitter used until transactional audit persistence lands."""
+    """No-op emitter used by database-free contexts."""
 
     async def emit(
-        self, action: str, outcome: str, actor: ActorContext | None = None
+        self,
+        action: str | AuditAction,
+        outcome: str | AuditOutcome,
+        actor: ActorContext | None = None,
+        **kwargs: object,
     ) -> None:
         """Accept an event without recording secrets or credentials."""
 
@@ -171,7 +180,7 @@ class AuthenticationService:
         """Authenticate without disclosing whether a username exists."""
         normalized = normalize_username(username)
         if not self.limiter.allow(normalized):
-            await self.audit.emit("urn:ati:action:auth:login", "failure")
+            await self.audit.emit(AuditAction.AUTH_LOGIN, AuditOutcome.FAILURE)
             raise AuthenticationError(self.FAILURE_MESSAGE)
         user = await self.users.get_by_username(normalized)  # type: ignore[attr-defined]
         credential = None if user is None else await self.credentials.get_by_user_id(user.id)  # type: ignore[attr-defined]
@@ -183,7 +192,7 @@ class AuthenticationService:
             and self.hasher.verify(credential.password_hash, password)
         )
         if not valid:
-            await self.audit.emit("urn:ati:action:auth:login", "failure")
+            await self.audit.emit(AuditAction.AUTH_LOGIN, AuditOutcome.FAILURE)
             raise AuthenticationError(self.FAILURE_MESSAGE)
         now = datetime.now(timezone.utc)
         token, token_hash = self.tokens.issue()
@@ -195,13 +204,22 @@ class AuthenticationService:
             last_seen_at=now,
         )
         await self.sessions.create(session)  # type: ignore[attr-defined]
-        await self.audit.emit("urn:ati:action:auth:login", "success")
+        await self.audit.emit(
+            AuditAction.AUTH_LOGIN,
+            AuditOutcome.SUCCESS,
+            ActorContext(
+                actor_id=user.id,
+                username=user.username,
+                display_name=user.display_name,
+                role=user.role,
+            ),
+        )
         return user, token
 
     async def logout(self, token: str) -> None:
         """Revoke the session represented by an opaque token."""
         await self.sessions.revoke_by_token_hash(self.tokens.hash(token))  # type: ignore[attr-defined]
-        await self.audit.emit("urn:ati:action:auth:logout", "success")
+        await self.audit.emit(AuditAction.AUTH_LOGOUT, AuditOutcome.SUCCESS)
 
     async def validate_session(self, token: str) -> User | None:
         """Validate expiry, revocation, and user state, updating last-seen."""

@@ -19,6 +19,26 @@ class Base(DeclarativeBase):  # pylint: disable=too-few-public-methods
     """Base for ATI ORM mappings."""
 
 
+class AuditEventRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for an immutable audit event."""
+
+    __tablename__ = "audit_event"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    action: Mapped[str] = mapped_column(String)
+    outcome: Mapped[str] = mapped_column(String)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    actor_username: Mapped[str | None] = mapped_column(String)
+    object_type: Mapped[str | None] = mapped_column(String)
+    object_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    request_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    version: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("nextval('ati.audit_event_version_seq')")
+    )
+
+
 class EntityRow(Base):  # pylint: disable=too-few-public-methods
     """Database row for an entity."""
 

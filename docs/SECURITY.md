@@ -141,7 +141,20 @@ class AuditOutcome(str, Enum):
 
 AuditEvent is append-only.
 
-Stable action URNs cover authentication, user administration, investigation lifecycle, monitor lifecycle, finding workflow, and system/security configuration changes.
+Stable action URNs cover authentication, user administration, investigation lifecycle, monitor lifecycle, finding workflow, and system/security configuration changes. The currently implemented vocabulary is:
+
+| Action | URN |
+|---|---|
+| Login | `urn:ati:action:auth:login` |
+| Logout | `urn:ati:action:auth:logout` |
+| CSRF rejected | `urn:ati:action:auth:csrf_rejected` |
+| Create user | `urn:ati:action:user:create` |
+| Change password | `urn:ati:action:user:change_password` |
+| Update user | `urn:ati:action:user:update` |
+| Disable user | `urn:ati:action:user:disable` |
+| Delete user | `urn:ati:action:user:delete` |
+
+Additional category URNs are added only when their flows are implemented.
 
 DENIED means an authenticated actor lacked permission.
 
