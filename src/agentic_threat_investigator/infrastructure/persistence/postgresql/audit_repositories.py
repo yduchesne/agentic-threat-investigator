@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """PostgreSQL adapter for immutable audit events."""
+
+# The filtered audit query intentionally exposes one argument per supported
+# query dimension; keeping these filters explicit avoids an untyped criteria map.
+# pylint: disable=too-many-arguments
 from datetime import datetime
 from uuid import UUID
 
