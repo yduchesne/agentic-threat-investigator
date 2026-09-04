@@ -9,9 +9,9 @@
 - [PR 4 — Local identity/authentication \[DONE\]](#pr-4-local-identityauthentication-done)
 - [PR 5 — Audit and history \[DONE\]](#pr-5-audit-and-history-done)
 - [PR 6 — PostgreSQL batch persistence \[DONE\]](#pr-6-postgresql-batch-persistence-done)
-- [PR 7 — SecretsResolver implementation and integration](#pr-7-secretsresolver-implementation-and-integration)
-- [PR 8 — Batch source/ingestion framework](#pr-8-batch-sourceingestion-framework)
-- [PR 9 — MITRE ATT&CK ingestion](#pr-9-mitre-attck-ingestion)
+- [PR 7 — SecretsResolver implementation and integration \[DONE\]](#pr-7-secretsresolver-implementation-and-integration)
+- [PR 8 — Batch source/ingestion framework \[DONE\]](#pr-8-batch-sourceingestion-framework)
+- [PR 9 — MITRE ATT&CK ingestion \[DONE\]](#pr-9-mitre-attck-ingestion-done)
 - [PR 10 — Documents/chunks/embeddings](#pr-10-documentschunksembeddings)
 - [PR 11 — RAG retrieval](#pr-11-rag-retrieval)
 - [PR 12 — Live provider framework + RDAP + Google DNS](#pr-12-live-provider-framework-rdap-google-dns)
@@ -134,7 +134,7 @@ Deliver:
 - normalization versioning;
 - URI-oriented ObjectStore artifact behavior.
 
-## PR 9 — MITRE ATT&CK ingestion
+## PR 9 — MITRE ATT&CK ingestion [DONE]
 
 Deliver:
 

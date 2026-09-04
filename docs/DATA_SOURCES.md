@@ -151,6 +151,30 @@ Source identifier:
 
 `urn:ati:source:mitre_attack`
 
+The v0.1 source consumes an already-acquired STIX 2.1 bundle. It emits these
+`SourceRecord.record_type` values:
+
+- `attack_technique` for STIX `attack-pattern` objects;
+- `attack_software` for STIX `malware` and `tool` objects;
+- `attack_group` for STIX `intrusion-set` objects;
+- `attack_relationship` for STIX `relationship` objects.
+
+The durable source-record identity is the STIX object ID. Timestamps and the
+original STIX object are retained as provenance; ATT&CK tactics and platforms
+are normalized into technique/software payload attributes. Revoked and
+deprecated records are retained rather than deleted.
+
+STIX relationships are normalized to `urn:ati:relationship:attack:uses_technique`
+when a `uses` relationship targets an `attack-pattern`. Other relationship
+forms use `urn:ati:relationship:threat:associated_with`, while preserving the
+original STIX relationship type and endpoint IDs in the canonical payload.
+Missing endpoint objects do not invalidate a relationship record.
+
+Bundle metadata objects such as `identity`, `marking-definition`,
+`x-mitre-tactic`, `x-mitre-matrix`, and `course-of-action` are skipped. Unknown
+STIX types are also ignored. Source progress uses the opaque `index:<n>`
+checkpoint format and is committed atomically with each bounded batch.
+
 ### CISA Known Exploited Vulnerabilities
 
 Purpose:
