@@ -198,7 +198,7 @@ composite[] input
  -> temporary input table
  -> join current target rows
  -> temporary reconciliation/change table
- -> classify INSERT / UPDATE / UNCHANGED / CONFLICT
+ -> classify INSERTED / UPDATED / UNCHANGED / CONFLICT
  -> allocate versions for changed rows only
  -> compute old/new state and diff
  -> set-based final target mutation
@@ -207,6 +207,14 @@ composite[] input
 ```
 
 For existing rows, reconciliation captures the observed current version. Final mutation verifies that the target version still equals that observed version; otherwise the row is classified as `CONFLICT` rather than silently overwritten. `UNCHANGED` rows receive no new version and no history record.
+
+### Duplicate input and insert-race semantics (SQL v0003)
+
+Input staging deduplicates on the canonical identity `(entity_type, canonical_value)`, keeping the lowest input ordinal as the primary row. Later duplicates in the same batch are classified `CONFLICT` and reported with the winning row's identity and version; they never trigger a unique violation or abort the transaction. This matches stale-`expected_version` semantics: the caller supplied a redundant, potentially contradictory expectation that was not applied.
+
+Inserts are conflict-aware (`ON CONFLICT ... DO NOTHING` on the canonical identity). A row that loses an insert race against a concurrent transaction is re-classified in a second reconciliation pass against the observed row state, yielding `UNCHANGED`, `UPDATED`, or `CONFLICT` (stale `expected_version`). Raced rows are treated as observed state, matching single-batch semantics, and never silently overwrite the concurrent writer.
+
+Staging tables are dropped before creation so the batch function may execute more than once within the same transaction; `ON COMMIT DROP` still cleans them up at transaction end.
 
 ### Domain resource versioning and history
 
@@ -243,6 +251,8 @@ Identity:
 `(source_id, source_record_id)`
 
 Normalization version is stored so records can be reprocessed when ATI normalization changes.
+
+Any adapter that persists a `SourceRecord` must recompute `source_record_content_hash(record)` at the write boundary and reject the write if it does not match the record's `content_hash`.
 
 ## Migrations
 

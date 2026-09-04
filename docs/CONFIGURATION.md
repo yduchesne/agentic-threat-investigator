@@ -38,13 +38,14 @@ The core rule is:
 ## Package layout
 
 ```text
-backend/src/ati/config/
+src/agentic_threat_investigator/config/
 ├── __init__.py
 ├── config_default.py
 ├── config_local.py
 ├── config_dev.py
 ├── config_prod.py
-└── config_utils.py
+├── config_utils.py
+└── settings.py
 ```
 
 Additional profiles may use the same naming convention:
@@ -164,6 +165,7 @@ from collections.abc import Mapping
 
 def load_config(
     env: Mapping[str, str] = os.environ,
+    import_module: Callable[[str], ModuleType] = importlib.import_module,
 ) -> Config:
     ...
 ```
@@ -230,7 +232,7 @@ config-prod
 The implementation constructs the module name internally as:
 
 ```text
-ati.config.config_<profile>
+agentic_threat_investigator.config.config_<profile>
 ```
 
 This prevents path traversal or arbitrary module-import behavior through `ATI_CONFIG_PROFILE`.
@@ -357,9 +359,18 @@ must be logged as:
 
 `ATI_CONFIG_PROFILE` selects the source-controlled profile.
 
-The profile mechanism itself does not imply that arbitrary environment variables automatically override arbitrary configuration keys.
+Profile values are passed as constructor values to the typed `Settings` bridge
+(`settings_from_config`), so a profile key pins that setting for the process.
+Fields not defined by a profile remain injectable through `ATI_*` environment
+variables (or `.env`) according to the typed settings model. Profiles never
+contain secrets; therefore `config_default` pins only stable,
+non-deployment-tunable values and deployment values such as credentials remain
+externally provisioned. `get_settings()` loads this bridge once during process
+bootstrap and returns the cached settings instance.
 
-Environment-driven secret injection or explicit environment-to-setting mappings must be deliberately defined rather than inferred from matching names.
+The optional `import_module` argument to `load_config` defaults to
+`importlib.import_module` and is an injectable test seam for malformed or
+missing modules. The normal `load_config(env)` call shape is unchanged.
 
 ## Configuration loading lifecycle
 
@@ -401,6 +412,7 @@ variables use the corresponding `ATI_` prefix):
 - `ATI_SESSION_IDLE_TIMEOUT_SECONDS` (optional);
 - `ATI_SESSION_COOKIE_SECURE` (set `true` when served over HTTPS);
 - `ATI_LOGIN_RATE_LIMIT_MAXIMUM` and `ATI_LOGIN_RATE_LIMIT_WINDOW_SECONDS`;
+- `ATI_PUBLIC_BASE_URL` (default `http://localhost:8000`; must match the externally visible scheme, host, and port and is validated at startup);
 - `ATI_BOOTSTRAP_ADMIN_USERNAME` and `ATI_BOOTSTRAP_ADMIN_PASSWORD`.
 
 Bootstrap credentials are used only when the database contains no users. They

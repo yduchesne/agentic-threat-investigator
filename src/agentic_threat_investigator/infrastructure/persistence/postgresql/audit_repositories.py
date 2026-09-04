@@ -14,6 +14,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     AuditEventRepository,
 )
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
+from agentic_threat_investigator.domain.immutable_json import thaw_json
 
 from .models import AuditEventRow
 
@@ -44,7 +45,7 @@ class PostgresAuditEventRepository(AuditEventRepository):
     async def append(self, event: AuditEvent) -> AuditEvent:
         """Insert and flush an event without committing the caller's transaction."""
         values = event.model_dump(exclude={"version"})
-        values["metadata_"] = values.pop("metadata")
+        values["metadata_"] = thaw_json(values.pop("metadata"))
         row = AuditEventRow(**values)
         self._session.add(row)
         await self._session.flush()

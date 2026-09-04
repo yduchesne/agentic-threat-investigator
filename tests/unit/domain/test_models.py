@@ -57,6 +57,27 @@ def test_evidence_requires_core_observation_fields() -> None:
     assert evidence.source_record_id is None
 
 
+def test_evidence_is_deeply_immutable() -> None:
+    """Nested evidence data and its subject cannot be modified in place."""
+    facts = {"answer": {"addresses": ["192.0.2.1"]}}
+    evidence = Evidence(
+        investigation_id=uuid4(),
+        type=EvidenceType.DNS,
+        subject=EntityRef(type=EntityType.DOMAIN, value="example.com"),
+        source="urn:ati:source:google_public_dns",
+        retrieved_at=_RETRIEVED_AT,
+        facts=facts,
+    )
+    facts["answer"]["addresses"].append("192.0.2.2")
+
+    with pytest.raises(TypeError, match="immutable"):
+        evidence.facts["answer"]["extra"] = True
+    with pytest.raises(ValidationError, match="frozen"):
+        evidence.subject.value = "changed.example"
+
+    assert evidence.facts["answer"]["addresses"] == ("192.0.2.1",)
+
+
 def test_evidence_rejects_missing_subject() -> None:
     """Evidence without a subject is invalid."""
 

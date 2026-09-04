@@ -36,7 +36,7 @@ EXPECTED_SEQUENCES = {
     "audit_event_version_seq",
 }
 
-EXPECTED_FUNCTIONS = {"ati_jsonb_diff", "upsert_entity"}
+EXPECTED_FUNCTIONS = {"ati_jsonb_diff", "upsert_entity", "upsert_entities"}
 
 
 def _test_engine() -> AsyncEngine:

@@ -185,6 +185,7 @@ Structured batch sources normalize to `SourceRecord`.
 
 ```python
 class SourceRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
     id: UUID | None = None
     source_id: str
     source_record_id: str
@@ -203,7 +204,7 @@ External identity is `(source_id, source_record_id)`.
 
 Use a durable provider identifier where available. Otherwise derive a deterministic identifier from stable normalized fields. Retrieval time must not participate in source-record identity.
 
-`content_hash` is based on deterministic semantic canonical payload, excluding retrieval and local transport metadata.
+`content_hash` is based on deterministic semantic canonical payload, excluding retrieval and local transport metadata. It is derived and verified at construction (supplied values are normalized to lowercase). Nested payload and metadata values are recursively frozen so the digest cannot become stale. Non-JSON payload values and naive timestamp strings are rejected.
 
 Results classify records as:
 
