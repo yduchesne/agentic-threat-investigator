@@ -8,8 +8,13 @@ from .repositories import (
     EntityBatchResult,
     EntityRepository,
     EvidenceRepository,
+    IngestionCheckpoint,
+    IngestionCheckpointRepository,
     RelationshipObservationRepository,
     RelationshipRepository,
+    SourceRecordBatchItem,
+    SourceRecordBatchResult,
+    SourceRecordRepository,
     UnitOfWork,
 )
 
@@ -21,7 +26,12 @@ __all__ = [
     "EntityBatchResult",
     "EntityRepository",
     "EvidenceRepository",
+    "IngestionCheckpoint",
+    "IngestionCheckpointRepository",
     "RelationshipObservationRepository",
     "RelationshipRepository",
+    "SourceRecordBatchItem",
+    "SourceRecordBatchResult",
+    "SourceRecordRepository",
     "UnitOfWork",
 ]

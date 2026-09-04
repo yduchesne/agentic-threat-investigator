@@ -22,7 +22,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
 from agentic_threat_investigator.config import Settings
 
 from .audit_repositories import PostgresAuditEventRepository
-from .composites import register_entity_batch_composite
+from .composites import register_batch_composites
 from .identity_repositories import (
     PostgresCredentialRepository,
     PostgresSessionRepository,
@@ -34,6 +34,10 @@ from .relationship_repositories import (
     PostgresRelationshipRepository,
 )
 from .repositories import PostgresEntityRepository
+from .source_repositories import (
+    PostgresIngestionCheckpointRepository,
+    PostgresSourceRecordRepository,
+)
 
 
 class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attributes
@@ -56,6 +60,8 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         self.credentials = cast(CredentialRepository, None)
         self.sessions = cast(SessionRepository, None)
         self.audit_events = cast(AuditEventRepository, None)
+        self.source_records = cast(PostgresSourceRecordRepository, None)
+        self.ingestion_checkpoints = cast(PostgresIngestionCheckpointRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -66,9 +72,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         # (notably isolated integration fixtures) still need the composite
         # adapter installed on their physical connection.
         raw_connection = await (await self.session.connection()).get_raw_connection()
-        await register_entity_batch_composite(
-            cast(Any, raw_connection.driver_connection)
-        )
+        await register_batch_composites(cast(Any, raw_connection.driver_connection))
         self.entities = PostgresEntityRepository(self.session, self._batch_size)
         self.users = PostgresUserRepository(self.session)
         self.credentials = PostgresCredentialRepository(self.session)
@@ -79,6 +83,10 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         )
         self.evidence = PostgresEvidenceRepository(self.session)
         self.audit_events = PostgresAuditEventRepository(self.session)
+        self.source_records = PostgresSourceRecordRepository(
+            self.session, self._batch_size
+        )
+        self.ingestion_checkpoints = PostgresIngestionCheckpointRepository(self.session)
         return self
 
     async def __aexit__(
@@ -108,6 +116,10 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             )
             self.evidence = cast(PostgresEvidenceRepository, None)
             self.audit_events = cast(PostgresAuditEventRepository, None)
+            self.source_records = cast(PostgresSourceRecordRepository, None)
+            self.ingestion_checkpoints = cast(
+                PostgresIngestionCheckpointRepository, None
+            )
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""
@@ -140,6 +152,6 @@ def create_engine_and_session_factory(
         """Register custom types before a pooled connection is used."""
         run_async = getattr(dbapi_connection, "run_async", None)
         if run_async is not None:
-            run_async(register_entity_batch_composite)
+            run_async(register_batch_composites)
 
     return engine, async_sessionmaker(engine, expire_on_commit=False)

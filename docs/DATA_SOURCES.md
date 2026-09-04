@@ -18,7 +18,7 @@
 - [Deferred sources](#deferred-sources)
 - [Batch ingestion model](#batch-ingestion-model)
 - [Live evidence model](#live-evidence-model)
-- [Source cache](#source-cache)
+- [Artifact storage](#artifact-storage)
 - [Data bundling](#data-bundling)
 
 ## Source policy
@@ -218,11 +218,15 @@ Only changed records require downstream regeneration/re-embedding.
 
 Live provider calls produce normalized `Evidence` directly. Live providers and batch normalizers share lower-level canonicalization utilities but the live path is not artificially forced through `SourceRecord`.
 
-## Source cache
+## Artifact storage
 
-Downloaded datasets are retained in the configured host source-cache directory for reproducibility/debugging.
+`BatchSource` consumes an already-present artifact through an application-layer `ObjectStore`; it never downloads the artifact. Artifact locations are canonical, credential-free URIs. URI-scheme resolution occurs during composition, outside the source. v0.1 implements `FileSystemObjectStore` and places local datasets beneath:
 
-The normalized PostgreSQL data remains authoritative application state.
+`${ATI_DATA_DIR}/datasets/<source>/`
+
+Checkpoints are opaque source-owned values persisted by `(source_id, artifact_uri, normalization_version)`. Each record batch and its post-batch checkpoint commit atomically. A completed artifact is a deterministic no-op on repeat invocation unless explicitly restarted. Restart clears only that artifact/version checkpoint.
+
+Ingestion results retain authoritative IDs, versions, input ordinals, and INSERTED/UPDATED/UNCHANGED outcomes. Only INSERTED and UPDATED records are exposed as changed work for downstream processing. The normalized PostgreSQL data remains authoritative application state.
 
 ## Data bundling
 

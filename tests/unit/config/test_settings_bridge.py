@@ -31,6 +31,14 @@ def test_unpinned_fields_remain_environment_injectable(
     assert settings_from_config({}).session_cookie_secure is True
 
 
+def test_data_dir_derives_datasets_root_and_must_be_absolute() -> None:
+    """Artifact storage is rooted under an absolute deployment data path."""
+    settings = settings_from_config({"data_dir": "/srv/ati"})
+    assert str(settings.datasets_dir) == "/srv/ati/datasets"
+    with pytest.raises(ValidationError, match="absolute"):
+        settings_from_config({"data_dir": "relative"})
+
+
 def test_unknown_keys_are_ignored(caplog: LogCaptureFixture) -> None:
     """Forward-compatible profile keys are warned about and ignored."""
     settings = settings_from_config({"future_setting": 1})

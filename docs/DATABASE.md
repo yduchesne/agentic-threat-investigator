@@ -250,9 +250,13 @@ Identity:
 
 `(source_id, source_record_id)`
 
-Normalization version is stored so records can be reprocessed when ATI normalization changes.
+Normalization version is stored and participates in semantic hashing, so increasing it deterministically classifies a record as changed.
+
+`ati.upsert_source_records(ati.source_record_batch_item[])` is the canonical persistence path. It uses a bounded composite array, `unnest ... WITH ORDINALITY`, temporary staging/reconciliation tables, and set-oriented mutation. PostgreSQL allocates versions and writes immutable `domain_object_history` entries for inserts and updates. An UNCHANGED result neither mutates current retrieval/metadata state nor allocates a version/history row. Duplicate identities, stale expected versions, and lost update races produce deterministic CONFLICT outcomes.
 
 Any adapter that persists a `SourceRecord` must recompute `source_record_content_hash(record)` at the write boundary and reject the write if it does not match the record's `content_hash`.
+
+`ati.ingestion_checkpoint` is mutable internal operational state rather than a versioned domain record. Its identity is `(source_id, artifact_uri, normalization_version)`. The application stores each post-batch opaque checkpoint and completion marker in the same transaction as the corresponding source-record batch, so failed/conflicted batches never advance progress.
 
 ## Migrations
 

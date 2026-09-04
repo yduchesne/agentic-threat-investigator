@@ -102,7 +102,9 @@ class SourceRecord(BaseModel):
     retrieved_at: datetime
     canonical_payload: dict[str, Any]
     raw_payload: dict[str, Any] | None = None
-    content_hash: str | None = None
+    # The public model always exposes a string digest.  The empty default is
+    # only an input convenience; the pre-validator replaces it deterministically.
+    content_hash: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     _validate_observed_at = field_validator(
@@ -111,6 +113,14 @@ class SourceRecord(BaseModel):
     _validate_retrieved_at = field_validator("retrieved_at", mode="after")(
         _utc_timestamp
     )
+
+    @field_validator("source_id", "source_record_id", "record_type")
+    @classmethod
+    def validate_identifiers(cls, value: str) -> str:
+        """Reject identifiers that cannot provide a stable external identity."""
+        if not value.strip():
+            raise ValueError("source identifiers and record_type must not be blank")
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -127,8 +137,8 @@ class SourceRecord(BaseModel):
         if not required_for_hash.issubset(values):
             return values
         expected = source_record_content_hash(values)
-        supplied = values.get("content_hash")
-        if supplied is not None:
+        if "content_hash" in values:
+            supplied = values["content_hash"]
             if not isinstance(supplied, str) or supplied.lower() != expected:
                 raise ValueError(
                     "content_hash does not match semantic source-record content"

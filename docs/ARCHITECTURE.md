@@ -329,6 +329,8 @@ For v0.1 the only required storage implementation is `FileSystemObjectStore`, ro
 ${ATI_DATA_DIR}/datasets/<source>/
 ```
 
+Resumable progress is scoped by `(source_id, artifact_uri, normalization_version)`. A source owns its opaque checkpoint syntax. The ingestion service commits each bounded source-record batch and its post-batch checkpoint in one short UnitOfWork transaction; it never holds a database transaction while awaiting artifact I/O or the next normalized batch. Earlier committed batches remain resumable if later parsing fails. Completed artifacts return a deterministic no-op unless explicitly restarted, and downstream work receives only INSERTED/UPDATED records.
+
 A future `Downloader` is a producer-side abstraction:
 
 ```text

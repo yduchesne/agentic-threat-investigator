@@ -18,7 +18,7 @@
 - [Health](#health)
 - [Logging](#logging)
 - [DB-IP](#db-ip)
-- [Source cache](#source-cache)
+- [Artifact datasets](#artifact-datasets)
 - [Backup/restore](#backuprestore)
 - [Runtime versions](#runtime-versions)
 - [Test environment isolation](#test-environment-isolation)
@@ -48,7 +48,7 @@ Host
  +-- ATI_DATA_DIR
       +-- postgres/data
       +-- geo/dbip
-      +-- source-cache
+      +-- datasets
       +-- backups
       +-- runtime
 ```
@@ -71,9 +71,9 @@ ${ATI_DATA_DIR}/
 │   └── data/
 ├── geo/
 │   └── dbip/
-├── source-cache/
-│   ├── attack/
-│   ├── cisa/
+├── datasets/
+│   ├── mitre-attack/
+│   ├── cisa-kev/
 │   └── other/
 ├── backups/
 └── runtime/
@@ -86,7 +86,7 @@ volumes:
   - ${ATI_DATA_DIR}/postgres/data:/var/lib/postgresql/data
 ```
 
-DB-IP and source cache are likewise explicitly mounted where required.
+DB-IP and artifact datasets are likewise explicitly mounted where required, read-only for ingestion consumers where practical.
 
 ## Environment isolation
 
@@ -210,7 +210,7 @@ Categories include:
 - LangSmith/observability;
 - investigation budgets;
 - RAG;
-- DB-IP/source-cache paths;
+- DB-IP/artifact dataset paths;
 - logging;
 - scheduler.
 
@@ -263,13 +263,13 @@ Dataset/version metadata is retained for provenance.
 
 Refreshing the MMDB does not require rebuilding ATI application images.
 
-## Source cache
+## Artifact datasets
 
-Downloaded ATT&CK/CISA/etc. artifacts live under:
+Already-acquired ATT&CK/CISA/etc. artifacts live under:
 
-`${ATI_DATA_DIR}/source-cache`
+`${ATI_DATA_DIR}/datasets/<source>/`
 
-The cache aids reproducibility/debugging but is not the authoritative normalized datastore.
+Consumers receive this directory as a read-only mount where practical and address artifacts with canonical `file://` URIs. Batch ingestion does not download artifacts, and credentials must never appear in artifact URIs. PostgreSQL remains the authoritative normalized datastore.
 
 ## Backup/restore
 
