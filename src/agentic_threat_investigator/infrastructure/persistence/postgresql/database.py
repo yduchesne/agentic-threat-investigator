@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Async SQLAlchemy engine, sessions, and UnitOfWork implementation."""
 
+from types import TracebackType
 from typing import Self, cast
 
 from sqlalchemy.ext.asyncio import (
@@ -13,6 +14,9 @@ from sqlalchemy.ext.asyncio import (
 from agentic_threat_investigator.app.persistence import UnitOfWork
 from agentic_threat_investigator.app.persistence.repositories import (
     CredentialRepository,
+    EvidenceRepository,
+    RelationshipObservationRepository,
+    RelationshipRepository,
     SessionRepository,
     UserRepository,
 )
@@ -26,17 +30,24 @@ from .identity_repositories import (
 from .repositories import PostgresEntityRepository
 
 
-class PostgresUnitOfWork(UnitOfWork):
+class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attributes
+    # The UoW deliberately exposes one repository per persistence boundary.
     """Expose one SQLAlchemy transaction to all repositories."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
         self.session: AsyncSession | None = None
+        self.entities = cast(PostgresEntityRepository, None)
+        self.relationships = cast(RelationshipRepository, None)
+        self.relationship_observations = cast(RelationshipObservationRepository, None)
+        self.evidence = cast(EvidenceRepository, None)
         self.users = cast(UserRepository, None)
         self.credentials = cast(CredentialRepository, None)
         self.sessions = cast(SessionRepository, None)
 
     async def __aenter__(self) -> Self:
+        if self.session is not None:
+            raise RuntimeError("UnitOfWork is already active")
         self.session = self._session_factory()
         await self.session.begin()
         self.entities = PostgresEntityRepository(self.session)
@@ -49,17 +60,26 @@ class PostgresUnitOfWork(UnitOfWork):
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: object,
+        traceback: TracebackType | None,
     ) -> None:
-        if self.session is not None:
+        session = self.session
+        if session is None:
+            return
+        try:
             if exc_type is None:
-                await self.session.commit()
+                await session.commit()
             else:
-                await self.session.rollback()
-            await self.session.close()
+                await session.rollback()
+        finally:
+            await session.close()
+            self.session = None
+            self.entities = cast(PostgresEntityRepository, None)
+            self.users = cast(UserRepository, None)
+            self.credentials = cast(CredentialRepository, None)
+            self.sessions = cast(SessionRepository, None)
 
     async def commit(self) -> None:
-        """Commit the current transaction."""
+        """Commit the current transaction while retaining the active session."""
         if self.session is None:
             raise RuntimeError("UnitOfWork is not active")
         await self.session.commit()

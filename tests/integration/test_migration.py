@@ -18,6 +18,9 @@ EXPECTED_TABLES = {
     "evidence",
     "investigation",
     "assessment",
+    "user",
+    "credential",
+    "session",
     "alembic_version",
 }
 
@@ -28,6 +31,7 @@ EXPECTED_SEQUENCES = {
     "evidence_version_seq",
     "investigation_version_seq",
     "assessment_version_seq",
+    "user_version_seq",
 }
 
 EXPECTED_FUNCTIONS = {"ati_jsonb_diff", "upsert_entity"}
@@ -96,6 +100,51 @@ async def test_upgrade_head_installs_expected_schema() -> None:
     # The migration search path installs extensions into the ati schema so all
     # database objects, including pgvector support, live there.
     assert {"vector", "pgcrypto"} <= extensions
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_identity_schema_contract() -> None:
+    """Identity tables expose their constraints and required UTC columns."""
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            columns = {
+                (row[0], row[1], row[2])
+                for row in await connection.execute(
+                    text(
+                        """
+                    SELECT table_name, column_name, is_nullable
+                    FROM information_schema.columns
+                    WHERE table_schema = 'ati'
+                      AND table_name IN ('user', 'credential', 'session')
+                """
+                    )
+                )
+            }
+            constraints = {
+                row[0]
+                for row in await connection.execute(
+                    text(
+                        """
+                    SELECT con.conname
+                    FROM pg_constraint con
+                    JOIN pg_class rel ON rel.oid = con.conrelid
+                    JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                    WHERE ns.nspname = 'ati'
+                      AND rel.relname IN ('user', 'credential', 'session')
+                """
+                    )
+                )
+            }
+    finally:
+        await engine.dispose()
+    assert ("user", "username", "NO") in columns
+    assert ("user", "version", "NO") in columns
+    assert ("credential", "password_hash", "NO") in columns
+    assert ("session", "token_hash", "NO") in columns
+    assert any("role" in name for name in constraints)
+    assert any("credential" in name or "user" in name for name in constraints)
 
 
 @pytest.mark.asyncio

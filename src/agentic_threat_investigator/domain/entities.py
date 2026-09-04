@@ -14,6 +14,7 @@ calling :func:`canonicalize` at the persistence boundary so the confirmed
 
 import ipaddress
 from collections.abc import Callable
+from datetime import datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -48,6 +49,12 @@ class Entity(BaseModel):
     value: str
     display_name: str | None = None
     attributes: dict[str, Any] = Field(default_factory=dict)
+    content_hash: bytes | None = None
+    # Persistence-owned fields are exposed so repository writes can return the
+    # authoritative revision and deletion state without leaking ORM types.
+    version: int | None = None
+    deleted_at: datetime | None = None
+    deleted_by_actor_id: UUID | None = None
 
 
 def canonicalize_domain(value: str) -> str:

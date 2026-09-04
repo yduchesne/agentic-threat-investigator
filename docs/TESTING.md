@@ -97,7 +97,11 @@ Avoid accumulating blanket `# pylint: disable=...` directives.
 
 ## Static typing
 
-Mypy runs in strict mode for ATI-owned production code.
+Mypy runs in strict mode for ATI-owned production code and all integration-test code. The integration target is checked explicitly, including every module under `tests/integration/`:
+
+```bash
+uv run mypy src tests/integration
+```
 
 Conceptually:
 

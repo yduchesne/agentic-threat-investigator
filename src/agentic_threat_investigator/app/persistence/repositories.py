@@ -168,7 +168,11 @@ class SessionRepository(
         """Revoke a session by token digest."""
 
     @abstractmethod
-    async def touch(self, session_id: UUID, seen_at: object) -> None:
+    async def revoke_by_user_id(self, user_id: UUID) -> None:
+        """Revoke every active session belonging to a user."""
+
+    @abstractmethod
+    async def touch(self, session_id: UUID, seen_at: datetime) -> None:
         """Update last-seen metadata."""
 
 
@@ -179,6 +183,9 @@ class UnitOfWork(ABC):  # pragma: no cover
     relationships: RelationshipRepository
     relationship_observations: RelationshipObservationRepository
     evidence: EvidenceRepository
+    users: UserRepository
+    credentials: CredentialRepository
+    sessions: SessionRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:
