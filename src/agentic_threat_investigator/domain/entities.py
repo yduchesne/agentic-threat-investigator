@@ -13,6 +13,7 @@ calling :func:`canonicalize` at the persistence boundary so the confirmed
 """
 
 import ipaddress
+import re
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
@@ -22,6 +23,9 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 _ASN_UPPER_BOUND = 4294967295
+_DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_DNS_MAX_NAME_LENGTH = 253
+_DNS_MAX_LABEL_LENGTH = 63
 
 
 class EntityType(str, Enum):
@@ -70,6 +74,45 @@ def canonicalize_domain(value: str) -> str:
     if all(ord(char) < 128 for char in trimmed):
         return trimmed.lower()
     return trimmed.encode("idna").decode("ascii")
+
+
+def validate_dns_name(value: str) -> str:
+    """Return the strict canonical form of a DNS name used by providers.
+
+    Beyond :func:`canonicalize_domain` normalization, this rejects names with
+    empty labels, embedded whitespace, underscores, malformed label
+    characters, labels longer than 63 octets, and names longer than 253
+    octets. At most one terminal DNS root dot is removed; a name that still
+    ends in a dot afterwards contains an empty label and is rejected, so
+    malformed names such as ``example.com..`` never silently canonicalize.
+    Non-ASCII input is canonicalized to IDNA punycode before label
+    validation, so the returned value is always a canonical ASCII name.
+    """
+
+    trimmed = value.strip()
+    if trimmed.endswith("."):
+        trimmed = trimmed[:-1]
+    if trimmed.endswith("."):
+        raise ValueError("DNS name has multiple terminal dots")
+    if not trimmed:
+        raise ValueError("DNS name must not be empty")
+    if len(trimmed) > _DNS_MAX_NAME_LENGTH:
+        raise ValueError("DNS name exceeds the maximum length")
+    if not trimmed.isascii():
+        try:
+            trimmed = trimmed.encode("idna").decode("ascii")
+        except (UnicodeError, ValueError) as exc:
+            raise ValueError("DNS name is not valid IDNA") from exc
+        if len(trimmed) > _DNS_MAX_NAME_LENGTH:
+            raise ValueError("DNS name exceeds the maximum length")
+    trimmed = trimmed.lower()
+    labels = trimmed.split(".")
+    for label in labels:
+        if not label or len(label) > _DNS_MAX_LABEL_LENGTH:
+            raise ValueError("DNS name has an invalid label length")
+        if not _DNS_LABEL_RE.fullmatch(label):
+            raise ValueError("DNS name has invalid label characters")
+    return trimmed
 
 
 def canonicalize_ip_address(value: str) -> str:

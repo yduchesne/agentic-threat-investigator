@@ -14,7 +14,7 @@
 - [PR 9 — MITRE ATT&CK ingestion \[DONE\]](#pr-9-mitre-attck-ingestion-done)
 - [PR 10 — Documents/chunks/embeddings \[DONE\]](#pr-10-documentschunksembeddings-done)
 - [PR 11 — RAG retrieval](#pr-11-rag-retrieval)
-- [PR 12 — Live provider framework + RDAP + Google DNS](#pr-12-live-provider-framework-rdap-google-dns)
+- [PR 12 — Live provider framework + RDAP + Google DNS [DONE]](#pr-12-live-provider-framework-rdap-google-dns-done)
 - [PR 13 — Remaining v0.1 live sources](#pr-13-remaining-v01-live-sources)
 - [PR 14 — Investigation persistence and relationship construction](#pr-14-investigation-persistence-and-relationship-construction)
 - [PR 15 — LangGraph skeleton](#pr-15-langgraph-skeleton)
@@ -162,7 +162,7 @@ Deliver:
 - metadata filtering;
 - retrieval evaluation fixtures.
 
-## PR 12 — Live provider framework + RDAP + Google DNS
+## PR 12 — Live provider framework + RDAP + Google DNS [DONE]
 
 Deliver:
 

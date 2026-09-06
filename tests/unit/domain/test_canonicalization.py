@@ -4,7 +4,11 @@
 
 import pytest
 
-from agentic_threat_investigator.domain.entities import EntityType, canonicalize
+from agentic_threat_investigator.domain.entities import (
+    EntityType,
+    canonicalize,
+    validate_dns_name,
+)
 
 
 def test_domain_normalizes_case_trailing_dot_and_whitespace() -> None:
@@ -131,3 +135,55 @@ def test_uncontracted_types_raise(entity_type: EntityType) -> None:
 
     with pytest.raises(ValueError):
         canonicalize(entity_type, "example")
+
+
+def test_validate_dns_name_canonicalizes() -> None:
+    """Strict validation canonicalizes case, trailing dots, whitespace, and IDNA."""
+
+    assert validate_dns_name("  EXAMPLE.COM. ") == "example.com"
+    assert validate_dns_name("Bücher.Example.") == "xn--bcher-kva.example"
+    assert validate_dns_name("xn--bcher-kva.example") == "xn--bcher-kva.example"
+    assert validate_dns_name("1.0.0.127.in-addr.arpa") == "1.0.0.127.in-addr.arpa"
+    assert validate_dns_name("  1.0.0.127.in-addr.arpa. ") == "1.0.0.127.in-addr.arpa"
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "example.com..",
+        "example.com...",
+        "  example.com..  ",
+        "Bücher.Example..",
+        "xn--bcher-kva.example..",
+        "1.0.0.127.in-addr.arpa..",
+        "1.0.0.127.in-addr.arpa...",
+    ],
+)
+def test_validate_dns_name_rejects_multiple_terminal_dots(bad_name: str) -> None:
+    """More than one terminal root dot introduces an empty label and is rejected."""
+
+    with pytest.raises(ValueError):
+        validate_dns_name(bad_name)
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "bad label.com",
+        "bad_label.com",
+        "a..b.com",
+        ".leadingdot.com",
+        "-leadinghyphen.com",
+        "trailinghyphen-.com",
+        "x" * 64 + ".com",
+        ("ab." * 100),  # > 253 octets overall
+        "",
+        "   ",
+        ".",
+    ],
+)
+def test_validate_dns_name_rejects_malformed(bad_name: str) -> None:
+    """Spaces, underscores, empty labels, and overlong values are rejected."""
+
+    with pytest.raises(ValueError):
+        validate_dns_name(bad_name)
