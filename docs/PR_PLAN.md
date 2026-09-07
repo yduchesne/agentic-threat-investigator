@@ -60,8 +60,11 @@ Deliver:
 -   provider error mapping;
 -   rate/quota handling;
 -   synthetic response fixtures;
--   deterministic provider tests;
--   optional live contract tests outside deterministic CI.
+-   deterministic provider tests.
+
+All PR 13 provider tests use deterministic synthetic responses only.
+Live IPinfo contract testing is outside PR 13 and requires a separately
+approved future change.
 
 No analytical verdict logic belongs in the provider.
 
