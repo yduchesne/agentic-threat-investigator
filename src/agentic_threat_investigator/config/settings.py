@@ -92,6 +92,14 @@ class Settings(BaseSettings):
         default=None, gt=0, allow_inf_nan=False
     )
     rdap_bootstrap_cache_seconds: int = Field(default=3600, gt=0)
+    ipinfo_lite_max_concurrency: int = Field(default=10, gt=0)
+    ipinfo_lite_requests_per_second: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    # Secret reference name only: the environment variable carrying the
+    # IPinfo Lite access token. The token value itself is resolved outside
+    # configuration during composition and never stored or logged here.
+    ipinfo_lite_token_secret: str = "ATI_IPINFO_LITE_TOKEN"
 
     @field_validator(
         "provider_max_retries",
@@ -99,6 +107,7 @@ class Settings(BaseSettings):
         "google_dns_max_concurrency",
         "rdap_max_concurrency",
         "rdap_bootstrap_cache_seconds",
+        "ipinfo_lite_max_concurrency",
         mode="before",
     )
     @classmethod
@@ -115,6 +124,7 @@ class Settings(BaseSettings):
         "provider_retry_jitter_ratio",
         "google_dns_requests_per_second",
         "rdap_requests_per_second",
+        "ipinfo_lite_requests_per_second",
         mode="before",
     )
     @classmethod
@@ -123,6 +133,14 @@ class Settings(BaseSettings):
         if isinstance(value, bool):
             raise ValueError("provider numeric setting must be a real number")
         return value
+
+    @field_validator("ipinfo_lite_token_secret")
+    @classmethod
+    def validate_ipinfo_lite_token_secret(cls, value: str) -> str:
+        """Require a non-blank secret reference name (never a token value)."""
+        if not value.strip():
+            raise ValueError("ipinfo_lite_token_secret must not be blank")
+        return value.strip()
 
     @model_validator(mode="after")
     def validate_chunk_bounds(self) -> "Settings":

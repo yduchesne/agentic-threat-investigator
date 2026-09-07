@@ -23,6 +23,26 @@ class TestProviderSettings:
         assert settings.google_dns_max_concurrency == 10
         assert settings.rdap_max_concurrency == 10
         assert settings.rdap_bootstrap_cache_seconds == 3600
+        assert settings.ipinfo_lite_max_concurrency == 10
+        assert settings.ipinfo_lite_token_secret == "ATI_IPINFO_LITE_TOKEN"
+
+    def test_ipinfo_token_secret_environment_reference(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """The IPinfo secret-reference name is configurable by environment."""
+        monkeypatch.setenv("ATI_IPINFO_LITE_TOKEN_SECRET", "MY_CUSTOM_TOKEN_VAR")
+        settings = settings_from_config({})
+        assert settings.ipinfo_lite_token_secret == "MY_CUSTOM_TOKEN_VAR"
+
+    def test_ipinfo_token_secret_blank_rejected(self) -> None:
+        """A blank IPinfo secret-reference name is rejected."""
+        with pytest.raises(ValidationError, match="blank"):
+            settings_from_config({"ipinfo_lite_token_secret": "   "})
+
+    def test_ipinfo_token_secret_whitespace_trimmed(self) -> None:
+        """The IPinfo secret-reference name is trimmed of whitespace."""
+        settings = settings_from_config({"ipinfo_lite_token_secret": "  VAR  "})
+        assert settings.ipinfo_lite_token_secret == "VAR"
 
     def test_environment_injection(self, monkeypatch: MonkeyPatch) -> None:
         """ATI_* env vars override provider settings."""
@@ -42,6 +62,7 @@ class TestProviderSettings:
             "google_dns_max_concurrency",
             "rdap_max_concurrency",
             "rdap_bootstrap_cache_seconds",
+            "ipinfo_lite_max_concurrency",
         ],
     )
     @pytest.mark.parametrize("bad_value", [True, False, 1.0, 1.5, None])
@@ -61,6 +82,7 @@ class TestProviderSettings:
             "provider_retry_jitter_ratio",
             "google_dns_requests_per_second",
             "rdap_requests_per_second",
+            "ipinfo_lite_requests_per_second",
         ],
     )
     def test_real_profile_values_reject_booleans(self, field_name: str) -> None:
@@ -129,6 +151,26 @@ class TestProviderSettings:
         with pytest.raises(ValidationError, match="greater_than"):
             settings_from_config({"google_dns_max_concurrency": 0})
 
+    def test_ipinfo_concurrency_zero_rejected(self) -> None:
+        """Zero IPinfo concurrency is rejected."""
+        with pytest.raises(ValidationError, match="greater_than"):
+            settings_from_config({"ipinfo_lite_max_concurrency": 0})
+
+    def test_ipinfo_optional_rate_zero_rejected(self) -> None:
+        """A zero IPinfo RPS value is rejected."""
+        with pytest.raises(ValidationError, match="greater_than"):
+            settings_from_config({"ipinfo_lite_requests_per_second": 0})
+
+    def test_ipinfo_optional_rate_omitted(self) -> None:
+        """Omitting the optional IPinfo RPS setting leaves it as None."""
+        settings = settings_from_config({})
+        assert settings.ipinfo_lite_requests_per_second is None
+
+    def test_ipinfo_optional_rate_positive(self) -> None:
+        """A positive IPinfo RPS value is accepted."""
+        settings = settings_from_config({"ipinfo_lite_requests_per_second": 5.0})
+        assert settings.ipinfo_lite_requests_per_second == 5.0
+
     def test_cache_lifetime_zero_rejected(self) -> None:
         """Zero cache lifetime is rejected."""
         with pytest.raises(ValidationError, match="greater_than"):
@@ -143,6 +185,7 @@ class TestProviderSettings:
             "provider_retry_jitter_ratio",
             "google_dns_requests_per_second",
             "rdap_requests_per_second",
+            "ipinfo_lite_requests_per_second",
         ],
     )
     def test_positive_infinity_rejected(self, field_name: str) -> None:
@@ -164,6 +207,7 @@ class TestProviderSettings:
             "provider_retry_jitter_ratio",
             "google_dns_requests_per_second",
             "rdap_requests_per_second",
+            "ipinfo_lite_requests_per_second",
         ],
     )
     def test_nan_rejected(self, field_name: str) -> None:
