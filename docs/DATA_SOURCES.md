@@ -74,6 +74,159 @@ Source identifier:
 
 `urn:ati:source:ipinfo_lite`
 
+The stable ATI member `SourceId.IPINFO_LITE` publishes this identifier.
+
+#### Applicability
+
+Supported entity types:
+
+- `IP_ADDRESS`
+
+Unsupported entity types (each is a non-retryable
+`UNSUPPORTED_INDICATOR` produced before clock evaluation or any HTTP I/O):
+
+- `DOMAIN`
+- `URL`
+- `NETWORK_PREFIX`
+- `ASN`
+- `ORGANIZATION`
+- `MALWARE`
+- `ATTACK_TECHNIQUE`
+- `VULNERABILITY`
+
+#### Endpoint
+
+A single IP lookup uses the fixed HTTPS authority and the canonical IP as
+the only variable path segment:
+
+`https://api.ipinfo.io/lite/<canonical-ip>`
+
+The `/me` self-lookup form is not used. The legacy
+`https://ipinfo.io/<ip>/json` endpoint is not used. The canonical IP is
+percent-encoded into the resource path; the URL never contains a query,
+fragment, credentials, or the access token.
+
+#### Authentication
+
+Requests authenticate with the access token in the Authorization header:
+
+```http
+Authorization: Bearer <token>
+```
+
+IPinfo accepts the same token as a Bearer header, HTTP Basic username, or
+`?token=` query parameter. ATI uses only the Bearer header form. The token
+must never appear in query parameters, URLs, logs, errors, evidence, or
+fixtures. The token is resolved during composition/bootstrap from the
+secret reference documented in `CONFIGURATION.md`; the provider receives
+the resolved token value and never reads configuration or the environment.
+
+#### Successful response fields
+
+The Lite lookup response is a top-level JSON object:
+
+```json
+{
+  "ip": "8.8.8.8",
+  "asn": "AS15169",
+  "as_name": "Google LLC",
+  "as_domain": "google.com",
+  "country_code": "US",
+  "country": "United States",
+  "continent_code": "NA",
+  "continent": "North America"
+}
+```
+
+Only `ip` is strictly required. All other fields are optional; a Lite
+response may omit any operator or geographic member for addresses without
+such data, and omission is a source fact, not an error. Optional fields
+that are present must be strictly valid strings under the rules below;
+presence with malformed content invalidates the response.
+
+#### ATI normalized fact shape
+
+Facts are the canonical forms of the response members, keyed identically:
+
+```json
+{
+  "ip": "8.8.8.8",
+  "asn": "AS15169",
+  "as_name": "Google LLC",
+  "as_domain": "google.com",
+  "country_code": "US",
+  "country": "United States",
+  "continent_code": "NA",
+  "continent": "North America"
+}
+```
+
+The provider does not add derived fields. City, region, latitude,
+longitude, VPN/proxy classification, risk, reputation, confidence,
+provider score, and network-prefix members are not part of the Lite
+response and are never synthesized.
+
+#### Response validation matrix
+
+One successful lookup yields exactly one immutable `Evidence`
+(`EvidenceType.NETWORK`). One malformed response yields one typed
+`ProviderError` and no evidence; the provider never emits a partly
+normalized observation.
+
+| Case | Behavior |
+|---|---|
+| IPv4 query | Supported; canonical compressed form used in path and subject |
+| IPv6 query | Supported; canonical compressed lowercase form used in path and subject |
+| unsupported entity type | `UNSUPPORTED_INDICATOR` before I/O; zero HTTP calls |
+| invalid entity value | `UNSUPPORTED_INDICATOR` before I/O; zero HTTP calls |
+| top-level JSON object required | Non-object top level (list, string, number, boolean, null) is `INVALID_RESPONSE` |
+| missing `ip` | `INVALID_RESPONSE`; cross-field identity cannot be proven |
+| malformed `ip` | `INVALID_RESPONSE`; outer whitespace is stripped before address parsing (shared canonicalization convention) |
+| returned IP mismatch | Returned `ip` must canonicalize exactly to the requested canonical IP; otherwise `INVALID_RESPONSE` (covers textual variants, family mismatch, and wrong address) |
+| malformed `asn` | Present `asn` must be `AS` + decimal digits within the legal 32-bit ASN domain (`1..4294967295`), canonical uppercase `AS<number>`; otherwise `INVALID_RESPONSE` |
+| malformed `as_domain` | Present `as_domain` must be a valid strict DNS name (IDNA, label characters, length bounds); otherwise `INVALID_RESPONSE` |
+| malformed `country_code` | Present value must be a bounded ISO 3166-1 alpha-2 uppercase code; otherwise `INVALID_RESPONSE` |
+| malformed `continent_code` | Present value must be a bounded uppercase two-letter continent code; otherwise `INVALID_RESPONSE` |
+| wrong scalar types | Strict scalars only: booleans, integers, lists, objects, and null where a string is expected are `INVALID_RESPONSE` |
+| missing optional fields | Omitted optional members are omitted from facts; not an error |
+| null optional fields | Null is not a string sentinel and is `INVALID_RESPONSE` |
+| unknown fields | Unknown top-level members are ignored (extra="ignore") and never copied into facts |
+| descriptive text | `as_name`, `country`, and `continent` are preserved verbatim as provider presentation text, bounded in length; only whitespace-only values are rejected |
+| overlong strings | Strings over their bounded length are `INVALID_RESPONSE` |
+| blank optional strings | Present-but-blank strings are `INVALID_RESPONSE` |
+| 401 | `AUTHENTICATION_FAILED`, non-retryable |
+| 403 | `FORBIDDEN`, non-retryable |
+| 404 | `NOT_FOUND`, non-retryable (shared provider convention) |
+| 429 | `RATE_LIMITED`, retryable; Retry-After honored by shared HTTP behavior |
+| timeout | `TIMEOUT`, retryable |
+| 5xx | `PROVIDER_UNAVAILABLE`, retryable |
+| malformed JSON | `INVALID_RESPONSE`, non-retryable |
+| invalid content type | `INVALID_RESPONSE`, non-retryable |
+| response too large | `INVALID_RESPONSE`, non-retryable (shared bounded-body rule) |
+| cancellation | `asyncio.CancelledError` propagates unchanged |
+
+Error messages are generic and never include the response body, URLs,
+headers, or the token.
+
+#### Evidence semantics
+
+A successful lookup emits:
+
+- `EvidenceType.NETWORK` (`urn:ati:evidence:network`);
+- subject: the queried IP entity reference;
+- source: `urn:ati:source:ipinfo_lite`;
+- `observed_at=None` (the Lite API carries no source observation time);
+- timezone-aware UTC `retrieved_at`;
+- credential-free `source_url=https://api.ipinfo.io/lite/<canonical-ip>`;
+- `raw_payload=None` (conservative data minimization).
+
+Country and continent members are contextual network facts about the
+address's registration geography. They are not maliciousness evidence by
+themselves, and a missing country is not evidence of concealment or of
+benignity. The provider does not create an ATI verdict, does not assess
+maliciousness, does not create relationships, does not instantiate
+discovered entities from `as_domain`, and does not persist anything.
+
 ### RDAP
 
 - **SourceId URN:** `urn:ati:source:rdap`
