@@ -4,6 +4,7 @@
 
 - [Principles](#principles)
 - [DTO boundary](#dto-boundary)
+- [Structured analytical resources](#structured-analytical-resources)
 - [Authentication](#authentication)
 - [Investigations](#investigations)
 - [Investigation subresources](#investigation-subresources)
@@ -55,6 +56,82 @@ Examples:
 - `InvestigationResponse`
 
 Internal refactoring must not silently change the public contract.
+
+## Structured analytical resources
+
+ATI's API exposes structured analytical resources. The frontend and API
+clients must never need to parse free-form LLM prose to recover programmatic
+meaning.
+
+Internally, agent outputs are first validated as concrete ATI Pydantic models.
+API DTOs remain a separate boundary, but they map deterministically from those
+validated structured models.
+
+The authoritative representation of an analytical result is therefore:
+
+```text
+validated ATI Pydantic model
+        |
+        v
+JSON-compatible structured representation
+        |
+        v
+API response DTO
+```
+
+Human-readable Markdown/HTML is a derived presentation and is not the
+authoritative API representation.
+
+### Structured fields
+
+Where applicable, API resources expose explicit fields for:
+
+- verdict;
+- confidence;
+- supporting and contradicting Evidence references;
+- findings;
+- limitations;
+- unresolved questions;
+- recommended next steps;
+- research claims;
+- retrieved-chunk citations;
+- report sections and references.
+
+Clients must not be required to extract any of these values from
+generated prose.
+
+### Reports
+
+Report endpoints return the structured `InvestigationReport`
+representation (or a stable API DTO mapped from it).
+
+If ATI exposes a human-readable report representation, that
+representation is generated deterministically from the same validated
+structured report. It must not invoke an LLM during request rendering
+and must not alter report semantics.
+
+If content negotiation or a dedicated export endpoint is later
+introduced, for example Markdown or HTML, the structured JSON report
+remains the authoritative resource.
+
+### Deterministic rendering invariant
+
+For a given report version and explicit formatter configuration,
+repeated rendering must preserve the same semantic content, verdict,
+confidence, findings, citations, limitations, and recommendations.
+
+Rendered content may differ only in presentation aspects explicitly
+controlled by formatter inputs, such as target format or locale.
+
+### No model-output leakage
+
+The API does not expose unvalidated raw model responses, model-provider
+tool call envelopes, hidden reasoning, or chain-of-thought as analytical
+resources.
+
+Operational/debug metadata may be exposed only through a separately
+designed diagnostic interface and must not become the authoritative
+analytical result.
 
 ## Authentication
 
@@ -138,11 +215,20 @@ Assessment endpoints preserve version history and evidence references.
 
 The current assessment endpoint returns the current/final analytical version.
 
+Assessment JSON is mapped from the validated typed `Assessment` model. Verdict,
+confidence, evidence references, limitations, unresolved questions, and
+recommended next steps are explicit fields and are never recovered by parsing
+LLM prose.
+
 ## Research
 
 Research responses expose structured claims and citations to retrieved document chunks.
 
 The frontend must not need to parse free-form LLM prose to determine provenance.
+
+The structured research resource is mapped from a validated Pydantic result.
+Any human-readable research narrative is a deterministic presentation of that
+structured result and must preserve its claim/citation associations.
 
 ## Timeline
 

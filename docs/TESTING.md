@@ -20,6 +20,7 @@
 - [Test isolation](#test-isolation)
 - [Synthetic fixtures](#synthetic-fixtures)
 - [Fake implementations](#fake-implementations)
+- [Structured agent output and deterministic formatter tests](#structured-agent-output-and-deterministic-formatter-tests)
 - [Scenario factory](#scenario-factory)
 - [Coverage](#coverage)
 - [Pre-commit](#pre-commit)
@@ -187,7 +188,9 @@ Priority unit-test areas include:
 - soft-delete semantics;
 - DTO/domain validation;
 - retry classification;
-- report/assessment structural validation.
+- report/assessment structural validation;
+- structured agent-result validation and serialization;
+- deterministic report/presentation formatting.
 
 ## Provider contract tests
 
@@ -354,6 +357,168 @@ The test suite should provide deterministic implementations such as:
 
 Fakes should implement the same ABC contracts as production components.
 
+## Structured agent output and deterministic formatter tests
+
+All programmatic agent outputs are validated Pydantic models. Conventional
+tests and behavioral evaluations together enforce this boundary.
+
+`TESTING.md` owns deterministic schema, serialization, formatter, and
+application-boundary tests. `EVALUATION.md` owns model/agent behavioral
+quality and trajectory scoring.
+
+### Structured-output contract tests
+
+For every agent output model, deterministic tests must cover:
+
+- valid representative output;
+- missing required fields;
+- unexpected fields where `extra="forbid"` applies;
+- wrong scalar/container types;
+- invalid enum/URN values;
+- invalid referenced-ID shapes;
+- empty versus absent semantics;
+- field-level bounds;
+- cross-field invariants implemented outside Pydantic;
+- stable JSON-compatible serialization.
+
+An invalid LLM result must never partially update investigation state or
+persistence.
+
+### Reference validation tests
+
+Where an agent result references ATI resources, tests must prove that
+deterministic application validation rejects:
+
+- nonexistent entity IDs;
+- nonexistent Evidence IDs;
+- nonexistent retrieved-chunk IDs;
+- references outside the current investigation where prohibited;
+- duplicate or contradictory references where prohibited;
+- Coordinator pivots that are not root/evidence-discovered entities;
+- references that violate pivot policy or budgets.
+
+### FakeLlmClient
+
+`FakeLlmClient` returns typed Pydantic results corresponding to the requested
+response model.
+
+Tests must not rely on parsing free-form fake model prose to simulate a
+structured-output operation.
+
+The fake should also support deterministic invalid-output/failure cases needed
+to test bounded repair and `INVALID_STRUCTURED_OUTPUT` handling.
+
+### Serialization tests
+
+For persisted/API-visible structured agent results, test:
+
+```text
+Pydantic model
+ -> JSON-compatible serialization
+ -> persistence/API mapping
+```
+
+as applicable.
+
+Tests must verify preservation of:
+
+- stable IDs;
+- enum/URN values;
+- verdict/confidence;
+- Evidence references;
+- research/chunk citations;
+- list ordering where semantically relevant;
+- optional/empty semantics.
+
+Do not use human-readable rendered text as the source for reconstructing
+the structured result.
+
+### Deterministic formatter tests
+
+Every human-readable formatter must be tested without an LLM.
+
+Given a fixed structured result and fixed formatter configuration,
+repeated calls must produce identical output bytes unless the formatter
+contract explicitly defines a non-semantic presentation variation.
+
+Formatter tests must prove that rendering:
+
+- preserves verdict/confidence;
+- preserves findings;
+- preserves Evidence references;
+- preserves research citations;
+- preserves limitations;
+- preserves recommended next steps;
+- introduces no unsupported claim;
+- does not omit material structured content required by the target
+  format;
+- does not mutate the source Pydantic object;
+- performs no provider/retriever/LLM call.
+
+Use golden/snapshot fixtures only when repository policy permits them
+and when the fixture is reviewed as a deterministic presentation
+artifact. Semantic assertions must still cover critical fields so that
+an indiscriminate snapshot update cannot hide a semantic regression.
+
+### Report Writer versus formatter tests
+
+Keep these responsibilities separate:
+
+**Report Writer behavioral evaluation**
+
+- grounded synthesis;
+- correct Evidence/research references;
+- no unsupported material claims;
+- Assessment verdict/confidence preserved;
+- useful structured report content.
+
+**Formatter deterministic tests**
+
+- exact rendering behavior;
+- escaping;
+- ordering;
+- headings/labels;
+- citation presentation;
+- format-specific syntax;
+- semantic preservation.
+
+A formatter failure is a deterministic software defect, not an LLM
+evaluation failure.
+
+### No free-form fallback
+
+Tests must prove that ATI does not silently accept free-form text when a
+structured response model is required.
+
+If structured parsing/validation fails after the bounded repair policy,
+the operation returns the typed LLM failure. ATI must not:
+
+- persist the raw text as the authoritative result;
+- regex/heuristically extract a verdict or action;
+- execute a pivot inferred from prose;
+- generate a final report directly from the unvalidated text.
+
+### Deterministic report equivalence
+
+For a fixed `InvestigationReport` version, formatter tests should verify
+that all supported renderers represent the same material semantics even
+though their syntax differs.
+
+For example:
+
+```text
+InvestigationReport JSON
+       |             |
+       v             v
+   Markdown         HTML
+       \             /
+        same verdict
+        same findings
+        same citations
+        same limitations
+        same next steps
+```
+
 ## Scenario factory
 
 A reusable `ThreatScenarioFactory` should construct deterministic integration/evaluation fixtures.
@@ -497,7 +662,10 @@ A change is not complete until:
 3. database migrations/integration tests pass where applicable;
 4. strict typing is preserved;
 5. behavioral evaluation expectations are updated when agent semantics intentionally change;
-6. authoritative documentation is updated for deliberate contract changes.
+6. authoritative documentation is updated for deliberate contract changes;
+7. new/changed agent operations have typed structured-output tests;
+8. new/changed human-readable analytical output has deterministic formatter
+   tests and does not depend on an LLM for presentation.
 
 ## Configuration tests
 

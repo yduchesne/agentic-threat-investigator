@@ -15,6 +15,7 @@
 - [Provider URL, path, and redirect safety](#provider-url-path-and-redirect-safety)
 - [Pivot policy](#pivot-policy)
 - [LLM contract](#llm-contract)
+- [Structured agent output contract](#structured-agent-output-contract)
 - [Prompt-injection resistance](#prompt-injection-resistance)
 - [LLM failure](#llm-failure)
 - [RAG contract](#rag-contract)
@@ -367,6 +368,165 @@ LLMs cannot:
 - persist hidden reasoning.
 
 Application code validates all referenced evidence/entity/chunk IDs.
+
+## Structured agent output contract
+
+All agent/LLM operations that produce programmatic ATI results MUST return
+schema-validated structured output. Free-form model prose is not an
+authoritative programmatic result.
+
+The contract is:
+
+```text
+LLM / Agent
+    |
+    v
+structured model output
+    |
+    v
+Pydantic validation
+    |
+    v
+typed ATI result
+    |
+    +--> persistence / workflow decisions
+    |
+    v
+deterministic formatter
+    |
+    v
+human-readable Markdown / HTML / plain text
+```
+
+### Authoritative representation
+
+For each agent operation, ATI defines a concrete Pydantic response
+model. `LlmClient.invoke_structured()` returns an instance of that
+model, not an unvalidated string or arbitrary dictionary.
+
+The validated Pydantic object, and its JSON-compatible serialized form,
+are the authoritative machine-readable representation of the agent
+result.
+
+Examples include:
+
+- Coordinator decisions;
+- Evidence Analyst results / `Assessment`;
+- Threat Research synthesis results;
+- report content / `InvestigationReport`.
+
+Structured result models SHOULD use strict validation and
+`extra="forbid"` where appropriate so that unexpected model-generated
+fields cannot silently become part of ATI semantics.
+
+### Validation before effect
+
+No agent result may affect investigation state, persistence, pivots,
+assessment, research claims, or reporting until:
+
+1. the LLM output has been parsed into the expected Pydantic model;
+2. Pydantic/schema validation succeeds;
+3. ATI deterministic validators verify semantic invariants that cannot
+   be expressed by the schema alone;
+4. all referenced entity, Evidence, chunk, Assessment, and other
+   resource IDs are verified against authoritative ATI state;
+5. policy and budget checks succeed where applicable.
+
+Invalid structured output follows the bounded LLM failure/repair policy
+and must never be treated as a partially valid result.
+
+### No authoritative free-form output
+
+Agents MUST NOT return free-form prose as the system-of-record
+representation for a programmatic result.
+
+Text fields inside a structured model are permitted when prose is itself
+part of the domain result, for example:
+
+- an evidence-reference rationale;
+- an assessment summary;
+- a research claim;
+- a report finding;
+- a limitation;
+- a recommended next step.
+
+Such text remains contained within, validated by, and attributable
+through the surrounding typed result.
+
+### Deterministic human-readable rendering
+
+Human-readable output is produced from validated structured ATI models
+by deterministic formatter/presenter code.
+
+A formatter:
+
+- performs no LLM call;
+- performs no investigation;
+- introduces no new facts;
+- changes no verdict or confidence;
+- changes no citation/reference;
+- adds no new recommendation;
+- does not infer missing information;
+- does not mutate the structured source object.
+
+Given the same structured object and formatter configuration, the
+formatter MUST produce the same semantic output. Presentation-only
+variation such as an explicit locale or date-format setting is allowed
+when it is an input to the formatter.
+
+Conceptually:
+
+```python
+class ReportFormatter(ABC):
+    @abstractmethod
+    def format(self, report: InvestigationReport) -> str:
+        ...
+```
+
+Concrete implementations may include deterministic Markdown, HTML, or
+plain-text renderers.
+
+### Agent-role implications
+
+**Investigation Coordinator**
+
+The Coordinator returns a typed decision containing actions and
+references to already-known ATI entity IDs. It does not communicate
+executable decisions through prose. Deterministic policy code validates
+every proposed action before execution.
+
+**Evidence Analyst**
+
+The Evidence Analyst returns a typed analytical model such as
+`Assessment`. Verdict, confidence, evidence references, limitations,
+unresolved questions, and next steps are explicit fields.
+
+**Threat Research / Context Agent**
+
+Research synthesis returns typed claims and citations to retrieved chunk
+IDs. The frontend or report layer never needs to parse prose to recover
+citation structure.
+
+**Report Writer**
+
+The Report Writer returns a typed `InvestigationReport`. It does not
+return the final Markdown/HTML document directly. A deterministic
+formatter renders the validated report for human consumption.
+
+The Report Writer cannot change the current Assessment
+verdict/confidence and cannot introduce unsupported facts. Deterministic
+validation enforces these invariants before the report becomes
+authoritative.
+
+### Serialization
+
+Persisted or API-visible structured agent results serialize using their
+defined JSON-compatible representation. Serialization must preserve
+stable identifiers, enum values, citations, ordering where semantically
+relevant, and versioned domain semantics.
+
+Serialization is not a substitute for validation: ATI validates the
+Pydantic model first and serializes the validated result.
 
 ## Prompt-injection resistance
 
