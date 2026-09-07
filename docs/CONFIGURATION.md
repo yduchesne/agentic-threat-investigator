@@ -476,8 +476,10 @@ Secret provisioning remains an external runtime concern.
 ### IPinfo Lite access token
 
 The IPinfo Lite provider authenticates with an access token sent as
-`Authorization: Bearer <token>` on every request. The token is never stored
-in configuration, fixtures, URLs, logs, errors, or evidence:
+`Authorization: Bearer <token>` on every request. Real or resolved IPinfo
+credentials must never be committed, logged, persisted, placed in URLs, or
+copied into test fixtures; clearly synthetic placeholder credentials are
+permitted only in isolated deterministic tests. In production:
 
 - the setting `ipinfo_lite_token_secret` holds only the NAME of the
   environment variable carrying the token (default reference:
@@ -488,8 +490,9 @@ in configuration, fixtures, URLs, logs, errors, or evidence:
   only in the Authorization header; providers never read configuration or
   the environment directly;
 - a missing required token fails clearly at composition time with
-  `SecretNotFoundError` before any provider HTTP client is created, so
-  already-created clients roll back cleanly.
+  `SecretNotFoundError` before the IPinfo HTTP client is created;
+  Google DNS and RDAP clients created earlier in the same composition
+  are rolled back cleanly.
 
 ## Testing requirements
 

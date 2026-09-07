@@ -54,6 +54,14 @@ class TestProviderSettings:
         assert settings.provider_max_retries == 5
         assert settings.google_dns_max_concurrency == 20
 
+    def test_ipinfo_environment_parsing(self, monkeypatch: MonkeyPatch) -> None:
+        """IPinfo concurrency and rate settings parse from environment text."""
+        monkeypatch.setenv("ATI_IPINFO_LITE_MAX_CONCURRENCY", "4")
+        monkeypatch.setenv("ATI_IPINFO_LITE_REQUESTS_PER_SECOND", "12.5")
+        settings = settings_from_config({})
+        assert settings.ipinfo_lite_max_concurrency == 4
+        assert settings.ipinfo_lite_requests_per_second == 12.5
+
     @pytest.mark.parametrize(
         "field_name",
         [

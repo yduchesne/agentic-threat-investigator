@@ -22,6 +22,7 @@ from agentic_threat_investigator.infrastructure.providers.http import (
     BoundedLimiter,
     ProviderHttpClient,
     ProviderHttpPolicy,
+    RateLimiterSettings,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -260,7 +261,9 @@ async def test_composition_properties_require_create() -> None:
         _ = comp.ipinfo_lite
 
 
-async def test_composition_wires_ipinfo_settings() -> None:
+async def test_composition_wires_ipinfo_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Composition applies exact settings and a dedicated limiter to IPinfo."""
     factory = _SpyHttpClientFactory()
     settings = settings_from_config(
@@ -270,6 +273,19 @@ async def test_composition_wires_ipinfo_settings() -> None:
             "ipinfo_lite_token_secret": "CUSTOM_TOKEN_VAR",
         }
     )
+
+    seen_settings: list[RateLimiterSettings] = []
+
+    class _RecordingBoundedLimiter(  # pylint: disable=too-few-public-methods
+        BoundedLimiter
+    ):
+        """Spy recording the exact limiter settings each provider receives."""
+
+        def __init__(self, limiter_settings: RateLimiterSettings) -> None:
+            seen_settings.append(limiter_settings)
+            super().__init__(limiter_settings)
+
+    monkeypatch.setattr(composition_module, "BoundedLimiter", _RecordingBoundedLimiter)
 
     async with await ProviderComposition.create(
         settings,
@@ -283,6 +299,17 @@ async def test_composition_wires_ipinfo_settings() -> None:
         google_limiter = factory.calls[0][1]
         rdap_limiter = factory.calls[1][1]
         assert len({id(google_limiter), id(rdap_limiter), id(ipinfo_limiter)}) == 3
+
+        # The exact configured values reached each provider's limiter.
+        assert seen_settings[0] == RateLimiterSettings(
+            max_concurrency=10, requests_per_second=None
+        )
+        assert seen_settings[1] == RateLimiterSettings(
+            max_concurrency=10, requests_per_second=None
+        )
+        assert seen_settings[2] == RateLimiterSettings(
+            max_concurrency=4, requests_per_second=12.0
+        )
 
         assert comp.ipinfo_lite.supports(
             Entity(type=EntityType.IP_ADDRESS, value="8.8.8.8")
@@ -407,3 +434,39 @@ async def test_composition_later_failure_closes_ipinfo_client(
 
     # All three created clients roll back, in LIFO unwind order.
     assert closed == ["client-3", "client-2", "client-1"]
+
+
+async def test_composition_normal_close_closes_all_clients_once() -> None:
+    """A successful composition close closes each owned client exactly once."""
+    closed: list[str] = []
+
+    class _TrackingClient(ProviderHttpClient):
+        def __init__(self, name: str) -> None:
+            self._name = name
+            super().__init__()
+
+        async def aclose(self) -> None:
+            closed.append(self._name)
+            await super().aclose()
+
+    class _TrackingFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def create(
+            self, policy: ProviderHttpPolicy, limiter: BoundedLimiter
+        ) -> ProviderHttpClient:
+            self.call_count += 1
+            return _TrackingClient(f"client-{self.call_count}")
+
+    settings = settings_from_config({})
+    async with await ProviderComposition.create(
+        settings, http_client_factory=_TrackingFactory(), secrets=_fake_secrets()
+    ) as comp:
+        _ = comp.google_dns
+        _ = comp.rdap
+        _ = comp.ipinfo_lite
+
+    # The normal context exit closed Google DNS, RDAP, and IPinfo clients,
+    # each exactly once, in creation order.
+    assert closed == ["client-1", "client-2", "client-3"]
