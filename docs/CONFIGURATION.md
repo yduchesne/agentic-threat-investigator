@@ -443,6 +443,9 @@ type before bounds are enforced. The bounds below apply on top of those type req
 | `rdap_max_concurrency` | `ATI_RDAP_MAX_CONCURRENCY` | `int` | `10` | `> 0` | RDAP maximum in-flight requests |
 | `rdap_requests_per_second` | `ATI_RDAP_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional RDAP rate limit (omission disables) |
 | `rdap_bootstrap_cache_seconds` | `ATI_RDAP_BOOTSTRAP_CACHE_SECONDS` | `int` | `3600` | `> 0` | In-process IANA bootstrap cache TTL |
+| `ipinfo_lite_max_concurrency` | `ATI_IPINFO_LITE_MAX_CONCURRENCY` | `int` | `10` | `> 0` | IPinfo Lite maximum in-flight requests |
+| `ipinfo_lite_requests_per_second` | `ATI_IPINFO_LITE_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional IPinfo Lite rate limit (omission disables) |
+| `ipinfo_lite_token_secret` | `ATI_IPINFO_LITE_TOKEN_SECRET` | `str` | `ATI_IPINFO_LITE_TOKEN` | non-blank | Environment variable NAME carrying the IPinfo Lite access token (secret reference, never a token value) |
 
 When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
 When set, the value must be strictly positive. Retry backoff computes the exponential delay for the
@@ -469,6 +472,27 @@ config_prod.py
 may define defaults, names, URLs, limits, feature settings, and references to secret mechanisms, but repository-committed code must not contain production secrets.
 
 Secret provisioning remains an external runtime concern.
+
+### IPinfo Lite access token
+
+The IPinfo Lite provider authenticates with an access token sent as
+`Authorization: Bearer <token>` on every request. Real or resolved IPinfo
+credentials must never be committed, logged, persisted, placed in URLs, or
+copied into test fixtures; clearly synthetic placeholder credentials are
+permitted only in isolated deterministic tests. In production:
+
+- the setting `ipinfo_lite_token_secret` holds only the NAME of the
+  environment variable carrying the token (default reference:
+  `ATI_IPINFO_LITE_TOKEN`);
+- during provider composition, the `SecretsResolver` bootstrap contract
+  resolves that reference through `EnvVarSecretsResolver`;
+- the resolved token value is passed to `IpinfoLiteProvider`, which uses it
+  only in the Authorization header; providers never read configuration or
+  the environment directly;
+- a missing, empty, or whitespace-only required token fails clearly at
+  composition time with `SecretNotFoundError` before the IPinfo HTTP
+  client is created; Google DNS and RDAP clients created earlier in the
+  same composition are rolled back cleanly.
 
 ## Testing requirements
 
@@ -529,7 +553,8 @@ Configuration may contain a secret reference such as `ATI_ABUSEIPDB_API_KEY`, bu
 
 ## SecretsResolver contract
 
-The secret-resolution abstraction is intentionally small and independent of configuration-profile loading.
+The secret-resolution abstraction is intentionally small and independent of configuration-profile loading. It is implemented in
+`agentic_threat_investigator.app.secrets` as specified below.
 
 Conceptually:
 
@@ -543,7 +568,7 @@ class SecretsResolver(ABC):
 
     def require(self, name: str) -> str:
         value = self.get(name)
-        if value is None:
+        if value is None or not value.strip():
             raise SecretNotFoundError(name)
         return value
 ```

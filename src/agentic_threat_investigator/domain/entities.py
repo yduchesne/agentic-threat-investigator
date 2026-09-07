@@ -116,9 +116,42 @@ def validate_dns_name(value: str) -> str:
 
 
 def canonicalize_ip_address(value: str) -> str:
-    """Return the canonical compressed representation of an IP address."""
+    """Return the canonical compressed representation of an IP address.
 
-    return str(ipaddress.ip_address(value.strip()))
+    The IPv6 form is rebuilt from the numeric 128-bit address rather than
+    from ``ipaddress``' textual rendering: Python releases have changed how
+    IPv4-mapped addresses such as ``::ffff:8.8.8.8`` are displayed, while
+    canonical entity values and provider identity checks must remain stable
+    across environments.
+    """
+    address = ipaddress.ip_address(value.strip())
+    if isinstance(address, ipaddress.IPv4Address):
+        return str(address)
+
+    number = int(address)
+    hextets = [format((number >> shift) & 0xFFFF, "x") for shift in range(112, -1, -16)]
+    best_start = -1
+    best_length = 0
+    index = 0
+    while index < len(hextets):
+        if hextets[index] != "0":
+            index += 1
+            continue
+        end = index
+        while end < len(hextets) and hextets[end] == "0":
+            end += 1
+        if end - index > best_length:
+            best_start = index
+            best_length = end - index
+        index = end
+
+    if best_length < 2:
+        return ":".join(hextets)
+    return (
+        ":".join(hextets[:best_start])
+        + "::"
+        + ":".join(hextets[best_start + best_length :])
+    )
 
 
 def canonicalize_asn(value: str) -> str:

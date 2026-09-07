@@ -46,7 +46,7 @@ configuration, secret handling, normalization, typed Evidence, entity
 discovery, relationship inputs, typed failures, quota/rate behavior,
 deterministic fixtures, tests, and documentation.
 
-## PR 13 --- IPinfo Lite provider
+## PR 13 --- IPinfo Lite provider \[DONE\]
 
 Deliver:
 
@@ -60,8 +60,11 @@ Deliver:
 -   provider error mapping;
 -   rate/quota handling;
 -   synthetic response fixtures;
--   deterministic provider tests;
--   optional live contract tests outside deterministic CI.
+-   deterministic provider tests.
+
+All PR 13 provider tests use deterministic synthetic responses only.
+Live IPinfo contract testing is outside PR 13 and requires a separately
+approved future change.
 
 No analytical verdict logic belongs in the provider.
 
