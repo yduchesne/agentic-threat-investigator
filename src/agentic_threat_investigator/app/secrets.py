@@ -46,11 +46,14 @@ class SecretsResolver(ABC):
     def require(self, name: str) -> str:
         """Return the secret value for a reference name or raise.
 
-        Raises ``SecretNotFoundError`` when the reference cannot be resolved
-        so missing required credentials fail clearly at bootstrap.
+        A missing reference and a present-but-blank value (empty or
+        whitespace-only) both raise ``SecretNotFoundError`` naming only the
+        configured reference name, so blank credentials can never reach a
+        provider as if they were resolved. The returned value is passed
+        through unchanged; normalization is the consumer's contract.
         """
         value = self.get(name)
-        if value is None:
+        if value is None or not value.strip():
             raise SecretNotFoundError(name)
         return value
 
