@@ -237,11 +237,54 @@ class TestIpinfoLiteSchema:
         with pytest.raises(ValidationError):
             IpinfoLiteResponse.model_validate({"ip": bad})
 
+    def test_both_address_families_accepted(self) -> None:
+        """Both address families are accepted."""
+        assert IpinfoLiteResponse.model_validate({"ip": "8.8.4.4"}).ip == "8.8.4.4"
+        assert (
+            IpinfoLiteResponse.model_validate({"ip": "::ffff:8.8.8.8"}).ip
+            == "::ffff:808:808"
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.provider_contract
+class TestIpinfoLiteCanonicalization:
+    """Whitespace-tolerant canonicalization and length-boundary behavior."""
+
     @pytest.mark.parametrize("textual", ["  8.8.8.8  ", "8.8.8.8 "])
     def test_ip_outer_whitespace_canonicalized(self, textual: str) -> None:
         """Outer whitespace is stripped before address parsing (RDAP convention)."""
         parsed = IpinfoLiteResponse.model_validate({"ip": textual})
         assert parsed.ip == "8.8.8.8"
+
+    def test_max_asn_with_outer_whitespace_canonicalized(self) -> None:
+        """A padded maximum legal ASN is judged on its canonical length."""
+        parsed = IpinfoLiteResponse.model_validate(_lite_response(asn=" AS4294967295 "))
+        assert parsed.asn == "AS4294967295"
+
+    def test_max_length_ip_with_outer_whitespace_canonicalized(self) -> None:
+        """A padded maximum-length textual IP canonicalizes instead of failing
+        the raw member bound (45-character address plus whitespace)."""
+        raw = " ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255 "
+        assert len(raw) > 45
+        parsed = IpinfoLiteResponse.model_validate({"ip": raw})
+        assert parsed.ip == "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
+
+    def test_boundary_domain_with_outer_whitespace_canonicalized(self) -> None:
+        """A padded domain whose canonical form sits at the length limit is accepted."""
+        canonical = "a" * 63 + "." + "b" * 63 + "." + "c" * 63 + "." + "d" * 61
+        assert len(canonical) == 253
+        parsed = IpinfoLiteResponse.model_validate(
+            _lite_response(as_domain=f"  {canonical} ")
+        )
+        assert parsed.as_domain == canonical
+
+    def test_domain_over_max_length_after_canonicalization_rejected(self) -> None:
+        """A domain whose canonical form exceeds the length limit is rejected."""
+        overlong = "a" * 63 + "." + "b" * 63 + "." + "c" * 63 + "." + "d" * 62
+        assert len(overlong) == 254
+        with pytest.raises(ValidationError):
+            IpinfoLiteResponse.model_validate(_lite_response(as_domain=overlong))
 
     @pytest.mark.parametrize(
         ("raw", "expected"),
@@ -263,14 +306,6 @@ class TestIpinfoLiteSchema:
         DNS-name canonicalizer, which also lowercases the value."""
         parsed = IpinfoLiteResponse.model_validate(_lite_response(as_domain=raw))
         assert parsed.as_domain == expected
-
-    def test_both_address_families_accepted(self) -> None:
-        """Both address families are accepted."""
-        assert IpinfoLiteResponse.model_validate({"ip": "8.8.4.4"}).ip == "8.8.4.4"
-        assert (
-            IpinfoLiteResponse.model_validate({"ip": "::ffff:8.8.8.8"}).ip
-            == "::ffff:808:808"
-        )
 
 
 @pytest.mark.unit
@@ -524,6 +559,30 @@ class TestIpinfoLiteProviderContract:
             )
         assert result.errors == ()
         assert result.evidence[0].facts["ip"] == "8.8.8.8"
+
+    async def test_expanded_ipv6_response_identity_accepted(self) -> None:
+        """An equivalent fully expanded IPv6 response satisfies the identity check."""
+
+        def _handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=_lite_response(
+                    ip="2001:0db8:0000:0000:0000:0000:0000:0001",
+                    asn="AS123",
+                ),
+            )
+
+        async with _client_handler(_handler) as client:
+            result = await _provider(client).investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.IP_ADDRESS, value="2001:db8::1"),
+            )
+        assert result.errors == ()
+        assert len(result.evidence) == 1
+        evidence = result.evidence[0]
+        assert evidence.subject.value == "2001:db8::1"
+        assert evidence.facts["ip"] == "2001:db8::1"
+        assert evidence.facts["asn"] == "AS123"
 
     async def test_wrong_identity_rejected(self) -> None:
         """A response about a different IP is rejected as INVALID_RESPONSE."""
