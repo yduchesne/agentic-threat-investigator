@@ -11,7 +11,6 @@ from uuid import UUID
 
 import httpx
 import pytest
-from httpx import MockTransport
 from pydantic import ValidationError
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode
@@ -27,6 +26,11 @@ from agentic_threat_investigator.infrastructure.providers.ipinfo_lite import (
     IpinfoLiteProvider,
     IpinfoLiteResponse,
 )
+from tests.support.provider_http import failing_io_client as _client_failing_io
+from tests.support.provider_http import handler_client as _client_handler
+from tests.support.provider_http import no_op_sleep as _no_op_sleep
+from tests.support.provider_http import static_client as _client_static
+from tests.support.provider_http import zero_jitter as _zero_jitter
 
 _FIXED_UUID = UUID("11111111-2222-3333-4444-555555555555")
 _FIXED_TS = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
@@ -60,15 +64,6 @@ def _lite_response(**overrides: Any) -> dict[str, Any]:
     return data
 
 
-async def _no_op_sleep(_: float) -> None:
-    """Non-blocking async sleep replacement for deterministic tests."""
-
-
-def _zero_jitter() -> float:
-    """Deterministic zero-offset jitter callable."""
-    return 0.5
-
-
 def _provider(
     client: httpx.AsyncClient,
     *,
@@ -91,25 +86,6 @@ def _provider(
         ProviderHttpClient(client=client, **client_kwargs),
         token=_FIXED_TOKEN,
         **provider_kwargs,
-    )
-
-
-def _client_static(response: httpx.Response) -> httpx.AsyncClient:
-    """Build a client serving one fixed response for every request."""
-    return httpx.AsyncClient(transport=MockTransport(lambda _: response))
-
-
-def _client_handler(handler: Any) -> httpx.AsyncClient:
-    """Build a client dispatching to the given handler."""
-    return httpx.AsyncClient(transport=MockTransport(handler))
-
-
-def _client_failing_io() -> httpx.AsyncClient:
-    """Build a client that fails the test if any HTTP I/O is attempted."""
-    return httpx.AsyncClient(
-        transport=MockTransport(
-            lambda _: pytest.fail("provider must not perform HTTP I/O")
-        )
     )
 
 

@@ -100,11 +100,14 @@ Deliver:
 -   provider reputation/abuse scores retained as source facts;
 -   relevant report/count/category/time facts;
 -   rate-limit/quota and authentication/error behavior;
--   deterministic fixtures and tests;
--   optional live contract tests outside deterministic CI.
+-   deterministic fixtures and tests.
+
+All PR 15 AbuseIPDB provider tests use deterministic synthetic responses
+only. Live AbuseIPDB contract testing is outside PR 15 and requires a
+separately approved future change.
 
 Provider scores do not directly determine ATI assessment confidence. No
-AbuseIPDB hit does not imply `BENIGN`.
+AbuseIPDB hit does not imply `BENIGN`. [DONE]
 
 ## PR 16 --- ThreatFox provider
 

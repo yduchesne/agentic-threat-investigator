@@ -26,6 +26,55 @@ class TestProviderSettings:
         assert settings.rdap_bootstrap_cache_seconds == 3600
         assert settings.ipinfo_lite_max_concurrency == 10
         assert settings.ipinfo_lite_token_secret == "ATI_IPINFO_LITE_TOKEN"
+        assert settings.abuseipdb_max_concurrency == 10
+        assert settings.abuseipdb_requests_per_second is None
+        assert settings.abuseipdb_api_key_secret == "ATI_ABUSEIPDB_API_KEY"
+        assert settings.abuseipdb_max_age_in_days == 30
+
+    def test_abuseipdb_api_key_secret_environment_reference(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """The AbuseIPDB secret-reference name is configurable by environment."""
+        monkeypatch.setenv("ATI_ABUSEIPDB_API_KEY_SECRET", "MY_CUSTOM_KEY_VAR")
+        settings = settings_from_config({})
+        assert settings.abuseipdb_api_key_secret == "MY_CUSTOM_KEY_VAR"
+
+    def test_abuseipdb_api_key_secret_blank_rejected(self) -> None:
+        """A blank AbuseIPDB secret-reference name is rejected."""
+        with pytest.raises(ValidationError, match="blank"):
+            settings_from_config({"abuseipdb_api_key_secret": "   "})
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("abuseipdb_max_concurrency", 0),
+            ("abuseipdb_max_concurrency", -1),
+            ("abuseipdb_max_concurrency", 2.5),
+            ("abuseipdb_max_concurrency", True),
+            ("abuseipdb_max_age_in_days", 0),
+            ("abuseipdb_max_age_in_days", 366),
+            ("abuseipdb_max_age_in_days", -30),
+            ("abuseipdb_max_age_in_days", True),
+            ("abuseipdb_max_age_in_days", 12.5),
+            ("abuseipdb_requests_per_second", 0),
+            ("abuseipdb_requests_per_second", -1.0),
+            ("abuseipdb_requests_per_second", True),
+        ],
+    )
+    def test_abuseipdb_bounds_rejected(self, field: str, value: object) -> None:
+        """Out-of-bounds and non-coercive AbuseIPDB values are rejected."""
+        with pytest.raises(ValidationError):
+            settings_from_config({field: value})
+
+    def test_abuseipdb_environment_parsing(self, monkeypatch: MonkeyPatch) -> None:
+        """AbuseIPDB settings parse from environment text."""
+        monkeypatch.setenv("ATI_ABUSEIPDB_MAX_CONCURRENCY", "3")
+        monkeypatch.setenv("ATI_ABUSEIPDB_REQUESTS_PER_SECOND", "5.5")
+        monkeypatch.setenv("ATI_ABUSEIPDB_MAX_AGE_IN_DAYS", "60")
+        settings = settings_from_config({})
+        assert settings.abuseipdb_max_concurrency == 3
+        assert settings.abuseipdb_requests_per_second == 5.5
+        assert settings.abuseipdb_max_age_in_days == 60
 
     def test_ipinfo_token_secret_environment_reference(
         self, monkeypatch: MonkeyPatch

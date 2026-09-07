@@ -328,3 +328,23 @@ The following rules apply to configuration, providers, storage, and future acqui
 - Resolved secret values must not be logged, included in effective-configuration dumps, persisted in evidence/history/audit/timeline data, or exposed in errors.
 - Artifact URIs identify locations only and must never embed credentials.
 - Redaction is defense in depth; code must not rely on redaction as permission to place secrets into ordinary configuration/log structures.
+
+## AbuseIPDB credential and data minimization
+
+The AbuseIPDB provider follows the shared secret-handling rules with the
+following specifics:
+
+- The `abuseipdb_api_key_secret` setting contains only the NAME of the
+  environment variable carrying the API key, never a key value.
+- Composition resolves the key through `SecretsResolver` during
+  bootstrap and injects the resolved value into the provider; the
+  provider never reads configuration or the environment.
+- The key is sent only in the custom `Key` request header. It is never
+  placed in a URL, query string, log, error message, evidence fact,
+  persistence record, or test fixture.
+- Response bodies are never copied into provider error messages.
+- Report comments and reporter metadata (reporter IDs and reporter
+  countries) are discarded during normalization and never retained.
+- Raw verbose response payloads are not retained (`raw_payload=None`).
+- Automated tests are synthetic (ATI-authored in-process responses) and
+  cannot contact the real AbuseIPDB service.

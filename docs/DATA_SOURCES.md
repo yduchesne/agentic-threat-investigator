@@ -702,6 +702,259 @@ Source identifier:
 
 `urn:ati:source:abuseipdb`
 
+The stable ATI member `SourceId.ABUSEIPDB` publishes this identifier.
+
+ATI treats provider-specific fields as source facts rather than generic
+confidence. `abuseConfidenceScore` and all report facts are retained as
+normalized source facts only; they never weight ATI assessment confidence
+and never constitute maliciousness evidence by themselves.
+
+#### Applicability
+
+Supported entity types:
+
+- `IP_ADDRESS`
+
+Unsupported entity types (each is a non-retryable
+`UNSUPPORTED_INDICATOR` produced before clock evaluation or any HTTP
+I/O):
+
+- `DOMAIN`
+- `URL`
+- `NETWORK_PREFIX`
+- `ASN`
+- `ORGANIZATION`
+- `MALWARE`
+- `ATTACK_TECHNIQUE`
+- `VULNERABILITY`
+
+#### Endpoint
+
+A single IP check uses the fixed AbuseIPDB API v2 endpoint with the
+canonical IP as a query parameter:
+
+`https://api.abuseipdb.com/api/v2/check`
+
+The `/api/v2/check-block`, `/api/v2/blacklist`, and `/api/v2/report`
+endpoints are not used. The request query string carries exactly
+`ipAddress` (the canonical IP; IPv6 colons are percent-encoded by the
+shared client), `maxAgeInDays` (settings-bounded to `1..365`), and
+`verbose` (always sent, so report facts are returned). The URL stored as
+evidence `source_url` is the credential-free, query-free endpoint above.
+The legacy `?key=` query authentication form is never used because it
+leaks credentials into server logs.
+
+#### Authentication
+
+Requests authenticate with the API key in the custom header:
+
+```http
+Key: <api key>
+```
+
+Real or resolved keys must never be committed, logged, persisted, placed
+in URLs, or copied into test fixtures; clearly synthetic placeholder
+keys are permitted only in isolated deterministic tests. The key is
+resolved during composition/bootstrap from the secret reference
+documented in `CONFIGURATION.md`; the provider receives the resolved
+key value and never reads configuration or the environment.
+
+#### Request parameters
+
+- `ipAddress`: the canonical queried IP (required).
+- `maxAgeInDays`: the report look-back window in days; configured by
+  the `abuseipdb_max_age_in_days` setting (default `30`, bounded
+  `1..365`), identical for every lookup.
+- `verbose`: always present, so the response includes the `reports`
+  array and report facts.
+
+#### Quota and operational limits
+
+- Request quotas and rate limits depend on the operator's current
+  AbuseIPDB plan and are external terms subject to change; ATI does not
+  encode a fixed daily quota policy.
+- When the quota is exhausted the source responds with HTTP 429; the
+  shared provider HTTP policy treats it as retryable and honors
+  `Retry-After`.
+- Only the `/api/v2/check` endpoint is used. ATI performs lookups only
+  and never submits abuse reports.
+- Automated tests use ATI-authored synthetic responses only and never
+  contact the real AbuseIPDB service.
+
+#### Successful response fields
+
+The success response is a top-level JSON object with a `data` object.
+The example below is illustrative synthetic data authored for ATI
+documentation and tests (an RFC 5737 documentation address and synthetic
+operator values); it is not a copied AbuseIPDB record. Consumed `data`
+members:
+
+```json
+{
+  "ipAddress": "192.0.2.39",
+  "isPublic": false,
+  "ipVersion": 4,
+  "isWhitelisted": false,
+  "abuseConfidenceScore": 75,
+  "isTor": false,
+  "totalReports": 1,
+  "numDistinctUsers": 1,
+  "lastReportedAt": "2026-01-15T12:00:00+00:00",
+  "reports": [
+    {
+      "reportedAt": "2026-01-15T12:00:00+00:00",
+      "categories": [18, 22]
+    }
+  ]
+}
+```
+
+Consumed members are exactly: `ipAddress`, `isPublic`, `ipVersion`,
+`isWhitelisted`, `abuseConfidenceScore`, `isTor`, `totalReports`,
+`numDistinctUsers`, `lastReportedAt`, report `reportedAt`, and report
+`categories`.
+
+Presence rules:
+
+- `isWhitelisted` is required in the response but may be `true`,
+  `false`, or `null`; its value is always retained as the
+  `is_whitelisted` fact. Whitelist state is a source fact only and is
+  never translated into benign/suspicious/malicious semantics
+  (AbuseIPDB itself cautions against using this field as the primary
+  basis for action).
+- `lastReportedAt` is required but may be a timezone-aware timestamp or
+  `null`; its value is always retained as the `last_reported_at` fact.
+- Because ATI always requests `verbose`, `reports` is a required array;
+  an empty array is valid and is retained as `reports: []`. A missing
+  or null `reports` member is malformed.
+- Report `reportedAt` and `categories` are required in every report
+  entry.
+- `categories` values are strict positive integers; `0`, negative
+  integers, booleans, floats, strings, and null are invalid. ATI
+  retains the integer identifiers exactly as reported and does not
+  synthesize, map, or attach category names.
+- All other members are required non-nullable: an explicit null or
+  absent member is malformed (`INVALID_RESPONSE`).
+
+Deliberately unconsumed members (ignored, never copied into facts,
+never validated, never synthesized): `countryCode`, `countryName`,
+`usageType`, `isp`, `domain`, `hostnames`, report `comment` (untrusted
+third-party free text), report `reporterId`, report
+`reporterCountryCode`, report `reporterCountryName`, and all unknown
+members. AbuseIPDB documents the geography and network fields as
+sourced from IPinfo; ATI has a dedicated IPinfo Lite provider and does
+not normalize this data from AbuseIPDB. Ignored members cannot become
+entities, relationships, evidence facts, or pivot targets.
+
+Only exact external camel-case member names affect parsing: ATI-side
+snake-case names are never accepted as source members (the response
+models do not populate by field name), and unknown members are ignored.
+
+#### ATI normalized fact shape
+
+```json
+{
+  "ip_address": "192.0.2.39",
+  "is_public": false,
+  "ip_version": 4,
+  "is_whitelisted": false,
+  "abuse_confidence_score": 75,
+  "is_tor": false,
+  "total_reports": 1,
+  "num_distinct_users": 1,
+  "last_reported_at": "2026-01-15T12:00:00+00:00",
+  "max_age_in_days": 30,
+  "reports": [
+    {
+      "reported_at": "2026-01-15T12:00:00+00:00",
+      "categories": [18, 22]
+    }
+  ]
+}
+```
+
+Every fact key above is always present in a successful lookup, including
+zero-report responses and non-default look-back windows:
+`max_age_in_days` is always included so report and count semantics can
+be interpreted against the queried window. `last_reported_at` is `null`
+when the source value is null. `last_reported_at` and report
+`reported_at` values are strict timezone-aware ISO 8601 timestamps
+normalized to UTC; outer whitespace in a timestamp is invalid and is
+never normalized away. Report entries and category identifiers preserve
+source array order: ATI does not sort, deduplicate, or attach category
+names. Each normalized report contains exactly `reported_at` and
+`categories`. The provider does not add derived fields; risk bands,
+severity, verdicts, and confidence values are never synthesized.
+
+#### Response validation matrix
+
+One successful lookup yields exactly one immutable `Evidence`
+(`EvidenceType.REPUTATION`). One malformed response yields one typed
+`ProviderError` and no evidence; the provider never emits a partly
+normalized observation.
+
+| Case | Behavior |
+|---|---|
+| IPv4 query | Supported; canonical compressed form in the query and subject |
+| IPv6 query | Supported; canonical compressed lowercase form in the query and subject |
+| unsupported entity type | `UNSUPPORTED_INDICATOR` before I/O; zero HTTP calls |
+| invalid entity value | `UNSUPPORTED_INDICATOR` before I/O; zero HTTP calls |
+| top-level JSON object required | Non-object top level is `INVALID_RESPONSE` |
+| missing/non-object `data` | `INVALID_RESPONSE` |
+| returned IP mismatch | `data.ipAddress` must canonicalize exactly to the requested canonical IP; otherwise `INVALID_RESPONSE` (covers textual variants, family mismatch, and a wrong address) |
+| `ipVersion` mismatch | Must be `4` for IPv4 and `6` for IPv6 queries; otherwise `INVALID_RESPONSE` |
+| `isWhitelisted` | Required member; `true`, `false`, and `null` are valid and retained; booleans-string, integer, list, and object values are `INVALID_RESPONSE` |
+| `lastReportedAt` | Required member; a timezone-aware ISO 8601 timestamp or `null` is valid; naive timestamps, whitespace-padded strings, non-strings, and unparseable values are `INVALID_RESPONSE` |
+| `abuseConfidenceScore` bounds | Strict integer `0..100`; floats, booleans, strings, null, out-of-range are `INVALID_RESPONSE` |
+| `totalReports`/`numDistinctUsers` | Strict integers `>= 0`; otherwise `INVALID_RESPONSE` |
+| `isPublic`/`isTor` | Strict booleans; otherwise `INVALID_RESPONSE` |
+| timestamps | Strict timezone-aware ISO 8601; naive timestamps, whitespace-padded strings, non-strings, and unparseable values are `INVALID_RESPONSE` |
+| `reports` | Required array under the verbose contract; a missing or null member and non-array values are `INVALID_RESPONSE`; an explicit empty array is valid |
+| report `reportedAt` | Required; strict timezone-aware ISO 8601 |
+| report `categories` | Required list of strict positive integers (explicit empty list allowed); `0`, negative integers, booleans, floats, numeric strings, null entries, and a missing member are `INVALID_RESPONSE` |
+| null required member | `INVALID_RESPONSE`, except `isWhitelisted` and `lastReportedAt` whose documented null values are valid |
+| unknown members | Unknown members at any level are ignored and never copied into facts |
+| 401 | `AUTHENTICATION_FAILED`, non-retryable |
+| 402 | `FORBIDDEN`, non-retryable (expired subscription is an access denial, not a malformed response) |
+| 403 | `FORBIDDEN`, non-retryable |
+| 404 | `NOT_FOUND`, non-retryable (shared provider convention) |
+| 422 | `INVALID_RESPONSE`, non-retryable |
+| 429 | `RATE_LIMITED`, retryable; `Retry-After` honored by shared HTTP behavior |
+| timeout | `TIMEOUT`, retryable |
+| 5xx | `PROVIDER_UNAVAILABLE`, retryable |
+| malformed JSON | `INVALID_RESPONSE`, non-retryable |
+| invalid content type | `INVALID_RESPONSE`, non-retryable |
+| response too large | `INVALID_RESPONSE`, non-retryable (shared bounded-body rule) |
+| cancellation | `asyncio.CancelledError` propagates unchanged |
+
+Error messages are generic and never include the response body, URLs,
+headers, or the API key.
+
+#### Misses and benignity
+
+There is no lookup-miss concept: the source returns score data for any
+checkable IP. A response with `abuseConfidenceScore` 0 and zero reports
+is a successful lookup whose facts are retained as evidence; it is
+**not** a benign assessment and never implies benignity.
+
+#### Evidence semantics
+
+A successful lookup emits:
+
+- `EvidenceType.REPUTATION` (`urn:ati:evidence:reputation`);
+- subject: the queried IP entity reference;
+- source: `urn:ati:source:abuseipdb`;
+- `observed_at`: the normalized `lastReportedAt` value (UTC) when
+  non-null; `None` only when `lastReportedAt` is null;
+- timezone-aware UTC `retrieved_at`;
+- credential-free `source_url=https://api.abuseipdb.com/api/v2/check`;
+- `raw_payload=None` (conservative data minimization).
+
+The provider does not create an ATI verdict, does not assess
+maliciousness, does not weight assessment confidence, does not create
+relationships, does not instantiate discovered entities from report
+data, and does not persist anything.
+
 ### ThreatFox
 
 Purpose:

@@ -190,6 +190,35 @@ class EvidenceProvider(ABC):  # pylint: disable=too-few-public-methods
         """
 
 
+def provider_error_result(
+    provider_id: str,
+    code: ProviderErrorCode,
+    message: str,
+    *,
+    retry_after_seconds: int | None = None,
+) -> ProviderResult:
+    """Build one typed provider error result attributed to ``provider_id``.
+
+    The error carries the code's natural retryability and an optional
+    provider-directed ``retry_after_seconds`` value. This is the shared
+    construction for the single-error ``ProviderResult`` shape used by the
+    live providers; provider-specific status remapping stays in each
+    provider module.
+    """
+    return ProviderResult(
+        provider=provider_id,
+        errors=(
+            ProviderError(
+                provider=provider_id,
+                code=code,
+                message=message,
+                retryable=code.retryable,
+                retry_after_seconds=retry_after_seconds,
+            ),
+        ),
+    )
+
+
 def unsupported_indicator_result(
     provider_id: str, message: str = "invalid entity value"
 ) -> ProviderResult:

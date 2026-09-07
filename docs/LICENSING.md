@@ -187,6 +187,35 @@ Evidence exposes stable source identifiers and source URLs where appropriate.
 
 Provenance supports analyst verification but is not automatically a substitute for legally required attribution.
 
+## AbuseIPDB API terms
+
+The AbuseIPDB provider uses only the official API v2 `check` endpoint.
+Authoritative references (must be re-verified before every release):
+
+- <https://docs.abuseipdb.com/>
+- <https://www.abuseipdb.com/pricing>
+- <https://www.abuseipdb.com/legal>
+
+Terms relevant to ATI operators (as documented at the references above at
+the time of writing; the authoritative pages prevail):
+
+1. Operators must choose and comply with an AbuseIPDB plan appropriate
+   for their use.
+2. Free/Individual use is currently restricted to evaluation,
+   contribution, and non-commercial personal projects; commercial or
+   organization use requires the appropriate paid plan under current
+   terms.
+3. Plan quotas are finite and can change. ATI does not hard-code a daily
+   quota policy; it safely handles HTTP 429 responses through the shared
+   retry policy and `Retry-After` handling.
+4. ATI performs lookups only and never submits abuse reports.
+5. ATI does not bundle or redistribute AbuseIPDB data; evidence facts are
+   retained as investigation observations, not as a redistributable
+   dataset.
+
+This section describes source terms for operator awareness and is not
+legal advice.
+
 ## Dependencies
 
 Python and frontend dependencies receive an automated license inventory/check before release.

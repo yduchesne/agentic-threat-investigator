@@ -100,6 +100,16 @@ class Settings(BaseSettings):
     # IPinfo Lite access token. The token value itself is resolved outside
     # configuration during composition and never stored or logged here.
     ipinfo_lite_token_secret: str = "ATI_IPINFO_LITE_TOKEN"
+    # AbuseIPDB provider settings. The secret setting carries only the NAME
+    # of the environment variable holding the API key; the key value is
+    # resolved outside configuration during composition and never stored or
+    # logged here. The report look-back window is fixed per deployment.
+    abuseipdb_max_concurrency: int = Field(default=10, gt=0)
+    abuseipdb_requests_per_second: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    abuseipdb_api_key_secret: str = "ATI_ABUSEIPDB_API_KEY"
+    abuseipdb_max_age_in_days: int = Field(default=30, ge=1, le=365)
     # Credential-free local artifact URI of the DB-IP IP to City Lite MMDB.
     # Blank (default) disables the DB-IP City Lite provider. This is a plain
     # artifact location, not a secret; it is validated as an authority-free
@@ -113,6 +123,8 @@ class Settings(BaseSettings):
         "rdap_max_concurrency",
         "rdap_bootstrap_cache_seconds",
         "ipinfo_lite_max_concurrency",
+        "abuseipdb_max_concurrency",
+        "abuseipdb_max_age_in_days",
         mode="before",
     )
     @classmethod
@@ -130,6 +142,7 @@ class Settings(BaseSettings):
         "google_dns_requests_per_second",
         "rdap_requests_per_second",
         "ipinfo_lite_requests_per_second",
+        "abuseipdb_requests_per_second",
         mode="before",
     )
     @classmethod
@@ -145,6 +158,14 @@ class Settings(BaseSettings):
         """Require a non-blank secret reference name (never a token value)."""
         if not value.strip():
             raise ValueError("ipinfo_lite_token_secret must not be blank")
+        return value.strip()
+
+    @field_validator("abuseipdb_api_key_secret")
+    @classmethod
+    def validate_abuseipdb_api_key_secret(cls, value: str) -> str:
+        """Require a non-blank secret reference name (never an API key value)."""
+        if not value.strip():
+            raise ValueError("abuseipdb_api_key_secret must not be blank")
         return value.strip()
 
     @field_validator("dbip_city_lite_artifact_uri")
