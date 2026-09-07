@@ -62,11 +62,9 @@ Additionally:
 
 ## Tests
 
-CI must remain deterministic and must not require live internet/API keys for ordinary PR validation.
-
-Use fake providers/FakeLlmClient and synthetic scenario fixtures.
-
-Integration tests use isolated PostgreSQL + pgvector storage and must never use normal developer persistent data.
+- CI must remain deterministic and must not require live internet/API keys for ordinary PR validation.
+- Use fake providers/FakeLlmClient and synthetic scenario fixtures.
+- Integration tests use isolated PostgreSQL + pgvector storage and must never use normal developer persistent data.
 
 ## Documentation
 

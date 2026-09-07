@@ -1,336 +1,297 @@
-# Agentic Threat Investigator — Implementation / PR Plan
-
-## Table of contents
-
-- [Delivery principle](#delivery-principle)
-- [PR 1 — Repository bootstrap and development environment \[DONE\]](#pr-1-repository-bootstrap-and-development-environment-done)
-- [PR 2 — Core domain model \[DONE\]](#pr-2-core-domain-model-done)
-- [PR 3 — Database migrations and repository contracts \[DONE\]](#pr-3-database-migrations-and-repository-contracts-done)
-- [PR 4 — Local identity/authentication \[DONE\]](#pr-4-local-identityauthentication-done)
-- [PR 5 — Audit and history \[DONE\]](#pr-5-audit-and-history-done)
-- [PR 6 — PostgreSQL batch persistence \[DONE\]](#pr-6-postgresql-batch-persistence-done)
-- [PR 7 — SecretsResolver implementation and integration \[DONE\]](#pr-7-secretsresolver-implementation-and-integration)
-- [PR 8 — Batch source/ingestion framework \[DONE\]](#pr-8-batch-sourceingestion-framework)
-- [PR 9 — MITRE ATT&CK ingestion \[DONE\]](#pr-9-mitre-attck-ingestion-done)
-- [PR 10 — Documents/chunks/embeddings \[DONE\]](#pr-10-documentschunksembeddings-done)
-- [PR 11 — RAG retrieval](#pr-11-rag-retrieval)
-- [PR 12 — Live provider framework + RDAP + Google DNS [DONE]](#pr-12-live-provider-framework-rdap-google-dns-done)
-- [PR 13 — Remaining v0.1 live sources](#pr-13-remaining-v01-live-sources)
-- [PR 14 — Investigation persistence and relationship construction](#pr-14-investigation-persistence-and-relationship-construction)
-- [PR 15 — LangGraph skeleton](#pr-15-langgraph-skeleton)
-- [PR 16 — Evidence Analyst](#pr-16-evidence-analyst)
-- [PR 17 — Adaptive pivots and stopping](#pr-17-adaptive-pivots-and-stopping)
-- [PR 18 — Threat Research RAG Agent](#pr-18-threat-research-rag-agent)
-- [PR 19 — Report Writer and API](#pr-19-report-writer-and-api)
-- [PR 20 — Frontend analyst workbench](#pr-20-frontend-analyst-workbench)
-- [PR 21 — Monitors, diffs, findings](#pr-21-monitors-diffs-findings)
-- [PR 22 — System/jobs/admin UI](#pr-22-systemjobsadmin-ui)
-- [PR 23 — Evaluation and release hardening](#pr-23-evaluation-and-release-hardening)
-- [Every PR](#every-pr)
-- [Latest persistence/configuration requirements](#latest-persistenceconfiguration-requirements)
+# Agentic Threat Investigator --- Implementation / PR Plan
 
 ## Delivery principle
 
-Implement ATI in small, reviewable increments. Every PR must preserve repository quality gates and add tests appropriate to the new behavior.
+Implement ATI in small, reviewable increments. Every PR must preserve
+repository quality gates and add tests appropriate to the new behavior.
 
-Do not allow coding agents to invent major architecture contrary to the authoritative documentation.
+Do not allow coding agents to invent major architecture contrary to the
+authoritative documentation.
 
-## PR 1 — Repository bootstrap and development environment [DONE]
+------------------------------------------------------------------------
 
-Deliver:
+## PR 1 --- Repository bootstrap and development environment \[DONE\]
 
-- repository layout;
-- `uv` project configuration;
-- `pyproject.toml`;
-- committed `uv.lock`;
-- Black/isort/Pylint/Mypy/Pytest/pytest-cov/pre-commit;
-- canonical `make quality` or equivalent;
-- Podman Compose baseline;
-- backend/frontend skeletons;
-- environment configuration;
-- CI baseline;
-- SPDX/license files.
+## PR 2 --- Core domain model \[DONE\]
 
-## PR 2 — Core domain model [DONE]
+## PR 3 --- Database migrations and repository contracts \[DONE\]
 
-Implement typed domain models/enums for:
+## PR 4 --- Local identity/authentication \[DONE\]
 
-- entities;
-- evidence;
-- relationships;
-- assessment;
-- geolocation;
-- investigation state/budgets/pivots/stopping;
-- common identifiers/canonicalization contracts.
+## PR 5 --- Audit and history \[DONE\]
 
-No infrastructure coupling.
+## PR 6 --- PostgreSQL batch persistence \[DONE\]
 
-## PR 3 — Database migrations and repository contracts [DONE]
+## PR 7 --- SecretsResolver implementation and integration \[DONE\]
 
-Deliver:
+## PR 8 --- Batch source/ingestion framework \[DONE\]
 
-- PostgreSQL/pgvector schema;
-- Alembic;
-- repository ABCs;
-- UnitOfWork ABC;
-- initial PostgreSQL implementations;
-- soft-delete conventions;
-- integration-test database.
+## PR 9 --- MITRE ATT&CK ingestion \[DONE\]
 
-## PR 4 — Local identity/authentication [DONE]
+## PR 10 --- Documents/chunks/embeddings \[DONE\]
+
+## PR 11 --- RAG retrieval \[DONE\]
+
+## PR 12 --- Live provider framework + RDAP + Google DNS \[DONE\]
+
+The completed PRs retain their existing repository scope and contracts.
+
+------------------------------------------------------------------------
+
+# Remaining evidence-source integrations
+
+Each remaining source gets its own PR. Every source PR is a complete,
+independently reviewable vertical slice and, where applicable, includes
+configuration, secret handling, normalization, typed Evidence, entity
+discovery, relationship inputs, typed failures, quota/rate behavior,
+deterministic fixtures, tests, and documentation.
+
+## PR 13 --- IPinfo Lite provider
 
 Deliver:
 
-- users/credentials/sessions;
-- Argon2id;
-- bootstrap administrator;
-- ADMIN/ANALYST enforcement;
-- CSRF/session protections;
-- admin invariant.
+-   IPinfo Lite integration;
+-   IP-address support;
+-   authentication through bootstrap-resolved credentials where
+    required;
+-   network/ASN/organization normalization;
+-   normalized `NETWORK` evidence;
+-   deterministic extraction of eligible ASN/network/organization facts;
+-   provider error mapping;
+-   rate/quota handling;
+-   synthetic response fixtures;
+-   deterministic provider tests;
+-   optional live contract tests outside deterministic CI.
 
-## PR 5 — Audit and history [DONE]
+No analytical verdict logic belongs in the provider.
 
-Deliver:
-
-- AuditEvent;
-- stable audit action vocabulary;
-- transactional audit behavior;
-- actor/system semantics.
-
-## PR 6 — PostgreSQL batch persistence [DONE]
-
-Deliver:
-
-- `upsert_batch` repository contracts;
-- versioned stored functions;
-- JSONB/set-based merge;
-- content-hash behavior;
-- inserted/updated/unchanged result;
-- integration tests.
-
-## PR 7 — SecretsResolver implementation and integration [DONE]
+## PR 14 --- DB-IP City Lite geolocation integration
 
 Deliver:
 
-- `SecretsResolver` ABC with `get`/`require` semantics and `SecretNotFoundError`;
-- `EnvVarSecretsResolver` with an injectable environment mapping for deterministic tests;
-- bootstrap/composition-time resolution with clear failure on missing required secrets;
-- configuration carrying secret reference names only (for example `ATI_ABUSEIPDB_API_KEY`), never secret values;
-- resolved credentials passed into provider/infrastructure construction; providers must not depend directly on `SecretsResolver`;
-- confirmation that resolved secret values are never logged, persisted, or embedded in artifact URIs;
-- `.env.example` documentation of required secret variables without real credentials;
-- deterministic unit tests without live keys.
+-   DB-IP City Lite local MMDB integration;
+-   artifact-location configuration using URI semantics;
+-   storage/artifact abstraction integration;
+-   local artifact validation;
+-   IP-address lookup;
+-   normalized `GeoLocation`;
+-   normalized `GEOLOCATION` evidence;
+-   country/region/city/approximate
+    latitude/longitude/precision/provider fields;
+-   behavior for missing/unknown/private/reserved addresses;
+-   deterministic MMDB fixture or test dataset;
+-   unit/integration tests.
 
-This PR prepares credential wiring for subsequent provider and batch PRs.
+Geolocation remains contextual evidence in v0.1. Do not introduce
+PostGIS, general-purpose GEOINT entities, spatial pivoting, or physical
+attacker-location inference.
 
-## PR 8 — Batch source/ingestion framework [DONE]
-
-Deliver:
-
-- BatchSource ABC;
-- SourceRecord;
-- checkpoints/capabilities;
-- IngestionService;
-- normalization versioning;
-- URI-oriented ObjectStore artifact behavior.
-
-## PR 9 — MITRE ATT&CK ingestion [DONE]
+## PR 15 --- AbuseIPDB provider
 
 Deliver:
 
-- STIX ingestion;
-- normalized ATT&CK entities/relationships;
-- idempotent update behavior;
-- provenance.
+-   AbuseIPDB integration;
+-   IP-address support;
+-   credential resolution through the established bootstrap mechanism;
+-   normalized `REPUTATION` evidence;
+-   provider reputation/abuse scores retained as source facts;
+-   relevant report/count/category/time facts;
+-   rate-limit/quota and authentication/error behavior;
+-   deterministic fixtures and tests;
+-   optional live contract tests outside deterministic CI.
 
-## PR 10 — Documents/chunks/embeddings [DONE]
+Provider scores do not directly determine ATI assessment confidence. No
+AbuseIPDB hit does not imply `BENIGN`.
 
-Deliver:
-
-- Document/DocumentChunk persistence;
-- source-aware chunking;
-- embedding abstraction/config metadata;
-- pgvector indexing.
-
-## PR 11 — RAG retrieval [DONE]
-
-Deliver:
-
-- ResearchQuery/RetrievedChunk;
-- ResearchRetriever ABC;
-- PgVectorResearchRetriever;
-- metadata filtering;
-- retrieval evaluation fixtures.
-
-## PR 12 — Live provider framework + RDAP + Google DNS [DONE]
+## PR 16 --- ThreatFox provider
 
 Deliver:
 
-- EvidenceProvider ABC;
-- ProviderResult/errors;
-- retry/rate-limit infrastructure;
-- RDAP provider;
-- Google DNS provider;
-- deterministic provider tests;
-- documented transport, field, cross-field, RR-set, special-value, and
-  entity-eligibility validation matrices for the supported DNS/RDAP forms,
-  with corresponding deterministic boundary tests.
+-   ThreatFox integration;
+-   supported IOC lookup forms;
+-   source-specific normalization;
+-   normalized `THREAT_INTELLIGENCE` evidence;
+-   IOC-to-malware discovery where supported;
+-   `MALWARE` entity discovery;
+-   inputs for deterministic `ASSOCIATED_WITH` relationships;
+-   source timestamps/reference identifiers;
+-   typed errors;
+-   malicious IOC and no-result fixtures;
+-   canonical AsyncRAT fixture support;
+-   deterministic provider tests;
+-   optional live contract tests.
 
-This PR establishes the first domain-to-IP discovery path. It is not complete
-while a standards-valid supported form (including DNS protocol roots/null MX
-or supported escaped DNS presentation syntax) lacks an approved normalized
-representation and contract coverage.
+Canonical trajectory:
 
-## PR 13 — Remaining v0.1 live sources
+``` text
+domain
+  ↓
+DNS
+  ↓
+IP
+  ↓
+ThreatFox
+  ↓
+malware entity
+  ↓
+Threat Research RAG
+```
 
-Deliver:
+The provider supplies evidence, not the ATI verdict.
 
-- IPinfo Lite;
-- DB-IP City Lite local MMDB;
-- AbuseIPDB;
-- ThreatFox;
-- URLhaus;
-- source-specific normalization/tests.
-
-## PR 14 — Investigation persistence and relationship construction
-
-Deliver:
-
-- Investigation persistence;
-- Evidence persistence;
-- deterministic relationship extractors;
-- RelationshipObservation;
-- discovered-entity processing;
-- atomic provider-result persistence.
-
-## PR 15 — LangGraph skeleton
+## PR 17 --- URLhaus provider
 
 Deliver:
 
-- graph state integration;
-- Coordinator skeleton;
-- collector nodes;
-- job execution through worker;
-- typed transitions;
-- deterministic FakeLlmClient path.
+-   URLhaus integration;
+-   supported URL/host/IOC queries;
+-   normalized `THREAT_INTELLIGENCE` evidence;
+-   URL/infrastructure entity discovery where supported;
+-   relevant payload/malware/source metadata normalization;
+-   typed errors;
+-   rate/quota behavior where applicable;
+-   deterministic fixtures and tests;
+-   optional live contract tests.
 
-## PR 16 — Evidence Analyst
+------------------------------------------------------------------------
 
-Deliver:
+# Investigation engine
 
-- structured analysis contract;
-- verdict/confidence semantics;
-- supporting/contradicting evidence;
-- limitations/unresolved questions;
-- evidence-reference validation;
-- analytical regression tests.
+## PR 18 --- Investigation persistence and relationship construction
 
-## PR 17 — Adaptive pivots and stopping
+Deliver Investigation persistence, Evidence persistence, deterministic
+relationship extraction, stable Relationship identity, immutable
+`RelationshipObservation`, discovered-entity processing, atomic
+provider-result persistence, history/version invariants, and integration
+tests.
 
-Deliver:
+## PR 19 --- LangGraph investigation skeleton
 
-- deterministic pivot policy;
-- depth/entity/provider/replan/LLM budgets;
-- cycle prevention;
-- Coordinator proposal validation;
-- stop reasons;
-- canonical trajectory tests.
+Deliver typed `InvestigationState`, coordinator graph, provider/tool
+execution nodes, working-set/queue mechanics, budgets/counters,
+persisted observable timeline actions, deterministic fake providers/LLM,
+and the initial deterministic evaluation framework.
 
-## PR 18 — Threat Research RAG Agent
+Do not persist or expose chain-of-thought.
 
-Deliver:
+## PR 20 --- Evidence Analyst
 
-- conditional research triggers;
-- ResearchResult;
-- claim/chunk citation validation;
-- grounded synthesis;
-- RAG evaluation suite.
+Deliver `LlmClient` ABC and LangChain implementation, structured
+Evidence Analyst output, typed `Assessment`, supporting/contradicting
+evidence references, limitations/unresolved questions/next steps,
+deterministic citation validation, fake-LLM tests, and agent-level
+evaluations.
 
-## PR 19 — Report Writer and API
+## PR 21 --- Adaptive pivots and stopping
 
-Deliver:
+Deliver evidence-driven pivot requests, deterministic pivot-policy
+validation, depth/entity/provider/replan/LLM budgets, duplicate
+suppression, stopping rules/reasons, canonical investigation trajectory,
+and coordinator trajectory evaluations.
 
-- versioned InvestigationReport;
-- `/api/v1` DTOs/routes;
-- asynchronous investigation creation;
-- evidence/relationship/research/assessment/report/timeline/geolocation resources;
-- pagination/errors/idempotency/concurrency behavior.
+Every autonomous pivot must have provenance to user input or observed
+evidence. LLM-selected pivots must reference already-existing eligible
+entity IDs.
 
-## PR 20 — Frontend analyst workbench
+## PR 22 --- Threat Research RAG agent
 
-Deliver:
+Deliver conditional research triggering for discovered malware/ATT&CK
+techniques/vulnerabilities, Research Agent, RAG claim/chunk citations,
+persisted research results, retrieval/synthesis evaluations, and
+no-relevant-context behavior.
 
-- Investigations;
-- investigation creation;
-- Overview;
-- Evidence;
-- Relationships with React Flow;
-- Map with Leaflet;
-- Research;
-- Timeline;
-- Report.
+RAG supplies contextual research, not live IOC facts.
 
-Maintain explicit visual separation between evidence, research context, and assessment.
+## PR 23 --- Report Writer and investigation API
 
-## PR 21 — Monitors, diffs, findings
+Deliver structured reports, Report Writer, report
+persistence/versioning, `/api/v1` investigation and subresource
+endpoints, asynchronous semantics, cursor pagination, stable errors,
+idempotency, and resource version/history exposure where appropriate.
 
-Deliver:
+The Report Writer cannot alter the Evidence Analyst verdict/confidence
+or introduce unsupported facts.
 
-- Monitor domain/persistence;
-- scheduler integration;
-- scheduled investigations;
-- deterministic comparison;
-- materiality analysis;
-- Finding;
-- findings inbox/workflow.
+## PR 24 --- Analyst frontend
 
-## PR 22 — System/jobs/admin UI
+Deliver the React/TypeScript application, investigation
+list/create/detail flows, Overview, Evidence, Relationships, Research,
+Timeline and Report views, React Flow relationship visualization, and
+polling.
 
-Deliver:
+Keep the interface evidence-centric rather than chat-centric.
 
-- minimal provider/job/system status;
-- user administration;
-- monitor administration;
-- relevant health/config visibility.
-
-## PR 23 — Evaluation and release hardening
+## PR 25 --- Geolocation map
 
 Deliver:
 
-- canonical scenario suite;
-- real-model regression workflow;
-- optional live-provider contracts;
-- observability/evaluation integration;
-- security review;
-- dependency/license review;
-- documentation verification;
-- backup/restore verification;
-- clean install/migration verification.
+-   Map tab;
+-   Leaflet integration;
+-   plotting v0.1 approximate IP geolocations;
+-   multi-IOC visualization;
+-   provenance/precision display;
+-   geographic disclaimer;
+-   correlation-oriented presentation without implying physical attacker
+    location.
 
-## Every PR
+This is contextual geolocation visualization, not general GEOINT.
+PostGIS and spatial investigation remain deferred.
 
-Before completion:
+## PR 26 --- Monitors, diffs, findings, jobs and administration
 
-1. run canonical quality command;
-2. run applicable deterministic tests;
-3. add/update tests for changed behavior;
-4. maintain strict typing;
-5. preserve architectural boundaries;
-6. update authoritative documentation when a contract intentionally changes;
-7. do not weaken quality gates to make a PR pass;
-8. for external adapters, identify both transport and protocol-semantic source
-   specifications, document field/cross-field/collection invariants and
-   standards-valid special forms, and map them to deterministic tests;
-9. validate untrusted input before lossy canonicalization and ensure every
-   malformed external-input path terminates in a safe typed error rather than
-   an incidental implementation exception;
-10. explicitly distinguish protocol-valid source facts and sentinels from
-    values eligible to become domain entities, relationships, or pivots.
+Deliver Monitor persistence, scheduler, normal Investigation execution
+from monitors, snapshot/diff logic, material Finding generation,
+findings inbox, PostgreSQL-backed jobs, basic administration/system UI,
+and operational visibility.
 
-## Latest persistence/configuration requirements
+Code determines deterministic differences; AI may determine materiality.
 
-PR 1 delivers the initial environment configuration as a single typed settings module, `src/agentic_threat_investigator/config.py`, based on pydantic-settings: `Settings`, a cached `get_settings()` accessor, and `ensure_test_database_safe`, which fails closed when an integration-test database URL lacks the isolated test marker. The profile-based configuration system described in `CONFIGURATION.md` (`ati.config` profile modules, `ATI_CONFIG_PROFILE` selection, `config_utils`, sensitive-value redaction, and its tests) is not yet implemented and must be delivered by a subsequent PR.
+## PR 27 --- Evaluation and release hardening
 
-PR 3 establishes PostgreSQL 18 as the database baseline, domain-resource version columns/sequences, immutable domain-object history schema, and versioned SQL-function conventions.
+Expand and harden the evaluation framework introduced with the agent
+PRs.
 
-PR 6 implements the canonical batch path: application-bounded arrays of resource-specific PostgreSQL composite types, `unnest ... WITH ORDINALITY`, temporary staging/work tables for every batch, set-oriented INSERT/UPDATE/UNCHANGED/CONFLICT reconciliation, optimistic version checks, version allocation, shallow `ati_jsonb_diff`, final target mutations, and immutable history insertion. It must not introduce row-level history/version triggers, Python-side reconciliation, or an alternate small-batch path.
+Deliver:
+
+-   approximately 30--50 curated scenarios;
+-   deterministic invariant evaluators;
+-   agent behavioral evaluations;
+-   end-to-end trajectory evaluations;
+-   optional model-assisted semantic judges;
+-   adversarial prompt-injection/content scenarios;
+-   canonical malicious-domain/IP/malware trajectory;
+-   release gates and stability runs;
+-   performance/cost/latency reporting where appropriate;
+-   licensing/source-term checks;
+-   documentation review and release checklist.
+
+Hard failures include invented or policy-invalid pivots, budget
+violations, nontermination, invalid citations, unsupported material
+claims, report-verdict mutation, persistence invariant violations, and
+unacceptable canonical-scenario outcomes.
+
+------------------------------------------------------------------------
+
+# v0.1 release boundary
+
+v0.1 includes IOC investigation/enrichment, adaptive LangGraph
+investigation, typed entities/relationships/evidence, bounded traversal,
+PostgreSQL relational graph representation, relationship provenance,
+approximate city-level IP geolocation, multi-IOC map visualization,
+ASN/network/registration profiling, reputation and malware intelligence,
+curated threat-research RAG, evidence-backed assessment,
+reports/history, local auth/audit, monitors/findings, and deterministic
+tests/evaluations.
+
+v0.1 explicitly excludes general-purpose GEOINT, PostGIS-backed spatial
+investigation, spatial entities/observations and spatial pivoting,
+deep/general graph traversal, graph databases, unrestricted ASN
+expansion, ontology/inference, threat-actor/campaign attribution,
+commercial CTI feeds, paid passive DNS, AWS/customer telemetry, SIEM/EDR
+integration, and automated remediation.
+
+General geospatial intelligence, spatial entities/observations,
+PostGIS-backed spatial queries, spatial/temporal correlation, and
+agent-directed geographic investigation are candidates for v0.2 and
+should be designed as a coherent capability rather than retrofitted into
+v0.1 geolocation.
