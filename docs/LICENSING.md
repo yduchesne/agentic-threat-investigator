@@ -109,27 +109,25 @@ and attribution is required when using IPinfo Lite:
 - CC BY-SA 4.0 license text:
   <https://creativecommons.org/licenses/by-sa/4.0/>
 
-Approved handling for ATI:
+Compliance handling for ATI:
 
 - ATI consumes the Lite API live, stores only normalized facts as evidence
   provenance (`raw_payload=None`), never redistributes or bundles IPinfo
   data, and applies ATI-configured concurrency/rate bounds.
-- Under CC BY-SA 4.0, normalized or otherwise adapted IPinfo Lite material
-  that is shared onward is adapted material and must carry the same
-  CC BY-SA 4.0 license plus attribution. ATI's local persistence of
-  investigation evidence within a deployment is use, not distribution;
-  if a deployment shares IPinfo-derived evidence or reports outside the
-  deployment, that shared material carries the CC BY-SA 4.0 obligation.
-- The approved attribution is IPinfo's suggested credit form:
-  "IP address data powered by IPinfo" with a link to
-  <https://ipinfo.io>, together with a CC BY-SA 4.0 pointer. It is
-  recorded in the repository `NOTICE` file and `docs/LICENSING.md`, and
-  runtime attribution is provided with the frontend data-sources view.
-  Evidence `source_url` provenance alone does not satisfy this
-  attribution obligation.
-- Current IPinfo terms must be re-verified before each release, and formal
-  legal review of the ShareAlike handling above should confirm this
-  decision before v0.1 general availability.
+- Distribution or sharing of IPinfo-licensed material, or of material
+  adapted from it, must follow the applicable CC BY-SA 4.0 attribution,
+  change-indication, and ShareAlike requirements.
+- Use-specific classification of ATI's normalized evidence under CC BY-SA
+  4.0 requires legal review; that review must be complete before general
+  availability of any release that exposes IPinfo-derived data.
+- IPinfo's suggested credit form is "IP address data powered by IPinfo"
+  with a link to <https://ipinfo.io>, together with a CC BY-SA 4.0
+  pointer. That attribution is recorded in the repository `NOTICE` file
+  and `docs/LICENSING.md`. Runtime attribution must be added before
+  IPinfo-derived data is exposed through a future UI; Evidence
+  `source_url` provenance alone does not satisfy this attribution
+  obligation.
+- Current IPinfo terms must be re-verified before each release.
 
 ## Data bundling
 
