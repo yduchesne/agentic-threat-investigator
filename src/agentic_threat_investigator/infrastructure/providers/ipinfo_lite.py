@@ -49,6 +49,44 @@ _IPINFO_LITE_ENDPOINT = "https://api.ipinfo.io/lite"
 _MAX_IP_LENGTH = 45
 """Longest legal textual IPv4/IPv6 address representation."""
 
+
+def _canonical_ip_address(value: str) -> str:
+    """Return an address in deterministic compressed IPv4/IPv6 form.
+
+    ``ipaddress`` has varied across supported Python patch releases in how it
+    renders IPv4-mapped IPv6 addresses (for example, ``::ffff:8.8.8.8`` may
+    retain its dotted suffix).  Build the IPv6 form from its expanded numeric
+    hextets so provider facts do not depend on that implementation detail.
+    """
+    address = ipaddress.ip_address(value)
+    if isinstance(address, ipaddress.IPv4Address):
+        return str(address)
+
+    hextets = [format(int(part, 16), "x") for part in address.exploded.split(":")]
+    best_start = -1
+    best_length = 0
+    index = 0
+    while index < len(hextets):
+        if hextets[index] != "0":
+            index += 1
+            continue
+        end = index
+        while end < len(hextets) and hextets[end] == "0":
+            end += 1
+        if end - index > best_length:
+            best_start = index
+            best_length = end - index
+        index = end
+
+    if best_length < 2:
+        return ":".join(hextets)
+    return (
+        ":".join(hextets[:best_start])
+        + "::"
+        + ":".join(hextets[best_start + best_length :])
+    )
+
+
 _MAX_ASN_LENGTH = 12
 """``AS`` prefix plus the largest legal 32-bit decimal autonomous system number."""
 
@@ -390,7 +428,7 @@ class IpinfoLiteResponse(BaseModel):
         if not isinstance(value, str):
             raise ValueError("Lite response ip member must be a string")
         try:
-            return str(ipaddress.ip_address(value.strip()))
+            return _canonical_ip_address(value.strip())
         except ValueError as exc:
             raise ValueError("invalid Lite response ip member") from exc
 
