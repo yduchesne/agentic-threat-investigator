@@ -46,7 +46,7 @@ configuration, secret handling, normalization, typed Evidence, entity
 discovery, relationship inputs, typed failures, quota/rate behavior,
 deterministic fixtures, tests, and documentation.
 
-## PR 13 --- IPinfo Lite provider
+## PR 13 --- IPinfo Lite provider \[DONE\]
 
 Deliver:
 
