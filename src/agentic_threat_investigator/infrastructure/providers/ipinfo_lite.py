@@ -37,7 +37,6 @@ from agentic_threat_investigator.domain.entities import (
 )
 from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
 from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
-from agentic_threat_investigator.domain.geolocation import validate_iso_3166_1_alpha_2
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
@@ -64,6 +63,269 @@ _MAX_CONTINENT_LENGTH = 64
 
 _CODE_PATTERN = re.compile(r"[A-Z]{2}")
 """Exact grammar for the bounded two-letter country and continent codes."""
+
+# Officially assigned ISO 3166-1 alpha-2 country-code elements.
+# Authoritative source: ISO 3166-1, ISO 3166 maintenance agency
+# (https://www.iso.org/iso-3166-country-codes.html), officially assigned
+# code elements; snapshot verified against the published 249-entry assigned
+# list during PR 13 integration (2026-02). Exceptionally reserved elements
+# (for example ``UK``) and unassigned elements (for example ``ZZ``) are
+# deliberately excluded. Keep provider-local until a later geolocation
+# integration justifies a shared domain registry.
+_ISO_3166_1_ALPHA_2_ASSIGNED: frozenset[str] = frozenset(
+    {
+        "AD",
+        "AE",
+        "AF",
+        "AG",
+        "AI",
+        "AL",
+        "AM",
+        "AO",
+        "AQ",
+        "AR",
+        "AS",
+        "AT",
+        "AU",
+        "AW",
+        "AX",
+        "AZ",
+        "BA",
+        "BB",
+        "BD",
+        "BE",
+        "BF",
+        "BG",
+        "BH",
+        "BI",
+        "BJ",
+        "BL",
+        "BM",
+        "BN",
+        "BO",
+        "BQ",
+        "BR",
+        "BS",
+        "BT",
+        "BV",
+        "BW",
+        "BY",
+        "BZ",
+        "CA",
+        "CC",
+        "CD",
+        "CF",
+        "CG",
+        "CH",
+        "CI",
+        "CK",
+        "CL",
+        "CM",
+        "CN",
+        "CO",
+        "CR",
+        "CU",
+        "CV",
+        "CW",
+        "CX",
+        "CY",
+        "CZ",
+        "DE",
+        "DJ",
+        "DK",
+        "DM",
+        "DO",
+        "DZ",
+        "EC",
+        "EE",
+        "EG",
+        "EH",
+        "ER",
+        "ES",
+        "ET",
+        "FI",
+        "FJ",
+        "FK",
+        "FM",
+        "FO",
+        "FR",
+        "GA",
+        "GB",
+        "GD",
+        "GE",
+        "GF",
+        "GG",
+        "GH",
+        "GI",
+        "GL",
+        "GM",
+        "GN",
+        "GP",
+        "GQ",
+        "GR",
+        "GS",
+        "GT",
+        "GU",
+        "GW",
+        "GY",
+        "HK",
+        "HM",
+        "HN",
+        "HR",
+        "HT",
+        "HU",
+        "ID",
+        "IE",
+        "IL",
+        "IM",
+        "IN",
+        "IO",
+        "IQ",
+        "IR",
+        "IS",
+        "IT",
+        "JE",
+        "JM",
+        "JO",
+        "JP",
+        "KE",
+        "KG",
+        "KH",
+        "KI",
+        "KM",
+        "KN",
+        "KP",
+        "KR",
+        "KW",
+        "KY",
+        "KZ",
+        "LA",
+        "LB",
+        "LC",
+        "LI",
+        "LK",
+        "LR",
+        "LS",
+        "LT",
+        "LU",
+        "LV",
+        "LY",
+        "MA",
+        "MC",
+        "MD",
+        "ME",
+        "MF",
+        "MG",
+        "MH",
+        "MK",
+        "ML",
+        "MM",
+        "MN",
+        "MO",
+        "MP",
+        "MQ",
+        "MR",
+        "MS",
+        "MT",
+        "MU",
+        "MV",
+        "MW",
+        "MX",
+        "MY",
+        "MZ",
+        "NA",
+        "NC",
+        "NE",
+        "NF",
+        "NG",
+        "NI",
+        "NL",
+        "NO",
+        "NP",
+        "NR",
+        "NU",
+        "NZ",
+        "OM",
+        "PA",
+        "PE",
+        "PF",
+        "PG",
+        "PH",
+        "PK",
+        "PL",
+        "PM",
+        "PN",
+        "PR",
+        "PS",
+        "PT",
+        "PW",
+        "PY",
+        "QA",
+        "RE",
+        "RO",
+        "RS",
+        "RU",
+        "RW",
+        "SA",
+        "SB",
+        "SC",
+        "SD",
+        "SE",
+        "SG",
+        "SH",
+        "SI",
+        "SJ",
+        "SK",
+        "SL",
+        "SM",
+        "SN",
+        "SO",
+        "SR",
+        "SS",
+        "ST",
+        "SV",
+        "SX",
+        "SY",
+        "SZ",
+        "TC",
+        "TD",
+        "TF",
+        "TG",
+        "TH",
+        "TJ",
+        "TK",
+        "TL",
+        "TM",
+        "TN",
+        "TO",
+        "TR",
+        "TT",
+        "TV",
+        "TW",
+        "TZ",
+        "UA",
+        "UG",
+        "UM",
+        "US",
+        "UY",
+        "UZ",
+        "VA",
+        "VC",
+        "VE",
+        "VG",
+        "VI",
+        "VN",
+        "VU",
+        "WF",
+        "WS",
+        "YE",
+        "YT",
+        "ZA",
+        "ZM",
+        "ZW",
+    }
+)
+"""Officially assigned ISO 3166-1 alpha-2 country codes (249 elements)."""
 
 _LITE_RESPONSE_FIELDS = (
     "ip",
@@ -116,32 +378,54 @@ class IpinfoLiteResponse(BaseModel):
                     raise ValueError(f"Lite response member {key} must not be null")
         return data
 
-    @field_validator("ip")
+    @field_validator("ip", mode="before")
     @classmethod
-    def _canonical_ip(cls, value: str) -> str:
-        """Require a syntactically valid IPv4/IPv6 address in canonical form."""
+    def _canonical_ip(cls, value: object) -> object:
+        """Require a valid IPv4/IPv6 address, canonicalized before length bounds.
+
+        Outer whitespace is stripped first so a raw representation whose
+        whitespace-padded length exceeds the member bound is judged on its
+        canonical form. Non-string scalars are rejected explicitly.
+        """
+        if not isinstance(value, str):
+            raise ValueError("Lite response ip member must be a string")
         try:
             return str(ipaddress.ip_address(value.strip()))
         except ValueError as exc:
             raise ValueError("invalid Lite response ip member") from exc
 
-    @field_validator("asn")
+    @field_validator("asn", mode="before")
     @classmethod
-    def _canonical_asn(cls, value: str) -> str:
-        """Require a Lite ASN with an ``AS`` prefix in ATI canonical form."""
+    def _canonical_asn(cls, value: object) -> object:
+        """Require an ``AS``-prefixed ASN, canonicalized before length bounds.
+
+        Outer whitespace is stripped first so a padded maximum-length ASN
+        canonicalizes instead of failing the raw member bound. Non-string
+        scalars are rejected explicitly.
+        """
+        if not isinstance(value, str):
+            raise ValueError("Lite response asn member must be a string")
         candidate = value.strip()
         if not candidate.upper().startswith("AS"):
             raise ValueError("Lite response asn member must carry an AS prefix")
-        return canonicalize_asn(candidate)
+        try:
+            return canonicalize_asn(candidate)
+        except ValueError as exc:
+            raise ValueError("invalid Lite response asn member") from exc
 
-    @field_validator("as_domain")
+    @field_validator("as_domain", mode="before")
     @classmethod
-    def _canonical_domain(cls, value: str) -> str:
-        """Require a valid strict DNS name and store its canonical IDNA form.
+    def _canonical_domain(cls, value: object) -> object:
+        """Require a strict DNS name, canonicalized before length bounds.
 
-        The canonical operator domain remains a source fact only: it never
-        becomes a discovered ATI ``DOMAIN`` entity or relationship endpoint.
+        The canonical lowercase/IDNA form is produced first so a padded
+        boundary-length domain is judged on its canonical length.
+        Non-string scalars are rejected explicitly. The canonical operator
+        domain remains a source fact only: it never becomes a discovered
+        ATI ``DOMAIN`` entity or relationship endpoint.
         """
+        if not isinstance(value, str):
+            raise ValueError("Lite response as_domain member must be a string")
         try:
             return validate_dns_name(value)
         except ValueError as exc:
@@ -154,7 +438,7 @@ class IpinfoLiteResponse(BaseModel):
         if _CODE_PATTERN.fullmatch(value) is None:
             raise ValueError("Lite response country code must be two uppercase letters")
         try:
-            return validate_iso_3166_1_alpha_2(value)
+            return _validate_assigned_country_code(value)
         except ValueError as exc:
             raise ValueError(
                 "Lite response country code is not an assigned code"
@@ -326,6 +610,13 @@ def _lite_error_result(
             ),
         ),
     )
+
+
+def _validate_assigned_country_code(value: str) -> str:
+    """Return ``value`` only when it is an officially assigned alpha-2 code."""
+    if value not in _ISO_3166_1_ALPHA_2_ASSIGNED:
+        raise ValueError(f"not an assigned ISO 3166-1 alpha-2 code: {value}")
+    return value
 
 
 def _build_facts(parsed: IpinfoLiteResponse) -> dict[str, Any]:
