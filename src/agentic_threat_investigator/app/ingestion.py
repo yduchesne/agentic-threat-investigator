@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-import logging
 
 from agentic_threat_investigator.app.persistence.repositories import (
     BatchOutcome,
@@ -22,7 +22,6 @@ from agentic_threat_investigator.app.sources import (
     SourceBatch,
     SourceCapability,
 )
-
 
 LOGGER = logging.getLogger(__name__)
 

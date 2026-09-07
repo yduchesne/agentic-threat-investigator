@@ -19,6 +19,7 @@
 - [Configuration loading lifecycle](#configuration-loading-lifecycle)
 - [Process consistency](#process-consistency)
 - [Authentication settings](#authentication-settings)
+- [Provider settings](#provider-settings)
 - [Configuration and secrets](#configuration-and-secrets)
 - [Testing requirements](#testing-requirements)
 - [Implementation invariants](#implementation-invariants)
@@ -418,6 +419,40 @@ variables use the corresponding `ATI_` prefix):
 Bootstrap credentials are used only when the database contains no users. They
 are hashed immediately and changing these settings cannot reset an existing
 account. Password values are always redacted from configuration logging.
+
+## Provider settings
+
+All live evidence provider settings map to environment variables using the `ATI_` prefix:
+
+All provider floating-point settings must be **finite**: NaN and both infinities are rejected at
+startup so bounded timeouts, backoff caps, jitter, and request rates can never be silently disabled
+by a non-finite value. Boolean values are not accepted as numbers. Integer settings require genuine
+integer profile values (not booleans or floats); decimal environment text is parsed into the declared
+type before bounds are enforced. The bounds below apply on top of those type requirements.
+
+| Setting | Environment variable | Type | Default | Bounds | Description |
+|---|---|---|---|---|---|
+| `provider_timeout_seconds` | `ATI_PROVIDER_TIMEOUT_SECONDS` | `float` | `15.0` | `> 0` | Per-request HTTP timeout in seconds |
+| `provider_max_retries` | `ATI_PROVIDER_MAX_RETRIES` | `int` | `2` | `>= 0` | Maximum retry attempts for transient errors |
+| `provider_retry_base_delay_seconds` | `ATI_PROVIDER_RETRY_BASE_DELAY_SECONDS` | `float` | `1.0` | `>= 0` | Initial exponential backoff delay |
+| `provider_retry_max_delay_seconds` | `ATI_PROVIDER_RETRY_MAX_DELAY_SECONDS` | `float` | `30.0` | `>= base_delay` | Maximum retry delay cap |
+| `provider_retry_jitter_ratio` | `ATI_PROVIDER_RETRY_JITTER_RATIO` | `float` | `0.1` | `[0.0, 1.0]` | Bounded jitter ratio |
+| `provider_max_response_bytes` | `ATI_PROVIDER_MAX_RESPONSE_BYTES` | `int` | `2097152` | `1..100000000` | Streamed response size limit (reviewed 100 MB safety ceiling) |
+| `google_dns_max_concurrency` | `ATI_GOOGLE_DNS_MAX_CONCURRENCY` | `int` | `10` | `> 0` | Google DNS maximum in-flight requests |
+| `google_dns_requests_per_second` | `ATI_GOOGLE_DNS_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional Google DNS rate limit (omission disables) |
+| `rdap_max_concurrency` | `ATI_RDAP_MAX_CONCURRENCY` | `int` | `10` | `> 0` | RDAP maximum in-flight requests |
+| `rdap_requests_per_second` | `ATI_RDAP_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional RDAP rate limit (omission disables) |
+| `rdap_bootstrap_cache_seconds` | `ATI_RDAP_BOOTSTRAP_CACHE_SECONDS` | `int` | `3600` | `> 0` | In-process IANA bootstrap cache TTL |
+
+When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
+When set, the value must be strictly positive. Retry backoff computes the exponential delay for the
+retry number, applies bounded symmetric jitter to that component alone, then takes the larger of the
+jittered exponential delay and a valid HTTP 429 `Retry-After` value (so negative jitter
+can never schedule a retry earlier than an in-cap `Retry-After`), and finally clamps the result to
+`provider_retry_max_delay_seconds`, which remains the hard upper bound even when the provider asks
+for a longer wait. Backoff arithmetic is overflow-safe: huge retry indices and oversized valid
+429 `Retry-After` integers saturate at the cap instead of raising, while the parsed value is
+still reported unchanged on the final rate-limit error.
 
 ## Configuration and secrets
 

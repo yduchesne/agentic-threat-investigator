@@ -18,10 +18,7 @@ from agentic_threat_investigator.app.audit import (
     TransactionalAuditEmitter,
 )
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
-from agentic_threat_investigator.domain.audit import (
-    AuditAction,
-    AuditOutcome,
-)
+from agentic_threat_investigator.domain.audit import AuditAction, AuditOutcome
 from agentic_threat_investigator.domain.identity import ActorContext, Session, User
 
 

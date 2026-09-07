@@ -68,6 +68,62 @@ class Settings(BaseSettings):
     bootstrap_admin_username: str | None = None
     bootstrap_admin_password: str | None = None
 
+    # Provider HTTP settings. allow_inf_nan=False guarantees bounded finite
+    # timeouts, backoff delays, jitter, and request rates at the settings
+    # boundary; NaN and both infinities are rejected during validation.
+    provider_timeout_seconds: float = Field(default=15.0, gt=0, allow_inf_nan=False)
+    provider_max_retries: int = Field(default=2, ge=0)
+    provider_retry_base_delay_seconds: float = Field(
+        default=1.0, ge=0, allow_inf_nan=False
+    )
+    provider_retry_max_delay_seconds: float = Field(
+        default=30.0, ge=0, allow_inf_nan=False
+    )
+    provider_retry_jitter_ratio: float = Field(
+        default=0.1, ge=0, le=1, allow_inf_nan=False
+    )
+    provider_max_response_bytes: int = Field(default=2_097_152, gt=0, le=100_000_000)
+    google_dns_max_concurrency: int = Field(default=10, gt=0)
+    google_dns_requests_per_second: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    rdap_max_concurrency: int = Field(default=10, gt=0)
+    rdap_requests_per_second: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    rdap_bootstrap_cache_seconds: int = Field(default=3600, gt=0)
+
+    @field_validator(
+        "provider_max_retries",
+        "provider_max_response_bytes",
+        "google_dns_max_concurrency",
+        "rdap_max_concurrency",
+        "rdap_bootstrap_cache_seconds",
+        mode="before",
+    )
+    @classmethod
+    def validate_provider_integer_types(cls, value: object) -> object:
+        """Reject coercive non-integers while retaining environment text parsing."""
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ValueError("provider integer setting must be an integer")
+        return value
+
+    @field_validator(
+        "provider_timeout_seconds",
+        "provider_retry_base_delay_seconds",
+        "provider_retry_max_delay_seconds",
+        "provider_retry_jitter_ratio",
+        "google_dns_requests_per_second",
+        "rdap_requests_per_second",
+        mode="before",
+    )
+    @classmethod
+    def validate_provider_real_types(cls, value: object) -> object:
+        """Reject booleans masquerading as provider timing or rate numbers."""
+        if isinstance(value, bool):
+            raise ValueError("provider numeric setting must be a real number")
+        return value
+
     @model_validator(mode="after")
     def validate_chunk_bounds(self) -> "Settings":
         """Require the target chunk size not to exceed the hard maximum."""
@@ -89,6 +145,18 @@ class Settings(BaseSettings):
     def datasets_dir(self) -> Path:
         """Return the filesystem object-store root below the data directory."""
         return self.data_dir / "datasets"
+
+    @model_validator(mode="after")
+    def validate_retry_delays(self) -> "Settings":
+        """Require max delay >= base delay."""
+        if (
+            self.provider_retry_max_delay_seconds
+            < self.provider_retry_base_delay_seconds
+        ):
+            raise ValueError(
+                "provider_retry_max_delay_seconds must be >= provider_retry_base_delay_seconds"
+            )
+        return self
 
     @field_validator("public_base_url")
     @classmethod
