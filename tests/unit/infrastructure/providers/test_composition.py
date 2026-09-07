@@ -5,12 +5,21 @@
 from __future__ import annotations
 
 import asyncio
+import pathlib
+import uuid
+from contextlib import AsyncExitStack
 
 import pytest
 
+from agentic_threat_investigator.app.providers import ProviderErrorCode
 from agentic_threat_investigator.app.secrets import SecretNotFoundError, SecretsResolver
 from agentic_threat_investigator.config import settings_from_config
+from agentic_threat_investigator.config.settings import Settings
 from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.infrastructure.object_store import (
+    ArtifactNotFoundError,
+    FileSystemObjectStore,
+)
 from agentic_threat_investigator.infrastructure.providers import (
     composition as composition_module,
 )
@@ -18,11 +27,21 @@ from agentic_threat_investigator.infrastructure.providers.composition import (
     HttpClientFactory,
     ProviderComposition,
 )
+from agentic_threat_investigator.infrastructure.providers.dbip_city_lite import (
+    CityLiteDatabase,
+    DbIpCityLiteProvider,
+    MmdbLookupError,
+    MmdbOpenError,
+)
 from agentic_threat_investigator.infrastructure.providers.http import (
     BoundedLimiter,
     ProviderHttpClient,
     ProviderHttpPolicy,
     RateLimiterSettings,
+)
+from tests.support.mmdb import (
+    build_synthetic_city_lite_mmdb,
+    build_wrong_product_city_lite_mmdb,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -515,3 +534,358 @@ async def test_composition_normal_close_closes_all_clients_once() -> None:
     # The normal context exit closed Google DNS, RDAP, and IPinfo clients,
     # each exactly once, in creation order.
     assert closed == ["client-1", "client-2", "client-3"]
+
+
+class TestDbIpCityLiteComposition:
+    """Composition lifecycle for the local DB-IP City Lite provider."""
+
+    @staticmethod
+    def _artifact_settings(tmp_path: pathlib.Path) -> dict[str, object]:
+        """Build settings pointing at a synthetic artifact below tmp datasets."""
+        return {
+            "data_dir": str(tmp_path),
+            "dbip_city_lite_artifact_uri": (
+                f"file://{tmp_path}/datasets/dbip-city-lite/city-lite.mmdb"
+            ),
+        }
+
+    async def test_disabled_by_default(self) -> None:
+        """Without a configured artifact URI the DB-IP provider is None."""
+        async with await ProviderComposition.create(
+            settings_from_config({}),
+            http_client_factory=_SpyHttpClientFactory(),
+            secrets=_fake_secrets(),
+        ) as comp:
+            assert comp.dbip_city_lite is None
+
+    async def test_composed_with_present_artifact(self, tmp_path: pathlib.Path) -> None:
+        """A present readable artifact composes a working local provider."""
+        store = FileSystemObjectStore(pathlib.Path(tmp_path) / "datasets")
+        await store.write(
+            f"file://{tmp_path}/datasets/dbip-city-lite/city-lite.mmdb",
+            build_synthetic_city_lite_mmdb(),
+        )
+        async with await ProviderComposition.create(
+            settings_from_config(self._artifact_settings(tmp_path)),
+            http_client_factory=_SpyHttpClientFactory(),
+            secrets=_fake_secrets(),
+        ) as comp:
+            assert comp.dbip_city_lite is not None
+            result = await comp.dbip_city_lite.investigate(
+                uuid.UUID(int=1), Entity(type=EntityType.IP_ADDRESS, value="192.0.2.10")
+            )
+            assert result.errors == ()
+            assert len(result.evidence) == 1
+
+    async def test_missing_artifact_fails_composition(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A configured but absent artifact fails composition clearly."""
+        with pytest.raises(ArtifactNotFoundError):
+            await ProviderComposition.create(
+                settings_from_config(self._artifact_settings(tmp_path)),
+                http_client_factory=_SpyHttpClientFactory(),
+                secrets=_fake_secrets(),
+            )
+
+    async def test_corrupt_artifact_fails_composition(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A corrupt artifact cannot be opened and fails composition."""
+        store = FileSystemObjectStore(pathlib.Path(tmp_path) / "datasets")
+        await store.write(
+            f"file://{tmp_path}/datasets/dbip-city-lite/city-lite.mmdb",
+            b"not an mmdb database at all",
+        )
+        with pytest.raises(MmdbOpenError):
+            await ProviderComposition.create(
+                settings_from_config(self._artifact_settings(tmp_path)),
+                http_client_factory=_SpyHttpClientFactory(),
+                secrets=_fake_secrets(),
+            )
+
+    async def test_aclose_closes_local_reader(self, tmp_path: pathlib.Path) -> None:
+        """Composition teardown closes the owned local MMDB reader."""
+        store = FileSystemObjectStore(pathlib.Path(tmp_path) / "datasets")
+        await store.write(
+            f"file://{tmp_path}/datasets/dbip-city-lite/city-lite.mmdb",
+            build_synthetic_city_lite_mmdb(),
+        )
+        comp = await ProviderComposition.create(
+            settings_from_config(self._artifact_settings(tmp_path)),
+            http_client_factory=_SpyHttpClientFactory(),
+            secrets=_fake_secrets(),
+        )
+        assert comp.dbip_city_lite is not None
+        await comp.aclose()
+        # The reader is closed: lookups now map to a typed unavailable error.
+        result = await comp.dbip_city_lite.investigate(
+            uuid.UUID(int=1), Entity(type=EntityType.IP_ADDRESS, value="192.0.2.10")
+        )
+        assert result.evidence == ()
+        assert result.errors[0].code is ProviderErrorCode.PROVIDER_UNAVAILABLE
+
+    async def test_partial_failure_closes_created_clients(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A DB-IP artifact failure rolls back all created HTTP clients."""
+        closed: list[str] = []
+
+        class _TrackingClient(ProviderHttpClient):
+            def __init__(self, name: str) -> None:
+                self._name = name
+                super().__init__()
+
+            async def aclose(self) -> None:
+                closed.append(self._name)
+                await super().aclose()
+
+        class _PassThroughFactory(  # pylint: disable=too-few-public-methods
+            HttpClientFactory
+        ):
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            def create(
+                self, policy: ProviderHttpPolicy, limiter: BoundedLimiter
+            ) -> ProviderHttpClient:
+                self.call_count += 1
+                return _TrackingClient(f"client-{self.call_count}")
+
+        with pytest.raises(ArtifactNotFoundError):
+            await ProviderComposition.create(
+                settings_from_config(self._artifact_settings(tmp_path)),
+                http_client_factory=_PassThroughFactory(),
+                secrets=_fake_secrets(),
+            )
+        # All three already-created clients roll back, in LIFO unwind order.
+        assert closed == ["client-3", "client-2", "client-1"]
+
+    async def test_artifact_outside_datasets_root_rejected(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A valid file:// URI outside the datasets root fails the boundary."""
+        outside = tmp_path / "outside"
+        (outside / "dbip-city-lite").mkdir(parents=True)
+        artifact = outside / "dbip-city-lite" / "city-lite.mmdb"
+        artifact.write_bytes(build_synthetic_city_lite_mmdb())
+        settings = settings_from_config(
+            {
+                "data_dir": str(tmp_path),
+                "dbip_city_lite_artifact_uri": f"file://{artifact}",
+            }
+        )
+        with pytest.raises(ValueError, match="escapes the datasets root"):
+            await ProviderComposition.create(
+                settings,
+                http_client_factory=_SpyHttpClientFactory(),
+                secrets=_fake_secrets(),
+            )
+
+    async def test_wrong_product_artifact_fails_composition(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A valid MMDB of a different product edition fails composition."""
+        store = FileSystemObjectStore(pathlib.Path(tmp_path) / "datasets")
+        await store.write(
+            f"file://{tmp_path}/datasets/dbip-city-lite/city-lite.mmdb",
+            build_wrong_product_city_lite_mmdb(),
+        )
+        with pytest.raises(MmdbOpenError, match="product type"):
+            await ProviderComposition.create(
+                settings_from_config(self._artifact_settings(tmp_path)),
+                http_client_factory=_SpyHttpClientFactory(),
+                secrets=_fake_secrets(),
+            )
+
+    async def test_later_provider_failure_closes_database_once(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """Provider construction failure closes the opened database exactly once."""
+        store = FileSystemObjectStore(pathlib.Path(tmp_path) / "datasets")
+        await store.write(
+            f"file://{tmp_path}/datasets/dbip-city-lite/city-lite.mmdb",
+            build_synthetic_city_lite_mmdb(),
+        )
+        captured: list[CityLiteDatabase] = []
+        closed: list[str] = []
+
+        class _TrackingClient(ProviderHttpClient):
+            def __init__(self, name: str) -> None:
+                self._name = name
+                super().__init__()
+
+            async def aclose(self) -> None:
+                closed.append(self._name)
+                await super().aclose()
+
+        class _PassThroughFactory(  # pylint: disable=too-few-public-methods
+            HttpClientFactory
+        ):
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            def create(
+                self, policy: ProviderHttpPolicy, limiter: BoundedLimiter
+            ) -> ProviderHttpClient:
+                self.call_count += 1
+                return _TrackingClient(f"client-{self.call_count}")
+
+        def _failing_construction(database: CityLiteDatabase) -> None:
+            captured.append(database)
+            raise RuntimeError("provider construction failed")
+
+        monkeypatch.setattr(
+            composition_module, "DbIpCityLiteProvider", _failing_construction
+        )
+
+        with pytest.raises(RuntimeError, match="provider construction failed"):
+            await ProviderComposition.create(
+                settings_from_config(self._artifact_settings(tmp_path)),
+                http_client_factory=_PassThroughFactory(),
+                secrets=_fake_secrets(),
+            )
+
+        assert len(captured) == 1
+        # The opened reader rolled back with construction: lookups now fail.
+        with pytest.raises(MmdbLookupError):
+            captured[0].lookup("192.0.2.10")
+        # All three created HTTP clients still unwind in LIFO order.
+        assert closed == ["client-3", "client-2", "client-1"]
+
+    async def test_database_close_failure_still_closes_clients(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """A database close error is re-raised after all clients close."""
+
+        class _BrokenCloseDatabase(CityLiteDatabase):
+            """Database stub whose close always fails exactly once per call."""
+
+            def __init__(self) -> None:
+                self.close_attempts = 0
+
+            def lookup(self, ip: str) -> None:
+                """Never called in this test."""
+                return None
+
+            def close(self) -> None:
+                """Record the attempt and fail."""
+                self.close_attempts += 1
+                raise RuntimeError("database close boom")
+
+        broken = _BrokenCloseDatabase()
+
+        async def _fake_compose(
+            _settings: Settings, _stack: AsyncExitStack
+        ) -> tuple[DbIpCityLiteProvider, CityLiteDatabase]:
+            _stack.callback(broken.close)
+            return DbIpCityLiteProvider(broken), broken
+
+        monkeypatch.setattr(
+            composition_module, "_compose_dbip_city_lite", _fake_compose
+        )
+        closed: list[str] = []
+
+        class _TrackingClient(ProviderHttpClient):
+            def __init__(self, name: str) -> None:
+                self._name = name
+                super().__init__()
+
+            async def aclose(self) -> None:
+                closed.append(self._name)
+                await super().aclose()
+
+        class _PassThroughFactory(  # pylint: disable=too-few-public-methods
+            HttpClientFactory
+        ):
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            def create(
+                self, policy: ProviderHttpPolicy, limiter: BoundedLimiter
+            ) -> ProviderHttpClient:
+                self.call_count += 1
+                return _TrackingClient(f"client-{self.call_count}")
+
+        comp = await ProviderComposition.create(
+            settings_from_config(self._artifact_settings(tmp_path)),
+            http_client_factory=_PassThroughFactory(),
+            secrets=_fake_secrets(),
+        )
+        with pytest.raises(RuntimeError, match="database close boom"):
+            await comp.aclose()
+        assert broken.close_attempts == 1
+        assert closed == ["client-1", "client-2", "client-3"]
+
+    async def test_first_close_failure_re_raised_after_full_cleanup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """Every resource is attempted and the first failure is re-raised."""
+
+        class _BrokenCloseDatabase(CityLiteDatabase):
+            """Database stub whose close fails."""
+
+            def __init__(self) -> None:
+                self.close_attempts = 0
+
+            def lookup(self, ip: str) -> None:
+                """Never called in this test."""
+                return None
+
+            def close(self) -> None:
+                """Record the attempt and fail."""
+                self.close_attempts += 1
+                raise RuntimeError("database close boom")
+
+        broken = _BrokenCloseDatabase()
+
+        async def _fake_compose(
+            _settings: Settings, _stack: AsyncExitStack
+        ) -> tuple[DbIpCityLiteProvider, CityLiteDatabase]:
+            _stack.callback(broken.close)
+            return DbIpCityLiteProvider(broken), broken
+
+        monkeypatch.setattr(
+            composition_module, "_compose_dbip_city_lite", _fake_compose
+        )
+        closed: list[str] = []
+
+        class _ExplodingClient(ProviderHttpClient):
+            """Client whose close also fails, after tracking the attempt."""
+
+            def __init__(self, name: str) -> None:
+                self._name = name
+                super().__init__()
+
+            async def aclose(self) -> None:
+                closed.append(self._name)
+                raise RuntimeError(f"{self._name} close boom")
+
+        class _ExplodingFactory(  # pylint: disable=too-few-public-methods
+            HttpClientFactory
+        ):
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            def create(
+                self, policy: ProviderHttpPolicy, limiter: BoundedLimiter
+            ) -> ProviderHttpClient:
+                self.call_count += 1
+                return _ExplodingClient(f"client-{self.call_count}")
+
+        comp = await ProviderComposition.create(
+            settings_from_config(self._artifact_settings(tmp_path)),
+            http_client_factory=_ExplodingFactory(),
+            secrets=_fake_secrets(),
+        )
+        with pytest.raises(RuntimeError, match="database close boom"):
+            await comp.aclose()
+        # Every resource received exactly one close attempt despite failures.
+        assert broken.close_attempts == 1
+        assert closed == ["client-1", "client-2", "client-3"]

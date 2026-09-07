@@ -58,3 +58,102 @@ Until fixed, run `./integration-test.sh` serially.
 - `rg -n "never redistributes" docs/LICENSING.md` returns no matches.
 - License and attribution links remain present.
 - Documentation describes current implementation facts without making use-specific legal conclusions.
+
+## Harden DB-IP MMDB metadata failure cleanup
+
+**Priority:** MEDIUM
+**Origin:** PR 14 remediation review 02.
+
+### Problem
+
+`CityLiteMmdb.__init__()` wraps failures from `maxminddb.open_database()`, but the subsequent `reader.metadata()` call is outside that exception boundary. If metadata inspection raises, the third-party exception escapes instead of becoming `MmdbOpenError`, and the newly opened reader is not explicitly closed. The current reader normally parses metadata during open, so this is a defensive malformed-artifact/lifecycle gap rather than a demonstrated normal-path failure.
+
+### Intended fix
+
+1. In `src/agentic_threat_investigator/infrastructure/providers/dbip_city_lite.py`, perform reader opening and metadata product validation inside one guarded initialization path.
+2. Keep the opened reader in a local variable until all validation succeeds.
+3. If metadata access or product validation fails, close the local reader before raising.
+4. Convert third-party metadata/decoder exceptions to the fixed, path-free `MmdbOpenError("unreadable City Lite MMDB artifact")` message.
+5. Preserve the distinct, path-free wrong-product `MmdbOpenError` message when metadata is readable but `database_type` is not `DBIP-City-Lite`.
+6. Assign `self._reader` and the open state only after validation succeeds.
+7. Add a unit test that monkeypatches the reader so `metadata()` raises; assert the reader closes exactly once and only `MmdbOpenError` escapes.
+8. Add a unit test that a wrong-product reader also closes exactly once.
+
+### Acceptance checks
+
+- No third-party metadata exception escapes `CityLiteMmdb` construction.
+- Every reader opened during a failed constructor is closed exactly once.
+- Error messages contain no artifact bytes, record values, or host paths.
+- DB-IP provider and composition tests pass.
+
+## Clarify DB-IP private and reserved address semantics
+
+**Priority:** MEDIUM
+**Origin:** PR 14 remediation review 02.
+
+### Problem
+
+`docs/DATA_SOURCES.md` says private, reserved, and non-global ranges are lookup misses because City Lite never contains them. The provider does not pre-filter these ranges; it performs the MMDB lookup and will normalize any matched record. The ATI-authored integration fixture intentionally stores hits in documentation-only reserved ranges, so the categorical documentation does not describe actual provider behavior. Existing private-address tests prove only that an address absent from the synthetic MMDB misses.
+
+### Intended fix
+
+1. Keep documentation-range addresses in the synthetic MMDB; they are required to avoid real IP data.
+2. Do not add a blanket `ipaddress.is_global` filter, because that would prevent the required synthetic documentation-range integration tests.
+3. In `docs/DATA_SOURCES.md`, state that every syntactically valid IPv4/IPv6 address is looked up in the configured MMDB.
+4. State that an absent record, regardless of address class, is a valid empty miss and is not a benign assessment.
+5. Qualify the production expectation: the official DB-IP City Lite artifact is expected not to carry useful public-geolocation records for private/local-use addresses, but ATI does not infer this independently of the artifact.
+6. Rename private-address tests so they state that an unlisted private address misses, not that the provider forcibly excludes all private ranges.
+7. Add a unit test with a fake matched record for a private address and document the selected contract explicitly. Under the current lookup-all-valid-addresses design, assert that the matched record is validated normally and can produce evidence.
+8. Ensure all wording still says geolocation is approximate and never establishes an attacker or device's physical location.
+
+### Acceptance checks
+
+- Documentation matches lookup behavior for global, private, reserved, and documentation ranges.
+- Tests distinguish address-class policy from an ordinary MMDB miss.
+- No real IP address data or real DB-IP record is introduced.
+
+## Verify and record MMDB software dependency licenses
+
+**Priority:** LOW
+**Origin:** PR 14 remediation review 02.
+
+### Problem
+
+The incorrect `mmdb-writer` license comment was corrected to MIT, but the review did not find a repository artifact recording completed authoritative license verification for the new runtime `maxminddb` dependency and the test-only `mmdb-writer`/`netaddr` dependency chain. Package metadata alone is incomplete for `maxminddb`.
+
+### Intended fix
+
+1. Verify `maxminddb`, `mmdb-writer`, and `netaddr` against their authoritative source distributions or repositories.
+2. Record the verified names, versions/ranges, licenses, and source links using the repository's existing dependency-license process.
+3. If no dependency inventory exists, add a short documented process to `docs/LICENSING.md` rather than creating an ad hoc generated inventory.
+4. Keep software dependency licensing separate from the DB-IP City Lite dataset's CC BY 4.0 terms.
+5. Correct any source comment that disagrees with the authoritative package license.
+
+### Acceptance checks
+
+- All three new dependency licenses have authoritative citations.
+- Runtime and test-only dependencies are distinguished.
+- No dependency license is attributed to the DB-IP dataset or vice versa.
+
+## Avoid global test import-path mutation for MMDB helpers
+
+**Priority:** LOW
+**Origin:** PR 14 remediation review 02.
+
+### Problem
+
+`tests/conftest.py` mutates `sys.path` for the entire test suite solely so DB-IP tests can import `tests.support.mmdb`. This passes today, but it changes global module resolution and can hide collisions with installed top-level `tests` packages.
+
+### Intended fix
+
+1. Confirm whether pytest already places the repository root first when invoked through `uv run pytest` and the canonical scripts.
+2. Prefer a normal explicit test-support package or fixture module that does not require runtime `sys.path` insertion.
+3. If package markers are used, ensure they do not break integration-test discovery or existing fixture loading.
+4. Remove `tests/conftest.py` if it has no fixture/configuration responsibility after imports are corrected.
+5. Run targeted tests, `./build.sh --qa`, and `./integration-test.sh` to catch import-mode differences.
+
+### Acceptance checks
+
+- DB-IP unit and integration tests import the synthetic MMDB helper without modifying `sys.path` at runtime.
+- Canonical unit and integration commands still discover all tests.
+- No production package includes test-support code.

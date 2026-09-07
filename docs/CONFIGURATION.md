@@ -446,6 +446,7 @@ type before bounds are enforced. The bounds below apply on top of those type req
 | `ipinfo_lite_max_concurrency` | `ATI_IPINFO_LITE_MAX_CONCURRENCY` | `int` | `10` | `> 0` | IPinfo Lite maximum in-flight requests |
 | `ipinfo_lite_requests_per_second` | `ATI_IPINFO_LITE_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional IPinfo Lite rate limit (omission disables) |
 | `ipinfo_lite_token_secret` | `ATI_IPINFO_LITE_TOKEN_SECRET` | `str` | `ATI_IPINFO_LITE_TOKEN` | non-blank | Environment variable NAME carrying the IPinfo Lite access token (secret reference, never a token value) |
+| `dbip_city_lite_artifact_uri` | `ATI_DBIP_CITY_LITE_ARTIFACT_URI` | `str` | `""` (blank) | see notes | Credential-free local `file://` artifact URI of the DB-IP IP to City Lite MMDB. Blank (default) disables composition of the DB-IP City Lite provider. v0.1 requires an authority-free absolute `file://` URI; query, fragment, credential, and non-file URIs are rejected by the settings validator, and artifact paths outside `${ATI_DATA_DIR}/datasets` are rejected by the storage boundary. The configured artifact must already exist and be readable at composition time; there is no downloader and no API key. |
 
 When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
 When set, the value must be strictly positive. Retry backoff computes the exponential delay for the

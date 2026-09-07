@@ -47,8 +47,8 @@ Host
  |
  +-- ATI_DATA_DIR
       +-- postgres/data
-      +-- geo/dbip
       +-- datasets
+           +-- dbip-city-lite
       +-- backups
       +-- runtime
 ```
@@ -69,9 +69,8 @@ Example:
 ${ATI_DATA_DIR}/
 ├── postgres/
 │   └── data/
-├── geo/
-│   └── dbip/
 ├── datasets/
+│   ├── dbip-city-lite/
 │   ├── mitre-attack/
 │   ├── cisa-kev/
 │   └── other/
@@ -275,15 +274,34 @@ Persistent product history belongs in PostgreSQL AuditEvent/investigation timeli
 
 ## DB-IP
 
-DB-IP City Lite MMDB lives under:
+The DB-IP IP to City Lite MMDB artifact lives under the datasets store:
 
-`${ATI_DATA_DIR}/geo/dbip`
+`file://${ATI_DATA_DIR}/datasets/dbip-city-lite/city-lite.mmdb`
 
-and is mounted read-only into lookup processes where practical.
+The DB-IP City Lite provider is composed only when the artifact URI setting
+`ATI_DBIP_CITY_LITE_ARTIFACT_URI` is configured; blank (the default) disables
+the provider. The configured artifact must already exist and be readable at
+composition time — there is no downloader in ATI and no DB-IP API access.
 
-Dataset/version metadata is retained for provenance.
+Operator procedure:
 
-Refreshing the MMDB does not require rebuilding ATI application images.
+1. Obtain the DB-IP IP to City Lite MMDB from the authoritative DB-IP source
+   (<https://db-ip.com/db/lite.php>);
+2. comply with the DB-IP attribution/license terms (CC BY 4.0; see
+   `docs/LICENSING.md`);
+3. place the artifact at the configured dataset location, for example
+   `${ATI_DATA_DIR}/datasets/dbip-city-lite/city-lite.mmdb`;
+4. configure the credential-free artifact URI
+   `ATI_DBIP_CITY_LITE_ARTIFACT_URI=file://...`;
+5. grant the API/worker container read access to the artifact path
+   (read-only mounts where practical);
+6. restart/reload the consuming processes: the MMDB reader is opened once at
+   composition time, so refreshing the artifact requires a restart/reload to
+   take effect.
+
+Dataset/version metadata may be retained alongside the artifact for
+provenance. Refreshing the MMDB does not require rebuilding ATI application
+images. Do not hard-code a release-month filename into configuration.
 
 ## Artifact datasets
 
