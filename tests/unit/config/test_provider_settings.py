@@ -252,3 +252,74 @@ class TestProviderSettings:
         assert settings.provider_retry_jitter_ratio == 1.0
         assert settings.google_dns_requests_per_second == 0.001
         assert settings.rdap_requests_per_second == 1000.0
+
+
+class TestDbIpCityLiteArtifactSettings:
+    """DB-IP City Lite artifact-URI setting validation."""
+
+    def test_default_is_blank(self) -> None:
+        """The artifact URI defaults to blank, disabling the provider."""
+        settings = settings_from_config({})
+        assert settings.dbip_city_lite_artifact_uri == ""
+
+    def test_valid_local_uri_accepted(self) -> None:
+        """A credential-free authority-free file URI is accepted."""
+        uri = "file:///var/lib/ati/datasets/dbip-city-lite/city-lite.mmdb"
+        settings = settings_from_config({"dbip_city_lite_artifact_uri": uri})
+        assert settings.dbip_city_lite_artifact_uri == uri
+
+    def test_whitespace_trimmed(self) -> None:
+        """Surrounding whitespace around the URI is trimmed."""
+        settings = settings_from_config(
+            {"dbip_city_lite_artifact_uri": "  file:///data/datasets/db.mmdb  "}
+        )
+        assert settings.dbip_city_lite_artifact_uri == "file:///data/datasets/db.mmdb"
+
+    def test_blank_remains_disabled(self) -> None:
+        """A blank or whitespace-only URI remains blank (provider disabled)."""
+        for blank in ["", "   "]:
+            settings = settings_from_config({"dbip_city_lite_artifact_uri": blank})
+            assert settings.dbip_city_lite_artifact_uri == ""
+
+    @pytest.mark.parametrize(
+        "bad_uri",
+        [
+            "https://example.com/db.mmdb",
+            "s3://bucket/db.mmdb",
+            "file://host/share/db.mmdb",
+            "file://user:pass@example.com/db.mmdb",
+            "file:///data/db.mmdb?token=x",
+            "file:///data/db.mmdb#frag",
+            "file:relative/path.mmdb",
+            "not a uri at all",
+        ],
+    )
+    def test_unsupported_or_credential_bearing_uri_rejected(self, bad_uri: str) -> None:
+        """Non-file, authority-bearing, and fragment/query URIs are rejected."""
+        with pytest.raises(ValidationError):
+            settings_from_config({"dbip_city_lite_artifact_uri": bad_uri})
+
+    def test_non_secret_treatment(self) -> None:
+        """The artifact URI is a plain setting, not a secret reference."""
+        settings = settings_from_config(
+            {"dbip_city_lite_artifact_uri": "file:///data/datasets/db.mmdb"}
+        )
+        # Plain setting: directly readable, no secret-reference indirection.
+        assert settings.dbip_city_lite_artifact_uri == "file:///data/datasets/db.mmdb"
+        assert not hasattr(settings, "dbip_city_lite_artifact_secret")
+
+
+class TestDbIpCityLiteArtifactEnvironment:
+    """Environment injection for the DB-IP City Lite artifact URI."""
+
+    def test_environment_value_parsed(self, monkeypatch: MonkeyPatch) -> None:
+        """ATI_DBIP_CITY_LITE_ARTIFACT_URI overrides the blank default."""
+        monkeypatch.setenv(
+            "ATI_DBIP_CITY_LITE_ARTIFACT_URI",
+            "file:///var/lib/ati/datasets/dbip-city-lite/city-lite.mmdb",
+        )
+        settings = settings_from_config({})
+        assert (
+            settings.dbip_city_lite_artifact_uri
+            == "file:///var/lib/ati/datasets/dbip-city-lite/city-lite.mmdb"
+        )

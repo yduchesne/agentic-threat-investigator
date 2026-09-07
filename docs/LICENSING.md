@@ -129,6 +129,37 @@ Compliance handling for ATI:
   obligation.
 - Current IPinfo terms must be re-verified before each release.
 
+### DB-IP City Lite license and attribution
+
+DB-IP publishes the IP to City Lite database under the Creative Commons
+Attribution 4.0 International license (CC BY 4.0), and DB-IP attribution is
+required when using the database:
+
+- DB-IP City Lite product and download page:
+  <https://db-ip.com/db/lite.php>
+- DB-IP license terms:
+  <https://db-ip.com/db/lite.php#license>
+- CC BY 4.0 license text:
+  <https://creativecommons.org/licenses/by/4.0/>
+
+Compliance handling for ATI:
+
+- ATI consumes only the downloadable local MMDB database; it never calls a
+  DB-IP API. The provider reads an operator-supplied local MMDB artifact;
+  this repository does not bundle, commit, or distribute the DB-IP dataset,
+  and external display or distribution of DB-IP-derived data must satisfy
+  the applicable attribution and license terms.
+- Operators obtain the City Lite MMDB from the authoritative DB-IP source
+  and comply with the applicable attribution/license terms (see
+  `docs/DEPLOYMENT.md`).
+- Web applications displaying or using DB-IP-derived geolocation results
+  must display DB-IP attribution with a link to <https://db-ip.com>, as
+  required by the DB-IP Lite license. This runtime attribution must be
+  implemented in the future frontend/map work before DB-IP-derived
+  geolocation is exposed through a UI; Evidence `source_url` provenance
+  alone does not satisfy this obligation.
+- Current DB-IP terms must be re-verified before each release.
+
 ## Data bundling
 
 Third-party datasets are generally not committed or bundled with ATI.

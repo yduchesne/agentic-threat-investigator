@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     # IPinfo Lite access token. The token value itself is resolved outside
     # configuration during composition and never stored or logged here.
     ipinfo_lite_token_secret: str = "ATI_IPINFO_LITE_TOKEN"
+    # Credential-free local artifact URI of the DB-IP IP to City Lite MMDB.
+    # Blank (default) disables the DB-IP City Lite provider. This is a plain
+    # artifact location, not a secret; it is validated as an authority-free
+    # file:// URI without credentials, query, or fragment parts.
+    dbip_city_lite_artifact_uri: str = ""
 
     @field_validator(
         "provider_max_retries",
@@ -140,6 +145,29 @@ class Settings(BaseSettings):
         """Require a non-blank secret reference name (never a token value)."""
         if not value.strip():
             raise ValueError("ipinfo_lite_token_secret must not be blank")
+        return value.strip()
+
+    @field_validator("dbip_city_lite_artifact_uri")
+    @classmethod
+    def validate_dbip_city_lite_artifact_uri(cls, value: str) -> str:
+        """Require a blank or credential-free authority-free file artifact URI."""
+        if not value.strip():
+            return ""
+        parsed = urlsplit(value.strip())
+        if parsed.scheme != "file":
+            raise ValueError(
+                "dbip_city_lite_artifact_uri must use the file:// scheme in v0.1"
+            )
+        if parsed.netloc:
+            raise ValueError("dbip_city_lite_artifact_uri must be authority-free")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("dbip_city_lite_artifact_uri must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError(
+                "dbip_city_lite_artifact_uri must not contain a query or fragment"
+            )
+        if not parsed.path or not parsed.path.startswith("/"):
+            raise ValueError("dbip_city_lite_artifact_uri must have an absolute path")
         return value.strip()
 
     @model_validator(mode="after")

@@ -68,7 +68,7 @@ approved future change.
 
 No analytical verdict logic belongs in the provider.
 
-## PR 14 --- DB-IP City Lite geolocation integration
+## PR 14 --- DB-IP City Lite geolocation integration \[DONE\]
 
 Deliver:
 

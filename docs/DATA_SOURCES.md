@@ -570,6 +570,125 @@ Source identifier:
 
 `urn:ati:source:dbip_city_lite`
 
+#### Source contract
+
+DB-IP City Lite is a **local, file-backed** geolocation evidence source. It is
+not an HTTP provider: the provider performs no DB-IP API call, no download,
+and holds no HTTP client. PR 14 never downloads the database; operators obtain
+it once (see `docs/DEPLOYMENT.md`) and place it under the configured dataset
+location before provider use. The artifact URI is credential-free (a
+`file://` URI below `${ATI_DATA_DIR}/datasets/` in v0.1); no API key exists.
+
+The artifact is the downloadable **DB-IP IP to City Lite MMDB**
+(MaxMind DB format). The provider resolves the configured artifact URI through
+the existing ObjectStore boundary (`FileSystemObjectStore` in v0.1), reads the
+artifact bytes, and opens a long-lived read-only MMDB reader at composition
+time. The MMDB file is untrusted input: every consumed record is strictly
+validated before normalization, and the MMDB metadata `database_type` is
+verified against the official DB-IP City Lite product identity
+(`DBIP-City-Lite`); a valid MMDB of any other product edition is rejected
+with a typed composition failure.
+
+Supported entity type: `IP_ADDRESS` only (IPv4 and IPv6, canonicalized by the
+domain IP canonicalizer before lookup).
+
+Consumed City Lite members (all other members are ignored):
+
+```text
+country.iso_code
+subdivisions[0].names["en"]
+city.names["en"]
+location.latitude
+location.longitude
+```
+
+Paid or out-of-scope fields (postal code, timezone, ASN, ISP, organization,
+connection type) are never consumed. Only English (`en`) names are used in
+v0.1. If the English name is absent, the field is `None`; no arbitrary
+language fallback is performed.
+
+#### Record validation
+
+- `country.iso_code`: strict string, exactly two ASCII letters, normalized to
+  uppercase. Lowercase is accepted and uppercased; digits, punctuation, wrong
+  lengths, booleans, numbers, lists, objects, null, blank, and whitespace-only
+  values are malformed.
+- `city.names["en"]`, `subdivisions[0].names["en"]`: strict non-blank bounded
+  strings (at most 200 characters after stripping outer whitespace). Booleans,
+  numbers, lists, objects, null, blank, whitespace-only, and overlong values
+  are malformed.
+- `subdivisions[0]`: the first entry is selected deterministically when
+  present; `subdivisions` must be a list and the first entry a mapping with a
+  mapping `names` member. A non-list `subdivisions`, a non-mapping first
+  entry, or a non-mapping `names` is a malformed record. An absent `names`
+  member or an absent `en` name yields `None`; no arbitrary language fallback
+  is performed.
+- `location.latitude`/`location.longitude`: finite real numeric values only.
+  Booleans, strings, NaN, infinities, and out-of-range values are malformed.
+  Valid ranges are latitude [-90, 90] and longitude [-180, 180].
+- Coordinate pair rule: both coordinates must be present or both absent. A
+  partial pair (exactly one of the two) is `INVALID_RESPONSE`.
+- Unknown or out-of-scope members at any level are ignored.
+- Malformed nested structures (non-dict `country`, `city`, `location`; or a
+  non-list `subdivisions`) make the record malformed.
+
+#### Precision
+
+Exactly one of:
+
+- `CITY` — usable city and country present.
+- `REGION` — no usable city; usable region and country present.
+- `COUNTRY` — no usable city/region; usable country present.
+- `UNKNOWN` — a record exists but no approved granularity can be established;
+  coordinates alone do not upgrade precision and are still normalized when
+  valid.
+
+A record carrying no usable approved data at all (no country, region, city,
+and no valid coordinate pair) is treated as a documented lookup miss and
+yields no evidence and no error.
+
+#### Misses, private/reserved addresses, and failures
+
+- Lookup miss (no record for the canonical IP, including private, reserved,
+  and non-global ranges, which City Lite never contains): a valid miss is
+  `ProviderResult(provider=..., evidence=(), errors=())` — no evidence and no
+  error. A miss is not a benign assessment.
+- Missing, unreadable, or corrupt artifact at lookup time:
+  `PROVIDER_UNAVAILABLE` (retryable).
+- Malformed matched record (including a partial coordinate pair):
+  `INVALID_RESPONSE` (non-retryable).
+
+#### Evidence shape
+
+A successful usable lookup emits exactly one immutable evidence observation:
+
+```text
+type         = GEOLOCATION (urn:ati:evidence:geolocation)
+subject      = queried IP (canonicalized value)
+source       = urn:ati:source:dbip_city_lite
+source_url   = None (local artifact; no host paths are leaked)
+observed_at  = None
+retrieved_at = lookup time (timezone-aware UTC)
+raw_payload  = None
+facts        = normalized geolocation: country_code, region, city,
+               latitude, longitude, provider, precision
+```
+
+The `provider` fact is `urn:ati:source:dbip_city_lite`. Geolocation facts are
+approximate context only; they never imply attacker or device physical
+location and are never maliciousness evidence.
+
+#### Validation matrix
+
+Automated tests must cover: IPv4 and IPv6 hits; lookup miss; unsupported and
+invalid entity input without any lookup; missing, unreadable, and corrupt
+artifact; malformed top-level and nested record shapes; missing English
+names; country-code validity; coordinate types, ranges, NaN, infinities,
+booleans, strings, and partial pairs; extra/unknown fields; city, region, and
+country precision derivation; no-usable-location records; private/reserved
+addresses; and the absence of persistence, relationships, network I/O, or
+recursive side effects.
+
 ### AbuseIPDB
 
 Purpose:

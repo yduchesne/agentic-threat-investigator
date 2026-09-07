@@ -17,6 +17,15 @@ from agentic_threat_investigator.app.secrets import (
     SecretsResolver,
 )
 from agentic_threat_investigator.config.settings import Settings
+from agentic_threat_investigator.infrastructure.object_store import (
+    FileSystemObjectStore,
+    object_store_for_uri,
+)
+from agentic_threat_investigator.infrastructure.providers.dbip_city_lite import (
+    CityLiteDatabase,
+    CityLiteMmdb,
+    DbIpCityLiteProvider,
+)
 from agentic_threat_investigator.infrastructure.providers.google_dns import (
     GooglePublicDnsProvider,
 )
@@ -59,6 +68,30 @@ class DefaultHttpClientFactory(  # pylint: disable=too-few-public-methods
         return ProviderHttpClient(policy=policy, limiter=limiter)
 
 
+async def _compose_dbip_city_lite(
+    settings: Settings, stack: AsyncExitStack
+) -> tuple[DbIpCityLiteProvider, CityLiteDatabase]:
+    """Resolve, verify, and open the configured City Lite MMDB artifact.
+
+    The artifact URI is resolved through the existing ObjectStore boundary
+    and opened as a long-lived read-only reader. The opened reader is
+    registered on the construction stack immediately, before the provider is
+    constructed, so any later construction failure rolls it back. On success
+    ``pop_all()`` discards that callback and explicit ``aclose()`` ownership
+    takes over. Raises a typed error when the artifact is absent or
+    unreadable; no download is ever attempted.
+    """
+    artifact_uri = settings.dbip_city_lite_artifact_uri
+    file_store = FileSystemObjectStore(settings.datasets_dir)
+    # Existing URI-scheme boundary: rejects unsupported schemes.
+    object_store_for_uri(artifact_uri, file_store)
+    payload = await file_store.read(artifact_uri)
+    database: CityLiteDatabase = CityLiteMmdb(payload)
+    stack.callback(database.close)
+    provider = DbIpCityLiteProvider(database)
+    return provider, database
+
+
 class ProviderComposition:
     """Owned provider instances and their shared HTTP infrastructure.
 
@@ -71,9 +104,11 @@ class ProviderComposition:
     def __init__(self) -> None:
         """Initialize the uninitialized composition invariant."""
         self._clients: tuple[ProviderHttpClient, ...] = ()
+        self._databases: tuple[CityLiteDatabase, ...] = ()
         self._google_dns: GooglePublicDnsProvider | None = None
         self._rdap: RdapProvider | None = None
         self._ipinfo_lite: IpinfoLiteProvider | None = None
+        self._dbip_city_lite: DbIpCityLiteProvider | None = None
 
     @classmethod
     async def create(
@@ -145,6 +180,17 @@ class ProviderComposition:
                 ipinfo_http, token=ipinfo_token
             )
 
+            # Local DB-IP City Lite geolocation: composed only when the
+            # credential-free artifact URI is configured. The artifact must
+            # already exist and be readable; composition fails fast otherwise.
+            # The provider is local evidence only: no HTTP client, no secret.
+            if settings.dbip_city_lite_artifact_uri:
+                (
+                    composition._dbip_city_lite,
+                    database,
+                ) = await _compose_dbip_city_lite(settings, stack)
+                composition._databases = (database,)
+
             composition._clients = (google_http, rdap_http, ipinfo_http)
             # Construction succeeded: the composition now owns explicit cleanup
             # through aclose(); the stack must not close the clients again.
@@ -172,9 +218,23 @@ class ProviderComposition:
             raise RuntimeError("ProviderComposition must be created via create()")
         return self._ipinfo_lite
 
+    @property
+    def dbip_city_lite(self) -> DbIpCityLiteProvider | None:
+        """DB-IP City Lite provider instance, or ``None`` when disabled.
+
+        The provider is composed only when the DB-IP City Lite artifact URI
+        is configured; a ``None`` value is the documented disabled state.
+        """
+        return self._dbip_city_lite
+
     async def aclose(self) -> None:
-        """Close all owned clients and re-raise the first failure, including cancellation."""
+        """Close all owned local readers and clients, re-raising the first failure."""
         errors: list[BaseException] = []
+        for database in self._databases:
+            try:
+                database.close()
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                errors.append(exc)
         for client in self._clients:
             try:
                 await client.aclose()
