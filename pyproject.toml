@@ -24,15 +24,19 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "black>=24.10,<26",
+  "black>=26.3,<27",
   "isort>=5.13,<6",
   "mypy>=1.13,<2",
   "pylint>=3.3,<4",
-  "pytest>=8.3,<9",
+  "pytest>=9,<10",
   "pytest-cov>=6,<7",
   "pytest-asyncio>=1.0,<2",
   "pre-commit>=4,<5",
   "mmdb-writer>=0.2,<1",
+  "bandit>=1.8,<2",
+  "semgrep>=1.100,<2",
+  "safety>=3,<4",
+  "pip-audit>=2.7,<3",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -73,6 +77,15 @@ source = ["agentic_threat_investigator"]
 [tool.coverage.report]
 show_missing = true
 fail_under = 85
+
+# Bandit security scanning (./build.sh --sec). B101 (assert_used) is skipped
+# globally with justification: asserts in src are internal invariant checks
+# used for strict-Mypy control-flow narrowing, not security controls, and the
+# codebase intentionally keeps them. Site-specific false positives (B105, B110,
+# B311, B608) carry inline `# nosec` comments with per-site justification.
+[tool.bandit]
+exclude_dirs = []
+skips = ["B101"]
 
 [tool.uv]
 default-groups = ["dev"]

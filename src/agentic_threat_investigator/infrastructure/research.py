@@ -97,6 +97,9 @@ class PgVectorResearchRetriever(
                 FROM ati.document_chunk AS chunk
                 JOIN ati.document AS document ON document.id = chunk.document_id
                 WHERE """
+            # nosec B608 - predicates are compile-time constant strings; every
+            # dynamic value is a bound parameter (:source_ids, :document_types,
+            # :query_embedding, :max_results), never interpolated input.
             + " AND ".join(predicates)
             + " ORDER BY chunk.embedding <=> CAST(:query_embedding AS vector)"
             + " LIMIT :max_results"

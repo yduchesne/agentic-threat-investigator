@@ -100,8 +100,7 @@ class PostgresDocumentRepository(DocumentRepository):
     ) -> Document | None:
         """Return a visible document by durable source identity."""
         result = await self._session.execute(
-            text(
-                """
+            text("""
                 SELECT id, source_id, source_record_id, document_type, title,
                        source_url, published_at, retrieved_at, content,
                        normalization_version, chunking_version, content_hash,
@@ -109,8 +108,7 @@ class PostgresDocumentRepository(DocumentRepository):
                 FROM ati.document
                 WHERE source_id=:source_id AND source_record_id=:record_id
                   AND deleted_at IS NULL
-                """
-            ),
+                """),
             {"source_id": source_id, "record_id": source_record_id},
         )
         row = result.mappings().first()
@@ -174,8 +172,7 @@ class PostgresDocumentChunkRepository(DocumentChunkRepository):
     async def list_by_document(self, document_id: UUID) -> list[DocumentChunk]:
         """Return all current chunks in deterministic sequence order."""
         result = await self._session.execute(
-            text(
-                """
+            text("""
                 SELECT id, document_id, sequence, text, token_count, embedding,
                        embedding_provider, embedding_model,
                        embedding_model_version, embedding_dimension,
@@ -183,8 +180,7 @@ class PostgresDocumentChunkRepository(DocumentChunkRepository):
                 FROM ati.document_chunk
                 WHERE document_id=:document_id
                 ORDER BY sequence
-                """
-            ),
+                """),
             {"document_id": document_id},
         )
         chunks: list[DocumentChunk] = []

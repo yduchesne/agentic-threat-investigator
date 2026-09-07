@@ -163,7 +163,8 @@ async def _default_sleep(seconds: float) -> None:
 
 
 def _default_jitter() -> float:
-    return _random.random()
+    # Non-cryptographic by design: jitter only spreads retry timing.
+    return _random.random()  # nosec B311
 
 
 def _default_monotonic() -> float:
@@ -379,7 +380,7 @@ def parse_retry_after_header(
         pass
     try:
         retry_after_dt = parsedate_to_datetime(raw)
-    except (TypeError, ValueError, OverflowError, OSError):
+    except TypeError, ValueError, OverflowError, OSError:
         return None
     if retry_after_dt.tzinfo is None:
         retry_after_dt = retry_after_dt.replace(tzinfo=UTC)
@@ -927,7 +928,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
 
         try:
             parsed = json.loads(body.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
+        except ValueError, UnicodeDecodeError:
             return HttpOutcome(
                 attempt_count=0,
                 retry_count=0,

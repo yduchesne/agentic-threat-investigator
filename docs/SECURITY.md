@@ -18,6 +18,7 @@
 - [Prompt injection](#prompt-injection)
 - [Secrets](#secrets)
 - [Container security](#container-security)
+- [Automated security scanning](#automated-security-scanning)
 - [Data deletion](#data-deletion)
 - [Geolocation safety](#geolocation-safety)
 - [Future external identity](#future-external-identity)
@@ -253,6 +254,47 @@ ATI does not require:
 - unnecessary Linux capabilities.
 
 Only required host ports are exposed.
+
+## Automated security scanning
+
+ATI runs four Python security tools through `./build.sh --sec`:
+
+| Tool | Type | Scope |
+|---|---|---|
+| Bandit | Static analysis (SAST) | Production code (`src`) only; tests are excluded because they intentionally carry synthetic credentials and asserts |
+| Semgrep | Static analysis (SAST), `p/ci` ruleset | Production code (`src`) |
+| Safety | Dependency vulnerability scan (SCA) | Full Python environment, including dev/test tooling |
+| pip-audit | Dependency vulnerability scan (SCA) | Full Python environment, including dev/test tooling |
+
+Gate policy:
+
+- `./build.sh --sec` runs as a dedicated, mandatory `security` CI gate on
+  every pull request, in parallel with the quality and integration gates,
+  and must pass before a PR can be merged.
+- Running the security scans locally is not required after ordinary code
+  changes; the CI gate is the enforcement point.
+- Unlike the ordinary validation gates, the security gate requires network
+  access (Semgrep registry rulesets and vulnerability databases) and is a
+  deliberate exception to the offline-CI principle for test validation.
+
+Suppression governance:
+
+- Every suppression must carry an explicit, documented justification at the
+  suppression site (inline `# nosec` with reason) or in configuration
+  (`[tool.bandit]` skip list in `pyproject.toml`).
+- `B101` (assert) is globally skipped in Bandit with documented rationale:
+  asserts in production code are internal invariant checks used for
+  strict-Mypy control-flow narrowing, not security controls.
+- Suppressions must be re-justified when the surrounding code changes; the
+  security gate must never be weakened merely to make it pass.
+
+Currently accepted risk:
+
+- `nltk` PYSEC-2026-3740 is ignored in `build.sh` (`pip-audit
+  --ignore-vuln`). It is a transitive, test-only dependency of the Safety
+  scanner itself; ATI production code does not import it, and no fixed
+  release exists on PyPI. This ignore must be re-evaluated when Safety ships
+  a fixed `nltk` bound.
 
 ## Data deletion
 

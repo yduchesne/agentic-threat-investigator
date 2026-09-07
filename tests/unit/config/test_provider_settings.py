@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
 """Tests for provider HTTP settings."""
+
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from pydantic import ValidationError

@@ -146,7 +146,7 @@ async def logout(
                     AuditAction.AUTH_CSRF_REJECTED, AuditOutcome.DENIED
                 )
             except Exception:  # audit failure must not alter the security response
-                pass
+                pass  # nosec B110 - deliberate: audit failure must not mask the 403
             raise HTTPException(
                 status_code=403, detail="CSRF validation failed"
             ) from exc

@@ -64,14 +64,12 @@ class PostgresEntityRepository(EntityRepository):
         """Invoke the authoritative PostgreSQL entity write function."""
         canonical_value = canonicalize(entity.type, entity.value)
         result = await self._session.execute(
-            text(
-                """
+            text("""
                 SELECT id, version, created FROM ati.upsert_entity(
                     :id, :entity_type, :canonical_value, :display_name,
                     CAST(:attributes AS jsonb), :content_hash, :expected_version
                 )
-            """
-            ),
+            """),
             {
                 "id": entity.id,
                 "entity_type": entity.type.value,

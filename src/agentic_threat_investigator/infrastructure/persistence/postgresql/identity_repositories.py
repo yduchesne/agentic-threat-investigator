@@ -66,13 +66,11 @@ class PostgresUserRepository(UserRepository):
         self.session.add(row)
         await self.session.flush()
         await self.session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO ati.domain_object_history
                     (object_type, object_id, version, operation, state, diff)
                 VALUES ('user', :id, :version, 'CREATE', CAST(:state AS jsonb), '{}'::jsonb)
-            """
-            ),
+            """),
             {
                 "id": row.id,
                 "version": row.version,

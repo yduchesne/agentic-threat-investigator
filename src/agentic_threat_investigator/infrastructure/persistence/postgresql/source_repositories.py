@@ -80,14 +80,12 @@ class PostgresSourceRecordRepository(SourceRecordRepository):
     async def get_by_id(self, record_id: UUID) -> SourceRecord | None:
         """Look up a current normalized record by internal UUID."""
         result = await self._session.execute(
-            text(
-                """
+            text("""
             SELECT id, source_id, source_record_id, record_type,
                    normalization_version, observed_at, published_at, retrieved_at,
                    canonical_payload, raw_payload, content_hash, metadata
             FROM ati.source_record WHERE id=:id
-        """
-            ),
+        """),
             {"id": record_id},
         )
         row = result.mappings().first()
@@ -102,16 +100,14 @@ class PostgresSourceRecordRepository(SourceRecordRepository):
     ) -> SourceRecord | None:
         """Look up a current normalized record."""
         result = await self._session.execute(
-            text(
-                """
+            text("""
                 SELECT id, source_id, source_record_id, record_type,
                        normalization_version, observed_at, published_at,
                        retrieved_at, canonical_payload, raw_payload,
                        content_hash, metadata
                 FROM ati.source_record
                 WHERE source_id=:source_id AND source_record_id=:record_id
-                """
-            ),
+                """),
             {"source_id": source_id, "record_id": source_record_id},
         )
         row = result.mappings().first()
@@ -132,15 +128,13 @@ class PostgresIngestionCheckpointRepository(IngestionCheckpointRepository):
         self, source_id: str, artifact_uri: str, normalization_version: int
     ) -> IngestionCheckpoint | None:
         result = await self._session.execute(
-            text(
-                """
+            text("""
                 SELECT source_id, artifact_uri, normalization_version,
                        checkpoint, complete
                 FROM ati.ingestion_checkpoint
                 WHERE source_id=:s AND artifact_uri=:u
                   AND normalization_version=:v
-                """
-            ),
+                """),
             {"s": source_id, "u": artifact_uri, "v": normalization_version},
         )
         row = result.mappings().first()
@@ -158,16 +152,14 @@ class PostgresIngestionCheckpointRepository(IngestionCheckpointRepository):
 
     async def put(self, checkpoint: IngestionCheckpoint) -> None:
         await self._session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO ati.ingestion_checkpoint(
                     source_id, artifact_uri, normalization_version,
                     checkpoint, complete
                 ) VALUES (:s, :u, :v, :c, :done)
                 ON CONFLICT (source_id, artifact_uri, normalization_version)
                 DO UPDATE SET checkpoint=:c, complete=:done, updated_at=now()
-                """
-            ),
+                """),
             {
                 "s": checkpoint.source_id,
                 "u": checkpoint.artifact_uri,
@@ -181,12 +173,10 @@ class PostgresIngestionCheckpointRepository(IngestionCheckpointRepository):
         self, source_id: str, artifact_uri: str, normalization_version: int
     ) -> None:
         await self._session.execute(
-            text(
-                """
+            text("""
                 DELETE FROM ati.ingestion_checkpoint
                 WHERE source_id=:s AND artifact_uri=:u
                   AND normalization_version=:v
-                """
-            ),
+                """),
             {"s": source_id, "u": artifact_uri, "v": normalization_version},
         )
