@@ -12,6 +12,10 @@ import asyncio
 from abc import ABC, abstractmethod
 from contextlib import AsyncExitStack
 
+from agentic_threat_investigator.app.secrets import (
+    EnvVarSecretsResolver,
+    SecretsResolver,
+)
 from agentic_threat_investigator.config.settings import Settings
 from agentic_threat_investigator.infrastructure.providers.google_dns import (
     GooglePublicDnsProvider,
@@ -21,6 +25,9 @@ from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
     ProviderHttpPolicy,
     RateLimiterSettings,
+)
+from agentic_threat_investigator.infrastructure.providers.ipinfo_lite import (
+    IpinfoLiteProvider,
 )
 from agentic_threat_investigator.infrastructure.providers.rdap import RdapProvider
 
@@ -66,6 +73,7 @@ class ProviderComposition:
         self._clients: tuple[ProviderHttpClient, ...] = ()
         self._google_dns: GooglePublicDnsProvider | None = None
         self._rdap: RdapProvider | None = None
+        self._ipinfo_lite: IpinfoLiteProvider | None = None
 
     @classmethod
     async def create(
@@ -73,9 +81,18 @@ class ProviderComposition:
         settings: Settings,
         *,
         http_client_factory: HttpClientFactory | None = None,
+        secrets: SecretsResolver | None = None,
     ) -> ProviderComposition:
-        """Compose providers, rolling back owned clients on partial failure."""
+        """Compose providers, rolling back owned clients on partial failure.
+
+        The IPinfo Lite access token is resolved here, during composition,
+        from the configured secret reference name; providers receive only the
+        resolved credential and never read configuration or the environment.
+        A missing required secret fails clearly before the corresponding
+        client is created so already-created owned clients roll back.
+        """
         factory = http_client_factory or DefaultHttpClientFactory()
+        resolver = secrets if secrets is not None else EnvVarSecretsResolver()
         policy = ProviderHttpPolicy(
             timeout_seconds=settings.provider_timeout_seconds,
             max_retries=settings.provider_max_retries,
@@ -113,7 +130,22 @@ class ProviderComposition:
                 cache_seconds=settings.rdap_bootstrap_cache_seconds,
             )
 
-            composition._clients = (google_http, rdap_http)
+            ipinfo_token = resolver.require(settings.ipinfo_lite_token_secret)
+            ipinfo_http = factory.create(
+                policy,
+                BoundedLimiter(
+                    RateLimiterSettings(
+                        max_concurrency=settings.ipinfo_lite_max_concurrency,
+                        requests_per_second=settings.ipinfo_lite_requests_per_second,
+                    )
+                ),
+            )
+            stack.push_async_callback(ipinfo_http.aclose)
+            composition._ipinfo_lite = IpinfoLiteProvider(
+                ipinfo_http, token=ipinfo_token
+            )
+
+            composition._clients = (google_http, rdap_http, ipinfo_http)
             # Construction succeeded: the composition now owns explicit cleanup
             # through aclose(); the stack must not close the clients again.
             stack.pop_all()
@@ -133,8 +165,15 @@ class ProviderComposition:
             raise RuntimeError("ProviderComposition must be created via create()")
         return self._rdap
 
+    @property
+    def ipinfo_lite(self) -> IpinfoLiteProvider:
+        """IPinfo Lite provider instance."""
+        if self._ipinfo_lite is None:
+            raise RuntimeError("ProviderComposition must be created via create()")
+        return self._ipinfo_lite
+
     async def aclose(self) -> None:
-        """Close both clients and re-raise the first failure, including cancellation."""
+        """Close all owned clients and re-raise the first failure, including cancellation."""
         errors: list[BaseException] = []
         for client in self._clients:
             try:
