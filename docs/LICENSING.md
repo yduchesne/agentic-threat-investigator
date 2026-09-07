@@ -96,22 +96,40 @@ Before a release, current terms for each source must be verified for:
 
 The fact that a source is free to access does not imply that ATI may bundle or redistribute it.
 
-### IPinfo Lite terms notes
+### IPinfo Lite license and attribution
 
-Verified against the IPinfo Lite product page and IPinfo's general terms of
-service at the time of integration:
+IPinfo publishes the IPinfo Lite database and Lite API under the Creative
+Commons Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0),
+and attribution is required when using IPinfo Lite:
 
-- the Lite API is offered free of charge with no stated monthly quota or
-  credit-card requirement;
-- neither the Lite product page nor the general terms state an attribution
-  obligation for API use;
-- the general terms permit internal use of retrieved content and prohibit
-  resale or redistribution of that content without IPinfo's written consent;
+- IPinfo Lite product and license terms:
+  <https://ipinfo.io/lite>
+- IPinfo attribution guidance:
+  <https://ipinfo.io/attribution>
+- CC BY-SA 4.0 license text:
+  <https://creativecommons.org/licenses/by-sa/4.0/>
+
+Approved handling for ATI:
+
 - ATI consumes the Lite API live, stores only normalized facts as evidence
   provenance (`raw_payload=None`), never redistributes or bundles IPinfo
-  data, and applies ATI-configured concurrency/rate bounds. If IPinfo's
-  terms change before release, this note and the integration must be
-  re-verified.
+  data, and applies ATI-configured concurrency/rate bounds.
+- Under CC BY-SA 4.0, normalized or otherwise adapted IPinfo Lite material
+  that is shared onward is adapted material and must carry the same
+  CC BY-SA 4.0 license plus attribution. ATI's local persistence of
+  investigation evidence within a deployment is use, not distribution;
+  if a deployment shares IPinfo-derived evidence or reports outside the
+  deployment, that shared material carries the CC BY-SA 4.0 obligation.
+- The approved attribution is IPinfo's suggested credit form:
+  "IP address data powered by IPinfo" with a link to
+  <https://ipinfo.io>, together with a CC BY-SA 4.0 pointer. It is
+  recorded in the repository `NOTICE` file and `docs/LICENSING.md`, and
+  runtime attribution is provided with the frontend data-sources view.
+  Evidence `source_url` provenance alone does not satisfy this
+  attribution obligation.
+- Current IPinfo terms must be re-verified before each release, and formal
+  legal review of the ShareAlike handling above should confirm this
+  decision before v0.1 general availability.
 
 ## Data bundling
 

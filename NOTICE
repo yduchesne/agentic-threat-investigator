@@ -6,3 +6,9 @@ only. See LICENSE.
 
 Third-party dependencies retain their own licenses. External data sources
 are not bundled; see docs/LICENSING.md for attribution and usage guidance.
+
+IP address data and ASN context for IP-address lookups are powered by
+IPinfo (https://ipinfo.io) through the IPinfo Lite service, licensed
+under the Creative Commons Attribution-ShareAlike 4.0 International
+license (CC BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/

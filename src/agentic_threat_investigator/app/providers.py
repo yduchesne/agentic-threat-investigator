@@ -190,38 +190,20 @@ class EvidenceProvider(ABC):  # pylint: disable=too-few-public-methods
         """
 
 
-def provider_error_result(
-    provider_id: str,
-    code: ProviderErrorCode,
-    message: str,
-    *,
-    retry_after_seconds: int | None = None,
+def unsupported_indicator_result(
+    provider_id: str, message: str = "invalid entity value"
 ) -> ProviderResult:
-    """Build a standard single-error ``ProviderResult`` for a provider.
-
-    The error is attributed to ``provider_id`` and its retryability is
-    derived from the error code's natural retryability contract.
-    """
+    """Build a standard non-retryable ``UNSUPPORTED_INDICATOR`` result."""
     return ProviderResult(
         provider=provider_id,
         errors=(
             ProviderError(
                 provider=provider_id,
-                code=code,
+                code=ProviderErrorCode.UNSUPPORTED_INDICATOR,
                 message=message,
-                retryable=code.retryable,
-                retry_after_seconds=retry_after_seconds,
+                retryable=False,
             ),
         ),
-    )
-
-
-def unsupported_indicator_result(
-    provider_id: str, message: str = "invalid entity value"
-) -> ProviderResult:
-    """Build a standard non-retryable ``UNSUPPORTED_INDICATOR`` result."""
-    return provider_error_result(
-        provider_id, ProviderErrorCode.UNSUPPORTED_INDICATOR, message
     )
 
 
