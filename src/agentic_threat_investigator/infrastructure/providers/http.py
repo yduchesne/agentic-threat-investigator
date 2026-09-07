@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from numbers import Real
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -97,7 +98,24 @@ class ProviderHttpPolicy:
     max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES
 
     def __post_init__(self) -> None:
-        """Enforce parameter bounds on policy settings."""
+        """Enforce parameter types and bounds on policy settings."""
+        # Non-finite values are not real bounded configuration: comparisons
+        # cannot constrain NaN or infinities, so reject them explicitly.
+        for name in (
+            "timeout_seconds",
+            "base_delay_seconds",
+            "max_delay_seconds",
+            "jitter_ratio",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise ValueError(f"{name} must be a real number")
+            if not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
+        for name in ("max_retries", "max_response_bytes"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         if self.max_retries < 0:
@@ -122,11 +140,22 @@ class RateLimiterSettings:
     requests_per_second: float | None = None
 
     def __post_init__(self) -> None:
-        """Validate concurrency and rate bounds."""
+        """Validate concurrency and rate types and bounds."""
+        if isinstance(self.max_concurrency, bool) or not isinstance(
+            self.max_concurrency, int
+        ):
+            raise ValueError("max_concurrency must be an integer")
         if self.max_concurrency <= 0:
             raise ValueError("max_concurrency must be positive")
-        if self.requests_per_second is not None and self.requests_per_second <= 0:
-            raise ValueError("requests_per_second must be positive")
+        if self.requests_per_second is not None:
+            if isinstance(self.requests_per_second, bool) or not isinstance(
+                self.requests_per_second, Real
+            ):
+                raise ValueError("requests_per_second must be a real number")
+            if not math.isfinite(self.requests_per_second):
+                raise ValueError("requests_per_second must be finite")
+            if self.requests_per_second <= 0:
+                raise ValueError("requests_per_second must be positive")
 
 
 async def _default_sleep(seconds: float) -> None:
@@ -143,6 +172,26 @@ def _default_monotonic() -> float:
 
 def _default_utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def read_monotonic_clock(clock: Clock) -> float:
+    """Read an injected monotonic clock and require a finite real result."""
+    value = clock()
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError("monotonic clock must return a real number")
+    if not math.isfinite(value):
+        raise ValueError("monotonic clock must return a finite value")
+    return float(value)
+
+
+def _read_utc_clock(clock: UtcClock) -> datetime:
+    """Read an injected UTC clock and require a timezone-aware datetime."""
+    value = clock()
+    if not isinstance(value, datetime):
+        raise ValueError("UTC clock must return a datetime")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("UTC clock must return a timezone-aware datetime")
+    return value.astimezone(UTC)
 
 
 def _canonical_host(hostname: str) -> str:
@@ -282,7 +331,10 @@ def classify_http_status(
         return None
     if status in _STATUS_CODE_MAP:
         return _STATUS_CODE_MAP[status]
-    if status >= 500:
+    # Only the closed HTTP 5xx range (500-599) is a retryable server error.
+    # Malformed/nonstandard statuses such as 600 are not 5xx responses and
+    # must remain terminal INVALID_RESPONSE outcomes.
+    if 500 <= status <= 599:
         return ProviderErrorCode.PROVIDER_UNAVAILABLE
     return ProviderErrorCode.INVALID_RESPONSE
 
@@ -327,17 +379,15 @@ def parse_retry_after_header(
         pass
     try:
         retry_after_dt = parsedate_to_datetime(raw)
-        if retry_after_dt.tzinfo is None:
-            retry_after_dt = retry_after_dt.replace(tzinfo=UTC)
-        now = utc_now()
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=UTC)
-        delta_seconds = (retry_after_dt - now).total_seconds()
-        if delta_seconds < 0:
-            return None
-        return math.ceil(delta_seconds)
-    except (ValueError, OverflowError, OSError):
+    except (TypeError, ValueError, OverflowError, OSError):
         return None
+    if retry_after_dt.tzinfo is None:
+        retry_after_dt = retry_after_dt.replace(tzinfo=UTC)
+    now = _read_utc_clock(utc_now)
+    delta_seconds = (retry_after_dt - now).total_seconds()
+    if delta_seconds < 0:
+        return None
+    return math.ceil(delta_seconds)
 
 
 class _AdmissionWaiter:  # pylint: disable=too-few-public-methods
@@ -435,7 +485,7 @@ class BoundedLimiter:
         reservations stay spaced from this start; otherwise the caller joins
         the FIFO queue one interval behind the last reserved slot.
         """
-        now = self._clock()
+        now = read_monotonic_clock(self._clock)
         if self._last_slot is None:
             # The first request starts immediately; only elapsed time since
             # this start constrains later reservations.
@@ -457,7 +507,7 @@ class BoundedLimiter:
         """Sleep until the waiter's reserved slot, re-deriving on reclaim wakes."""
         while True:
             async with self._lock:
-                delay = waiter.slot - self._clock()
+                delay = waiter.slot - read_monotonic_clock(self._clock)
                 if delay <= 0:
                     # The slot is already due: a reclaim shifted it into the
                     # past, or the clock advanced between waits.
@@ -623,15 +673,44 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         configured maximum as the hard upper bound even when the provider
         asks for a longer wait. The externally reported
         ``retry_after_seconds`` value is never altered by this clamping.
+
+        The calculation is overflow-safe and constant-time: intermediate
+        arithmetic for huge retry numbers, and integer ``Retry-After`` values
+        at or above the cap, saturate at ``max_delay_seconds`` instead of
+        raising. A negative ``retry_number`` is a programming error.
         """
-        exponential = self._policy.base_delay_seconds * (2.0**retry_number)
-        jitter = (
-            (self._jitter_fn() * 2.0 - 1.0) * self._policy.jitter_ratio * exponential
+        if retry_number < 0:
+            raise ValueError("retry_number must be nonnegative")
+        max_delay = self._policy.max_delay_seconds
+        jitter_sample = self._jitter_fn()
+        if (
+            isinstance(jitter_sample, bool)
+            or not isinstance(jitter_sample, Real)
+            or not math.isfinite(jitter_sample)
+            or not 0.0 <= jitter_sample <= 1.0
+        ):
+            raise ValueError("jitter sample must be finite and between 0.0 and 1.0")
+        normalized_jitter = float(jitter_sample)
+        jitter_factor = 1.0 + (
+            (normalized_jitter * 2.0 - 1.0) * self._policy.jitter_ratio
         )
-        delay = max(0.0, exponential + jitter)
+        delay = 0.0
+        if self._policy.base_delay_seconds > 0.0 and jitter_factor > 0.0:
+            try:
+                scaled = math.ldexp(
+                    self._policy.base_delay_seconds * jitter_factor, retry_number
+                )
+            except OverflowError:
+                scaled = max_delay
+            delay = min(scaled, max_delay)
+        # Never float()-convert an integer at or above the cap: a huge
+        # untrusted Retry-After value would overflow instead of saturating.
         if retry_after_seconds is not None and retry_after_seconds >= 0:
-            delay = max(delay, float(retry_after_seconds))
-        return max(0.0, min(delay, self._policy.max_delay_seconds))
+            if retry_after_seconds >= max_delay:
+                delay = max_delay
+            else:
+                delay = max(delay, float(retry_after_seconds))
+        return max(0.0, min(delay, max_delay))
 
     async def request_json(  # pylint: disable=too-many-arguments
         self,
@@ -684,7 +763,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         """Execute request attempts up to max_retries with backoff."""
         attempt = 0
         last_outcome: HttpOutcome | None = None
-        start_time = self._clock()
+        start_time = read_monotonic_clock(self._clock)
 
         while attempt <= self._policy.max_retries:
             attempt += 1
@@ -751,7 +830,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                 timeout=self._policy.timeout_seconds,
             ) as response:
                 status = response.status_code
-                duration = self._clock() - start_time
+                duration = read_monotonic_clock(self._clock) - start_time
                 error_code = classify_http_status(status, accept_statuses)
 
                 if error_code is None:
@@ -759,7 +838,15 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                         response, status, accepted_media_types, duration
                     )
 
-                retry_after = parse_retry_after_header(response, self._utc_clock)
+                # The plan authorizes provider-directed Retry-After handling
+                # only for HTTP 429. Timeout/network/5xx retries use local
+                # exponential backoff and jitter; permanent statuses never
+                # parse or report Retry-After (and never evaluate the clock).
+                retry_after = (
+                    parse_retry_after_header(response, self._utc_clock)
+                    if error_code is ProviderErrorCode.RATE_LIMITED
+                    else None
+                )
                 msg = status_error_message(status, error_code)
                 return HttpOutcome(
                     attempt_count=0,
@@ -778,7 +865,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                 final_status=None,
                 final_error_code=ProviderErrorCode.TIMEOUT,
                 final_error_message="request timed out",
-                duration_seconds=self._clock() - start_time,
+                duration_seconds=read_monotonic_clock(self._clock) - start_time,
             )
         except httpx.TransportError:
             return HttpOutcome(
@@ -787,7 +874,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                 final_status=None,
                 final_error_code=ProviderErrorCode.PROVIDER_UNAVAILABLE,
                 final_error_message="provider transport unavailable",
-                duration_seconds=self._clock() - start_time,
+                duration_seconds=read_monotonic_clock(self._clock) - start_time,
             )
 
     async def _handle_accepted_response(

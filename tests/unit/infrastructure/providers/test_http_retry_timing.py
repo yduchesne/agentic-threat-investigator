@@ -12,10 +12,13 @@ from ever expiring before the provider-directed deadline.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 import httpx
+import pytest
 
 from agentic_threat_investigator.infrastructure.providers.http import (
+    JitterFn,
     ProviderHttpClient,
     parse_retry_after_header,
 )
@@ -94,6 +97,102 @@ class TestComputeBackoffDelay:
                 jitter_fn=_fixed_jitter(jitter_value),
             )
             assert http.compute_backoff_delay(retry_number=0) == expected
+
+    def test_huge_retry_after_saturates_without_overflow(self) -> None:
+        """A hundreds-of-digits Retry-After saturates at the cap, never raising."""
+        http = ProviderHttpClient(
+            base_delay_seconds=1.0,
+            max_delay_seconds=30.0,
+            jitter_ratio=1.0,
+            jitter_fn=_zero_jitter,
+        )
+        delay = http.compute_backoff_delay(retry_number=0, retry_after_seconds=10**400)
+        assert delay == 30.0
+
+    def test_huge_retry_number_saturates_without_overflow(self) -> None:
+        """A huge retry index saturates at the cap before any overflow."""
+        http = ProviderHttpClient(
+            base_delay_seconds=1.0,
+            max_delay_seconds=30.0,
+            jitter_ratio=1.0,
+            jitter_fn=_zero_jitter,
+        )
+        assert http.compute_backoff_delay(retry_number=1024) == 30.0
+        assert http.compute_backoff_delay(retry_number=10**400) == 30.0
+
+    def test_zero_base_delay_with_huge_retry_number_is_zero(self) -> None:
+        """Zero base delay stays exactly zero even for a huge retry index."""
+        http = ProviderHttpClient(
+            base_delay_seconds=0.0,
+            max_delay_seconds=30.0,
+            jitter_ratio=1.0,
+            jitter_fn=_fixed_jitter(1.0),
+        )
+        assert http.compute_backoff_delay(retry_number=10**400) == 0.0
+
+    def test_zero_jitter_factor_with_huge_retry_number_is_zero(self) -> None:
+        """Full negative jitter stays exactly zero for a huge retry index."""
+        http = ProviderHttpClient(
+            base_delay_seconds=1.0,
+            max_delay_seconds=30.0,
+            jitter_ratio=1.0,
+            jitter_fn=_fixed_jitter(0.0),
+        )
+        assert http.compute_backoff_delay(retry_number=10**400) == 0.0
+
+    def test_negative_retry_number_rejected(self) -> None:
+        """A negative retry index is a programming error, not a provider failure."""
+        http = ProviderHttpClient(
+            base_delay_seconds=1.0,
+            max_delay_seconds=30.0,
+            jitter_ratio=1.0,
+            jitter_fn=_zero_jitter,
+        )
+        with pytest.raises(ValueError, match="nonnegative"):
+            http.compute_backoff_delay(retry_number=-1)
+
+    @pytest.mark.parametrize(
+        "sample",
+        [-0.0001, 1.0001, float("nan"), float("inf"), float("-inf")],
+    )
+    def test_invalid_numeric_jitter_sample_rejected(self, sample: float) -> None:
+        """Out-of-range and non-finite jitter samples are programming errors."""
+        http = ProviderHttpClient(jitter_fn=_fixed_jitter(sample))
+        with pytest.raises(ValueError, match="jitter sample must be finite"):
+            http.compute_backoff_delay(retry_number=0)
+
+    def test_wrong_type_jitter_sample_rejected(self) -> None:
+        """A non-numeric jitter sample produces a stable ValueError."""
+        invalid_jitter = cast(JitterFn, lambda: "not-a-number")
+        http = ProviderHttpClient(jitter_fn=invalid_jitter)
+        with pytest.raises(ValueError, match="jitter sample must be finite"):
+            http.compute_backoff_delay(retry_number=0)
+
+    def test_jitter_sample_evaluated_exactly_once(self) -> None:
+        """One backoff computation requests exactly one jitter sample."""
+        call_count = 0
+
+        def _counting_jitter() -> float:
+            nonlocal call_count
+            call_count += 1
+            return 0.5
+
+        http = ProviderHttpClient(jitter_fn=_counting_jitter)
+        assert http.compute_backoff_delay(retry_number=0) == 1.0
+        assert call_count == 1
+
+    def test_jitter_callable_exception_propagates(self) -> None:
+        """An exception raised by the jitter callable is never normalized."""
+
+        class JitterSentinelError(Exception):
+            """Sentinel exception proving callable failures propagate unchanged."""
+
+        def _failing_jitter() -> float:
+            raise JitterSentinelError("sentinel")
+
+        http = ProviderHttpClient(jitter_fn=_failing_jitter)
+        with pytest.raises(JitterSentinelError, match="sentinel"):
+            http.compute_backoff_delay(retry_number=0)
 
 
 class TestRetryAfter:

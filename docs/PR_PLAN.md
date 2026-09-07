@@ -171,9 +171,15 @@ Deliver:
 - retry/rate-limit infrastructure;
 - RDAP provider;
 - Google DNS provider;
-- deterministic provider tests.
+- deterministic provider tests;
+- documented transport, field, cross-field, RR-set, special-value, and
+  entity-eligibility validation matrices for the supported DNS/RDAP forms,
+  with corresponding deterministic boundary tests.
 
-This PR establishes the first domain-to-IP discovery path.
+This PR establishes the first domain-to-IP discovery path. It is not complete
+while a standards-valid supported form (including DNS protocol roots/null MX
+or supported escaped DNS presentation syntax) lacks an approved normalized
+representation and contract coverage.
 
 ## PR 13 — Remaining v0.1 live sources
 
@@ -311,7 +317,15 @@ Before completion:
 4. maintain strict typing;
 5. preserve architectural boundaries;
 6. update authoritative documentation when a contract intentionally changes;
-7. do not weaken quality gates to make a PR pass.
+7. do not weaken quality gates to make a PR pass;
+8. for external adapters, identify both transport and protocol-semantic source
+   specifications, document field/cross-field/collection invariants and
+   standards-valid special forms, and map them to deterministic tests;
+9. validate untrusted input before lossy canonicalization and ensure every
+   malformed external-input path terminates in a safe typed error rather than
+   an incidental implementation exception;
+10. explicitly distinguish protocol-valid source facts and sentinels from
+    values eligible to become domain entities, relationships, or pivots.
 
 ## Latest persistence/configuration requirements
 

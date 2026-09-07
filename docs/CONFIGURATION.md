@@ -424,6 +424,12 @@ account. Password values are always redacted from configuration logging.
 
 All live evidence provider settings map to environment variables using the `ATI_` prefix:
 
+All provider floating-point settings must be **finite**: NaN and both infinities are rejected at
+startup so bounded timeouts, backoff caps, jitter, and request rates can never be silently disabled
+by a non-finite value. Boolean values are not accepted as numbers. Integer settings require genuine
+integer profile values (not booleans or floats); decimal environment text is parsed into the declared
+type before bounds are enforced. The bounds below apply on top of those type requirements.
+
 | Setting | Environment variable | Type | Default | Bounds | Description |
 |---|---|---|---|---|---|
 | `provider_timeout_seconds` | `ATI_PROVIDER_TIMEOUT_SECONDS` | `float` | `15.0` | `> 0` | Per-request HTTP timeout in seconds |
@@ -441,10 +447,12 @@ All live evidence provider settings map to environment variables using the `ATI_
 When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
 When set, the value must be strictly positive. Retry backoff computes the exponential delay for the
 retry number, applies bounded symmetric jitter to that component alone, then takes the larger of the
-jittered exponential delay and any valid provider-directed `Retry-After` value (so negative jitter
+jittered exponential delay and a valid HTTP 429 `Retry-After` value (so negative jitter
 can never schedule a retry earlier than an in-cap `Retry-After`), and finally clamps the result to
 `provider_retry_max_delay_seconds`, which remains the hard upper bound even when the provider asks
-for a longer wait.
+for a longer wait. Backoff arithmetic is overflow-safe: huge retry indices and oversized valid
+429 `Retry-After` integers saturate at the cap instead of raising, while the parsed value is
+still reported unchanged on the final rate-limit error.
 
 ## Configuration and secrets
 

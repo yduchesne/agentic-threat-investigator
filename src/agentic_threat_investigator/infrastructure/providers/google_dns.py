@@ -38,6 +38,10 @@ from agentic_threat_investigator.infrastructure.providers.http import ProviderHt
 _GOOGLE_DNS_ENDPOINT = "https://dns.google/resolve"
 _DOMAIN_RR_TYPES = ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA"]
 
+_ASCII_WHITESPACE = frozenset(" \t\n\r\f\v")
+_PRINTABLE_ASCII_MIN = 0x21
+_PRINTABLE_ASCII_MAX = 0x7E
+
 _NUMERIC_TO_RR_TYPE: dict[int, str] = {
     1: "A",
     28: "AAAA",
@@ -111,6 +115,147 @@ class DnsQueryOutcome:
     is_nxdomain: bool = False
 
 
+# -- DNS presentation parsing ---------------------------------------------
+
+
+def _tokenize_rdata(data: str) -> list[str] | None:
+    """Split RDATA presentation text on unescaped ASCII whitespace.
+
+    Escape sequences are preserved inside tokens for later decoding. Returns
+    ``None`` when the text ends with an incomplete escape, so field boundaries
+    can never be moved by escaped or malformed whitespace.
+    """
+    tokens: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in data:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            current.append(char)
+            escaped = True
+        elif char in _ASCII_WHITESPACE:
+            if current:
+                tokens.append("".join(current))
+                current = []
+        else:
+            current.append(char)
+    if escaped:
+        return None
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _decode_presentation_label(label: str) -> str | None:
+    """Decode RFC 1035 presentation escapes within one name label.
+
+    A backslash followed by exactly three decimal digits decodes one octet;
+    a backslash followed by any other character quotes that character.
+    Returns ``None`` for trailing or incomplete escapes, out-of-range octets,
+    octets outside the printable ASCII range (control characters, whitespace,
+    and unsupported arbitrary bytes), and escaped literal dots, which cannot
+    be represented unambiguously in canonical dotted form.
+    """
+    decoded: list[str] = []
+    index = 0
+    length = len(label)
+    while index < length:
+        char = label[index]
+        if char != "\\":
+            decoded.append(char)
+            index += 1
+            continue
+        if index + 1 >= length:
+            return None
+        following = label[index + 1]
+        if following.isdigit() and not "0" <= following <= "9":
+            return None
+        if "0" <= following <= "9":
+            digits = label[index + 1 : index + 4]
+            if (
+                index + 4 > length
+                or len(digits) != 3
+                or not digits.isascii()
+                or not digits.isdecimal()
+            ):
+                return None
+            octet = int(label[index + 1 : index + 4])
+            if not _PRINTABLE_ASCII_MIN <= octet <= _PRINTABLE_ASCII_MAX:
+                return None
+            decoded.append(chr(octet))
+            index += 4
+            continue
+        if following == ".":
+            return None
+        decoded.append(following)
+        index += 2
+    return "".join(decoded)
+
+
+def _split_name_labels(candidate: str) -> list[str] | None:
+    """Split a presentation name into raw labels on unescaped dots.
+
+    Escapes are preserved inside labels for later decoding. Returns ``None``
+    for empty labels (leading dot, double dot) and for a trailing backslash.
+    """
+    labels: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in candidate:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            current.append(char)
+            escaped = True
+        elif char == ".":
+            if not current:
+                return None
+            labels.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    if escaped:
+        return None
+    if current:
+        labels.append("".join(current))
+    return labels
+
+
+def _normalize_protocol_name(raw: str) -> str | None:
+    """Normalize a domain-valued DNS protocol name for provider facts.
+
+    The exact root name normalizes to ``.``. Every other name is split on
+    unescaped label separators, decoded from presentation escapes per label,
+    and validated through the strict domain-name contract (IDNA, label
+    characters, and length limits). Returns ``None`` for malformed,
+    incomplete, or unrepresentable names.
+
+    The result is a source fact only: a normalized root never becomes an ATI
+    domain entity, relationship endpoint, or pivot target.
+    """
+    candidate = raw.strip()
+    if not candidate:
+        return None
+    if candidate == ".":
+        return "."
+    labels = _split_name_labels(candidate)
+    if labels is None:
+        return None
+    decoded_labels: list[str] = []
+    for label in labels:
+        decoded = _decode_presentation_label(label)
+        if not decoded:
+            return None
+        decoded_labels.append(decoded)
+    try:
+        return validate_dns_name(".".join(decoded_labels))
+    except ValueError:
+        return None
+
+
 # -- Answer normalizers ---------------------------------------------------
 
 
@@ -118,12 +263,15 @@ def _normalize_ip_answer(
     answer: GoogleDnsAnswer, expected_version: int, record_type: str
 ) -> dict[str, Any] | None:
     """Normalize an A or AAAA answer record."""
+    owner = _normalize_protocol_name(answer.name)
+    if owner is None:
+        return None
     try:
         ip_obj = ipaddress.ip_address(answer.data.strip())
         if ip_obj.version != expected_version:
             return None
         return {
-            "name": validate_dns_name(answer.name),
+            "name": owner,
             "record_type": record_type,
             "ttl": answer.TTL,
             "value": str(ip_obj),
@@ -135,77 +283,105 @@ def _normalize_ip_answer(
 def _normalize_name_answer(
     answer: GoogleDnsAnswer, record_type: str
 ) -> dict[str, Any] | None:
-    """Normalize a CNAME, NS, or PTR answer record."""
-    try:
-        return {
-            "name": validate_dns_name(answer.name),
-            "record_type": record_type,
-            "ttl": answer.TTL,
-            "value": validate_dns_name(answer.data),
-        }
-    except ValueError:
+    """Normalize a CNAME, NS, or PTR answer record.
+
+    The target normalizes through the protocol-name contract: the root name
+    is retained as ``.`` and is not eligible to become an ATI domain entity.
+    """
+    owner = _normalize_protocol_name(answer.name)
+    value = _normalize_protocol_name(answer.data)
+    if owner is None or value is None:
         return None
+    return {
+        "name": owner,
+        "record_type": record_type,
+        "ttl": answer.TTL,
+        "value": value,
+    }
 
 
 def _normalize_mx_answer(answer: GoogleDnsAnswer) -> dict[str, Any] | None:
-    """Normalize an MX answer record."""
-    parts = answer.data.strip().split(None, 1)
-    if len(parts) != 2:
+    """Normalize an MX answer record.
+
+    The exchange normalizes through the protocol-name contract. The exact
+    pair of preference ``0`` and root exchange ``.`` is the null-MX sentinel;
+    a root exchange with any nonzero preference is malformed.
+    """
+    tokens = _tokenize_rdata(answer.data)
+    preference: int | None = None
+    exchange: str | None = None
+    if (
+        tokens is not None
+        and len(tokens) == 2
+        and tokens[0].isdigit()
+        and 0 <= int(tokens[0]) <= 65535
+    ):
+        candidate_exchange = _normalize_protocol_name(tokens[1])
+        if candidate_exchange is not None and (
+            candidate_exchange != "." or int(tokens[0]) == 0
+        ):
+            preference = int(tokens[0])
+            exchange = candidate_exchange
+    owner = _normalize_protocol_name(answer.name)
+    if preference is None or exchange is None or owner is None:
         return None
-    try:
-        preference = int(parts[0])
-        if not 0 <= preference <= 65535:
-            return None
-        exchange = validate_dns_name(parts[1])
-        return {
-            "name": validate_dns_name(answer.name),
-            "record_type": "MX",
-            "ttl": answer.TTL,
-            "preference": preference,
-            "exchange": exchange,
-        }
-    except ValueError:
-        return None
+    return {
+        "name": owner,
+        "record_type": "MX",
+        "ttl": answer.TTL,
+        "preference": preference,
+        "exchange": exchange,
+    }
 
 
 def _normalize_soa_answer(answer: GoogleDnsAnswer) -> dict[str, Any] | None:
-    """Normalize an SOA authority record."""
-    parts = answer.data.strip().split(None, 6)
-    if len(parts) != 7:
+    """Normalize an SOA authority record.
+
+    RDATA must tokenize into exactly seven fields: two protocol names and
+    five unsigned 32-bit integers. Tokenization honors escape boundaries so
+    escaped whitespace can never move a field boundary.
+    """
+    tokens = _tokenize_rdata(answer.data)
+    if tokens is None or len(tokens) != 7:
         return None
-    try:
-        mname = validate_dns_name(parts[0])
-        rname = validate_dns_name(parts[1])
-        numbers = [int(p) for p in parts[2:]]
-        if any(not 0 <= n <= _MAX_UINT32 for n in numbers):
-            return None
-        return {
-            "name": validate_dns_name(answer.name),
-            "record_type": "SOA",
-            "ttl": answer.TTL,
-            "mname": mname,
-            "rname": rname,
-            "serial": numbers[0],
-            "refresh": numbers[1],
-            "retry": numbers[2],
-            "expire": numbers[3],
-            "minimum": numbers[4],
-        }
-    except ValueError:
+    mname = _normalize_protocol_name(tokens[0])
+    rname = _normalize_protocol_name(tokens[1])
+    if mname is None or rname is None:
         return None
+    number_tokens = tokens[2:]
+    if not all(token.isdigit() for token in number_tokens):
+        return None
+    numbers = [int(token) for token in number_tokens]
+    if any(not 0 <= number <= _MAX_UINT32 for number in numbers):
+        return None
+    owner = _normalize_protocol_name(answer.name)
+    if owner is None:
+        return None
+    return {
+        "name": owner,
+        "record_type": "SOA",
+        "ttl": answer.TTL,
+        "mname": mname,
+        "rname": rname,
+        "serial": numbers[0],
+        "refresh": numbers[1],
+        "retry": numbers[2],
+        "expire": numbers[3],
+        "minimum": numbers[4],
+    }
 
 
 def _normalize_txt_answer(answer: GoogleDnsAnswer) -> dict[str, Any] | None:
     """Normalize a TXT answer record."""
-    try:
-        return {
-            "name": validate_dns_name(answer.name),
-            "record_type": "TXT",
-            "ttl": answer.TTL,
-            "value": answer.data,
-        }
-    except ValueError:
+    owner = _normalize_protocol_name(answer.name)
+    if owner is None:
         return None
+    return {
+        "name": owner,
+        "record_type": "TXT",
+        "ttl": answer.TTL,
+        "value": answer.data,
+    }
 
 
 _NORMALIZERS: dict[str, Callable[[GoogleDnsAnswer], dict[str, Any] | None]] = {
@@ -227,21 +403,55 @@ def _normalize_single_answer(
     actual_type = _NUMERIC_TO_RR_TYPE.get(answer.type)
     if actual_type is None:
         return None
-
+    if actual_type == "CNAME" and requested_type != "CNAME":
+        return _normalize_name_answer(answer, "CNAME")
     if actual_type != requested_type:
-        if actual_type == "CNAME" and requested_type in (
-            "A",
-            "AAAA",
-            "MX",
-            "NS",
-            "TXT",
-            "PTR",
-        ):
-            return _normalize_name_answer(answer, "CNAME")
         return None
-
     normalizer = _NORMALIZERS.get(actual_type)
     return normalizer(answer) if normalizer is not None else None
+
+
+def _validate_answer_set(
+    normalized: list[dict[str, Any]],
+    query_name: str,
+    rr_type: str,
+) -> bool:
+    """Validate answer attribution, CNAME chains, and MX-set consistency.
+
+    Every answer must belong to the queried canonical name, either directly
+    or through a contiguous acyclic CNAME chain rooted at it. A CNAME chain
+    may not follow a terminal answer or point back to an earlier owner, and
+    terminal answers of the requested type must sit at the final chain
+    target; several terminal answers may share that owner. For MX queries, a
+    root exchange (null MX) must be the only MX record in the set, with
+    preference zero. This is source attribution validation only: it infers
+    no relationships, entities, or maliciousness.
+    """
+    expected_owner = query_name
+    visited_owners = {query_name}
+    saw_terminal = False
+    for answer in normalized:
+        record_type = answer["record_type"]
+        if record_type == "CNAME":
+            if saw_terminal or answer["name"] != expected_owner:
+                return False
+            target = answer["value"]
+            if target in visited_owners:
+                return False
+            visited_owners.add(target)
+            expected_owner = target
+            continue
+        if record_type != rr_type:
+            return False
+        if answer["name"] != expected_owner:
+            return False
+        saw_terminal = True
+    if rr_type == "MX":
+        mx_answers = [answer for answer in normalized if answer["record_type"] == "MX"]
+        if any(answer["exchange"] == "." for answer in mx_answers):
+            if len(mx_answers) != 1 or mx_answers[0]["preference"] != 0:
+                return False
+    return True
 
 
 def _validate_question(
@@ -523,6 +733,18 @@ class GooglePublicDnsProvider(EvidenceProvider):
                     )
                 )
             normalized_answers.append(norm)
+
+        if not _validate_answer_set(normalized_answers, query_name, rr_type):
+            return DnsQueryOutcome(
+                errors=(
+                    ProviderError(
+                        provider=self.id,
+                        code=ProviderErrorCode.INVALID_RESPONSE,
+                        message="inconsistent DNS answer set",
+                        retryable=False,
+                    ),
+                )
+            )
 
         flags: dict[str, bool] = {}
         for flag_name, flag_val in [

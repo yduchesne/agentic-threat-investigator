@@ -8,6 +8,10 @@
   - [IPinfo Lite](#ipinfo-lite)
   - [RDAP](#rdap)
   - [Google Public DNS](#google-public-dns)
+    - [Authoritative DNS semantics](#authoritative-dns-semantics)
+    - [Entity names and protocol names](#entity-names-and-protocol-names)
+    - [DNS record validation matrix](#dns-record-validation-matrix)
+    - [DNS RR-set consistency](#dns-rr-set-consistency)
   - [DB-IP City Lite](#db-ip-city-lite)
   - [AbuseIPDB](#abuseipdb)
   - [ThreatFox](#threatfox)
@@ -228,19 +232,133 @@ Source identifier:
 
 `urn:ati:source:google_public_dns`
 
+#### Authoritative DNS semantics
+
+Google's JSON API documentation defines the HTTP request/response encoding,
+but it is not the complete semantic specification for DNS record data. DNS
+normalization and validation must also follow the applicable DNS standards,
+including:
+
+- RFC 1035 for DNS names and common resource-record presentation;
+- RFC 7505 for null MX;
+- RFC 8499 for current DNS terminology.
+
+When the JSON transport contract and an applicable DNS protocol contract both
+constrain a value, ATI validates both. A schema-valid JSON string is not
+necessarily a semantically valid resource record. Conversely, a protocol-valid
+special value must not be rejected merely because it is not a valid ATI entity
+value.
+
+#### Entity names and protocol names
+
+ATI entity canonicalization and DNS protocol-field normalization are related
+but distinct contracts:
+
+- An investigated `DOMAIN` must identify a non-root reusable domain entity.
+  Empty values, empty labels, and the DNS root (`.`) are not ATI domain
+  entities.
+- Non-root DNS owner names and ordinary domain-valued RDATA use strict
+  lowercase IDNA normalization without a terminal dot.
+- The DNS root is a valid protocol name but not an ATI `DOMAIN` entity. Where
+  a supported domain-valued DNS field contains the root, ATI preserves it as
+  the exact normalized string `.` and marks it ineligible for entity
+  discovery. A field-specific semantic rule may impose additional limits.
+- A protocol-defined sentinel may be valid in one specific RDATA field even
+  when it is not eligible to become an ATI entity. Such exceptions must be
+  explicit per record type; they must not weaken the general domain entity or
+  DNS-name validator.
+- The MX root exchange (`.`) has the specific null-MX meaning only when paired
+  with preference `0`. It must never be emitted as a discovered domain,
+  relationship endpoint, or pivot target.
+
+Provider implementations must use field-specific normalizers where protocol
+semantics differ from entity canonicalization. Do not make a global
+canonicalizer accept a protocol sentinel to accommodate one record type.
+
+#### DNS record validation matrix
+
+For each query, ATI validates every answer before emitting evidence. One
+malformed answer invalidates that query observation; ATI never emits a partly
+normalized answer set. CNAME records included in another query type are
+preserved in source order only where the provider contract permits a CNAME
+chain.
+
+| RR type | Required semantic validation | Stable normalized fields | Special values |
+|---|---|---|---|
+| A | RDATA is an IPv4 address | canonical compressed `value` | none |
+| AAAA | RDATA is an IPv6 address | canonical compressed lowercase `value` | none |
+| CNAME | RDATA is one DNS domain name | canonical `value` | root normalizes to `.` and is not discoverable |
+| NS | RDATA is one DNS domain name | canonical `value` | root normalizes to `.` and is not discoverable |
+| PTR | RDATA is one DNS domain name | canonical `value` | root normalizes to `.` and is not discoverable |
+| MX | preference is an integer in `0..65535`; exchange follows the MX rules below | integer `preference`, canonical `exchange` | `0 .` is null MX |
+| TXT | JSON `data` is a string and remains untrusted text; ATI does not execute, concatenate, or reinterpret provider presentation quoting | exact post-JSON-decoding provider string as `value` | a zero-length `data` member is schema-invalid |
+| SOA | RDATA tokenizes into exactly two DNS domain names and five unsigned 32-bit integers | `mname`, `rname`, `serial`, `refresh`, `retry`, `expire`, `minimum` | RFC 1035 decimal and escaped-character name syntax is decoded before canonicalization; malformed/incomplete escapes are invalid |
+
+Domain-valued RDATA parsing must understand DNS presentation escapes rather
+than splitting or validating the escaped source text as though it were already
+a canonical hostname. A backslash followed by exactly three ASCII decimal
+digits decodes one octet; Unicode numeral characters are not decimal-escape
+digits. A backslash followed by another character quotes that
+character. A trailing or incomplete escape is invalid. Decoded names must be
+representable as valid DNS names under ATI's supported IDNA/text contract;
+unsupported arbitrary-octet labels are `INVALID_RESPONSE`, not replacement-
+decoded or silently altered. SOA tokenization must honor escaped whitespace so
+it cannot change field boundaries.
+
+Record-type tests must include a positive ordinary form, malformed syntax, a
+wrong-family/type form where applicable, canonicalization boundaries, root-name
+handling for domain-valued fields, escaped presentation syntax where
+applicable, and each standards-defined special form ATI claims to support. If
+a standards-valid form has no approved normalized representation, stop and
+update this document before coding rather than classifying it as malformed by
+accident.
+
+#### DNS RR-set consistency
+
+Validation includes relationships among answers, not only validation of each
+record in isolation. At minimum:
+
+- NXDOMAIN with an Answer section is contradictory and is
+  `INVALID_RESPONSE`.
+- A null MX is valid only as preference `0` with exchange `.`.
+- A valid null-MX set contains exactly one MX record. A null MX mixed with an
+  ordinary MX, a duplicate null MX, or a root exchange with nonzero preference
+  is `INVALID_RESPONSE`; no partial MX evidence is emitted.
+- Preference `0` with a non-root exchange is an ordinary MX record, not null
+  MX.
+- A CNAME included as part of an otherwise supported answer chain does not
+  itself count as an MX record when evaluating null-MX cardinality.
+- When `Question` is present, every entry must match the canonical requested
+  name and numeric requested type.
+- Every non-CNAME answer must be attributable to the requested name or to the
+  terminal target of a validated CNAME chain. CNAME chains must be contiguous
+  by canonical owner/target name, must not loop, and must not contain two
+  different targets for the same owner. Unrelated-owner answers are
+  `INVALID_RESPONSE` and are never attached to the investigated subject.
+- For a direct query without a CNAME chain, each answer owner must equal the
+  canonical query name. Owner-name validation alone is insufficient.
+- Answer-type exceptions must be explicit. A query may contain its requested
+  type and a validated CNAME chain; an unrelated known or unknown RR type is
+  `INVALID_RESPONSE`.
+
+RR-set consistency rules must be enforced after individual answer
+normalization and before immutable Evidence construction. They do not infer
+relationships or maliciousness.
+
 Supported entity types:
 
 - ``DOMAIN``: queries A, AAAA, CNAME, MX, NS, TXT, SOA in order. NXDOMAIN
   on the first query short-circuits remaining types. An NXDOMAIN response
   that carries an Answer section is contradictory upstream data and is
   rejected as ``INVALID_RESPONSE``. NOERROR with no answers
-  for a record type is a valid empty sub-result. Queried names and all
-  provider-supplied DNS names are strictly validated (no embedded
-  whitespace, underscores, empty labels, or overlong labels; at most one
-  terminal DNS root dot is removed, so names such as ``example.com..``
-  are rejected; Unicode input is canonicalized to IDNA punycode). Invalid
-  names are `UNSUPPORTED_INDICATOR` on input and `INVALID_RESPONSE` in
-  responses.
+  for a record type is a valid empty sub-result. Queried names and ordinary
+  provider-supplied DNS names are strictly validated (no embedded whitespace,
+  underscores, empty labels, or overlong labels; at most one terminal DNS
+  root dot is removed, so names such as ``example.com..`` are rejected;
+  Unicode input is canonicalized to IDNA punycode). Invalid input names are
+  `UNSUPPORTED_INDICATOR`; invalid response names are `INVALID_RESPONSE`.
+  Protocol sentinels are accepted only where the field-specific matrix above
+  explicitly defines them and never broaden valid entity inputs.
 - ``IP_ADDRESS``: queries PTR via the reverse-pointer name (``in-addr.arpa``
   or ``ip6.arpa``).
 
@@ -262,8 +380,14 @@ Every normalized answer contains ``name``, ``record_type``, and ``ttl``.
 Type-specific fields:
 
 - A/AAAA: ``value`` as canonical compressed IP.
-- CNAME/NS/PTR: ``value`` as canonical lowercase IDNA domain without trailing dot.
-- MX: integer ``preference`` and canonical domain ``exchange``.
+- CNAME/NS/PTR: ``value`` as a canonical lowercase IDNA domain without a
+  trailing dot, or `.` for the protocol root. The root value is retained as a
+  source fact but is not eligible for entity discovery.
+- MX: integer ``preference`` and ``exchange``. An ordinary exchange is a
+  canonical lowercase IDNA domain without a trailing dot. The exact pair
+  ``preference=0`` and ``exchange="."`` represents null MX and states that the
+  source advertises no mail exchanger. The root sentinel is retained only as
+  a provider fact; it is not a domain entity or relationship target.
 - TXT: exact decoded provider string as ``value``.
 - SOA: structured ``mname``, ``rname``, ``serial``, ``refresh``, ``retry``,
   ``expire``, and ``minimum``.

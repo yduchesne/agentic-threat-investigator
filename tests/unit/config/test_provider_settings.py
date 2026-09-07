@@ -34,6 +34,40 @@ class TestProviderSettings:
         assert settings.provider_max_retries == 5
         assert settings.google_dns_max_concurrency == 20
 
+    @pytest.mark.parametrize(
+        "field_name",
+        [
+            "provider_max_retries",
+            "provider_max_response_bytes",
+            "google_dns_max_concurrency",
+            "rdap_max_concurrency",
+            "rdap_bootstrap_cache_seconds",
+        ],
+    )
+    @pytest.mark.parametrize("bad_value", [True, False, 1.0, 1.5, None])
+    def test_integer_profile_values_reject_coercion(
+        self, field_name: str, bad_value: object
+    ) -> None:
+        """Typed profile values cannot coerce booleans or floats to integers."""
+        with pytest.raises(ValidationError, match="integer"):
+            settings_from_config({field_name: bad_value})
+
+    @pytest.mark.parametrize(
+        "field_name",
+        [
+            "provider_timeout_seconds",
+            "provider_retry_base_delay_seconds",
+            "provider_retry_max_delay_seconds",
+            "provider_retry_jitter_ratio",
+            "google_dns_requests_per_second",
+            "rdap_requests_per_second",
+        ],
+    )
+    def test_real_profile_values_reject_booleans(self, field_name: str) -> None:
+        """Boolean profile values are not provider timing or rate numbers."""
+        with pytest.raises(ValidationError, match="real number"):
+            settings_from_config({field_name: True})
+
     def test_zero_timeout_rejected(self) -> None:
         """A zero timeout is rejected."""
         with pytest.raises(ValidationError, match="greater_than"):
@@ -99,3 +133,70 @@ class TestProviderSettings:
         """Zero cache lifetime is rejected."""
         with pytest.raises(ValidationError, match="greater_than"):
             settings_from_config({"rdap_bootstrap_cache_seconds": 0})
+
+    @pytest.mark.parametrize(
+        "field_name",
+        [
+            "provider_timeout_seconds",
+            "provider_retry_base_delay_seconds",
+            "provider_retry_max_delay_seconds",
+            "provider_retry_jitter_ratio",
+            "google_dns_requests_per_second",
+            "rdap_requests_per_second",
+        ],
+    )
+    def test_positive_infinity_rejected(self, field_name: str) -> None:
+        """Positive infinity is not a finite bounded provider setting."""
+        with pytest.raises(ValidationError, match="finite"):
+            settings_from_config({field_name: float("inf")})
+
+    def test_negative_infinity_timeout_rejected(self) -> None:
+        """Negative infinity is rejected by finiteness before sign checks."""
+        with pytest.raises(ValidationError, match="finite"):
+            settings_from_config({"provider_timeout_seconds": float("-inf")})
+
+    @pytest.mark.parametrize(
+        "field_name",
+        [
+            "provider_timeout_seconds",
+            "provider_retry_base_delay_seconds",
+            "provider_retry_max_delay_seconds",
+            "provider_retry_jitter_ratio",
+            "google_dns_requests_per_second",
+            "rdap_requests_per_second",
+        ],
+    )
+    def test_nan_rejected(self, field_name: str) -> None:
+        """NaN is not a finite provider setting and violates sign bounds."""
+        with pytest.raises(ValidationError, match="finite"):
+            settings_from_config({field_name: float("nan")})
+
+    def test_optional_rate_none_remains_accepted(self) -> None:
+        """The optional rate settings still accept None (rate limiting off)."""
+        settings = settings_from_config(
+            {
+                "google_dns_requests_per_second": None,
+                "rdap_requests_per_second": None,
+            }
+        )
+        assert settings.google_dns_requests_per_second is None
+        assert settings.rdap_requests_per_second is None
+
+    def test_finite_boundary_values_accepted(self) -> None:
+        """Representative finite boundary values remain accepted."""
+        settings = settings_from_config(
+            {
+                "provider_timeout_seconds": 0.5,
+                "provider_retry_base_delay_seconds": 0.0,
+                "provider_retry_max_delay_seconds": 0.0,
+                "provider_retry_jitter_ratio": 1.0,
+                "google_dns_requests_per_second": 0.001,
+                "rdap_requests_per_second": 1000.0,
+            }
+        )
+        assert settings.provider_timeout_seconds == 0.5
+        assert settings.provider_retry_base_delay_seconds == 0.0
+        assert settings.provider_retry_max_delay_seconds == 0.0
+        assert settings.provider_retry_jitter_ratio == 1.0
+        assert settings.google_dns_requests_per_second == 0.001
+        assert settings.rdap_requests_per_second == 1000.0

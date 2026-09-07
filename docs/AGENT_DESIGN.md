@@ -140,6 +140,39 @@ Distinguish:
 
 A valid "no hit" result is not globally equivalent to benign evidence.
 
+### Layered provider-response validation
+
+External responses are untrusted and must pass all applicable validation
+layers before Evidence construction:
+
+1. **Transport/schema:** status, media type, response size, JSON shape, strict
+   scalar types, required fields, and container types.
+2. **Field semantics:** protocol syntax, numeric/address/name bounds,
+   canonicalization, and standards-defined special values.
+3. **Cross-field/object consistency:** requested object class and identity,
+   range ordering/containment, address family, and mutually dependent fields.
+4. **Collection/RR-set consistency:** uniqueness, ambiguity, CNAME/owner
+   attribution, null/sentinel cardinality, and contradictions among entries.
+5. **ATI eligibility:** whether a normalized protocol value is a reusable
+   entity, a non-discoverable source fact, or an explicitly supported
+   sentinel. Protocol validity does not automatically imply entity
+   eligibility.
+6. **Provenance:** subject, source, source record identity, credential-free
+   source URL, and observation/retrieval timestamps.
+
+Validation must inspect original external input before lossy normalization can
+erase invalid syntax. Fact builders consume only validated canonical values.
+Provider-originated malformed data must produce a typed provider error and
+must not escape as incidental parser, index, decoding, arithmetic, or model
+exceptions. Programming errors and cancellation continue to propagate.
+
+For every optional external field or nested entry, source documentation must
+state whether absence is accepted and whether malformed content invalidates
+the response or is omitted. Implementations must not infer this policy from a
+fixture. Standards-valid protocol forms that differ from ATI entity syntax
+require an explicit normalized representation; they must not be rejected as
+malformed merely because a general entity canonicalizer cannot represent them.
+
 Infrastructure retries are bounded. Initial policy:
 
 - configurable timeout;
@@ -161,13 +194,23 @@ Responses must match accepted provider-specific media types: Google DNS accepts
 implicitly accepted. Redirects are terminal (never followed to unapproved hosts).
 Retry backoff computes the exponential delay for the retry number, applies
 bounded symmetric jitter to that component alone, and then takes the larger
-of the jittered exponential delay and any valid provider-directed
-`Retry-After` value, so a negative jitter never schedules a retry earlier
-than an in-cap `Retry-After` minimum. The final result is clamped to
+of the jittered exponential delay and a valid HTTP 429 `Retry-After`
+value, so a negative jitter never schedules a retry earlier
+than an in-cap `Retry-After` minimum. `Retry-After` is parsed and reported
+only for HTTP 429 rate-limit responses; timeout, network, and 5xx retries
+use local exponential/jitter backoff only, and permanent statuses never
+parse or report it. Backoff arithmetic is overflow-safe: huge retry
+indices and oversized valid 429 `Retry-After` values saturate at
+`provider_retry_max_delay_seconds` instead of raising, while the parsed
+retry-after value may still be reported unchanged on the final rate-limit
+error. The final result is clamped to
 `provider_retry_max_delay_seconds`, which remains the hard upper bound even
 when the provider requests a longer wait; the reported `retry_after_seconds`
-error field is never altered by that clamping. The rate limiter
-computes wait outside the scheduling lock so concurrent acquirers are not
+error field is never altered by that clamping. The injectable jitter source
+is sampled exactly once per retry delay and must return a finite value in
+`[0.0, 1.0]`; an invalid sample is a propagated programming error rather than
+a typed provider failure. The rate limiter computes wait outside the scheduling
+lock so concurrent acquirers are not
 blocked, and cancellation safely releases concurrency permits and reclaims
 the canceled rate reservation so canceled waiters never delay later requests.
 

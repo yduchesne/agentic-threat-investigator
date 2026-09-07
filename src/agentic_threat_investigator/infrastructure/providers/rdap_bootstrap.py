@@ -18,6 +18,7 @@ from agentic_threat_investigator.app.providers import ProviderError, ProviderErr
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
+    read_monotonic_clock,
     validate_provider_url,
 )
 
@@ -399,11 +400,11 @@ class RdapBootstrapCache:
             )
 
         cached = self._cache.get(registry_url)
-        if cached is not None and self._clock() < cached.expires_at:
+        if cached is not None and read_monotonic_clock(self._clock) < cached.expires_at:
             return cached.services, None
 
         async with self._get_lock(registry_url):
-            now = self._clock()
+            now = read_monotonic_clock(self._clock)
             cached = self._cache.get(registry_url)
             if cached is not None and now < cached.expires_at:
                 return cached.services, None
@@ -447,7 +448,7 @@ class RdapBootstrapCache:
                 retryable=False,
             )
 
-        completion_time = self._clock()
+        completion_time = read_monotonic_clock(self._clock)
         self._cache[registry_url] = BootstrapCacheEntry(
             services=services,
             expires_at=completion_time + self._cache_seconds,

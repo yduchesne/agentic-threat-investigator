@@ -188,7 +188,7 @@ class TestGoogleDnsContract:
             rr_type = request.url.params.get("type")
             if rr_type == "CNAME":
                 data = _dns_response(
-                    answers=[_record("alias.example.", 5, "canonical.example.")]
+                    answers=[_record("example.com.", 5, "canonical.example.")]
                 )
             elif rr_type == "MX":
                 data = _dns_response(
@@ -701,6 +701,26 @@ class TestGoogleDnsHttpContract:
         assert attempts == 3
         assert len(sleep.calls) == 2
 
+    async def test_exhausted_5xx_carries_no_retry_after(self) -> None:
+        """An exhausted 5xx with Retry-After stays retryable with no retry-after value."""
+
+        def _handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(503, headers={"Retry-After": "120"}, json={})
+
+        transport = MockTransport(_handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            result, _ = await self._investigate_ptr(
+                client,
+                max_retries=2,
+                base_delay_seconds=0.02,
+                max_delay_seconds=0.5,
+                sleep=_RecordingSleep(),
+                jitter_fn=_zero_jitter,
+            )
+        assert result.errors[0].code == ProviderErrorCode.PROVIDER_UNAVAILABLE
+        assert result.errors[0].retryable is True
+        assert result.errors[0].retry_after_seconds is None
+
 
 @pytest.mark.unit
 @pytest.mark.provider_contract
@@ -865,7 +885,7 @@ class TestGoogleDnsValidation:
         assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
 
     async def test_valid_cname_chain_accepted(self) -> None:
-        """A CNAME answer to an A query is accepted as a valid CNAME chain record."""
+        """A query-rooted CNAME chain ending in a terminal A record is accepted."""
 
         def _handler(request: httpx.Request) -> httpx.Response:
             if request.url.params.get("type") == "A":
@@ -874,7 +894,8 @@ class TestGoogleDnsValidation:
                     headers={"Content-Type": "application/json"},
                     json=_dns_response(
                         answers=[
-                            _record("alias.example.com.", 5, "target.example.com.")
+                            _record("example.com.", 5, "alias.example.com."),
+                            _record("alias.example.com.", 1, "192.0.2.7"),
                         ]
                     ),
                 )
@@ -890,9 +911,10 @@ class TestGoogleDnsValidation:
             )
         assert len(result.evidence) == 1
         assert result.evidence[0].facts["query_type"] == "A"
-        answer = result.evidence[0].facts["answers"][0]
-        assert answer["record_type"] == "CNAME"
-        assert answer["value"] == "target.example.com"
+        answers = result.evidence[0].facts["answers"]
+        assert [answer["record_type"] for answer in answers] == ["CNAME", "A"]
+        assert answers[0]["value"] == "alias.example.com"
+        assert answers[1]["value"] == "192.0.2.7"
 
     async def test_ipv6_ptr_reverse_pointer(self) -> None:
         """An IPv6 PTR query uses the ip6.arpa reverse-pointer name."""

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -190,6 +191,11 @@ class TestContentTypeAndStatusClassification:
             classify_http_status(503, accepted)
             == ProviderErrorCode.PROVIDER_UNAVAILABLE
         )
+        assert (
+            classify_http_status(599, accepted)
+            == ProviderErrorCode.PROVIDER_UNAVAILABLE
+        )
+        assert classify_http_status(600, accepted) == ProviderErrorCode.INVALID_RESPONSE
         assert classify_http_status(400, accepted) == ProviderErrorCode.INVALID_RESPONSE
         assert classify_http_status(301, accepted) == ProviderErrorCode.INVALID_RESPONSE
 
@@ -223,6 +229,47 @@ class TestPolicyValidation:
         valid = RateLimiterSettings(max_concurrency=5, requests_per_second=10.0)
         assert valid.max_concurrency == 5
         assert valid.requests_per_second == 10.0
+
+    @pytest.mark.parametrize("bad_rate", [float("inf"), float("-inf"), float("nan")])
+    def test_rate_limiter_non_finite_rate_rejected(self, bad_rate: float) -> None:
+        """A non-finite request rate is not a bounded limiter setting."""
+        with pytest.raises(ValueError, match="finite"):
+            RateLimiterSettings(max_concurrency=5, requests_per_second=bad_rate)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"timeout_seconds": float("inf")},
+            {"timeout_seconds": float("-inf")},
+            {"timeout_seconds": float("nan")},
+            {"base_delay_seconds": float("inf"), "max_delay_seconds": float("inf")},
+            {"base_delay_seconds": float("nan")},
+            {"max_delay_seconds": float("inf")},
+            {"max_delay_seconds": float("nan")},
+            {"jitter_ratio": float("inf")},
+            {"jitter_ratio": float("nan")},
+        ],
+    )
+    def test_provider_http_policy_non_finite_rejected(
+        self, kwargs: dict[str, Any]
+    ) -> None:
+        """Non-finite timing/jitter values violate the bounded policy contract."""
+        with pytest.raises(ValueError, match="finite"):
+            ProviderHttpPolicy(**kwargs)
+
+    def test_finite_policy_and_rate_construct(self) -> None:
+        """Ordinary finite policy and rate settings still construct."""
+        policy = ProviderHttpPolicy(
+            timeout_seconds=15.0,
+            base_delay_seconds=0.0,
+            max_delay_seconds=0.0,
+            jitter_ratio=1.0,
+        )
+        assert policy.timeout_seconds == 15.0
+        limiter_settings = RateLimiterSettings(
+            max_concurrency=1, requests_per_second=0.001
+        )
+        assert limiter_settings.requests_per_second == 0.001
 
     def test_provider_http_policy_bounds(self) -> None:
         """ProviderHttpPolicy validates timing, retry, and byte bounds."""
@@ -655,6 +702,64 @@ class TestProviderHttpClient:
 
 
 @pytest.mark.asyncio
+class TestFiveXxRetryBoundary:
+    """Exact retry behavior across the upper 5xx status boundary."""
+
+    @pytest.mark.asyncio
+    async def test_request_599_exhausts_retries(self) -> None:
+        """The last true 5xx status (599) remains retryable through exhaustion."""
+
+        def _handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(599, json={"error": "unavailable"})
+
+        transport = MockTransport(_handler)
+        sleep = _RecordingSleep()
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client,
+                max_retries=2,
+                base_delay_seconds=0.01,
+                max_delay_seconds=0.1,
+                sleep=sleep,
+                jitter_fn=_zero_jitter,
+            )
+            outcome = await http.request_json("GET", "https://test.example.com/api")
+            assert outcome.final_error_code == ProviderErrorCode.PROVIDER_UNAVAILABLE
+            assert outcome.final_status == 599
+            assert outcome.attempt_count == 3
+            assert outcome.retry_count == 2
+            assert len(sleep.calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_request_600_is_terminal_invalid_response(self) -> None:
+        """A nonstandard status above 599 is not a retryable server error."""
+        request_count = 0
+
+        def _handler(_: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            return httpx.Response(600, json={})
+
+        transport = MockTransport(_handler)
+        sleep = _RecordingSleep()
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client,
+                max_retries=2,
+                base_delay_seconds=0.01,
+                sleep=sleep,
+                jitter_fn=_zero_jitter,
+            )
+            outcome = await http.request_json("GET", "https://test.example.com/api")
+            assert outcome.final_error_code == ProviderErrorCode.INVALID_RESPONSE
+            assert outcome.final_status == 600
+            assert outcome.attempt_count == 1
+            assert outcome.retry_count == 0
+            assert request_count == 1
+            assert not sleep.calls
+
+
+@pytest.mark.asyncio
 class TestBoundedLimiter:
     """BoundedLimiter concurrency, rate limiting, and cancellation safety."""
 
@@ -862,3 +967,31 @@ class TestBoundedLimiter:
         assert sorted(reserved) == pytest.approx([1.0, 2.0, 3.0])
         for _ in tasks:
             limiter.release()
+
+
+@pytest.mark.asyncio
+async def test_huge_retry_after_exhaustion_is_bounded_and_reported() -> None:
+    """A 400-digit Retry-After sleeps at the cap but is reported unchanged."""
+    huge = 10**400
+
+    def _handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": str(huge)}, json={})
+
+    transport = MockTransport(_handler)
+    sleep = _RecordingSleep()
+    async with httpx.AsyncClient(transport=transport) as client:
+        http = ProviderHttpClient(
+            client=client,
+            max_retries=1,
+            base_delay_seconds=0.005,
+            max_delay_seconds=0.25,
+            sleep=sleep,
+            jitter_fn=_zero_jitter,
+        )
+        outcome = await http.request_json("GET", "https://test.example.com/api")
+
+    assert outcome.final_error_code == ProviderErrorCode.RATE_LIMITED
+    assert outcome.attempt_count == 2
+    assert len(sleep.calls) == 1
+    assert sleep.calls[0] == pytest.approx(0.25)
+    assert outcome.retry_after_seconds == huge
