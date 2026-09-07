@@ -6,6 +6,7 @@
 - [Evidence](#evidence)
 - [Relationships](#relationships)
 - [Assessment](#assessment)
+- [Structured agent results](#structured-agent-results)
 - [Geolocation](#geolocation)
 - [Investigation state](#investigation-state)
 - [Stopping](#stopping)
@@ -182,6 +183,108 @@ Verdict semantics:
 "Nothing malicious found" is not equivalent to BENIGN.
 
 Confidence expresses confidence in the verdict, not severity.
+
+## Structured agent results
+
+ATI agent outputs are domain/application data, not opaque conversational
+transcripts.
+
+Every programmatic agent result is represented by a concrete Pydantic model.
+The validated model is authoritative; its JSON-compatible serialization is
+the canonical machine representation used for persistence, API mapping,
+evaluation, and deterministic rendering.
+
+Free-form LLM output is not a domain object and is not persisted as the
+authoritative result of an agent operation.
+
+### Common rules
+
+Structured agent result models:
+
+- use explicit typed fields;
+- use stable enums/URNs where ATI defines them;
+- reference existing resources by stable IDs;
+- reject unexpected fields where appropriate;
+- distinguish required, optional, and empty values explicitly;
+- contain no hidden chain-of-thought;
+- contain no infrastructure clients, tool objects, prompts, or model-provider
+  state.
+
+Text fields are allowed when the text is an explicit part of the domain
+result, but the surrounding structure remains authoritative.
+
+### Coordinator result
+
+The Coordinator's executable recommendation is represented as a typed result,
+conceptually:
+
+```python
+class CoordinatorDecision(BaseModel):
+    action: CoordinatorAction
+    pivot_entity_ids: list[UUID] = Field(default_factory=list)
+    research_entity_ids: list[UUID] = Field(default_factory=list)
+    stop_reason: StopReason | None = None
+```
+
+The exact implementation model may evolve, but these invariants do not:
+
+- referenced entities already exist in the root/discovered set;
+- the model cannot manufacture an arbitrary target;
+- deterministic policy validates eligibility and budgets;
+- prose is not parsed to determine the action.
+
+### Evidence Analyst result
+
+`Assessment` is the authoritative Evidence Analyst output.
+
+Verdict and confidence are typed fields. Supporting/contradicting
+evidence references, limitations, unresolved questions, and recommended
+next steps remain explicit structured fields rather than being recovered
+from a prose report.
+
+### Threat Research result
+
+Threat Research output uses a typed result containing structured claims
+and retrieved-chunk references. Material research claims must remain
+attributable to chunk IDs.
+
+### InvestigationReport
+
+The Report Writer produces a structured `InvestigationReport` Pydantic
+model.
+
+At minimum, the report model must preserve structured references to:
+
+- the investigation;
+- the authoritative Assessment;
+- key findings;
+- Evidence references;
+- research/chunk citations where used;
+- limitations;
+- recommended next steps.
+
+The exact field decomposition is finalized with the Report Writer PR,
+but the following are hard invariants:
+
+1. the report is a Pydantic model;
+2. its JSON-compatible serialization is authoritative;
+3. the report references, rather than redefines, the Assessment verdict
+   and confidence;
+4. material claims are traceable to Evidence or research citations;
+5. the Report Writer cannot change the Assessment verdict/confidence;
+6. the final human-readable document is a deterministic rendering of
+   this structured model.
+
+### Deterministic rendered representations
+
+Markdown, HTML, and plain-text reports are derived representations, not
+separate analytical domain objects.
+
+A rendered representation MUST NOT contain a material semantic claim
+that is absent from the structured source model.
+
+The same structured model plus the same explicit formatter configuration
+must produce semantically identical rendered output.
 
 ## Geolocation
 

@@ -15,6 +15,7 @@
 - [Asynchronous investigation execution](#asynchronous-investigation-execution)
 - [LangGraph topology](#langgraph-topology)
 - [Agent boundaries](#agent-boundaries)
+- [Structured agent results and presentation](#structured-agent-results-and-presentation)
 - [Provider architecture](#provider-architecture)
 - [Relationship construction](#relationship-construction)
 - [RAG](#rag)
@@ -169,6 +170,106 @@ ATI has six logical agent roles:
 6. Report Writer.
 
 There is not one agent per external API.
+
+## Structured agent results and presentation
+
+ATI separates model reasoning/synthesis from presentation.
+
+Every agent operation that produces a programmatic result crosses the agent
+boundary through a concrete Pydantic output model:
+
+```text
+Agent / LLM
+    |
+    v
+Pydantic structured result
+    |
+    v
+deterministic semantic validation
+    |
+    +--> application workflow
+    +--> persistence
+    +--> API DTO mapping
+    |
+    v
+deterministic presentation
+```
+
+Free-form LLM text is never the authoritative representation of an agent
+decision or analytical output.
+
+The JSON-compatible serialization of the validated Pydantic model is the
+authoritative machine-readable representation. Human-readable documents
+are derived views.
+
+### Presentation boundary
+
+Human-readable Markdown, HTML, and plain text are produced by
+deterministic formatter/presenter components. Presentation components
+belong outside the agent reasoning boundary and do not invoke an LLM.
+
+A formatter may:
+
+- select headings and labels;
+- render lists/tables;
+- render references/citations;
+- apply explicit locale/date-format settings;
+- escape content for the target representation.
+
+A formatter may not:
+
+- add or remove material findings;
+- alter verdict/confidence;
+- reinterpret evidence;
+- introduce citations;
+- generate recommendations;
+- infer facts;
+- invoke tools/providers/retrievers;
+- mutate persisted/domain state.
+
+This makes structured ATI data the single semantic source for API
+responses, frontend rendering, exported reports, and deterministic test
+comparisons.
+
+### Report pipeline
+
+The report path is:
+
+```text
+Evidence + Relationships + Research + Assessment
+                    |
+                    v
+              Report Writer
+                    |
+                    v
+       InvestigationReport (Pydantic)
+                    |
+             validate invariants
+                    |
+                    v
+        persist structured report
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+       API DTO         deterministic formatter
+                              |
+                         Markdown / HTML
+```
+
+The Report Writer therefore produces structured report content rather
+than a finished free-form document.
+
+### Framework boundary
+
+LangChain/LangGraph or an LLM-provider-specific structured-output
+mechanism is an infrastructure concern. Domain/application contracts
+depend on ATI Pydantic result types, not on a vendor-specific
+JSON-schema or tool-call representation.
+
+The LLM adapter is responsible for converting provider/framework
+structured output into the requested ATI Pydantic model and reporting
+invalid output as the typed LLM failure defined by the agent contract.
 
 ## Provider architecture
 
