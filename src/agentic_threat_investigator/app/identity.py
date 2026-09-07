@@ -55,7 +55,7 @@ class Argon2idPasswordHasher(PasswordHasher):
         """Return false for malformed or non-matching hashes."""
         try:
             return self._hasher.verify(password_hash, password)
-        except (VerifyMismatchError, VerificationError, InvalidHashError):
+        except VerifyMismatchError, VerificationError, InvalidHashError:
             return False
 
 

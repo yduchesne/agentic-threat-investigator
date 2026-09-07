@@ -5,6 +5,7 @@
 - [Source of truth](#source-of-truth)
 - [Non-negotiable rules](#non-negotiable-rules)
 - [Python engineering](#python-engineering)
+- [Security scanning](#security-scanning)
 - [Tests](#tests)
 - [Documentation](#documentation)
 - [Configuration and batch-persistence invariants](#configuration-and-batch-persistence-invariants)
@@ -59,6 +60,21 @@ Additionally:
 - Source code must use type hints.
 - Keep generated Python bytecode out of source control; `__pycache__/` directories under `src/` must remain ignored and must never be committed.
 - We are leveraging async IO for application code. Unit tests, integration tests should use async io as well.
+
+## Security scanning
+
+- The repository runs Bandit, Semgrep, Safety, and pip-audit through
+  `./build.sh --sec`.
+- Running `./build.sh --sec` locally is NOT mandatory after making code
+  changes; it is deliberately skipped locally to save time.
+- The dedicated `security` CI gate runs `./build.sh --sec` on every PR, in
+  parallel with the quality and integration gates, and MUST pass for a PR to
+  be merged.
+- Any security-scan suppression (inline `# nosec`, tool skip lists, or
+  vulnerability ignores) must carry an explicit, documented justification at
+  the suppression site or in configuration.
+- Do not weaken the security gate to make it pass; fix findings or justify
+  each suppression independently.
 
 ## Tests
 

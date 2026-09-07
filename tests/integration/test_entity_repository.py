@@ -56,11 +56,9 @@ async def test_entity_upsert_canonicalizes_and_records_history(
         )
         assert uow.session is not None
         history = await uow.session.execute(
-            text(
-                """SELECT operation FROM ati.domain_object_history
+            text("""SELECT operation FROM ati.domain_object_history
                     WHERE object_type = 'entity' AND object_id = :id
-                    ORDER BY version"""
-            ),
+                    ORDER BY version"""),
             {"id": entity_id},
         )
         assert [row[0] for row in history] == ["CREATE", "UPDATE", "DELETE"]

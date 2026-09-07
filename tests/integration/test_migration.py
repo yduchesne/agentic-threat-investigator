@@ -154,29 +154,18 @@ async def test_audit_schema_contract() -> None:
     engine = _test_engine()
     try:
         async with engine.connect() as connection:
-            check = await connection.scalar(
-                text(
-                    """
+            check = await connection.scalar(text("""
                 SELECT pg_get_constraintdef(con.oid)
                 FROM pg_constraint con
                 JOIN pg_class rel ON rel.oid = con.conrelid
                 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                 WHERE ns.nspname = 'ati' AND rel.relname = 'audit_event'
                   AND con.contype = 'c'
-            """
-                )
-            )
-            indexes = {
-                row[0]
-                for row in await connection.execute(
-                    text(
-                        """
+            """))
+            indexes = {row[0] for row in await connection.execute(text("""
                     SELECT indexname FROM pg_indexes
                     WHERE schemaname = 'ati' AND tablename = 'audit_event'
-                """
-                    )
-                )
-            }
+                """))}
     finally:
         await engine.dispose()
     assert check and "success" in check and "failure" in check and "denied" in check
@@ -195,33 +184,21 @@ async def test_identity_schema_contract() -> None:
     try:
         async with engine.connect() as connection:
             columns = {
-                (row[0], row[1], row[2])
-                for row in await connection.execute(
-                    text(
-                        """
+                (row[0], row[1], row[2]) for row in await connection.execute(text("""
                     SELECT table_name, column_name, is_nullable
                     FROM information_schema.columns
                     WHERE table_schema = 'ati'
                       AND table_name IN ('user', 'credential', 'session')
-                """
-                    )
-                )
+                """))
             }
-            constraints = {
-                row[0]
-                for row in await connection.execute(
-                    text(
-                        """
+            constraints = {row[0] for row in await connection.execute(text("""
                     SELECT con.conname
                     FROM pg_constraint con
                     JOIN pg_class rel ON rel.oid = con.conrelid
                     JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                     WHERE ns.nspname = 'ati'
                       AND rel.relname IN ('user', 'credential', 'session')
-                """
-                    )
-                )
-            }
+                """))}
     finally:
         await engine.dispose()
     assert ("user", "username", "NO") in columns

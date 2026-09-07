@@ -51,11 +51,9 @@ async def _history(
 ) -> list[tuple[str, dict[str, Any]]]:
     """Return the immutable (operation, diff) history of one entity."""
     result = await session.execute(
-        text(
-            """SELECT operation, diff FROM ati.domain_object_history
+        text("""SELECT operation, diff FROM ati.domain_object_history
                 WHERE object_type = 'entity' AND object_id = :id
-                ORDER BY version"""
-        ),
+                ORDER BY version"""),
         {"id": entity_id},
     )
     return [(row[0], row[1]) for row in result]

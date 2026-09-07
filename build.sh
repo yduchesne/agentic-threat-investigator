@@ -18,6 +18,9 @@ Options:
   --unit    Run the unit test suites only (Python and frontend).
   --intg    Run the PostgreSQL integration tests (via ./integration-test.sh)
             and the frontend unit tests.
+  --sec     Run the Python security scans: Bandit static analysis, Semgrep
+            static analysis, Safety and pip-audit dependency vulnerability
+            audits.
   -h, --help  Show this help message and exit.
 USAGE
 }
@@ -39,6 +42,26 @@ run_frontend_unit_tests() {
 run_frontend_lint() {
   ensure_frontend_deps
   (cd frontend && npm run lint)
+}
+
+run_security_checks() {
+  # Security scans are not part of the local --qa gate; they run as a
+  # dedicated, parallel CI gate (build.sh --sec) that must pass before a
+  # PR can be merged.
+  echo '== Security: static analysis (Bandit) =='
+  # Scans production code only (src); tests intentionally carry synthetic
+  # credentials and asserts. B101 skips are justified in pyproject.toml.
+  uv run bandit -q -r src -c pyproject.toml
+  echo '== Security: static analysis (Semgrep) =='
+  # p/ci rules are fetched from the Semgrep registry (network required).
+  uv run semgrep scan --config p/ci --metrics=off --error src
+  echo '== Security: dependency vulnerabilities (Safety) =='
+  uv run safety check
+  echo '== Security: dependency vulnerabilities (pip-audit) =='
+  # PYSEC-2026-3740 (nltk, no fixed release on PyPI) is a transitive,
+  # test-only dependency of the Safety scanner itself; ATI production code
+  # never imports nltk. Re-evaluate when Safety ships a fixed nltk bound.
+  uv run pip-audit --ignore-vuln PYSEC-2026-3740
 }
 
 run_quality_checks() {
@@ -80,6 +103,9 @@ case "${1:-}" in
     ./integration-test.sh
     echo '== Frontend: unit tests =='
     run_frontend_unit_tests
+    ;;
+  --sec)
+    run_security_checks
     ;;
   -h|--help)
     usage

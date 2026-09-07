@@ -414,7 +414,7 @@ def _parse_utc_event_date(date_str: str) -> datetime | None:
     normalized = date_str.replace("t", "T").replace("z", "Z")
     try:
         dt = datetime.fromisoformat(normalized)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
     if dt.tzinfo is None or dt.utcoffset() is None:
         return None
@@ -966,7 +966,7 @@ class RdapProvider(EvidenceProvider):
             observed_at = _find_latest_last_changed(parsed)
             facts = facts_builder(parsed)
             record_id = _derive_source_record_id(parsed, canonical_value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return ProviderResult(
                 provider=self.id,
                 errors=(

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """FastAPI application bootstrap."""
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta

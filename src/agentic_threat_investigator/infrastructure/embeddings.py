@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Offline deterministic embedding implementation."""
+
 from __future__ import annotations
 
 import hashlib

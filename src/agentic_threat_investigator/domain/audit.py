@@ -28,7 +28,8 @@ class AuditAction(str, Enum):
     AUTH_LOGOUT = "urn:ati:action:auth:logout"
     AUTH_CSRF_REJECTED = "urn:ati:action:auth:csrf_rejected"
     USER_CREATE = "urn:ati:action:user:create"
-    USER_CHANGE_PASSWORD = "urn:ati:action:user:change_password"
+    # Not a credential: this is an audit action URN identifier (B105 false positive).
+    USER_CHANGE_PASSWORD = "urn:ati:action:user:change_password"  # nosec B105
     USER_UPDATE = "urn:ati:action:user:update"
     USER_DISABLE = "urn:ati:action:user:disable"
     USER_DELETE = "urn:ati:action:user:delete"

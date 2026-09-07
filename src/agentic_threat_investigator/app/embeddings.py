@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Application port for deterministic or remote text embeddings."""
+
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
