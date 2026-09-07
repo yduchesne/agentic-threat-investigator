@@ -489,10 +489,10 @@ permitted only in isolated deterministic tests. In production:
 - the resolved token value is passed to `IpinfoLiteProvider`, which uses it
   only in the Authorization header; providers never read configuration or
   the environment directly;
-- a missing required token fails clearly at composition time with
-  `SecretNotFoundError` before the IPinfo HTTP client is created;
-  Google DNS and RDAP clients created earlier in the same composition
-  are rolled back cleanly.
+- a missing, empty, or whitespace-only required token fails clearly at
+  composition time with `SecretNotFoundError` before the IPinfo HTTP
+  client is created; Google DNS and RDAP clients created earlier in the
+  same composition are rolled back cleanly.
 
 ## Testing requirements
 
@@ -568,7 +568,7 @@ class SecretsResolver(ABC):
 
     def require(self, name: str) -> str:
         value = self.get(name)
-        if value is None:
+        if value is None or not value.strip():
             raise SecretNotFoundError(name)
         return value
 ```
