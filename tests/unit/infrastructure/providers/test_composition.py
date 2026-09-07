@@ -390,6 +390,51 @@ async def test_composition_missing_required_token_fails_before_client_creation()
     assert closed == ["client-2", "client-1"]
 
 
+@pytest.mark.parametrize("blank_token", ["", "   "])
+async def test_composition_blank_token_fails_before_client_creation(
+    blank_token: str,
+) -> None:
+    """Empty and whitespace-only token values fail before the IPinfo client."""
+    closed: list[str] = []
+
+    class _TrackingClient(ProviderHttpClient):
+        def __init__(self, name: str) -> None:
+            self._name = name
+            super().__init__()
+
+        async def aclose(self) -> None:
+            closed.append(self._name)
+            await super().aclose()
+
+    class _CountingFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def create(
+            self, policy: ProviderHttpPolicy, limiter: BoundedLimiter
+        ) -> ProviderHttpClient:
+            self.call_count += 1
+            return _TrackingClient(f"client-{self.call_count}")
+
+    settings = settings_from_config({})
+    factory = _CountingFactory()
+    with pytest.raises(SecretNotFoundError) as excinfo:
+        await ProviderComposition.create(
+            settings,
+            http_client_factory=factory,
+            secrets=_StaticSecretsResolver({_FAKE_TOKEN_SECRET_NAME: blank_token}),
+        )
+
+    # Only Google DNS and RDAP clients were created (no third factory call);
+    # the two earlier clients rolled back in LIFO unwind order.
+    assert factory.call_count == 2
+    assert closed == ["client-2", "client-1"]
+
+    # The raised error is exactly the reference-name message: the blank
+    # value never appears in it.
+    assert str(excinfo.value) == f"required secret not found: {_FAKE_TOKEN_SECRET_NAME}"
+
+
 async def test_composition_later_failure_closes_ipinfo_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
