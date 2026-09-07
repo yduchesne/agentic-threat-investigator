@@ -115,9 +115,11 @@ Authorization: Bearer <token>
 ```
 
 IPinfo accepts the same token as a Bearer header, HTTP Basic username, or
-`?token=` query parameter. ATI uses only the Bearer header form. The token
-must never appear in query parameters, URLs, logs, errors, evidence, or
-fixtures. The token is resolved during composition/bootstrap from the
+`?token=` query parameter. ATI uses only the Bearer header form. Real or
+resolved tokens must never be committed, logged, persisted, placed in URLs,
+or copied into test fixtures; clearly synthetic placeholder credentials are
+permitted only in isolated deterministic tests. The token is resolved
+during composition/bootstrap from the
 secret reference documented in `CONFIGURATION.md`; the provider receives
 the resolved token value and never reads configuration or the environment.
 
@@ -183,9 +185,9 @@ normalized observation.
 | missing `ip` | `INVALID_RESPONSE`; cross-field identity cannot be proven |
 | malformed `ip` | `INVALID_RESPONSE`; outer whitespace is stripped before address parsing (shared canonicalization convention) |
 | returned IP mismatch | Returned `ip` must canonicalize exactly to the requested canonical IP; otherwise `INVALID_RESPONSE` (covers textual variants, family mismatch, and wrong address) |
-| malformed `asn` | Present `asn` must be `AS` + decimal digits within the legal 32-bit ASN domain (`1..4294967295`), canonical uppercase `AS<number>`; otherwise `INVALID_RESPONSE` |
-| malformed `as_domain` | Present `as_domain` must be a valid strict DNS name (IDNA, label characters, length bounds); otherwise `INVALID_RESPONSE` |
-| malformed `country_code` | Present value must be a bounded ISO 3166-1 alpha-2 uppercase code; otherwise `INVALID_RESPONSE` |
+| malformed `asn` | Present `asn` must be `AS` + decimal digits within the legal 32-bit ASN domain (`1..4294967295`), canonical uppercase `AS<number>`; otherwise `INVALID_RESPONSE`. Outer whitespace is stripped before validation (shared canonicalization convention) |
+| malformed `as_domain` | Present `as_domain` must be a valid strict DNS name (IDNA, label characters, length bounds); otherwise `INVALID_RESPONSE`. Outer whitespace is stripped and the value lowercased/IDNA-canonicalized (shared canonicalization convention) |
+| malformed `country_code` | Present value must be an officially assigned ISO 3166-1 alpha-2 uppercase code (exceptionally reserved elements such as `UK` and unassigned elements such as `ZZ` are rejected); otherwise `INVALID_RESPONSE` |
 | malformed `continent_code` | Present value must be a bounded uppercase two-letter continent code; otherwise `INVALID_RESPONSE` |
 | wrong scalar types | Strict scalars only: booleans, integers, lists, objects, and null where a string is expected are `INVALID_RESPONSE` |
 | missing optional fields | Omitted optional members are omitted from facts; not an error |

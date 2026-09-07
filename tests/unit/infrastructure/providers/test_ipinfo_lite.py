@@ -209,6 +209,8 @@ class TestIpinfoLiteSchema:
         with pytest.raises(ValidationError):
             IpinfoLiteResponse.model_validate(_lite_response(as_name="x" * 257))
         with pytest.raises(ValidationError):
+            IpinfoLiteResponse.model_validate(_lite_response(as_domain="x" * 254))
+        with pytest.raises(ValidationError):
             IpinfoLiteResponse.model_validate(_lite_response(country="x" * 129))
         with pytest.raises(ValidationError):
             IpinfoLiteResponse.model_validate(_lite_response(continent="x" * 65))
@@ -240,6 +242,27 @@ class TestIpinfoLiteSchema:
         """Outer whitespace is stripped before address parsing (RDAP convention)."""
         parsed = IpinfoLiteResponse.model_validate({"ip": textual})
         assert parsed.ip == "8.8.8.8"
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [("  AS15169  ", "AS15169"), ("AS15169 ", "AS15169")],
+    )
+    def test_asn_outer_whitespace_canonicalized(self, raw: str, expected: str) -> None:
+        """Outer whitespace on the ASN is stripped before canonicalization."""
+        parsed = IpinfoLiteResponse.model_validate(_lite_response(asn=raw))
+        assert parsed.asn == expected
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [(" google.com ", "google.com"), ("GOOGLE.COM\t", "google.com")],
+    )
+    def test_as_domain_outer_whitespace_canonicalized(
+        self, raw: str, expected: str
+    ) -> None:
+        """Outer whitespace on the operator domain is stripped by the strict
+        DNS-name canonicalizer, which also lowercases the value."""
+        parsed = IpinfoLiteResponse.model_validate(_lite_response(as_domain=raw))
+        assert parsed.as_domain == expected
 
     def test_both_address_families_accepted(self) -> None:
         """Both address families are accepted."""
@@ -303,6 +326,20 @@ class TestIpinfoLiteCodesAndDomain:
         )
         assert parsed.country_code == "US"
         assert parsed.continent_code == "NA"
+
+    @pytest.mark.parametrize("assigned", ["US", "NL", "GB"])
+    def test_assigned_country_codes_accepted(self, assigned: str) -> None:
+        """Officially assigned ISO 3166-1 alpha-2 codes are accepted."""
+        parsed = IpinfoLiteResponse.model_validate(
+            _lite_response(country_code=assigned)
+        )
+        assert parsed.country_code == assigned
+
+    @pytest.mark.parametrize("unassigned", ["ZZ", "UK"])
+    def test_unassigned_country_codes_rejected(self, unassigned: str) -> None:
+        """Unassigned or exceptionally reserved codes are rejected (GB is the ISO code)."""
+        with pytest.raises(ValidationError):
+            IpinfoLiteResponse.model_validate(_lite_response(country_code=unassigned))
 
     @pytest.mark.parametrize("member", ["country_code", "continent_code"])
     @pytest.mark.parametrize("bad", ["us", "USA", "  ", "U", "U1"])
@@ -500,6 +537,60 @@ class TestIpinfoLiteProviderContract:
         assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
         assert result.errors[0].retryable is False
 
+    async def test_unassigned_country_code_invalid_response(self) -> None:
+        """An unassigned country code yields exactly one INVALID_RESPONSE, no evidence."""
+        async with _client_static(
+            httpx.Response(200, json=_lite_response(country_code="ZZ"))
+        ) as client:
+            result = await _provider(client).investigate(
+                _FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value="8.8.8.8")
+            )
+        assert result.evidence == ()
+        assert len(result.errors) == 1
+        assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+        assert result.errors[0].retryable is False
+
+    async def test_malformed_returned_ip_invalid_response(self) -> None:
+        """A nonblank malformed returned IP yields INVALID_RESPONSE, no evidence."""
+        async with _client_static(
+            httpx.Response(200, json=_lite_response(ip="999.999.999.999"))
+        ) as client:
+            result = await _provider(client).investigate(
+                _FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value="8.8.8.8")
+            )
+        assert result.evidence == ()
+        assert len(result.errors) == 1
+        assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+        assert result.errors[0].retryable is False
+
+    @pytest.mark.parametrize(
+        "omitted",
+        [
+            "asn",
+            "as_name",
+            "as_domain",
+            "country_code",
+            "country",
+            "continent_code",
+            "continent",
+        ],
+    )
+    async def test_missing_optional_field_omitted_from_facts(
+        self, omitted: str
+    ) -> None:
+        """Each omitted optional field succeeds and only that fact key is absent."""
+        response = _lite_response(**{omitted: _REMOVED})
+        async with _client_static(httpx.Response(200, json=response)) as client:
+            result = await _provider(client).investigate(
+                _FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value="8.8.8.8")
+            )
+        assert result.errors == ()
+        assert len(result.evidence) == 1
+        facts = result.evidence[0].facts
+        assert omitted not in facts
+        expected_keys = set(_lite_response()) - {omitted}
+        assert set(facts) == expected_keys
+
     async def test_address_family_mismatch_rejected(self) -> None:
         """A response about a different address family is rejected."""
         async with _client_static(
@@ -574,6 +665,13 @@ class TestIpinfoLiteProviderContract:
         assert result.evidence == ()
         assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
 
+
+@pytest.mark.unit
+@pytest.mark.provider_contract
+@pytest.mark.asyncio
+class TestIpinfoLiteProviderFailures:
+    """Shared HTTP failure, cancellation, and lifecycle contract tests."""
+
     @pytest.mark.parametrize(
         ("status", "headers", "expected_code", "retryable"),
         [
@@ -630,6 +728,24 @@ class TestIpinfoLiteProviderContract:
         assert result.evidence == ()
         assert result.errors[0].code == ProviderErrorCode.TIMEOUT
         assert result.errors[0].retryable is True
+
+    async def test_oversized_response_rejected(self) -> None:
+        """A response exceeding the shared size bound is a non-retryable typed error."""
+        oversized = _lite_response(continent="x" * 4096)
+        policy = ProviderHttpPolicy(max_response_bytes=64, max_retries=0)
+        async with _client_static(httpx.Response(200, json=oversized)) as client:
+            result = await _provider(
+                client, http_kwargs={"policy": policy}
+            ).investigate(
+                _FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value="8.8.8.8")
+            )
+        assert result.evidence == ()
+        assert len(result.errors) == 1
+        assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+        assert result.errors[0].retryable is False
+        # The response body and the credential never reach the error message.
+        assert "xxxx" not in result.errors[0].message
+        _assert_no_token_leak(result.errors[0].message)
 
     async def test_error_messages_carry_no_token(self) -> None:
         """Typed error messages never contain the access token."""

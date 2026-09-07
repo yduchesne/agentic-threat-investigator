@@ -23,10 +23,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agentic_threat_investigator.app.providers import (
     EvidenceProvider,
+    ProviderError,
     ProviderErrorCode,
     ProviderResult,
     normalize_retrieval_timestamp,
-    provider_error_result,
     validate_investigation_entity,
 )
 from agentic_threat_investigator.domain.entities import (
@@ -37,6 +37,7 @@ from agentic_threat_investigator.domain.entities import (
 )
 from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
 from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.geolocation import validate_iso_3166_1_alpha_2
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
@@ -146,12 +147,27 @@ class IpinfoLiteResponse(BaseModel):
         except ValueError as exc:
             raise ValueError("invalid Lite response as_domain member") from exc
 
-    @field_validator("country_code", "continent_code")
+    @field_validator("country_code")
     @classmethod
-    def _validate_code(cls, value: str) -> str:
-        """Require a bounded uppercase two-letter country/continent code."""
+    def _validate_country_code(cls, value: str) -> str:
+        """Require an officially assigned ISO 3166-1 alpha-2 country code."""
         if _CODE_PATTERN.fullmatch(value) is None:
-            raise ValueError("Lite response code member must be two uppercase letters")
+            raise ValueError("Lite response country code must be two uppercase letters")
+        try:
+            return validate_iso_3166_1_alpha_2(value)
+        except ValueError as exc:
+            raise ValueError(
+                "Lite response country code is not an assigned code"
+            ) from exc
+
+    @field_validator("continent_code")
+    @classmethod
+    def _validate_continent_code(cls, value: str) -> str:
+        """Require a bounded uppercase two-letter continent code."""
+        if _CODE_PATTERN.fullmatch(value) is None:
+            raise ValueError(
+                "Lite response continent code must be two uppercase letters"
+            )
         return value
 
     @field_validator("as_name", "country", "continent")
@@ -245,7 +261,7 @@ class IpinfoLiteProvider(EvidenceProvider):
         )
 
         if outcome.final_error_code is not None:
-            return provider_error_result(
+            return _lite_error_result(
                 self.id,
                 outcome.final_error_code,
                 outcome.final_error_message or "Lite request failed",
@@ -287,9 +303,29 @@ class IpinfoLiteProvider(EvidenceProvider):
 
     def _invalid_response(self, message: str) -> ProviderResult:
         """Build a standard non-retryable ``INVALID_RESPONSE`` failure."""
-        return provider_error_result(
-            self.id, ProviderErrorCode.INVALID_RESPONSE, message
-        )
+        return _lite_error_result(self.id, ProviderErrorCode.INVALID_RESPONSE, message)
+
+
+def _lite_error_result(
+    provider_urn: str,
+    code: ProviderErrorCode,
+    message: str,
+    *,
+    retry_after_seconds: int | None = None,
+) -> ProviderResult:
+    """Build one typed provider error attributed to the Lite provider."""
+    return ProviderResult(
+        provider=provider_urn,
+        errors=(
+            ProviderError(
+                provider=provider_urn,
+                code=code,
+                message=message,
+                retryable=code.retryable,
+                retry_after_seconds=retry_after_seconds,
+            ),
+        ),
+    )
 
 
 def _build_facts(parsed: IpinfoLiteResponse) -> dict[str, Any]:
