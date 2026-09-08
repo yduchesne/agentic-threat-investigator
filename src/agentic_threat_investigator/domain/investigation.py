@@ -7,11 +7,11 @@ outcomes rather than copies of all domain objects. The persisted domain
 objects remain authoritative.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from agentic_threat_investigator.domain.entities import EntityType
 
@@ -169,6 +169,11 @@ class InvestigationState(BaseModel):
     Contains IDs and workflow information only: no raw provider payloads,
     complete document chunks, prompts, database clients, repositories, HTTP
     clients, or hidden reasoning.
+
+    The trailing ``version``/timestamp/deletion fields are database-owned
+    persistence output. Callers must not supply them; the persistence layer
+    never serializes them back into ``budget`` or ``operational_state`` and
+    never lets caller values override the authoritative database columns.
     """
 
     investigation_id: UUID
@@ -191,6 +196,21 @@ class InvestigationState(BaseModel):
     errors: list[InvestigationError] = Field(default_factory=list)
     started_at: datetime
     completed_at: datetime | None = None
+    version: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    deleted_at: datetime | None = None
+    deleted_by_actor_id: UUID | None = None
+
+    @field_validator("started_at", "completed_at")
+    @classmethod
+    def validate_utc(cls, value: datetime | None) -> datetime | None:
+        """Require timezone-aware timestamps, normalized to UTC."""
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("investigation timestamps must be timezone-aware")
+        return value.astimezone(UTC)
 
 
 class StopReason(str, Enum):

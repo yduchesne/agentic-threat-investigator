@@ -29,12 +29,14 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationWriteResult,
 )
 from agentic_threat_investigator.domain.investigation import (
+    InvalidInvestigationStatusTransitionError,
     InvestigationState,
     InvestigationStatus,
     require_status_transition,
 )
 
 from .errors import (
+    SQLSTATE_INVALID_TRANSITION,
     SQLSTATE_INVESTIGATION_DUPLICATE,
     SQLSTATE_INVESTIGATION_NOT_FOUND,
     SQLSTATE_VERSION_CONFLICT,
@@ -42,8 +44,8 @@ from .errors import (
 )
 from .models import InvestigationRow
 
-# InvestigationState fields persisted as database columns rather than inside
-# the operational_state JSONB document.
+# InvestigationState fields stored inside the operational_state JSONB document.
+# The remaining domain fields map to dedicated ati.investigation columns.
 _OPERATIONAL_FIELDS = (
     "trigger_id",
     "root_entity_ids",
@@ -62,7 +64,11 @@ _OPERATIONAL_FIELDS = (
 
 
 def _to_domain(row: InvestigationRow) -> InvestigationState:
-    """Rebuild the domain resource from its columns and operational state."""
+    """Rebuild the domain resource with its authoritative persistence metadata.
+
+    Database-owned columns are applied after the operational-state JSONB
+    document so stored values can never override authoritative columns.
+    """
     payload: dict[str, object] = {
         "investigation_id": row.id,
         "status": row.status,
@@ -70,16 +76,34 @@ def _to_domain(row: InvestigationRow) -> InvestigationState:
         "objective": row.objective,
         "budget": row.budget,
         **(row.operational_state or {}),
+        "started_at": row.started_at,
+        "completed_at": row.completed_at,
+        "version": row.version,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "deleted_at": row.deleted_at,
+        "deleted_by_actor_id": row.deleted_by_actor_id,
     }
-    if row.started_at is not None:
-        payload["started_at"] = row.started_at
-    payload["completed_at"] = row.completed_at
     return InvestigationState.model_validate(payload)
 
 
 def _serialized(state: InvestigationState) -> tuple[str, str]:
-    """Return the JSON budget and operational-state documents for persistence."""
-    payload = state.model_dump(mode="json", exclude={"investigation_id"})
+    """Return the JSON budget and operational-state documents for persistence.
+
+    Database-owned persistence metadata is never serialized into the stored
+    documents; callers cannot override database-owned values.
+    """
+    payload = state.model_dump(
+        mode="json",
+        exclude={
+            "investigation_id",
+            "version",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "deleted_by_actor_id",
+        },
+    )
     budget = json.dumps(payload["budget"])
     operational = json.dumps({field: payload[field] for field in _OPERATIONAL_FIELDS})
     return budget, operational
@@ -151,7 +175,9 @@ class PostgresInvestigationRepository(InvestigationRepository):
     ) -> InvestigationWriteResult:
         """Change the status with database-owned version/history semantics.
 
-        The confirmed lifecycle is validated before the database mutation; a
+        The confirmed lifecycle is validated before the database mutation and
+        again against the locked row inside the SQL function, so a concurrent
+        writer cannot invalidate a transition after the pre-lock check. A
         stale expected version produces a typed conflict and no mutation.
         """
         current = await self.get_by_id(investigation_id)
@@ -177,6 +203,14 @@ class PostgresInvestigationRepository(InvestigationRepository):
             state = sqlstate(error)
             if state == SQLSTATE_INVESTIGATION_NOT_FOUND:
                 raise InvestigationNotFoundError(str(investigation_id)) from error
+            if state == SQLSTATE_INVALID_TRANSITION:
+                # The locked row moved between the pre-lock check and the
+                # mutation; surface the domain error rather than a raw DBAPI
+                # exception.
+                raise InvalidInvestigationStatusTransitionError(
+                    f"investigation {investigation_id} no longer permits "
+                    f"transition to {status.value}"
+                ) from error
             if state == SQLSTATE_VERSION_CONFLICT:
                 raise InvestigationVersionConflictError(
                     investigation_id, expected_version or 0
