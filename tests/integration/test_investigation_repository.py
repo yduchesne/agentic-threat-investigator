@@ -4,6 +4,7 @@
 # pylint: disable=redefined-outer-name
 
 import asyncio
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -800,3 +801,83 @@ async def test_concurrent_duplicate_investigation_identity_is_typed(
         assert stored.objective == state.objective
         rows = await history_rows(uow, "investigation", state.investigation_id)
         assert [operation for _, operation, _ in rows] == ["CREATE"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_colliding_operational_state_cannot_spoof_columns(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Dedicated columns win even when operational_state collides with them."""
+    state = investigation_state()
+    async with uow_factory() as uow:
+        created = await uow.investigations.create(state)
+        created_version = created.version
+
+    # Test-only corruption: replace the stored JSONB document with values
+    # Pydantic would otherwise accept, colliding with every dedicated column.
+    # The autouse fixture truncates the table afterwards.
+    spoofed_actor_id = uuid4()
+    spoofed_operational_state = {
+        "investigation_id": str(uuid4()),
+        "status": "failed",
+        "trigger_type": "api",
+        "objective": "spoofed objective",
+        "budget": {
+            "max_depth": 9,
+            "max_entities": 99,
+            "max_provider_calls": 999,
+            "max_replans": 9,
+            "provider_calls_used": 99,
+            "replans_used": 9,
+        },
+        "started_at": "2020-01-01T00:00:00Z",
+        "completed_at": "2020-01-01T00:00:00Z",
+        "version": 42,
+        "created_at": "2020-01-01T00:00:00Z",
+        "updated_at": "2020-01-01T00:00:00Z",
+        "deleted_at": "2020-01-01T00:00:00Z",
+        "deleted_by_actor_id": str(spoofed_actor_id),
+        # A legitimate operational field survives alongside the collisions.
+        "trigger_id": str(state.trigger_id),
+        "root_entity_ids": [str(entity) for entity in state.root_entity_ids],
+        "stop_reason": "sufficient_evidence",
+        "errors": [],
+    }
+    async with uow_factory() as uow:
+        assert uow.session is not None
+        await uow.session.execute(
+            text("""
+                UPDATE ati.investigation
+                SET operational_state = CAST(:document AS jsonb)
+                WHERE id = :id
+            """),
+            {
+                "document": json.dumps(spoofed_operational_state),
+                "id": state.investigation_id,
+            },
+        )
+
+    async with uow_factory() as uow:
+        round_tripped = await uow.investigations.get_by_id(state.investigation_id)
+        assert round_tripped is not None
+        # Every dedicated column keeps its authoritative value.
+        assert round_tripped.investigation_id == state.investigation_id
+        assert round_tripped.status is InvestigationStatus.PENDING
+        assert round_tripped.trigger_type is InvestigationTriggerType.MANUAL
+        assert round_tripped.objective == state.objective
+        assert round_tripped.budget.max_depth == 2
+        assert round_tripped.budget.provider_calls_used == 5
+        assert round_tripped.started_at == _STARTED_AT
+        assert round_tripped.completed_at is None
+        assert round_tripped.version == created_version
+        assert round_tripped.created_at is not None
+        assert round_tripped.created_at.year == 2026
+        assert round_tripped.updated_at is not None
+        assert round_tripped.updated_at.tzinfo is not None
+        assert round_tripped.deleted_at is None
+        assert round_tripped.deleted_by_actor_id is None
+        # Legitimate operational fields still come from operational_state.
+        assert round_tripped.trigger_id == state.trigger_id
+        assert round_tripped.root_entity_ids == state.root_entity_ids
+        assert round_tripped.stop_reason == "sufficient_evidence"
