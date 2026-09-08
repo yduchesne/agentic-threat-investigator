@@ -109,23 +109,32 @@ separately approved future change.
 Provider scores do not directly determine ATI assessment confidence. No
 AbuseIPDB hit does not imply `BENIGN`. 
 
-## PR 16 --- ThreatFox provider
+## PR 16 --- ThreatFox provider [DONE]
 
 Deliver:
 
 -   ThreatFox integration;
--   supported IOC lookup forms;
+-   supported IOC lookup forms (DOMAIN and IP_ADDRESS; URL is deferred
+    until an approved URL identity contract exists);
 -   source-specific normalization;
 -   normalized `THREAT_INTELLIGENCE` evidence;
--   IOC-to-malware discovery where supported;
--   `MALWARE` entity discovery;
--   inputs for deterministic `ASSOCIATED_WITH` relationships;
+-   normalized facts sufficient for deterministic IOC-to-malware
+    extraction;
+-   ThreatFox malware machine identifiers suitable for canonical `MALWARE`
+    entity discovery by PR 18;
+-   evidence-backed inputs consumed by PR 18's deterministic
+    `ASSOCIATED_WITH` extractor;
 -   source timestamps/reference identifiers;
 -   typed errors;
 -   malicious IOC and no-result fixtures;
 -   canonical AsyncRAT fixture support;
 -   deterministic provider tests;
 -   optional live contract tests.
+
+The provider emits validated ThreatFox source records as normalized
+`THREAT_INTELLIGENCE` evidence facts; it does not instantiate discovered
+entities or create relationship candidates. PR 18 owns malware entity
+discovery, `ASSOCIATED_WITH` relationship construction, and persistence.
 
 Canonical trajectory:
 
