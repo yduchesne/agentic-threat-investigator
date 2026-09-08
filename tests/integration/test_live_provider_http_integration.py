@@ -1758,3 +1758,61 @@ class TestNoPersistenceSideEffect:  # pylint: disable=too-few-public-methods
                 ).scalar_one()
 
             assert count_before == count_after
+
+    async def test_threatfox_provider_call_does_not_persist_to_database(
+        self,
+        integration_engine: AsyncEngine,
+    ) -> None:
+        """A ThreatFox provider invocation alone persists nothing at all."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: threatfox_search_response(
+                asyncrat_domain_record()
+            )
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            entity = Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN)
+
+            async with integration_engine.connect() as conn:
+                counts_before = {
+                    table: (
+                        await conn.execute(text(f"SELECT count(*) FROM ati.{table}"))
+                    ).scalar_one()
+                    for table in (
+                        "evidence",
+                        "entity",
+                        "relationship",
+                        "relationship_observation",
+                    )
+                }
+
+            result = await provider.investigate(_FIXED_UUID, entity)
+
+            assert len(result.evidence) == 1
+            assert result.evidence[0].id is None
+            assert result.evidence[0].investigation_id == _FIXED_UUID
+
+            async with integration_engine.connect() as conn:
+                counts_after = {
+                    table: (
+                        await conn.execute(text(f"SELECT count(*) FROM ati.{table}"))
+                    ).scalar_one()
+                    for table in (
+                        "evidence",
+                        "entity",
+                        "relationship",
+                        "relationship_observation",
+                    )
+                }
+
+            # Provider invocation alone writes no evidence, entity,
+            # relationship, or relationship-observation rows.
+            assert counts_after == counts_before
