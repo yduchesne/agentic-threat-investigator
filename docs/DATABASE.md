@@ -206,7 +206,10 @@ explicit admin reads, `deleted_at` and `deleted_by_actor_id` — following the
 `Entity` persistence-metadata convention. A version obtained by a fresh read
 can be supplied as `expected_version` in a later unit of work. Persistence
 metadata is never serialized into the stored JSONB documents and caller
-values never override database-owned columns.
+values never override database-owned columns. Dedicated investigation
+columns are authoritative during deserialization; colliding keys inside
+`operational_state` cannot replace identity, lifecycle, budget, timestamps,
+version, or deletion metadata.
 
 `started_at` is required and non-null. Investigation timestamps are
 timezone-aware UTC: the domain rejects naive values and normalizes accepted

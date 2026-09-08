@@ -170,7 +170,7 @@ Deliver:
 
 # Investigation engine
 
-## PR 18A --- Investigation and Evidence persistence [DONE]
+## PR 18A --- Investigation and Evidence persistence
 
 Deliver the narrow persistence foundation needed by the investigation engine:
 
