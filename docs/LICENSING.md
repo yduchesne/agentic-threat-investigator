@@ -216,6 +216,36 @@ the time of writing; the authoritative pages prevail):
 This section describes source terms for operator awareness and is not
 legal advice.
 
+## ThreatFox API terms
+
+The ThreatFox provider uses only the official ThreatFox Community API v1
+`search_ioc` query. Authoritative references (must be re-verified before
+every release):
+
+- <https://threatfox.abuse.ch/api/>
+- <https://threatfox.abuse.ch/faq/>
+- <https://abuse.ch/terms-of-use/>
+
+Terms relevant to ATI operators (as documented at the references above at
+the time of writing; the authoritative pages prevail):
+
+1. The Community API is available free of charge under the abuse.ch fair
+   use principles. Use by companies, networks, or individuals with
+   commercial or for-profit needs may require a paid subscription for the
+   enhanced abuse.ch commercial API.
+2. An Auth-Key (free via the abuse.ch authentication portal) is required
+   for API interaction and is sent only in the `Auth-Key` header.
+3. IOCs older than six months expire from API and export visibility
+   (since 2025-05-01); a no-result never proves historical absence.
+4. ATI performs lookups only. It never submits IOCs, retrieves malware
+   samples, or consumes MalwareBazaar payloads.
+5. ATI does not bundle or redistribute ThreatFox data; evidence facts are
+   retained as investigation observations, not as a redistributable
+   dataset.
+
+This section describes source terms for operator awareness and is not
+legal advice.
+
 ## Dependencies
 
 Python and frontend dependencies receive an automated license inventory/check before release.
