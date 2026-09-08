@@ -45,6 +45,7 @@ from agentic_threat_investigator.infrastructure.providers.rdap import RdapProvid
 from agentic_threat_investigator.infrastructure.providers.threatfox import (
     ThreatFoxProvider,
 )
+from agentic_threat_investigator.infrastructure.providers.urlhaus import UrlhausProvider
 
 
 class HttpClientFactory(ABC):  # pylint: disable=too-few-public-methods
@@ -120,9 +121,13 @@ class ProviderComposition:  # pylint: disable=too-many-instance-attributes
         self._ipinfo_lite: IpinfoLiteProvider | None = None
         self._abuseipdb: AbuseIpdbProvider | None = None
         self._threatfox: ThreatFoxProvider | None = None
+        self._urlhaus: UrlhausProvider | None = None
         self._dbip_city_lite: DbIpCityLiteProvider | None = None
 
     @classmethod
+    # The explicit one-step-per-provider composition is deliberate; the
+    # named locals are the accepted cost of transparent, typed wiring.
+    # pylint: disable=too-many-locals
     async def create(
         cls,
         settings: Settings,
@@ -235,6 +240,23 @@ class ProviderComposition:  # pylint: disable=too-many-instance-attributes
             clients.append(http)
             composition._threatfox = ThreatFoxProvider(http, auth_key=threatfox_key)
 
+            # The URLhaus Auth-Key is resolved during composition through
+            # the same bootstrap contract; the provider receives only the
+            # resolved key and never reads configuration or the environment.
+            urlhaus_key = resolver.require(settings.urlhaus_auth_key_secret)
+            http = factory.create(
+                policy,
+                BoundedLimiter(
+                    RateLimiterSettings(
+                        max_concurrency=settings.urlhaus_max_concurrency,
+                        requests_per_second=settings.urlhaus_requests_per_second,
+                    )
+                ),
+            )
+            stack.push_async_callback(http.aclose)
+            clients.append(http)
+            composition._urlhaus = UrlhausProvider(http, auth_key=urlhaus_key)
+
             # Local DB-IP City Lite geolocation: composed only when the
             # credential-free artifact URI is configured. The artifact must
             # already exist and be readable; composition fails fast otherwise.
@@ -286,6 +308,13 @@ class ProviderComposition:  # pylint: disable=too-many-instance-attributes
         if self._threatfox is None:
             raise RuntimeError("ProviderComposition must be created via create()")
         return self._threatfox
+
+    @property
+    def urlhaus(self) -> UrlhausProvider:
+        """URLhaus provider instance."""
+        if self._urlhaus is None:
+            raise RuntimeError("ProviderComposition must be created via create()")
+        return self._urlhaus
 
     @property
     def dbip_city_lite(self) -> DbIpCityLiteProvider | None:

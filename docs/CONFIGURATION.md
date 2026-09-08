@@ -453,6 +453,9 @@ type before bounds are enforced. The bounds below apply on top of those type req
 | `threatfox_max_concurrency` | `ATI_THREATFOX_MAX_CONCURRENCY` | `int` | `10` | `> 0` | ThreatFox maximum in-flight requests |
 | `threatfox_requests_per_second` | `ATI_THREATFOX_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional ThreatFox rate limit (omission disables) |
 | `threatfox_auth_key_secret` | `ATI_THREATFOX_AUTH_KEY_SECRET` | `str` | `ATI_THREATFOX_AUTH_KEY` | non-blank | Environment variable NAME carrying the abuse.ch ThreatFox Auth-Key (secret reference, never a key value) |
+| `urlhaus_max_concurrency` | `ATI_URLHAUS_MAX_CONCURRENCY` | `int` | `10` | `> 0` | URLhaus maximum in-flight requests |
+| `urlhaus_requests_per_second` | `ATI_URLHAUS_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional URLhaus rate limit (omission disables) |
+| `urlhaus_auth_key_secret` | `ATI_URLHAUS_AUTH_KEY_SECRET` | `str` | `ATI_URLHAUS_AUTH_KEY` | non-blank | Environment variable NAME carrying the abuse.ch URLhaus Auth-Key (secret reference, never a key value) |
 | `dbip_city_lite_artifact_uri` | `ATI_DBIP_CITY_LITE_ARTIFACT_URI` | `str` | `""` (blank) | see notes | Credential-free local `file://` artifact URI of the DB-IP IP to City Lite MMDB. Blank (default) disables composition of the DB-IP City Lite provider. v0.1 requires an authority-free absolute `file://` URI; query, fragment, credential, and non-file URIs are rejected by the settings validator, and artifact paths outside `${ATI_DATA_DIR}/datasets` are rejected by the storage boundary. The configured artifact must already exist and be readable at composition time; there is no downloader and no API key. |
 
 When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
@@ -546,6 +549,30 @@ deterministic tests. In production:
   composition time with `SecretNotFoundError` before the ThreatFox HTTP
   client is created; Google DNS, RDAP, IPinfo, and AbuseIPDB clients
   created earlier in the same composition are rolled back cleanly.
+
+### URLhaus Auth-Key
+
+The URLhaus provider authenticates with an abuse.ch Auth-Key sent as a
+custom `Auth-Key` header on every request. The key never travels in the
+URL or the form body, because both leak credentials into server logs.
+Real or resolved URLhaus keys must never be committed, logged,
+persisted, placed in URLs or bodies, or copied into test fixtures;
+clearly synthetic placeholder keys are permitted only in isolated
+deterministic tests. In production:
+
+- the setting `urlhaus_auth_key_secret` holds only the NAME of the
+  environment variable carrying the Auth-Key (default reference:
+  `ATI_URLHAUS_AUTH_KEY`);
+- during provider composition, the `SecretsResolver` bootstrap contract
+  resolves that reference through `EnvVarSecretsResolver`;
+- the resolved key value is passed to `UrlhausProvider`, which uses it
+  only in the `Auth-Key` header; providers never read configuration or
+  the environment directly;
+- a missing, empty, or whitespace-only required key fails clearly at
+  composition time with `SecretNotFoundError` before the URLhaus HTTP
+  client is created; Google DNS, RDAP, IPinfo, AbuseIPDB, and ThreatFox
+  clients created earlier in the same composition are rolled back
+  cleanly.
 
 ## Testing requirements
 

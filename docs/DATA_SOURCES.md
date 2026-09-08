@@ -1340,13 +1340,248 @@ data, and does not persist anything.
 
 Purpose:
 
-- Malicious URL intelligence.
-- Payload/malware information.
-- Related infrastructure.
+- Malicious-URL (malware-distribution) intelligence for URL and host
+  indicators.
+- Payload metadata as fact-only evidence context.
 
 Source identifier:
 
 `urn:ati:source:urlhaus`
+
+#### Verified API contract
+
+The provider uses the official URLhaus Community API v1 lookup queries
+only. Authoritative reference: <https://urlhaus-api.abuse.ch/> (the
+dedicated bulk-query API documented by URLhaus; also
+<https://urlhaus.abuse.ch/api/>). The contract below reflects the
+official documentation and must be re-verified before every release:
+
+- URL lookup: `POST https://urlhaus-api.abuse.ch/v1/url/` with an
+  `application/x-www-form-urlencoded` body carrying exactly one field,
+  `url=<value>`, and the `Auth-Key` HTTP header.
+- Host lookup: `POST https://urlhaus-api.abuse.ch/v1/host/` with an
+  `application/x-www-form-urlencoded` body carrying exactly one field,
+  `host=<value>`, and the `Auth-Key` HTTP header. The official
+  documentation defines the host query for IPv4 addresses, hostnames,
+  and domain names (case insensitive); IPv6 hosts are therefore not
+  supported by ATI in v0.1.
+- Responses are JSON with a top-level `query_status`. Documented URL
+  lookup statuses: `ok`, `http_post_expected`, `no_results`,
+  `invalid_url`. Documented host lookup statuses: `ok`,
+  `http_post_expected`, `no_results`, `invalid_host`.
+- `ok` URL responses carry a single record with the documented required
+  members `id`, `urlhaus_reference`, `url`, `url_status`
+  (`online`/`offline`/`unknown`), `host`, `date_added`
+  (`YYYY-MM-DD HH:MM:SS UTC`), `last_online` (same form or null),
+  `threat` (only `malware_download` is documented and accepted),
+  `blacklists`, `reporter`, `larted`, `takedown_time_seconds`, `tags`,
+  and `payloads` (0–100 entries). Every documented member must be
+  present; a missing key is always invalid, while nullable members may
+  carry null only where the contract documents null (`last_online`).
+- `ok` host responses carry `urlhaus_reference`, a required `host`
+  member, a required `firstseen` timestamp (`YYYY-MM-DD HH:MM:SS UTC`),
+  `url_count` (decimal string), `blacklists`, and `urls` (1–100 raw
+  entries) whose records carry only `id`, `urlhaus_reference`, `url`,
+  `url_status`, `date_added`, `threat`, `reporter`, `larted`,
+  `takedown_time_seconds`, and `tags`. Host nested records deliberately
+  do not consume or emit `host`, `last_online`, or `payloads` members;
+  the normalized facts emit those keys as explicit nulls. An `ok` host
+  response with an empty `urls[]` collection is invalid: a true miss
+  uses the documented `query_status="no_results"` response.
+- Payload entries carry `firstseen` (`YYYY-MM-DD` date), `filename`,
+  `file_type`, `response_size` (decimal string), `response_md5`,
+  `response_sha256`, `urlhaus_download`, `signature`, `virustotal`,
+  `imphash`, `ssdeep`, `tlsh`, and `magika`.
+
+#### Supported and unsupported entity types
+
+- Supported: `URL` (exact lookup), `DOMAIN` and `IP_ADDRESS` with an
+  IPv4 canonical value (host lookup). IPv6 addresses are rejected with
+  `UNSUPPORTED_INDICATOR` before any I/O because the verified host-query
+  contract does not document them.
+- Unsupported (rejected with `UNSUPPORTED_INDICATOR` before clock
+  evaluation or HTTP): `NETWORK_PREFIX`, `ASN`, `ORGANIZATION`,
+  `MALWARE`, `ATTACK_TECHNIQUE`, `VULNERABILITY`.
+
+#### Canonical identity rules
+
+- Direct URL identity is revalidated independently: the returned `url`
+  must pass the complete shared ATI `canonicalize_url()` contract and
+  canonicalize to exactly the queried canonical URL, and the record's
+  `host` member must validate (DOMAIN or IP) and equal the canonical
+  host parsed from the returned canonical URL itself. A missing,
+  malformed, wrong, or cross-field-inconsistent host is
+  `INVALID_RESPONSE`.
+- Host envelopes are revalidated independently: the top-level `host`
+  member must validate (strict DNS form for DOMAIN queries; canonical
+  IPv4 for IP queries) and equal the queried canonical identity, even
+  when every nested URL happens to match. A missing, malformed,
+  wrong-family, or mismatched top-level host is `INVALID_RESPONSE`.
+- Every host-response `urls[]` URL is validated through the complete
+  shared `canonicalize_url()` contract before the record is accepted: a
+  matching hostname alone is insufficient. One URL with an unsupported
+  scheme, userinfo, fragment (including an empty `#` delimiter),
+  malformed percent escape, invalid port, embedded whitespace, control
+  character, or malformed host invalidates the complete response with
+  no partial evidence.
+- URL queries send the ATI canonical URL identity
+  (`canonicalize_url`: strict HTTP/HTTPS-only contract documented in
+  `DOMAIN_MODEL.md`).
+- Domain queries send the strict canonical DNS form (`validate_dns_name`).
+- IPv4 queries send the canonical dotted-quad form.
+- The Auth-Key never appears in the URL or the form body.
+
+#### Query status semantics and error mapping
+
+- `no_results` is a valid no-result: an empty `ProviderResult`, never a
+  benign assessment.
+- `ok` is success only after strict record validation.
+- `http_post_expected`, `invalid_url`, and `invalid_host` are
+  body-encoded request rejections that can only result from an ATI
+  request defect; they map to non-retryable `INVALID_RESPONSE`.
+- Unknown statuses are never success and map to non-retryable
+  `INVALID_RESPONSE`.
+- Shared HTTP mapping applies: 401 -> `AUTHENTICATION_FAILED`,
+  403 -> `FORBIDDEN`, 404 -> `NOT_FOUND`, 429 -> `RATE_LIMITED` with
+  `Retry-After` handling, timeout -> `TIMEOUT`, 5xx ->
+  `PROVIDER_UNAVAILABLE` (retried), malformed JSON / wrong content type
+  / oversized body -> `INVALID_RESPONSE`.
+
+#### Normalized fact shape and PR 18 extraction eligibility
+
+A successful lookup emits exactly one immutable
+`THREAT_INTELLIGENCE` evidence observation whose `facts` contain
+`matches` (source order preserved) plus, for host lookups, the
+host-envelope provenance facts `queried_host` (the canonical validated
+top-level host), `first_seen` (the canonical UTC ISO-8601 form of the
+host-level `firstseen` source timestamp), and `url_count` (the parsed
+non-negative total observed by URLhaus; the returned `urls[]` list is
+capped at 100 and need not equal `url_count`):
+
+```json
+{
+  "queried_host": "malicious-domain.test",
+  "first_seen": "2026-08-19T08:00:00Z",
+  "url_count": 1,
+  "matches": [
+    {
+      "urlhaus_id": "556677",
+      "url": "http://malicious-domain.test/download/payload.bin",
+      "url_status": "online",
+      "date_added": "2026-08-20T12:00:00Z",
+      "last_online": null,
+      "threat": "malware_download",
+      "host": "malicious-domain.test",
+      "tags": ["elf"],
+      "payloads": [
+        {
+          "first_seen": "2026-08-20",
+          "filename": "payload.bin",
+          "file_type": "elf",
+          "response_size": 12345,
+          "response_md5": null,
+          "response_sha256": null,
+          "signature": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+Extraction eligibility (PR 18 owns all extraction; PR 17 performs
+none):
+
+- `matches[].url` — entity-eligible: the source URL is emitted in
+  canonical ATI form (`canonicalize_url()` output, never the original
+  source spelling) and is the canonical URL identity input.
+- `matches[].host` (URL lookups) — entity-eligible: emitted as a
+  canonical DOMAIN/IP identity value (strict DNS form or canonical IP
+  representation), never the original source spelling; only if strictly
+  derivable/validated by the PR 18 extractor as a DOMAIN or IPv4
+  entity. Host-response nested records emit `host=null` because that
+  endpoint does not supply the member.
+- The queried entity itself — the evidence subject, already canonical.
+- `payloads[].response_md5` / `response_sha256` — fact-only. ATI v0.1
+  has no file/hash entity type.
+- `payloads[].file_type`, `filename`, `response_size` — fact-only.
+- `payloads[].signature` — fact-only; no malware entity is inferred
+  from signatures or tags (ThreatFox remains ATI's IOC→MALWARE source).
+- `tags`, `url_status`, `threat`, timestamps — fact-only source
+  observations. `url_status: offline` is never a benign verdict.
+- `queried_host` and `first_seen` are host-envelope provenance facts:
+  `queried_host` is the strictly validated canonical top-level host the
+  source itself reports for the query, and `first_seen` is the
+  host-level source observation time. They are retained for provenance
+  completeness; extraction eligibility remains with the record-level
+  `url` and `host` members.
+- Evidence `observed_at` is the latest relevant source timestamp across
+  the host `firstseen` and all retained record `date_added`
+  (and, for URL lookups, `last_online`) observations; an earlier host
+  `firstseen` never replaces a newer record observation.
+
+PR 17 performs no entity extraction, no relationship construction, and
+no persistence. No existing `RelationshipType` semantic is repurposed
+for the URL–host composition relation; PR 18 must introduce any such
+semantic through separate approved documentation.
+
+#### Duplicate and collection invariants
+
+- For each `urlhaus_id`: the first occurrence establishes normalized
+  content and output position; an exact duplicate is omitted; the same
+  ID with conflicting consumed normalized content invalidates the whole
+  response (`INVALID_RESPONSE`, no evidence). Duplicate comparison
+  happens after strict validation and before evidence construction, on
+  the consumed normalized content (canonical URL, url_status,
+  normalized date_added, threat, and tags in source order); ignored
+  upstream members such as `reporter`, `larted`,
+  `takedown_time_seconds`, and `urlhaus_reference` are not part of the
+  comparison. Canonical-equivalent raw URL spellings for the same
+  source ID are identical consumed content because `matches[].url` is
+  canonicalized before comparison, while security-significant canonical
+  URL differences (different paths, query text/order, non-default
+  ports, or byte-for-byte percent-escape spelling) remain conflicts.
+- Records with distinct IDs but the same canonical URL are retained as
+  independently distinct source observations; deduplication by
+  canonical identity is PR 18's concern.
+- For host lookups, every returned URL must parse and canonicalize to
+  the queried canonical host; one unrelated record invalidates the
+  whole response (the endpoint promises exact host results), and the
+  top-level `host` envelope member must independently match the queried
+  identity. For URL lookups, the returned `url` must canonicalize to
+  exactly the queried canonical URL and the record `host` member must
+  agree with the returned URL's own host.
+- Duplicate collapsing happens after the documented 100-entry collection
+  limits are enforced on the raw response; a raw over-limit collection
+  is `INVALID_RESPONSE` regardless of duplicates.
+- One malformed record invalidates the whole response: no partial
+  evidence is ever emitted. Every malformed response returns a typed
+  result and never escapes an exception.
+
+#### Payload metadata policy
+
+Payload metadata is useful context but ATI v0.1 has no file/hash entity
+type: hashes, sizes, file types, signatures, and first-seen dates are
+evidence facts only. ATI never downloads payloads, never fetches
+`urlhaus_download` links (which are not retained at all), never opens
+returned URLs, and never infers malware identity from signatures or
+tags. URLhaus publicly warns that collected payloads are not necessarily
+malicious once a URL changes or is cleaned.
+
+#### Security constraints and terms
+
+- The Auth-Key is resolved through `SecretsResolver` during composition
+  (secret reference `ATI_URLHAUS_AUTH_KEY`) and is used only in the
+  `Auth-Key` header; it never appears in URLs, bodies, facts, errors,
+  logs, or fixtures.
+- Raw provider payloads are not retained (`raw_payload=None`).
+- The Community API is free of charge under abuse.ch fair-use for
+  non-commercial use; commercial use may require a paid subscription
+  (<https://abuse.ch/terms-of-use/>). ATI performs lookups only and
+  never submits URLs or downloads datasets.
+- Automated tests are fully synthetic over an in-process ASGI virtual
+  upstream (`urlhaus-api.abuse.ch`); no test contacts the real URLhaus
+  service, requires a real Auth-Key, or has internet access.
 
 ## Structured batch sources
 

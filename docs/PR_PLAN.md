@@ -152,7 +152,7 @@ Threat Research RAG
 
 The provider supplies evidence, not the ATI verdict.
 
-## PR 17 --- URLhaus provider
+## PR 17 --- URLhaus provider [DONE]
 
 Deliver:
 

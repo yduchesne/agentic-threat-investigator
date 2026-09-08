@@ -57,6 +57,8 @@ _FAKE_ABUSEIPDB_KEY_SECRET_NAME = "ATI_ABUSEIPDB_API_KEY"
 _FAKE_ABUSEIPDB_KEY = "fake-test-abuseipdb-key"
 _FAKE_THREATFOX_KEY_SECRET_NAME = "ATI_THREATFOX_AUTH_KEY"
 _FAKE_THREATFOX_KEY = "fake-test-threatfox-key"
+_FAKE_URLHAUS_KEY_SECRET_NAME = "ATI_URLHAUS_AUTH_KEY"
+_FAKE_URLHAUS_KEY = "fake-test-urlhaus-key"
 
 
 class _StaticSecretsResolver(SecretsResolver):
@@ -78,6 +80,7 @@ def _fake_secrets() -> _StaticSecretsResolver:
             _FAKE_TOKEN_SECRET_NAME: _FAKE_TOKEN,
             _FAKE_ABUSEIPDB_KEY_SECRET_NAME: _FAKE_ABUSEIPDB_KEY,
             _FAKE_THREATFOX_KEY_SECRET_NAME: _FAKE_THREATFOX_KEY,
+            _FAKE_URLHAUS_KEY_SECRET_NAME: _FAKE_URLHAUS_KEY,
         }
     )
 
@@ -120,7 +123,7 @@ async def test_composition_wires_google_dns_settings() -> None:
     async with await ProviderComposition.create(
         settings, http_client_factory=factory, secrets=_fake_secrets()
     ) as comp:
-        assert len(factory.calls) == 5
+        assert len(factory.calls) == 6
         google_policy, google_limiter = factory.calls[0]
         assert google_policy.timeout_seconds == 25.0
         assert google_policy.max_retries == 4
@@ -183,6 +186,7 @@ async def test_composition_closes_both_clients_on_individual_failure() -> None:
         _FailingClient("third"),
         _FailingClient("fourth"),
         _FailingClient("fifth"),
+        _FailingClient("sixth"),
     ]
 
     class _CannedFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
@@ -199,7 +203,7 @@ async def test_composition_closes_both_clients_on_individual_failure() -> None:
     with pytest.raises(RuntimeError, match="simulated client aclose failure"):
         await comp.aclose()
 
-    assert closed == ["first", "second", "third", "fourth", "fifth"]
+    assert closed == ["first", "second", "third", "fourth", "fifth", "sixth"]
 
 
 async def test_composition_rolls_back_on_partial_construction_failure() -> None:
@@ -269,6 +273,7 @@ async def test_composition_aclose_cancellation_closes_remaining_client() -> None
         _OrderTrackingClient("third"),
         _OrderTrackingClient("fourth"),
         _OrderTrackingClient("fifth"),
+        _OrderTrackingClient("sixth"),
     ]
 
     class _CannedFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
@@ -285,7 +290,7 @@ async def test_composition_aclose_cancellation_closes_remaining_client() -> None
     with pytest.raises(asyncio.CancelledError):
         await comp.aclose()
 
-    assert closed == ["second", "third", "fourth", "fifth"]
+    assert closed == ["second", "third", "fourth", "fifth", "sixth"]
 
 
 async def test_composition_properties_require_create() -> None:
@@ -301,6 +306,9 @@ async def test_composition_properties_require_create() -> None:
         _ = comp.abuseipdb
     with pytest.raises(RuntimeError, match="create"):
         _ = comp.threatfox
+        _ = comp.urlhaus
+    with pytest.raises(RuntimeError, match="create"):
+        _ = comp.urlhaus
 
 
 async def test_composition_wires_ipinfo_settings(
@@ -337,10 +345,11 @@ async def test_composition_wires_ipinfo_settings(
                 "CUSTOM_TOKEN_VAR": _FAKE_TOKEN,
                 _FAKE_ABUSEIPDB_KEY_SECRET_NAME: _FAKE_ABUSEIPDB_KEY,
                 _FAKE_THREATFOX_KEY_SECRET_NAME: _FAKE_THREATFOX_KEY,
+                _FAKE_URLHAUS_KEY_SECRET_NAME: _FAKE_URLHAUS_KEY,
             }
         ),
     ) as comp:
-        assert len(factory.calls) == 5
+        assert len(factory.calls) == 6
         _, ipinfo_limiter = factory.calls[2]
         assert isinstance(ipinfo_limiter, BoundedLimiter)
         # All providers must receive distinct limiter instances.
@@ -348,6 +357,7 @@ async def test_composition_wires_ipinfo_settings(
         rdap_limiter = factory.calls[1][1]
         abuseipdb_limiter = factory.calls[3][1]
         threatfox_limiter = factory.calls[4][1]
+        urlhaus_limiter = factory.calls[5][1]
         assert (
             len(
                 {
@@ -356,9 +366,10 @@ async def test_composition_wires_ipinfo_settings(
                     id(ipinfo_limiter),
                     id(abuseipdb_limiter),
                     id(threatfox_limiter),
+                    id(urlhaus_limiter),
                 }
             )
-            == 5
+            == 6
         )
 
         # The exact configured values reached each provider's limiter.
@@ -389,6 +400,7 @@ async def test_composition_passes_resolved_token_to_provider() -> None:
             _FAKE_TOKEN_SECRET_NAME: _FAKE_TOKEN,
             _FAKE_ABUSEIPDB_KEY_SECRET_NAME: _FAKE_ABUSEIPDB_KEY,
             _FAKE_THREATFOX_KEY_SECRET_NAME: _FAKE_THREATFOX_KEY,
+            _FAKE_URLHAUS_KEY_SECRET_NAME: _FAKE_URLHAUS_KEY,
         }
     )
 
@@ -408,6 +420,7 @@ async def test_composition_resolves_token_from_environment(
     monkeypatch.setenv(_FAKE_TOKEN_SECRET_NAME, _FAKE_TOKEN)
     monkeypatch.setenv(_FAKE_ABUSEIPDB_KEY_SECRET_NAME, _FAKE_ABUSEIPDB_KEY)
     monkeypatch.setenv(_FAKE_THREATFOX_KEY_SECRET_NAME, _FAKE_THREATFOX_KEY)
+    monkeypatch.setenv(_FAKE_URLHAUS_KEY_SECRET_NAME, _FAKE_URLHAUS_KEY)
     factory = _SpyHttpClientFactory()
     settings = settings_from_config({})
 
@@ -582,10 +595,18 @@ async def test_composition_normal_close_closes_all_clients_once() -> None:
         _ = comp.ipinfo_lite
         _ = comp.abuseipdb
         _ = comp.threatfox
+        _ = comp.urlhaus
 
     # The normal context exit closed Google DNS, RDAP, IPinfo, AbuseIPDB,
     # and ThreatFox clients, each exactly once, in creation order.
-    assert closed == ["client-1", "client-2", "client-3", "client-4", "client-5"]
+    assert closed == [
+        "client-1",
+        "client-2",
+        "client-3",
+        "client-4",
+        "client-5",
+        "client-6",
+    ]
 
 
 class TestDbIpCityLiteComposition:
@@ -711,7 +732,14 @@ class TestDbIpCityLiteComposition:
                 secrets=_fake_secrets(),
             )
         # All five already-created clients roll back, in LIFO unwind order.
-        assert closed == ["client-5", "client-4", "client-3", "client-2", "client-1"]
+        assert closed == [
+            "client-6",
+            "client-5",
+            "client-4",
+            "client-3",
+            "client-2",
+            "client-1",
+        ]
 
     async def test_artifact_outside_datasets_root_rejected(
         self, tmp_path: pathlib.Path
@@ -805,7 +833,14 @@ class TestDbIpCityLiteComposition:
         with pytest.raises(MmdbLookupError):
             captured[0].lookup("192.0.2.10")
         # All five created HTTP clients still unwind in LIFO order.
-        assert closed == ["client-5", "client-4", "client-3", "client-2", "client-1"]
+        assert closed == [
+            "client-6",
+            "client-5",
+            "client-4",
+            "client-3",
+            "client-2",
+            "client-1",
+        ]
 
     async def test_database_close_failure_still_closes_clients(
         self,
@@ -871,7 +906,14 @@ class TestDbIpCityLiteComposition:
         with pytest.raises(RuntimeError, match="database close boom"):
             await comp.aclose()
         assert broken.close_attempts == 1
-        assert closed == ["client-1", "client-2", "client-3", "client-4", "client-5"]
+        assert closed == [
+            "client-1",
+            "client-2",
+            "client-3",
+            "client-4",
+            "client-5",
+            "client-6",
+        ]
 
     async def test_first_close_failure_re_raised_after_full_cleanup(
         self,
@@ -940,4 +982,11 @@ class TestDbIpCityLiteComposition:
             await comp.aclose()
         # Every resource received exactly one close attempt despite failures.
         assert broken.close_attempts == 1
-        assert closed == ["client-1", "client-2", "client-3", "client-4", "client-5"]
+        assert closed == [
+            "client-1",
+            "client-2",
+            "client-3",
+            "client-4",
+            "client-5",
+            "client-6",
+        ]

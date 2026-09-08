@@ -128,7 +128,7 @@ def test_attack_technique_empty_raises() -> None:
 
 @pytest.mark.parametrize(
     "entity_type",
-    [EntityType.URL, EntityType.ORGANIZATION, EntityType.MALWARE],
+    [EntityType.ORGANIZATION, EntityType.MALWARE],
 )
 def test_uncontracted_types_raise(entity_type: EntityType) -> None:
     """Types without a confirmed canonicalization contract are rejected."""

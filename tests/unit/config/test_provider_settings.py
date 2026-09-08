@@ -33,6 +33,9 @@ class TestProviderSettings:
         assert settings.threatfox_max_concurrency == 10
         assert settings.threatfox_requests_per_second is None
         assert settings.threatfox_auth_key_secret == "ATI_THREATFOX_AUTH_KEY"
+        assert settings.urlhaus_max_concurrency == 10
+        assert settings.urlhaus_requests_per_second is None
+        assert settings.urlhaus_auth_key_secret == "ATI_URLHAUS_AUTH_KEY"
 
     def test_abuseipdb_api_key_secret_environment_reference(
         self, monkeypatch: MonkeyPatch
@@ -96,6 +99,49 @@ class TestProviderSettings:
         """The ThreatFox secret-reference name is trimmed of whitespace."""
         settings = settings_from_config({"threatfox_auth_key_secret": "  VAR  "})
         assert settings.threatfox_auth_key_secret == "VAR"
+
+    def test_urlhaus_auth_key_secret_environment_reference(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """The URLhaus secret-reference name is configurable by environment."""
+        monkeypatch.setenv("ATI_URLHAUS_AUTH_KEY_SECRET", "MY_CUSTOM_KEY_VAR")
+        settings = settings_from_config({})
+        assert settings.urlhaus_auth_key_secret == "MY_CUSTOM_KEY_VAR"
+
+    def test_urlhaus_auth_key_secret_blank_rejected(self) -> None:
+        """A blank URLhaus secret-reference name is rejected."""
+        with pytest.raises(ValidationError, match="blank"):
+            settings_from_config({"urlhaus_auth_key_secret": "   "})
+
+    def test_urlhaus_auth_key_secret_whitespace_trimmed(self) -> None:
+        """The URLhaus secret-reference name is trimmed of whitespace."""
+        settings = settings_from_config({"urlhaus_auth_key_secret": "  VAR  "})
+        assert settings.urlhaus_auth_key_secret == "VAR"
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("urlhaus_max_concurrency", 0),
+            ("urlhaus_max_concurrency", -1),
+            ("urlhaus_max_concurrency", 2.5),
+            ("urlhaus_max_concurrency", True),
+            ("urlhaus_requests_per_second", 0),
+            ("urlhaus_requests_per_second", -1.0),
+            ("urlhaus_requests_per_second", True),
+        ],
+    )
+    def test_urlhaus_bounds_rejected(self, field: str, value: object) -> None:
+        """Out-of-bounds and non-coercive URLhaus values are rejected."""
+        with pytest.raises(ValidationError):
+            settings_from_config({field: value})
+
+    def test_urlhaus_environment_parsing(self, monkeypatch: MonkeyPatch) -> None:
+        """URLhaus settings parse from environment text."""
+        monkeypatch.setenv("ATI_URLHAUS_MAX_CONCURRENCY", "7")
+        monkeypatch.setenv("ATI_URLHAUS_REQUESTS_PER_SECOND", "6.5")
+        settings = settings_from_config({})
+        assert settings.urlhaus_max_concurrency == 7
+        assert settings.urlhaus_requests_per_second == 6.5
 
     @pytest.mark.parametrize(
         ("field", "value"),

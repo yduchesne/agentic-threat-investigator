@@ -109,6 +109,7 @@ async def test_composition_wires_abuseipdb_settings(
             ATI_IPINFO_LITE_TOKEN=_FAKE_TOKEN,
             CUSTOM_ABUSEIPDB_VAR=_FAKE_KEY,
             ATI_THREATFOX_AUTH_KEY="fake-test-threatfox-key",
+            ATI_URLHAUS_AUTH_KEY="fake-test-urlhaus-key",
         ),
     ) as comp:
         assert seen[3] == RateLimiterSettings(
