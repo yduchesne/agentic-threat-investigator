@@ -11,6 +11,7 @@
 - [Soft deletion](#soft-deletion)
 - [Historical relationships](#historical-relationships)
 - [Evidence](#evidence)
+- [Investigation persistence](#investigation-persistence)
 - [Transactions and Unit of Work](#transactions-and-unit-of-work)
 - [Batch persistence](#batch-persistence)
   - [Composite-array input contract](#composite-array-input-contract)
@@ -125,6 +126,60 @@ Evidence is immutable.
 A new provider retrieval creates a new Evidence observation rather than overwriting the prior observation.
 
 Raw payload, when retained, is part of that immutable observation.
+
+`ati.append_evidence(...)` is the canonical persistence path. It inserts the
+observation with version `1`, writes a single immutable CREATE
+`domain_object_history` entry carrying actor/request/investigation
+correlation, and rejects a duplicate evidence identity with a dedicated error
+state: a repeated identity is a conflict, never an update of the prior
+observation. The normal repository surface is insert/read only
+(`insert`, `get_by_id`, `list_for_investigation`); there is no evidence
+update, delete, or upsert operation. `list_for_investigation` returns
+observations in deterministic newest-first order (`retrieved_at DESC`,
+then evidence `id`). Evidence timestamps must be timezone-aware and are
+normalized to UTC.
+
+Evidence subject identity is resolved by the caller before persistence: the
+stored observation references the canonical entity row, and reads rebuild the
+subject reference from that canonical identity.
+
+## Investigation persistence
+
+Investigation is a mutable, versioned operational resource persisted in
+`ati.investigation`. Its domain representation is `InvestigationState`:
+identity, status, trigger, objective, budget, and operational identifiers.
+`budget` and the remaining operational fields are stored in the `budget` and
+`operational_state` JSONB columns; the resource carries database-assigned
+versions, authoritative timestamps, and soft-deletion metadata.
+
+The lifecycle is confirmed and narrow:
+
+```text
+PENDING  -> RUNNING | FAILED
+RUNNING  -> COMPLETED | PARTIAL | FAILED
+COMPLETED/PARTIAL/FAILED  (terminal)
+```
+
+A same-status request is not a transition; the persistence path classifies it
+as an unchanged result without allocating a version or writing history.
+Transitioning to a terminal status stamps `completed_at` when absent.
+
+The authoritative write path is the versioned SQL API:
+
+- `ati.create_investigation(...)` allocates the initial version and writes
+  CREATE history;
+- `ati.update_investigation_status(...)` validates the current row, supports
+  an optional optimistic `expected_version` (a stale expectation raises a
+  dedicated error state without mutation), classifies the semantic no-op as
+  unchanged, allocates a new version for a real transition, and writes
+  UPDATE history with a JSONB diff;
+- `ati.soft_delete_investigation(...)` follows the standard soft-deletion
+  conventions and writes DELETE history.
+
+All three accept optional actor/request correlation recorded in the history
+entry. Normal reads hide soft-deleted investigations; explicit admin/history
+reads may include them. Lifecycle validation additionally runs in the
+application layer before any database mutation.
 
 ## Transactions and Unit of Work
 

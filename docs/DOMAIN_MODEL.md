@@ -376,6 +376,22 @@ class InvestigationBudget(BaseModel):
 
 The budget is extended by implementation with separate LLM call limits/counters.
 
+### Investigation lifecycle
+
+The confirmed status lifecycle is narrow and deterministic:
+
+```text
+PENDING  -> RUNNING | FAILED
+RUNNING  -> COMPLETED | PARTIAL | FAILED
+COMPLETED/PARTIAL/FAILED  (terminal)
+```
+
+An identical target status is not a transition: the persistence layer treats
+it as an unchanged result without allocating a version or writing history.
+Transitioning to a terminal status stamps `completed_at` when absent. The
+lifecycle is validated by the domain (`can_transition_status`) and enforced
+again at the persistence boundary before any database mutation.
+
 ```python
 class InvestigationError(BaseModel):
     source: str | None = None

@@ -299,7 +299,9 @@ They validate:
 - relationship-history semantics;
 - authentication/session persistence;
 - audit persistence;
-- RAG document/chunk/vector persistence.
+- RAG document/chunk/vector persistence;
+- investigation resource and immutable evidence persistence (versions,
+  history, lifecycle, soft deletion, and transaction atomicity).
 
 Do not replace critical PostgreSQL integration coverage with SQLite.
 
