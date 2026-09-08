@@ -170,7 +170,7 @@ Deliver:
 
 # Investigation engine
 
-## PR 18A --- Investigation and Evidence persistence [DONE]
+## PR 18A --- Investigation and Evidence persistence
 
 Deliver the narrow persistence foundation needed by the investigation engine:
 
@@ -190,6 +190,8 @@ Provider calls remain outside transactions.
 PR 18A does **not** interpret `Evidence.facts`, extract discovered entities, construct relationships, persist `RelationshipObservation`, or implement provider-result graph persistence.
 
 The purpose of PR 18A is to establish a small, independently reviewable persistence seam before semantic extraction is introduced.
+
+Approved PR 18A contract decisions (maintainer review 01 remediation): the exact status lifecycle `PENDING -> RUNNING | FAILED`, `RUNNING -> COMPLETED | PARTIAL | FAILED` with terminal statuses and same-status no-ops; optional `expected_version` on status updates; and Investigation soft deletion. The lifecycle is revalidated against the locked PostgreSQL row, not only on a pre-lock Python snapshot. See `docs/DOMAIN_MODEL.md` and `docs/DATABASE.md`.
 
 ## PR 18B --- Deterministic entity and relationship extraction
 
