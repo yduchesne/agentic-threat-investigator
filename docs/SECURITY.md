@@ -374,3 +374,34 @@ following specifics:
 - Automated tests are synthetic (ATI-authored in-process responses over
   the real ATI provider/HTTP stack) and cannot contact the real
   ThreatFox service. There is no live or opt-in live ThreatFox test.
+
+## URLhaus credential and data minimization
+
+The URLhaus provider follows the shared secret-handling rules with the
+following specifics:
+
+- The `urlhaus_auth_key_secret` setting contains only the NAME of the
+  environment variable carrying the abuse.ch Auth-Key, never a key
+  value.
+- Composition resolves the key through `SecretsResolver` during
+  bootstrap and injects the resolved value into the provider; the
+  provider never reads configuration or the environment.
+- The key is sent only in the custom `Auth-Key` request header. It is
+  never placed in a URL, form body, log, error message, evidence fact,
+  persistence record, or test fixture.
+- Response bodies are never copied into provider error messages.
+- Reporter metadata, blacklist details, `urlhaus_reference` links,
+  `larted`, `takedown_time_seconds`, and payload download locations
+  (`urlhaus_download`) are discarded during normalization and never
+  retained; no returned URL is ever fetched and no payload is ever
+  downloaded.
+- Raw response payloads are not retained (`raw_payload=None`).
+- The provider never instantiates discovered entities and never creates
+  relationship candidates; normalized `matches` facts are the handoff
+  contract for PR 18's deterministic extractor. Payload hashes and
+  signatures remain fact-only source data and never become entities or
+  malware attributions.
+- Automated tests are synthetic (ATI-authored in-process responses over
+  the real ATI provider/HTTP stack against a virtual
+  `urlhaus-api.abuse.ch` ASGI upstream) and cannot contact the real
+  URLhaus service. There is no live or opt-in live URLhaus test.

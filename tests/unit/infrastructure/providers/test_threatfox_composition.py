@@ -115,6 +115,7 @@ async def test_composition_wires_threatfox_settings(
             ATI_IPINFO_LITE_TOKEN=_FAKE_TOKEN,
             ATI_ABUSEIPDB_API_KEY=_FAKE_ABUSEIPDB_KEY,
             CUSTOM_THREATFOX_VAR=_FAKE_KEY,
+            ATI_URLHAUS_AUTH_KEY="fake-test-urlhaus-key",
         ),
     ) as comp:
         # ThreatFox is composed after Google DNS, RDAP, IPinfo, and

@@ -119,6 +119,15 @@ class Settings(BaseSettings):
         default=None, gt=0, allow_inf_nan=False
     )
     threatfox_auth_key_secret: str = "ATI_THREATFOX_AUTH_KEY"
+    # URLhaus provider settings. The secret setting carries only the NAME
+    # of the environment variable holding the abuse.ch Auth-Key; the key
+    # value is resolved outside configuration during composition and never
+    # stored or logged here.
+    urlhaus_max_concurrency: int = Field(default=10, gt=0)
+    urlhaus_requests_per_second: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    urlhaus_auth_key_secret: str = "ATI_URLHAUS_AUTH_KEY"
     # Credential-free local artifact URI of the DB-IP IP to City Lite MMDB.
     # Blank (default) disables the DB-IP City Lite provider. This is a plain
     # artifact location, not a secret; it is validated as an authority-free
@@ -135,6 +144,7 @@ class Settings(BaseSettings):
         "abuseipdb_max_concurrency",
         "abuseipdb_max_age_in_days",
         "threatfox_max_concurrency",
+        "urlhaus_max_concurrency",
         mode="before",
     )
     @classmethod
@@ -154,6 +164,7 @@ class Settings(BaseSettings):
         "ipinfo_lite_requests_per_second",
         "abuseipdb_requests_per_second",
         "threatfox_requests_per_second",
+        "urlhaus_requests_per_second",
         mode="before",
     )
     @classmethod
@@ -185,6 +196,14 @@ class Settings(BaseSettings):
         """Require a non-blank secret reference name (never an Auth-Key value)."""
         if not value.strip():
             raise ValueError("threatfox_auth_key_secret must not be blank")
+        return value.strip()
+
+    @field_validator("urlhaus_auth_key_secret")
+    @classmethod
+    def validate_urlhaus_auth_key_secret(cls, value: str) -> str:
+        """Require a non-blank secret reference name (never an Auth-Key value)."""
+        if not value.strip():
+            raise ValueError("urlhaus_auth_key_secret must not be blank")
         return value.strip()
 
     @field_validator("dbip_city_lite_artifact_uri")

@@ -2,6 +2,237 @@
 
 Deferred findings that are outside the CRITICAL/HIGH remediation scope of the current PR.
 
+## Contents
+
+- [Complete URLhaus secondary cross-field and model-hardening invariants](#complete-urlhaus-secondary-cross-field-and-model-hardening-invariants)
+- [Restore URLhaus docstring wording dropped during re-wrap](#restore-urlhaus-docstring-wording-dropped-during-re-wrap)
+- [Type the URLhaus host duplicate-comparison value without `Any`](#type-the-urlhaus-host-duplicate-comparison-value-without-any)
+- [Toggle the PR 17 completion marker during remediation](#toggle-the-pr-17-completion-marker-during-remediation)
+- [Integration-test harness isolation](#integration-test-harness-isolation)
+- [Complete the ThreatFox defense-in-depth test matrix](#complete-the-threatfox-defense-in-depth-test-matrix)
+- [Harden retained ThreatFox reference URL validation](#harden-retained-threatfox-reference-url-validation)
+- [Verify the official ThreatFox IOC-ID lexical bounds](#verify-the-official-threatfox-ioc-id-lexical-bounds)
+- [Restore PR 16 heading spacing](#restore-pr-16-heading-spacing)
+- [Remove categorical IPinfo redistribution wording](#remove-categorical-ipinfo-redistribution-wording)
+- [Harden DB-IP MMDB metadata failure cleanup](#harden-db-ip-mmdb-metadata-failure-cleanup)
+- [Clarify DB-IP private and reserved address semantics](#clarify-db-ip-private-and-reserved-address-semantics)
+- [Verify and record MMDB software dependency licenses](#verify-and-record-mmdb-software-dependency-licenses)
+- [Avoid global test import-path mutation for MMDB helpers](#avoid-global-test-import-path-mutation-for-mmdb-helpers)
+- [Complete AbuseIPDB boundary regression coverage](#complete-abuseipdb-boundary-regression-coverage)
+- [Align the configuration example with the implemented AbuseIPDB composition](#align-the-configuration-example-with-the-implemented-abuseipdb-composition)
+- [Reject rather than normalize padded AbuseIPDB credentials](#reject-rather-than-normalize-padded-abuseipdb-credentials)
+
+## Complete URLhaus secondary cross-field and model-hardening invariants
+
+**Priority:** MEDIUM
+
+**Origin:** PR 17 remediation review 02.
+
+### Problem
+
+The PR 17 provider now enforces the primary endpoint shapes and collection
+bounds, but several secondary strictness and maintainability gaps remain:
+
+- a host response can report `url_count=0` while returning one or more distinct
+  `urls[]` records, or otherwise report a total smaller than the number of
+  retained distinct records;
+- host-level `firstseen` can be later than a nested URL's `date_added`, even
+  though it is described as the first time the host was seen;
+- nullable URL payload members (`filename`, `file_type`, `response_md5`,
+  `response_sha256`, and `signature`) use defaults, so omission and an explicit
+  source `null` are currently indistinguishable even though the documented
+  payload shape lists each member;
+- `_build_evidence()` accepts `list[Any]`, uses `getattr()`, and zips parallel
+  record/canonical-identity lists without an explicit length invariant; this
+  reduces static assurance and could silently omit a record if a future caller
+  supplies misaligned lists;
+- URL lookups correctly support and canonicalize an IPv6 URL host, while the
+  extraction-eligibility wording in `docs/DATA_SOURCES.md` still says the
+  direct `matches[].host` may become only a DOMAIN or IPv4 entity; this can be
+  confused with the separate and correct rule that IPv6 *host queries* are
+  unsupported;
+- `UrlhausProvider` silently strips padding from a resolved Auth-Key instead of
+  rejecting a padded credential;
+- `test_urlhaus_limits.py` imports private helpers and constants from another
+  test module, coupling test collection to an implementation detail of the
+  test suite;
+- the canonical-equivalent duplicate ASGI test says the fake Auth-Key is absent
+  from the request body but directly checks only the URL and evidence facts;
+  the shared route restricts the body to the single expected `host` field, so
+  this is an assertion-clarity gap rather than a credential-leak defect.
+
+These are not demonstrated CRITICAL/HIGH failures. The malformed host-URL,
+noncanonical entity-eligible fact, and normalized duplicate defects from the
+prior reviews are now remediated and covered by unit and synthetic ASGI tests.
+
+### Intended fix
+
+1. Require `url_count` to be at least the number of retained distinct source
+   records after exact-duplicate collapsing. Do not require equality because
+   URLhaus caps the returned list at 100.
+2. Decide and document whether host `firstseen <= min(urls[].date_added)` is a
+   guaranteed source invariant. If authoritative material confirms it, reject
+   contradictions; otherwise document why the timestamps are retained as
+   independent source facts.
+3. Re-verify the official direct-URL payload member presence/null contract. If
+   the members are required-but-nullable, remove field defaults and add missing
+   member tests; if omission is valid, document that explicitly.
+4. Replace `list[Any]`/`getattr()` and parallel-list `zip()` evidence
+   construction with a typed normalized-record structure or endpoint-specific
+   fact builders. Make it impossible to misalign a record and its canonical
+   identity while retaining one stable normalized match shape.
+5. Clarify that a URL lookup may yield a canonical IPv6 `matches[].host` that
+   is eligible for later IP entity extraction; keep IPv6 host-query
+   applicability unsupported and document the distinction explicitly.
+6. Reject leading/trailing whitespace in the resolved URLhaus Auth-Key with a
+   fixed non-secret-bearing error; store and send accepted keys unchanged.
+7. Move shared URLhaus test assertions/entities into an explicit support helper
+   or duplicate the few local assertions so one test module does not import
+   private names from another test module.
+8. In the canonical-equivalent duplicate ASGI test, read the recorded request
+   body and explicitly assert that the fake Auth-Key is absent. Keep the route's
+   exact single-field form-body assertion.
+9. Keep all tests synthetic and offline. Do not query public URLhaus to settle
+   a contract question.
+
+### Acceptance checks
+
+- A host total cannot be smaller than its retained distinct URL records.
+- Timestamp behavior is explicitly supported by authoritative documentation or
+  documented as independent source facts.
+- Missing versus null payload behavior matches the verified API contract.
+- Production evidence construction contains no `list[Any]` or misalignable
+  parallel-list bridge.
+- URL-host IPv6 extraction eligibility is distinct from host-query applicability.
+- Padded credentials fail before HTTP and are never echoed.
+- URLhaus tests can be collected independently in any order.
+- The duplicate ASGI test explicitly proves the fake key is absent from the
+  request body as well as the URL and evidence facts.
+- `./build.sh --qa` and `./integration-test.sh` pass.
+
+## Restore URLhaus docstring wording dropped during re-wrap
+
+**Priority:** LOW
+
+**Origin:** PR 17 remediation review 04.
+
+### Problem
+
+Commit `4187ef4` re-wrapped several URLhaus docstrings and, in doing so,
+silently removed meaningful wording. The authoritative contract in
+`docs/DATA_SOURCES.md` is unchanged, so this is a documentation-only
+regression, not a behavior change.
+
+In `_build_match_facts()` the statements "...and never becomes an entity"
+(payload metadata) and "...no derived risk labels, verdicts, or confidence
+weightings are ever synthesized" were dropped.
+
+In `_host_record_identity()` "malformed percent escapes" became the less
+precise "malformed escapes", the parenthetical "(including an empty ``#``
+delimiter)" was removed, and "On success the returned URL's canonical host
+identity" became the weaker "The canonical URL's host identity".
+
+In `_direct_record_identity()` "the returned canonical URL's own parsed
+host" became "the returned canonical URL's own host".
+
+### Intended fix
+
+Restore the exact pre-`4187ef4` wording of the three docstrings in
+`src/agentic_threat_investigator/infrastructure/providers/urlhaus.py` while
+keeping lines within the Black/Pylint limits.
+
+1. `_build_match_facts()` must restore the two dropped statements so the
+   docstring conveys: "Payload metadata is fact-only and never becomes an
+   entity." and "no derived risk labels, verdicts, or confidence weightings
+   are ever synthesized."
+
+2. `_host_record_identity()` must include "malformed percent escapes" and
+   the phrase "fragments (including an empty ``#`` delimiter)".
+
+3. `_direct_record_identity()` must use "the returned canonical URL's own
+   parsed host".
+
+4. Make no code behavior changes; only edit the docstrings.
+
+### Acceptance checks
+
+- `rg -n "confidence weightings" src/agentic_threat_investigator/infrastructure/providers/urlhaus.py`
+  matches the `_build_match_facts` docstring.
+- `rg -nF "empty ``#`` delimiter" src/agentic_threat_investigator/infrastructure/providers/urlhaus.py`
+  matches the `_host_record_identity` docstring.
+- `rg -nF "own parsed host" src/agentic_threat_investigator/infrastructure/providers/urlhaus.py`
+  matches the `_direct_record_identity` docstring.
+- `./build.sh --qa` passes (Black and Pylint accept the restored lines).
+
+## Type the URLhaus host duplicate-comparison value without `Any`
+
+**Priority:** LOW
+
+**Origin:** PR 17 remediation review 04.
+
+### Problem
+
+`UrlhausProvider._normalize_host_response()` types its duplicate map as
+`dict[str, tuple[Any, ...]]`. The runtime value is exactly the five-field
+consumed normalized content
+`(canonical_url: str, url_status: str, date_added: datetime, threat: str,
+tags: tuple[str, ...])`, but the `Any` erases that shape and weakens static
+assurance inside otherwise strict normalization code. This is a distinct site
+from the separately deferred `_build_evidence()` `list[Any]`/`getattr()`/`zip()`
+refactor.
+
+### Intended fix
+
+1. Define a small frozen value type, for example a
+   `typing.NamedTuple` named `_HostConsumedContent` with fields
+   `canonical_url: str`, `url_status: str`, `date_added: datetime`,
+   `threat: str`, `tags: tuple[str, ...]`.
+2. Build it in `_normalize_host_response()` and type the map as
+   `dict[str, _HostConsumedContent]`.
+3. Preserve the exact five-field equality semantics; do not add or remove
+   any compared field.
+4. Do not fold the unrelated `_build_evidence()` refactor into this change
+   unless the smallest safe change cannot be expressed without it.
+
+### Acceptance checks
+
+- `consumed_by_id` has no `Any` in its type annotation.
+- Review-03 duplicate-equivalence and conflict tests still pass unchanged.
+- `src/agentic_threat_investigator/infrastructure/providers/urlhaus.py`
+  contains the named value type and no new `list[Any]` bridge in the
+  duplicate path.
+
+## Toggle the PR 17 completion marker during remediation
+
+**Priority:** LOW
+
+**Origin:** PR 17 remediation review 04.
+
+### Problem
+
+`.plans/pr-17-fixes-03.md` section 1 required removing `[DONE]` from the PR 17
+heading before any production change, and section 6 required restoring it only
+after all gates passed. The branch never did either as a distinct step:
+`docs/PR_PLAN.md` was not modified by any commit in `d11fb67..HEAD`, so the
+marker stayed `[DONE]` throughout remediation. The final tree is correct
+(`## PR 17 --- URLhaus provider [DONE]`), but the marker-toggle discipline was
+not followed, and commit `644f1fa` claims to "restore" a marker it never
+removed.
+
+### Intended fix
+
+1. Keep the final `[DONE]` marker; no tree change is required now.
+2. In future remediation plans and reviews, remove the `[DONE]` marker before
+   the first production change and restore it only after all gates pass.
+3. Ensure any commit message that mentions restoring or removing the marker
+   is backed by an actual `docs/PR_PLAN.md` diff for that marker.
+
+### Acceptance checks
+
+- The final tree has exactly one `## PR 17 --- URLhaus provider [DONE]`
+  heading and no altered PR 17 deliverable wording.
+- Future remediation commit messages match their diffs for the marker toggle.
+
 ## Integration-test harness isolation
 
 **Priority:** MEDIUM  

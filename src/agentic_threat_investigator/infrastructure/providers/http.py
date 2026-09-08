@@ -721,6 +721,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         json_body: dict[str, Any] | None = None,
+        form_body: dict[str, str] | None = None,
         accept_statuses: set[int] | None = None,
         accepted_media_types: tuple[str, ...] | None = None,
     ) -> HttpOutcome:
@@ -729,10 +730,14 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         Validates the URL before acquiring permits or performing I/O.
         Enforces timeout and no-redirect policies on every attempt. When
         ``json_body`` is given, it is serialized by the HTTP library as a
-        JSON request body with ``Content-Type: application/json``; the body
-        is replayed unchanged on retries. GET-based providers leave it as
-        ``None``.
+        JSON request body with ``Content-Type: application/json``; when
+        ``form_body`` is given, it is serialized as an
+        ``application/x-www-form-urlencoded`` body. Exactly one of the two
+        may be supplied. The body is replayed unchanged on retries.
+        GET-based providers leave both as ``None``.
         """
+        if json_body is not None and form_body is not None:
+            raise ValueError("json_body and form_body are mutually exclusive")
         canonical_url = validate_provider_url(url)
         accepted_statuses = {200} if accept_statuses is None else accept_statuses
         media_types = (
@@ -754,6 +759,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
             params,
             request_headers,
             json_body,
+            form_body,
             accepted_statuses,
             media_types,
         )
@@ -765,6 +771,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         params: dict[str, Any] | None,
         headers: dict[str, str],
         json_body: dict[str, Any] | None,
+        form_body: dict[str, str] | None,
         accepted_statuses: set[int],
         media_types: tuple[str, ...],
     ) -> HttpOutcome:
@@ -784,6 +791,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                         params,
                         headers,
                         json_body,
+                        form_body,
                         accepted_statuses,
                         media_types,
                         start_time,
@@ -795,6 +803,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                     params,
                     headers,
                     json_body,
+                    form_body,
                     accepted_statuses,
                     media_types,
                     start_time,
@@ -826,11 +835,18 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         params: dict[str, Any] | None,
         headers: dict[str, str],
         json_body: dict[str, Any] | None,
+        form_body: dict[str, str] | None,
         accept_statuses: set[int],
         accepted_media_types: tuple[str, ...],
         start_time: float,
     ) -> HttpOutcome:
         """Execute a single attempt with streaming, Content-Type, and bounds checks."""
+        # The per-outcome HttpOutcome construction blocks are the accepted
+        # cost of explicit, typed failure classification.
+        # pylint: disable=too-many-locals
+        data: dict[str, str] | None = None
+        if form_body is not None:
+            data = form_body
         try:
             async with self._client.stream(
                 method,
@@ -838,6 +854,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                 params=params,
                 headers=headers,
                 json=json_body,
+                data=data,
                 follow_redirects=False,
                 timeout=self._policy.timeout_seconds,
             ) as response:

@@ -43,10 +43,41 @@ Canonicalization is type-specific:
 
 - domain: lowercase, normalized trailing dot and IDN handling;
 - IP: canonical compressed representation;
+- URL: strict HTTP/HTTPS-only identity contract (below);
 - ASN: canonical numeric identity, rendered consistently;
 - network prefix: canonical network boundary;
 - CVE: uppercase;
 - ATT&CK identifier: canonical ATT&CK ID.
+
+### URL identity contract (v0.1)
+
+ATI URL canonicalization (`canonicalize_url`) is deterministic,
+conservative, stable across Python runtimes, safe for persistence
+identity and provider identity checks, and non-lossy with respect to
+security-relevant URL components:
+
+- Only the `http` and `https` schemes are supported; every other scheme
+  is rejected.
+- Rejected before I/O: userinfo (username/password), fragments, missing
+  hosts, invalid ports (including port 0 and ports above 65535),
+  embedded whitespace, and control characters.
+- The scheme is lowercased; DNS hosts are strictly validated (strict
+  DNS validation, lowercased, IDNA-encoded); IP hosts use the canonical
+  IP representation; IPv6 hosts render bracketed in the canonical URL.
+- Default ports (80 for `http`, 443 for `https`) are omitted; other
+  ports are preserved.
+- An empty path becomes `/`. The path, query, and non-default ports are
+  preserved exactly: query parameters are never sorted or dropped,
+  dot-segments are never resolved, trailing slashes are never removed,
+  application-specific path case is never normalized, and percent
+  escapes are preserved byte-for-byte after syntax validation (every
+  `%` must introduce two hex digits).
+- Fragments are excluded because they are not transmitted in HTTP
+  requests and would create ambiguous IOC identity. An empty query is
+  indistinguishable from no query and canonicalizes to no query.
+- Canonicalization is idempotent; canonically equivalent spellings
+  produce identical output; meaningful differences (path, query, query
+  order, port, percent-encoding, scheme) remain distinct identities.
 
 An item is an entity when it is independently identifiable, reusable across observations, and meaningful as a relationship participant. Otherwise it is an attribute or evidence fact.
 

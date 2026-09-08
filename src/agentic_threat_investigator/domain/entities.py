@@ -18,6 +18,7 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -207,9 +208,114 @@ def canonicalize_attack_technique(value: str) -> str:
 Canonicalizer = Callable[[str], str]
 """A pure function mapping a raw entity value to its canonical form."""
 
+
+def canonicalize_url(value: str) -> str:
+    """Return the canonical form of an HTTP/HTTPS URL (v0.1 identity contract).
+
+    The v0.1 URL identity contract is deliberately conservative so the
+    result is deterministic, stable across Python runtimes, safe as a
+    persistence identity, and non-lossy with respect to
+    security-relevant URL components:
+
+    - Only the ``http`` and ``https`` schemes are supported; any other
+      scheme is rejected.
+    - Userinfo (username/password), fragments, missing hosts, invalid
+      ports (including port 0 and ports above 65535), embedded
+      whitespace, and control characters are rejected.
+    - The scheme is lowercased. A DNS host is strictly validated with
+      :func:`validate_dns_name` (including IDNA) and lowercased; an IP
+      host uses :func:`canonicalize_ip_address`. IPv6 hosts are rendered
+      bracketed in the canonical URL.
+    - The default port for the scheme (80 for ``http``, 443 for
+      ``https``) is omitted; any other port is preserved.
+    - An empty path becomes ``/``; any other path, the query string, and
+      existing percent-encoded octets are preserved byte-for-byte after
+      syntax validation (every ``%`` must introduce two hex digits), so
+      the identity never decodes, reorders, or case-folds application
+      data. Query parameters are never sorted or dropped, dot-segments
+      are never resolved, and trailing slashes are never removed.
+    - Fragments are rejected because they are not transmitted in HTTP
+      requests and would create ambiguous indicator identity. An empty
+      query is indistinguishable from no query and canonicalizes to no
+      query.
+
+    Raises ``ValueError`` for any input outside the contract. The branch
+    count is intrinsic to the explicit per-rejection contract rules.
+    """
+    # pylint: disable=too-many-branches
+    # Only plain ASCII spaces are trimmed from the ends; tab, newline,
+    # and other control characters anywhere in the URL are rejected so
+    # they can never be silently dropped by broader Unicode trimming.
+    candidate = value.strip(" ")
+    if not candidate or any(
+        char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in candidate
+    ):
+        raise ValueError("URL contains embedded whitespace or control characters")
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError as exc:
+        raise ValueError("malformed URL") from exc
+
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError("URL must use http or https")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("URL must not contain userinfo")
+    if parsed.fragment or "#" in candidate:
+        raise ValueError("URL must not contain a fragment")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL must have a host")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("URL has an invalid port") from exc
+    if port is not None and port == 0:
+        raise ValueError("URL port must not be zero")
+
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        try:
+            canonical_host = validate_dns_name(hostname)
+        except (ValueError, UnicodeError) as exc:
+            raise ValueError("URL has an invalid DNS host") from exc
+    else:
+        canonical_host = canonicalize_ip_address(str(address))
+
+    _validate_percent_encoding(parsed.path, "path")
+    _validate_percent_encoding(parsed.query, "query")
+
+    default_port = 80 if scheme == "http" else 443
+    host_render = f"[{canonical_host}]" if ":" in canonical_host else canonical_host
+    if port is not None and port != default_port:
+        netloc = f"{host_render}:{port}"
+    else:
+        netloc = host_render
+    path = parsed.path or "/"
+    return urlunsplit((scheme, netloc, path, parsed.query, ""))
+
+
+def _validate_percent_encoding(component: str, member: str) -> None:
+    """Require every ``%`` in a URL component to introduce two hex digits.
+
+    Percent-encodings are otherwise preserved byte-for-byte: the contract
+    never decodes, re-encodes, or case-folds existing escapes.
+    """
+    index = component.find("%")
+    while index != -1:
+        escape = component[index + 1 : index + 3]
+        if len(escape) != 2 or any(
+            char not in "0123456789abcdefABCDEF" for char in escape
+        ):
+            raise ValueError(f"URL {member} has malformed percent encoding")
+        index = component.find("%", index + 3)
+
+
 _CANONICALIZERS: dict[EntityType, Canonicalizer] = {
     EntityType.DOMAIN: canonicalize_domain,
     EntityType.IP_ADDRESS: canonicalize_ip_address,
+    EntityType.URL: canonicalize_url,
     EntityType.NETWORK_PREFIX: canonicalize_network_prefix,
     EntityType.ASN: canonicalize_asn,
     EntityType.VULNERABILITY: canonicalize_cve,
