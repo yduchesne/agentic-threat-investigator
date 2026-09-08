@@ -36,6 +36,94 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 
 Until fixed, run `./integration-test.sh` serially.
 
+## Complete the ThreatFox defense-in-depth test matrix
+
+**Priority:** MEDIUM
+
+**Origin:** PR 16 review; production behavior is currently supplied by the shared HTTP stack.
+
+### Problem
+
+ThreatFox tests cover the primary success, authentication, rate-limit, retry,
+schema, cancellation, and no-result paths, but do not exercise every shared
+transport guarantee through `ThreatFoxProvider`. Missing provider-specific
+coverage includes timeout mapping, invalid response content type, oversized
+response bodies, a transient 5xx followed by success, and proof with an
+exploding clock that invalid/unsupported inputs are rejected before clock
+access.
+
+### Intended fix
+
+1. Add focused `ThreatFoxProvider` unit tests for timeout, invalid media type,
+   and the configured response-size bound.
+2. Add a deterministic transient-5xx-then-success test that asserts the exact
+   request count and normalized evidence.
+3. Inject a clock callable that raises if evaluated and use it for invalid and
+   unsupported input tests; continue using a transport that fails on any I/O.
+4. Reuse the existing shared HTTP helpers and synthetic responses; do not add
+   provider-specific retry or transport code.
+5. Keep every test offline and credential-free.
+
+### Acceptance checks
+
+- Every missing path maps through the existing typed provider taxonomy.
+- Invalid input performs zero clock and HTTP I/O.
+- No test contacts public ThreatFox.
+- `./build.sh --qa` passes.
+
+## Harden retained ThreatFox reference URL validation
+
+**Priority:** MEDIUM
+
+**Origin:** PR 16 review; external references are retained but never fetched.
+
+### Problem
+
+ThreatFox reference validation accepts an `http`/`https` URL containing URL
+userinfo. The provider never fetches references, and the ThreatFox Auth-Key is
+not exposed, but retaining a credential-bearing source URL is unnecessary and
+inconsistent with ATI's conservative URL data-minimization posture.
+
+### Intended fix
+
+1. Reject non-null `reference` and `malware_malpedia` URLs when
+   `urlsplit()` reports a username or password.
+2. Keep validation errors generic and never include the rejected URL.
+3. Add strict model tests for username-only and username/password URLs.
+4. Continue to validate but not retain `malware_malpedia`; continue to retain
+   safe `reference` values without fetching them.
+5. Update the ThreatFox source contract to state the no-userinfo rule.
+
+### Acceptance checks
+
+- Credential-bearing source URLs produce `INVALID_RESPONSE` without leaking
+  their content.
+- Ordinary bounded HTTP(S) references remain valid.
+- No URL is fetched.
+
+## Verify the official ThreatFox IOC-ID lexical bounds
+
+**Priority:** LOW
+
+**Origin:** PR 16 review; the public API documents IDs as strings but does not publish a complete grammar.
+
+### Problem
+
+The current provider accepts decimal strings from `"0"` through 16 digits.
+ThreatFox examples use positive decimal identifiers, but the reviewed public
+contract does not establish whether zero, leading zeroes, or the selected
+16-digit upper bound are authoritative.
+
+### Intended fix
+
+1. Re-check official ThreatFox API documentation or maintained source for the
+   exact IOC-ID grammar and range.
+2. If confirmed, update the provider validator, source contract, and boundary
+   tests together.
+3. If not confirmable, retain the current bounded decimal safety rule and
+   document it as an ATI defensive bound rather than an official source bound.
+4. Do not use a real Auth-Key or live API call solely to answer this question.
+
 ## Remove categorical IPinfo redistribution wording
 
 **Priority:** LOW  

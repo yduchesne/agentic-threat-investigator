@@ -109,7 +109,7 @@ separately approved future change.
 Provider scores do not directly determine ATI assessment confidence. No
 AbuseIPDB hit does not imply `BENIGN`. 
 
-## PR 16 --- ThreatFox provider [DONE]
+## PR 16 --- ThreatFox provider
 
 Deliver:
 
@@ -128,8 +128,7 @@ Deliver:
 -   typed errors;
 -   malicious IOC and no-result fixtures;
 -   canonical AsyncRAT fixture support;
--   deterministic provider tests;
--   optional live contract tests.
+-   deterministic provider tests.
 
 The provider emits validated ThreatFox source records as normalized
 `THREAT_INTELLIGENCE` evidence facts; it does not instantiate discovered

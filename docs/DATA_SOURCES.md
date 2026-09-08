@@ -1045,9 +1045,13 @@ must canonicalize exactly to the queried canonical identity. Unrelated
 records are rejected (`INVALID_RESPONSE`) even when the upstream claims an
 exact match.
 
-- **DOMAIN**: the returned domain canonicalizes under ATI domain rules
-  (lowercase, IDNA, one terminal root dot) and must equal the queried
-  canonical domain. The record `ioc_type` must be `domain`.
+- **DOMAIN**: the returned domain is validated with ATI's strict provider
+  DNS-name validator before canonical comparison, then must equal the
+  queried canonical domain. Empty labels, underscores, invalid IDNA
+  input, multiple terminal dots, invalid label characters or lengths,
+  and overlong names are rejected (`INVALID_RESPONSE`). Case differences
+  and exactly one terminal root dot are accepted through
+  canonicalization. The record `ioc_type` must be `domain`.
 - **IP_ADDRESS, bare IP**: a returned IOC that parses as a whole IPv4 or
   IPv6 address matches when its canonical form equals the queried
   canonical IP. The record `ioc_type` must be `ip:port` (the only source
@@ -1069,6 +1073,27 @@ exact match.
 The record `ioc_type` must be one of the source types ATI can interpret
 (`domain`, `ip:port`, `url`); any other value (for example `filename` or a
 hash type) cannot match a supported query and is rejected.
+
+#### Duplicate source records
+
+Duplicate handling runs only after each entry passes strict model
+validation and queried-IOC identity validation:
+
+- the first occurrence of a ThreatFox `id` establishes that source
+  record's consumed normalized content and its output position;
+- a later occurrence of the same `id` with identical consumed normalized
+  content is an exact duplicate and is omitted from `facts.matches`;
+- a later occurrence of the same `id` with different consumed normalized
+  content makes the whole response `INVALID_RESPONSE` with no evidence;
+- records with different IDs remain in upstream order even when their
+  IOC and malware are equal.
+
+Comparison uses the consumed validated record model, not raw
+dictionaries: differences only in deliberately ignored fields are
+neither duplicated into facts nor treated as conflicts. Records are
+never sorted, and records are never deduplicated merely because they
+share a malware identifier; semantic malware entity and association
+deduplication belongs to PR 18.
 
 #### Six-month expiration
 
@@ -1121,12 +1146,9 @@ Presence rules:
 - `malware` is the ThreatFox (Malpedia-style) machine identifier: a
   strict nonblank lowercase bounded identifier. It is the canonical
   identity input for later MALWARE entity discovery.
-- `malware_printable` and `malware_alias` may be `null`; a non-null value
-  must be a nonblank bounded unpadded string. The printable name is
-  display metadata only and never determines malware identity.
-- `malware_malpedia` may be `null`; a non-null value must be a bounded
-  `http`/`https` URL. It is validated but never retained and never
-  fetched.
+- `malware_printable` may be `null`; a non-null value must be a nonblank
+  bounded unpadded string. The printable name is display metadata only
+  and never determines malware identity.
 - `confidence_level` is a strict integer `0..100` exactly as reported.
 - `first_seen` is required and `last_seen` may be `null`; both use the
   official `YYYY-MM-DD HH:MM:SS UTC` form and are normalized to
@@ -1136,25 +1158,35 @@ Presence rules:
   `http`/`https` URL. It is retained as source metadata and never
   fetched.
 - `tags` may be `null` or an array of bounded nonblank strings; an
-  explicitly empty array is valid.
-- `ioc_type_desc` is validated as a required member but only
-  `ioc_type` is retained in facts.
+  explicitly empty array is valid. Empty, whitespace-only, and
+  outer-whitespace-padded tag values are invalid. Valid source order and
+  duplicate valid tags are preserved unchanged.
 
-Deliberately unconsumed members (ignored, never copied into facts,
-never validated, never synthesized): `reporter`, `comment` (untrusted
+Consumed and validated but not retained members: `ioc_type_desc`,
+`malware_alias`, and `malware_malpedia` are strictly validated on every
+record and never copied into normalized facts.
+
+- `ioc_type_desc` is required: omission and explicit null are malformed,
+  and a non-null value must be a nonblank bounded unpadded string.
+- `malware_alias` may be `null`; a non-null value must be a nonblank
+  bounded unpadded string.
+- `malware_malpedia` may be `null`; a non-null value must be a bounded
+  `http`/`https` URL. It is never fetched.
+
+Ignored and unvalidated members (never copied into facts, never
+validated, never synthesized): `reporter`, `comment` (untrusted
 third-party free text), `credits`, `malware_samples` (which would
-require a MalwareBazaar contract ATI does not implement),
-`malware_alias`, `malware_malpedia`, and all unknown members. Ignored
-members cannot become entities, relationships, evidence facts, or pivot
-targets. Only exact external member names affect parsing; ATI-side
-snake-case names are never accepted as source members, and unknown
-members are ignored.
+require a MalwareBazaar contract ATI does not implement), and all
+unknown members. Ignored members cannot become entities, relationships,
+evidence facts, or pivot targets. Only exact external member names
+affect parsing; ATI-side snake-case names are never accepted as source
+members.
 
 #### Query status matrix
 
 | `query_status` | Behavior |
 |---|---|
-| `ok` | Success; the `data` array is validated record by record. A missing or non-array `data` is `INVALID_RESPONSE`; an explicitly empty array is a valid no-result. |
+| `ok` | Success; the `data` array is validated record by record. A missing or non-array `data` is `INVALID_RESPONSE`; an explicitly empty array is a valid no-result. Duplicate source records follow the duplicate rule above. |
 | `no_result` | Valid no-result: empty `ProviderResult`, no evidence and no error. Never a benign assessment. |
 | `ratelimited` | Body-encoded rate limiting (HTTP 200): typed `RATE_LIMITED` error, retryable. |
 | any other value (including statuses such as `error` or `unauthorized`) | Unknown status: non-retryable `INVALID_RESPONSE`. An unknown status is never success. |
@@ -1162,8 +1194,8 @@ members are ignored.
 #### ATI normalized fact shape
 
 A successful search emits exactly one grouped evidence observation whose
-`facts.matches` array contains one entry per validated matching record,
-in upstream order:
+`facts.matches` array contains one entry per validated, non-duplicate
+matching record, in upstream order:
 
 ```json
 {
@@ -1177,8 +1209,8 @@ in upstream order:
       "malware": "win.asyncrat",
       "malware_printable": "AsyncRAT",
       "confidence_level": 100,
-      "first_seen": "2026-08-20T12:00:00+00:00",
-      "last_seen": "2026-08-21T12:00:00+00:00",
+      "first_seen": "2026-08-20T12:00:00Z",
+      "last_seen": "2026-08-21T12:00:00Z",
       "reference": null,
       "tags": ["AsyncRAT"]
     }
@@ -1191,10 +1223,10 @@ ThreatFox machine identifier retained verbatim: it is the canonical
 identity input from which a deterministic extractor later derives the
 canonical `MALWARE` entity (`display_name` = `malware_printable` when
 present, otherwise the identifier). `malware_printable` is display
-metadata only and never determines identity. `first_seen`/`last_seen`
-are timezone-aware UTC ISO 8601 values (`last_seen` is `null` when the
-source reported none). Source array order is preserved: ATI does not
-sort or reorder matches.
+metadata only and never determines identity. `first_seen` and non-null
+`last_seen` values are normalized to the canonical UTC ISO 8601 form
+ending in `Z` (`last_seen` is `null` when the source reported none).
+Source array order is preserved: ATI does not sort or reorder matches.
 
 #### Provider boundary: entity discovery and relationships
 
@@ -1230,13 +1262,18 @@ emits a partly normalized observation.
 | malformed record (any consumed member) | `INVALID_RESPONSE`; one malformed record invalidates the whole response |
 | unrelated record (identity mismatch) | `INVALID_RESPONSE`, even though `exact_match` was requested |
 | `ioc_type` disagreement with IOC syntax or query | `INVALID_RESPONSE` |
+| malformed returned domain | Empty labels, underscores, invalid IDNA, multiple terminal dots, invalid label characters/lengths, and overlong names are `INVALID_RESPONSE`; case differences and one terminal root dot are accepted |
+| missing/null/malformed `ioc_type_desc` | `INVALID_RESPONSE` (required, validated, not retained) |
+| exact duplicate `id` (identical consumed content) | Omitted from `facts.matches`; the first occurrence stays authoritative |
+| conflicting duplicate `id` (differing consumed content) | `INVALID_RESPONSE`, no evidence; changes only in ignored fields are not conflicts |
+| different IDs, equal IOC/malware | Both retained in upstream order |
 | `id` | Official bounded decimal string; other shapes are `INVALID_RESPONSE` |
 | `malware` | Strict bounded lowercase machine identifier; other values are `INVALID_RESPONSE` |
 | `malware_printable`/`malware_alias` | `null` or nonblank bounded unpadded string |
 | `malware_malpedia`/`reference` | `null` or bounded `http`/`https` URL; validated, never fetched |
 | `confidence_level` | Strict integer `0..100`; otherwise `INVALID_RESPONSE` |
-| `first_seen`/`last_seen` | Official `YYYY-MM-DD HH:MM:SS UTC` form (or `null` for `last_seen`); naive, ISO, padded, and unparseable values are `INVALID_RESPONSE`; `last_seen` before `first_seen` is `INVALID_RESPONSE` |
-| `tags` | `null` or bounded nonblank-string list; other shapes are `INVALID_RESPONSE` |
+| `first_seen`/`last_seen` | Official `YYYY-MM-DD HH:MM:SS UTC` form (or `null` for `last_seen`); naive, ISO, padded, and unparseable values are `INVALID_RESPONSE`; `last_seen` before `first_seen` is `INVALID_RESPONSE`; normalized fact output uses the exact `Z` UTC form |
+| `tags` | `null` or bounded-string list; empty, whitespace-only, and outer-padded values are `INVALID_RESPONSE`; valid order and duplicates are preserved |
 | unknown members | Unknown members at any level are ignored and never copied into facts |
 | 401 | `AUTHENTICATION_FAILED`, non-retryable |
 | 403 | `FORBIDDEN`, non-retryable |
