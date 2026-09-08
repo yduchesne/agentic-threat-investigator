@@ -66,16 +66,20 @@ _OPERATIONAL_FIELDS = (
 def _to_domain(row: InvestigationRow) -> InvestigationState:
     """Rebuild the domain resource with its authoritative persistence metadata.
 
-    Database-owned columns are applied after the operational-state JSONB
-    document so stored values can never override authoritative columns.
+    The payload starts from the operational-state JSONB document, then every
+    dedicated database column is applied after the expansion so the
+    authoritative value always wins: colliding ``operational_state`` keys
+    cannot replace the identity, lifecycle state, trigger type, objective,
+    budget, timestamps, version, or deletion metadata. The JSONB document is
+    never mutated in place.
     """
     payload: dict[str, object] = {
+        **(row.operational_state or {}),
         "investigation_id": row.id,
         "status": row.status,
         "trigger_type": row.trigger_type,
         "objective": row.objective,
         "budget": row.budget,
-        **(row.operational_state or {}),
         "started_at": row.started_at,
         "completed_at": row.completed_at,
         "version": row.version,
