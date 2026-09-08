@@ -720,13 +720,18 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        json_body: dict[str, Any] | None = None,
         accept_statuses: set[int] | None = None,
         accepted_media_types: tuple[str, ...] | None = None,
     ) -> HttpOutcome:
         """Execute a bounded, retry-capable HTTP request and return parsed JSON.
 
         Validates the URL before acquiring permits or performing I/O.
-        Enforces timeout and no-redirect policies on every attempt.
+        Enforces timeout and no-redirect policies on every attempt. When
+        ``json_body`` is given, it is serialized by the HTTP library as a
+        JSON request body with ``Content-Type: application/json``; the body
+        is replayed unchanged on retries. GET-based providers leave it as
+        ``None``.
         """
         canonical_url = validate_provider_url(url)
         accepted_statuses = {200} if accept_statuses is None else accept_statuses
@@ -748,6 +753,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
             canonical_url,
             params,
             request_headers,
+            json_body,
             accepted_statuses,
             media_types,
         )
@@ -758,6 +764,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         url: str,
         params: dict[str, Any] | None,
         headers: dict[str, str],
+        json_body: dict[str, Any] | None,
         accepted_statuses: set[int],
         media_types: tuple[str, ...],
     ) -> HttpOutcome:
@@ -776,6 +783,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                         url,
                         params,
                         headers,
+                        json_body,
                         accepted_statuses,
                         media_types,
                         start_time,
@@ -786,6 +794,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                     url,
                     params,
                     headers,
+                    json_body,
                     accepted_statuses,
                     media_types,
                     start_time,
@@ -816,6 +825,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         url: str,
         params: dict[str, Any] | None,
         headers: dict[str, str],
+        json_body: dict[str, Any] | None,
         accept_statuses: set[int],
         accepted_media_types: tuple[str, ...],
         start_time: float,
@@ -827,6 +837,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                 url,
                 params=params,
                 headers=headers,
+                json=json_body,
                 follow_redirects=False,
                 timeout=self._policy.timeout_seconds,
             ) as response:
