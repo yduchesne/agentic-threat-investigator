@@ -170,20 +170,95 @@ Deliver:
 
 # Investigation engine
 
-## PR 18 --- Investigation persistence and relationship construction
+## PR 18A --- Investigation and Evidence persistence [DONE]
 
-Deliver Investigation persistence, Evidence persistence, deterministic
-relationship extraction, stable Relationship identity, immutable
-`RelationshipObservation`, discovered-entity processing, atomic
-provider-result persistence, history/version invariants, and integration
-tests.
+Deliver the narrow persistence foundation needed by the investigation engine:
+
+- PostgreSQL persistence for `Investigation`;
+- immutable PostgreSQL persistence for `Evidence`;
+- repository contracts and PostgreSQL implementations where not already present;
+- explicit application-service/UnitOfWork orchestration for these resources;
+- Investigation status/resource-version behavior required by the current domain/database contracts;
+- actor/request/investigation correlation and history/audit behavior required by existing persistence rules;
+- short transaction boundaries;
+- deterministic repository/unit tests;
+- real-PostgreSQL integration tests;
+- rollback/atomicity tests for the persistence operations introduced in this PR.
+
+Provider calls remain outside transactions.
+
+PR 18A does **not** interpret `Evidence.facts`, extract discovered entities, construct relationships, persist `RelationshipObservation`, or implement provider-result graph persistence.
+
+The purpose of PR 18A is to establish a small, independently reviewable persistence seam before semantic extraction is introduced.
+
+## PR 18B --- Deterministic entity and relationship extraction
+
+Deliver deterministic, database-free extraction of domain identities and relationship assertions from normalized provider Evidence.
+
+Include extraction contracts and source-specific extractors for the evidence shapes already implemented by:
+
+- Google Public DNS;
+- RDAP;
+- IPinfo Lite;
+- DB-IP City Lite where entity extraction is applicable;
+- AbuseIPDB where entity extraction is applicable;
+- ThreatFox;
+- URLhaus.
+
+Extraction must:
+
+- consume validated normalized Evidence facts only;
+- canonicalize all extracted Entity identities through the authoritative domain canonicalizers;
+- emit deterministic entity identities suitable for persistence;
+- emit deterministic relationship assertions only when the source semantics and existing `RelationshipType` vocabulary support them exactly;
+- retain Evidence provenance for every relationship assertion;
+- deduplicate within one extraction result deterministically;
+- reject malformed/internally inconsistent normalized facts rather than guessing;
+- remain free of repositories, SQL, provider HTTP calls, LLM calls, and transaction logic.
+
+Examples:
+
+```text
+DNS:
+DOMAIN + DNS facts
+    -> IP_ADDRESS
+    -> DOMAIN RESOLVES_TO IP_ADDRESS
+
+ThreatFox:
+IOC + malware machine identifier
+    -> MALWARE
+    -> IOC ASSOCIATED_WITH MALWARE
+```
+
+Do not invent generic relationships merely because values co-occur in the same Evidence record.
+
+PR 18B does **not** persist anything.
+
+## PR 18C --- Atomic provider-result and graph persistence
+
+Deliver the application-level persistence path that combines already-normalized Evidence with the deterministic extraction output from PR 18B.
+
+Include:
+
+- canonical Entity upsert by `(entity_type, canonical_value)`;
+- stable Relationship identity by `(source_entity_id, relationship_type_urn, target_entity_id)`;
+- immutable `RelationshipObservation` insertion;
+- evidence-to-observation provenance;
+- atomic persistence of one normalized provider result: Evidence + derived/canonical entities + Relationships + RelationshipObservations + required audit/history changes;
+- replay/idempotency behavior consistent with immutable observation semantics;
+- repeated observations creating new `RelationshipObservation` rows without replacing stable Relationships;
+- history/version invariants;
+- UnitOfWork ownership and short transactions;
+- real-PostgreSQL integration tests;
+- rollback, duplicate, replay, concurrent-identity, and conflict tests.
+
+Provider/LLM calls remain outside the transaction.
+
+PR 18C does not introduce LangGraph, agent planning, pivot policy, Assessment, RAG, or report generation.
 
 ## PR 19 --- LangGraph investigation skeleton
 
-Deliver typed `InvestigationState`, coordinator graph, provider/tool
-execution nodes, working-set/queue mechanics, budgets/counters,
-persisted observable timeline actions, deterministic fake providers/LLM,
-and the initial deterministic evaluation framework.
+Deliver typed `InvestigationState`, coordinator graph, provider/tool execution nodes, working-set/queue mechanics, budgets/counters, persisted observable timeline actions, deterministic fake providers/LLM, and the initial deterministic evaluation framework.
 
 Do not persist or expose chain-of-thought.
 
