@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentic_threat_investigator.app.persistence.repositories import (
     EvidenceDuplicateIdentityError,
     EvidenceRepository,
+    InvestigationNotFoundError,
     RelationshipObservationRepository,
     RelationshipRepository,
 )
@@ -27,7 +28,11 @@ from agentic_threat_investigator.domain.relationships import (
     RelationshipType,
 )
 
-from .errors import SQLSTATE_EVIDENCE_DUPLICATE, sqlstate
+from .errors import (
+    SQLSTATE_EVIDENCE_DUPLICATE,
+    SQLSTATE_INVESTIGATION_NOT_FOUND,
+    sqlstate,
+)
 from .models import EntityRow, EvidenceRow, RelationshipObservationRow, RelationshipRow
 
 
@@ -219,8 +224,15 @@ class PostgresEvidenceRepository(
                 },
             )
         except DBAPIError as error:
-            if sqlstate(error) == SQLSTATE_EVIDENCE_DUPLICATE:
+            state = sqlstate(error)
+            if state == SQLSTATE_EVIDENCE_DUPLICATE:
                 raise EvidenceDuplicateIdentityError(evidence_id) from error
+            if state == SQLSTATE_INVESTIGATION_NOT_FOUND:
+                # The database rejected a missing or soft-deleted parent
+                # Investigation; surface the established typed error.
+                raise InvestigationNotFoundError(
+                    str(evidence.investigation_id)
+                ) from error
             raise
         return evidence.model_copy(update={"id": evidence_id})
 
