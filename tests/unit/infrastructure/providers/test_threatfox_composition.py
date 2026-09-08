@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""AbuseIPDB-specific provider composition tests.
+"""ThreatFox-specific provider composition tests.
 
-Covers bootstrap key resolution, settings wiring, and the rollback
-behavior of the composition root when the AbuseIPDB credential is missing
+Covers bootstrap Auth-Key resolution, settings wiring, and the rollback
+behavior of the composition root when the ThreatFox credential is missing
 or blank. The fakes here are deliberately local and small so the shared
 composition suite keeps its own fixtures.
 """
@@ -28,9 +28,16 @@ from agentic_threat_investigator.infrastructure.providers.http import (
 
 pytestmark = pytest.mark.asyncio
 
-_ABUSEIPDB_KEY_SECRET_NAME = "ATI_ABUSEIPDB_API_KEY"
-_FAKE_KEY = "fake-test-abuseipdb-key"
+# The composition scaffolding intentionally mirrors
+# test_abuseipdb_composition.py so each provider's wiring, secret
+# resolution, and rollback tests stay symmetrical; the duplication is
+# test-only and deliberately accepted.
+# pylint: disable=duplicate-code
+
+_THREATFOX_KEY_SECRET_NAME = "ATI_THREATFOX_AUTH_KEY"
+_FAKE_KEY = "fake-test-threatfox-key"
 _FAKE_TOKEN = "fake-test-token"
+_FAKE_ABUSEIPDB_KEY = "fake-test-abuseipdb-key"
 
 
 class _KeyringResolver(SecretsResolver):  # pylint: disable=too-few-public-methods
@@ -76,14 +83,14 @@ class _SequentialFactory(HttpClientFactory):  # pylint: disable=too-few-public-m
         return _ClosingClient(self._closed, f"client-{self.created}")
 
 
-async def test_composition_wires_abuseipdb_settings(
+async def test_composition_wires_threatfox_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Composition applies exact settings and a dedicated limiter to AbuseIPDB."""
+    """Composition applies exact settings and a dedicated limiter to ThreatFox."""
     seen: list[RateLimiterSettings] = []
 
     class _RecordingLimiter(BoundedLimiter):
-        """Spy recording the exact limiter settings AbuseIPDB receives."""
+        """Spy recording the exact limiter settings ThreatFox receives."""
 
         def __init__(self, limiter_settings: RateLimiterSettings) -> None:
             seen.append(limiter_settings)
@@ -96,10 +103,9 @@ async def test_composition_wires_abuseipdb_settings(
     )
     settings = settings_from_config(
         {
-            "abuseipdb_max_concurrency": 6,
-            "abuseipdb_requests_per_second": 8.0,
-            "abuseipdb_max_age_in_days": 90,
-            "abuseipdb_api_key_secret": "CUSTOM_ABUSEIPDB_VAR",
+            "threatfox_max_concurrency": 5,
+            "threatfox_requests_per_second": 3.0,
+            "threatfox_auth_key_secret": "CUSTOM_THREATFOX_VAR",
         }
     )
 
@@ -107,34 +113,38 @@ async def test_composition_wires_abuseipdb_settings(
         settings,
         secrets=_KeyringResolver(
             ATI_IPINFO_LITE_TOKEN=_FAKE_TOKEN,
-            CUSTOM_ABUSEIPDB_VAR=_FAKE_KEY,
-            ATI_THREATFOX_AUTH_KEY="fake-test-threatfox-key",
+            ATI_ABUSEIPDB_API_KEY=_FAKE_ABUSEIPDB_KEY,
+            CUSTOM_THREATFOX_VAR=_FAKE_KEY,
         ),
     ) as comp:
-        assert seen[3] == RateLimiterSettings(
-            max_concurrency=6, requests_per_second=8.0
+        # ThreatFox is composed after Google DNS, RDAP, IPinfo, and
+        # AbuseIPDB, so its limiter is the fifth created.
+        assert seen[4] == RateLimiterSettings(
+            max_concurrency=5, requests_per_second=3.0
         )
-        assert comp.abuseipdb.supports(
-            Entity(type=EntityType.IP_ADDRESS, value="192.0.2.39")
-        )
-        assert not comp.abuseipdb.supports(
+        assert comp.threatfox.supports(
             Entity(type=EntityType.DOMAIN, value="example.com")
         )
-        assert comp.abuseipdb.id == "urn:ati:source:abuseipdb"
+        assert comp.threatfox.supports(
+            Entity(type=EntityType.IP_ADDRESS, value="192.0.2.39")
+        )
+        assert not comp.threatfox.supports(
+            Entity(type=EntityType.URL, value="https://example.com/")
+        )
+        assert comp.threatfox.id == "urn:ati:source:threatfox"
 
-        # White-box assertions proving bootstrap resolution and settings
-        # wiring; the values are fake test credentials only.
+        # White-box assertion proving bootstrap resolution and settings
+        # wiring; the value is a fake test credential only.
         # pylint: disable=protected-access
-        assert comp.abuseipdb._api_key == _FAKE_KEY
-        assert comp.abuseipdb._max_age_in_days == 90
+        assert comp.threatfox._auth_key == _FAKE_KEY
         # pylint: enable=protected-access
 
 
 @pytest.mark.parametrize("blank_key", ["", "   ", "\t"])
-async def test_composition_blank_abuseipdb_key_fails_before_client_creation(
+async def test_composition_blank_threatfox_key_fails_before_client_creation(
     blank_key: str,
 ) -> None:
-    """Empty, whitespace, and tab key values fail before the AbuseIPDB client."""
+    """Empty, whitespace, and tab key values fail before the ThreatFox client."""
     closed: list[str] = []
     factory = _SequentialFactory(closed)
     with pytest.raises(SecretNotFoundError) as excinfo:
@@ -143,36 +153,39 @@ async def test_composition_blank_abuseipdb_key_fails_before_client_creation(
             http_client_factory=factory,
             secrets=_KeyringResolver(
                 ATI_IPINFO_LITE_TOKEN=_FAKE_TOKEN,
-                ATI_ABUSEIPDB_API_KEY=blank_key,
+                ATI_ABUSEIPDB_API_KEY=_FAKE_ABUSEIPDB_KEY,
+                ATI_THREATFOX_AUTH_KEY=blank_key,
             ),
         )
 
-    # Only Google DNS, RDAP, and IPinfo clients were created and rolled
-    # back in LIFO unwind order; no AbuseIPDB client factory call occurred.
-    assert factory.created == 3
-    assert closed == ["client-3", "client-2", "client-1"]
+    # Google DNS, RDAP, IPinfo, and AbuseIPDB clients were created and
+    # rolled back in LIFO unwind order; no ThreatFox factory call occurred.
+    assert factory.created == 4
+    assert closed == ["client-4", "client-3", "client-2", "client-1"]
 
     # The raised error carries only the configured reference name; the
     # blank resolved value never appears in it.
     assert (
-        str(excinfo.value) == f"required secret not found: {_ABUSEIPDB_KEY_SECRET_NAME}"
+        str(excinfo.value) == f"required secret not found: {_THREATFOX_KEY_SECRET_NAME}"
     )
-    assert blank_key not in str(excinfo.value) or not blank_key
 
 
-async def test_composition_missing_abuseipdb_key_fails_before_client_creation() -> None:
-    """A missing AbuseIPDB key fails clearly and rolls back created clients."""
+async def test_composition_missing_threatfox_key_fails_before_client_creation() -> None:
+    """A missing ThreatFox key fails clearly and rolls back created clients."""
     closed: list[str] = []
     factory = _SequentialFactory(closed)
     with pytest.raises(SecretNotFoundError) as excinfo:
         await ProviderComposition.create(
             settings_from_config({}),
             http_client_factory=factory,
-            secrets=_KeyringResolver(ATI_IPINFO_LITE_TOKEN=_FAKE_TOKEN),
+            secrets=_KeyringResolver(
+                ATI_IPINFO_LITE_TOKEN=_FAKE_TOKEN,
+                ATI_ABUSEIPDB_API_KEY=_FAKE_ABUSEIPDB_KEY,
+            ),
         )
 
-    assert factory.created == 3
-    assert closed == ["client-3", "client-2", "client-1"]
+    assert factory.created == 4
+    assert closed == ["client-4", "client-3", "client-2", "client-1"]
     assert (
-        str(excinfo.value) == f"required secret not found: {_ABUSEIPDB_KEY_SECRET_NAME}"
+        str(excinfo.value) == f"required secret not found: {_THREATFOX_KEY_SECRET_NAME}"
     )

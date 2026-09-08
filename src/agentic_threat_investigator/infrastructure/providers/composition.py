@@ -42,6 +42,9 @@ from agentic_threat_investigator.infrastructure.providers.ipinfo_lite import (
     IpinfoLiteProvider,
 )
 from agentic_threat_investigator.infrastructure.providers.rdap import RdapProvider
+from agentic_threat_investigator.infrastructure.providers.threatfox import (
+    ThreatFoxProvider,
+)
 
 
 class HttpClientFactory(ABC):  # pylint: disable=too-few-public-methods
@@ -95,8 +98,12 @@ async def _compose_dbip_city_lite(
     return provider, database
 
 
-class ProviderComposition:
+class ProviderComposition:  # pylint: disable=too-many-instance-attributes
     """Owned provider instances and their shared HTTP infrastructure.
+
+    One named attribute per composed provider is deliberate: the extra
+    instance attribute count is the accepted cost of explicit, typed
+    accessors instead of an untyped provider registry.
 
     Construct asynchronously through :meth:`create` so a failure partway
     through construction rolls back already-created owned clients; the
@@ -112,6 +119,7 @@ class ProviderComposition:
         self._rdap: RdapProvider | None = None
         self._ipinfo_lite: IpinfoLiteProvider | None = None
         self._abuseipdb: AbuseIpdbProvider | None = None
+        self._threatfox: ThreatFoxProvider | None = None
         self._dbip_city_lite: DbIpCityLiteProvider | None = None
 
     @classmethod
@@ -210,6 +218,23 @@ class ProviderComposition:
                 max_age_in_days=settings.abuseipdb_max_age_in_days,
             )
 
+            # The ThreatFox Auth-Key is resolved during composition through
+            # the same bootstrap contract; the provider receives only the
+            # resolved key and never reads configuration or the environment.
+            threatfox_key = resolver.require(settings.threatfox_auth_key_secret)
+            http = factory.create(
+                policy,
+                BoundedLimiter(
+                    RateLimiterSettings(
+                        max_concurrency=settings.threatfox_max_concurrency,
+                        requests_per_second=settings.threatfox_requests_per_second,
+                    )
+                ),
+            )
+            stack.push_async_callback(http.aclose)
+            clients.append(http)
+            composition._threatfox = ThreatFoxProvider(http, auth_key=threatfox_key)
+
             # Local DB-IP City Lite geolocation: composed only when the
             # credential-free artifact URI is configured. The artifact must
             # already exist and be readable; composition fails fast otherwise.
@@ -254,6 +279,13 @@ class ProviderComposition:
         if self._abuseipdb is None:
             raise RuntimeError("ProviderComposition must be created via create()")
         return self._abuseipdb
+
+    @property
+    def threatfox(self) -> ThreatFoxProvider:
+        """ThreatFox provider instance."""
+        if self._threatfox is None:
+            raise RuntimeError("ProviderComposition must be created via create()")
+        return self._threatfox
 
     @property
     def dbip_city_lite(self) -> DbIpCityLiteProvider | None:
