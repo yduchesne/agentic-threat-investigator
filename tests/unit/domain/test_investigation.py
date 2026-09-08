@@ -14,6 +14,7 @@ from agentic_threat_investigator.domain.investigation import (
     DEFAULT_MAX_ENTITIES,
     DEFAULT_MAX_PROVIDER_CALLS,
     DEFAULT_MAX_REPLANS,
+    InvalidInvestigationStatusTransitionError,
     InvestigationBudget,
     InvestigationError,
     InvestigationState,
@@ -22,8 +23,11 @@ from agentic_threat_investigator.domain.investigation import (
     PivotClass,
     PivotRequest,
     PivotStatus,
+    can_transition_status,
     default_investigation_budget,
+    is_terminal_status,
     pivot_class,
+    require_status_transition,
 )
 
 _STARTED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
@@ -148,3 +152,76 @@ def test_investigation_error_records_source_and_recoverability() -> None:
     )
 
     assert error.recoverable is True
+
+
+def test_confirmed_status_transitions_are_deterministic() -> None:
+    """Every status exposes exactly its confirmed lifecycle targets."""
+
+    assert can_transition_status(
+        InvestigationStatus.PENDING, InvestigationStatus.RUNNING
+    )
+    assert can_transition_status(
+        InvestigationStatus.PENDING, InvestigationStatus.FAILED
+    )
+    assert not can_transition_status(
+        InvestigationStatus.PENDING, InvestigationStatus.COMPLETED
+    )
+    assert can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.COMPLETED
+    )
+    assert can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.PARTIAL
+    )
+    assert can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.FAILED
+    )
+    assert not can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.PENDING
+    )
+
+
+@pytest.mark.parametrize(
+    "terminal",
+    [
+        InvestigationStatus.COMPLETED,
+        InvestigationStatus.PARTIAL,
+        InvestigationStatus.FAILED,
+    ],
+)
+def test_terminal_statuses_admit_no_transitions(
+    terminal: InvestigationStatus,
+) -> None:
+    """Terminal statuses admit no further transitions and are recognized."""
+
+    assert is_terminal_status(terminal)
+    for target in InvestigationStatus:
+        if target is terminal:
+            continue  # identical statuses are not transitions
+        assert not can_transition_status(terminal, target)
+
+
+def test_identical_status_is_not_a_transition() -> None:
+    """An identical target status is not treated as a lifecycle transition."""
+
+    assert can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.RUNNING
+    )
+
+
+def test_invalid_status_transition_raises_typed_error() -> None:
+    """Lifecycle violations raise the typed domain error before persistence."""
+
+    with pytest.raises(InvalidInvestigationStatusTransitionError, match="running"):
+        require_status_transition(
+            InvestigationStatus.RUNNING, InvestigationStatus.PENDING
+        )
+
+
+def test_valid_status_transition_passes_domain_validation() -> None:
+    """Confirmed transitions pass domain validation without raising."""
+
+    require_status_transition(InvestigationStatus.PENDING, InvestigationStatus.RUNNING)
+    require_status_transition(
+        InvestigationStatus.RUNNING, InvestigationStatus.COMPLETED
+    )
+    require_status_transition(InvestigationStatus.FAILED, InvestigationStatus.FAILED)
