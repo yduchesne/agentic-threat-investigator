@@ -124,6 +124,30 @@ contract does not establish whether zero, leading zeroes, or the selected
    document it as an ATI defensive bound rather than an official source bound.
 4. Do not use a real Auth-Key or live API call solely to answer this question.
 
+## Restore PR 16 heading spacing
+
+**Priority:** LOW
+
+**Origin:** PR 16 review 03; documentation-only formatting regression.
+
+### Problem
+
+Commit `2fa5dfd` removed the blank line between the
+`## PR 16 --- ThreatFox provider [DONE]` heading and its `Deliver:` paragraph in
+`docs/PR_PLAN.md`. Markdown still renders and no product contract changed, but
+the section no longer follows the surrounding document's heading spacing.
+
+### Intended fix
+
+1. Restore exactly one blank line after the PR 16 heading.
+2. Do not alter the `[DONE]` marker or any PR 16 deliverable wording.
+3. Keep the change documentation-only.
+
+### Acceptance checks
+
+- PR 16 has the same heading spacing as adjacent PR sections.
+- `git diff --check` passes.
+
 ## Remove categorical IPinfo redistribution wording
 
 **Priority:** LOW  
