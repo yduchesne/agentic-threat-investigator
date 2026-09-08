@@ -12,6 +12,7 @@ ASGI application handles the request.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -41,6 +42,18 @@ from agentic_threat_investigator.infrastructure.providers.ipinfo_lite import (
     IpinfoLiteProvider,
 )
 from agentic_threat_investigator.infrastructure.providers.rdap import RdapProvider
+from agentic_threat_investigator.infrastructure.providers.threatfox import (
+    ThreatFoxProvider,
+)
+from tests.support.threatfox_fixtures import (
+    CANONICAL_ASYNCRAT_DOMAIN,
+    CANONICAL_ASYNCRAT_IP,
+    CANONICAL_ASYNCRAT_IP_PORT,
+    CANONICAL_ASYNCRAT_MALWARE,
+    asyncrat_domain_record,
+    asyncrat_ip_port_record,
+    threatfox_search_response,
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -53,13 +66,16 @@ _GOOGLE_DNS_HOST = "dns.google"
 _IANA_HOST = "data.iana.org"
 _IPINFO_HOST = "api.ipinfo.io"
 _ABUSEIPDB_HOST = "api.abuseipdb.com"
+_THREATFOX_HOST = "threatfox-api.abuse.ch"
 _FAKE_IPINFO_TOKEN = "fake-test-token"
+_FAKE_THREATFOX_KEY = "fake-test-threatfox-key"
 
 _DNS_ACCEPT = "application/json, application/dns-json"
 _IANA_ACCEPT = "application/json"
 _RDAP_ACCEPT = "application/rdap+json, application/json"
 _IPINFO_ACCEPT = "application/json"
 _ABUSEIPDB_ACCEPT = "application/json"
+_THREATFOX_ACCEPT = "application/json"
 _FAKE_ABUSEIPDB_KEY = "fake-test-abuseipdb-key"
 _SYNTHETIC_IPV4 = "192.0.2.39"
 """ATI-authored synthetic RFC 5737 documentation address for AbuseIPDB fixtures."""
@@ -94,6 +110,7 @@ def _build_stub_app() -> FastAPI:
     rdap_responses: dict[tuple[str, str], dict[str, Any]] = {}
     ipinfo_responses: dict[str, Any] = {}
     abuseipdb_responses: dict[str, Any] = {}
+    threatfox_responses: dict[str, Any] = {}
     state.dns_requests = []
     state.dns_responses = dns_responses
     state.dns_default = None
@@ -105,6 +122,8 @@ def _build_stub_app() -> FastAPI:
     state.ipinfo_responses = ipinfo_responses
     state.abuseipdb_requests = []
     state.abuseipdb_responses = abuseipdb_responses
+    state.threatfox_requests = []
+    state.threatfox_responses = threatfox_responses
 
     @app.get("/resolve")
     async def dns_resolve(
@@ -173,6 +192,31 @@ def _build_stub_app() -> FastAPI:
         ip = request.query_params["ipAddress"]
         entry = state.abuseipdb_responses.get(ip)
         assert entry is not None, f"no stub AbuseIPDB response for {ip!r}"
+        if isinstance(entry, Response):
+            return entry
+        if isinstance(entry, list):
+            response: Response = entry.pop(0) if len(entry) > 1 else entry[0]
+            return response
+        return JSONResponse(content=entry)
+
+    @app.post("/api/v1/")
+    async def threatfox_search(request: Request) -> Response:
+        """Serve synthetic ThreatFox search_ioc responses for /api/v1/."""
+        state.threatfox_requests.append(request)
+        assert "AgenticThreatInvestigator" in request.headers["User-Agent"]
+        assert request.headers["Accept"] == _THREATFOX_ACCEPT
+        assert request.method == "POST"
+        assert request.headers["Auth-Key"] == _FAKE_THREATFOX_KEY
+        assert request.headers["Content-Type"].startswith("application/json")
+        # The Auth-Key must never travel in the URL.
+        assert _FAKE_THREATFOX_KEY not in str(request.url)
+        body = await request.json()
+        assert set(body) == {"query", "search_term", "exact_match"}
+        assert body["query"] == "search_ioc"
+        assert body["exact_match"] is True
+        search_term = body["search_term"]
+        entry = state.threatfox_responses.get(search_term)
+        assert entry is not None, f"no stub ThreatFox response for {search_term!r}"
         if isinstance(entry, Response):
             return entry
         if isinstance(entry, list):
@@ -1182,6 +1226,388 @@ class TestAbuseIpdbIntegration:
             assert result.errors[0].retryable is False
 
 
+class TestThreatFoxIntegration:
+    """ThreatFox search_ioc integration flows over the ASGI boundary."""
+
+    async def test_domain_hit_traverses_asgi_route_with_auth_header(self) -> None:
+        """A domain search sends the exact POST body and normalizes matches."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: threatfox_search_response(
+                asyncrat_domain_record()
+            )
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+            )
+
+            assert len(app.state.threatfox_requests) == 1
+            request = app.state.threatfox_requests[0]
+            assert request.method == "POST"
+            assert request.url.path == "/api/v1/"
+            assert request.headers["Auth-Key"] == _FAKE_THREATFOX_KEY
+            body = json.loads(await request.body())
+            assert body == {
+                "query": "search_ioc",
+                "search_term": CANONICAL_ASYNCRAT_DOMAIN,
+                "exact_match": True,
+            }
+            assert _FAKE_THREATFOX_KEY not in str(request.url)
+
+            assert result.provider == "urn:ati:source:threatfox"
+            assert len(result.evidence) == 1
+            evidence = result.evidence[0]
+            assert evidence.type == EvidenceType.THREAT_INTELLIGENCE
+            assert evidence.investigation_id == _FIXED_UUID
+            assert evidence.subject.type == EntityType.DOMAIN
+            assert evidence.subject.value == CANONICAL_ASYNCRAT_DOMAIN
+            assert evidence.source == "urn:ati:source:threatfox"
+            assert evidence.source_url == "https://threatfox-api.abuse.ch/api/v1/"
+            assert evidence.retrieved_at == _FIXED_TS
+            assert evidence.raw_payload is None
+            matches = evidence.facts["matches"]
+            assert len(matches) == 1
+            assert matches[0]["malware"] == "win.asyncrat"
+            assert matches[0]["malware_printable"] == "AsyncRAT"
+            assert matches[0]["confidence_level"] == 100
+            assert _FAKE_THREATFOX_KEY not in str(evidence.facts)
+
+    async def test_canonical_asyncrat_ip_to_malware_scenario(self) -> None:
+        """The canonical scenario: IP -> ThreatFox -> win.asyncrat facts."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_IP: threatfox_search_response(asyncrat_ip_port_record())
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP),
+            )
+
+            assert result.errors == ()
+            assert len(app.state.threatfox_requests) == 1
+            assert len(result.evidence) == 1
+            evidence = result.evidence[0]
+            assert evidence.subject.type == EntityType.IP_ADDRESS
+            assert evidence.subject.value == CANONICAL_ASYNCRAT_IP
+            matches = evidence.facts["matches"]
+            assert len(matches) == 1
+            assert matches[0]["ioc"] == CANONICAL_ASYNCRAT_IP_PORT
+            assert matches[0]["ioc_type"] == "ip:port"
+            # The machine identifier is the identity input a deterministic
+            # extractor would later canonicalize into a MALWARE entity.
+            assert matches[0]["malware"] == CANONICAL_ASYNCRAT_MALWARE
+
+    async def test_no_result_is_empty_result_not_benign(self) -> None:
+        """A no_result response yields an empty result with no error."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: {"query_status": "no_result"}
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+            )
+
+            assert len(app.state.threatfox_requests) == 1
+            assert result.evidence == ()
+            assert result.errors == ()
+
+    async def test_multiple_records_same_malware_are_all_retained(self) -> None:
+        """Distinct records for one malware remain available to the extractor."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_IP: threatfox_search_response(
+                asyncrat_ip_port_record(id="864202"),
+                asyncrat_ip_port_record(
+                    id="864203", ioc=CANONICAL_ASYNCRAT_IP + ":8443"
+                ),
+            )
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP),
+            )
+
+            matches = result.evidence[0].facts["matches"]
+            assert len(matches) == 2
+            assert {m["threatfox_id"] for m in matches} == {"864202", "864203"}
+            assert {m["malware"] for m in matches} == {"win.asyncrat"}
+
+    async def test_exact_duplicate_source_id_is_collapsed_over_asgi(self) -> None:
+        """Two same-ID identical records normalize to one match over ASGI."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_IP: threatfox_search_response(
+                asyncrat_ip_port_record(id="864202"),
+                asyncrat_ip_port_record(id="864202"),
+            )
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP),
+            )
+
+            # Duplicate handling is response normalization, not a second
+            # API call: exactly one request reaches the ThreatFox route.
+            assert len(app.state.threatfox_requests) == 1
+            assert result.errors == ()
+            assert len(result.evidence) == 1
+            assert result.evidence[0].type == EvidenceType.THREAT_INTELLIGENCE
+            matches = result.evidence[0].facts["matches"]
+            assert len(matches) == 1
+            # The first occurrence remains authoritative.
+            assert matches[0]["threatfox_id"] == "864202"
+            assert matches[0]["ioc"] == CANONICAL_ASYNCRAT_IP_PORT
+            assert matches[0]["first_seen"] == "2026-08-20T12:00:00Z"
+            assert matches[0]["malware"] == CANONICAL_ASYNCRAT_MALWARE
+
+    async def test_unrelated_ioc_response_is_safely_rejected(self) -> None:
+        """A response about a different IOC is a non-retryable INVALID_RESPONSE."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: threatfox_search_response(
+                asyncrat_domain_record(ioc="other-domain.test")
+            )
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+            )
+
+            assert len(app.state.threatfox_requests) == 1
+            assert result.evidence == ()
+            assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+            assert result.errors[0].retryable is False
+
+    async def test_401_and_403_produce_single_attempt_typed_errors(self) -> None:
+        """401/403 yield non-retryable typed errors on exactly one attempt."""
+        for status, expected in (
+            (401, ProviderErrorCode.AUTHENTICATION_FAILED),
+            (403, ProviderErrorCode.FORBIDDEN),
+        ):
+            app = _build_stub_app()
+            app.state.threatfox_responses = {
+                CANONICAL_ASYNCRAT_DOMAIN: JSONResponse(status_code=status, content={})
+            }
+
+            transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+            async with httpx.AsyncClient(transport=transport) as client:
+                http = ProviderHttpClient(
+                    client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+                )
+                provider = ThreatFoxProvider(
+                    http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+                )
+                result = await provider.investigate(
+                    _FIXED_UUID,
+                    Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+                )
+
+                assert len(app.state.threatfox_requests) == 1
+                assert result.evidence == ()
+                assert result.errors[0].code == expected
+                assert result.errors[0].retryable is False
+
+    async def test_429_retries_with_deterministic_delay(self) -> None:
+        """A persistent 429 exhausts retries and schedules the Retry-After delay."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: JSONResponse(
+                status_code=429, headers={"Retry-After": "30"}, content={}
+            )
+        }
+        scheduled_delays: list[float] = []
+
+        async def _spy_sleep(seconds: float) -> None:
+            """Record each requested retry delay without sleeping."""
+            scheduled_delays.append(seconds)
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            policy = ProviderHttpPolicy(
+                max_retries=1, base_delay_seconds=0.01, max_delay_seconds=30.0
+            )
+            http = ProviderHttpClient(
+                client=client,
+                policy=policy,
+                sleep=_spy_sleep,
+                jitter_fn=_zero_jitter,
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+            )
+
+            assert len(app.state.threatfox_requests) == 2
+            assert scheduled_delays == [30.0]
+            assert result.evidence == ()
+            assert result.errors[0].code == ProviderErrorCode.RATE_LIMITED
+            assert result.errors[0].retry_after_seconds == 30
+
+    async def test_persistent_5xx_exhausts_retries_and_fails(self) -> None:
+        """A persistent 5xx exhausts retries and ends PROVIDER_UNAVAILABLE."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: JSONResponse(status_code=503, content={})
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            policy = ProviderHttpPolicy(max_retries=2, base_delay_seconds=0.01)
+            http = ProviderHttpClient(
+                client=client,
+                policy=policy,
+                sleep=_no_op_sleep,
+                jitter_fn=_zero_jitter,
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+            )
+
+            assert len(app.state.threatfox_requests) == 3
+            assert result.evidence == ()
+            assert result.errors[0].code == ProviderErrorCode.PROVIDER_UNAVAILABLE
+            assert result.errors[0].retryable is True
+
+    async def test_malformed_json_is_typed_error(self) -> None:
+        """A malformed JSON body is a non-retryable INVALID_RESPONSE."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: Response(
+                status_code=200,
+                content=b"{not json",
+                media_type="application/json",
+            )
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+            )
+
+            assert result.evidence == ()
+            assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+            assert result.errors[0].retryable is False
+
+    async def test_malformed_record_schema_is_typed_error(self) -> None:
+        """A schema-invalid record is a non-retryable INVALID_RESPONSE."""
+        app = _build_stub_app()
+        bad_record = asyncrat_domain_record(confidence_level="100")
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: threatfox_search_response(bad_record)
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+            )
+
+            assert result.evidence == ()
+            assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+
+    async def test_unknown_query_status_is_typed_error(self) -> None:
+        """An unknown query_status is never success."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: {"query_status": "mystery_status"}
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN),
+            )
+
+            assert result.evidence == ()
+            assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+            assert result.errors[0].retryable is False
+
+
 class TestTransportRetryIntegration:
     """Exact attempt counts and error handling under transport retries."""
 
@@ -1369,3 +1795,61 @@ class TestNoPersistenceSideEffect:  # pylint: disable=too-few-public-methods
                 ).scalar_one()
 
             assert count_before == count_after
+
+    async def test_threatfox_provider_call_does_not_persist_to_database(
+        self,
+        integration_engine: AsyncEngine,
+    ) -> None:
+        """A ThreatFox provider invocation alone persists nothing at all."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_DOMAIN: threatfox_search_response(
+                asyncrat_domain_record()
+            )
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            entity = Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN)
+
+            async with integration_engine.connect() as conn:
+                counts_before = {
+                    table: (
+                        await conn.execute(text(f"SELECT count(*) FROM ati.{table}"))
+                    ).scalar_one()
+                    for table in (
+                        "evidence",
+                        "entity",
+                        "relationship",
+                        "relationship_observation",
+                    )
+                }
+
+            result = await provider.investigate(_FIXED_UUID, entity)
+
+            assert len(result.evidence) == 1
+            assert result.evidence[0].id is None
+            assert result.evidence[0].investigation_id == _FIXED_UUID
+
+            async with integration_engine.connect() as conn:
+                counts_after = {
+                    table: (
+                        await conn.execute(text(f"SELECT count(*) FROM ati.{table}"))
+                    ).scalar_one()
+                    for table in (
+                        "evidence",
+                        "entity",
+                        "relationship",
+                        "relationship_observation",
+                    )
+                }
+
+            # Provider invocation alone writes no evidence, entity,
+            # relationship, or relationship-observation rows.
+            assert counts_after == counts_before

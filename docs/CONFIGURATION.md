@@ -450,6 +450,9 @@ type before bounds are enforced. The bounds below apply on top of those type req
 | `abuseipdb_requests_per_second` | `ATI_ABUSEIPDB_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional AbuseIPDB rate limit (omission disables) |
 | `abuseipdb_api_key_secret` | `ATI_ABUSEIPDB_API_KEY_SECRET` | `str` | `ATI_ABUSEIPDB_API_KEY` | non-blank | Environment variable NAME carrying the AbuseIPDB API key (secret reference, never a key value) |
 | `abuseipdb_max_age_in_days` | `ATI_ABUSEIPDB_MAX_AGE_IN_DAYS` | `int` | `30` | `1..365` | Fixed AbuseIPDB report look-back window in days sent on every check |
+| `threatfox_max_concurrency` | `ATI_THREATFOX_MAX_CONCURRENCY` | `int` | `10` | `> 0` | ThreatFox maximum in-flight requests |
+| `threatfox_requests_per_second` | `ATI_THREATFOX_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional ThreatFox rate limit (omission disables) |
+| `threatfox_auth_key_secret` | `ATI_THREATFOX_AUTH_KEY_SECRET` | `str` | `ATI_THREATFOX_AUTH_KEY` | non-blank | Environment variable NAME carrying the abuse.ch ThreatFox Auth-Key (secret reference, never a key value) |
 | `dbip_city_lite_artifact_uri` | `ATI_DBIP_CITY_LITE_ARTIFACT_URI` | `str` | `""` (blank) | see notes | Credential-free local `file://` artifact URI of the DB-IP IP to City Lite MMDB. Blank (default) disables composition of the DB-IP City Lite provider. v0.1 requires an authority-free absolute `file://` URI; query, fragment, credential, and non-file URIs are rejected by the settings validator, and artifact paths outside `${ATI_DATA_DIR}/datasets` are rejected by the storage boundary. The configured artifact must already exist and be readable at composition time; there is no downloader and no API key. |
 
 When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
@@ -520,6 +523,29 @@ permitted only in isolated deterministic tests. In production:
   composition time with `SecretNotFoundError` before the AbuseIPDB HTTP
   client is created; Google DNS, RDAP, and IPinfo clients created
   earlier in the same composition are rolled back cleanly.
+
+### ThreatFox Auth-Key
+
+The ThreatFox provider authenticates with an abuse.ch Auth-Key sent as a
+custom `Auth-Key` header on every request. The key never travels in the
+URL or the request body, because both leak credentials into server logs.
+Real or resolved ThreatFox keys must never be committed, logged,
+persisted, placed in URLs or bodies, or copied into test fixtures;
+clearly synthetic placeholder keys are permitted only in isolated
+deterministic tests. In production:
+
+- the setting `threatfox_auth_key_secret` holds only the NAME of the
+  environment variable carrying the Auth-Key (default reference:
+  `ATI_THREATFOX_AUTH_KEY`);
+- during provider composition, the `SecretsResolver` bootstrap contract
+  resolves that reference through `EnvVarSecretsResolver`;
+- the resolved key value is passed to `ThreatFoxProvider`, which uses it
+  only in the `Auth-Key` header; providers never read configuration or
+  the environment directly;
+- a missing, empty, or whitespace-only required key fails clearly at
+  composition time with `SecretNotFoundError` before the ThreatFox HTTP
+  client is created; Google DNS, RDAP, IPinfo, and AbuseIPDB clients
+  created earlier in the same composition are rolled back cleanly.
 
 ## Testing requirements
 

@@ -959,14 +959,382 @@ data, and does not persist anything.
 
 Purpose:
 
-- IOC-to-malware associations.
-- Recent threat-intelligence context.
+- IOC-to-malware associations from the abuse.ch ThreatFox Community API.
+- Source malware identifiers and printable names for later deterministic
+  MALWARE entity discovery.
 
-ATI persists observations locally because provider retention may be bounded.
+ATI persists observations locally because provider retention may be bounded
+(ThreatFox expires IOCs from API/export visibility after six months).
 
 Source identifier:
 
 `urn:ati:source:threatfox`
+
+The stable ATI member `SourceId.THREATFOX` publishes this identifier.
+
+ThreatFox is a malware-focused community IOC platform: a record associates
+one IOC (domain, `ip:port`, URL, or hash) with a malware family, a source
+`confidence_level`, first/last-seen timestamps, and optional reference and
+tag metadata. All of these values are normalized source facts. The source
+`confidence_level` is not an ATI Assessment confidence and never weights
+one; a ThreatFox match is not by itself an ATI malicious verdict, and a
+ThreatFox no-result is never a benign assessment.
+
+#### Applicability
+
+Supported entity types:
+
+- `DOMAIN`
+- `IP_ADDRESS`
+
+Unsupported entity types (each is a non-retryable `UNSUPPORTED_INDICATOR`
+produced before clock evaluation or any HTTP I/O):
+
+- `URL` — ATI has no approved URL canonicalization or exact URL identity
+  contract yet, so an unambiguous exact-match identity rule cannot be
+  guaranteed; ThreatFox URL support is deferred until such a contract
+  exists.
+- `NETWORK_PREFIX`, `ASN`, `ORGANIZATION`, `MALWARE`, `ATTACK_TECHNIQUE`,
+  `VULNERABILITY`
+
+#### Endpoint
+
+A single IOC search uses the fixed ThreatFox Community API v1 endpoint:
+
+`https://threatfox-api.abuse.ch/api/v1/`
+
+The request is an HTTP `POST` whose JSON body carries exactly:
+
+```json
+{
+  "query": "search_ioc",
+  "search_term": "<canonical entity value>",
+  "exact_match": true
+}
+```
+
+`search_term` is the canonicalized queried entity value. `exact_match` is
+always `true`: ATI never performs wildcard searches. The other Community
+API queries (`get_iocs`, `ioc`, `search_hash`, `taginfo`, `malwareinfo`,
+`submit_ioc`, `get_label`, `malware_list`, `types`, `tag_list`) are not
+used. ATI performs lookups only and never submits IOCs. The URL stored as
+evidence `source_url` is the credential-free endpoint above.
+
+#### Authentication
+
+Requests authenticate with the abuse.ch Auth-Key in the custom header:
+
+```http
+Auth-Key: <auth key>
+```
+
+The Auth-Key travels only in the `Auth-Key` header. It never appears in
+the URL, the request body, logs, errors, evidence facts, or fixtures.
+Real or resolved keys must never be committed or logged; clearly synthetic
+placeholder keys are permitted only in isolated deterministic tests. The
+key is resolved during composition/bootstrap from the secret reference
+documented in `CONFIGURATION.md`; the provider receives the resolved key
+value and never reads configuration or the environment.
+
+#### IOC identity matching
+
+ATI independently validates every returned record even though the request
+requests an exact match. A record's `ioc_type` must agree with its actual
+IOC syntax and with the queried entity type, and the record's IOC value
+must canonicalize exactly to the queried canonical identity. Unrelated
+records are rejected (`INVALID_RESPONSE`) even when the upstream claims an
+exact match.
+
+- **DOMAIN**: the returned domain is validated with ATI's strict provider
+  DNS-name validator before canonical comparison, then must equal the
+  queried canonical domain. Empty labels, underscores, invalid IDNA
+  input, multiple terminal dots, invalid label characters or lengths,
+  and overlong names are rejected (`INVALID_RESPONSE`). Case differences
+  and exactly one terminal root dot are accepted through
+  canonicalization. The record `ioc_type` must be `domain`.
+- **IP_ADDRESS, bare IP**: a returned IOC that parses as a whole IPv4 or
+  IPv6 address matches when its canonical form equals the queried
+  canonical IP. The record `ioc_type` must be `ip:port` (the only source
+  type ThreatFox uses for address indicators); the port part is optional
+  in source data.
+- **IP_ADDRESS, `ip:port`**: a returned `address:port` pair matches when
+  the parsed host canonicalizes exactly to the queried canonical IP and
+  the port is an integer in `1..65535`. The port is retained as part of
+  the source IOC string only; it never becomes an entity, a fact field,
+  or a pivot target.
+- **IPv6 safety**: a bracketed RFC 3986 `[address]:port` pair is parsed
+  as host plus port. An unbracketed colon-containing value is never split
+  on colons to infer a port: a multi-colon value is accepted only when it
+  parses as a whole bare IPv6 address, so ambiguous unbracketed
+  IPv6-plus-port spellings are rejected rather than guessed.
+- **URL records**: `url`-typed records never match a DOMAIN or
+  IP_ADDRESS query and are rejected.
+
+The record `ioc_type` must be one of the source types ATI can interpret
+(`domain`, `ip:port`, `url`); any other value (for example `filename` or a
+hash type) cannot match a supported query and is rejected.
+
+#### Duplicate source records
+
+Duplicate handling runs only after each entry passes strict model
+validation and queried-IOC identity validation:
+
+- the first occurrence of a ThreatFox `id` establishes that source
+  record's consumed normalized content and its output position;
+- a later occurrence of the same `id` with identical consumed normalized
+  content is an exact duplicate and is omitted from `facts.matches`;
+- a later occurrence of the same `id` with different consumed normalized
+  content makes the whole response `INVALID_RESPONSE` with no evidence;
+- records with different IDs remain in upstream order even when their
+  IOC and malware are equal.
+
+Comparison uses the consumed validated record model, not raw
+dictionaries: differences only in deliberately ignored fields are
+neither duplicated into facts nor treated as conflicts. Records are
+never sorted, and records are never deduplicated merely because they
+share a malware identifier; semantic malware entity and association
+deduplication belongs to PR 18.
+
+#### Six-month expiration
+
+Since 2025-05-01 ThreatFox expires IOCs older than six months from API
+and export visibility (they remain visible in the ThreatFox web UI). A
+ThreatFox no-result therefore means only that the indicator is not
+currently exposed by the API; it never proves that the indicator was
+never historically observed.
+
+#### Successful response fields
+
+The success response is a top-level JSON object with `query_status` and a
+`data` array. The example below is illustrative synthetic data authored
+for ATI documentation and tests (an RFC 5737 address, an RFC 2606 `.test`
+domain, and synthetic identifiers); it is not a copied ThreatFox record.
+Consumed `data` members:
+
+```json
+{
+  "query_status": "ok",
+  "data": [
+    {
+      "id": "864201",
+      "ioc": "malicious-domain.test",
+      "threat_type": "botnet_cc",
+      "threat_type_desc": "Indicator that identifies a botnet command&control server (C&C)",
+      "ioc_type": "domain",
+      "ioc_type_desc": "Domain that is used for botnet Command&control (C&C)",
+      "malware": "win.asyncrat",
+      "malware_printable": "AsyncRAT",
+      "malware_alias": null,
+      "malware_malpedia": null,
+      "confidence_level": 100,
+      "first_seen": "2026-08-20 12:00:00 UTC",
+      "last_seen": "2026-08-21 12:00:00 UTC",
+      "reference": null,
+      "tags": ["AsyncRAT"]
+    }
+  ]
+}
+```
+
+Presence rules:
+
+- `id` must be the official bounded decimal identifier string.
+- `ioc` must be a nonblank, unpadded, bounded source IOC string whose
+  syntax agrees with `ioc_type` (validated by the identity rules above).
+- `threat_type`, `threat_type_desc`, and `ioc_type_desc` are required
+  nonblank bounded strings.
+- `malware` is the ThreatFox (Malpedia-style) machine identifier: a
+  strict nonblank lowercase bounded identifier. It is the canonical
+  identity input for later MALWARE entity discovery.
+- `malware_printable` may be `null`; a non-null value must be a nonblank
+  bounded unpadded string. The printable name is display metadata only
+  and never determines malware identity.
+- `confidence_level` is a strict integer `0..100` exactly as reported.
+- `first_seen` is required and `last_seen` may be `null`; both use the
+  official `YYYY-MM-DD HH:MM:SS UTC` form and are normalized to
+  timezone-aware UTC. A `last_seen` earlier than `first_seen` is
+  malformed.
+- `reference` may be `null`; a non-null value must be a bounded
+  `http`/`https` URL. It is retained as source metadata and never
+  fetched.
+- `tags` may be `null` or an array of bounded nonblank strings; an
+  explicitly empty array is valid. Empty, whitespace-only, and
+  outer-whitespace-padded tag values are invalid. Valid source order and
+  duplicate valid tags are preserved unchanged.
+
+Consumed and validated but not retained members: `ioc_type_desc`,
+`malware_alias`, and `malware_malpedia` are strictly validated on every
+record and never copied into normalized facts.
+
+- `ioc_type_desc` is required: omission and explicit null are malformed,
+  and a non-null value must be a nonblank bounded unpadded string.
+- `malware_alias` may be `null`; a non-null value must be a nonblank
+  bounded unpadded string.
+- `malware_malpedia` may be `null`; a non-null value must be a bounded
+  `http`/`https` URL. It is never fetched.
+
+Ignored and unvalidated members (never copied into facts, never
+validated, never synthesized): `reporter`, `comment` (untrusted
+third-party free text), `credits`, `malware_samples` (which would
+require a MalwareBazaar contract ATI does not implement), and all
+unknown members. Ignored members cannot become entities, relationships,
+evidence facts, or pivot targets. Only exact external member names
+affect parsing; ATI-side snake-case names are never accepted as source
+members.
+
+#### Query status matrix
+
+| `query_status` | Behavior |
+|---|---|
+| `ok` | Success; the `data` array is validated record by record. A missing or non-array `data` is `INVALID_RESPONSE`; an explicitly empty array is a valid no-result. Duplicate source records follow the duplicate rule above. |
+| `no_result` | Valid no-result: empty `ProviderResult`, no evidence and no error. Never a benign assessment. |
+| `ratelimited` | Body-encoded rate limiting (HTTP 200): typed `RATE_LIMITED` error, retryable. |
+| any other value (including statuses such as `error` or `unauthorized`) | Unknown status: non-retryable `INVALID_RESPONSE`. An unknown status is never success. |
+
+#### ATI normalized fact shape
+
+A successful search emits exactly one grouped evidence observation whose
+`facts.matches` array contains one entry per validated, non-duplicate
+matching record, in upstream order:
+
+```json
+{
+  "matches": [
+    {
+      "threatfox_id": "864201",
+      "ioc": "malicious-domain.test",
+      "ioc_type": "domain",
+      "threat_type": "botnet_cc",
+      "threat_type_description": "Indicator that identifies a botnet command&control server (C&C)",
+      "malware": "win.asyncrat",
+      "malware_printable": "AsyncRAT",
+      "confidence_level": 100,
+      "first_seen": "2026-08-20T12:00:00Z",
+      "last_seen": "2026-08-21T12:00:00Z",
+      "reference": null,
+      "tags": ["AsyncRAT"]
+    }
+  ]
+}
+```
+
+Each match contains exactly the keys above. `malware` is the validated
+ThreatFox machine identifier retained verbatim: it is the canonical
+identity input from which a deterministic extractor later derives the
+canonical `MALWARE` entity (`display_name` = `malware_printable` when
+present, otherwise the identifier). `malware_printable` is display
+metadata only and never determines identity. `first_seen` and non-null
+`last_seen` values are normalized to the canonical UTC ISO 8601 form
+ending in `Z` (`last_seen` is `null` when the source reported none).
+Source array order is preserved: ATI does not sort or reorder matches.
+
+#### Provider boundary: entity discovery and relationships
+
+`ThreatFoxProvider` retrieves, validates, and normalizes. It does not
+instantiate discovered entities and does not create relationship
+candidates or relationships. `facts.matches` is the complete PR 16
+handoff contract for later deterministic extraction: PR 18 owns malware
+entity discovery, IOC `ASSOCIATED_WITH` malware relationship
+construction, `RelationshipObservation` construction, semantic
+deduplication of malware identities and associations, and persistence.
+Distinct matching source records remain represented even when they map
+to the same malware, preserving source provenance for that extractor.
+The provider performs no persistence of any kind.
+
+#### Response validation matrix
+
+One successful search with at least one validated matching record yields
+exactly one immutable `Evidence` (`EvidenceType.THREAT_INTELLIGENCE`).
+One malformed response — including one malformed or unrelated record —
+yields one typed `ProviderError` and no evidence; the provider never
+emits a partly normalized observation.
+
+| Case | Behavior |
+|---|---|
+| unsupported entity type | `UNSUPPORTED_INDICATOR` before I/O; zero HTTP calls |
+| invalid entity value | `UNSUPPORTED_INDICATOR` before I/O; zero HTTP calls |
+| top-level JSON object required | Non-object top level is `INVALID_RESPONSE` |
+| missing/empty/non-string `query_status` | `INVALID_RESPONSE` |
+| unknown `query_status` | `INVALID_RESPONSE` (never success) |
+| body-encoded `ratelimited` | `RATE_LIMITED`, retryable |
+| `ok` without a `data` array | `INVALID_RESPONSE` |
+| `ok` with an explicitly empty `data` array | Valid no-result: empty result, no error |
+| malformed record (any consumed member) | `INVALID_RESPONSE`; one malformed record invalidates the whole response |
+| unrelated record (identity mismatch) | `INVALID_RESPONSE`, even though `exact_match` was requested |
+| `ioc_type` disagreement with IOC syntax or query | `INVALID_RESPONSE` |
+| malformed returned domain | Empty labels, underscores, invalid IDNA, multiple terminal dots, invalid label characters/lengths, and overlong names are `INVALID_RESPONSE`; case differences and one terminal root dot are accepted |
+| missing/null/malformed `ioc_type_desc` | `INVALID_RESPONSE` (required, validated, not retained) |
+| exact duplicate `id` (identical consumed content) | Omitted from `facts.matches`; the first occurrence stays authoritative |
+| conflicting duplicate `id` (differing consumed content) | `INVALID_RESPONSE`, no evidence; changes only in ignored fields are not conflicts |
+| different IDs, equal IOC/malware | Both retained in upstream order |
+| `id` | Official bounded decimal string; other shapes are `INVALID_RESPONSE` |
+| `malware` | Strict bounded lowercase machine identifier; other values are `INVALID_RESPONSE` |
+| `malware_printable`/`malware_alias` | `null` or nonblank bounded unpadded string |
+| `malware_malpedia`/`reference` | `null` or bounded `http`/`https` URL; validated, never fetched |
+| `confidence_level` | Strict integer `0..100`; otherwise `INVALID_RESPONSE` |
+| `first_seen`/`last_seen` | Official `YYYY-MM-DD HH:MM:SS UTC` form (or `null` for `last_seen`); naive, ISO, padded, and unparseable values are `INVALID_RESPONSE`; `last_seen` before `first_seen` is `INVALID_RESPONSE`; normalized fact output uses the exact `Z` UTC form |
+| `tags` | `null` or bounded-string list; empty, whitespace-only, and outer-padded values are `INVALID_RESPONSE`; valid order and duplicates are preserved |
+| unknown members | Unknown members at any level are ignored and never copied into facts |
+| 401 | `AUTHENTICATION_FAILED`, non-retryable |
+| 403 | `FORBIDDEN`, non-retryable |
+| 404 | `NOT_FOUND`, non-retryable (shared provider convention) |
+| 422 | `INVALID_RESPONSE`, non-retryable |
+| 429 | `RATE_LIMITED`, retryable; `Retry-After` honored by shared HTTP behavior |
+| timeout | `TIMEOUT`, retryable |
+| 5xx | `PROVIDER_UNAVAILABLE`, retryable |
+| malformed JSON | `INVALID_RESPONSE`, non-retryable |
+| invalid content type | `INVALID_RESPONSE`, non-retryable |
+| response too large | `INVALID_RESPONSE`, non-retryable (shared bounded-body rule) |
+| cancellation | `asyncio.CancelledError` propagates unchanged |
+
+Error messages are generic and never include the response body, URLs,
+headers, or the Auth-Key.
+
+#### Misses and benignity
+
+A `no_result` response (or an explicitly empty `data` array under `ok`)
+is a valid no-result: an empty `ProviderResult` with no evidence and no
+error. It is **not** a benign assessment and never implies benignity.
+Because ThreatFox expires IOCs older than six months from API
+visibility, a no-result also never proves historical absence.
+
+#### Evidence semantics
+
+A successful search emits:
+
+- `EvidenceType.THREAT_INTELLIGENCE`
+  (`urn:ati:evidence:threat_intelligence`);
+- subject: the queried entity reference (canonical value);
+- source: `urn:ati:source:threatfox`;
+- `observed_at`: the latest retained source observation across all
+  validated matches (each match's `last_seen` when present, otherwise
+  its `first_seen`);
+- timezone-aware UTC `retrieved_at`;
+- credential-free
+  `source_url=https://threatfox-api.abuse.ch/api/v1/`;
+- `raw_payload=None` (conservative data minimization).
+
+The provider does not create an ATI verdict, does not assess
+maliciousness, does not weight assessment confidence, does not create
+relationships, does not instantiate discovered entities from record
+data, and does not persist anything.
+
+#### Source terms and test policy
+
+- The Community API is governed by the abuse.ch fair-use principles and
+  terms of use; commercial or for-profit needs may require the enhanced
+  abuse.ch commercial API. Operators must review the current terms at
+  <https://threatfox.abuse.ch/api/>, <https://threatfox.abuse.ch/faq/>,
+  and <https://abuse.ch/terms-of-use/>.
+- ATI performs lookups only; it never submits IOCs, retrieves malware
+  samples, or consumes MalwareBazaar payloads.
+- ATI bundles no ThreatFox dataset and never redistributes source data
+  as a bundled artifact.
+- All automated ThreatFox tests use ATI-authored synthetic responses
+  with the real ATI provider/HTTP stack against an in-process upstream
+  and never contact the real ThreatFox service, never use a real
+  Auth-Key, and never require internet access. There is no live or
+  opt-in live ThreatFox test.
 
 ### URLhaus
 

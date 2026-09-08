@@ -348,3 +348,29 @@ following specifics:
 - Raw verbose response payloads are not retained (`raw_payload=None`).
 - Automated tests are synthetic (ATI-authored in-process responses) and
   cannot contact the real AbuseIPDB service.
+
+## ThreatFox credential and data minimization
+
+The ThreatFox provider follows the shared secret-handling rules with the
+following specifics:
+
+- The `threatfox_auth_key_secret` setting contains only the NAME of the
+  environment variable carrying the abuse.ch Auth-Key, never a key
+  value.
+- Composition resolves the key through `SecretsResolver` during
+  bootstrap and injects the resolved value into the provider; the
+  provider never reads configuration or the environment.
+- The key is sent only in the custom `Auth-Key` request header. It is
+  never placed in a URL, request body, log, error message, evidence
+  fact, persistence record, or test fixture.
+- Response bodies are never copied into provider error messages.
+- Reporter metadata, comments, credits, and malware-sample metadata are
+  discarded during normalization and never retained; reference and
+  Malpedia URLs are validated but never fetched.
+- Raw response payloads are not retained (`raw_payload=None`).
+- The provider never instantiates discovered entities and never creates
+  relationship candidates; normalized `matches` facts are the handoff
+  contract for PR 18's deterministic extractor.
+- Automated tests are synthetic (ATI-authored in-process responses over
+  the real ATI provider/HTTP stack) and cannot contact the real
+  ThreatFox service. There is no live or opt-in live ThreatFox test.

@@ -30,6 +30,9 @@ class TestProviderSettings:
         assert settings.abuseipdb_requests_per_second is None
         assert settings.abuseipdb_api_key_secret == "ATI_ABUSEIPDB_API_KEY"
         assert settings.abuseipdb_max_age_in_days == 30
+        assert settings.threatfox_max_concurrency == 10
+        assert settings.threatfox_requests_per_second is None
+        assert settings.threatfox_auth_key_secret == "ATI_THREATFOX_AUTH_KEY"
 
     def test_abuseipdb_api_key_secret_environment_reference(
         self, monkeypatch: MonkeyPatch
@@ -75,6 +78,49 @@ class TestProviderSettings:
         assert settings.abuseipdb_max_concurrency == 3
         assert settings.abuseipdb_requests_per_second == 5.5
         assert settings.abuseipdb_max_age_in_days == 60
+
+    def test_threatfox_auth_key_secret_environment_reference(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """The ThreatFox secret-reference name is configurable by environment."""
+        monkeypatch.setenv("ATI_THREATFOX_AUTH_KEY_SECRET", "MY_CUSTOM_KEY_VAR")
+        settings = settings_from_config({})
+        assert settings.threatfox_auth_key_secret == "MY_CUSTOM_KEY_VAR"
+
+    def test_threatfox_auth_key_secret_blank_rejected(self) -> None:
+        """A blank ThreatFox secret-reference name is rejected."""
+        with pytest.raises(ValidationError, match="blank"):
+            settings_from_config({"threatfox_auth_key_secret": "   "})
+
+    def test_threatfox_auth_key_secret_whitespace_trimmed(self) -> None:
+        """The ThreatFox secret-reference name is trimmed of whitespace."""
+        settings = settings_from_config({"threatfox_auth_key_secret": "  VAR  "})
+        assert settings.threatfox_auth_key_secret == "VAR"
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("threatfox_max_concurrency", 0),
+            ("threatfox_max_concurrency", -1),
+            ("threatfox_max_concurrency", 2.5),
+            ("threatfox_max_concurrency", True),
+            ("threatfox_requests_per_second", 0),
+            ("threatfox_requests_per_second", -1.0),
+            ("threatfox_requests_per_second", True),
+        ],
+    )
+    def test_threatfox_bounds_rejected(self, field: str, value: object) -> None:
+        """Out-of-bounds and non-coercive ThreatFox values are rejected."""
+        with pytest.raises(ValidationError):
+            settings_from_config({field: value})
+
+    def test_threatfox_environment_parsing(self, monkeypatch: MonkeyPatch) -> None:
+        """ThreatFox settings parse from environment text."""
+        monkeypatch.setenv("ATI_THREATFOX_MAX_CONCURRENCY", "7")
+        monkeypatch.setenv("ATI_THREATFOX_REQUESTS_PER_SECOND", "2.5")
+        settings = settings_from_config({})
+        assert settings.threatfox_max_concurrency == 7
+        assert settings.threatfox_requests_per_second == 2.5
 
     def test_ipinfo_token_secret_environment_reference(
         self, monkeypatch: MonkeyPatch
