@@ -231,6 +231,28 @@ class RelationshipRow(Base):  # pylint: disable=too-few-public-methods
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
+class InvestigationRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for the mutable, versioned investigation resource."""
+
+    __tablename__ = "investigation"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    status: Mapped[str] = mapped_column(String)
+    trigger_type: Mapped[str] = mapped_column(String)
+    objective: Mapped[str] = mapped_column(String)
+    budget: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    operational_state: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
+
 class EvidenceRow(Base):  # pylint: disable=too-few-public-methods
     """Database row for immutable evidence."""
 

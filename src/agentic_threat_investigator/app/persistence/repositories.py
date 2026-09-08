@@ -24,6 +24,10 @@ from agentic_threat_investigator.domain.documents import Document, DocumentChunk
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.identity import Credential, Session, User
+from agentic_threat_investigator.domain.investigation import (
+    InvestigationState,
+    InvestigationStatus,
+)
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -42,6 +46,41 @@ class BatchOutcome(str, Enum):
 
 class BatchSizeLimitExceededError(ValueError):
     """Raised when a batch exceeds the configured application limit."""
+
+
+class InvestigationNotFoundError(LookupError):
+    """Raised when an investigation resource is absent or soft-deleted."""
+
+
+class InvestigationDuplicateIdentityError(ValueError):
+    """Raised when an investigation identity already exists."""
+
+    def __init__(self, investigation_id: UUID) -> None:
+        """Record the conflicting investigation identity."""
+        super().__init__(f"investigation already exists: {investigation_id}")
+        self.investigation_id = investigation_id
+
+
+class InvestigationVersionConflictError(RuntimeError):
+    """Raised when a stale expected_version must not silently overwrite state."""
+
+    def __init__(self, investigation_id: UUID, expected_version: int) -> None:
+        """Record the conflicting investigation identity and expectation."""
+        super().__init__(
+            f"investigation version conflict: {investigation_id} "
+            f"expected version {expected_version}"
+        )
+        self.investigation_id = investigation_id
+        self.expected_version = expected_version
+
+
+class EvidenceDuplicateIdentityError(ValueError):
+    """Raised when an evidence identity already exists; never an update."""
+
+    def __init__(self, evidence_id: UUID) -> None:
+        """Record the conflicting evidence identity."""
+        super().__init__(f"evidence observation already exists: {evidence_id}")
+        self.evidence_id = evidence_id
 
 
 @dataclass(frozen=True)
@@ -107,6 +146,15 @@ class IngestionCheckpoint:
             raise ValueError("checkpoint normalization_version must be positive")
         if self.checkpoint is not None and not self.checkpoint:
             raise ValueError("checkpoint value must not be blank")
+
+
+@dataclass(frozen=True)
+class InvestigationWriteResult:
+    """Authoritative database result for one investigation mutation."""
+
+    investigation_id: UUID
+    version: int
+    outcome: BatchOutcome
 
 
 @dataclass(frozen=True)
@@ -318,11 +366,82 @@ class RelationshipObservationRepository(
 class EvidenceRepository(
     ABC
 ):  # pylint: disable=too-few-public-methods  # pragma: no cover
-    """Append-only evidence repository."""
+    """Append-only evidence repository; immutable observations."""
 
     @abstractmethod
-    async def insert(self, evidence: Evidence) -> Evidence:
-        """Insert a new immutable evidence observation."""
+    async def insert(
+        self,
+        evidence: Evidence,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+    ) -> Evidence:
+        """Insert a new immutable evidence observation.
+
+        A duplicate evidence identity is rejected with a typed error and
+        never becomes an update of a prior observation.
+        """
+
+    @abstractmethod
+    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+        """Return an evidence observation by its immutable identity."""
+
+    @abstractmethod
+    async def list_for_investigation(
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Evidence]:
+        """Return bounded observations in deterministic newest-first order."""
+
+
+class InvestigationRepository(ABC):  # pragma: no cover
+    """Repository for the mutable, versioned investigation resource.
+
+    The database allocates versions and writes immutable history; this
+    repository never commits and never owns the transaction lifecycle.
+    """
+
+    @abstractmethod
+    async def create(
+        self,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+    ) -> InvestigationWriteResult:
+        """Create the resource and return its database-assigned version."""
+
+    @abstractmethod
+    async def get_by_id(
+        self, investigation_id: UUID, *, include_deleted: bool = False
+    ) -> InvestigationState | None:
+        """Return the visible investigation resource, if any."""
+
+    @abstractmethod
+    async def update_status(
+        self,
+        investigation_id: UUID,
+        status: InvestigationStatus,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Change the status with database-owned version/history semantics."""
+
+    @abstractmethod
+    async def soft_delete(
+        self,
+        investigation_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Soft-delete the resource and return its post-deletion version."""
 
 
 class UserRepository(ABC):  # pylint: disable=too-few-public-methods  # pragma: no cover
@@ -408,6 +527,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     relationships: RelationshipRepository
     relationship_observations: RelationshipObservationRepository
     evidence: EvidenceRepository
+    investigations: InvestigationRepository
     users: UserRepository
     credentials: CredentialRepository
     sessions: SessionRepository

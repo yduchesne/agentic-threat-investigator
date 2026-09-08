@@ -28,6 +28,10 @@ DEFAULT_MAX_REPLANS = 3
 """Initial configurable default maximum coordinator replans."""
 
 
+class InvalidInvestigationStatusTransitionError(ValueError):
+    """Raised when a status change violates the investigation lifecycle."""
+
+
 class InvestigationStatus(str, Enum):
     """Lifecycle statuses of an investigation."""
 
@@ -36,6 +40,73 @@ class InvestigationStatus(str, Enum):
     COMPLETED = "completed"
     PARTIAL = "partial"
     FAILED = "failed"
+
+
+INVESTIGATION_STATUS_TRANSITIONS: dict[
+    InvestigationStatus, frozenset[InvestigationStatus]
+] = {
+    InvestigationStatus.PENDING: frozenset(
+        {InvestigationStatus.RUNNING, InvestigationStatus.FAILED}
+    ),
+    InvestigationStatus.RUNNING: frozenset(
+        {
+            InvestigationStatus.COMPLETED,
+            InvestigationStatus.PARTIAL,
+            InvestigationStatus.FAILED,
+        }
+    ),
+    InvestigationStatus.COMPLETED: frozenset(),
+    InvestigationStatus.PARTIAL: frozenset(),
+    InvestigationStatus.FAILED: frozenset(),
+}
+"""The confirmed investigation lifecycle.
+
+``PENDING`` investigations start running or fail before execution begins.
+``RUNNING`` investigations complete, complete partially, or fail. Terminal
+statuses admit no further transitions. An identical target status is not a
+transition and is handled as a semantic no-op by the persistence layer.
+"""
+
+
+_TERMINAL_STATUSES: frozenset[InvestigationStatus] = frozenset(
+    {
+        InvestigationStatus.COMPLETED,
+        InvestigationStatus.PARTIAL,
+        InvestigationStatus.FAILED,
+    }
+)
+
+
+def is_terminal_status(status: InvestigationStatus) -> bool:
+    """Return whether an investigation status admits no further transitions."""
+
+    return status in _TERMINAL_STATUSES
+
+
+def can_transition_status(
+    current: InvestigationStatus, target: InvestigationStatus
+) -> bool:
+    """Return whether the lifecycle permits changing one status to another.
+
+    An identical target status is not a transition; callers that want the
+    confirmed lifecycle rule only must compare statuses first.
+    """
+
+    if current is target:
+        return True
+    return target in INVESTIGATION_STATUS_TRANSITIONS[current]
+
+
+def require_status_transition(
+    current: InvestigationStatus, target: InvestigationStatus
+) -> None:
+    """Validate a status change against the lifecycle or raise a typed error."""
+
+    if not can_transition_status(current, target):
+        raise InvalidInvestigationStatusTransitionError(
+            f"investigation status transition {current.value} -> {target.value} "
+            "is not permitted"
+        )
 
 
 class InvestigationTriggerType(str, Enum):
