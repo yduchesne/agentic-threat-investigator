@@ -42,8 +42,8 @@ from agentic_threat_investigator.app.providers import (
 from agentic_threat_investigator.domain.entities import (
     Entity,
     EntityType,
-    canonicalize_domain,
     canonicalize_ip_address,
+    validate_dns_name,
 )
 from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
 from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
@@ -140,6 +140,7 @@ class ThreatFoxRecord(BaseModel):
     threat_type: str = Field(min_length=1, max_length=64)
     threat_type_desc: str = Field(min_length=1, max_length=_DESCRIPTION_MAX_LENGTH)
     ioc_type: str = Field(min_length=1, max_length=32)
+    ioc_type_desc: str = Field(min_length=1, max_length=_DESCRIPTION_MAX_LENGTH)
     malware: str
     malware_printable: str | None = Field(
         default=None, min_length=1, max_length=_PRINTABLE_MAX_LENGTH
@@ -170,7 +171,7 @@ class ThreatFoxRecord(BaseModel):
             raise ValueError("ThreatFox record ioc must be a nonblank string")
         return value
 
-    @field_validator("threat_type", "threat_type_desc", "ioc_type")
+    @field_validator("threat_type", "threat_type_desc", "ioc_type", "ioc_type_desc")
     @classmethod
     def _validate_nonblank_bounded(cls, value: str) -> str:
         """Require nonblank bounded source strings without padding."""
@@ -235,13 +236,23 @@ class ThreatFoxRecord(BaseModel):
     @field_validator("tags", mode="before")
     @classmethod
     def _validate_tags(cls, value: object) -> list[str] | None:
-        """Require the documented null or bounded-string list form."""
+        """Require the documented null or bounded-string list form.
+
+        Each tag must be a nonempty string that is unchanged by stripping
+        (no outer whitespace) and no longer than the tag bound. Valid
+        order and duplicate valid tags are preserved.
+        """
         if value is None:
             return None
         if not isinstance(value, list):
             raise ValueError("ThreatFox record tags must be a list or null")
         for tag in value:
-            if not isinstance(tag, str) or not tag or len(tag) > _TAG_MAX_LENGTH:
+            if (
+                not isinstance(tag, str)
+                or not tag.strip()
+                or tag != tag.strip()
+                or len(tag) > _TAG_MAX_LENGTH
+            ):
                 raise ValueError("invalid ThreatFox record tag")
         return value
 
@@ -354,10 +365,17 @@ def record_matches_query(
 
 
 def _canonical_record_domain(value: str) -> str | None:
-    """Return the canonical ATI form of a returned domain, or ``None``."""
+    """Return the strict canonical form of a returned domain, or ``None``.
+
+    The untrusted returned IOC is validated with ATI's strict provider
+    DNS-name validator (not the persistence-oriented canonicalizer), so
+    malformed spellings such as multiple terminal dots, underscores,
+    invalid IDNA input, and overlong names can never match a valid
+    queried domain. Every parser or Unicode error maps to ``None``.
+    """
     try:
-        return canonicalize_domain(value)
-    except ValueError:
+        return validate_dns_name(value)
+    except ValueError, UnicodeError:
         return None
 
 
@@ -513,6 +531,7 @@ class ThreatFoxProvider(EvidenceProvider):
             return ProviderResult(provider=self.id)
 
         records: list[ThreatFoxRecord] = []
+        consumed_by_id: dict[str, ThreatFoxRecord] = {}
         for entry in data:
             try:
                 record = ThreatFoxRecord.model_validate(entry)
@@ -525,6 +544,20 @@ class ThreatFoxProvider(EvidenceProvider):
                     self.id,
                     "ThreatFox response record does not match the queried indicator",
                 )
+            first = consumed_by_id.get(record.id)
+            if first is not None:
+                if first != record:
+                    # Conflicting duplicate source ID: one generic error, no
+                    # evidence, and no ID, record, body, IOC, URL, or key in
+                    # the message.
+                    return _malformed_result(
+                        self.id,
+                        "ThreatFox response contains conflicting duplicate records",
+                    )
+                # Exact duplicate of a consumed record: the first occurrence
+                # stays authoritative for content and output position.
+                continue
+            consumed_by_id[record.id] = record
             records.append(record)
 
         subject = EvidenceEntityRef(
@@ -556,6 +589,15 @@ def _malformed_result(provider_id: str, message: str) -> ProviderResult:
     )
 
 
+def format_threatfox_fact_timestamp(value: datetime) -> str:
+    """Format an already validated timezone-aware UTC datetime as ``...Z``.
+
+    Normalized ThreatFox fact timestamps use the canonical UTC ISO 8601
+    form ending in ``Z``, for example ``2026-08-20T12:00:00Z``.
+    """
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _build_match_facts(record: ThreatFoxRecord) -> dict[str, Any]:
     """Build one normalized match fact object from a validated record.
 
@@ -575,9 +617,11 @@ def _build_match_facts(record: ThreatFoxRecord) -> dict[str, Any]:
         "malware": record.malware,
         "malware_printable": record.malware_printable,
         "confidence_level": record.confidence_level,
-        "first_seen": record.first_seen.isoformat(),
+        "first_seen": format_threatfox_fact_timestamp(record.first_seen),
         "last_seen": (
-            None if record.last_seen is None else record.last_seen.isoformat()
+            None
+            if record.last_seen is None
+            else format_threatfox_fact_timestamp(record.last_seen)
         ),
         "reference": record.reference,
         "tags": None if record.tags is None else list(record.tags),

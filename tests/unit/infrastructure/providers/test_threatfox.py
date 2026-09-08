@@ -348,6 +348,44 @@ class TestEnvelopeValidation:
         assert result.evidence == ()
         assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
 
+    @pytest.mark.parametrize("desc", [None, "", " ", " padded", 42, True, ["d"]])
+    async def test_missing_or_malformed_ioc_type_desc_rejected(self, desc: Any) -> None:
+        """A missing or malformed ioc_type_desc is a typed INVALID_RESPONSE."""
+        record = asyncrat_domain_record(ioc_type_desc=desc)
+        result = await investigate(
+            httpx.Response(200, json=threatfox_search_response(record)),
+            entity=_DOMAIN_ENTITY,
+        )
+        assert result.evidence == ()
+        assert len(result.errors) == 1
+        assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+        assert result.errors[0].retryable is False
+        # The error never carries the response body or the offending record.
+        assert "Domain that is used" not in result.errors[0].message
+
+    async def test_missing_ioc_type_desc_member_rejected(self) -> None:
+        """Omitting ioc_type_desc entirely is a typed INVALID_RESPONSE."""
+        record = asyncrat_domain_record()
+        del record["ioc_type_desc"]
+        result = await investigate(
+            httpx.Response(200, json=threatfox_search_response(record)),
+            entity=_DOMAIN_ENTITY,
+        )
+        assert result.evidence == ()
+        assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+
+    async def test_malformed_returned_domain_is_typed_error(self) -> None:
+        """One malformed returned domain yields one error and no evidence."""
+        record = asyncrat_domain_record(ioc="malicious-domain.test..")
+        result = await investigate(
+            httpx.Response(200, json=threatfox_search_response(record)),
+            entity=_DOMAIN_ENTITY,
+        )
+        assert result.evidence == ()
+        assert len(result.errors) == 1
+        assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+        assert result.errors[0].retryable is False
+
     async def test_unrelated_record_invalidates_whole_response(self) -> None:
         """An unrelated record is rejected even though exact_match was sent."""
         payload = threatfox_search_response(
@@ -407,8 +445,8 @@ class TestEvidenceNormalization:
         assert match["malware"] == CANONICAL_ASYNCRAT_MALWARE
         assert match["malware_printable"] == CANONICAL_ASYNCRAT_PRINTABLE
         assert match["confidence_level"] == 100
-        assert match["first_seen"] == "2026-08-20T12:00:00+00:00"
-        assert match["last_seen"] == "2026-08-21T12:00:00+00:00"
+        assert match["first_seen"] == "2026-08-20T12:00:00Z"
+        assert match["last_seen"] == "2026-08-21T12:00:00Z"
         assert match["reference"] is None
         assert match["tags"] == ("AsyncRAT",)
         # Ignored upstream members never reach the normalized facts.
@@ -533,6 +571,64 @@ class TestEvidenceNormalization:
         match = result.evidence[0].facts["matches"][0]
         assert match["tags"] is None
         assert match["reference"] is None
+
+    async def test_exact_duplicate_id_produces_one_match(self) -> None:
+        """Two identical entries sharing one ID collapse to one match."""
+        payload = threatfox_search_response(
+            asyncrat_ip_port_record(id="864202"),
+            asyncrat_ip_port_record(id="864202"),
+        )
+        result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
+        assert result.errors == ()
+        matches = result.evidence[0].facts["matches"]
+        assert len(matches) == 1
+        assert matches[0]["threatfox_id"] == "864202"
+
+    async def test_conflicting_duplicate_id_invalidates_response(self) -> None:
+        """The same ID with different consumed content is INVALID_RESPONSE."""
+        payload = threatfox_search_response(
+            asyncrat_ip_port_record(id="864202", confidence_level=75),
+            asyncrat_ip_port_record(id="864202", confidence_level=100),
+        )
+        result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
+        assert result.evidence == ()
+        assert len(result.errors) == 1
+        assert result.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
+        assert result.errors[0].retryable is False
+        # The generic message never carries the ID, IOC, or response body.
+        assert "864202" not in result.errors[0].message
+        assert CANONICAL_ASYNCRAT_IP not in result.errors[0].message
+
+    async def test_duplicate_id_with_ignored_field_change_is_exact_duplicate(
+        self,
+    ) -> None:
+        """Ignored-field differences do not conflict or create extra facts."""
+        payload = threatfox_search_response(
+            asyncrat_ip_port_record(id="864202"),
+            asyncrat_ip_port_record(
+                id="864202",
+                reporter="other_reporter",
+                comment="another synthetic comment",
+                malware_samples=[],
+            ),
+        )
+        result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
+        assert result.errors == ()
+        matches = result.evidence[0].facts["matches"]
+        assert len(matches) == 1
+        assert matches[0]["threatfox_id"] == "864202"
+
+    async def test_different_ids_with_equal_content_both_remain_in_order(
+        self,
+    ) -> None:
+        """Different IDs are never deduplicated, even with equal content."""
+        payload = threatfox_search_response(
+            asyncrat_ip_port_record(id="864202"),
+            asyncrat_ip_port_record(id="864203"),
+        )
+        result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
+        matches = result.evidence[0].facts["matches"]
+        assert [m["threatfox_id"] for m in matches] == ["864202", "864203"]
 
     async def test_no_entity_relationship_or_persistence_objects(self) -> None:
         """The result carries evidence only: no discovered entities or edges."""

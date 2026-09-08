@@ -9,15 +9,16 @@ test contacts the real ThreatFox service.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from agentic_threat_investigator.domain.entities import EntityType
+from agentic_threat_investigator.domain.entities import EntityType, validate_dns_name
 from agentic_threat_investigator.infrastructure.providers.threatfox import (
     ThreatFoxRecord,
+    format_threatfox_fact_timestamp,
     parse_source_ip_ioc,
     record_matches_query,
 )
@@ -40,6 +41,7 @@ _REQUIRED_RECORD_MEMBERS = (
     "threat_type",
     "threat_type_desc",
     "ioc_type",
+    "ioc_type_desc",
     "malware",
     "confidence_level",
     "first_seen",
@@ -75,6 +77,9 @@ class TestThreatFoxRecordSchema:
         assert parsed.ioc == CANONICAL_ASYNCRAT_DOMAIN
         assert parsed.threat_type == "botnet_cc"
         assert parsed.ioc_type == "domain"
+        assert parsed.ioc_type_desc == (
+            "Domain that is used for botnet Command&control (C&C)"
+        )
         assert parsed.malware == CANONICAL_ASYNCRAT_MALWARE
         assert parsed.malware_printable == CANONICAL_ASYNCRAT_PRINTABLE
         assert parsed.malware_alias is None
@@ -292,11 +297,57 @@ class TestThreatFoxRecordMemberValues:
         for member in (*_IGNORED_RECORD_MEMBERS, "malware_bazaar"):
             assert member not in str(dumped)
 
+    @pytest.mark.parametrize(
+        "bad",
+        [None, REMOVED, "", " ", " padded", "x" * 513, True, 42, ["desc"], {"d": 1}],
+    )
+    def test_malformed_ioc_type_desc_rejected(self, bad: Any) -> None:
+        """Missing, null, padded, overlong, and wrongly typed descriptions fail."""
+        record = (
+            asyncrat_domain_record(ioc_type_desc=bad)
+            if bad is not REMOVED
+            else asyncrat_domain_record()
+        )
+        if bad is REMOVED:
+            record.pop("ioc_type_desc")
+        with pytest.raises(ValidationError):
+            ThreatFoxRecord.model_validate(record)
+
+    @pytest.mark.parametrize(
+        "bad",
+        ["", "   ", " padded", "\tlead", "trail\n", 42, True, None, ["tag"], "x" * 65],
+    )
+    def test_malformed_tag_values_rejected(self, bad: Any) -> None:
+        """Empty, whitespace-only, padded, non-string, and overlong tags fail."""
+        with pytest.raises(ValidationError):
+            ThreatFoxRecord.model_validate(asyncrat_domain_record(tags=[bad]))
+
+    def test_valid_tags_preserve_internal_spaces_order_and_duplicates(self) -> None:
+        """Valid internal spaces, order, and duplicates are preserved."""
+        tags = ["Cobalt Strike", "exe", "exe"]
+        parsed = ThreatFoxRecord.model_validate(asyncrat_domain_record(tags=tags))
+        assert parsed.tags == tags
+
     def test_record_model_is_frozen(self) -> None:
         """The record model is immutable."""
         parsed = ThreatFoxRecord.model_validate(asyncrat_domain_record())
         with pytest.raises(ValidationError):
             parsed.malware = "win.other"
+
+
+@pytest.mark.unit
+class TestThreatFoxFactTimestampFormat:
+    """Normalized fact timestamps use the exact canonical UTC ``Z`` form."""
+
+    def test_utc_datetime_formats_with_z_suffix(self) -> None:
+        """A timezone-aware UTC datetime formats as ``YYYY-MM-DDTHH:MM:SSZ``."""
+        value = datetime(2026, 8, 20, 12, 0, 0, tzinfo=UTC)
+        assert format_threatfox_fact_timestamp(value) == "2026-08-20T12:00:00Z"
+
+    def test_offset_datetime_is_normalized_to_utc_z(self) -> None:
+        """A non-UTC offset is normalized to the UTC ``Z`` form."""
+        value = datetime(2026, 8, 20, 13, 0, 0, tzinfo=timezone(timedelta(hours=1)))
+        assert format_threatfox_fact_timestamp(value) == "2026-08-20T12:00:00Z"
 
 
 # -- IOC identity matching ---------------------------------------------------
@@ -365,6 +416,46 @@ class TestIocIdentityMatching:
             asyncrat_domain_record(ioc="malicious-domain.test.")
         )
         assert record_matches_query(dotted, EntityType.DOMAIN, "malicious-domain.test")
+
+    @pytest.mark.parametrize(
+        "bad_ioc",
+        [
+            "malicious-domain.test..",
+            "under_score.malicious-domain.test",
+            "bad..malicious-domain.test",
+            "-leading-hyphen.malicious-domain.test",
+            "malign\u0000ous-domain.test",
+            "x" * 64 + ".malicious-domain.test",
+            ("a." * 127) + "malicious-domain.test",
+        ],
+    )
+    def test_malformed_returned_domain_never_matches(self, bad_ioc: str) -> None:
+        """Returned domains must pass strict DNS validation before comparison."""
+        record = ThreatFoxRecord.model_validate(asyncrat_domain_record(ioc=bad_ioc))
+        assert not record_matches_query(
+            record, EntityType.DOMAIN, "malicious-domain.test"
+        )
+
+    def test_valid_domain_variants_match_through_canonicalization(self) -> None:
+        """Uppercase and one terminal dot are accepted through canonicalization."""
+        for variant in ("MALICIOUS-DOMAIN.TEST", "malicious-domain.test."):
+            record = ThreatFoxRecord.model_validate(asyncrat_domain_record(ioc=variant))
+            assert record_matches_query(
+                record, EntityType.DOMAIN, "malicious-domain.test"
+            )
+
+    def test_valid_idna_returned_domain_matches(self) -> None:
+        """A valid IDNA name canonicalizes and can match its queried form."""
+        record = ThreatFoxRecord.model_validate(
+            asyncrat_domain_record(ioc="m\u00e4licious-domain.test")
+        )
+        # An IDN only matches when it canonicalizes to exactly the queried
+        # canonical identity.
+        assert not record_matches_query(
+            record, EntityType.DOMAIN, "malicious-domain.test"
+        )
+        canonical = validate_dns_name("m\u00e4licious-domain.test")
+        assert record_matches_query(record, EntityType.DOMAIN, canonical)
 
     def test_domain_mismatch_rejected(self) -> None:
         """A different domain never matches the queried identity."""
