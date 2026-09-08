@@ -89,7 +89,7 @@ Geolocation remains contextual evidence in v0.1. Do not introduce
 PostGIS, general-purpose GEOINT entities, spatial pivoting, or physical
 attacker-location inference.
 
-## PR 15 --- AbuseIPDB provider
+## PR 15 --- AbuseIPDB provider \[DONE\]
 
 Deliver:
 
@@ -107,7 +107,7 @@ only. Live AbuseIPDB contract testing is outside PR 15 and requires a
 separately approved future change.
 
 Provider scores do not directly determine ATI assessment confidence. No
-AbuseIPDB hit does not imply `BENIGN`. [DONE]
+AbuseIPDB hit does not imply `BENIGN`. 
 
 ## PR 16 --- ThreatFox provider
 
