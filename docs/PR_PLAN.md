@@ -110,7 +110,6 @@ Provider scores do not directly determine ATI assessment confidence. No
 AbuseIPDB hit does not imply `BENIGN`. 
 
 ## PR 16 --- ThreatFox provider [DONE]
-
 Deliver:
 
 -   ThreatFox integration;

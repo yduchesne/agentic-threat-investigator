@@ -1370,6 +1370,43 @@ class TestThreatFoxIntegration:
             assert {m["threatfox_id"] for m in matches} == {"864202", "864203"}
             assert {m["malware"] for m in matches} == {"win.asyncrat"}
 
+    async def test_exact_duplicate_source_id_is_collapsed_over_asgi(self) -> None:
+        """Two same-ID identical records normalize to one match over ASGI."""
+        app = _build_stub_app()
+        app.state.threatfox_responses = {
+            CANONICAL_ASYNCRAT_IP: threatfox_search_response(
+                asyncrat_ip_port_record(id="864202"),
+                asyncrat_ip_port_record(id="864202"),
+            )
+        }
+
+        transport = HostAllowlistASGITransport(app, allowed_hosts={_THREATFOX_HOST})
+        async with httpx.AsyncClient(transport=transport) as client:
+            http = ProviderHttpClient(
+                client=client, sleep=_no_op_sleep, jitter_fn=_zero_jitter
+            )
+            provider = ThreatFoxProvider(
+                http, auth_key=_FAKE_THREATFOX_KEY, clock=lambda: _FIXED_TS
+            )
+            result = await provider.investigate(
+                _FIXED_UUID,
+                Entity(type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP),
+            )
+
+            # Duplicate handling is response normalization, not a second
+            # API call: exactly one request reaches the ThreatFox route.
+            assert len(app.state.threatfox_requests) == 1
+            assert result.errors == ()
+            assert len(result.evidence) == 1
+            assert result.evidence[0].type == EvidenceType.THREAT_INTELLIGENCE
+            matches = result.evidence[0].facts["matches"]
+            assert len(matches) == 1
+            # The first occurrence remains authoritative.
+            assert matches[0]["threatfox_id"] == "864202"
+            assert matches[0]["ioc"] == CANONICAL_ASYNCRAT_IP_PORT
+            assert matches[0]["first_seen"] == "2026-08-20T12:00:00Z"
+            assert matches[0]["malware"] == CANONICAL_ASYNCRAT_MALWARE
+
     async def test_unrelated_ioc_response_is_safely_rejected(self) -> None:
         """A response about a different IOC is a non-retryable INVALID_RESPONSE."""
         app = _build_stub_app()
