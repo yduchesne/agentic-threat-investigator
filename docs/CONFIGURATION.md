@@ -446,6 +446,10 @@ type before bounds are enforced. The bounds below apply on top of those type req
 | `ipinfo_lite_max_concurrency` | `ATI_IPINFO_LITE_MAX_CONCURRENCY` | `int` | `10` | `> 0` | IPinfo Lite maximum in-flight requests |
 | `ipinfo_lite_requests_per_second` | `ATI_IPINFO_LITE_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional IPinfo Lite rate limit (omission disables) |
 | `ipinfo_lite_token_secret` | `ATI_IPINFO_LITE_TOKEN_SECRET` | `str` | `ATI_IPINFO_LITE_TOKEN` | non-blank | Environment variable NAME carrying the IPinfo Lite access token (secret reference, never a token value) |
+| `abuseipdb_max_concurrency` | `ATI_ABUSEIPDB_MAX_CONCURRENCY` | `int` | `10` | `> 0` | AbuseIPDB maximum in-flight requests |
+| `abuseipdb_requests_per_second` | `ATI_ABUSEIPDB_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional AbuseIPDB rate limit (omission disables) |
+| `abuseipdb_api_key_secret` | `ATI_ABUSEIPDB_API_KEY_SECRET` | `str` | `ATI_ABUSEIPDB_API_KEY` | non-blank | Environment variable NAME carrying the AbuseIPDB API key (secret reference, never a key value) |
+| `abuseipdb_max_age_in_days` | `ATI_ABUSEIPDB_MAX_AGE_IN_DAYS` | `int` | `30` | `1..365` | Fixed AbuseIPDB report look-back window in days sent on every check |
 | `dbip_city_lite_artifact_uri` | `ATI_DBIP_CITY_LITE_ARTIFACT_URI` | `str` | `""` (blank) | see notes | Credential-free local `file://` artifact URI of the DB-IP IP to City Lite MMDB. Blank (default) disables composition of the DB-IP City Lite provider. v0.1 requires an authority-free absolute `file://` URI; query, fragment, credential, and non-file URIs are rejected by the settings validator, and artifact paths outside `${ATI_DATA_DIR}/datasets` are rejected by the storage boundary. The configured artifact must already exist and be readable at composition time; there is no downloader and no API key. |
 
 When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
@@ -494,6 +498,28 @@ permitted only in isolated deterministic tests. In production:
   composition time with `SecretNotFoundError` before the IPinfo HTTP
   client is created; Google DNS and RDAP clients created earlier in the
   same composition are rolled back cleanly.
+
+### AbuseIPDB API key
+
+The AbuseIPDB provider authenticates with an API key sent as a custom
+`Key` header on every request. ATI never uses the `?key=` query form
+because it leaks credentials into server logs. Real or resolved AbuseIPDB
+keys must never be committed, logged, persisted, placed in URLs, or
+copied into test fixtures; clearly synthetic placeholder keys are
+permitted only in isolated deterministic tests. In production:
+
+- the setting `abuseipdb_api_key_secret` holds only the NAME of the
+  environment variable carrying the API key (default reference:
+  `ATI_ABUSEIPDB_API_KEY`);
+- during provider composition, the `SecretsResolver` bootstrap contract
+  resolves that reference through `EnvVarSecretsResolver`;
+- the resolved key value is passed to `AbuseIpdbProvider`, which uses it
+  only in the `Key` header; providers never read configuration or the
+  environment directly;
+- a missing, empty, or whitespace-only required key fails clearly at
+  composition time with `SecretNotFoundError` before the AbuseIPDB HTTP
+  client is created; Google DNS, RDAP, and IPinfo clients created
+  earlier in the same composition are rolled back cleanly.
 
 ## Testing requirements
 

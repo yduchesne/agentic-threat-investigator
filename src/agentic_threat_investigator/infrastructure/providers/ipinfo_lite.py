@@ -22,10 +22,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agentic_threat_investigator.app.providers import (
     EvidenceProvider,
-    ProviderError,
     ProviderErrorCode,
     ProviderResult,
     normalize_retrieval_timestamp,
+    provider_error_result,
     validate_investigation_entity,
 )
 from agentic_threat_investigator.domain.entities import (
@@ -598,17 +598,11 @@ def _lite_error_result(
     retry_after_seconds: int | None = None,
 ) -> ProviderResult:
     """Build one typed provider error attributed to the Lite provider."""
-    return ProviderResult(
-        provider=provider_urn,
-        errors=(
-            ProviderError(
-                provider=provider_urn,
-                code=code,
-                message=message,
-                retryable=code.retryable,
-                retry_after_seconds=retry_after_seconds,
-            ),
-        ),
+    return provider_error_result(
+        provider_urn,
+        code,
+        message,
+        retry_after_seconds=retry_after_seconds,
     )
 
 

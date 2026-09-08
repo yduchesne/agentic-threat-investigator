@@ -21,6 +21,9 @@ from agentic_threat_investigator.infrastructure.object_store import (
     FileSystemObjectStore,
     object_store_for_uri,
 )
+from agentic_threat_investigator.infrastructure.providers.abuseipdb import (
+    AbuseIpdbProvider,
+)
 from agentic_threat_investigator.infrastructure.providers.dbip_city_lite import (
     CityLiteDatabase,
     CityLiteMmdb,
@@ -108,6 +111,7 @@ class ProviderComposition:
         self._google_dns: GooglePublicDnsProvider | None = None
         self._rdap: RdapProvider | None = None
         self._ipinfo_lite: IpinfoLiteProvider | None = None
+        self._abuseipdb: AbuseIpdbProvider | None = None
         self._dbip_city_lite: DbIpCityLiteProvider | None = None
 
     @classmethod
@@ -137,8 +141,9 @@ class ProviderComposition:
             max_response_bytes=settings.provider_max_response_bytes,
         )
         composition = cls()
+        clients: list[ProviderHttpClient] = []
         async with AsyncExitStack() as stack:
-            google_http = factory.create(
+            http = factory.create(
                 policy,
                 BoundedLimiter(
                     RateLimiterSettings(
@@ -147,10 +152,11 @@ class ProviderComposition:
                     )
                 ),
             )
-            stack.push_async_callback(google_http.aclose)
-            composition._google_dns = GooglePublicDnsProvider(google_http)
+            stack.push_async_callback(http.aclose)
+            clients.append(http)
+            composition._google_dns = GooglePublicDnsProvider(http)
 
-            rdap_http = factory.create(
+            http = factory.create(
                 policy,
                 BoundedLimiter(
                     RateLimiterSettings(
@@ -159,14 +165,18 @@ class ProviderComposition:
                     )
                 ),
             )
-            stack.push_async_callback(rdap_http.aclose)
+            stack.push_async_callback(http.aclose)
+            clients.append(http)
             composition._rdap = RdapProvider(
-                rdap_http,
+                http,
                 cache_seconds=settings.rdap_bootstrap_cache_seconds,
             )
 
+            # The IPinfo Lite access token is resolved here, during
+            # composition, from the configured secret reference name; the
+            # provider receives only the resolved credential.
             ipinfo_token = resolver.require(settings.ipinfo_lite_token_secret)
-            ipinfo_http = factory.create(
+            http = factory.create(
                 policy,
                 BoundedLimiter(
                     RateLimiterSettings(
@@ -175,9 +185,29 @@ class ProviderComposition:
                     )
                 ),
             )
-            stack.push_async_callback(ipinfo_http.aclose)
-            composition._ipinfo_lite = IpinfoLiteProvider(
-                ipinfo_http, token=ipinfo_token
+            stack.push_async_callback(http.aclose)
+            clients.append(http)
+            composition._ipinfo_lite = IpinfoLiteProvider(http, token=ipinfo_token)
+
+            # The AbuseIPDB API key is resolved during composition through the
+            # same bootstrap contract; the provider receives only the resolved
+            # key and never reads configuration or the environment.
+            abuseipdb_key = resolver.require(settings.abuseipdb_api_key_secret)
+            http = factory.create(
+                policy,
+                BoundedLimiter(
+                    RateLimiterSettings(
+                        max_concurrency=settings.abuseipdb_max_concurrency,
+                        requests_per_second=settings.abuseipdb_requests_per_second,
+                    )
+                ),
+            )
+            stack.push_async_callback(http.aclose)
+            clients.append(http)
+            composition._abuseipdb = AbuseIpdbProvider(
+                http,
+                api_key=abuseipdb_key,
+                max_age_in_days=settings.abuseipdb_max_age_in_days,
             )
 
             # Local DB-IP City Lite geolocation: composed only when the
@@ -191,7 +221,7 @@ class ProviderComposition:
                 ) = await _compose_dbip_city_lite(settings, stack)
                 composition._databases = (database,)
 
-            composition._clients = (google_http, rdap_http, ipinfo_http)
+            composition._clients = tuple(clients)
             # Construction succeeded: the composition now owns explicit cleanup
             # through aclose(); the stack must not close the clients again.
             stack.pop_all()
@@ -217,6 +247,13 @@ class ProviderComposition:
         if self._ipinfo_lite is None:
             raise RuntimeError("ProviderComposition must be created via create()")
         return self._ipinfo_lite
+
+    @property
+    def abuseipdb(self) -> AbuseIpdbProvider:
+        """AbuseIPDB provider instance."""
+        if self._abuseipdb is None:
+            raise RuntimeError("ProviderComposition must be created via create()")
+        return self._abuseipdb
 
     @property
     def dbip_city_lite(self) -> DbIpCityLiteProvider | None:

@@ -222,22 +222,26 @@ Do not commit `.env` or credentials.
 Provider composition (`ProviderComposition`) is not yet started by any
 current Compose service; no v0.1 service constructs live evidence
 providers at this time. When provider composition is activated for a
-service in a future PR, that PR must provision `ATI_IPINFO_LITE_TOKEN`
-to that service only, preferably through the Compose secret mechanism,
-and must not place the resolved token into `Settings`.
+service in a future PR, that PR must provision each provider credential
+(`ATI_IPINFO_LITE_TOKEN`, `ATI_ABUSEIPDB_API_KEY`) to that service only,
+preferably through the Compose secret mechanism, and must not place the
+resolved values into `Settings`.
 
 Until then, executing the provider composition directly on the host
-requires exporting `ATI_IPINFO_LITE_TOKEN` into the process environment:
+requires exporting `ATI_IPINFO_LITE_TOKEN` and `ATI_ABUSEIPDB_API_KEY`
+into the process environment:
 
 ```bash
 export ATI_IPINFO_LITE_TOKEN="..."
+export ATI_ABUSEIPDB_API_KEY="..."
 ```
 
-Placing a token in an unexported `.env` file does not make it available
-to `EnvVarSecretsResolver`, which reads the process environment. Pydantic
-loading of `.env` into `Settings` does not export values to the process
-environment, and Compose does not inject every `.env` value into a
-container automatically.
+Placing a token or API key in an unexported `.env` file does not make it
+available to `EnvVarSecretsResolver`, which reads the process environment.
+Pydantic loading of `.env` into `Settings` does not export values to the
+process environment, and Compose does not inject every `.env` value into
+a container automatically. This applies to both provider tokens and API
+keys (`ATI_IPINFO_LITE_TOKEN`, `ATI_ABUSEIPDB_API_KEY`).
 
 ## Networking
 

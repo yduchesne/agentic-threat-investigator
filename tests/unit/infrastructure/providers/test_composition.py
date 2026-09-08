@@ -1,6 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Tests for settings-driven provider composition."""
+"""Tests for settings-driven provider composition.
+
+This module intentionally exceeds the default line-count bound: each live
+provider's wiring, secret resolution, rollback, and close semantics are
+covered in dedicated deterministic tests within one composition suite.
+"""
 
 from __future__ import annotations
 
@@ -48,6 +53,8 @@ pytestmark = pytest.mark.asyncio
 
 _FAKE_TOKEN_SECRET_NAME = "ATI_IPINFO_LITE_TOKEN"
 _FAKE_TOKEN = "fake-test-token"
+_FAKE_ABUSEIPDB_KEY_SECRET_NAME = "ATI_ABUSEIPDB_API_KEY"
+_FAKE_ABUSEIPDB_KEY = "fake-test-abuseipdb-key"
 
 
 class _StaticSecretsResolver(SecretsResolver):
@@ -63,8 +70,13 @@ class _StaticSecretsResolver(SecretsResolver):
 
 
 def _fake_secrets() -> _StaticSecretsResolver:
-    """Build the standard fake resolver carrying only the fake test token."""
-    return _StaticSecretsResolver({_FAKE_TOKEN_SECRET_NAME: _FAKE_TOKEN})
+    """Build the standard fake resolver carrying the fake test credentials."""
+    return _StaticSecretsResolver(
+        {
+            _FAKE_TOKEN_SECRET_NAME: _FAKE_TOKEN,
+            _FAKE_ABUSEIPDB_KEY_SECRET_NAME: _FAKE_ABUSEIPDB_KEY,
+        }
+    )
 
 
 class _SpyHttpClientFactory(  # pylint: disable=too-few-public-methods
@@ -105,7 +117,7 @@ async def test_composition_wires_google_dns_settings() -> None:
     async with await ProviderComposition.create(
         settings, http_client_factory=factory, secrets=_fake_secrets()
     ) as comp:
-        assert len(factory.calls) == 3
+        assert len(factory.calls) == 4
         google_policy, google_limiter = factory.calls[0]
         assert google_policy.timeout_seconds == 25.0
         assert google_policy.max_retries == 4
@@ -166,6 +178,7 @@ async def test_composition_closes_both_clients_on_individual_failure() -> None:
         _FailingClient("first"),
         _FailingClient("second"),
         _FailingClient("third"),
+        _FailingClient("fourth"),
     ]
 
     class _CannedFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
@@ -182,7 +195,7 @@ async def test_composition_closes_both_clients_on_individual_failure() -> None:
     with pytest.raises(RuntimeError, match="simulated client aclose failure"):
         await comp.aclose()
 
-    assert closed == ["first", "second", "third"]
+    assert closed == ["first", "second", "third", "fourth"]
 
 
 async def test_composition_rolls_back_on_partial_construction_failure() -> None:
@@ -250,6 +263,7 @@ async def test_composition_aclose_cancellation_closes_remaining_client() -> None
         _CancellingClient("first"),
         _OrderTrackingClient("second"),
         _OrderTrackingClient("third"),
+        _OrderTrackingClient("fourth"),
     ]
 
     class _CannedFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
@@ -266,7 +280,7 @@ async def test_composition_aclose_cancellation_closes_remaining_client() -> None
     with pytest.raises(asyncio.CancelledError):
         await comp.aclose()
 
-    assert closed == ["second", "third"]
+    assert closed == ["second", "third", "fourth"]
 
 
 async def test_composition_properties_require_create() -> None:
@@ -278,6 +292,8 @@ async def test_composition_properties_require_create() -> None:
         _ = comp.rdap
     with pytest.raises(RuntimeError, match="create"):
         _ = comp.ipinfo_lite
+    with pytest.raises(RuntimeError, match="create"):
+        _ = comp.abuseipdb
 
 
 async def test_composition_wires_ipinfo_settings(
@@ -309,15 +325,31 @@ async def test_composition_wires_ipinfo_settings(
     async with await ProviderComposition.create(
         settings,
         http_client_factory=factory,
-        secrets=_StaticSecretsResolver({"CUSTOM_TOKEN_VAR": _FAKE_TOKEN}),
+        secrets=_StaticSecretsResolver(
+            {
+                "CUSTOM_TOKEN_VAR": _FAKE_TOKEN,
+                _FAKE_ABUSEIPDB_KEY_SECRET_NAME: _FAKE_ABUSEIPDB_KEY,
+            }
+        ),
     ) as comp:
-        assert len(factory.calls) == 3
+        assert len(factory.calls) == 4
         _, ipinfo_limiter = factory.calls[2]
         assert isinstance(ipinfo_limiter, BoundedLimiter)
         # All providers must receive distinct limiter instances.
         google_limiter = factory.calls[0][1]
         rdap_limiter = factory.calls[1][1]
-        assert len({id(google_limiter), id(rdap_limiter), id(ipinfo_limiter)}) == 3
+        abuseipdb_limiter = factory.calls[3][1]
+        assert (
+            len(
+                {
+                    id(google_limiter),
+                    id(rdap_limiter),
+                    id(ipinfo_limiter),
+                    id(abuseipdb_limiter),
+                }
+            )
+            == 4
+        )
 
         # The exact configured values reached each provider's limiter.
         assert seen_settings[0] == RateLimiterSettings(
@@ -342,7 +374,12 @@ async def test_composition_passes_resolved_token_to_provider() -> None:
     """The token resolved by the secrets resolver reaches the provider."""
     factory = _SpyHttpClientFactory()
     settings = settings_from_config({})
-    resolver = _StaticSecretsResolver({_FAKE_TOKEN_SECRET_NAME: _FAKE_TOKEN})
+    resolver = _StaticSecretsResolver(
+        {
+            _FAKE_TOKEN_SECRET_NAME: _FAKE_TOKEN,
+            _FAKE_ABUSEIPDB_KEY_SECRET_NAME: _FAKE_ABUSEIPDB_KEY,
+        }
+    )
 
     async with await ProviderComposition.create(
         settings, http_client_factory=factory, secrets=resolver
@@ -358,6 +395,7 @@ async def test_composition_resolves_token_from_environment(
 ) -> None:
     """The default environment resolver supplies the configured reference."""
     monkeypatch.setenv(_FAKE_TOKEN_SECRET_NAME, _FAKE_TOKEN)
+    monkeypatch.setenv(_FAKE_ABUSEIPDB_KEY_SECRET_NAME, _FAKE_ABUSEIPDB_KEY)
     factory = _SpyHttpClientFactory()
     settings = settings_from_config({})
 
@@ -530,10 +568,11 @@ async def test_composition_normal_close_closes_all_clients_once() -> None:
         _ = comp.google_dns
         _ = comp.rdap
         _ = comp.ipinfo_lite
+        _ = comp.abuseipdb
 
-    # The normal context exit closed Google DNS, RDAP, and IPinfo clients,
-    # each exactly once, in creation order.
-    assert closed == ["client-1", "client-2", "client-3"]
+    # The normal context exit closed Google DNS, RDAP, IPinfo, and AbuseIPDB
+    # clients, each exactly once, in creation order.
+    assert closed == ["client-1", "client-2", "client-3", "client-4"]
 
 
 class TestDbIpCityLiteComposition:
@@ -658,8 +697,8 @@ class TestDbIpCityLiteComposition:
                 http_client_factory=_PassThroughFactory(),
                 secrets=_fake_secrets(),
             )
-        # All three already-created clients roll back, in LIFO unwind order.
-        assert closed == ["client-3", "client-2", "client-1"]
+        # All four already-created clients roll back, in LIFO unwind order.
+        assert closed == ["client-4", "client-3", "client-2", "client-1"]
 
     async def test_artifact_outside_datasets_root_rejected(
         self, tmp_path: pathlib.Path
@@ -752,8 +791,8 @@ class TestDbIpCityLiteComposition:
         # The opened reader rolled back with construction: lookups now fail.
         with pytest.raises(MmdbLookupError):
             captured[0].lookup("192.0.2.10")
-        # All three created HTTP clients still unwind in LIFO order.
-        assert closed == ["client-3", "client-2", "client-1"]
+        # All four created HTTP clients still unwind in LIFO order.
+        assert closed == ["client-4", "client-3", "client-2", "client-1"]
 
     async def test_database_close_failure_still_closes_clients(
         self,
@@ -819,7 +858,7 @@ class TestDbIpCityLiteComposition:
         with pytest.raises(RuntimeError, match="database close boom"):
             await comp.aclose()
         assert broken.close_attempts == 1
-        assert closed == ["client-1", "client-2", "client-3"]
+        assert closed == ["client-1", "client-2", "client-3", "client-4"]
 
     async def test_first_close_failure_re_raised_after_full_cleanup(
         self,
@@ -888,4 +927,4 @@ class TestDbIpCityLiteComposition:
             await comp.aclose()
         # Every resource received exactly one close attempt despite failures.
         assert broken.close_attempts == 1
-        assert closed == ["client-1", "client-2", "client-3"]
+        assert closed == ["client-1", "client-2", "client-3", "client-4"]

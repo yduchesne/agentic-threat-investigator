@@ -157,3 +157,86 @@ The incorrect `mmdb-writer` license comment was corrected to MIT, but the review
 - DB-IP unit and integration tests import the synthetic MMDB helper without modifying `sys.path` at runtime.
 - Canonical unit and integration commands still discover all tests.
 - No production package includes test-support code.
+
+## Complete AbuseIPDB boundary regression coverage
+
+**Priority:** MEDIUM
+**Origin:** PR 15 remediation review 03.
+
+### Problem
+
+The PR 15 implementation follows the approved execution order and shared HTTP behavior, but several explicit regression checks from `.plans/PR_15_LUNA_EXECUTION_PLAN.md` and `.plans/pr-15-fixes-02.md` remain indirect or absent:
+
+- unsupported and invalid entities are tested for zero HTTP I/O, but the tests do not prove that the provider clock is not evaluated;
+- malformed JSON is covered through the synthetic ASGI integration path, but not in the AbuseIPDB unit matrix;
+- cancellation propagation is tested, but the AbuseIPDB-facing test does not prove that the shared limiter permit is released afterward;
+- HTTP 402 and 422 mappings are covered, but AbuseIPDB does not have an explicit HTTP 400 mapping assertion.
+
+The implementation currently uses the correct validation-before-clock order and delegates these HTTP/lifecycle behaviors to the tested shared client, so these are regression-coverage gaps rather than demonstrated production defects.
+
+### Intended fix
+
+1. In `tests/unit/infrastructure/providers/test_abuseipdb_contract.py`, inject a clock callable that raises if called.
+2. Invoke `investigate()` once with an unsupported entity and once with an invalid `IP_ADDRESS`; assert each returns one non-retryable `UNSUPPORTED_INDICATOR` and the raising clock is never evaluated.
+3. Add a unit response with status 200, `application/json`, and malformed JSON bytes; assert zero evidence and one non-retryable `INVALID_RESPONSE` with a generic body-free message.
+4. Add HTTP 400 to the AbuseIPDB status-mapping matrix and assert `INVALID_RESPONSE`, non-retryable, zero evidence, and one attempt.
+5. Add an AbuseIPDB cancellation test using a dedicated `BoundedLimiter` with concurrency one.
+6. Cancel the first request while it owns the permit, then make a second deterministic request through the same client/limiter; assert the second request completes instead of blocking, proving permit release.
+7. Keep all transports synthetic and fail closed; do not add real network access or sleeps.
+8. Do not duplicate shared retry/backoff implementation logic in provider tests.
+
+### Acceptance checks
+
+- Unsupported and invalid entities are rejected before both clock evaluation and HTTP I/O.
+- Malformed JSON has direct AbuseIPDB unit coverage.
+- HTTP 400 has an explicit typed mapping assertion.
+- Cancellation propagates and the next request can acquire the same limiter permit.
+- Targeted AbuseIPDB tests and `./build.sh --qa` pass.
+
+## Align the configuration example with the implemented AbuseIPDB composition
+
+**Priority:** LOW
+**Origin:** PR 15 remediation review 03; pre-existing forward-looking example now conflicts with the implemented provider.
+
+### Problem
+
+The generic secret-resolution example near the end of `docs/CONFIGURATION.md` still uses a nested `CONFIG["abuseipdb"]` object with an unsupported `enabled` member and the nonexistent class name `AbuseIPDBProvider`. PR 15 implements flat `Settings` fields and `AbuseIpdbProvider`, so readers can now mistake the old illustrative pseudocode for the production configuration contract.
+
+### Intended fix
+
+1. Keep the generic explanation that configuration stores secret reference names rather than values.
+2. Replace the nested AbuseIPDB profile example with the real flat setting name `abuseipdb_api_key_secret`, or make the example provider-neutral.
+3. Remove the unsupported `enabled` member unless a future approved provider-enable contract is implemented.
+4. Use the actual class name `AbuseIpdbProvider` in any concrete example.
+5. Show secret resolution at composition time without placing the resolved value in `Settings`.
+6. Ensure the example agrees with the settings table, `.env.example`, and `ProviderComposition.create()`.
+
+### Acceptance checks
+
+- `docs/CONFIGURATION.md` contains no `AbuseIPDBProvider` identifier.
+- No example implies that `CONFIG["abuseipdb"]` or `abuseipdb.enabled` is supported.
+- The documented secret reference remains `ATI_ABUSEIPDB_API_KEY` by default.
+
+## Reject rather than normalize padded AbuseIPDB credentials
+
+**Priority:** LOW
+**Origin:** PR 15 remediation review 03.
+
+### Problem
+
+`SecretsResolver.require()` deliberately returns a nonblank resolved secret unchanged, but `AbuseIpdbProvider.__init__()` silently strips leading and trailing whitespace before storing the API key. Silent normalization can hide a deployment mistake and means the provider does not send the exact resolved credential. Normal API keys contain no surrounding whitespace, so failing clearly is safer than changing the value.
+
+### Intended fix
+
+1. In `AbuseIpdbProvider.__init__()`, keep rejecting empty and whitespace-only keys.
+2. Also reject a key when `api_key != api_key.strip()`; use a fixed message that does not include the key.
+3. Store an accepted key unchanged.
+4. Add unit tests for leading space, trailing space, tab, and newline padding.
+5. Assert error messages do not contain any supplied credential fragment.
+6. Keep composition failure behavior and header-only authentication unchanged.
+
+### Acceptance checks
+
+- A valid synthetic key reaches the `Key` header byte-for-byte.
+- Padded keys fail before HTTP I/O and are never echoed.
+- Missing/blank-key composition tests continue to pass.
