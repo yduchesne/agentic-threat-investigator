@@ -301,7 +301,11 @@ They validate:
 - audit persistence;
 - RAG document/chunk/vector persistence;
 - investigation resource and immutable evidence persistence (versions,
-  history, lifecycle, soft deletion, and transaction atomicity).
+  history, lifecycle, soft deletion, and transaction atomicity);
+- PR 18A concurrency invariants: locked-row lifecycle revalidation with a
+  controlled two-session transition race, typed duplicate-identity errors
+  under concurrent inserts, and evidence insertion blocked across a
+  concurrent parent soft deletion.
 
 Do not replace critical PostgreSQL integration coverage with SQLite.
 

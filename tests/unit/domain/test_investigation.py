@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for investigation state, budgets, and pivot classification."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -124,6 +124,76 @@ def test_investigation_state_requires_core_workflow_fields() -> None:
     assert state.pending_pivots == []
     assert state.errors == []
     assert state.stop_reason is None
+    assert state.completed_at is None
+    # Database-owned persistence metadata is optional output.
+    assert state.version is None
+    assert state.created_at is None
+    assert state.updated_at is None
+    assert state.deleted_at is None
+    assert state.deleted_by_actor_id is None
+
+
+def test_investigation_state_rejects_naive_timestamps() -> None:
+    """Naive started_at and completed_at values are rejected."""
+
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        InvestigationState(
+            investigation_id=uuid4(),
+            status=InvestigationStatus.PENDING,
+            trigger_type=InvestigationTriggerType.MANUAL,
+            root_entity_ids=[uuid4()],
+            objective="Assess the root indicator.",
+            budget=default_investigation_budget(),
+            started_at=datetime(2026, 1, 2, 3, 4, 5),
+        )
+
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        InvestigationState(
+            investigation_id=uuid4(),
+            status=InvestigationStatus.PENDING,
+            trigger_type=InvestigationTriggerType.MANUAL,
+            root_entity_ids=[uuid4()],
+            objective="Assess the root indicator.",
+            budget=default_investigation_budget(),
+            started_at=_STARTED_AT,
+            completed_at=datetime(2026, 1, 3),
+        )
+
+
+def test_investigation_state_normalizes_offsets_to_utc() -> None:
+    """Aware offsets are accepted and normalized to UTC on both fields."""
+
+    offset = timezone(timedelta(hours=2))
+    state = InvestigationState(
+        investigation_id=uuid4(),
+        status=InvestigationStatus.RUNNING,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[uuid4()],
+        objective="Assess the root indicator.",
+        budget=default_investigation_budget(),
+        started_at=datetime(2026, 1, 2, 5, 0, 0, tzinfo=offset),
+        completed_at=datetime(2026, 1, 2, 7, 30, 0, tzinfo=offset),
+    )
+
+    assert state.started_at == datetime(2026, 1, 2, 3, 0, 0, tzinfo=UTC)
+    assert state.completed_at == datetime(2026, 1, 2, 5, 30, 0, tzinfo=UTC)
+    assert state.started_at.tzinfo is not None
+    assert state.completed_at is not None and state.completed_at.tzinfo is not None
+
+
+def test_investigation_state_preserves_absent_completed_at() -> None:
+    """A missing completed_at remains None after UTC normalization."""
+
+    state = InvestigationState(
+        investigation_id=uuid4(),
+        status=InvestigationStatus.PENDING,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[uuid4()],
+        objective="Assess the root indicator.",
+        budget=default_investigation_budget(),
+        started_at=_STARTED_AT,
+    )
+
     assert state.completed_at is None
 
 

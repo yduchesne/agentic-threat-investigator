@@ -3,12 +3,14 @@
 
 # pylint: disable=redefined-outer-name
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_threat_investigator.app.investigation_persistence import (
@@ -18,6 +20,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationDuplicateIdentityError,
     InvestigationNotFoundError,
     InvestigationVersionConflictError,
+    InvestigationWriteResult,
 )
 from agentic_threat_investigator.domain.audit import AuditAction, AuditEvent
 from agentic_threat_investigator.domain.entities import Entity, EntityType
@@ -40,6 +43,13 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.audit_rep
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
+)
+from agentic_threat_investigator.infrastructure.persistence.postgresql.errors import (
+    SQLSTATE_INVALID_TRANSITION,
+    sqlstate,
+)
+from agentic_threat_investigator.infrastructure.persistence.postgresql.investigation_repositories import (
+    PostgresInvestigationRepository,
 )
 
 _STARTED_AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -110,16 +120,6 @@ async def history_rows(
         {"object_type": object_type, "object_id": object_id},
     )
     return [(row[0], row[1], row[2]) for row in result.fetchall()]
-    assert uow.session is not None
-    result = uow.session.execute(
-        text("""
-            SELECT version, operation, diff::text FROM ati.domain_object_history
-            WHERE object_type = :object_type AND object_id = :object_id
-            ORDER BY version
-        """),
-        {"object_type": object_type, "object_id": object_id},
-    )
-    return [(row[0], row[1], row[2]) for row in result.fetchall()]
 
 
 @pytest.mark.asyncio
@@ -150,6 +150,36 @@ async def test_investigation_create_read_round_trip(
         assert round_tripped.budget.replans_used == 1
         assert round_tripped.started_at == _STARTED_AT
         assert round_tripped.completed_at is None
+        # The fresh read returns the exact database-assigned version from the
+        # write result plus authoritative tz-aware metadata.
+        assert round_tripped.version == created_version
+        assert round_tripped.created_at is not None
+        assert round_tripped.created_at.tzinfo is not None
+        assert round_tripped.updated_at is not None
+        assert round_tripped.updated_at.tzinfo is not None
+        assert round_tripped.deleted_at is None
+        assert round_tripped.deleted_by_actor_id is None
+
+        # Persistence metadata is never serialized into the stored documents.
+        assert uow.session is not None
+        stored_documents = (
+            await uow.session.execute(
+                text("""
+                    SELECT budget, operational_state FROM ati.investigation
+                    WHERE id = :id
+                """),
+                {"id": state.investigation_id},
+            )
+        ).one()
+        metadata_keys = {
+            "version",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "deleted_by_actor_id",
+        }
+        assert metadata_keys.isdisjoint(stored_documents[0])
+        assert metadata_keys.isdisjoint(stored_documents[1])
 
     async with uow_factory() as uow:
         assert (await uow.investigations.get_by_id(state.investigation_id)) is not None
@@ -504,3 +534,269 @@ async def test_service_evidence_audit_failure_rolls_back_evidence(
             )
         ).scalar_one()
         assert count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_status_update_changes_version_and_updated_at(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A transition returns a new version and refreshed authoritative times."""
+    state = investigation_state()
+    async with uow_factory() as uow:
+        created = await uow.investigations.create(state)
+    async with uow_factory() as uow:
+        updated = await uow.investigations.update_status(
+            state.investigation_id, InvestigationStatus.RUNNING
+        )
+    async with uow_factory() as uow:
+        round_tripped = await uow.investigations.get_by_id(state.investigation_id)
+        assert round_tripped is not None
+        assert round_tripped.version == updated.version > created.version
+        assert round_tripped.created_at is not None
+        assert round_tripped.updated_at is not None
+        assert round_tripped.updated_at >= round_tripped.created_at
+        assert round_tripped.updated_at.tzinfo is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_soft_deleted_read_returns_deletion_metadata(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """An administrative read reveals deletion state, actor, and version."""
+    state = investigation_state()
+    actor_id = uuid4()
+    async with uow_factory() as uow:
+        created = await uow.investigations.create(state)
+        deleted = await uow.investigations.soft_delete(
+            state.investigation_id, actor_id=actor_id
+        )
+    async with uow_factory() as uow:
+        assert await uow.investigations.get_by_id(state.investigation_id) is None
+        hidden = await uow.investigations.get_by_id(
+            state.investigation_id, include_deleted=True
+        )
+        assert hidden is not None
+        assert hidden.deleted_at is not None
+        assert hidden.deleted_at.tzinfo is not None
+        assert hidden.deleted_by_actor_id == actor_id
+        assert hidden.version == deleted.version > created.version
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_fresh_read_version_supports_optimistic_update(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A version obtained by a fresh read drives a later optimistic update."""
+    state = investigation_state()
+    async with uow_factory() as uow:
+        await uow.investigations.create(state)
+    async with uow_factory() as uow:
+        read = await uow.investigations.get_by_id(state.investigation_id)
+        assert read is not None and read.version is not None
+    async with uow_factory() as uow:
+        result = await uow.investigations.update_status(
+            state.investigation_id,
+            InvestigationStatus.RUNNING,
+            expected_version=read.version,
+        )
+        assert result.version is not None and result.version > read.version
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_started_at_column_is_not_nullable(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """The schema requires a non-null started_at."""
+    async with uow_factory() as uow:
+        assert uow.session is not None
+        nullable = (await uow.session.execute(text("""
+                    SELECT is_nullable FROM information_schema.columns
+                    WHERE table_schema = 'ati'
+                      AND table_name = 'investigation'
+                      AND column_name = 'started_at'
+                """))).scalar_one()
+        assert nullable == "NO"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_locked_row_rejects_disallowed_transitions(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """The locked SQL function rejects every disallowed transition."""
+    disallowed = [
+        (InvestigationStatus.PENDING, InvestigationStatus.COMPLETED),
+        (InvestigationStatus.PENDING, InvestigationStatus.PARTIAL),
+        (InvestigationStatus.RUNNING, InvestigationStatus.PENDING),
+        (InvestigationStatus.COMPLETED, InvestigationStatus.RUNNING),
+        (InvestigationStatus.COMPLETED, InvestigationStatus.FAILED),
+        (InvestigationStatus.PARTIAL, InvestigationStatus.PENDING),
+        (InvestigationStatus.FAILED, InvestigationStatus.RUNNING),
+    ]
+    for current, target in disallowed:
+        state = investigation_state(status=current)
+        async with uow_factory() as uow:
+            await uow.investigations.create(state)
+        async with uow_factory() as uow:
+            assert uow.session is not None
+            with pytest.raises(DBAPIError) as error_info:
+                await uow.session.execute(
+                    text("SELECT * FROM ati.update_investigation_status(:id, :status)"),
+                    {"id": state.investigation_id, "status": target.value},
+                )
+            assert sqlstate(error_info.value) == SQLSTATE_INVALID_TRANSITION
+        async with uow_factory() as uow:
+            round_tripped = await uow.investigations.get_by_id(state.investigation_id)
+            assert round_tripped is not None
+            assert round_tripped.status is current
+            rows = await history_rows(uow, "investigation", state.investigation_id)
+            assert [operation for _, operation, _ in rows] == ["CREATE"]
+
+
+class _SnapshotGatedRepository(PostgresInvestigationRepository):
+    """Test-only repository exposing the stale pre-lock snapshot interval.
+
+    The subclass records the pre-lock status snapshot and then pauses until a
+    gate opens, so a second writer can commit a lifecycle-invalidating
+    transition inside the window the SQL function must defend.
+    """
+
+    def __init__(
+        self, session: AsyncSession, ready: asyncio.Event, gate: asyncio.Event
+    ) -> None:
+        super().__init__(session)
+        self._ready = ready
+        self._gate = gate
+        self.observed: InvestigationStatus | None = None
+
+    async def update_status(
+        self,
+        investigation_id: UUID,
+        status: InvestigationStatus,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Snapshot, wait for the gate, then reach the locked SQL function."""
+        current = await self.get_by_id(investigation_id)
+        assert current is not None
+        self.observed = current.status
+        self._ready.set()
+        await self._gate.wait()
+        return await super().update_status(
+            investigation_id,
+            status,
+            actor_id=actor_id,
+            request_id=request_id,
+            expected_version=expected_version,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_concurrent_invalid_transition_is_rejected_on_locked_row(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A transition invalidated between check and write cannot be persisted."""
+    state = investigation_state()
+    async with uow_factory() as uow:
+        await uow.investigations.create(state)
+
+    failed_ready, failed_gate = asyncio.Event(), asyncio.Event()
+    running_ready, running_gate = asyncio.Event(), asyncio.Event()
+    repos: dict[str, _SnapshotGatedRepository] = {}
+
+    async def failed_writer() -> object:
+        async with uow_factory() as uow:
+            assert uow.session is not None
+            gated = _SnapshotGatedRepository(uow.session, failed_ready, failed_gate)
+            uow.investigations = gated
+            repos["failed"] = gated
+            try:
+                return await gated.update_status(
+                    state.investigation_id, InvestigationStatus.FAILED
+                )
+            except InvalidInvestigationStatusTransitionError as error:
+                return error
+
+    async def running_writer() -> object:
+        async with uow_factory() as uow:
+            assert uow.session is not None
+            gated = _SnapshotGatedRepository(uow.session, running_ready, running_gate)
+            uow.investigations = gated
+            repos["running"] = gated
+            try:
+                return await gated.update_status(
+                    state.investigation_id, InvestigationStatus.RUNNING
+                )
+            except InvalidInvestigationStatusTransitionError as error:
+                return error
+
+    failed_task = asyncio.create_task(failed_writer())
+    running_task = asyncio.create_task(running_writer())
+    # Both writers complete their pre-lock snapshots before either mutation;
+    # each observed PENDING.
+    await asyncio.wait_for(failed_ready.wait(), 5)
+    await asyncio.wait_for(running_ready.wait(), 5)
+
+    # The FAILED writer completes its locked-row transition first.
+    failed_gate.set()
+    failed_outcome = await asyncio.wait_for(failed_task, 5)
+    assert isinstance(failed_outcome, InvestigationWriteResult)
+    assert failed_outcome.outcome is not None
+
+    # The RUNNING writer reaches the SQL function with its stale PENDING
+    # snapshot; the locked row is now FAILED and the transition must be
+    # rejected with the typed domain error.
+    running_gate.set()
+    running_outcome = await asyncio.wait_for(running_task, 5)
+    assert isinstance(running_outcome, InvalidInvestigationStatusTransitionError)
+    # Both pre-lock snapshots observed PENDING, proving the stale snapshot
+    # window the locked-row validation defends.
+    assert repos["failed"].observed is InvestigationStatus.PENDING
+    assert repos["running"].observed is InvestigationStatus.PENDING
+
+    async with uow_factory() as uow:
+        round_tripped = await uow.investigations.get_by_id(state.investigation_id)
+        assert round_tripped is not None
+        assert round_tripped.status is InvestigationStatus.FAILED
+        rows = await history_rows(uow, "investigation", state.investigation_id)
+        assert [operation for _, operation, _ in rows] == ["CREATE", "UPDATE"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_concurrent_duplicate_investigation_identity_is_typed(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A concurrent duplicate identity produces the typed error, never 23505."""
+    state = investigation_state()
+
+    async def create_writer() -> object:
+        async with uow_factory() as uow:
+            try:
+                return await uow.investigations.create(state)
+            except InvestigationDuplicateIdentityError as error:
+                return error
+
+    outcomes = await asyncio.gather(
+        asyncio.wait_for(create_writer(), 10),
+        asyncio.wait_for(create_writer(), 10),
+    )
+    winners = [o for o in outcomes if isinstance(o, InvestigationWriteResult)]
+    losers = [o for o in outcomes if isinstance(o, InvestigationDuplicateIdentityError)]
+    assert len(winners) == 1 and len(losers) == 1
+    assert winners[0].investigation_id == state.investigation_id
+
+    async with uow_factory() as uow:
+        stored = await uow.investigations.get_by_id(state.investigation_id)
+        assert stored is not None
+        assert stored.status is state.status
+        assert stored.objective == state.objective
+        rows = await history_rows(uow, "investigation", state.investigation_id)
+        assert [operation for _, operation, _ in rows] == ["CREATE"]

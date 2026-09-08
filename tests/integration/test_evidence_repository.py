@@ -3,12 +3,14 @@
 
 # pylint: disable=redefined-outer-name
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_threat_investigator.app.investigation_persistence import (
     InvestigationPersistenceService,
@@ -348,3 +350,145 @@ async def test_evidence_rollback_leaves_no_row(
         assert await evidence_row_count(uow) == 0
         stored = await uow.evidence.get_by_id(evidence.id or uuid4())
         assert stored is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_evidence_rejects_missing_investigation_parent(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Direct repository insertion requires an existing visible parent."""
+    async with uow_factory() as uow:
+        entity = await uow.entities.upsert(
+            Entity(type=EntityType.DOMAIN, value="example.com")
+        )
+        assert entity.id is not None
+        entity_id = entity.id
+
+    evidence = evidence_factory(uuid4(), entity_id)
+    with pytest.raises(InvestigationNotFoundError):
+        async with uow_factory() as uow:
+            await uow.evidence.insert(evidence)
+
+    async with uow_factory() as uow:
+        assert await evidence_row_count(uow) == 0
+        assert await evidence_history_rows(uow, evidence.id or uuid4()) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_evidence_rejects_soft_deleted_investigation_parent(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Direct repository insertion rejects an already deleted parent."""
+    async with uow_factory() as uow:
+        investigation_id, entity_id = await seed_investigation(uow)
+    async with uow_factory() as uow:
+        await uow.investigations.soft_delete(investigation_id)
+
+    evidence = evidence_factory(investigation_id, entity_id)
+    with pytest.raises(InvestigationNotFoundError):
+        async with uow_factory() as uow:
+            await uow.evidence.insert(evidence)
+
+    async with uow_factory() as uow:
+        assert await evidence_row_count(uow) == 0
+        assert await evidence_history_rows(uow, evidence.id or uuid4()) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_evidence_cannot_follow_concurrent_parent_soft_deletion(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Evidence insertion fails when the parent is deleted in the gap."""
+    async with uow_factory() as uow:
+        investigation_id, entity_id = await seed_investigation(uow)
+    evidence = evidence_factory(investigation_id, entity_id)
+
+    deleter_locked = asyncio.Event()
+    insert_attempted = asyncio.Event()
+
+    async def deleting_writer() -> None:
+        async with uow_factory() as uow:
+            await uow.investigations.soft_delete(investigation_id)
+            deleter_locked.set()
+            await insert_attempted.wait()
+            # Exiting the unit of work commits the soft deletion.
+
+    deleter_task = asyncio.create_task(deleting_writer())
+    await asyncio.wait_for(deleter_locked.wait(), 5)
+
+    insert_attempted.set()
+    with pytest.raises(InvestigationNotFoundError):
+        async with uow_factory() as uow:
+            # The insert blocks on the locked parent row and re-evaluates the
+            # visibility predicate once the soft deletion commits.
+            await uow.evidence.insert(evidence)
+
+    await asyncio.wait_for(deleter_task, 5)
+
+    async with uow_factory() as uow:
+        assert await evidence_row_count(uow) == 0
+        assert await evidence_history_rows(uow, evidence.id or uuid4()) == []
+        assert (
+            await uow.investigations.get_by_id(investigation_id, include_deleted=True)
+        ) is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_concurrent_duplicate_evidence_identity_is_typed(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A concurrent duplicate evidence identity produces the typed error."""
+    async with uow_factory() as uow:
+        investigation_id, entity_id = await seed_investigation(uow)
+    # Both writers submit the same explicit identity.
+    evidence = evidence_factory(investigation_id, entity_id).model_copy(
+        update={"id": uuid4()}
+    )
+
+    async def insert_writer() -> object:
+        async with uow_factory() as uow:
+            try:
+                return await uow.evidence.insert(evidence)
+            except EvidenceDuplicateIdentityError as error:
+                return error
+
+    outcomes = await asyncio.gather(
+        asyncio.wait_for(insert_writer(), 10),
+        asyncio.wait_for(insert_writer(), 10),
+    )
+    winners = [o for o in outcomes if isinstance(o, Evidence)]
+    losers = [o for o in outcomes if isinstance(o, EvidenceDuplicateIdentityError)]
+    assert len(winners) == 1 and len(losers) == 1
+    assert winners[0].id is not None
+
+    async with uow_factory() as uow:
+        assert await evidence_row_count(uow) == 1
+        assert winners[0].id is not None
+        assert await evidence_history_rows(uow, winners[0].id) == [(1, "CREATE")]
+        stored = await uow.evidence.get_by_id(winners[0].id)
+        assert stored is not None
+        assert stored.facts["answers"] == ("192.0.2.1", "192.0.2.2")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_evidence_listing_index_exists_with_deterministic_order(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """The listing query path has its matching deterministic-order index."""
+    async with uow_factory() as uow:
+        assert uow.session is not None
+        index_definitions = (await uow.session.execute(text("""
+                    SELECT indexdef FROM pg_indexes
+                    WHERE schemaname = 'ati'
+                      AND tablename = 'evidence'
+                      AND indexname = 'evidence_investigation_listing_idx'
+                """))).scalars().all()
+        assert len(index_definitions) == 1
+        definition = index_definitions[0].replace('"', "")
+        # ASC is the default order and may be omitted by pg_get_indexdef.
+        assert "investigation_id, retrieved_at DESC, id" in definition
