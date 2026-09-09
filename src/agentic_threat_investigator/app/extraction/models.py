@@ -204,6 +204,19 @@ def deduplicate_entities(
     return tuple(ordered)
 
 
+def assertion_order_key(
+    assertion: RelationshipAssertion,
+) -> tuple[EntityType, str, RelationshipType, EntityType, str]:
+    """Return the deterministic ordering key of one relationship assertion."""
+    return (
+        assertion.source.type,
+        assertion.source.value,
+        assertion.type,
+        assertion.target.type,
+        assertion.target.value,
+    )
+
+
 def deduplicate_assertions(
     assertions: Iterable[RelationshipAssertion],
 ) -> tuple[RelationshipAssertion, ...]:
@@ -216,14 +229,7 @@ def deduplicate_assertions(
     seen: set[tuple[EntityType, str, RelationshipType, EntityType, str, UUID]] = set()
     ordered: list[RelationshipAssertion] = []
     for assertion in assertions:
-        key = (
-            assertion.source.type,
-            assertion.source.value,
-            assertion.type,
-            assertion.target.type,
-            assertion.target.value,
-            assertion.evidence_id,
-        )
+        key = (*assertion_order_key(assertion), assertion.evidence_id)
         if key in seen:
             continue
         seen.add(key)

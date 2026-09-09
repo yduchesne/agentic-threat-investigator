@@ -1,7 +1,6 @@
 """PostgreSQL adapters for relationships, observations, and evidence."""
 
 import json
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
@@ -14,6 +13,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationNotFoundError,
     RelationshipObservationRepository,
     RelationshipRepository,
+    SoftDeletedIdentityError,
 )
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import (
@@ -31,9 +31,12 @@ from agentic_threat_investigator.domain.relationships import (
 from .errors import (
     SQLSTATE_EVIDENCE_DUPLICATE,
     SQLSTATE_INVESTIGATION_NOT_FOUND,
+    SQLSTATE_RELATIONSHIP_NOT_FOUND,
+    SQLSTATE_RELATIONSHIP_SOFT_DELETED,
+    SQLSTATE_VERSION_CONFLICT,
     sqlstate,
 )
-from .models import EntityRow, EvidenceRow, RelationshipObservationRow, RelationshipRow
+from .models import EntityRow, EvidenceRow, RelationshipRow
 
 
 def _relationship(row: RelationshipRow) -> Relationship:
@@ -74,38 +77,41 @@ class PostgresRelationshipRepository(RelationshipRepository):
     async def upsert(
         self, relationship: Relationship, *, expected_version: int | None = None
     ) -> Relationship:
-        """Insert an edge, or return its existing immutable identity."""
-        existing = await self.get_by_identity(
-            relationship.source_entity_id,
-            relationship.type.value,
-            relationship.target_entity_id,
-            include_deleted=True,
-        )
-        if existing is not None:
-            row = await self.session.get(RelationshipRow, existing.id)
-            if (
-                expected_version is not None
-                and row is not None
-                and row.version != expected_version
-            ):
-                raise ValueError("stale expected_version")
-            return existing
-        version = int(
-            await self.session.scalar(
-                text("SELECT nextval('ati.relationship_version_seq')")
+        """Create or reuse the edge through the authoritative SQL function.
+
+        The database owns identity resolution, race-safe creation, version
+        allocation, and history; this adapter never self-commits and never
+        allocates versions in Python. A soft-deleted identity raises the
+        approved typed error instead of being silently reused.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, created FROM ati.upsert_relationship(
+                        :source, :target, :type)
+                """),
+                {
+                    "source": relationship.source_entity_id,
+                    "target": relationship.target_entity_id,
+                    "type": relationship.type.value,
+                },
             )
-        )
-        row = RelationshipRow(
-            id=relationship.id,
-            source_entity_id=relationship.source_entity_id,
-            target_entity_id=relationship.target_entity_id,
-            relationship_type_urn=relationship.type.value,
-            version=version,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-        self.session.add(row)
-        await self.session.flush()
+        except DBAPIError as error:
+            if sqlstate(error) == SQLSTATE_RELATIONSHIP_SOFT_DELETED:
+                raise SoftDeletedIdentityError(
+                    "relationship", relationship.id
+                ) from error
+            raise
+        written_id, _version, created = result.one()
+        row = await self.session.get(RelationshipRow, written_id)
+        if row is None:  # pragma: no cover - the function and transaction are atomic
+            raise RuntimeError("relationship write returned no row")
+        if (
+            expected_version is not None
+            and not created
+            and row.version != expected_version
+        ):
+            raise ValueError("stale expected_version")
         return _relationship(row)
 
     async def soft_delete(
@@ -115,19 +121,38 @@ class PostgresRelationshipRepository(RelationshipRepository):
         actor_id: UUID | None = None,
         expected_version: int | None = None,
     ) -> Relationship:
-        """Soft-delete an edge with optimistic version checking."""
-        row = await self.session.get(RelationshipRow, relationship_id)
-        if row is None or row.deleted_at is not None:
-            raise LookupError("relationship not found")
-        if expected_version is not None and row.version != expected_version:
-            raise ValueError("stale expected_version")
-        row.deleted_at, row.deleted_by_actor_id, row.updated_at, row.version = (
-            datetime.now(timezone.utc),
-            actor_id,
-            datetime.now(timezone.utc),
-            row.version + 1,
-        )
-        await self.session.flush()
+        """Soft-delete through the authoritative SQL function.
+
+        PostgreSQL owns the version allocation and the immutable DELETE
+        history; a missing or already-deleted edge and a stale expected
+        version surface as the established typed errors without any extra
+        mutation.
+        """
+        try:
+            result = await self.session.execute(
+                text(
+                    "SELECT id, version FROM ati.soft_delete_relationship("
+                    ":id, :actor, :expected)"
+                ),
+                {
+                    "id": relationship_id,
+                    "actor": actor_id,
+                    "expected": expected_version,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_RELATIONSHIP_NOT_FOUND:
+                raise LookupError("relationship not found") from error
+            if state == SQLSTATE_VERSION_CONFLICT:
+                raise ValueError("stale expected_version") from error
+            raise
+        written_id, _version = result.one()
+        row = (
+            await self.session.execute(
+                select(RelationshipRow).where(RelationshipRow.id == written_id)
+            )
+        ).scalar_one()
         return _relationship(row)
 
 
@@ -142,11 +167,30 @@ class PostgresRelationshipObservationRepository(
     async def append(
         self, observation: RelationshipObservation
     ) -> RelationshipObservation:
-        """Insert an observation with immutable version one."""
-        self.session.add(
-            RelationshipObservationRow(**observation.model_dump(), version=1)
+        """Append one immutable observation through the authoritative function.
+
+        The database allocates the version and writes the immutable CREATE
+        history carrying investigation correlation in the same transaction;
+        the adapter performs no Python-side version allocation and exposes no
+        update or delete path.
+        """
+        await self.session.execute(
+            text("""
+                SELECT id, version FROM ati.append_relationship_observation(
+                    :id, :relationship_id, :evidence_id, :investigation_id,
+                    :observed_at, :retrieved_at, :source, :confidence)
+            """),
+            {
+                "id": observation.id,
+                "relationship_id": observation.relationship_id,
+                "evidence_id": observation.evidence_id,
+                "investigation_id": observation.investigation_id,
+                "observed_at": observation.observed_at,
+                "retrieved_at": observation.retrieved_at,
+                "source": observation.source,
+                "confidence": observation.confidence,
+            },
         )
-        await self.session.flush()
         return observation
 
 

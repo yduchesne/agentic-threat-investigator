@@ -297,7 +297,7 @@ The PR 18B extraction layer (`app/extraction`) is a pure, database-free applicat
 
 No LLM is required to infer basic relationships such as DNS resolution or network ownership.
 
-Relationship extraction can discover entities. The Coordinator may then evaluate those entities as possible pivots. PR 18C persists the extraction output atomically (entity upserts, stable relationships, immutable relationship observations).
+Relationship extraction can discover entities. The Coordinator may then evaluate those entities as possible pivots. PR 18C persists the extraction output atomically (entity upserts, stable relationships, immutable relationship observations). Its narrow application service performs preflight validation before BEGIN — Evidence identity, canonical values, assertion Evidence-ID equality, endpoint coverage, and the deterministic duplicate policy — so provider calls and PR 18B extraction never run inside the UnitOfWork. Rediscovery of a soft-deleted Entity or Relationship is a fail-closed typed error: no second canonical row, no silent restore, and no observation attached to a deleted object. The fail-closed behavior is database-enforced: the authoritative write functions reject soft-deleted identities and dangling Evidence provenance under the row lock, so application pre-checks are defense in depth rather than the guarantee itself.
 
 ## RAG
 
@@ -325,7 +325,7 @@ All persistent application/domain deletion is soft deletion. Immutable historica
 
 External provider and LLM calls occur outside database transactions.
 
-A normalized provider result is persisted atomically as the relevant evidence, entities, relationships, observations, and audit changes.
+A normalized provider result is persisted atomically as the relevant evidence, entities, relationships, observations, and audit changes. Evidence is insert-only, stable graph identities are reused, and each assertion receives one immutable Evidence-provenanced observation.
 
 Repositories never self-commit. Application services use an explicit Unit of Work.
 
