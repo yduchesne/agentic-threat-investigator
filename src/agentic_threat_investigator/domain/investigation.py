@@ -11,9 +11,10 @@ from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agentic_threat_investigator.domain.entities import EntityType
+from agentic_threat_investigator.domain.identifiers import SourceId
 
 DEFAULT_MAX_DEPTH = 2
 """Initial configurable default maximum pivot depth."""
@@ -140,6 +141,22 @@ class PivotRequest(BaseModel):
     status: PivotStatus = PivotStatus.PENDING
 
 
+class ProviderWorkItem(BaseModel):
+    """One approved provider-work unit queued for deterministic execution.
+
+    The work identity is exactly ``(provider, entity_id, depth)`` and is used
+    for deterministic queue duplicate suppression only. It carries
+    operational identifiers, never entity values, provider instances, or
+    infrastructure objects.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: SourceId
+    entity_id: UUID
+    depth: int = Field(ge=0)
+
+
 class InvestigationBudget(BaseModel):
     """Deterministic resource budgets for one investigation.
 
@@ -161,6 +178,28 @@ class InvestigationError(BaseModel):
     code: str
     message: str
     recoverable: bool
+
+
+class ProviderExecutionStatus(str, Enum):
+    """Outcome status of one fake/deterministic provider work execution."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ProviderExecutionOutcome(BaseModel):
+    """Typed operational result of executing one :class:`ProviderWorkItem`.
+
+    Contains operational identifiers only: no evidence, provider payloads,
+    relationships, assessments, or hidden reasoning.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    work_item: ProviderWorkItem
+    status: ProviderExecutionStatus
+    discovered_entity_ids: tuple[UUID, ...] = ()
+    error: InvestigationError | None = None
 
 
 class InvestigationState(BaseModel):
@@ -186,6 +225,10 @@ class InvestigationState(BaseModel):
     evidence_ids: list[UUID] = Field(default_factory=list)
     relationship_ids: list[UUID] = Field(default_factory=list)
     pending_pivots: list[PivotRequest] = Field(default_factory=list)
+    pending_provider_work: list[ProviderWorkItem] = Field(default_factory=list)
+    completed_provider_work: list[ProviderWorkItem] = Field(default_factory=list)
+    current_provider_work: ProviderWorkItem | None = None
+    last_provider_outcome: ProviderExecutionOutcome | None = None
     investigated_entity_ids: list[UUID] = Field(default_factory=list)
     research_required_for_entity_ids: list[UUID] = Field(default_factory=list)
     research_result_ids: list[UUID] = Field(default_factory=list)
