@@ -803,6 +803,41 @@ The generic secret-resolution example near the end of `docs/CONFIGURATION.md` st
 - No example implies that `CONFIG["abuseipdb"]` or `abuseipdb.enabled` is supported.
 - The documented secret reference remains `ATI_ABUSEIPDB_API_KEY` by default.
 
+## PR 19A secondary orchestration hardening
+
+**Priority:** MEDIUM
+
+**Origin:** PR 19A branch review against `.plans/PR_19A_LUNA_EXECUTION_PLAN.md`.
+
+### Problem
+
+The PR 19A graph and queue helpers pass the required deterministic scenario and the canonical QA gate. No CRITICAL or HIGH defect was found. The following lower-severity contract-hardening items remain:
+
+- `ProviderWorkItem` and `ProviderExecutionOutcome` are operational orchestration contracts but are defined in `domain.investigation.py`; the approved package boundary prefers orchestration contracts under `app/orchestration` while keeping only pure state/domain contracts in the domain layer.
+- `InvestigationState` does not enforce all documented queue invariants at model validation time: duplicate items or an item present in both pending and completed collections can be constructed directly. The current enqueue/record helpers preserve the invariants for normal use, and PR 19A intentionally avoids broad cross-field semantic validation.
+- `record_provider_outcome()` verifies the selected item and duplicate completion, but does not explicitly reject a selected item that is absent from `pending_provider_work`. A malformed manually constructed state could therefore increment the provider counter and create a completed item without removing pending work.
+- `ProviderExecutionOutcome` does not validate status/error consistency (for example, a succeeded outcome with an error or a failed outcome without one). The current deterministic fake and graph behavior do not depend on this distinction, and stronger outcome policy may belong with real provider execution.
+- The graph channel wraps a Pydantic model in a `TypedDict`; the state model itself has a JSON round-trip test, but there is no graph-level test invoking the graph from a JSON-reconstructed channel payload. This would make checkpoint/channel compatibility explicit without adding a persistence backend.
+- The fake executor raises `KeyError` for an unconfigured work item. The required contract only requires configured work to be deterministic and exception-free, but a fixed typed failure or explicit constructor-time mapping validation would make fixture failures clearer.
+
+### Intended fix
+
+1. In a future orchestration-contract cleanup, move `ProviderWorkItem` and `ProviderExecutionOutcome` (and their status enum) to the established `app/orchestration` contract module, or document and consistently apply the decision to keep pure operational contracts in the domain. Update imports/exports and documentation without introducing a LangGraph dependency into the domain.
+2. Add focused helper/model tests for duplicate pending/completed collections and pending/completed overlap. Decide whether to reject these only at helper boundaries or with a narrowly scoped model validator; do not add PR 21 pivot/budget/stopping policy.
+3. Make `record_provider_outcome()` require the outcome work item to be present in pending before moving it to completed. Add a regression test proving malformed state cannot increment `provider_calls_used` or create an inconsistent queue.
+4. Decide the minimal status/error invariant for `ProviderExecutionOutcome`; if enforced, reject only contradictory combinations and preserve operational-only error data. Add success/failure boundary tests.
+5. Add a graph test that serializes the initial `InvestigationState` with `model_dump(mode="json")`, reconstructs it with `model_validate()`, wraps it in the graph channel, and asserts the same deterministic execution result.
+6. Improve `FakeWorkExecutor` diagnostics for missing mappings while keeping it offline and deterministic; do not add real provider behavior.
+
+### Acceptance checks
+
+- Orchestration contracts have one documented, architecture-compliant owner.
+- Queue invariants are either rejected or explicitly limited to helper preconditions, with tests matching the decision.
+- Malformed outcome recording cannot corrupt queues or counters.
+- Outcome status/error semantics are explicit and tested.
+- JSON-reconstructed graph input executes deterministically.
+- All tests remain synthetic/offline and `./build.sh --qa` passes.
+
 ## Reject rather than normalize padded AbuseIPDB credentials
 
 **Priority:** LOW
