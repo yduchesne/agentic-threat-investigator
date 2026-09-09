@@ -158,6 +158,17 @@ END
 
 The persisted domain objects are authoritative. `InvestigationState` carries identifiers, queues, budgets, status, and outcomes rather than copies of all domain objects.
 
+### Current LangGraph implementation status (PR 19A)
+
+The first LangGraph implementation is a **deterministic orchestration skeleton** (PR 19A) under `app/orchestration/`. It proves typed work can be queued, executed through an injected deterministic `WorkExecutor`, recorded, and terminated on queue exhaustion:
+
+```text
+START -> initialize -> select_work -> execute_work -> record_outcome -> select_work
+                     ^-- (pending work -> execute_work | no work -> END)
+```
+
+The skeleton implements mechanics only: FIFO selection, duplicate suppression for identical work, provider-call counter increments, and serializable operational state. Real provider execution is PR 19B; LLM/Evidence Analyst behavior is PR 20; adaptive coordinator/pivot behavior, budget enforcement, stopping policy, and trajectory evaluation arrive with PR 21. The domain layer does not depend on LangGraph; only `app/orchestration/graph.py` does.
+
 ## Agent boundaries
 
 ATI has six logical agent roles:

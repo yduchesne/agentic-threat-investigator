@@ -19,6 +19,15 @@ dependencies = [
   "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.32,<1",
   "argon2-cffi>=23.1,<26",
+  "langgraph>=1.2.11,<2",
+  # Transitive constraint: langsmith>=0.12 depends on the forked httpx2
+  # package, which authlib prefers over plain httpx whenever it is
+  # importable. Safety 3.8.1's platform client then passes a plain
+  # httpx.Timeout into the httpx2-backed OAuth2Client and crashes with
+  # "TypeError: 'httpx.Timeout' object cannot be interpreted as an integer
+  # or float" on Python 3.14, breaking ./build.sh --sec. langsmith<0.12
+  # keeps plain httpx and restores the working authlib code path.
+  "langsmith>=0.3.45,<0.12",
   "maxminddb>=2,<4",
 ]
 

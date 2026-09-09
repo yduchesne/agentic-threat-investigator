@@ -554,6 +554,10 @@ class InvestigationState(BaseModel):
     evidence_ids: list[UUID] = Field(default_factory=list)
     relationship_ids: list[UUID] = Field(default_factory=list)
     pending_pivots: list[PivotRequest] = Field(default_factory=list)
+    pending_provider_work: list[ProviderWorkItem] = Field(default_factory=list)
+    completed_provider_work: list[ProviderWorkItem] = Field(default_factory=list)
+    current_provider_work: ProviderWorkItem | None = None
+    last_provider_outcome: ProviderExecutionOutcome | None = None
     investigated_entity_ids: list[UUID] = Field(default_factory=list)
     research_required_for_entity_ids: list[UUID] = Field(default_factory=list)
     research_result_ids: list[UUID] = Field(default_factory=list)
@@ -567,6 +571,59 @@ class InvestigationState(BaseModel):
 ```
 
 State contains IDs and operational workflow information, not raw provider payloads, complete document chunks, prompts, database clients, repositories, HTTP clients, or hidden reasoning.
+
+### Provider work orchestration (PR 19A)
+
+PR 19A adds typed provider-work models to the domain (pure Pydantic, no
+LangGraph dependency) and deterministic queue mechanics in
+`app/orchestration`:
+
+```python
+class ProviderWorkItem(BaseModel):
+    provider: SourceId
+    entity_id: UUID
+    depth: int = Field(ge=0)
+
+class ProviderExecutionStatus(str, Enum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+class ProviderExecutionOutcome(BaseModel):
+    work_item: ProviderWorkItem
+    status: ProviderExecutionStatus
+    discovered_entity_ids: tuple[UUID, ...] = ()
+    error: InvestigationError | None = None
+```
+
+The work identity is exactly `(provider, entity_id, depth)` and is used only
+for deterministic queue duplicate suppression. Work items carry operational
+identifiers only; no entity values, provider instances, reasons, or metadata
+dictionaries.
+
+The orchestration queue helpers (`enqueue_provider_work`,
+`select_next_provider_work`/`select_provider_work`, `record_provider_outcome`)
+are pure functions over `InvestigationState`:
+
+-   enqueue appends in input order, skipping any work identity already
+    pending or already completed;
+-   selection is strictly FIFO with no semantic priority, evidence
+    inspection, or pivot policy;
+-   recording an outcome (success or failure) moves the work item from
+    pending to completed exactly once, records
+    `last_provider_outcome`, merges `discovered_entity_ids` preserving
+    first-seen order, appends the outcome's typed `InvestigationError` when
+    present, increments `budget.provider_calls_used` exactly once, and
+    clears `current_provider_work`;
+-   a work item never exists simultaneously in pending and completed
+    collections, and failure is still completed work (retry policy is not
+    part of PR 19A).
+
+Discovering an entity updates the working set only; it does not enqueue
+further provider work. Adaptive pivot scheduling, budget enforcement, and
+stopping policy remain PR 21. The state remains JSON-serializable via
+`model_dump(mode="json")` and reconstructable through Pydantic validation,
+and the persistence layer stores the new fields inside the schemaless
+`operational_state` JSONB document (no migration required).
 
 ## Stopping
 
