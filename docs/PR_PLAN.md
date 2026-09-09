@@ -193,7 +193,7 @@ The purpose of PR 18A is to establish a small, independently reviewable persiste
 
 Approved PR 18A contract decisions (maintainer review 01 remediation): the exact status lifecycle `PENDING -> RUNNING | FAILED`, `RUNNING -> COMPLETED | PARTIAL | FAILED` with terminal statuses and same-status no-ops; optional `expected_version` on status updates; and Investigation soft deletion. The lifecycle is revalidated against the locked PostgreSQL row, not only on a pre-lock Python snapshot. See `docs/DOMAIN_MODEL.md` and `docs/DATABASE.md`.
 
-## PR 18B --- Deterministic entity and relationship extraction
+## PR 18B --- Deterministic entity and relationship extraction [DONE]
 
 Deliver deterministic, database-free extraction of domain identities and relationship assertions from normalized provider Evidence.
 

@@ -4,6 +4,7 @@
 
 - [Entity](#entity)
 - [Evidence](#evidence)
+- [Deterministic extraction (PR 18B)](#deterministic-extraction-pr-18b)
 - [Relationships](#relationships)
 - [Assessment](#assessment)
 - [Structured agent results](#structured-agent-results)
@@ -47,7 +48,13 @@ Canonicalization is type-specific:
 - ASN: canonical numeric identity, rendered consistently;
 - network prefix: canonical network boundary;
 - CVE: uppercase;
-- ATT&CK identifier: canonical ATT&CK ID.
+- ATT&CK identifier: canonical ATT&CK ID;
+- malware: strict nonblank lowercase machine identifier (at most 128
+  characters, only lowercase ASCII letters, digits, and ``.``, ``_``, ``-``).
+  This narrow machine-identity grammar is shared by the sources that publish
+  machine malware identifiers (ThreatFox). Printable names, aliases, and
+  human-readable labels never determine MALWARE identity, and no
+  ORGANIZATION canonicalization contract exists in v0.1.
 
 ### URL identity contract (v0.1)
 
@@ -80,6 +87,119 @@ security-relevant URL components:
   order, port, percent-encoding, scheme) remain distinct identities.
 
 An item is an entity when it is independently identifiable, reusable across observations, and meaningful as a relationship participant. Otherwise it is an attribute or evidence fact.
+
+## Deterministic extraction (PR 18B)
+
+Extraction is a pure, database-free application layer
+(``app/extraction``) that converts one normalized, persisted ``Evidence``
+observation into canonical discovered entity identities and evidence-backed
+relationship assertions. It performs no I/O, persistence, provider calls,
+SQL, LangGraph, LLM calls, ``RelationshipObservation`` creation, or
+database-ID allocation, and depends only on domain models, source IDs,
+Pydantic, and the standard library.
+
+### Output contract
+
+```python
+class ExtractedEntity(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    type: EntityType
+    value: str  # canonical
+    display_name: str | None = None
+
+class EntityIdentity(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    type: EntityType
+    value: str  # canonical
+
+class RelationshipAssertion(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    source: EntityIdentity
+    type: RelationshipType
+    target: EntityIdentity
+    evidence_id: UUID
+
+class ExtractionResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    entities: tuple[ExtractedEntity, ...] = ()
+    relationships: tuple[RelationshipAssertion, ...] = ()
+```
+
+The persisted ``Relationship`` model is never an extraction output because
+it requires database entity UUIDs; extraction never fabricates identifiers.
+``RelationshipObservation`` creation, entity/relationship upserts, and
+transactionality belong to PR 18C.
+
+### Extraction rules
+
+- Extraction consumes normalized Evidence facts only, never provider HTTP
+  responses or ``raw_payload``.
+- Every extracted identity passes the shared domain canonicalizer for its
+  type; a fact value that canonicalizes differently than promised is a
+  contract failure, not a silent repair.
+- Every relationship assertion is directly justified by the documented
+  source semantics in `DATA_SOURCES.md` and carries the supporting persisted
+  Evidence ID. If an assertion is required and ``Evidence.id`` is ``None``,
+  extraction fails explicitly.
+- No relationship is inferred merely because two values co-occur.
+  ``RELATED_TO`` does not exist and no existing relationship URN is
+  repurposed.
+- Provider confidence/scores never become ATI relationship confidence.
+- Fact-only values remain fact-only (see the per-source matrix in
+  `DATA_SOURCES.md`).
+- Malformed normalized facts raise ``EvidenceExtractionError``; extraction
+  is all-or-nothing per Evidence and never returns a partial result. The
+  error carries only safe context: source, bounded reason category, and the
+  Evidence ID when known.
+- Entity deduplication key: ``(type, canonical value)``. Assertion
+  deduplication key: ``(source type, source value, relationship type,
+  target type, target value, evidence id)``. Duplicates collapse within one
+  Evidence preserving first-seen order; the first non-null display name
+  wins.
+- The dispatcher maps ``(source, evidence type)`` to one extractor. A known
+  source with an impossible evidence type is an extraction error; an
+  unknown or unregistered source deliberately yields an empty result.
+
+### Source extraction matrix
+
+- **Google Public DNS** (`DNS`): A/AAAA assert answer owner DOMAIN
+  ``RESOLVES_TO`` answer IP_ADDRESS and discover the address; CNAME asserts
+  ``CNAME_OF`` and discovers the target; NS asserts ``USES_NAME_SERVER`` and
+  discovers the target; ordinary MX asserts ``USES_MAIL_SERVER`` and
+  discovers the exchange; the null-MX sentinel (``0 .``) produces nothing;
+  PTR discovers the target DOMAIN only and asserts no relationship; TXT and
+  SOA produce nothing; the DNS root is never an entity. Forward-record
+  relationships use the normalized ``answers[].name`` owner, not blindly the
+  Evidence subject, because CNAME chains change owners.
+- **ThreatFox** (`THREAT_INTELLIGENCE`): for every ``facts.matches[]``, the
+  Evidence subject IOC is asserted ``ASSOCIATED_WITH`` the canonical MALWARE
+  derived from the machine identifier; ``malware_printable`` is display
+  metadata only; repeated same-malware matches deduplicate; confidence,
+  threat type, tags, references, and timestamps are ignored.
+- **URLhaus** (`THREAT_INTELLIGENCE`): ``matches[].url`` discovers a
+  canonical URL entity; direct URL records with non-null ``matches[].host``
+  discover a canonical DOMAIN or IP_ADDRESS entity after strict validation;
+  host-response records carry ``host=null`` and never synthesize a host from
+  ``queried_host``. No URL↔host relationship is emitted (no existing
+  ``RelationshipType`` is repurposed for URL composition). Payload hashes,
+  filenames, file types, sizes, signatures, tags, statuses, threat labels,
+  and timestamps remain fact-only; MALWARE is never inferred from URLhaus
+  data.
+- **RDAP** (`NETWORK` with an IP subject, conservative): when normalized
+  ``cidr0_cidrs`` supplies explicit prefixes, each prefix is canonicalized,
+  verified to contain the subject address, discovered as ``NETWORK_PREFIX``,
+  and asserted as the subject IP ``BELONGS_TO`` the prefix. No prefix is
+  synthesized from arbitrary start/end ranges. RDAP handles/display names
+  never become ORGANIZATION entities or ``REGISTERED_TO``/``OPERATED_BY``/
+  ``ANNOUNCED_BY`` assertions, RDAP domain nameservers produce no extraction,
+  and domain/ASN RDAP (`REGISTRATION`) returns an empty result.
+- **IPinfo Lite** (`NETWORK`): a present ``facts.asn`` discovers the
+  canonical ASN entity; an absent ASN yields an empty result. No
+  relationship is emitted and ``as_name``/``as_domain`` never become an
+  ORGANIZATION; ``ANNOUNCED_BY`` is not authorized for IPinfo evidence.
+- **DB-IP City Lite** (`GEOLOCATION`) and **AbuseIPDB** (`REPUTATION`):
+  always empty extraction results. Geolocation and reputation remain
+  contextual/source facts and never leak graph structure.
 
 ## Evidence
 

@@ -229,6 +229,15 @@ benignity. The provider does not create an ATI verdict, does not assess
 maliciousness, does not create relationships, does not instantiate
 discovered entities from `as_domain`, and does not persist anything.
 
+#### Deterministic extraction (PR 18B)
+
+A present `facts.asn` member discovers the canonical `ASN` entity through
+the shared ASN canonicalizer. An absent `asn` member is source absence and
+yields an empty extraction result. No relationship is emitted and no
+`ORGANIZATION` entity is ever derived from `as_name`/`as_domain`; the
+`ANNOUNCED_BY` semantic is not authorized for IPinfo evidence in v0.1.
+Country and continent members remain contextual facts.
+
 ### RDAP
 
 - **SourceId URN:** `urn:ati:source:rdap`
@@ -370,6 +379,20 @@ the same DNS identity. A malformed or contradictory identity member is
   (UTC), or None; malformed optional event entries are omitted (see the
   invalid optional-entry policy above)
 - `raw_payload=None` (conservative data-minimization for RDAP)
+
+#### Deterministic extraction (PR 18B)
+
+RDAP extraction is deliberately conservative. Only IP-subject RDAP network
+evidence participates: when the normalized `cidr0_cidrs` facts supply
+explicit prefixes, each prefix is canonicalized, verified to contain the
+subject address, discovered as a `NETWORK_PREFIX` entity, and asserted as
+the subject IP `BELONGS_TO` the prefix. No prefix is ever synthesized from
+arbitrary `start_address`/`end_address` ranges; no CIDR0 facts mean an empty
+extraction result. Handles, roles, event actors, and vCard display names
+never become `ORGANIZATION` entities and never produce
+`REGISTERED_TO`/`OPERATED_BY`/`ANNOUNCED_BY` assertions. RDAP domain
+nameserver facts produce no extraction, and domain/ASN RDAP evidence
+(`REGISTRATION`) returns an empty extraction result in v0.1.
 
 ### Google Public DNS
 
@@ -548,8 +571,26 @@ Type-specific fields:
   ``expire``, and ``minimum``.
 
 Providers retrieve and normalize. They do not infer relationships or
-instantiate discovered entities. Relationship extraction and entity
-discovery belong to PR 14.
+instantiate discovered entities. Deterministic relationship extraction and
+entity discovery belong to PR 18B (see `docs/DOMAIN_MODEL.md` for the exact
+matrix) and are summarized here:
+
+- A/AAAA: answer owner DOMAIN `RESOLVES_TO` answer IP_ADDRESS; the address
+  is discovered. The relationship source is the normalized `answers[].name`
+  owner, never blindly the Evidence subject, because CNAME chains change
+  owners.
+- CNAME: answer owner DOMAIN `CNAME_OF` target DOMAIN; the target is
+  discovered.
+- NS: answer owner DOMAIN `USES_NAME_SERVER` target DOMAIN; the target is
+  discovered.
+- Ordinary MX: answer owner DOMAIN `USES_MAIL_SERVER` exchange DOMAIN; the
+  exchange is discovered. Preference `0` with a real exchange is ordinary.
+- Null MX (`0 .`): no entity and no relationship.
+- PTR: the target DOMAIN is discovered only; PTR is not proof of forward
+  resolution, so no relationship is asserted.
+- TXT and SOA: no extraction.
+- The DNS root (`.`) is never an entity: root-valued RDATA contributes
+  nothing, and a root answer owner is a contract failure.
 
 DNS provenance is `source_url=https://dns.google/resolve`, `observed_at=None`,
 and a timezone-aware UTC `retrieved_at`. DNS evidence uses `raw_payload=None`
@@ -677,6 +718,12 @@ facts        = normalized geolocation: country_code, region, city,
 The `provider` fact is `urn:ati:source:dbip_city_lite`. Geolocation facts are
 approximate context only; they never imply attacker or device physical
 location and are never maliciousness evidence.
+
+#### Deterministic extraction (PR 18B)
+
+Geolocation evidence always yields an empty extraction result: geolocation
+is approximate contextual information, not graph structure. No entity is
+discovered and no relationship is asserted from geolocation facts.
 
 #### Validation matrix
 
@@ -955,6 +1002,12 @@ maliciousness, does not weight assessment confidence, does not create
 relationships, does not instantiate discovered entities from report
 data, and does not persist anything.
 
+#### Deterministic extraction (PR 18B)
+
+Reputation evidence always yields an empty extraction result: reputation
+scores, report counts, and categories remain contextual source facts, never
+graph structure, never entities, and never relationship confidence.
+
 ### ThreatFox
 
 Purpose:
@@ -1093,7 +1146,7 @@ dictionaries: differences only in deliberately ignored fields are
 neither duplicated into facts nor treated as conflicts. Records are
 never sorted, and records are never deduplicated merely because they
 share a malware identifier; semantic malware entity and association
-deduplication belongs to PR 18.
+deduplication belongs to PR 18B.
 
 #### Six-month expiration
 
@@ -1233,13 +1286,16 @@ Source array order is preserved: ATI does not sort or reorder matches.
 `ThreatFoxProvider` retrieves, validates, and normalizes. It does not
 instantiate discovered entities and does not create relationship
 candidates or relationships. `facts.matches` is the complete PR 16
-handoff contract for later deterministic extraction: PR 18 owns malware
+handoff contract for later deterministic extraction: PR 18B owns malware
 entity discovery, IOC `ASSOCIATED_WITH` malware relationship
-construction, `RelationshipObservation` construction, semantic
-deduplication of malware identities and associations, and persistence.
-Distinct matching source records remain represented even when they map
-to the same malware, preserving source provenance for that extractor.
-The provider performs no persistence of any kind.
+construction, and semantic deduplication of malware identities and
+associations within one Evidence. For every `matches[]` entry the Evidence
+subject IOC is asserted `ASSOCIATED_WITH` the canonical `MALWARE` entity
+derived from the machine identifier; `malware_printable` is display
+metadata only. Distinct matching source records remain represented even
+when they map to the same malware, preserving source provenance for that
+extractor. `RelationshipObservation` construction and persistence belong
+to PR 18C. The provider performs no persistence of any kind.
 
 #### Response validation matrix
 
@@ -1447,7 +1503,7 @@ official documentation and must be re-verified before every release:
   `PROVIDER_UNAVAILABLE` (retried), malformed JSON / wrong content type
   / oversized body -> `INVALID_RESPONSE`.
 
-#### Normalized fact shape and PR 18 extraction eligibility
+#### Normalized fact shape and PR 18B extraction eligibility
 
 A successful lookup emits exactly one immutable
 `THREAT_INTELLIGENCE` evidence observation whose `facts` contain
@@ -1489,7 +1545,7 @@ capped at 100 and need not equal `url_count`):
 }
 ```
 
-Extraction eligibility (PR 18 owns all extraction; PR 17 performs
+Extraction eligibility (PR 18B owns all extraction; PR 17 performs
 none):
 
 - `matches[].url` — entity-eligible: the source URL is emitted in
@@ -1498,7 +1554,7 @@ none):
 - `matches[].host` (URL lookups) — entity-eligible: emitted as a
   canonical DOMAIN/IP identity value (strict DNS form or canonical IP
   representation), never the original source spelling; only if strictly
-  derivable/validated by the PR 18 extractor as a DOMAIN or IPv4
+  derivable/validated by the PR 18B extractor as a DOMAIN or IPv4
   entity. Host-response nested records emit `host=null` because that
   endpoint does not supply the member.
 - The queried entity itself — the evidence subject, already canonical.
@@ -1522,7 +1578,7 @@ none):
 
 PR 17 performs no entity extraction, no relationship construction, and
 no persistence. No existing `RelationshipType` semantic is repurposed
-for the URL–host composition relation; PR 18 must introduce any such
+for the URL–host composition relation; PR 18B must introduce any such
 semantic through separate approved documentation.
 
 #### Duplicate and collection invariants
@@ -1543,7 +1599,7 @@ semantic through separate approved documentation.
   ports, or byte-for-byte percent-escape spelling) remain conflicts.
 - Records with distinct IDs but the same canonical URL are retained as
   independently distinct source observations; deduplication by
-  canonical identity is PR 18's concern.
+  canonical identity is PR 18B's concern.
 - For host lookups, every returned URL must parse and canonicalize to
   the queried canonical host; one unrelated record invalidates the
   whole response (the endpoint promises exact host results), and the
@@ -1691,6 +1747,8 @@ Only changed records require downstream regeneration/re-embedding.
 ## Live evidence model
 
 Live provider calls produce normalized `Evidence` directly. Live providers and batch normalizers share lower-level canonicalization utilities but the live path is not artificially forced through `SourceRecord`.
+
+Deterministic extraction from live evidence (PR 18B) is defined per source in the extraction subsections above and consolidated in `docs/DOMAIN_MODEL.md`. PR 18B consumes normalized persisted Evidence only, canonicalizes every identity through the shared domain canonicalizers, asserts only the relationships documented above, deduplicates deterministically within one Evidence, and never persists.
 
 ## Artifact storage
 
