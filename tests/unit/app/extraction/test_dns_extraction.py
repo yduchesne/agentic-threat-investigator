@@ -7,9 +7,6 @@
 # provider fixture family); the duplication is test-only and accepted.
 # pylint: disable=duplicate-code
 
-from datetime import UTC, datetime
-from uuid import UUID, uuid4
-
 import pytest
 
 from agentic_threat_investigator.app.extraction import (
@@ -19,61 +16,18 @@ from agentic_threat_investigator.app.extraction import (
 )
 from agentic_threat_investigator.app.extraction.models import ExtractionResult
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.relationships import RelationshipType
 from tests.support.extraction_fixtures import (
     CANONICAL_ASYNCRAT_DOMAIN,
     CANONICAL_ASYNCRAT_IP,
     CANONICAL_DNS_EVIDENCE_ID,
+    a_answer,
+    dns_evidence,
 )
 
 SOURCE = SourceId.GOOGLE_PUBLIC_DNS.value
-
-
-# One explicit argument per fixture dimension is intentional for tests.
-# pylint: disable=too-many-arguments,too-many-positional-arguments
-def dns_evidence(
-    answers: list[object],
-    *,
-    subject_value: str = CANONICAL_ASYNCRAT_DOMAIN,
-    subject_type: EntityType = EntityType.DOMAIN,
-    query_type: str = "A",
-    query_name: str | None = None,
-    facts_overrides: dict[str, object] | None = None,
-    evidence_id: UUID | None = None,
-) -> Evidence:
-    """Build one normalized DNS evidence observation with the given answers."""
-    facts: dict[str, object] = {
-        "query_name": query_name if query_name is not None else subject_value,
-        "query_type": query_type,
-        "status": 0,
-        "flags": {},
-        "answers": answers,
-    }
-    if facts_overrides:
-        facts.update(facts_overrides)
-    return Evidence(
-        id=evidence_id if evidence_id is not None else uuid4(),
-        investigation_id=uuid4(),
-        type=EvidenceType.DNS,
-        subject=EntityRef(type=subject_type, value=subject_value),
-        source=SOURCE,
-        retrieved_at=datetime(2026, 1, 15, tzinfo=UTC),
-        facts=facts,
-        raw_payload=None,
-    )
-
-
-def a_answer(
-    name: str = CANONICAL_ASYNCRAT_DOMAIN, value: str = CANONICAL_ASYNCRAT_IP
-) -> dict[str, object]:
-    """Build one normalized A answer."""
-    return {"name": name, "record_type": "A", "ttl": 300, "value": value}
 
 
 def test_a_record_resolves_and_discovers_address() -> None:
@@ -114,7 +68,8 @@ def test_aaaa_record_discovers_ipv6_address() -> None:
                     "ttl": 300,
                     "value": address,
                 }
-            ]
+            ],
+            query_type="AAAA",
         )
     )
 
@@ -422,7 +377,7 @@ def test_txt_and_soa_produce_nothing() -> None:
         dns_evidence(
             [
                 {
-                    "name": "example.test",
+                    "name": CANONICAL_ASYNCRAT_DOMAIN,
                     "record_type": "SOA",
                     "ttl": 3600,
                     "mname": "ns1.example.test",

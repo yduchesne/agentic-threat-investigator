@@ -370,7 +370,7 @@ following specifics:
 - Raw response payloads are not retained (`raw_payload=None`).
 - The provider never instantiates discovered entities and never creates
   relationship candidates; normalized `matches` facts are the handoff
-  contract for PR 18's deterministic extractor.
+  contract for PR 18B's deterministic extractor.
 - Automated tests are synthetic (ATI-authored in-process responses over
   the real ATI provider/HTTP stack) and cannot contact the real
   ThreatFox service. There is no live or opt-in live ThreatFox test.
@@ -398,7 +398,7 @@ following specifics:
 - Raw response payloads are not retained (`raw_payload=None`).
 - The provider never instantiates discovered entities and never creates
   relationship candidates; normalized `matches` facts are the handoff
-  contract for PR 18's deterministic extractor. Payload hashes and
+  contract for PR 18B's deterministic extractor. Payload hashes and
   signatures remain fact-only source data and never become entities or
   malware attributions.
 - Automated tests are synthetic (ATI-authored in-process responses over

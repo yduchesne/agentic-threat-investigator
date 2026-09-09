@@ -120,8 +120,8 @@ Deliver:
 -   normalized facts sufficient for deterministic IOC-to-malware
     extraction;
 -   ThreatFox malware machine identifiers suitable for canonical `MALWARE`
-    entity discovery by PR 18;
--   evidence-backed inputs consumed by PR 18's deterministic
+    entity discovery by PR 18B;
+-   evidence-backed inputs consumed by PR 18B's deterministic
     `ASSOCIATED_WITH` extractor;
 -   source timestamps/reference identifiers;
 -   typed errors;
@@ -131,8 +131,10 @@ Deliver:
 
 The provider emits validated ThreatFox source records as normalized
 `THREAT_INTELLIGENCE` evidence facts; it does not instantiate discovered
-entities or create relationship candidates. PR 18 owns malware entity
-discovery, `ASSOCIATED_WITH` relationship construction, and persistence.
+entities or create relationship candidates. PR 18B owns malware entity
+discovery and `ASSOCIATED_WITH` relationship assertion construction;
+persistence (including `RelationshipObservation` construction) belongs to
+PR 18C.
 
 Canonical trajectory:
 

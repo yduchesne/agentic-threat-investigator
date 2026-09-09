@@ -1554,9 +1554,9 @@ none):
 - `matches[].host` (URL lookups) — entity-eligible: emitted as a
   canonical DOMAIN/IP identity value (strict DNS form or canonical IP
   representation), never the original source spelling; only if strictly
-  derivable/validated by the PR 18B extractor as a DOMAIN or IPv4
-  entity. Host-response nested records emit `host=null` because that
-  endpoint does not supply the member.
+  derivable/validated by the PR 18B extractor as a DOMAIN or IP_ADDRESS
+  entity (IPv4 or IPv6). Host-response nested records emit `host=null`
+  because that endpoint does not supply the member.
 - The queried entity itself — the evidence subject, already canonical.
 - `payloads[].response_md5` / `response_sha256` — fact-only. ATI v0.1
   has no file/hash entity type.

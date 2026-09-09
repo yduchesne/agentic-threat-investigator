@@ -298,3 +298,117 @@ def test_noncanonical_ip_subject_fails() -> None:
         extract_rdap(evidence)
 
     assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+def test_noncanonical_ipv6_subject_fails() -> None:
+    """A valid but noncanonical IPv6 subject is a contract failure."""
+    evidence = rdap_evidence(network_facts(), subject_value="2001:0db8::1")
+
+    with pytest.raises(EvidenceExtractionError) as excinfo:
+        extract_rdap(evidence)
+
+    assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+def test_noncanonical_subject_fails_without_cidr0() -> None:
+    """The subject is validated even when no explicit prefixes exist."""
+    cidrs_options: tuple[object, ...] = (None, [])
+    for cidrs in cidrs_options:
+        evidence = rdap_evidence(
+            network_facts(cidr0_cidrs=cidrs), subject_value="2001:0db8::1"
+        )
+
+        with pytest.raises(EvidenceExtractionError) as excinfo:
+            extract_rdap(evidence)
+
+        assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+def test_cidr0_family_must_match_subject_family() -> None:
+    """A CIDR0 prefix of a different family than the subject fails explicitly."""
+    with pytest.raises(EvidenceExtractionError) as excinfo:
+        extract_rdap(
+            rdap_evidence(
+                network_facts(cidr0_cidrs=[{"prefix": "2001:db8::", "length": 32}]),
+                subject_value="198.51.100.42",
+            )
+        )
+    assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+    with pytest.raises(EvidenceExtractionError) as excinfo:
+        extract_rdap(
+            rdap_evidence(
+                network_facts(cidr0_cidrs=[{"prefix": "198.51.100.0", "length": 24}]),
+                subject_value="2001:db8::1",
+            )
+        )
+    assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+@pytest.mark.parametrize(
+    "subject_type,subject_value,object_class",
+    [
+        (EntityType.IP_ADDRESS, "198.51.100.42", "domain"),
+        (EntityType.IP_ADDRESS, "198.51.100.42", "autnum"),
+        (EntityType.MALWARE, "win.asyncrat", "domain"),
+        (EntityType.DOMAIN, "MALICIOUS-DOMAIN.TEST", "domain"),
+        (EntityType.ASN, "as64496", "autnum"),
+    ],
+)
+def test_invalid_registration_envelope_fails(
+    subject_type: EntityType, subject_value: str, object_class: str
+) -> None:
+    """REGISTRATION validates its subject pairing and canonical subject value."""
+    evidence = rdap_evidence(
+        {"object_class_name": object_class},
+        subject_type=subject_type,
+        subject_value=subject_value,
+        evidence_type=EvidenceType.REGISTRATION,
+    )
+
+    with pytest.raises(EvidenceExtractionError) as excinfo:
+        extract_rdap(evidence)
+
+    assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+def test_registration_requires_persisted_evidence_id() -> None:
+    """Both RDAP branches follow the same persisted-Evidence ID policy."""
+    evidence = rdap_evidence(
+        {
+            "object_class_name": "domain",
+            "ldh_name": "example.test",
+        },
+        subject_type=EntityType.DOMAIN,
+        subject_value="example.test",
+        evidence_type=EvidenceType.REGISTRATION,
+    )
+    unpersisted = evidence.model_copy(update={"id": None})
+
+    with pytest.raises(EvidenceExtractionError) as excinfo:
+        extract_rdap(unpersisted)
+
+    assert excinfo.value.reason is ExtractionErrorReason.MISSING_EVIDENCE_ID
+
+
+def test_valid_registration_pairings_return_empty() -> None:
+    """Valid DOMAIN/domain and ASN/autnum registrations yield empty results."""
+    domain_result = extract_rdap(
+        rdap_evidence(
+            {"object_class_name": "domain", "ldh_name": "example.test"},
+            subject_type=EntityType.DOMAIN,
+            subject_value="example.test",
+            evidence_type=EvidenceType.REGISTRATION,
+        )
+    )
+    asn_result = extract_rdap(
+        rdap_evidence(
+            {"object_class_name": "autnum", "start_autnum": 64496},
+            subject_type=EntityType.ASN,
+            subject_value="AS64496",
+            evidence_type=EvidenceType.REGISTRATION,
+        )
+    )
+
+    assert domain_result == ExtractionResult()
+    assert asn_result == ExtractionResult()

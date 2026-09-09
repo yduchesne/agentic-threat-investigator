@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Conservative IPinfo Lite extraction.
 
-Implements the documented IPinfo Lite extraction matrix: when the normalized
-``facts.asn`` member is present, it is canonicalized and discovered as a
-canonical ``ASN`` entity. When the member is absent, extraction yields an
-empty result. No relationship is emitted and no ORGANIZATION entity is ever
+Implements the documented IPinfo Lite extraction matrix. The source
+envelope is validated first: the Evidence subject must be a canonical IP
+address, before any ASN-presence decision. When the normalized ``facts.asn``
+member is present, it is canonicalized and discovered as a canonical
+``ASN`` entity. When the member is absent, extraction yields an empty
+result. No relationship is emitted and no ORGANIZATION entity is ever
 derived from ``as_name``/``as_domain``: the announced-by semantic is not
 authorized for IPinfo evidence in v0.1. Country/continent members remain
 contextual facts.
@@ -20,7 +22,11 @@ from agentic_threat_investigator.app.extraction.models import (
     malformed_facts,
     validate_extractor_input,
 )
-from agentic_threat_investigator.domain.entities import EntityType, canonicalize_asn
+from agentic_threat_investigator.domain.entities import (
+    EntityType,
+    canonicalize_asn,
+    canonicalize_ip_address,
+)
 from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
 
@@ -33,6 +39,7 @@ def extract_ipinfo(evidence: Evidence) -> ExtractionResult:
         evidence_type=EvidenceType.NETWORK,
         subject_types=(EntityType.IP_ADDRESS,),
     )
+    _validate_canonical_subject(evidence, evidence_id)
     asn = evidence.facts.get("asn")
     if asn is None:
         return ExtractionResult()
@@ -47,6 +54,16 @@ def extract_ipinfo(evidence: Evidence) -> ExtractionResult:
     return ExtractionResult(
         entities=(ExtractedEntity(type=EntityType.ASN, value=canonical),)
     )
+
+
+def _validate_canonical_subject(evidence: Evidence, evidence_id: UUID) -> None:
+    """Require a canonical IP subject before any ASN-presence decision."""
+    try:
+        canonical = canonicalize_ip_address(evidence.subject.value)
+    except ValueError as exc:
+        raise _malformed(evidence_id, "IPinfo subject address is malformed") from exc
+    if canonical != evidence.subject.value:
+        raise _malformed(evidence_id, "IPinfo subject address is not in canonical form")
 
 
 def _malformed(evidence_id: UUID, message: str) -> EvidenceExtractionError:

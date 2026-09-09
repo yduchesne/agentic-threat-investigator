@@ -7,7 +7,7 @@ authored for ATI (RFC 5737 addresses, RFC 2606 ``.test`` domains, and
 synthetic identifiers). No payload is a copied URLhaus record, no helper
 contacts the real URLhaus service, and no fixture ever references a real
 malicious URL or a real payload hash. The canonical scenario supports the
-later PR 18 deterministic extraction:
+later PR 18B deterministic extraction:
 
 ```text
 malicious-domain.test

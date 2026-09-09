@@ -103,3 +103,37 @@ def test_missing_persisted_evidence_id_fails() -> None:
         extract_ipinfo(unpersisted)
 
     assert excinfo.value.reason is ExtractionErrorReason.MISSING_EVIDENCE_ID
+
+
+@pytest.mark.parametrize(
+    "subject_value", ["198.51.100.042", "not-an-ip", "2001:0db8::1", " "]
+)
+def test_noncanonical_or_malformed_subject_with_asn_fails(subject_value: str) -> None:
+    """A malformed or noncanonical IP subject fails even with a present ASN."""
+    evidence = ipinfo_evidence(
+        {"ip": subject_value, "asn": "AS64496"},
+    ).model_copy(
+        update={"subject": EntityRef(type=EntityType.IP_ADDRESS, value=subject_value)}
+    )
+
+    with pytest.raises(EvidenceExtractionError) as excinfo:
+        extract_ipinfo(evidence)
+
+    assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+@pytest.mark.parametrize(
+    "subject_value", ["198.51.100.042", "not-an-ip", "2001:0db8::1", " "]
+)
+def test_noncanonical_or_malformed_subject_without_asn_fails(
+    subject_value: str,
+) -> None:
+    """The IP subject is validated before the source-absence empty return."""
+    evidence = ipinfo_evidence({"ip": subject_value}).model_copy(
+        update={"subject": EntityRef(type=EntityType.IP_ADDRESS, value=subject_value)}
+    )
+
+    with pytest.raises(EvidenceExtractionError) as excinfo:
+        extract_ipinfo(evidence)
+
+    assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS

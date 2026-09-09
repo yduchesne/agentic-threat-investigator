@@ -146,3 +146,40 @@ def canonical_threatfox_evidence() -> Evidence:
             ]
         },
     )
+
+
+def dns_evidence(
+    answers: list[object],
+    *,
+    subject_value: str = CANONICAL_ASYNCRAT_DOMAIN,
+    subject_type: EntityType = EntityType.DOMAIN,
+    query_type: str = "A",
+    query_name: str | None = None,
+    facts_overrides: dict[str, object] | None = None,
+    evidence_id: UUID | None = None,
+) -> Evidence:
+    """Build one normalized DNS evidence observation with the given answers."""
+    facts: dict[str, object] = {
+        "query_name": query_name if query_name is not None else subject_value,
+        "query_type": query_type,
+        "status": 0,
+        "flags": {},
+        "answers": answers,
+    }
+    if facts_overrides:
+        facts.update(facts_overrides)
+    return evidence(
+        source=SourceId.GOOGLE_PUBLIC_DNS.value,
+        evidence_type=EvidenceType.DNS,
+        subject_type=subject_type,
+        subject_value=subject_value,
+        facts=facts,
+        evidence_id=evidence_id,
+    )
+
+
+def a_answer(
+    name: str = CANONICAL_ASYNCRAT_DOMAIN, value: str = CANONICAL_ASYNCRAT_IP
+) -> dict[str, object]:
+    """Build one normalized A answer."""
+    return {"name": name, "record_type": "A", "ttl": 300, "value": value}

@@ -526,7 +526,7 @@ class TestEvidenceNormalization:
         """Distinct records mapping one IOC to one malware are all retained.
 
         Semantic deduplication of malware identities and associations is
-        the deterministic persistence-boundary extractor's concern (PR 18);
+        the deterministic persistence-boundary extractor's concern (PR 18B);
         the provider preserves every distinct validated source record.
         """
         payload = threatfox_search_response(
