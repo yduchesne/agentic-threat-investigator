@@ -1,17 +1,26 @@
 """PostgreSQL adapters for relationships, observations, and evidence."""
 
+import json
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.persistence.repositories import (
+    EvidenceDuplicateIdentityError,
     EvidenceRepository,
+    InvestigationNotFoundError,
     RelationshipObservationRepository,
     RelationshipRepository,
 )
-from agentic_threat_investigator.domain.evidence import Evidence
+from agentic_threat_investigator.domain.entities import EntityType
+from agentic_threat_investigator.domain.evidence import (
+    EntityRef,
+    Evidence,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.immutable_json import thaw_json
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
@@ -19,7 +28,12 @@ from agentic_threat_investigator.domain.relationships import (
     RelationshipType,
 )
 
-from .models import EvidenceRow, RelationshipObservationRow, RelationshipRow
+from .errors import (
+    SQLSTATE_EVIDENCE_DUPLICATE,
+    SQLSTATE_INVESTIGATION_NOT_FOUND,
+    sqlstate,
+)
+from .models import EntityRow, EvidenceRow, RelationshipObservationRow, RelationshipRow
 
 
 def _relationship(row: RelationshipRow) -> Relationship:
@@ -139,30 +153,116 @@ class PostgresRelationshipObservationRepository(
 class PostgresEvidenceRepository(
     EvidenceRepository
 ):  # pylint: disable=too-few-public-methods
-    """Append immutable evidence rows."""
+    """Append and read immutable evidence rows in the caller's transaction."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def insert(self, evidence: Evidence) -> Evidence:
-        """Insert evidence after the caller resolves its subject entity."""
+    @staticmethod
+    def _to_domain(row: EvidenceRow, subject: EntityRow) -> Evidence:
+        """Map an evidence row and its subject entity to the domain model."""
+        return Evidence(
+            id=row.id,
+            investigation_id=row.investigation_id,
+            type=EvidenceType(row.evidence_type),
+            subject=EntityRef(
+                id=subject.id,
+                type=EntityType(subject.entity_type),
+                value=subject.canonical_value,
+            ),
+            source=row.source,
+            source_record_id=row.source_record_id,
+            source_url=row.source_url,
+            observed_at=row.observed_at,
+            retrieved_at=row.retrieved_at,
+            facts=row.facts,
+            raw_payload=row.raw_payload,
+        )
+
+    async def insert(
+        self,
+        evidence: Evidence,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+    ) -> Evidence:
+        """Append evidence through the authoritative database write function.
+
+        The caller resolves the subject entity first; a duplicate evidence
+        identity is a typed conflict and never mutates a prior observation.
+        """
         if evidence.subject.id is None:
             raise ValueError("evidence subject id is required")
         evidence_id = evidence.id or uuid4()
-        row = EvidenceRow(
-            id=evidence_id,
-            investigation_id=evidence.investigation_id,
-            evidence_type=evidence.type.value,
-            subject_entity_id=evidence.subject.id,
-            source=evidence.source,
-            source_record_id=evidence.source_record_id,
-            source_url=evidence.source_url,
-            observed_at=evidence.observed_at,
-            retrieved_at=evidence.retrieved_at,
-            facts=thaw_json(evidence.facts),
-            raw_payload=thaw_json(evidence.raw_payload),
-            version=1,
+        try:
+            await self.session.execute(
+                text("""
+                    SELECT id, version FROM ati.append_evidence(
+                        :id, :investigation_id, :evidence_type, :subject_entity_id,
+                        :source, :source_record_id, :source_url, :observed_at,
+                        :retrieved_at, CAST(:facts AS jsonb),
+                        CAST(:raw_payload AS jsonb), :actor_id, :request_id)
+                """),
+                {
+                    "id": evidence_id,
+                    "investigation_id": evidence.investigation_id,
+                    "evidence_type": evidence.type.value,
+                    "subject_entity_id": evidence.subject.id,
+                    "source": evidence.source,
+                    "source_record_id": evidence.source_record_id,
+                    "source_url": evidence.source_url,
+                    "observed_at": evidence.observed_at,
+                    "retrieved_at": evidence.retrieved_at,
+                    "facts": json.dumps(thaw_json(evidence.facts)),
+                    "raw_payload": (
+                        None
+                        if evidence.raw_payload is None
+                        else json.dumps(thaw_json(evidence.raw_payload))
+                    ),
+                    "actor_id": actor_id,
+                    "request_id": request_id,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_EVIDENCE_DUPLICATE:
+                raise EvidenceDuplicateIdentityError(evidence_id) from error
+            if state == SQLSTATE_INVESTIGATION_NOT_FOUND:
+                # The database rejected a missing or soft-deleted parent
+                # Investigation; surface the established typed error.
+                raise InvestigationNotFoundError(
+                    str(evidence.investigation_id)
+                ) from error
+            raise
+        return evidence.model_copy(update={"id": evidence_id})
+
+    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+        """Return an evidence observation by its immutable identity."""
+        result = await self.session.execute(
+            select(EvidenceRow, EntityRow)
+            .join(EntityRow, EntityRow.id == EvidenceRow.subject_entity_id)
+            .where(EvidenceRow.id == evidence_id)
         )
-        self.session.add(row)
-        await self.session.flush()
-        return evidence.model_copy(update={"id": row.id})
+        row = result.first()
+        return None if row is None else self._to_domain(row[0], row[1])
+
+    async def list_for_investigation(
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Evidence]:
+        """Return bounded observations in deterministic newest-first order."""
+        if limit < 0 or offset < 0:
+            raise ValueError("limit and offset must be non-negative")
+        limit = min(limit, 1000)
+        result = await self.session.execute(
+            select(EvidenceRow, EntityRow)
+            .join(EntityRow, EntityRow.id == EvidenceRow.subject_entity_id)
+            .where(EvidenceRow.investigation_id == investigation_id)
+            .order_by(EvidenceRow.retrieved_at.desc(), EvidenceRow.id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return [self._to_domain(row[0], row[1]) for row in result.fetchall()]

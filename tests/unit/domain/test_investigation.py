@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for investigation state, budgets, and pivot classification."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -14,6 +14,7 @@ from agentic_threat_investigator.domain.investigation import (
     DEFAULT_MAX_ENTITIES,
     DEFAULT_MAX_PROVIDER_CALLS,
     DEFAULT_MAX_REPLANS,
+    InvalidInvestigationStatusTransitionError,
     InvestigationBudget,
     InvestigationError,
     InvestigationState,
@@ -22,8 +23,11 @@ from agentic_threat_investigator.domain.investigation import (
     PivotClass,
     PivotRequest,
     PivotStatus,
+    can_transition_status,
     default_investigation_budget,
+    is_terminal_status,
     pivot_class,
+    require_status_transition,
 )
 
 _STARTED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
@@ -121,6 +125,76 @@ def test_investigation_state_requires_core_workflow_fields() -> None:
     assert state.errors == []
     assert state.stop_reason is None
     assert state.completed_at is None
+    # Database-owned persistence metadata is optional output.
+    assert state.version is None
+    assert state.created_at is None
+    assert state.updated_at is None
+    assert state.deleted_at is None
+    assert state.deleted_by_actor_id is None
+
+
+def test_investigation_state_rejects_naive_timestamps() -> None:
+    """Naive started_at and completed_at values are rejected."""
+
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        InvestigationState(
+            investigation_id=uuid4(),
+            status=InvestigationStatus.PENDING,
+            trigger_type=InvestigationTriggerType.MANUAL,
+            root_entity_ids=[uuid4()],
+            objective="Assess the root indicator.",
+            budget=default_investigation_budget(),
+            started_at=datetime(2026, 1, 2, 3, 4, 5),
+        )
+
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        InvestigationState(
+            investigation_id=uuid4(),
+            status=InvestigationStatus.PENDING,
+            trigger_type=InvestigationTriggerType.MANUAL,
+            root_entity_ids=[uuid4()],
+            objective="Assess the root indicator.",
+            budget=default_investigation_budget(),
+            started_at=_STARTED_AT,
+            completed_at=datetime(2026, 1, 3),
+        )
+
+
+def test_investigation_state_normalizes_offsets_to_utc() -> None:
+    """Aware offsets are accepted and normalized to UTC on both fields."""
+
+    offset = timezone(timedelta(hours=2))
+    state = InvestigationState(
+        investigation_id=uuid4(),
+        status=InvestigationStatus.RUNNING,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[uuid4()],
+        objective="Assess the root indicator.",
+        budget=default_investigation_budget(),
+        started_at=datetime(2026, 1, 2, 5, 0, 0, tzinfo=offset),
+        completed_at=datetime(2026, 1, 2, 7, 30, 0, tzinfo=offset),
+    )
+
+    assert state.started_at == datetime(2026, 1, 2, 3, 0, 0, tzinfo=UTC)
+    assert state.completed_at == datetime(2026, 1, 2, 5, 30, 0, tzinfo=UTC)
+    assert state.started_at.tzinfo is not None
+    assert state.completed_at is not None and state.completed_at.tzinfo is not None
+
+
+def test_investigation_state_preserves_absent_completed_at() -> None:
+    """A missing completed_at remains None after UTC normalization."""
+
+    state = InvestigationState(
+        investigation_id=uuid4(),
+        status=InvestigationStatus.PENDING,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[uuid4()],
+        objective="Assess the root indicator.",
+        budget=default_investigation_budget(),
+        started_at=_STARTED_AT,
+    )
+
+    assert state.completed_at is None
 
 
 def test_investigation_state_rejects_missing_budget() -> None:
@@ -148,3 +222,76 @@ def test_investigation_error_records_source_and_recoverability() -> None:
     )
 
     assert error.recoverable is True
+
+
+def test_confirmed_status_transitions_are_deterministic() -> None:
+    """Every status exposes exactly its confirmed lifecycle targets."""
+
+    assert can_transition_status(
+        InvestigationStatus.PENDING, InvestigationStatus.RUNNING
+    )
+    assert can_transition_status(
+        InvestigationStatus.PENDING, InvestigationStatus.FAILED
+    )
+    assert not can_transition_status(
+        InvestigationStatus.PENDING, InvestigationStatus.COMPLETED
+    )
+    assert can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.COMPLETED
+    )
+    assert can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.PARTIAL
+    )
+    assert can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.FAILED
+    )
+    assert not can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.PENDING
+    )
+
+
+@pytest.mark.parametrize(
+    "terminal",
+    [
+        InvestigationStatus.COMPLETED,
+        InvestigationStatus.PARTIAL,
+        InvestigationStatus.FAILED,
+    ],
+)
+def test_terminal_statuses_admit_no_transitions(
+    terminal: InvestigationStatus,
+) -> None:
+    """Terminal statuses admit no further transitions and are recognized."""
+
+    assert is_terminal_status(terminal)
+    for target in InvestigationStatus:
+        if target is terminal:
+            continue  # identical statuses are not transitions
+        assert not can_transition_status(terminal, target)
+
+
+def test_identical_status_is_not_a_transition() -> None:
+    """An identical target status is not treated as a lifecycle transition."""
+
+    assert can_transition_status(
+        InvestigationStatus.RUNNING, InvestigationStatus.RUNNING
+    )
+
+
+def test_invalid_status_transition_raises_typed_error() -> None:
+    """Lifecycle violations raise the typed domain error before persistence."""
+
+    with pytest.raises(InvalidInvestigationStatusTransitionError, match="running"):
+        require_status_transition(
+            InvestigationStatus.RUNNING, InvestigationStatus.PENDING
+        )
+
+
+def test_valid_status_transition_passes_domain_validation() -> None:
+    """Confirmed transitions pass domain validation without raising."""
+
+    require_status_transition(InvestigationStatus.PENDING, InvestigationStatus.RUNNING)
+    require_status_transition(
+        InvestigationStatus.RUNNING, InvestigationStatus.COMPLETED
+    )
+    require_status_transition(InvestigationStatus.FAILED, InvestigationStatus.FAILED)

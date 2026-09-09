@@ -28,6 +28,7 @@ from .identity_repositories import (
     PostgresSessionRepository,
     PostgresUserRepository,
 )
+from .investigation_repositories import PostgresInvestigationRepository
 from .rag_repositories import (
     PostgresDocumentChunkRepository,
     PostgresDocumentRepository,
@@ -60,6 +61,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             PostgresRelationshipObservationRepository, None
         )
         self.evidence = cast(PostgresEvidenceRepository, None)
+        self.investigations = cast(PostgresInvestigationRepository, None)
         self.users = cast(UserRepository, None)
         self.credentials = cast(CredentialRepository, None)
         self.sessions = cast(SessionRepository, None)
@@ -88,6 +90,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             self.session
         )
         self.evidence = PostgresEvidenceRepository(self.session)
+        self.investigations = PostgresInvestigationRepository(self.session)
         self.audit_events = PostgresAuditEventRepository(self.session)
         self.source_records = PostgresSourceRecordRepository(
             self.session, self._batch_size
@@ -125,6 +128,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
                 PostgresRelationshipObservationRepository, None
             )
             self.evidence = cast(PostgresEvidenceRepository, None)
+            self.investigations = cast(PostgresInvestigationRepository, None)
             self.audit_events = cast(PostgresAuditEventRepository, None)
             self.source_records = cast(PostgresSourceRecordRepository, None)
             self.ingestion_checkpoints = cast(

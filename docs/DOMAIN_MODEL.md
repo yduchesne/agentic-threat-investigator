@@ -376,6 +376,40 @@ class InvestigationBudget(BaseModel):
 
 The budget is extended by implementation with separate LLM call limits/counters.
 
+### Investigation lifecycle
+
+The approved PR 18A status lifecycle is narrow and deterministic:
+
+```text
+PENDING  -> RUNNING | FAILED
+RUNNING  -> COMPLETED | PARTIAL | FAILED
+COMPLETED/PARTIAL/FAILED  (terminal)
+```
+
+An identical target status is not a transition: the persistence layer treats
+it as an unchanged result without allocating a version or writing history.
+Transitioning to a terminal status stamps `completed_at` when absent. The
+lifecycle is validated by the domain (`can_transition_status`) before any
+database mutation and revalidated against the locked PostgreSQL row inside
+`ati.update_investigation_status`, so a concurrent writer cannot invalidate a
+transition after the pre-lock check.
+
+PR 18A also exposes, by explicit maintainer approval: an optional optimistic
+`expected_version` argument on status updates (a stale expectation conflicts
+without mutation), and Investigation soft deletion following the standard
+soft-deletion conventions.
+
+`InvestigationState` additionally carries optional database-owned persistence
+metadata — `version`, `created_at`, `updated_at`, `deleted_at`, and
+`deleted_by_actor_id` — following the `Entity` persistence-metadata
+convention. Reads return the authoritative database values; callers must not
+supply them, and the persistence layer never serializes them into `budget`
+or `operational_state`.
+
+`started_at` and `completed_at` must be timezone-aware and are normalized to
+UTC; naive values are rejected. `started_at` is required and the schema
+enforces `NOT NULL`.
+
 ```python
 class InvestigationError(BaseModel):
     source: str | None = None

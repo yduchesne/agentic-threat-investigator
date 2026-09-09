@@ -11,6 +11,7 @@
 - [Soft deletion](#soft-deletion)
 - [Historical relationships](#historical-relationships)
 - [Evidence](#evidence)
+- [Investigation persistence](#investigation-persistence)
 - [Transactions and Unit of Work](#transactions-and-unit-of-work)
 - [Batch persistence](#batch-persistence)
   - [Composite-array input contract](#composite-array-input-contract)
@@ -125,6 +126,94 @@ Evidence is immutable.
 A new provider retrieval creates a new Evidence observation rather than overwriting the prior observation.
 
 Raw payload, when retained, is part of that immutable observation.
+
+`ati.append_evidence(...)` is the canonical persistence path. It requires an
+existing visible Investigation parent — validated with a row lock inside the
+function so the parent cannot be soft-deleted between validation and
+insertion, and additionally enforced by the
+`evidence(investigation_id) -> investigation(id)` foreign key, which uses no
+delete cascade because Investigation deletion is soft and Evidence is
+immutable — inserts the observation with version `1`, writes a single
+immutable CREATE `domain_object_history` entry carrying
+actor/request/investigation correlation, and rejects a duplicate evidence
+identity with a dedicated error state. The INSERT itself is authoritative for
+duplicate identities, so a concurrent losing insert raises the dedicated
+evidence duplicate error state instead of a raw unique violation; a repeated
+identity is a conflict, never an update of the prior observation. The normal
+repository surface is insert/read only (`insert`, `get_by_id`,
+`list_for_investigation`); there is no evidence update, delete, or upsert
+operation. `list_for_investigation` returns observations in deterministic
+newest-first order (`retrieved_at DESC`, then evidence `id ASC`), backed by
+the `evidence_investigation_listing_idx` index. Evidence timestamps must be
+timezone-aware and are normalized to UTC.
+
+Evidence subject identity is resolved by the caller before persistence: the
+stored observation references the canonical entity row, and reads rebuild the
+subject reference from that canonical identity.
+
+## Investigation persistence
+
+Investigation is a mutable, versioned operational resource persisted in
+`ati.investigation`. Its domain representation is `InvestigationState`:
+identity, status, trigger, objective, budget, and operational identifiers.
+`budget` and the remaining operational fields are stored in the `budget` and
+`operational_state` JSONB columns; the resource carries database-assigned
+versions, authoritative timestamps, and soft-deletion metadata.
+
+The lifecycle, optional optimistic `expected_version` on status updates, and
+Investigation soft deletion are explicitly approved PR 18A contracts
+(see `docs/DOMAIN_MODEL.md`).
+
+The lifecycle is approved and narrow:
+
+```text
+PENDING  -> RUNNING | FAILED
+RUNNING  -> COMPLETED | PARTIAL | FAILED
+COMPLETED/PARTIAL/FAILED  (terminal)
+```
+
+A same-status request is not a transition; the persistence path classifies it
+as an unchanged result without allocating a version or writing history.
+Transitioning to a terminal status stamps `completed_at` when absent.
+
+The authoritative write path is the versioned SQL API:
+
+- `ati.create_investigation(...)` allocates the initial version and writes
+  CREATE history; the INSERT itself is authoritative for the caller-supplied
+  identity, so a concurrent duplicate raises the dedicated investigation
+  duplicate error state instead of a raw unique violation, and is never
+  upserted;
+- `ati.update_investigation_status(...)` validates the current row, supports
+  an optional optimistic `expected_version` (a stale expectation raises a
+  dedicated error state without mutation), classifies the semantic no-op as
+  unchanged, revalidates the approved lifecycle against the locked row, and
+  only then allocates a new version, mutates, and writes UPDATE history with
+  a JSONB diff. Locked-row validation is required defense in depth: a
+  concurrent writer can invalidate a transition that passed the caller's
+  pre-lock check, and an invalid locked-row transition raises a dedicated
+  error state mapped to the domain transition error;
+- `ati.soft_delete_investigation(...)` follows the standard soft-deletion
+  conventions and writes DELETE history.
+
+All three accept optional actor/request correlation recorded in the history
+entry. Normal reads hide soft-deleted investigations; explicit admin/history
+reads may include them. Lifecycle validation additionally runs in the
+application layer before any database mutation.
+
+Reads return the authoritative persistence metadata — `version`,
+`created_at`, `updated_at`, and, for soft-deleted resources visible through
+explicit admin reads, `deleted_at` and `deleted_by_actor_id` — following the
+`Entity` persistence-metadata convention. A version obtained by a fresh read
+can be supplied as `expected_version` in a later unit of work. Persistence
+metadata is never serialized into the stored JSONB documents and caller
+values never override database-owned columns. Dedicated investigation
+columns are authoritative during deserialization; colliding keys inside
+`operational_state` cannot replace identity, lifecycle, budget, timestamps,
+version, or deletion metadata.
+
+`started_at` is required and non-null. Investigation timestamps are
+timezone-aware UTC: the domain rejects naive values and normalizes accepted
+offsets to UTC, and the database stores `timestamptz`.
 
 ## Transactions and Unit of Work
 

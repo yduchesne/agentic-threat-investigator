@@ -4,6 +4,7 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 
 ## Contents
 
+- [Complete PR 18A secondary validation and test hardening](#complete-pr-18a-secondary-validation-and-test-hardening)
 - [Complete URLhaus secondary cross-field and model-hardening invariants](#complete-urlhaus-secondary-cross-field-and-model-hardening-invariants)
 - [Restore URLhaus docstring wording dropped during re-wrap](#restore-urlhaus-docstring-wording-dropped-during-re-wrap)
 - [Type the URLhaus host duplicate-comparison value without `Any`](#type-the-urlhaus-host-duplicate-comparison-value-without-any)
@@ -21,6 +22,89 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 - [Complete AbuseIPDB boundary regression coverage](#complete-abuseipdb-boundary-regression-coverage)
 - [Align the configuration example with the implemented AbuseIPDB composition](#align-the-configuration-example-with-the-implemented-abuseipdb-composition)
 - [Reject rather than normalize padded AbuseIPDB credentials](#reject-rather-than-normalize-padded-abuseipdb-credentials)
+
+## Complete PR 18A secondary validation and test hardening
+
+**Priority:** MEDIUM
+
+**Origin:** PR 18A remediation review 02.
+
+### Problem
+
+The PR 18A remediation implements the required production integrity fixes, but
+several secondary validation, test-accuracy, and migration-verification gaps
+remain:
+
+- `InvestigationState.validate_utc()` validates only `started_at` and
+  `completed_at`; optional database-owned `created_at`, `updated_at`, and
+  `deleted_at` can still be constructed with naive values even though the
+  model and documentation describe Investigation persistence timestamps as
+  timezone-aware UTC;
+- `test_concurrent_invalid_transition_is_rejected_on_locked_row()` pauses after
+  an initial snapshot, but its test repository then calls
+  `super().update_status()`, which performs a second `get_by_id()` after the
+  gate opens. The losing writer therefore rejects the transition in Python
+  using the fresh `FAILED` status and does not prove that SQLSTATE `U18A5` came
+  from locked-row database validation;
+- `test_locked_row_rejects_disallowed_transitions()` claims to cover every
+  disallowed transition but checks only a subset of terminal-status targets;
+- the remediation adds a reversible `0010` migration, but no automated test
+  exercises upgrade -> downgrade -> upgrade or proves that downgrade restores
+  the archived v0006 functions and removes only the new constraint/index;
+- documentation says callers "must not supply" database-owned Investigation
+  metadata, while the Pydantic model necessarily accepts those fields so
+  repositories can reconstruct persisted resources. Writes safely ignore
+  them, but the wording overstates what the model enforces;
+- `test_colliding_operational_state_cannot_spoof_columns()` asserts
+  `created_at.year == 2026` even though `created_at` comes from PostgreSQL
+  `now()`. The test will fail solely because the calendar year changes, not
+  because deserialization precedence regresses.
+
+These are not demonstrated CRITICAL/HIGH production failures. The locked SQL
+function independently enforces the lifecycle, PostgreSQL returns aware
+`timestamptz` values on repository reads, and the write serializer excludes
+caller-supplied persistence metadata.
+
+### Intended fix
+
+1. Extend the Investigation timestamp validator to `created_at`, `updated_at`,
+   and `deleted_at`. Preserve `None`, reject naive values, and normalize aware
+   offsets to UTC. Add focused unit tests for each field.
+2. Rework the concurrent lifecycle integration test so both writers complete
+   exactly one repository pre-check before either mutation and the stale writer
+   then invokes the SQL function without a second Python read. Assert the stale
+   path reaches SQLSTATE `U18A5`, maps to
+   `InvalidInvestigationStatusTransitionError`, and creates no mutation or
+   history. Use events/barriers, not sleeps.
+3. Generate the disallowed lifecycle cases from the approved transition map,
+   excluding same-status no-ops, or explicitly enumerate every disallowed
+   pair. Assert each direct SQL call returns `U18A5` and leaves one CREATE
+   history row.
+4. Add an isolated migration test for 0009 -> 0010 -> 0009 -> 0010. Assert the
+   `started_at` nullability, Evidence foreign key, listing index, and active
+   function behavior at each revision. Do not run this against normal
+   developer data.
+5. Revise docs and the `InvestigationState` docstring to say callers must not
+   rely on supplied persistence metadata during writes: repository reads
+   populate it authoritatively, while write serialization ignores it. Do not
+   claim Pydantic rejects those fields unless such an API is actually added.
+6. Remove the hard-coded `created_at.year == 2026` assertion. Capture the
+   authoritative dedicated-column timestamps before injecting colliding JSONB,
+   then assert the later repository read returns those exact values and not the
+   spoofed 2020 values.
+
+### Acceptance checks
+
+- Every Investigation timestamp field rejects naive values and normalizes
+  aware offsets to UTC.
+- The controlled race proves the stale writer reaches the locked SQL check,
+  not a second Python pre-check.
+- Every disallowed status pair is covered automatically or explicitly.
+- The 0010 migration passes upgrade/downgrade/upgrade in an isolated test DB.
+- Documentation matches the accepted model and write behavior.
+- The collision regression compares authoritative timestamps exactly and has
+  no dependency on the current calendar year.
+- `./build.sh --qa` and `./integration-test.sh` pass.
 
 ## Complete URLhaus secondary cross-field and model-hardening invariants
 

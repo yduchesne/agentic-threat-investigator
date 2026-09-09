@@ -8,7 +8,7 @@ prior one. Provider-specific scores remain normalized facts; analytical
 confidence belongs to the Assessment.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -62,6 +62,16 @@ class Evidence(BaseModel):
     retrieved_at: datetime
     facts: dict[str, Any] = Field(default_factory=dict)
     raw_payload: dict[str, Any] | None = None
+
+    @field_validator("observed_at", "retrieved_at")
+    @classmethod
+    def validate_utc(cls, value: datetime | None) -> datetime | None:
+        """Require timezone-aware timestamps, normalized to UTC."""
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("evidence timestamps must be timezone-aware")
+        return value.astimezone(UTC)
 
     @field_validator("facts", mode="after")
     @classmethod

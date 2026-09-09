@@ -327,6 +327,12 @@ A normalized provider result is persisted atomically as the relevant evidence, e
 
 Repositories never self-commit. Application services use an explicit Unit of Work.
 
+The investigation persistence service owns this boundary for the PR 18A seam:
+investigation resources and immutable evidence observations persist in one
+short transaction each, together with their required audit events. Provider
+calls stay outside transactions. Graph persistence (entities, relationships,
+relationship observations) joins this seam atomically in a later PR.
+
 ## Batch ingestion
 
 Structured batch sources follow:
