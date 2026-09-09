@@ -26,22 +26,14 @@ from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
-from agentic_threat_investigator.app.extraction.extractor import extract
-from agentic_threat_investigator.app.investigation_timeline import (
-    UnitOfWorkInvestigationTimelineSink,
+from agentic_threat_investigator.app.orchestration.composition import (
+    build_provider_investigation_graph,
 )
 from agentic_threat_investigator.app.orchestration.models import (
     enqueue_provider_work,
-    record_provider_outcome,
-    select_provider_work,
 )
 from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
-    ProviderWorkExecutor,
-    UowEntityReader,
-)
-from agentic_threat_investigator.app.provider_observation_persistence import (
-    ProviderObservationPersistenceService,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.identifiers import SourceId
@@ -166,21 +158,28 @@ def _zero_jitter() -> float:
 async def seed_root_investigation(
     uow: PostgresUnitOfWork,
 ) -> tuple[UUID, Entity]:
-    """Persist one RUNNING investigation and its canonical DOMAIN root."""
+    """Persist one RUNNING investigation whose durable root is the DOMAIN entity.
+
+    The root Entity UUID is allocated once and reused: the canonical DOMAIN
+    Entity is persisted with that UUID and the Investigation records the same
+    UUID in ``root_entity_ids``, both in one explicit UnitOfWork transaction
+    committed exactly once.
+    """
     investigation_id = uuid4()
+    root_id = uuid4()
+    root = await uow.entities.upsert(
+        Entity(id=root_id, type=EntityType.DOMAIN, value=_DOMAIN_VALUE)
+    )
     await uow.investigations.create(
         InvestigationState(
             investigation_id=investigation_id,
             status=InvestigationStatus.RUNNING,
             trigger_type=InvestigationTriggerType.MANUAL,
-            root_entity_ids=[uuid4()],
+            root_entity_ids=[root_id],
             objective="Assess the root indicator.",
             budget=default_investigation_budget(),
             started_at=_FIXED_TS,
         )
-    )
-    root = await uow.entities.upsert(
-        Entity(id=uuid4(), type=EntityType.DOMAIN, value=_DOMAIN_VALUE)
     )
     await uow.commit()
     return investigation_id, root
@@ -213,12 +212,9 @@ async def test_dns_vertical_slice(
         async with uow_factory() as uow:
             investigation_id, root = await seed_root_investigation(uow)
 
-        executor = ProviderWorkExecutor(
-            entity_reader=UowEntityReader(uow_factory),
-            provider_registry={SourceId.GOOGLE_PUBLIC_DNS.value: provider},
-            extractor=extract,
-            persistence_service=ProviderObservationPersistenceService(uow_factory),
-            timeline_service=UnitOfWorkInvestigationTimelineSink(uow_factory),
+        graph = build_provider_investigation_graph(
+            uow_factory=uow_factory,
+            provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
             context=ProviderExecutionContext(
                 investigation_id=investigation_id,
                 clock=lambda: _FIXED_TS,
@@ -241,13 +237,15 @@ async def test_dns_vertical_slice(
             ),
             [work_item],
         )
-        outcome = await executor.execute(work_item)
+        result = await graph.ainvoke({"investigation": state})
+        recorded_state = result["investigation"]
+        outcome = recorded_state.last_provider_outcome
+        assert outcome is not None
         assert outcome.status is ProviderExecutionStatus.SUCCEEDED
         assert len(outcome.evidence_ids) == 1
         assert len(outcome.discovered_entity_ids) == 1
         assert len(outcome.relationship_ids) == 1
 
-        recorded_state = record_provider_outcome(select_provider_work(state), outcome)
         assert recorded_state.budget.provider_calls_used == 1
         assert list(recorded_state.evidence_ids) == list(outcome.evidence_ids)
         assert list(recorded_state.relationship_ids) == list(outcome.relationship_ids)
@@ -276,6 +274,13 @@ async def test_dns_vertical_slice(
                 )
             )
             assert len(observations.scalars().all()) == 1
+
+            # The durable Investigation references the actual root Entity.
+            durable = await reader.investigations.get_by_id(investigation_id)
+            assert durable is not None
+            assert durable.root_entity_ids == [root.id]
+            assert recorded_state.root_entity_ids == [root.id]
+            assert work_item.entity_id == root.id
 
             timeline = await reader.timeline_events.list_by_investigation(
                 investigation_id
@@ -317,25 +322,37 @@ async def test_dns_missing_root_never_calls_provider(
         async with uow_factory() as uow:
             investigation_id, _root = await seed_root_investigation(uow)
 
-        executor = ProviderWorkExecutor(
-            entity_reader=UowEntityReader(uow_factory),
-            provider_registry={SourceId.GOOGLE_PUBLIC_DNS.value: provider},
-            extractor=extract,
-            persistence_service=ProviderObservationPersistenceService(uow_factory),
-            timeline_service=UnitOfWorkInvestigationTimelineSink(uow_factory),
+        graph = build_provider_investigation_graph(
+            uow_factory=uow_factory,
+            provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
             context=ProviderExecutionContext(
                 investigation_id=investigation_id,
                 clock=lambda: _FIXED_TS,
             ),
         )
-        outcome = await executor.execute(
-            ProviderWorkItem(
-                provider=SourceId.GOOGLE_PUBLIC_DNS, entity_id=uuid4(), depth=0
-            )
+        missing_work = ProviderWorkItem(
+            provider=SourceId.GOOGLE_PUBLIC_DNS, entity_id=uuid4(), depth=0
         )
+        state = enqueue_provider_work(
+            InvestigationState(
+                investigation_id=investigation_id,
+                status=InvestigationStatus.RUNNING,
+                trigger_type=InvestigationTriggerType.MANUAL,
+                root_entity_ids=[uuid4()],
+                objective="Assess the root indicator.",
+                budget=default_investigation_budget(),
+                started_at=_FIXED_TS,
+            ),
+            [missing_work],
+        )
+        result = await graph.ainvoke({"investigation": state})
+        recorded_state = result["investigation"]
+        outcome = recorded_state.last_provider_outcome
+        assert outcome is not None
         assert outcome.status is not ProviderExecutionStatus.SUCCEEDED
         assert outcome.error is not None
         assert outcome.error.code == "target_not_found"
+        assert recorded_state.budget.provider_calls_used == 1
 
         async with uow_factory() as reader:
             timeline = await reader.timeline_events.list_by_investigation(

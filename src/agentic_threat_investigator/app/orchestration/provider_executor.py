@@ -370,7 +370,13 @@ class ProviderWorkExecutor(WorkExecutor):  # pylint: disable=too-few-public-meth
         work_item: ProviderWorkItem,
         result: ProviderResult,
     ) -> ProviderExecutionOutcome:
-        """Process one provider result deterministically in provider-return order."""
+        """Process one provider result deterministically in provider-return order.
+
+        The accumulated ID lists and per-Evidence working variables are the
+        intrinsic cost of deterministic per-observation sequencing; the narrow
+        disable follows repository convention.
+        """
+        # pylint: disable=too-many-locals
         evidence_ids: list[UUID] = []
         relationship_ids: list[UUID] = []
         discovered: list[UUID] = []

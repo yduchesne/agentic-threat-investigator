@@ -140,6 +140,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             )
             self.documents = cast(PostgresDocumentRepository, None)
             self.document_chunks = cast(PostgresDocumentChunkRepository, None)
+            self.timeline_events = cast(InvestigationTimelineRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

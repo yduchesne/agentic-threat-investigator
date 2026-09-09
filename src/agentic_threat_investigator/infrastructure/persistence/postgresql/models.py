@@ -9,7 +9,16 @@ from datetime import datetime
 from typing import Any, Self
 from uuid import UUID
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, String, text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    String,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, BYTEA
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -292,7 +301,19 @@ class InvestigationTimelineEventRow(Base):  # pylint: disable=too-few-public-met
     """Database row for an immutable analyst-facing investigation timeline event."""
 
     __tablename__ = "investigation_timeline_event"
-    __table_args__ = {"schema": "ati"}
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('investigation_started', 'provider_work_started', "
+            "'provider_work_completed', 'provider_work_failed', "
+            "'evidence_persisted', 'entities_discovered')",
+            name="investigation_timeline_event_type_check",
+        ),
+        CheckConstraint(
+            "error_code IS NULL OR error_code ~ '^[a-z][a-z0-9_]{0,63}$'",
+            name="investigation_timeline_event_error_code_check",
+        ),
+        {"schema": "ati"},
+    )
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     investigation_id: Mapped[UUID] = mapped_column(ForeignKey("ati.investigation.id"))
     event_type: Mapped[str] = mapped_column(String)

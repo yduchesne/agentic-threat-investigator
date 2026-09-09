@@ -47,11 +47,28 @@ class TestInvestigationTimelineEvent:
         event = _event(occurred_at=datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC))
         assert event.occurred_at.utcoffset() is not None
 
-    def test_blank_error_code_rejected(self) -> None:
-        """Blank error codes are rejected; None is allowed."""
-        assert _event(error_code=None).error_code is None
-        with pytest.raises(ValidationError):
-            _event(error_code="   ")
+    def test_error_code_grammar_and_length_are_bounded(self) -> None:
+        """Error codes are lowercase snake-case, at most 64 characters."""
+        failed = InvestigationTimelineEventType.PROVIDER_WORK_FAILED
+        assert (
+            _event(type=failed, error_code="provider_error").error_code
+            == "provider_error"
+        )
+        assert _event(type=failed, error_code="a" * 64).error_code == "a" * 64
+        for invalid in (
+            "   ",
+            " provider_error",
+            "provider_error ",
+            "ProviderError",
+            "provider-error",
+            "provider.error",
+            "provider error",
+            "_provider_error",
+            "0provider",
+            "a" * 65,
+        ):
+            with pytest.raises(ValidationError):
+                _event(type=failed, error_code=invalid)
 
     def test_unexpected_fields_rejected(self) -> None:
         """Extra fields, such as a prose reason, are contract violations."""
@@ -74,6 +91,165 @@ class TestInvestigationTimelineEvent:
             InvestigationTimelineEventType.EVIDENCE_PERSISTED.value
             == "evidence_persisted"
         )
+
+    @pytest.mark.parametrize(
+        ("event_type", "overrides"),
+        [
+            (
+                InvestigationTimelineEventType.INVESTIGATION_STARTED,
+                {"provider": None, "target_entity_id": None},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
+                {},
+            ),
+            (
+                InvestigationTimelineEventType.EVIDENCE_PERSISTED,
+                {"evidence_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
+                {},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
+                {"error_code": "timeout", "evidence_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+                {"error_code": "provider_error"},
+            ),
+            (
+                InvestigationTimelineEventType.ENTITIES_DISCOVERED,
+                {"entity_ids": (uuid4(),)},
+            ),
+        ],
+    )
+    def test_valid_event_shapes_accepted(
+        self, event_type: InvestigationTimelineEventType, overrides: dict[str, Any]
+    ) -> None:
+        """Every documented event-type shape validates successfully."""
+        _event(type=event_type, **overrides)
+
+    @pytest.mark.parametrize(
+        ("event_type", "overrides"),
+        [
+            (
+                InvestigationTimelineEventType.INVESTIGATION_STARTED,
+                {"provider": SourceId.GOOGLE_PUBLIC_DNS},
+            ),
+            (
+                InvestigationTimelineEventType.INVESTIGATION_STARTED,
+                {"target_entity_id": uuid4()},
+            ),
+            (
+                InvestigationTimelineEventType.INVESTIGATION_STARTED,
+                {"error_code": "provider_error"},
+            ),
+            (
+                InvestigationTimelineEventType.INVESTIGATION_STARTED,
+                {"evidence_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.INVESTIGATION_STARTED,
+                {"entity_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.INVESTIGATION_STARTED,
+                {"relationship_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
+                {"provider": None},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
+                {"target_entity_id": None},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
+                {"error_code": "provider_error"},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
+                {"evidence_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
+                {"entity_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
+                {"relationship_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.EVIDENCE_PERSISTED,
+                {"evidence_ids": ()},
+            ),
+            (
+                InvestigationTimelineEventType.EVIDENCE_PERSISTED,
+                {"evidence_ids": (uuid4(), uuid4())},
+            ),
+            (
+                InvestigationTimelineEventType.EVIDENCE_PERSISTED,
+                {"error_code": "provider_error"},
+            ),
+            (
+                InvestigationTimelineEventType.EVIDENCE_PERSISTED,
+                {"provider": None},
+            ),
+            (
+                InvestigationTimelineEventType.EVIDENCE_PERSISTED,
+                {"target_entity_id": None},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
+                {"provider": None},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
+                {"target_entity_id": None},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+                {"error_code": None},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+                {"evidence_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+                {"entity_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+                {"relationship_ids": (uuid4(),)},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+                {"provider": None},
+            ),
+            (
+                InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+                {"target_entity_id": None},
+            ),
+            (
+                InvestigationTimelineEventType.ENTITIES_DISCOVERED,
+                {"entity_ids": ()},
+            ),
+            (
+                InvestigationTimelineEventType.ENTITIES_DISCOVERED,
+                {"error_code": "provider_error"},
+            ),
+        ],
+    )
+    def test_invalid_event_shapes_rejected(
+        self, event_type: InvestigationTimelineEventType, overrides: dict[str, Any]
+    ) -> None:
+        """Each invalid field combination is a deterministic contract failure."""
+        with pytest.raises(ValidationError):
+            _event(type=event_type, **overrides)
 
 
 class TestUnitOfWorkTimelineSink:

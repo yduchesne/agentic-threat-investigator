@@ -44,6 +44,7 @@ EXPECTED_SEQUENCES = {
     "source_record_version_seq",
     "document_version_seq",
     "document_chunk_version_seq",
+    "investigation_timeline_event_seq",
 }
 
 EXPECTED_FUNCTIONS = {
@@ -350,3 +351,201 @@ async def test_graph_integrity_migration_downgrade_and_re_upgrade() -> None:
     function_present, foreign_key_present = await schema_state()
     assert function_present
     assert foreign_key_present
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_timeline_schema_contract() -> None:
+    """Timeline has the error-code check, owned sequence, and no mutation routines."""
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            checks = {row[0]: row[1] for row in await connection.execute(text("""
+                        SELECT con.conname, pg_get_constraintdef(con.oid)
+                        FROM pg_constraint con
+                        JOIN pg_class rel ON rel.oid = con.conrelid
+                        JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                        WHERE ns.nspname = 'ati'
+                          AND rel.relname = 'investigation_timeline_event'
+                          AND con.contype = 'c'
+                    """))}
+            sequence_owner = await connection.scalar(text("""
+                SELECT pg_get_serial_sequence(
+                    'ati.investigation_timeline_event',
+                    'sequence'
+                )
+            """))
+            routines = {
+                row[0]
+                for row in await connection.execute(
+                    text(
+                        "SELECT routine_name FROM information_schema.routines "
+                        "WHERE routine_schema = 'ati'"
+                    )
+                )
+            }
+    finally:
+        await engine.dispose()
+    # Both the event-type check and the error-code grammar/length check exist;
+    # PostgreSQL renders IN-lists as ANY(ARRAY[...]) so matching by name and
+    # by the regex literal is deterministic.
+    assert "investigation_timeline_event_type_check" in checks
+    assert "investigation_timeline_event_error_code_check" in checks
+    assert any(
+        "'^[a-z][a-z0-9_]{0,63}$'" in definition for definition in checks.values()
+    )
+    # The sequence is owned by its table column.
+    assert sequence_owner == "ati.investigation_timeline_event_seq"
+    # No application routine updates, deletes, or upserts timeline events.
+    assert not any(
+        "timeline_event" in name
+        and any(token in name for token in ("update", "delete", "upsert"))
+        for name in routines
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
+    """Migration 0013 downgrades to v0011 and re-upgrades cleanly.
+
+    At 0012 the timeline table and sequence are absent while the 0012
+    graph-integrity objects remain; after re-upgrade the table, owned
+    sequence, chronological index, and checks exist and one event round-trips.
+    The database is always returned to head in the finally block so later
+    tests do not depend on test order.
+    """
+    alembic_cfg = Config("alembic.ini")
+
+    async def timeline_state() -> tuple[bool, bool]:
+        """Return (table present, sequence present) for the ati schema."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                tables = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT table_name FROM information_schema.tables "
+                            "WHERE table_schema = 'ati'"
+                        )
+                    )
+                }
+                sequences = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT sequence_name FROM information_schema.sequences "
+                            "WHERE sequence_schema = 'ati'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        return (
+            "investigation_timeline_event" in tables,
+            "investigation_timeline_event_seq" in sequences,
+        )
+
+    try:
+        command.downgrade(alembic_cfg, "0012_pr18c_graph_integrity")
+        table_present, sequence_present = await timeline_state()
+        assert not table_present
+        assert not sequence_present
+        # The 0012 graph-integrity objects remain installed after downgrade.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                functions = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT routine_name FROM information_schema.routines "
+                            "WHERE routine_schema = 'ati'"
+                        )
+                    )
+                }
+                foreign_key = await connection.scalar(text("""
+                    SELECT con.conname FROM pg_constraint con
+                    JOIN pg_class rel ON rel.oid = con.conrelid
+                    JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                    WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
+                      AND con.conname = 'relationship_observation_evidence_fk'
+                """))
+        finally:
+            await engine.dispose()
+        assert {
+            "soft_delete_relationship",
+            "upsert_relationship",
+            "append_relationship_observation",
+        } <= functions
+        assert foreign_key is not None
+
+        command.upgrade(alembic_cfg, "head")
+        table_present, sequence_present = await timeline_state()
+        assert table_present
+        assert sequence_present
+        # Ownership dependency points at the table's sequence column, and the
+        # chronological index plus both checks exist.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                owner = await connection.scalar(text("""
+                    SELECT pg_get_serial_sequence(
+                        'ati.investigation_timeline_event', 'sequence'
+                    )
+                """))
+                indexes = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT indexname FROM pg_indexes "
+                            "WHERE schemaname = 'ati' "
+                            "AND tablename = 'investigation_timeline_event'"
+                        )
+                    )
+                }
+                checks = {row[0] for row in await connection.execute(text("""
+                            SELECT con.conname FROM pg_constraint con
+                            JOIN pg_class rel ON rel.oid = con.conrelid
+                            JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                            WHERE ns.nspname = 'ati'
+                              AND rel.relname = 'investigation_timeline_event'
+                              AND con.contype = 'c'
+                        """))}
+                await connection.execute(text("""
+                        DO $$
+                        DECLARE
+                          investigation_id uuid;
+                        BEGIN
+                          INSERT INTO ati.investigation
+                            (status, trigger_type, objective, budget,
+                             operational_state, version, created_at, updated_at,
+                             started_at)
+                          VALUES ('running', 'manual', 'assess', '{}'::jsonb,
+                                  '{}'::jsonb, 1, now(), now(), now())
+                          RETURNING id INTO investigation_id;
+                          INSERT INTO ati.investigation_timeline_event
+                            (id, investigation_id, event_type, occurred_at,
+                             provider, target_entity_id)
+                          VALUES (gen_random_uuid(), investigation_id,
+                                  'provider_work_started', now(),
+                                  'urn:ati:source:google_public_dns',
+                                  gen_random_uuid());
+                        END
+                        $$;
+                    """))
+                count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.investigation_timeline_event")
+                )
+        finally:
+            await engine.dispose()
+        assert owner == "ati.investigation_timeline_event_seq"
+        assert "investigation_timeline_event_chronological_idx" in indexes
+        assert {
+            "investigation_timeline_event_type_check",
+            "investigation_timeline_event_error_code_check",
+        } <= checks
+        assert count == 1
+    finally:
+        command.upgrade(alembic_cfg, "head")
