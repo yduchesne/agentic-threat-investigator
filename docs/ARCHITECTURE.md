@@ -171,7 +171,7 @@ The skeleton implements mechanics only: FIFO selection, duplicate suppression fo
 
 ### Real provider execution path (PR 19B)
 
-The production `WorkExecutor` is `ProviderWorkExecutor` (`app/orchestration/provider_executor.py`), composed with explicit injected dependencies: an `EntityReader` (short UnitOfWork-backed target lookup closed before any provider I/O), a typed provider registry (`Mapping[source URN, EvidenceProvider]`, built from `ProviderComposition.provider_registry()`), the PR 18B deterministic extractor, the PR 18C `ProviderObservationPersistenceService`, and an `InvestigationTimelineSink`. Its per-work-item flow:
+The production `WorkExecutor` is `ProviderWorkExecutor` (`app/orchestration/provider_executor.py`), composed with explicit injected dependencies: an `EntityReader` (short UnitOfWork-backed target lookup closed before any provider I/O), a typed provider registry (`Mapping[SourceId, EvidenceProvider]` keyed by enum members, built from `ProviderComposition.provider_registry()`), the PR 18B deterministic extractor, the PR 18C `ProviderObservationPersistenceService`, and an `InvestigationTimelineSink`. The public composition seam `build_provider_investigation_graph(uow_factory, provider_registry, context)` in `app/orchestration/composition.py` assembles all production dependencies and returns the compiled PR 19A graph for a later worker entry point; it constructs no HTTP clients, providers, settings, engines, or global registries. Its per-work-item flow:
 
 ```text
 ProviderWorkItem (provider, entity_id, depth)

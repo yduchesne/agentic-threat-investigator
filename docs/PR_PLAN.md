@@ -342,7 +342,7 @@ The graph and fake executor must be deterministic so orchestration
 invariants can be tested independently of provider behavior and model
 behavior.
 
-## PR 19B --- Provider execution integration and persisted workflow timeline
+## PR 19B --- Provider execution integration and persisted workflow timeline [DONE]
 
 Integrate the deterministic PR 19A orchestration skeleton with ATI's
 existing provider, extraction, and persistence seams.

@@ -15,7 +15,6 @@ from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
 )
 from agentic_threat_investigator.app.providers import EvidenceProvider, ProviderResult
-from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.identifiers import SourceId
 from tests.support.provider_executor_fixtures import fixed_clock, null_uow_factory

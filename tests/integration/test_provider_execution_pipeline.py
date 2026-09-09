@@ -29,9 +29,7 @@ from sqlalchemy import select
 from agentic_threat_investigator.app.orchestration.composition import (
     build_provider_investigation_graph,
 )
-from agentic_threat_investigator.app.orchestration.models import (
-    enqueue_provider_work,
-)
+from agentic_threat_investigator.app.orchestration.models import enqueue_provider_work
 from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
 )

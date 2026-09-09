@@ -103,7 +103,12 @@ class InvestigationTimelineEvent(BaseModel):
 
     @model_validator(mode="after")
     def _validate_shape(self) -> "InvestigationTimelineEvent":
-        """Enforce the per-event-type field-shape contract deterministically."""
+        """Enforce the per-event-type field-shape contract deterministically.
+
+        The branch count is intrinsic to the six distinct documented event
+        shapes; the narrow disable follows repository convention.
+        """
+        # pylint: disable=too-many-branches
         event_type = self.type
         has_provider = self.provider is not None
         has_target = self.target_entity_id is not None

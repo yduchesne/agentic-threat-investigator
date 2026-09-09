@@ -176,8 +176,8 @@ async def test_database_rejects_invalid_error_code_even_if_model_bypassed(
     A direct SQL insert bypasses Pydantic validation entirely; the database
     constraint must still reject an out-of-grammar error code.
     """
-    from sqlalchemy.exc import IntegrityError
     from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
 
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)

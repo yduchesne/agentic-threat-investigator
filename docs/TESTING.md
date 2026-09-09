@@ -204,18 +204,42 @@ Priority unit-test areas include:
   per-Evidence PR 18C invocation, outcome ID bookkeeping (evidence,
   relationship, discovered entity merges; one provider-call increment per
   work item), and timeline event ordering/failure semantics, via fakes in
-  `tests/unit/app/orchestration/test_provider_executor.py`;
+  `tests/unit/app/orchestration/test_provider_executor.py` (shared
+  deterministic fakes/builders in `tests/support/provider_executor_fixtures.py`);
 - provider-output provenance and partial-failure regressions (PR 19B
   fixes): binding validation of the returned provider, owning
-  investigation, and persisted target (type, canonical value, subject
-  identifier; a two-Evidence tuple with one invalid item proves zero
-  extraction and zero persistence for the whole result), retention of all
-  committed Evidence/Entity/Relationship IDs when a later Evidence fails
-  extraction or persistence (including through state bookkeeping and when
-  the failure timeline event itself cannot append), and bounded
-  secret-free logging of caught provider/persistence/timeline exceptions
-  (synthetic markers never appear in any log message), via
-  `tests/unit/app/orchestration/test_provider_executor_regressions.py`.
+  investigation, and persisted target (type, exact canonical value,
+  subject identifier; malformed/noncanonical subjects provably reach zero
+  extraction and zero persistence; a two-Evidence tuple with one invalid
+  item proves full preflight), retention of all committed
+  Evidence/Entity/Relationship IDs when a later Evidence fails extraction
+  or persistence (including through state bookkeeping and when the failure
+  timeline event itself cannot append), canonical first-seen aggregate ID
+  lists across outcomes and completion events, and bounded secret-free
+  logging of caught provider/persistence/timeline exceptions (adversarial
+  injected exception text never appears in any log message or record and
+  every record has `exc_info is None`), via
+  `tests/unit/app/orchestration/test_provider_executor_regressions.py`;
+- timeline event-shape and error-code contract (PR 19B): table-driven
+  domain tests for every valid event type and each invalid field
+  combination, including blank, padded, uppercase, punctuation, and
+  65-character error codes, via
+  `tests/unit/domain/test_investigation_timeline.py`, plus a database
+  integration assertion that an invalid code is rejected even when model
+  validation is bypassed;
+- migration lifecycle and schema contract (PR 19B): migration 0013
+  downgrades to 0012 and re-upgrades to head, proving the timeline table
+  and owned sequence absence at 0012 and clean reinstall with checks,
+  index, and sequence ownership; the schema contract asserts the
+  error-code CHECK and that no ATI routine mutates timeline events, via
+  `tests/integration/test_migration.py`;
+- UnitOfWork lifecycle (PR 19B): a closed UoW exposes no stale timeline
+  repository and re-enters with a fresh repository, including the
+  rollback path, via `tests/integration/test_investigation_timeline_repository.py`;
+- production composition (PR 19B): `build_provider_investigation_graph`
+  assembles the real seams without global state and the compiled graph is
+  invoked asynchronously in the vertical slice, via
+  `tests/unit/app/orchestration/test_composition.py` and the pipeline test.
 
 ### Deterministic vertical-slice provider execution (PR 19B)
 
@@ -235,13 +259,18 @@ persisted DOMAIN root
   -> ProviderExecutionOutcome + persisted timeline events
 ```
 
-The slice asserts the persisted Evidence row, the discovered IP entity, the
-stable relationship and its immutable observation, the outcome/state ID
-bookkeeping (`provider_calls_used == 1`), the started/evidence-persisted/
-completed timeline sequence, and that discovered entities are never
-automatically enqueued. The provider's internal HTTP parsing is not mocked.
-Timeline repository integration tests cover append, chronological read,
-foreign-key rejection, rollback, and append-only semantics.
+The slice runs through the public `build_provider_investigation_graph`
+factory and invokes the compiled graph asynchronously; it asserts the
+persisted Evidence row, the discovered IP entity, the stable relationship
+and its immutable observation, the outcome/state ID bookkeeping
+(`provider_calls_used == 1`), the durable Investigation's
+`root_entity_ids == [root.id]` (the fixture persists the actual root Entity
+UUID), the started/evidence-persisted/completed timeline sequence, and that
+discovered entities are never automatically enqueued. The provider's
+internal HTTP parsing is not mocked. Timeline repository integration tests
+cover append, chronological read, exact foreign-key SQLSTATE 23503 with
+rollback and closed-UoW assertions, rollback, append-only semantics, and
+the database error-code rejection.
 
 ## Provider contract tests
 

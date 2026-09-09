@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for the PR 19B real provider work executor."""
 
-# pylint: disable=redefined-outer-name,protected-access,too-few-public-methods,unused-argument,missing-class-docstring
+# pylint: disable=redefined-outer-name,protected-access,too-few-public-methods,unused-argument,missing-class-docstring,duplicate-code
+# The executor test harness intentionally composes comparable deterministic
+# scenarios; R0801 duplicate-code is not supported per-block by Pylint, so it
+# is disabled at module scope per repository convention.
 
 import asyncio
 from typing import Any
@@ -39,7 +42,9 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEventType,
 )
 from tests.support.provider_executor_fixtures import (
+    DOMAIN_ENTITY_ID,
     FIXED_TS,
+    INVESTIGATION_ID,
     FakeEvidenceProvider,
     FakePersistenceService,
     FakeTimelineSink,
@@ -50,11 +55,6 @@ from tests.support.provider_executor_fixtures import (
     persisted_result,
     provider_calls_recorded,
     provider_error,
-)
-
-from tests.support.provider_executor_fixtures import (
-    INVESTIGATION_ID,
-    DOMAIN_ENTITY_ID,
 )
 
 

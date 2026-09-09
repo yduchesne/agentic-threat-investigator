@@ -682,6 +682,34 @@ Invariants:
     intended processing completes; a failed append never rolls back already
     committed domain data and surfaces a typed `timeline_error` instead.
 
+Event-shape contract (enforced by a Pydantic `model_validator(mode="after")`
+and mirrored by PostgreSQL CHECK constraints for the error-code grammar):
+
+-   `INVESTIGATION_STARTED`: `provider`, `target_entity_id`, and
+    `error_code` are `None`; all ID tuples are empty.
+-   `PROVIDER_WORK_STARTED`: `provider` and `target_entity_id` are required;
+    `error_code` is `None`; all ID tuples are empty.
+-   `EVIDENCE_PERSISTED`: `provider` and `target_entity_id` are required;
+    exactly one Evidence ID is required; Entity/Relationship ID tuples may
+    be empty; `error_code` is `None`.
+-   `PROVIDER_WORK_COMPLETED`: `provider` and `target_entity_id` are
+    required; aggregate ID tuples may be empty; `error_code` may carry the
+    retained first provider error for the approved mixed-result contract.
+-   `PROVIDER_WORK_FAILED`: `provider`, `target_entity_id`, and `error_code`
+    are required; all ID tuples are empty because committed IDs live in the
+    operational outcome and prior `EVIDENCE_PERSISTED` events.
+-   `ENTITIES_DISCOVERED`: at least one Entity ID is required; `error_code`
+    is `None`; the executor does not emit this currently-unused event.
+
+`error_code` is bounded to 64 ASCII characters matching
+`^[a-z][a-z0-9_]{0,63}$`; leading/trailing whitespace is rejected, never
+stripped or normalized. The same grammar is enforced by the database CHECK
+constraint so an invalid code is rejected even if model validation is
+bypassed. Append-only enforcement is an application boundary: the repository
+ABC exposes append and chronological read only, and no ATI routine mutates
+timeline events; direct owner/admin SQL is outside that boundary, with
+runtime-role privilege separation deferred as future hardening.
+
 ## Stopping
 
 ```python
