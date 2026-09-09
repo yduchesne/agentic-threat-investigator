@@ -192,7 +192,12 @@ Priority unit-test areas include:
 - retry classification;
 - report/assessment structural validation;
 - structured agent-result validation and serialization;
-- deterministic report/presentation formatting.
+- deterministic report/presentation formatting;
+- deterministic orchestration mechanics (PR 19A): typed work-item
+  validation, FIFO queue selection, duplicate suppression, outcome
+  bookkeeping, provider-call counter accounting, JSON state round-trip,
+  and graph termination on queue exhaustion via the LangGraph skeleton
+  in `app/orchestration`.
 
 ## Provider contract tests
 
@@ -382,6 +387,11 @@ Provider-shaped fixture data should avoid copying third-party payloads wholesale
 The test suite should provide deterministic implementations such as:
 
 - `FakeEvidenceProvider`;
+- `FakeWorkExecutor` (PR 19A, in `tests/support/orchestration_fixtures.py`):
+  a deterministic in-memory `WorkExecutor` driven by an explicit
+  `ProviderWorkItem -> ProviderExecutionOutcome` mapping with no network,
+  database, or LLM I/O, used to prove orchestration mechanics without
+  live providers;
 - `FakeLlmClient`;
 - fake embedding model;
 - fixed retriever;

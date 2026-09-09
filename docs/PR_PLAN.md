@@ -269,7 +269,7 @@ Provider/LLM calls remain outside the transaction.
 PR 18C does not introduce LangGraph, agent planning, pivot policy,
 Assessment, RAG, or report generation.
 
-## PR 19A --- Investigation orchestration state and deterministic LangGraph skeleton
+## PR 19A --- Investigation orchestration state and deterministic LangGraph skeleton [DONE]
 
 Deliver the narrow, deterministic orchestration foundation required
 before real provider execution is wired into LangGraph.
