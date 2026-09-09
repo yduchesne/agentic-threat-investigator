@@ -485,3 +485,55 @@ def test_root_mx_with_second_mx_answer_fails() -> None:
     }
 
     assert_malformed(raw_dns_evidence(facts))
+
+
+def test_root_cname_cannot_be_followed_by_terminal_at_old_owner() -> None:
+    """After a root CNAME, a terminal answer at the old owner is inconsistent.
+
+    The authoritative provider chain validation advances the expected owner
+    to every CNAME target, including the root sentinel, so this malformed
+    sequence must fail instead of emitting a fabricated RESOLVES_TO edge.
+    """
+    facts: dict[str, object] = {
+        "query_name": CANONICAL_ASYNCRAT_DOMAIN,
+        "query_type": "A",
+        "status": 0,
+        "flags": {},
+        "answers": [
+            {
+                "name": CANONICAL_ASYNCRAT_DOMAIN,
+                "record_type": "CNAME",
+                "ttl": 300,
+                "value": ".",
+            },
+            a_answer(name=CANONICAL_ASYNCRAT_DOMAIN),
+        ],
+    }
+
+    assert_malformed(raw_dns_evidence(facts))
+
+
+def test_root_cname_cannot_be_followed_by_cname_at_old_owner() -> None:
+    """After a root CNAME, another CNAME at the old owner is inconsistent."""
+    facts: dict[str, object] = {
+        "query_name": CANONICAL_ASYNCRAT_DOMAIN,
+        "query_type": "CNAME",
+        "status": 0,
+        "flags": {},
+        "answers": [
+            {
+                "name": CANONICAL_ASYNCRAT_DOMAIN,
+                "record_type": "CNAME",
+                "ttl": 300,
+                "value": ".",
+            },
+            {
+                "name": CANONICAL_ASYNCRAT_DOMAIN,
+                "record_type": "CNAME",
+                "ttl": 300,
+                "value": "other.test",
+            },
+        ],
+    }
+
+    assert_malformed(raw_dns_evidence(facts))

@@ -218,13 +218,18 @@ def _validate_answer_set(
             if saw_terminal:
                 raise _malformed(evidence_id, "a CNAME cannot follow a terminal answer")
             target = _protocol_name(_answer_value(answer, evidence_id), evidence_id)
-            if target != _ROOT_NAME:
-                if target in visited_owners:
-                    raise _malformed(
-                        evidence_id, "DNS CNAME chain cycles or revisits an owner"
-                    )
-                visited_owners.add(target)
-                expected_owner = target
+            # Every validated CNAME target participates in chain state,
+            # including the root sentinel: the authoritative provider chain
+            # validation always advances the expected owner to every CNAME
+            # target, so a root target can never be followed by an answer at
+            # the pre-CNAME owner. The root still never becomes an entity or
+            # relationship endpoint.
+            if target in visited_owners:
+                raise _malformed(
+                    evidence_id, "DNS CNAME chain cycles or revisits an owner"
+                )
+            visited_owners.add(target)
+            expected_owner = target
             continue
         if record_type != query_type:
             raise _malformed(

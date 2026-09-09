@@ -4,6 +4,7 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 
 ## Contents
 
+- [Complete PR 18B secondary extraction-contract hardening](#complete-pr-18b-secondary-extraction-contract-hardening)
 - [Complete PR 18A secondary validation and test hardening](#complete-pr-18a-secondary-validation-and-test-hardening)
 - [Complete URLhaus secondary cross-field and model-hardening invariants](#complete-urlhaus-secondary-cross-field-and-model-hardening-invariants)
 - [Restore URLhaus docstring wording dropped during re-wrap](#restore-urlhaus-docstring-wording-dropped-during-re-wrap)
@@ -22,6 +23,55 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 - [Complete AbuseIPDB boundary regression coverage](#complete-abuseipdb-boundary-regression-coverage)
 - [Align the configuration example with the implemented AbuseIPDB composition](#align-the-configuration-example-with-the-implemented-abuseipdb-composition)
 - [Reject rather than normalize padded AbuseIPDB credentials](#reject-rather-than-normalize-padded-abuseipdb-credentials)
+
+## Complete PR 18B secondary extraction-contract hardening
+
+**Priority:** LOW
+
+**Origin:** PR 18B remediation review 02.
+
+### Problem
+
+The PR 18B Fix 01 implementation addresses the primary malformed-Evidence
+failures, but several secondary validation and regression-test details remain:
+
+- `_validated_registration()` validates the RDAP subject and object class
+  before calling `validate_extractor_input()`. A registration with both a
+  missing Evidence ID and malformed registration fields therefore reports
+  `MALFORMED_FACTS` instead of the package's usual
+  `MISSING_EVIDENCE_ID` precedence. This does not permit graph output or lose
+  provenance because valid registration Evidence still requires an ID and
+  registration extraction is empty.
+- The RDAP registration tests cover invalid subject types and noncanonical
+  subject values, but do not directly pin the two same-type object-class
+  mismatches: DOMAIN with `object_class_name="autnum"` and ASN with
+  `object_class_name="domain"`. Production code rejects both.
+- TXT validation requires a string but accepts an empty string even though the
+  Google DNS provider response model requires nonempty source RDATA. TXT is
+  fact-only and creates no entity or relationship, so this cannot fabricate
+  graph structure.
+
+### Intended fix
+
+1. In `extract_rdap()`, call `validate_extractor_input()` for the REGISTRATION
+   branch before registration-specific subject/object-class validation. Pass
+   the validated Evidence ID into the private registration validator so error
+   precedence is consistent and helper signatures do not need `UUID | None`.
+2. Add explicit RDAP tests for DOMAIN/autnum and ASN/domain registration
+   mismatches. Assert `EvidenceExtractionError` with `MALFORMED_FACTS` and an
+   empty/no returned result.
+3. Decide and document whether normalized TXT `value` must be nonempty at the
+   extraction boundary. If it must mirror the provider contract, reject `""`
+   with `MALFORMED_FACTS` and add one focused test. Do not interpret TXT or emit
+   graph output.
+
+### Acceptance checks
+
+- Missing persisted IDs have consistent precedence across valid and malformed
+  RDAP registration envelopes.
+- Both same-type RDAP object-class mismatches have direct regression tests.
+- TXT emptiness behavior is explicit and remains fact-only.
+- `./build.sh --qa` and `./integration-test.sh` pass.
 
 ## Complete PR 18A secondary validation and test hardening
 

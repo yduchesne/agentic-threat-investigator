@@ -356,6 +356,8 @@ def test_root_cname_target_contributes_nothing() -> None:
     )
 
     assert result == ExtractionResult()
+    assert not result.entities
+    assert not result.relationships
 
 
 def test_txt_and_soa_produce_nothing() -> None:
