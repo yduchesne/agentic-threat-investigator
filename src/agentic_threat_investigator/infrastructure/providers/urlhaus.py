@@ -14,7 +14,7 @@ never downloads payloads, never fetches any returned URL, never assesses
 maliciousness, never persists, never creates relationships, and never
 instantiates discovered entities. The normalized ``matches`` facts carry
 the exact source URL and host members so a deterministic
-persistence-boundary extractor (PR 18) can later derive canonical URL and
+persistence-boundary extractor (PR 18B) can later derive canonical URL and
 infrastructure entities under its own approved semantics. A no-result
 response is an empty result, never a benign assessment.
 

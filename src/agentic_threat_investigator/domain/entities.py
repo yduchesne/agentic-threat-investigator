@@ -27,6 +27,7 @@ _ASN_UPPER_BOUND = 4294967295
 _DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _DNS_MAX_NAME_LENGTH = 253
 _DNS_MAX_LABEL_LENGTH = 63
+_MALWARE_MACHINE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
 
 class EntityType(str, Enum):
@@ -183,6 +184,27 @@ def canonicalize_network_prefix(value: str) -> str:
     return str(ipaddress.ip_network(value.strip(), strict=False))
 
 
+def canonicalize_malware(value: str) -> str:
+    """Return the canonical machine identity of a malware family.
+
+    The v0.1 MALWARE identity contract is deliberately narrow and shared by
+    the sources that already publish machine malware identifiers (ThreatFox):
+    a strict, nonblank, lowercase machine identifier of at most 128
+    characters using only lowercase ASCII letters, digits, and the
+    punctuation characters ``.``, ``_``, and ``-``. Surrounding whitespace,
+    uppercase letters, and any other punctuation are contract failures, not
+    silent repairs: printable names never determine malware identity, and no
+    alias, fuzzy, or human-name normalization exists at the identity level.
+    Canonicalization is deterministic and idempotent.
+    """
+
+    if not _MALWARE_MACHINE_ID_RE.fullmatch(value):
+        raise ValueError(
+            f"malware identifier must be a lowercase machine ID: {value!r}"
+        )
+    return value
+
+
 def canonicalize_cve(value: str) -> str:
     """Return the canonical uppercase CVE identifier."""
 
@@ -320,6 +342,7 @@ _CANONICALIZERS: dict[EntityType, Canonicalizer] = {
     EntityType.ASN: canonicalize_asn,
     EntityType.VULNERABILITY: canonicalize_cve,
     EntityType.ATTACK_TECHNIQUE: canonicalize_attack_technique,
+    EntityType.MALWARE: canonicalize_malware,
 }
 
 

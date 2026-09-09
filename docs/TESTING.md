@@ -182,6 +182,8 @@ Priority unit-test areas include:
 - pivot-policy helpers;
 - budget accounting;
 - relationship extraction;
+- deterministic source extraction (PR 18B) including per-source
+  malformed-fact rejection and deterministic deduplication;
 - source normalization;
 - content hashing;
 - authorization decisions;
@@ -560,6 +562,7 @@ Critical deterministic logic should receive especially strong coverage:
 - pivot-policy enforcement;
 - budget accounting;
 - relationship extraction;
+- deterministic source extraction;
 - source normalization;
 - persistence invariants;
 - assessment validation;

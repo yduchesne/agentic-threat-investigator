@@ -120,8 +120,8 @@ Deliver:
 -   normalized facts sufficient for deterministic IOC-to-malware
     extraction;
 -   ThreatFox malware machine identifiers suitable for canonical `MALWARE`
-    entity discovery by PR 18;
--   evidence-backed inputs consumed by PR 18's deterministic
+    entity discovery by PR 18B;
+-   evidence-backed inputs consumed by PR 18B's deterministic
     `ASSOCIATED_WITH` extractor;
 -   source timestamps/reference identifiers;
 -   typed errors;
@@ -131,8 +131,10 @@ Deliver:
 
 The provider emits validated ThreatFox source records as normalized
 `THREAT_INTELLIGENCE` evidence facts; it does not instantiate discovered
-entities or create relationship candidates. PR 18 owns malware entity
-discovery, `ASSOCIATED_WITH` relationship construction, and persistence.
+entities or create relationship candidates. PR 18B owns malware entity
+discovery and `ASSOCIATED_WITH` relationship assertion construction;
+persistence (including `RelationshipObservation` construction) belongs to
+PR 18C.
 
 Canonical trajectory:
 
@@ -193,7 +195,7 @@ The purpose of PR 18A is to establish a small, independently reviewable persiste
 
 Approved PR 18A contract decisions (maintainer review 01 remediation): the exact status lifecycle `PENDING -> RUNNING | FAILED`, `RUNNING -> COMPLETED | PARTIAL | FAILED` with terminal statuses and same-status no-ops; optional `expected_version` on status updates; and Investigation soft deletion. The lifecycle is revalidated against the locked PostgreSQL row, not only on a pre-lock Python snapshot. See `docs/DOMAIN_MODEL.md` and `docs/DATABASE.md`.
 
-## PR 18B --- Deterministic entity and relationship extraction
+## PR 18B --- Deterministic entity and relationship extraction [DONE]
 
 Deliver deterministic, database-free extraction of domain identities and relationship assertions from normalized provider Evidence.
 

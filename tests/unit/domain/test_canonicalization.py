@@ -128,10 +128,15 @@ def test_attack_technique_empty_raises() -> None:
 
 @pytest.mark.parametrize(
     "entity_type",
-    [EntityType.ORGANIZATION, EntityType.MALWARE],
+    [EntityType.ORGANIZATION],
 )
 def test_uncontracted_types_raise(entity_type: EntityType) -> None:
-    """Types without a confirmed canonicalization contract are rejected."""
+    """Types without a confirmed canonicalization contract are rejected.
+
+    ORGANIZATION deliberately has no canonicalizer: no source semantics in
+    v0.1 authorize organization entity discovery. MALWARE has the narrow
+    ThreatFox machine-identifier contract.
+    """
 
     with pytest.raises(ValueError):
         canonicalize(entity_type, "example")
@@ -187,3 +192,52 @@ def test_validate_dns_name_rejects_malformed(bad_name: str) -> None:
 
     with pytest.raises(ValueError):
         validate_dns_name(bad_name)
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("win.asyncrat", "win.asyncrat"),
+        ("win-treeview_qakbot-47", "win-treeview_qakbot-47"),
+        ("x", "x"),
+        ("a" * 128, "a" * 128),
+    ],
+)
+def test_malware_machine_ids_canonicalize_idempotently(raw: str, expected: str) -> None:
+    """Strict lowercase machine identifiers pass through unchanged."""
+
+    assert canonicalize(EntityType.MALWARE, raw) == expected
+    assert canonicalize(EntityType.MALWARE, expected) == expected
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        " ",
+        "AsyncRAT",
+        "WIN.ASYNCRAT",
+        "win asyncrat",
+        "win/asyncrat",
+        "win:asyncrat",
+        "win;asyncrat",
+        "win+asyncrat",
+        "программа",
+        "-leadingpunctuation",
+        ".leadingdot",
+        "_leadingunderscore",
+        "a" * 129,
+    ],
+)
+def test_malware_identity_rejects_non_machine_forms(bad: str) -> None:
+    """Uppercase, whitespace, disallowed punctuation, and overlong IDs are rejected."""
+
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.MALWARE, bad)
+
+
+def test_malware_printable_name_is_never_an_identity() -> None:
+    """Printable names never canonicalize: identity is the machine ID only."""
+
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.MALWARE, "AsyncRAT (aka Win32.AsyncRAT)")

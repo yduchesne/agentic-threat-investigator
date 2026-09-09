@@ -293,9 +293,11 @@ Providers do not:
 
 Relationships are derived deterministically from normalized evidence/source records through relationship extractors.
 
+The PR 18B extraction layer (`app/extraction`) is a pure, database-free application package. A dispatcher maps each `(source, evidence type)` pair to a source-specific extractor that converts one normalized, persisted `Evidence` observation into canonical discovered entity identities (`ExtractedEntity`) and evidence-backed relationship assertions (`RelationshipAssertion`, each carrying the supporting Evidence ID). Extraction consumes normalized facts only (never raw payloads), performs no I/O, persistence, provider calls, or LLM calls, re-canonicalizes every identity through the shared domain canonicalizers, fails explicitly on malformed facts (all-or-nothing per Evidence), and deduplicates within one Evidence deterministically. The exact per-source extraction matrix lives in `docs/DOMAIN_MODEL.md` and `docs/DATA_SOURCES.md`.
+
 No LLM is required to infer basic relationships such as DNS resolution or network ownership.
 
-Relationship extraction can discover entities. The Coordinator may then evaluate those entities as possible pivots.
+Relationship extraction can discover entities. The Coordinator may then evaluate those entities as possible pivots. PR 18C persists the extraction output atomically (entity upserts, stable relationships, immutable relationship observations).
 
 ## RAG
 

@@ -16,6 +16,15 @@ from .embeddings import (
     EmbeddingError,
     EmbeddingInputError,
 )
+from .extraction import (
+    EntityIdentity,
+    EvidenceExtractionError,
+    ExtractedEntity,
+    ExtractionErrorReason,
+    ExtractionResult,
+    RelationshipAssertion,
+    extract,
+)
 from .ingestion import (
     IngestionConflictError,
     IngestionRecordResult,
@@ -47,6 +56,12 @@ __all__ = [
     "EmbeddingClient",
     "EmbeddingError",
     "EmbeddingInputError",
+    "EntityIdentity",
+    "EvidenceExtractionError",
+    "ExtractionErrorReason",
+    "ExtractionResult",
+    "ExtractedEntity",
+    "RelationshipAssertion",
     "ResearchRetrievalError",
     "ResearchRetriever",
     "TokenBoundedChunker",
@@ -61,4 +76,5 @@ __all__ = [
     "ObjectStore",
     "SourceBatch",
     "SourceCapability",
+    "extract",
 ]
