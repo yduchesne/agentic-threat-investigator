@@ -32,6 +32,10 @@ from .ingestion import (
     IngestionSummary,
 )
 from .investigation_persistence import InvestigationPersistenceService
+from .provider_observation_persistence import (
+    ProviderObservationPersistenceResult,
+    ProviderObservationPersistenceService,
+)
 from .research import ResearchRetrievalError, ResearchRetriever
 from .sources import (
     CHECKPOINTING,
@@ -73,6 +77,8 @@ __all__ = [
     "IngestionService",
     "IngestionSummary",
     "InvestigationPersistenceService",
+    "ProviderObservationPersistenceResult",
+    "ProviderObservationPersistenceService",
     "ObjectStore",
     "SourceBatch",
     "SourceCapability",

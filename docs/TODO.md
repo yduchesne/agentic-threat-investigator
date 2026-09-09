@@ -4,6 +4,7 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 
 ## Contents
 
+- [Complete PR 18C secondary persistence hardening](#complete-pr-18c-secondary-persistence-hardening)
 - [Complete PR 18B secondary extraction-contract hardening](#complete-pr-18b-secondary-extraction-contract-hardening)
 - [Complete PR 18A secondary validation and test hardening](#complete-pr-18a-secondary-validation-and-test-hardening)
 - [Complete URLhaus secondary cross-field and model-hardening invariants](#complete-urlhaus-secondary-cross-field-and-model-hardening-invariants)
@@ -23,6 +24,114 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 - [Complete AbuseIPDB boundary regression coverage](#complete-abuseipdb-boundary-regression-coverage)
 - [Align the configuration example with the implemented AbuseIPDB composition](#align-the-configuration-example-with-the-implemented-abuseipdb-composition)
 - [Reject rather than normalize padded AbuseIPDB credentials](#reject-rather-than-normalize-padded-abuseipdb-credentials)
+
+## Complete PR 18C secondary persistence hardening
+
+**Priority:** MEDIUM
+
+**Origin:** PR 18C reviews 02-03. The HIGH findings from
+`.plans/pr-18c-fixes-02.md` are remediated; this section contains only
+lower-severity follow-up.
+
+### Problem
+
+The PR 18C implementation passes the current QA and PostgreSQL integration gates and
+now enforces the reviewed soft-delete/provenance invariants. The following secondary
+hardening, test-accuracy, and documentation items remain:
+
+- `_is_canonical_identity_violation()` accepts a PostgreSQL unique violation when
+  `constraint_name` is unavailable. Production psycopg diagnostics normally provide
+  the constraint, but accepting `None` weakens the stated rule that only the canonical
+  Entity identity constraint is recoverable.
+- `PostgresEntityRepository.upsert()` performs a canonical-identity query after every
+  caught `DBAPIError`, before checking whether the SQLSTATE is recoverable. A connection,
+  serialization, or unrelated database failure can therefore trigger a second query
+  and obscure the original failure.
+- `PostgresRelationshipRepository.upsert()` constructs
+  `SoftDeletedIdentityError` with the caller's newly generated candidate Relationship
+  UUID, not the UUID of the already-existing soft-deleted stable Relationship. The
+  transaction still fails closed, but the diagnostic identity is inaccurate.
+- `SoftDeletedIdentityError` is defined in `app.persistence.repositories` but is not
+  re-exported by `app.persistence`, unlike adjacent public persistence errors.
+- `assertion_order_key()` was added to the PR 18B extraction-model module solely for
+  PR 18C persistence ordering. It does not change extraction output, but keeping the
+  helper private to the persistence service would avoid expanding the extraction API
+  during a persistence-only PR.
+- The fake UnitOfWork records rollback calls but does not snapshot and restore fake
+  repository state. Its stage-failure tests prove lifecycle selection, not actual state
+  restoration. PostgreSQL coverage still injects only an observation-stage service
+  failure, not independent post-Evidence, post-Relationship, and audit failures.
+- `test_canonical_race_recovery_rejects_a_soft_deleted_row()` does not exercise the
+  production unique-race recovery branch: the service's earlier deleted-Entity check
+  fails before the test repository's synthetic `IntegrityError`, and that synthetic
+  error would be raised outside `PostgresEntityRepository.upsert()` if reached.
+- Migration `0012` now has upgrade/downgrade coverage and the PR 18C functions are in
+  `EXPECTED_FUNCTIONS`, but migration `0011_relationship_persistence` itself still has
+  no focused `0010 -> 0011 -> 0010 -> 0011` signature/behavior test.
+- RelationshipObservation integration assertions count history rows but do not directly
+  assert that the database-assigned observation version equals the immutable history
+  version and that history state carries the exact Evidence, Relationship, and
+  investigation identifiers.
+- The Relationship soft-delete test proves only that the new version is greater than
+  the old version; it does not pin sequence ownership directly. Also, the returned
+  `Relationship` domain model cannot expose the post-delete version/deletion metadata
+  promised by the repository method's contract, so callers must re-query persistence
+  details indirectly.
+- `docs/ARCHITECTURE.md` says dangling Evidence provenance is rejected "under the row
+  lock", although the new foreign key enforces it during observation insertion.
+  `docs/PR_PLAN.md` names only SQL API v0008 even though v0009 now owns graph-integrity
+  remediation, and `docs/DATABASE.md` still contains an extra blank line before the
+  `raw_payload` paragraph.
+
+These are not demonstrated CRITICAL/HIGH production failures. They do not bypass the
+current atomic service transaction or invalidate the canonical persisted graph.
+
+### Intended fix
+
+1. Require SQLSTATE `23505` and the exact Entity canonical-identity constraint name
+   before race recovery. Re-raise when diagnostics omit or report another constraint.
+2. Check SQLSTATE/type before querying raced Entity state. Query only for the entity
+   soft-deleted SQLSTATE or the exact canonical unique violation; preserve every other
+   original database exception unchanged.
+3. Preserve the actual deleted Relationship UUID in `SoftDeletedIdentityError` using a
+   bounded database diagnostic or safe post-savepoint lookup. Never convert failure
+   into reuse and never expose provider data.
+4. Re-export `SoftDeletedIdentityError` from
+   `agentic_threat_investigator.app.persistence` and add it to `__all__`.
+5. Move the assertion ordering helper into
+   `provider_observation_persistence.py` unless another extraction consumer has a
+   documented need. Keep ordering and PR 18B deduplication behavior unchanged.
+6. Make service fakes transactional by snapshotting state on enter and restoring it on
+   rollback. Add PostgreSQL service failures after Evidence, Relationship, Observation,
+   and audit writes without production switches.
+7. Replace the ineffective synthetic unique-race test with a test that invokes the real
+   repository recovery branch. Supply an `IntegrityError` carrying SQLSTATE `23505` and
+   the exact canonical constraint from inside the production call seam, then return a
+   soft-deleted durable row and assert `SoftDeletedIdentityError`.
+8. Add focused migration `0011` downgrade/re-upgrade verification without duplicating
+   the completed migration `0012` test.
+9. Assert RelationshipObservation row/history version parity and exact durable
+   provenance state in the canonical PostgreSQL scenario.
+10. Assert sequence ownership for Relationship DELETE versions using `currval` or an
+    equivalent transaction-local sequence check. Decide separately whether the
+    `Relationship` model/repository return contract should expose deletion metadata;
+    update the model and mappings together if that contract is retained.
+11. Correct the documentation wording to distinguish row-lock enforcement from FK
+    enforcement, mention v0009 where graph-integrity ownership is described, and remove
+    the duplicate blank line.
+
+### Acceptance checks
+
+- Only expected recoverable Entity SQLSTATEs cause a follow-up query.
+- Only the exact canonical Entity constraint is treated as a creation race.
+- Soft-deleted Relationship errors identify the durable row.
+- Public persistence imports expose the typed error consistently.
+- The unique-race test reaches the production recovery code it claims to cover.
+- Fake and PostgreSQL failure-stage tests prove no partial state remains.
+- Migrations 0011 and 0012 each have accurate, non-duplicative lifecycle coverage.
+- Observation and Relationship DELETE versions are proven database-owned.
+- Documentation accurately distinguishes lock and foreign-key guarantees.
+- `./build.sh --qa` and `./integration-test.sh` pass.
 
 ## Complete PR 18B secondary extraction-contract hardening
 

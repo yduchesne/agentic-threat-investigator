@@ -83,6 +83,22 @@ class EvidenceDuplicateIdentityError(ValueError):
         self.evidence_id = evidence_id
 
 
+class SoftDeletedIdentityError(ValueError):
+    """Raised when a soft-deleted stable identity is rediscovered.
+
+    The approved PR 18C policy is fail-closed: new observations never attach
+    to a deleted graph object, no second canonical row is created, and no
+    silent restore occurs. Recovery requires an explicit, separately reviewed
+    governance action rather than a persistence-time decision.
+    """
+
+    def __init__(self, object_type: str, object_id: UUID) -> None:
+        """Record the deleted object type and identity."""
+        super().__init__(f"soft-deleted {object_type} rediscovered: {object_id}")
+        self.object_type = object_type
+        self.object_id = object_id
+
+
 @dataclass(frozen=True)
 class EntityBatchItem:
     """An entity and its optional optimistic-concurrency expectation."""

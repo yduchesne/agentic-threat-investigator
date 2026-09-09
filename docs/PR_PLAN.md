@@ -238,7 +238,20 @@ Do not invent generic relationships merely because values co-occur in the same E
 
 PR 18B does **not** persist anything.
 
-## PR 18C --- Atomic provider-result and graph persistence
+## PR 18C --- Atomic provider-result and graph persistence [DONE]
+
+**Implemented contract:** PR 18B produces canonical identities and
+Evidence-backed assertions outside the database transaction. PR 18C validates
+that output in a zero-database preflight, then atomically persists
+subject/discovered entities, immutable Evidence, stable Relationships,
+append-only RelationshipObservations, and required audit/history through the
+versioned SQL API v0008 (`ati.upsert_relationship`,
+`ati.append_relationship_observation`). A new Evidence ID reuses stable graph
+identities and appends observations; replaying an Evidence ID is a typed
+duplicate conflict with no partial mutation; rediscovery of a soft-deleted
+Entity or Relationship is a fail-closed `SoftDeletedIdentityError` (no second
+canonical row, no silent restore). PR 19 remains unchanged and orchestrates
+this service.
 
 Deliver the application-level persistence path that combines already-normalized Evidence with the deterministic extraction output from PR 18B.
 

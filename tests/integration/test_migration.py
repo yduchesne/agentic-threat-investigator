@@ -5,6 +5,8 @@ import os
 from typing import Any
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -50,6 +52,9 @@ EXPECTED_FUNCTIONS = {
     "upsert_source_records",
     "upsert_documents",
     "replace_document_chunks",
+    "upsert_relationship",
+    "append_relationship_observation",
+    "soft_delete_relationship",
 }
 
 
@@ -247,3 +252,100 @@ async def test_jsonb_diff_semantics() -> None:
         }
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_graph_integrity_schema_contract() -> None:
+    """v0009 installs the provenance FK and the relationship delete function."""
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            foreign_key = await connection.scalar(text("""
+                SELECT pg_get_constraintdef(con.oid)
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
+                  AND con.conname = 'relationship_observation_evidence_fk'
+            """))
+            parameters = await connection.execute(text("""
+                SELECT p.parameter_name, p.data_type
+                FROM information_schema.parameters p
+                JOIN information_schema.routines r
+                  ON r.specific_schema = 'ati'
+                 AND r.routine_name = 'soft_delete_relationship'
+                 AND r.specific_name = p.specific_name
+                WHERE p.parameter_mode = 'IN'
+                ORDER BY p.ordinal_position
+            """))
+    finally:
+        await engine.dispose()
+    assert foreign_key is not None
+    assert "evidence(id)" in foreign_key
+    # Evidence and observations are immutable; deletion is soft only, so the
+    # provenance foreign key must never cascade.
+    assert "CASCADE" not in foreign_key
+    assert [(row[0], row[1]) for row in parameters] == [
+        ("p_id", "uuid"),
+        ("p_actor_id", "uuid"),
+        ("p_expected_version", "bigint"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_graph_integrity_migration_downgrade_and_re_upgrade() -> None:
+    """Migration 0012 downgrades to v0008 and re-upgrades cleanly."""
+    alembic_cfg = Config("alembic.ini")
+
+    async def schema_state() -> tuple[bool, bool]:
+        """Return (soft_delete_relationship present, FK present)."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                functions = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT routine_name FROM information_schema.routines "
+                            "WHERE routine_schema = 'ati'"
+                        )
+                    )
+                }
+                foreign_key = await connection.scalar(text("""
+                    SELECT con.conname FROM pg_constraint con
+                    JOIN pg_class rel ON rel.oid = con.conrelid
+                    JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                    WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
+                      AND con.conname = 'relationship_observation_evidence_fk'
+                """))
+        finally:
+            await engine.dispose()
+        return "soft_delete_relationship" in functions, foreign_key is not None
+
+    command.downgrade(alembic_cfg, "0011_relationship_persistence")
+    function_present, foreign_key_present = await schema_state()
+    assert not function_present
+    assert not foreign_key_present
+    # The v0008 relationship write API remains installed after the downgrade.
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            functions = {
+                row[0]
+                for row in await connection.execute(
+                    text(
+                        "SELECT routine_name FROM information_schema.routines "
+                        "WHERE routine_schema = 'ati'"
+                    )
+                )
+            }
+    finally:
+        await engine.dispose()
+    assert {"upsert_relationship", "append_relationship_observation"} <= functions
+
+    command.upgrade(alembic_cfg, "head")
+    function_present, foreign_key_present = await schema_state()
+    assert function_present
+    assert foreign_key_present

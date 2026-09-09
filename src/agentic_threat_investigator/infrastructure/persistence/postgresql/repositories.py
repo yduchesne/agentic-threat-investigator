@@ -7,6 +7,7 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.persistence.repositories import (
@@ -15,10 +16,25 @@ from agentic_threat_investigator.app.persistence.repositories import (
     EntityBatchItem,
     EntityBatchResult,
     EntityRepository,
+    SoftDeletedIdentityError,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
 
+from .errors import SQLSTATE_ENTITY_SOFT_DELETED, sqlstate
 from .models import EntityRow
+
+_UNIQUE_SQLSTATE = "23505"
+_CANONICAL_IDENTITY_CONSTRAINT = "entity_entity_type_canonical_value_key"
+
+
+def _is_canonical_identity_violation(error: IntegrityError) -> bool:
+    """Return whether the error is the entity canonical-identity violation."""
+    orig = getattr(error, "orig", None)
+    if getattr(orig, "sqlstate", None) != _UNIQUE_SQLSTATE:
+        return False
+    diag = getattr(orig, "diag", None)
+    constraint = getattr(diag, "constraint_name", None)
+    return constraint in (None, _CANONICAL_IDENTITY_CONSTRAINT)
 
 
 class PostgresEntityRepository(EntityRepository):
@@ -63,24 +79,58 @@ class PostgresEntityRepository(EntityRepository):
     ) -> Entity:
         """Invoke the authoritative PostgreSQL entity write function."""
         canonical_value = canonicalize(entity.type, entity.value)
-        result = await self._session.execute(
-            text("""
-                SELECT id, version, created FROM ati.upsert_entity(
-                    :id, :entity_type, :canonical_value, :display_name,
-                    CAST(:attributes AS jsonb), :content_hash, :expected_version
+        try:
+            # A savepoint makes the canonical unique-identity race recoverable
+            # without poisoning the caller's transaction. The database remains
+            # authoritative; this is not a process-local lock.
+            async with self._session.begin_nested():
+                result = await self._session.execute(
+                    text("""
+                        SELECT id, version, created FROM ati.upsert_entity(
+                            :id, :entity_type, :canonical_value, :display_name,
+                            CAST(:attributes AS jsonb), :content_hash, :expected_version
+                        )
+                    """),
+                    {
+                        "id": entity.id,
+                        "entity_type": entity.type.value,
+                        "canonical_value": canonical_value,
+                        "display_name": entity.display_name,
+                        "attributes": json.dumps(entity.attributes),
+                        "content_hash": entity.content_hash,
+                        "expected_version": expected_version,
+                    },
                 )
-            """),
-            {
-                "id": entity.id,
-                "entity_type": entity.type.value,
-                "canonical_value": canonical_value,
-                "display_name": entity.display_name,
-                "attributes": json.dumps(entity.attributes),
-                "content_hash": entity.content_hash,
-                "expected_version": expected_version,
-            },
-        )
-        written_id, _version, _created = result.one()
+                written_id, _version, _created = result.one()
+        except DBAPIError as error:
+            state = sqlstate(error)
+            raced = await self.get_by_identity(
+                entity.type.value, canonical_value, include_deleted=True
+            )
+            if state == SQLSTATE_ENTITY_SOFT_DELETED:
+                # The savepoint rolled back the failed statement; re-read the
+                # canonical identity to report the durable deleted identity.
+                if (
+                    raced is not None
+                    and raced.deleted_at is not None
+                    and raced.id is not None
+                ):
+                    raise SoftDeletedIdentityError("entity", raced.id) from error
+                raise
+            # Only the canonical-identity unique violation is recoverable as
+            # a concurrent-creation race; every other constraint failure must
+            # propagate so real write errors are never masked as "existing".
+            if not (
+                isinstance(error, IntegrityError)
+                and _is_canonical_identity_violation(error)
+                and raced is not None
+            ):
+                raise
+            if raced.deleted_at is not None:
+                if raced.id is None:  # pragma: no cover - persisted rows have IDs
+                    raise
+                raise SoftDeletedIdentityError("entity", raced.id) from error
+            return raced
         row = await self._session.get(EntityRow, written_id)
         if row is None:  # pragma: no cover - the function and transaction are atomic
             raise RuntimeError("entity write returned no row")

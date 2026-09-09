@@ -307,7 +307,32 @@ They validate:
 - PR 18A concurrency invariants: locked-row lifecycle revalidation with a
   controlled two-session transition race, typed duplicate-identity errors
   under concurrent inserts, and evidence insertion blocked across a
-  concurrent parent soft deletion.
+  concurrent parent soft deletion;
+- PR 18C atomic graph persistence: the canonical DNS/ThreatFox scenarios
+  (domain RESOLVES_TO IP, IP ASSOCIATED_WITH malware) with exact Entity,
+  Evidence, Relationship, RelationshipObservation, and history counts;
+  repeated observations under new Evidence IDs reusing stable identities;
+  same-Evidence-ID replay conflicting with unchanged counts; empty
+  extraction persisting Evidence only; fact-only/URLhaus evidence creating
+  no invented edges; typed preflight errors leaving zero rows; injected
+  mid-transaction failures leaving no partial state; two concurrent writers
+  converging on one canonical Entity/Relationship with both observations;
+  fail-closed soft-deleted Entity/Relationship rediscovery; graph
+  reconstruction from durable rows without re-extraction; and no spurious
+  version bumps for unchanged re-observation;
+- PR 18C graph-integrity hardening: a controlled two-transaction Entity
+  soft-deletion race proving the locked write rejects the deleted identity
+  with full observation rollback and one remaining canonical row; the
+  canonical-create recovery path rejecting a raced row that was soft-deleted
+  before recovery; database-enforced (not only preflight) soft-deleted
+  Entity writes; Relationship soft deletion allocating a sequence version
+  and exactly one immutable DELETE history row with diff and actor
+  preservation, plus stale/missing/repeat rejections with zero extra
+  mutation or history; the named non-cascading
+  `relationship_observation_evidence_fk` rejecting dangling Evidence
+  references with no residual observation or history rows; and migration
+  0012 contract checks covering the FK, the `ati.soft_delete_relationship`
+  signature, and an isolated downgrade/re-upgrade cycle.
 
 Do not replace critical PostgreSQL integration coverage with SQLite.
 

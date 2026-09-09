@@ -60,6 +60,44 @@ Relationship uniqueness:
 
 `(source_entity_id, relationship_type_urn, target_entity_id)`
 
+Relationship writes route through the versioned SQL API: `ati.upsert_relationship`
+resolves the stable three-part identity, returns observed state unchanged for reuse
+(no version and no history), makes creation race-safe through the authoritative
+unique index, and `ati.append_relationship_observation` appends one immutable
+observation with a database-allocated version and its CREATE history in the same
+transaction. Python repositories never allocate relationship versions or write
+relationship history directly.
+
+### Soft-deleted stable identity rediscovery (PR 18C policy)
+
+Rediscovery of a soft-deleted Entity or Relationship raises the typed
+`SoftDeletedIdentityError` and fails closed:
+
+- no second canonical row is ever created;
+- the soft-deleted object is never silently restored or reused;
+- no new Evidence, observation, or relationship mutation is attached to the
+  deleted object, and the surrounding unit of work rolls back.
+
+Recovery requires an explicit, separately reviewed governance action rather than a
+persistence-time decision.
+
+The policy is enforced by the database write path, not only by application
+pre-checks: `ati.upsert_entity` rejects a soft-deleted canonical identity with the
+dedicated `U18C2` SQLSTATE while holding the authoritative row lock, so a soft
+deletion committed after the caller's pre-lock read is still rejected before any
+version allocation, metadata update, or history write.
+
+Relationship soft deletion uses the versioned SQL API: `ati.soft_delete_relationship`
+validates the active row under lock, rejects absent/already-deleted edges and stale
+expected versions with dedicated SQLSTATEs, allocates the new version from the
+relationship sequence, and writes exactly one immutable DELETE history row with the
+canonical JSONB diff in the same transaction.
+
+RelationshipObservation Evidence provenance is enforced relationally by the named,
+non-cascading foreign key `relationship_observation_evidence_fk`
+(`relationship_observation.evidence_id -> evidence(id)`); a dangling Evidence
+reference is rejected at insert time and observations are immutable afterwards.
+
 ### Versioned analytical outputs
 
 New version/row rather than silent overwrite:
@@ -124,6 +162,7 @@ A DNS relationship is not physically removed because a later lookup no longer ob
 Evidence is immutable.
 
 A new provider retrieval creates a new Evidence observation rather than overwriting the prior observation.
+
 
 Raw payload, when retained, is part of that immutable observation.
 
@@ -235,7 +274,7 @@ Evidence
 
 either commit together or not at all.
 
-Transactions must remain short.
+Transactions must remain short. PR 18B extraction and provider I/O occur before BEGIN; PR 18C preflight validates without database access (Evidence identity, canonical values, assertion Evidence-ID equality, endpoint coverage, and the deterministic duplicate policy), then resolves canonical identities, inserts immutable Evidence, reuses stable Relationships, appends RelationshipObservations, and commits once. A missing or soft-deleted parent Investigation is a typed error before any graph mutation. Empty extraction never deletes graph history.
 
 ## Batch persistence
 
@@ -351,7 +390,7 @@ Any adapter that persists a `SourceRecord` must recompute `source_record_content
 
 Alembic orchestrates schema migrations.
 
-Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files.
+Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0008 (`migrations/sql/ati/v0008/relationship_persistence.sql`) owns relationship/observation writes for PR 18C.
 
 Rules:
 

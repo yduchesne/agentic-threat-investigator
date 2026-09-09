@@ -128,7 +128,13 @@ class ExtractionResult(BaseModel):
 The persisted ``Relationship`` model is never an extraction output because
 it requires database entity UUIDs; extraction never fabricates identifiers.
 ``RelationshipObservation`` creation, entity/relationship upserts, and
-transactionality belong to PR 18C.
+transactionality belong to PR 18C. The application service consumes this
+output without reinterpretation: preflight rejects non-canonical identities,
+assertion Evidence-ID mismatches, uncovered endpoints, and duplicates
+(extraction output is already deduplicated); it then resolves canonical
+identities, preserves the Evidence ID exactly, and appends one immutable
+observation per assertion in the same transaction as Evidence and graph
+mutations.
 
 ### Extraction rules
 
