@@ -104,8 +104,21 @@ class ProviderError(BaseModel):
 class ProviderResult(BaseModel):
     """The output of a single provider investigation call.
 
-    Contains normalized evidence and typed errors. A valid miss is both lists
-    empty; it is not a benign assessment.
+    Contains normalized evidence and typed errors; the two collections are
+    validated independently and may legally be present together (for example
+    Google Public DNS aggregates independent per-RR-type query outcomes). A
+    valid miss is both lists empty; it is not a benign assessment.
+
+    Execution-status contract (approved for PR 19B orchestration): a mixed
+    Evidence-plus-errors result is a valid partial provider result. The
+    provider executor persists valid Evidence in provider-return order and
+    returns ``SUCCEEDED`` when at least one Evidence observation committed
+    and no extraction, persistence, or timeline failure subsequently
+    occurred; only the first provider error, in provider-return order, is
+    retained (its stable code and retryability, never the free-form
+    message), and the ``PROVIDER_WORK_COMPLETED`` timeline event exposes the
+    retained code. Errors without Evidence fail the work; an all-empty
+    result succeeds. No PARTIAL execution status exists in PR 19B.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from contextlib import AsyncExitStack
+from types import MappingProxyType
 
+from agentic_threat_investigator.app.providers import EvidenceProvider
 from agentic_threat_investigator.app.secrets import (
     EnvVarSecretsResolver,
     SecretsResolver,
 )
 from agentic_threat_investigator.config.settings import Settings
+from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.infrastructure.object_store import (
     FileSystemObjectStore,
     object_store_for_uri,
@@ -324,6 +328,26 @@ class ProviderComposition:  # pylint: disable=too-many-instance-attributes
         is configured; a ``None`` value is the documented disabled state.
         """
         return self._dbip_city_lite
+
+    def provider_registry(self) -> Mapping[SourceId, EvidenceProvider]:
+        """Return the typed SourceId-to-provider registry for orchestration.
+
+        Only composed providers appear in the mapping; an absent entry is the
+        documented not-configured state. The mapping is read-only and keyed by
+        enum members, so orchestration resolves a work item's ``SourceId``
+        without string conversion.
+        """
+        registry: dict[SourceId, EvidenceProvider] = {
+            SourceId.GOOGLE_PUBLIC_DNS: self.google_dns,
+            SourceId.RDAP: self.rdap,
+            SourceId.IPINFO_LITE: self.ipinfo_lite,
+            SourceId.ABUSEIPDB: self.abuseipdb,
+            SourceId.THREATFOX: self.threatfox,
+            SourceId.URLHAUS: self.urlhaus,
+        }
+        if self._dbip_city_lite is not None:
+            registry[SourceId.DBIP_CITY_LITE] = self._dbip_city_lite
+        return MappingProxyType(registry)
 
     async def aclose(self) -> None:
         """Close all owned local readers and clients, re-raising the first failure."""

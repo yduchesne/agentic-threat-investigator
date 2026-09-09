@@ -167,7 +167,79 @@ START -> initialize -> select_work -> execute_work -> record_outcome -> select_w
                      ^-- (pending work -> execute_work | no work -> END)
 ```
 
-The skeleton implements mechanics only: FIFO selection, duplicate suppression for identical work, provider-call counter increments, and serializable operational state. Real provider execution is PR 19B; LLM/Evidence Analyst behavior is PR 20; adaptive coordinator/pivot behavior, budget enforcement, stopping policy, and trajectory evaluation arrive with PR 21. The domain layer does not depend on LangGraph; only `app/orchestration/graph.py` does.
+The skeleton implements mechanics only: FIFO selection, duplicate suppression for identical work, provider-call counter increments, and serializable operational state. Real provider execution arrived with PR 19B; LLM/Evidence Analyst behavior is PR 20; adaptive coordinator/pivot behavior, budget enforcement, stopping policy, and trajectory evaluation arrive with PR 21. The domain layer does not depend on LangGraph; only `app/orchestration/graph.py` does.
+
+### Real provider execution path (PR 19B)
+
+The production `WorkExecutor` is `ProviderWorkExecutor` (`app/orchestration/provider_executor.py`), composed with explicit injected dependencies: an `EntityReader` (short UnitOfWork-backed target lookup closed before any provider I/O), a typed provider registry (`Mapping[source URN, EvidenceProvider]`, built from `ProviderComposition.provider_registry()`), the PR 18B deterministic extractor, the PR 18C `ProviderObservationPersistenceService`, and an `InvestigationTimelineSink`. Its per-work-item flow:
+
+```text
+ProviderWorkItem (provider, entity_id, depth)
+  -> resolve persisted target Entity (short transaction, closed)
+  -> validate provider applicability (provider.supports)
+  -> append PROVIDER_WORK_STARTED timeline event
+  -> call the existing EvidenceProvider (outside all transactions)
+  -> validate the complete returned ProviderResult against the selected
+         provider, owning investigation, and persisted target
+  -> for each normalized Evidence, in provider-return order:
+         assign the Evidence identity if the provider did not
+         PR 18B deterministic extraction (outside transactions)
+         PR 18C atomic observation persistence
+         append EVIDENCE_PERSISTED timeline event
+  -> append PROVIDER_WORK_COMPLETED (aggregate committed IDs)
+  -> ProviderExecutionOutcome (evidence/entity/relationship IDs + safe error)
+```
+
+Returned provider data is validated before any extraction or persistence. The
+persisted Entity resolved for `work_item.entity_id` is authoritative: it must
+carry exactly that entity ID and an already-canonical value, or a faulty
+reader could substitute another Entity while timeline events retain the
+requested target ID. The result provider must equal the registry provider and
+the work item source, and every returned Evidence must carry the owning
+investigation ID and a subject whose type, canonical value, and (when present)
+identifier exactly match the authoritative persisted target. Subject values
+must already be canonical and equal the persisted target value exactly:
+canonical equivalence after normalization is not accepted. Malformed or
+noncanonical provider subjects and reader results that are not the exact
+selected Entity become safe `provider_binding` failures before any provider
+output is processed, extraction runs, or an observation is written;
+canonicalization errors fold into that deterministic failure and never escape
+the executor or appear in logs, state, or timeline events. The whole returned
+tuple is validated before the first Evidence is processed, so one invalid item
+never lets an earlier item commit; a violation fails the work with the stable
+`provider_binding` code and no observation is written.
+
+Failure semantics: an unknown provider, provider registry/key identity
+mismatch, missing/soft-deleted target, unsupported target, provider error,
+extraction failure, or persistence failure yields a failed typed outcome with a
+stable error code (`provider_not_configured`, `provider_binding`,
+`target_not_found`, `unsupported_indicator`, provider codes,
+`extraction_error`, `persistence_error`); already committed Evidence
+observations are never compensated. A failed work outcome always retains every
+Evidence, discovered Entity, and Relationship ID committed before the failure
+so `record_provider_outcome` can merge them into `InvestigationState`, even
+when the final failure timeline event cannot be appended.
+
+Mixed evidence-plus-provider results follow the approved PR 19B
+partial-result contract: valid Evidence is processed and persisted in
+provider-return order; when at least one Evidence observation committed and
+no extraction, persistence, or timeline failure followed, the status is
+`SUCCEEDED` and only the first provider error (provider-return order) is
+retained — its stable code and retryability, never its free-form message. The
+retained code is carried on the `PROVIDER_WORK_COMPLETED` event's
+`error_code` so the timeline accurately exposes the partial result. If
+extraction, persistence, or timeline processing fails after Evidence
+commits, `FAILED` takes precedence and all previously committed IDs remain in
+the outcome. Errors without Evidence remain `FAILED`; an all-empty result
+remains `SUCCEEDED`. No PARTIAL execution status exists in PR 19B. Caught
+provider, persistence, and timeline exceptions are never attached to logs: a
+bounded fixed-format summary carrying stable identifiers only is emitted
+instead. `asyncio.CancelledError` propagates unchanged.
+Extracted entities update `discovered_entity_ids` only; PR 21 owns whether
+they become pivots. The provider-call counter increments exactly once per
+executed work item.
+
+The investigation timeline (`domain/investigation_timeline.py`, table `ati.investigation_timeline_event`) is a distinct, append-only, analyst-facing workflow history. It is separate from AuditEvent (governance/security), domain-object history, structured logs, and trace backends. Events carry typed identifiers, a stable event type, and an optional bounded error code only: no prose reasoning, raw payloads, secrets, stack traces, or chain-of-thought. Timeline appends run in their own short transactions and are deliberately not transactionally atomic with PR 18C persistence; a failed append surfaces a typed `timeline_error` without rolling back committed domain data.
 
 ## Agent boundaries
 

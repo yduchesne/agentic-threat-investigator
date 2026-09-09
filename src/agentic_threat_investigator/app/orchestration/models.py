@@ -85,9 +85,9 @@ def record_provider_outcome(
     """Apply deterministic bookkeeping for one executed work item.
 
     Moves the executed work item from pending to completed (exactly once),
-    records the outcome, merges discovered entity IDs preserving first-seen
-    order, appends the outcome error when present, increments
-    ``provider_calls_used`` exactly once, and clears
+    records the outcome, merges discovered entity, evidence, and relationship
+    IDs preserving first-seen order, appends the outcome error when present,
+    increments ``provider_calls_used`` exactly once, and clears
     ``current_provider_work``. Failure is still completed work; retries are
     out of scope.
     """
@@ -115,6 +115,10 @@ def record_provider_outcome(
             ],
             "current_provider_work": None,
             "last_provider_outcome": outcome,
+            "evidence_ids": _merge_unique_ids(state.evidence_ids, outcome.evidence_ids),
+            "relationship_ids": _merge_unique_ids(
+                state.relationship_ids, outcome.relationship_ids
+            ),
             "discovered_entity_ids": _merge_unique_ids(
                 state.discovered_entity_ids, outcome.discovered_entity_ids
             ),

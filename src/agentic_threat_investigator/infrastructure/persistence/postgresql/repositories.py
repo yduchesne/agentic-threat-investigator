@@ -74,6 +74,17 @@ class PostgresEntityRepository(EntityRepository):
         row = (await self._session.execute(statement)).scalar_one_or_none()
         return None if row is None else self._to_domain(row)
 
+    async def get_by_id(
+        self, entity_id: UUID, *, include_deleted: bool = False
+    ) -> Entity | None:
+        """Return the visible entity with the given identifier, if any."""
+        row = await self._session.get(EntityRow, entity_id)
+        if row is None:
+            return None
+        if not include_deleted and row.deleted_at is not None:
+            return None
+        return self._to_domain(row)
+
     async def upsert(
         self, entity: Entity, *, expected_version: int | None = None
     ) -> Entity:

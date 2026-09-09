@@ -29,12 +29,12 @@ from agentic_threat_investigator.app.extraction.models import (
 )
 from agentic_threat_investigator.app.persistence.repositories import (
     AuditEventRepository,
-    InvestigationWriteResult,
     EntityRepository,
     EvidenceDuplicateIdentityError,
     EvidenceRepository,
     InvestigationNotFoundError,
     InvestigationRepository,
+    InvestigationWriteResult,
     RelationshipObservationRepository,
     RelationshipRepository,
     SoftDeletedIdentityError,
@@ -128,6 +128,17 @@ class FakeEntityRepository(EntityRepository):
     ) -> Entity | None:
         self.get_calls.append((entity_type, canonical_value))
         return self.rows.get((EntityType(entity_type), canonical_value))
+
+    async def get_by_id(
+        self, entity_id: UUID, *, include_deleted: bool = False
+    ) -> Entity | None:
+        """Return the visible entity with the given identifier, if any."""
+        for row in self.rows.values():
+            if row.id == entity_id:
+                if not include_deleted and row.deleted_at is not None:
+                    return None
+                return row.model_copy()
+        return None
 
     async def upsert(
         self, entity: Entity, *, expected_version: int | None = None

@@ -28,6 +28,9 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
 )
+from agentic_threat_investigator.domain.investigation_timeline import (
+    InvestigationTimelineEvent,
+)
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -304,6 +307,25 @@ class AuditEventRepository(
         """Return bounded events matching the supplied filters."""
 
 
+class InvestigationTimelineRepository(
+    ABC
+):  # pylint: disable=too-few-public-methods  # pragma: no cover
+    """Append-only repository for analyst-facing investigation timeline events.
+
+    Timeline events are immutable: no update or delete operation exists.
+    """
+
+    @abstractmethod
+    async def append(self, event: InvestigationTimelineEvent) -> None:
+        """Append one event in the caller's transaction without committing."""
+
+    @abstractmethod
+    async def list_by_investigation(
+        self, investigation_id: UUID
+    ) -> list[InvestigationTimelineEvent]:
+        """Return an investigation's events in chronological deterministic order."""
+
+
 class EntityRepository(ABC):  # pragma: no cover
     """Repository for canonical, soft-deletable entities."""
 
@@ -312,6 +334,12 @@ class EntityRepository(ABC):  # pragma: no cover
         self, entity_type: str, canonical_value: str, *, include_deleted: bool = False
     ) -> Entity | None:
         """Return the entity with the given canonical identity, if visible."""
+
+    @abstractmethod
+    async def get_by_id(
+        self, entity_id: UUID, *, include_deleted: bool = False
+    ) -> Entity | None:
+        """Return the visible entity with the given identifier, if any."""
 
     @abstractmethod
     async def upsert(
@@ -552,6 +580,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     ingestion_checkpoints: IngestionCheckpointRepository
     documents: DocumentRepository
     document_chunks: DocumentChunkRepository
+    timeline_events: InvestigationTimelineRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:

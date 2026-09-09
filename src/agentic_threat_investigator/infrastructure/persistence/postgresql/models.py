@@ -10,7 +10,7 @@ from typing import Any, Self
 from uuid import UUID
 
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, String, text
-from sqlalchemy.dialects.postgresql import BYTEA
+from sqlalchemy.dialects.postgresql import ARRAY, BYTEA
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import UserDefinedType
@@ -286,3 +286,30 @@ class RelationshipObservationRow(Base):  # pylint: disable=too-few-public-method
     source: Mapped[str] = mapped_column(String)
     confidence: Mapped[float | None]
     version: Mapped[int] = mapped_column(BigInteger)
+
+
+class InvestigationTimelineEventRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for an immutable analyst-facing investigation timeline event."""
+
+    __tablename__ = "investigation_timeline_event"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    investigation_id: Mapped[UUID] = mapped_column(ForeignKey("ati.investigation.id"))
+    event_type: Mapped[str] = mapped_column(String)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    provider: Mapped[str | None] = mapped_column(String)
+    target_entity_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    evidence_ids: Mapped[list[UUID]] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), default=list
+    )
+    entity_ids: Mapped[list[UUID]] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), default=list
+    )
+    relationship_ids: Mapped[list[UUID]] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), default=list
+    )
+    error_code: Mapped[str | None] = mapped_column(String)
+    sequence: Mapped[int] = mapped_column(
+        BigInteger,
+        server_default=text("nextval('ati.investigation_timeline_event_seq')"),
+    )

@@ -28,6 +28,7 @@ EXPECTED_TABLES = {
     "ingestion_checkpoint",
     "document",
     "document_chunk",
+    "investigation_timeline_event",
     "alembic_version",
 }
 

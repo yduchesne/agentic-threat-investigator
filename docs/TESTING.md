@@ -197,7 +197,51 @@ Priority unit-test areas include:
   validation, FIFO queue selection, duplicate suppression, outcome
   bookkeeping, provider-call counter accounting, JSON state round-trip,
   and graph termination on queue exhaustion via the LangGraph skeleton
-  in `app/orchestration`.
+  in `app/orchestration`;
+- deterministic provider execution (PR 19B): target/provider resolution,
+  applicability validation, empty-success and error-only outcomes,
+  cancellation propagation, extraction-before-persistence sequencing,
+  per-Evidence PR 18C invocation, outcome ID bookkeeping (evidence,
+  relationship, discovered entity merges; one provider-call increment per
+  work item), and timeline event ordering/failure semantics, via fakes in
+  `tests/unit/app/orchestration/test_provider_executor.py`;
+- provider-output provenance and partial-failure regressions (PR 19B
+  fixes): binding validation of the returned provider, owning
+  investigation, and persisted target (type, canonical value, subject
+  identifier; a two-Evidence tuple with one invalid item proves zero
+  extraction and zero persistence for the whole result), retention of all
+  committed Evidence/Entity/Relationship IDs when a later Evidence fails
+  extraction or persistence (including through state bookkeeping and when
+  the failure timeline event itself cannot append), and bounded
+  secret-free logging of caught provider/persistence/timeline exceptions
+  (synthetic markers never appear in any log message), via
+  `tests/unit/app/orchestration/test_provider_executor_regressions.py`.
+
+### Deterministic vertical-slice provider execution (PR 19B)
+
+`tests/integration/test_provider_execution_pipeline.py` proves the real
+pipeline against the isolated migrated PostgreSQL database and the
+in-process synthetic HTTP boundary (real `httpx.AsyncClient` over
+`ASGITransport` into an ATI-authored FastAPI stub upstream guarded by a
+host allowlist; no public internet):
+
+```text
+persisted DOMAIN root
+  -> queued GOOGLE_PUBLIC_DNS work
+  -> real GooglePublicDnsProvider over the synthetic upstream
+  -> normalized DNS Evidence
+  -> PR 18B deterministic extraction
+  -> PR 18C atomic persistence
+  -> ProviderExecutionOutcome + persisted timeline events
+```
+
+The slice asserts the persisted Evidence row, the discovered IP entity, the
+stable relationship and its immutable observation, the outcome/state ID
+bookkeeping (`provider_calls_used == 1`), the started/evidence-persisted/
+completed timeline sequence, and that discovered entities are never
+automatically enqueued. The provider's internal HTTP parsing is not mocked.
+Timeline repository integration tests cover append, chronological read,
+foreign-key rejection, rollback, and append-only semantics.
 
 ## Provider contract tests
 
