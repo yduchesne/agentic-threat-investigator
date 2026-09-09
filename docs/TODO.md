@@ -54,7 +54,11 @@ remain:
 - documentation says callers "must not supply" database-owned Investigation
   metadata, while the Pydantic model necessarily accepts those fields so
   repositories can reconstruct persisted resources. Writes safely ignore
-  them, but the wording overstates what the model enforces.
+  them, but the wording overstates what the model enforces;
+- `test_colliding_operational_state_cannot_spoof_columns()` asserts
+  `created_at.year == 2026` even though `created_at` comes from PostgreSQL
+  `now()`. The test will fail solely because the calendar year changes, not
+  because deserialization precedence regresses.
 
 These are not demonstrated CRITICAL/HIGH production failures. The locked SQL
 function independently enforces the lifecycle, PostgreSQL returns aware
@@ -84,6 +88,10 @@ caller-supplied persistence metadata.
    rely on supplied persistence metadata during writes: repository reads
    populate it authoritatively, while write serialization ignores it. Do not
    claim Pydantic rejects those fields unless such an API is actually added.
+6. Remove the hard-coded `created_at.year == 2026` assertion. Capture the
+   authoritative dedicated-column timestamps before injecting colliding JSONB,
+   then assert the later repository read returns those exact values and not the
+   spoofed 2020 values.
 
 ### Acceptance checks
 
@@ -94,6 +102,8 @@ caller-supplied persistence metadata.
 - Every disallowed status pair is covered automatically or explicitly.
 - The 0010 migration passes upgrade/downgrade/upgrade in an isolated test DB.
 - Documentation matches the accepted model and write behavior.
+- The collision regression compares authoritative timestamps exactly and has
+  no dependency on the current calendar year.
 - `./build.sh --qa` and `./integration-test.sh` pass.
 
 ## Complete URLhaus secondary cross-field and model-hardening invariants
