@@ -123,6 +123,37 @@ Langfuse and Phoenix are plausible LLM-aware replacements. Generic OTel-compatib
 
 v0.1 should architect for OTel portability without requiring a full OTel stack before it provides value.
 
+## LLM operation telemetry (PR 20B)
+
+The Evidence Analyst routes model calls through the ``LlmClient`` boundary.
+The LangChain adapter **disables automatic content-bearing LangSmith/LangChain
+tracing** for Evidence Analyst invocations (via the installed langsmith
+tracing context) before building or running the structured-output runnable.
+A normal LangChain invocation can be automatically traced by LangSmith with
+message inputs and model outputs; passing safe metadata alone does NOT
+suppress that. Passing safe metadata therefore never re-enables content
+capture, and the tests prove no tracer is installed for a suppressed call.
+
+Safe operation metadata is prepared locally and can be attached to the local
+runnable configuration without exporting prompts, Evidence facts, or model
+output. Only the documented non-content keys are ever emitted:
+
+```text
+metadata = { "operation": "urn:ati:llm:evidence_analysis",
+             "investigation_id": "<uuid>" }
+```
+
+The ``operation`` value always comes from the per-call ``operation_name``
+argument, never from stale constructor state. Prompts, evidence facts, model
+output, raw provider payloads, API keys, database sessions, and hidden
+chain-of-thought are never captured in LLM telemetry. The adapter rejects any
+other metadata key at construction, so content cannot leak through a caller
+mistake. Tracing is not the investigation timeline, and tracing failures
+remain non-fatal for investigation execution.
+
+Future prompt/content tracing requires an explicit privacy decision plus a
+tested redaction/opt-in mechanism; PR 20B ships none.
+
 ## Correlation
 
 Telemetry propagates stable identifiers:

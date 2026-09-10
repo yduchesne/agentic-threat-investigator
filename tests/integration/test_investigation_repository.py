@@ -18,6 +18,7 @@ from agentic_threat_investigator.app.investigation_persistence import (
     InvestigationPersistenceService,
 )
 from agentic_threat_investigator.app.persistence.repositories import (
+    BatchOutcome,
     InvestigationDuplicateIdentityError,
     InvestigationNotFoundError,
     InvestigationVersionConflictError,
@@ -33,6 +34,7 @@ from agentic_threat_investigator.domain.evidence import (
 from agentic_threat_investigator.domain.investigation import (
     InvalidInvestigationStatusTransitionError,
     InvestigationBudget,
+    InvestigationBudgetExhaustedError,
     InvestigationError,
     InvestigationState,
     InvestigationStatus,
@@ -621,6 +623,75 @@ async def test_started_at_column_is_not_nullable(
                       AND column_name = 'started_at'
                 """))).scalar_one()
         assert nullable == "NO"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_update_budget_persists_counter_and_history(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A budget write bumps the version and writes immutable history (PR 20B)."""
+    state = investigation_state()
+    async with uow_factory() as uow:
+        created = await uow.investigations.create(state)
+    updated = state.budget.model_copy(update={"llm_calls_used": 1})
+    async with uow_factory() as uow:
+        result = await uow.investigations.update_budget(
+            state.investigation_id, updated, expected_version=created.version
+        )
+        assert result.outcome is BatchOutcome.UPDATED
+        assert result.version == created.version + 1
+        round_tripped = await uow.investigations.get_by_id(state.investigation_id)
+        assert round_tripped is not None
+        assert round_tripped.budget.llm_calls_used == 1
+        rows = await history_rows(uow, "investigation", state.investigation_id)
+    assert any(operation == "UPDATE" for _version, operation, _diff in rows)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_update_budget_noop_consumes_no_version(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """An identical budget write is an UNCHANGED no-op (PR 20B)."""
+    state = investigation_state()
+    async with uow_factory() as uow:
+        created = await uow.investigations.create(state)
+    async with uow_factory() as uow:
+        result = await uow.investigations.update_budget(
+            state.investigation_id, state.budget, expected_version=created.version
+        )
+        assert result.outcome is BatchOutcome.UNCHANGED
+        assert result.version == created.version
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_update_budget_rejects_exhausted_and_stale(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Exhausted counters and stale versions fail with no mutation (PR 20B)."""
+    state = investigation_state()
+    async with uow_factory() as uow:
+        created = await uow.investigations.create(state)
+    async with uow_factory() as uow:
+        exhausted = state.budget.model_copy(update={"llm_calls_used": 999})
+        with pytest.raises(InvestigationBudgetExhaustedError):
+            await uow.investigations.update_budget(
+                state.investigation_id, exhausted, expected_version=created.version
+            )
+    async with uow_factory() as uow:
+        with pytest.raises(InvestigationVersionConflictError):
+            await uow.investigations.update_budget(
+                state.investigation_id,
+                state.budget.model_copy(update={"llm_calls_used": 1}),
+                expected_version=created.version + 99,
+            )
+    async with uow_factory() as uow:
+        round_tripped = await uow.investigations.get_by_id(state.investigation_id)
+        assert round_tripped is not None
+        assert round_tripped.budget.llm_calls_used == 0
+        assert round_tripped.version == created.version
 
 
 @pytest.mark.asyncio

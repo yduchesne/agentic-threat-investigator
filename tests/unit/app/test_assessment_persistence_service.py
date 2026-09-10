@@ -124,6 +124,15 @@ class FakeInvestigationRepository(InvestigationRepository):
             raise self.pointer_error
         return InvestigationWriteResult(investigation_id, 2, BatchOutcome.UPDATED)
 
+    async def update_budget(
+        self,
+        investigation_id: UUID,
+        budget: object,
+        **_: object,
+    ) -> InvestigationWriteResult:
+        # Not exercised by the Assessment persistence service tests.
+        raise NotImplementedError
+
     async def create(
         self, state: InvestigationState, **_: object
     ) -> InvestigationWriteResult:
@@ -168,6 +177,15 @@ class FakeObservationRepository(RelationshipObservationRepository):
 
     async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
         return self.rows.get(observation_id)
+
+    async def list_for_investigation(
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RelationshipObservation]:
+        raise NotImplementedError
 
     async def append(
         self, observation: RelationshipObservation

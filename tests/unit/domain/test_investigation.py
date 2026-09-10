@@ -12,10 +12,12 @@ from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.investigation import (
     DEFAULT_MAX_DEPTH,
     DEFAULT_MAX_ENTITIES,
+    DEFAULT_MAX_LLM_CALLS,
     DEFAULT_MAX_PROVIDER_CALLS,
     DEFAULT_MAX_REPLANS,
     InvalidInvestigationStatusTransitionError,
     InvestigationBudget,
+    InvestigationBudgetExhaustedError,
     InvestigationError,
     InvestigationState,
     InvestigationStatus,
@@ -40,6 +42,7 @@ def test_default_budget_constants() -> None:
     assert DEFAULT_MAX_ENTITIES == 10
     assert DEFAULT_MAX_PROVIDER_CALLS == 40
     assert DEFAULT_MAX_REPLANS == 3
+    assert DEFAULT_MAX_LLM_CALLS == 10
 
 
 def test_default_budget_uses_constants_and_fresh_counters() -> None:
@@ -51,8 +54,69 @@ def test_default_budget_uses_constants_and_fresh_counters() -> None:
     assert budget.max_entities == DEFAULT_MAX_ENTITIES
     assert budget.max_provider_calls == DEFAULT_MAX_PROVIDER_CALLS
     assert budget.max_replans == DEFAULT_MAX_REPLANS
+    assert budget.max_llm_calls == DEFAULT_MAX_LLM_CALLS
     assert budget.provider_calls_used == 0
     assert budget.replans_used == 0
+    assert budget.llm_calls_used == 0
+    assert budget.llm_calls_remaining == DEFAULT_MAX_LLM_CALLS
+
+
+def test_llm_call_reservation_increments_counter() -> None:
+    """Recording one LLM call consumes exactly one budgeted invocation."""
+    budget = default_investigation_budget()
+
+    budget.record_llm_call()
+    budget.record_llm_call()
+
+    assert budget.llm_calls_used == 2
+    assert budget.llm_calls_remaining == DEFAULT_MAX_LLM_CALLS - 2
+
+
+def test_llm_call_reservation_raises_when_exhausted() -> None:
+    """An exhausted LLM budget rejects the next reservation."""
+    budget = default_investigation_budget()
+    budget.llm_calls_used = budget.max_llm_calls
+
+    with pytest.raises(InvestigationBudgetExhaustedError):
+        budget.record_llm_call()
+
+    assert budget.llm_calls_used == budget.max_llm_calls
+
+
+def test_llm_counters_cannot_go_negative() -> None:
+    """Negative used/limit counters are rejected at the model boundary."""
+    with pytest.raises(ValidationError):
+        InvestigationBudget(
+            max_depth=2,
+            max_entities=10,
+            max_provider_calls=40,
+            max_replans=3,
+            max_llm_calls=-1,
+        )
+    with pytest.raises(ValidationError):
+        InvestigationBudget(
+            max_depth=2,
+            max_entities=10,
+            max_provider_calls=40,
+            max_replans=3,
+            llm_calls_used=-1,
+        )
+
+
+def test_llm_limit_may_disable_calls() -> None:
+    """A zero LLM limit means no model invocation may be reserved."""
+    budget = InvestigationBudget(
+        max_depth=2,
+        max_entities=10,
+        max_provider_calls=40,
+        max_replans=3,
+        max_llm_calls=0,
+    )
+
+    with pytest.raises(InvestigationBudgetExhaustedError):
+        budget.record_llm_call()
+
+    assert budget.llm_calls_remaining == 0
 
 
 def test_default_budget_instances_are_independent() -> None:

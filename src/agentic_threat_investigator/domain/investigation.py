@@ -28,9 +28,26 @@ DEFAULT_MAX_PROVIDER_CALLS = 40
 DEFAULT_MAX_REPLANS = 3
 """Initial configurable default maximum coordinator replans."""
 
+DEFAULT_MAX_LLM_CALLS = 10
+"""Initial configurable default maximum LLM calls per investigation.
+
+The limit covers every actual model invocation, including structured-output
+repair attempts, and is enforced by the Evidence Analyst through the
+persisted Investigation budget (PR 20B).
+"""
+
 
 class InvalidInvestigationStatusTransitionError(ValueError):
     """Raised when a status change violates the investigation lifecycle."""
+
+
+class InvestigationBudgetExhaustedError(ValueError):
+    """Raised when an LLM call would exceed the investigation's LLM budget.
+
+    The counter is incremented only when the call is actually attempted, and
+    the durable reservation is persisted through Investigation version/history
+    semantics rather than a transient in-memory mutation.
+    """
 
 
 class InvestigationStatus(str, Enum):
@@ -160,15 +177,39 @@ class ProviderWorkItem(BaseModel):
 class InvestigationBudget(BaseModel):
     """Deterministic resource budgets for one investigation.
 
-    LLM call limits and counters are added with the agent implementations.
+    LLM call accounting (PR 20B) counts every actual model invocation,
+    including structured-output repair attempts. Input-loading and
+    persistence failures never increment the counter; an exhausted budget
+    raises a typed error before another model call is attempted.
     """
 
     max_depth: int
     max_entities: int
     max_provider_calls: int
     max_replans: int
+    max_llm_calls: int = Field(default=DEFAULT_MAX_LLM_CALLS, ge=0)
     provider_calls_used: int = 0
     replans_used: int = 0
+    llm_calls_used: int = Field(default=0, ge=0)
+
+    @property
+    def llm_calls_remaining(self) -> int:
+        """Return how many model invocations remain before the limit."""
+        return self.max_llm_calls - self.llm_calls_used
+
+    def record_llm_call(self) -> None:
+        """Reserve one model invocation or raise a typed exhausted error.
+
+        The reservation becomes durable only after the caller persists the
+        budget through Investigation version/history semantics; callers must
+        never treat this in-memory mutation alone as authoritative accounting.
+        """
+        if self.llm_calls_used >= self.max_llm_calls:
+            raise InvestigationBudgetExhaustedError(
+                "investigation LLM budget exhausted "
+                f"(max_llm_calls={self.max_llm_calls})"
+            )
+        self.llm_calls_used += 1
 
 
 class InvestigationError(BaseModel):
@@ -322,4 +363,5 @@ def default_investigation_budget() -> InvestigationBudget:
         max_entities=DEFAULT_MAX_ENTITIES,
         max_provider_calls=DEFAULT_MAX_PROVIDER_CALLS,
         max_replans=DEFAULT_MAX_REPLANS,
+        max_llm_calls=DEFAULT_MAX_LLM_CALLS,
     )

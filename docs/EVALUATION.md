@@ -359,6 +359,14 @@ and runs before persistence; historical versions never change. Semantic
 grounding — whether the cited support actually entails the Finding statement
 or verdict — is PR 20C evaluation, not a deterministic gate.
 
+PR 20B established the deterministic execution baseline future evaluations
+run against: persisted-only input assembly with raw payloads excluded,
+bounded deterministic context, a typed `LlmClient` boundary, explicit bounded
+structured-output repair with per-invocation LLM accounting, and persistence
+only through the PR 20A seam. PR 20C evaluation consumes the persisted
+`Assessment` outputs of this unchanged execution contract; it does not rerun
+or reinterpret model output.
+
 Evaluate:
 
 - verdict correctness within an allowed envelope;

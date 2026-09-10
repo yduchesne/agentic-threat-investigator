@@ -411,6 +411,34 @@ PR 19C requires no new production configuration. `LocalTaskDispatcher` is select
 
 v0.1 does not define a dispatcher type, broker URL, subjects, acknowledgement timeout, redelivery policy, or distributed-worker settings.
 
+## LLM settings (PR 20B)
+
+PR 20B introduces the first LLM-bearing configuration. The concrete v0.1 provider is the OpenAI chat model composed through `langchain-openai`; the provider package choice is an infrastructure composition decision, not a runtime setting. Configuration carries only the API key **reference name**, never a key value.
+
+| Setting | Environment variable | Type | Default | Bounds | Description |
+|---|---|---|---|---|---|
+| `llm_model` | `ATI_LLM_MODEL` | `str` | `gpt-4o-mini` | non-blank | Model identifier handed to the OpenAI provider |
+| `llm_timeout_seconds` | `ATI_LLM_TIMEOUT_SECONDS` | `float` | `60.0` | `> 0`, finite | Per-operation model timeout |
+| `llm_max_structured_output_attempts` | `ATI_LLM_MAX_STRUCTURED_OUTPUT_ATTEMPTS` | `int` | `2` | `1..2` | Initial attempt plus at most one schema repair; values above 2 are rejected |
+| `llm_api_key_secret` | `ATI_LLM_API_KEY_SECRET` | `str` | `ATI_OPENAI_API_KEY` | non-blank | Environment variable NAME carrying the provider key (secret reference, never a key value) |
+| `llm_temperature` | `ATI_LLM_TEMPERATURE` | `float` | `0.0` | `[0.0, 2.0]`, finite | Deterministic analysis temperature |
+| `llm_max_tokens` | `ATI_LLM_MAX_TOKENS` | `int?` | `None` | `> 0` when set, integer | Optional output token cap; omission lets the provider decide |
+| `llm_max_evidence_items` | `ATI_LLM_MAX_EVIDENCE_ITEMS` | `int` | `100` | `1..500` | Evidence bound per analyst input; direct loader construction enforces the same ceiling |
+| `llm_max_relationship_observations` | `ATI_LLM_MAX_RELATIONSHIP_OBSERVATIONS` | `int` | `200` | `1..1000` | Observation bound per analyst input; overflow detection probes one sentinel row beyond the bound (up to 1001) and never silently clamps |
+| `llm_max_normalized_facts_bytes` | `ATI_LLM_MAX_NORMALIZED_FACTS_BYTES` | `int` | `131072` | `1000..1000000` | Aggregate UTF-8 byte bound on the serialized normalized-facts mappings (only each Evidence item's `facts`, never `raw_payload`) |
+| `llm_max_input_bytes` | `ATI_LLM_MAX_INPUT_BYTES` | `int` | `262144` | `1000..1000000` | Serialized analyst-input size bound |
+
+All LLM floating-point settings must be **finite**; NaN and both infinities are rejected at startup so timeouts and temperatures can never be silently disabled. Boolean values are not accepted as numbers. Integer settings require genuine integer profile values. Oversized analyst inputs (item counts, aggregate normalized-facts bytes, or total serialized size) fail with a typed application error **before any model call**; evidence is never silently truncated. The observation overflow sentinel detects a 1001st observation at the 1000 bound without silent clamping. Structured-output attempts are bounded to `1..2` and each actual invocation (including repair attempts) is counted against the Investigation LLM budget (`max_llm_calls`/`llm_calls_used`, defaults `10`/`0`).
+
+### OpenAI API key
+
+Real or resolved OpenAI API keys must never be committed, logged, persisted, placed in URLs or prompts, or copied into test fixtures; clearly synthetic placeholder keys are permitted only in isolated deterministic tests. In production:
+
+- the setting `llm_api_key_secret` holds only the NAME of the environment variable carrying the key (default reference: `ATI_OPENAI_API_KEY`);
+- during infrastructure composition, the `SecretsResolver` bootstrap contract resolves that reference through `EnvVarSecretsResolver`;
+- the resolved key value is passed to the composed chat model, which uses it only for provider authentication; application/domain code never reads configuration or the environment directly;
+- a missing, empty, or whitespace-only required key fails clearly at composition time with `SecretNotFoundError` **before** any model object is created.
+
 ## Authentication settings
 
 The local authentication profile may define the following settings (environment

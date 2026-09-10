@@ -21,8 +21,6 @@ symmetrical; the duplication is test-only and deliberately accepted.
 
 from __future__ import annotations
 
-# pylint: disable=duplicate-code
-
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -36,6 +34,9 @@ from agentic_threat_investigator.infrastructure.providers.threatfox import (
     ThreatFoxProvider,
 )
 from tests.support.provider_http import no_op_sleep, static_client, zero_jitter
+
+# pylint: disable=duplicate-code
+
 
 CANONICAL_ASYNCRAT_MALWARE = "win.asyncrat"
 """Official ThreatFox machine malware label for AsyncRAT (Malpedia family)."""

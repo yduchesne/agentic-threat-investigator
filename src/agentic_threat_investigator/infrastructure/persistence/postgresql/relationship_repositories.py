@@ -38,6 +38,11 @@ from .errors import (
 )
 from .models import EntityRow, EvidenceRow, RelationshipObservationRow, RelationshipRow
 
+# One above the Evidence Analyst's accepted observation maximum (1000), so the
+# loader's overflow probe (max + 1) is never silently clamped by the
+# repository. Exactly this sentinel width is required by the bound contract.
+_PROBE_LIMIT_CEILING = 1001
+
 
 def _relationship(row: RelationshipRow) -> Relationship:
     """Map a relationship row to its domain model."""
@@ -46,6 +51,20 @@ def _relationship(row: RelationshipRow) -> Relationship:
         source_entity_id=row.source_entity_id,
         target_entity_id=row.target_entity_id,
         type=RelationshipType(row.relationship_type_urn),
+    )
+
+
+def _observation(row: RelationshipObservationRow) -> RelationshipObservation:
+    """Map an observation row to its immutable domain model."""
+    return RelationshipObservation(
+        id=row.id,
+        relationship_id=row.relationship_id,
+        evidence_id=row.evidence_id,
+        investigation_id=row.investigation_id,
+        observed_at=row.observed_at,
+        retrieved_at=row.retrieved_at,
+        source=row.source,
+        confidence=row.confidence,
     )
 
 
@@ -177,18 +196,52 @@ class PostgresRelationshipObservationRepository(
     async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
         """Return an immutable observation by its identity."""
         row = await self.session.get(RelationshipObservationRow, observation_id)
-        if row is None:
-            return None
-        return RelationshipObservation(
-            id=row.id,
-            relationship_id=row.relationship_id,
-            evidence_id=row.evidence_id,
-            investigation_id=row.investigation_id,
-            observed_at=row.observed_at,
-            retrieved_at=row.retrieved_at,
-            source=row.source,
-            confidence=row.confidence,
+        return None if row is None else _observation(row)
+
+    async def list_for_investigation(
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RelationshipObservation]:
+        """Return bounded observations backed by the Investigation's Evidence.
+
+        The query joins through the immutable Evidence row so an observation
+        is only returned when its Evidence belongs to the supplied
+        Investigation, and additionally excludes rows whose own
+        investigation correlation contradicts the Investigation. Ordering is
+        deterministic: ``retrieved_at``/``observed_at`` descending with a
+        stable UUID tie-breaker, matching the documented analyst input order.
+
+        ``limit`` may reach ``_PROBE_LIMIT_CEILING`` (one above the analyst's
+        accepted maximum of 1000) so the Evidence Analyst overflow probe never
+        silently clamps; a larger limit is rejected rather than reduced.
+        """
+        if limit < 0 or offset < 0:
+            raise ValueError("limit and offset must be non-negative")
+        if limit > _PROBE_LIMIT_CEILING:
+            raise ValueError(f"limit must not exceed {_PROBE_LIMIT_CEILING}")
+        result = await self.session.execute(
+            select(RelationshipObservationRow)
+            .join(
+                EvidenceRow,
+                EvidenceRow.id == RelationshipObservationRow.evidence_id,
+            )
+            .where(EvidenceRow.investigation_id == investigation_id)
+            .where(
+                (RelationshipObservationRow.investigation_id.is_(None))
+                | (RelationshipObservationRow.investigation_id == investigation_id)
+            )
+            .order_by(
+                RelationshipObservationRow.retrieved_at.desc(),
+                RelationshipObservationRow.observed_at.desc().nulls_last(),
+                RelationshipObservationRow.id.asc(),
+            )
+            .limit(limit)
+            .offset(offset)
         )
+        return [_observation(row) for row in result.scalars().all()]
 
     async def append(
         self, observation: RelationshipObservation

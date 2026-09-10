@@ -244,6 +244,15 @@ class FakeObservationRepository(RelationshipObservationRepository):
         self.rows.append(observation)
         return observation
 
+    async def list_for_investigation(
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RelationshipObservation]:
+        raise NotImplementedError
+
     async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
         """Return the immutable observation with the given identity, if any."""
         return next((row for row in self.rows if row.id == observation_id), None)
@@ -314,6 +323,14 @@ class FakeInvestigationRepository(InvestigationRepository):
         self,
         investigation_id: UUID,
         assessment_id: UUID,
+        **_: object,
+    ) -> InvestigationWriteResult:
+        raise NotImplementedError
+
+    async def update_budget(
+        self,
+        investigation_id: UUID,
+        budget: object,
         **_: object,
     ) -> InvestigationWriteResult:
         raise NotImplementedError

@@ -341,23 +341,23 @@ Malware triggers research rather than recursive IOC expansion.
 
 ## LLM contract
 
-```python
-class LlmClient(ABC):
-    async def invoke_structured(
-        self,
-        request: LlmRequest,
-        response_model: type[T],
-    ) -> T: ...
-```
+The PR 20B-implemented application boundary (`app.llm`) supersedes the
+earlier illustrative ``invoke_structured`` sketch. It is a narrow, typed,
+structured-output-only operation with an explicit ATI-owned Pydantic output
+type and no provider-specific response objects, chat history, configuration
+reads, persistence, or hidden retries:
 
 ```python
-class LlmRequest(BaseModel):
-    operation: str
-    prompt_version: str
-    system_instructions: str
-    input: dict[str, Any]
-    model_profile: str
-    temperature: float | None = None
+ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+class LlmClient(ABC):
+    async def generate_structured(
+        self, *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[ResponseT],
+        operation_name: str,
+    ) -> ResponseT: ...
 ```
 
 Stable operation identifiers:
@@ -415,7 +415,7 @@ human-readable Markdown / HTML / plain text
 ### Authoritative representation
 
 For each agent operation, ATI defines a concrete Pydantic response
-model. `LlmClient.invoke_structured()` returns an instance of that
+model. `LlmClient.generate_structured()` returns an instance of that
 model, not an unvalidated string or arbitrary dictionary.
 
 The validated Pydantic object, and its JSON-compatible serialized form,
@@ -550,18 +550,25 @@ Raw provider payloads are normally excluded from LLM context; normalized evidenc
 
 ## LLM failure
 
-LLM failures are typed and bounded. Examples:
+LLM failures are typed and bounded. The PR 20B v0.1 taxonomy is deliberately
+small (`app.llm.LlmErrorCode`):
 
 - TIMEOUT
-- RATE_LIMITED
-- AUTHENTICATION_FAILED
-- MODEL_UNAVAILABLE
-- CONTEXT_LIMIT_EXCEEDED
+- PROVIDER_FAILURE
 - INVALID_STRUCTURED_OUTPUT
-- SAFETY_REFUSAL
-- PROVIDER_ERROR
+- CONFIGURATION_ERROR
 
-Transport retries are bounded, and one structured-output repair attempt may be allowed.
+Finer-grained provider categories (rate limiting, content refusal, model
+availability) remain future work and are conservatively mapped onto these
+categories at the adapter. Every ``LlmError`` carries a stable code and an
+explicit retryability flag; messages are bounded and content-free (no
+prompts, model output, raw exception text, or credentials), and mapped
+errors never retain the raw provider/framework exception as ``__cause__``.
+No setup-time or invocation-time provider/framework exception escapes the
+taxonomy. The Evidence Analyst retries only a retryable
+``INVALID_STRUCTURED_OUTPUT`` error, at most once (attempts hard-limited to
+``1..2``), and counts every actual invocation durably against the
+Investigation LLM budget. Cancellation propagates unchanged.
 
 LLM failure does not necessarily fail the investigation. ATI preserves collected evidence and may complete PARTIAL.
 

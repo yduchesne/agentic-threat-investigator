@@ -29,6 +29,15 @@ dependencies = [
   # keeps plain httpx and restores the working authlib code path.
   "langsmith>=0.3.45,<0.12",
   "maxminddb>=2,<4",
+  # Direct LangChain dependency: the PR 20B LLM adapter imports
+  # langchain_core types directly, so the dependency must not rely on
+  # LangGraph's transitive dependency.
+  "langchain-core>=1.6,<2",
+  # First concrete v0.1 model provider. The openai SDK itself stays
+  # transitive through langchain-openai and is constrained to <3 below so
+  # the forked httpx2 package can never become importable (see the httpx2
+  # note on langsmith).
+  "langchain-openai>=1.6,<2",
 ]
 
 [dependency-groups]
@@ -98,3 +107,10 @@ skips = ["B101"]
 
 [tool.uv]
 default-groups = ["dev"]
+# openai>=3 depends on the forked httpx2 package, which authlib prefers
+# over plain httpx whenever it is importable; Safety 3.8.1's platform
+# client then crashes with "TypeError: 'httpx.Timeout' object cannot be
+# interpreted as an integer or float" on Python 3.14. langchain-openai
+# accepts openai>=2.45,<4, so constrain the transitive SDK to the
+# plain-httpx 2.x line.
+constraint-dependencies = ["openai>=2.45,<3"]

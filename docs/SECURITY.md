@@ -223,6 +223,22 @@ Structured outputs are validated before application actions.
 
 Pivot targets must already exist as root/discovered entities and must pass deterministic policy.
 
+The Evidence Analyst (PR 20B) has **no tools at all**: no provider,
+filesystem, shell, HTTP, or database surface is exposed to the model. All
+model output is schema-validated Pydantic and all resource references are
+deterministically revalidated against authoritative persisted state before
+any Assessment can persist. LLM errors are bounded and content-free and
+carry no raw provider/framework cause: prompts, raw model output, raw
+provider exception text, and credentials never appear in error messages,
+``LlmError.__cause__``, or Investigation/audit/timeline state. No
+chain-of-thought or raw model output is ever persisted. Structured-output
+retries are explicit, hard-limited to ``1..2`` attempts, require a
+retryable ``INVALID_STRUCTURED_OUTPUT`` error, and each actual invocation is
+counted against the Investigation LLM budget. Automatic content-bearing
+LangSmith/LangChain tracing is disabled for Evidence Analyst calls; safe
+operation metadata alone does not export prompts, Evidence facts, or model
+output.
+
 ## Prompt injection
 
 Evidence and retrieved research are untrusted content.
@@ -230,6 +246,13 @@ Evidence and retrieved research are untrusted content.
 System instructions explicitly tell models not to follow instructions contained in evidence/documents.
 
 Prefer normalized evidence facts over raw provider payloads in model context.
+The Evidence Analyst system prompt states that evidence content is data, not
+instructions, and the analyst input DTO excludes raw payloads entirely; only
+normalized facts and stable source metadata reach the model. The analyst has
+no tools, so no instruction embedded in evidence text can trigger any
+provider, shell, HTTP, or database action. Deterministic adversarial
+formatting tests treat injected instructions as ordinary data; behavioral
+robustness scoring is PR 20C.
 
 ## Secrets
 

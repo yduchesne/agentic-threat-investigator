@@ -396,6 +396,78 @@ the repository before SQL, and by the database's larger defensive hard
 ceiling before staging; oversized aggregates are rejected with only the
 collection name, count, and limit.
 
+### Evidence Analyst execution (PR 20B)
+
+PR 20B establishes the deterministic analyst execution path:
+
+```text
+Persisted Investigation
+        |
+        v
+EvidenceAnalystInputLoader (short read-only UnitOfWork, then closed)
+        |
+        +-> Evidence / RelationshipObservation / Relationship / Entity reads
+        v
+EvidenceAnalystInput (immutable, bounded DTO; evidence facts only)
+        |
+        v
+EvidenceAnalyst (application service)
+        |
+        +-> deterministic prompt construction
+        v
+LlmClient (ABC) --typed, structured-output only--
+        |
+        v
+LangChainLlmClient (infrastructure)
+        |   with_structured_output + explicit error mapping
+        v
+EvidenceAnalystDecision (semantic output only)
+        |
+        v
+Assessment (application stamps investigation_id and analyzed_evidence_ids)
+        |
+        v
+AssessmentPersistenceService (PR 20A validator + atomic persistence)
+        |
+        v
+persisted Assessment + Investigation assessment pointer
+```
+
+The Evidence Analyst: assembles its input from persisted authoritative
+resources only (``Evidence.raw_payload`` never enters model context),
+bounds the context deterministically with typed errors instead of silent
+truncation, calls the LLM only through the ATI-owned ``LlmClient``
+abstraction, and persists exclusively through the PR 20A
+``AssessmentPersistenceService``. **All LLM calls occur strictly outside
+database transactions**: the loader's read-only UnitOfWork closes before the
+prompt is built, and the PR 20A persistence UnitOfWork opens only after a
+candidate has been constructed.
+
+Every actual model invocation, including each structured-output repair
+attempt, is durably reserved against the Investigation LLM budget through a
+short, versioned Investigation update. Prompt construction for each attempt
+happens BEFORE its reservation: a prompt-construction failure consumes no
+LLM budget, and a reservation is written only immediately before entering
+``LlmClient`` for that attempt — so a failed repair-prompt build never
+reserves a nonexistent repair call while the prior real attempt stays
+counted. Structured-output attempts are
+hard-limited to ``1..2`` (initial attempt plus at most one schema repair),
+and a repair happens only for an ``INVALID_STRUCTURED_OUTPUT`` error whose
+``retryable`` flag is true — a non-retryable invalid output, or any other
+category, fails conservative. Cancellation propagates unchanged. An
+Investigation with no Evidence short-circuits to a deterministic
+INCONCLUSIVE Assessment with no model call.
+
+The Evidence Analyst input is assembled from persisted authoritative
+resources only (``Evidence.raw_payload`` never enters model context); item
+counts, the aggregate normalized-facts byte size, and the total serialized
+size are each independently bounded with typed errors instead of silent
+truncation.
+
+PR 20B does not modify the PR 19C dispatcher or the provider-only LangGraph
+topology. Adaptive pivots, stopping, and the general multi-work dispatch
+boundary are PR 21.
+
 ### Report pipeline
 
 The report path is:

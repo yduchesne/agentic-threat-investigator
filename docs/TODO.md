@@ -25,6 +25,7 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 - [Complete AbuseIPDB boundary regression coverage](#complete-abuseipdb-boundary-regression-coverage)
 - [Align the configuration example with the implemented AbuseIPDB composition](#align-the-configuration-example-with-the-implemented-abuseipdb-composition)
 - [Reject rather than normalize padded AbuseIPDB credentials](#reject-rather-than-normalize-padded-abuseipdb-credentials)
+- [Complete PR 20B secondary execution hardening](#complete-pr-20b-secondary-execution-hardening)
 
 ## Complete PR 20A secondary validation and test hardening
 
@@ -1088,3 +1089,48 @@ The PR 19A graph and queue helpers pass the required deterministic scenario and 
 - A valid synthetic key reaches the `Key` header byte-for-byte.
 - Padded keys fail before HTTP I/O and are never echoed.
 - Missing/blank-key composition tests continue to pass.
+
+## Complete PR 20B secondary execution hardening
+
+**Priority:** MEDIUM
+
+**Origin:** Reviews of `.plans/pr-20b-fixes-01.md` and `.plans/pr-20b-fixes-02.md`. The fixes-01 implementation addresses the reviewed HIGH safe-error, tracing, retry, input-bound, transaction-test, and PostgreSQL failure-coverage defects. The fixes-02 implementation builds each initial/repair prompt before reserving that attempt, so prompt-construction failures no longer consume nonexistent LLM calls. Both canonical gates pass.
+
+### Problem
+
+The following lower-severity hardening and test-precision items remain. They are not demonstrated CRITICAL/HIGH production failures:
+
+- Mapped `LlmError` instances suppress and clear `__cause__`, but Python still retains the caught provider/framework exception in `__context__`. Normal traceback rendering suppresses that context because `raise ... from None` is used, and ATI does not persist/log it, but code inspecting the exception object can still reach the raw exception.
+- `tracing_context(enabled=False)` suppresses environment-enabled automatic LangSmith tracing, as covered by a real callback-manager control test. It does not remove callback handlers deliberately configured directly on an injected `BaseChatModel`; production composition currently adds none, but the documentation's broad “never captured” wording should distinguish automatic LangSmith tracing from explicitly injected model callbacks.
+- The loader bounds serialized DTO bytes, while prompt rendering serializes normalized facts with `ensure_ascii=True`. Non-ASCII facts can therefore expand in the actual user prompt beyond their UTF-8 DTO/facts byte sizes. Counts and DTO/facts limits remain bounded, but the configured byte limit is not an exact bound on bytes sent to the model.
+- LLM budget history updates omit the `actor_id` and `request_id` already accepted by `EvidenceAnalyst.analyze()`, even though `InvestigationRepository.update_budget()` supports both. Accounting remains durable and correct, but reservation history loses available correlation metadata.
+- `InvestigationBudget` validates that LLM counters are nonnegative but does not enforce `llm_calls_used <= max_llm_calls` at Pydantic construction. The application reservation helper and PostgreSQL function enforce the limit, so the durable path fails closed; a directly constructed transient model can still report a negative `llm_calls_remaining` value.
+- `ati.update_investigation_budget` relies on repository-produced Pydantic JSON and does not fully validate the shape/type/presence of every budget field for a repository-bypassing SQL caller. Missing values coalesce to zero and malformed numeric text can surface as a generic PostgreSQL cast error. Normal application writes remain typed and bounded.
+- The transaction-order integration test proves all real UnitOfWork instances are closed at the LLM boundary, but its comment that persistence starts only after a “typed decision exists” is inferred from the fake returning after the `llm` event rather than recorded as a separate post-validation event.
+- Concrete OpenAI model construction and the LangChain adapter are separately composable, but there is no single production composition helper that wires Settings, SecretsResolver, `LangChainLlmClient`, input bounds, accounting, and Assessment persistence together. PR 20B has no API/graph integration requirement, so this is composition completeness rather than a broken invoked path.
+- The 1001-observation PostgreSQL overflow regression inserts rows one at a time. It is deterministic and passes, but it adds avoidable integration-suite cost and could use an existing bounded set-oriented test fixture/helper if one is introduced without creating a second persistence path.
+- The final `docs/PR_PLAN.md` PR 20B `[DONE]` marker is correct, but the uncommitted worktree cannot demonstrate the requested remove-then-restore transition as distinct history.
+
+### Intended fix
+
+1. Refactor exception mapping so mapped errors are raised after leaving the provider exception handler, or otherwise ensure neither `__cause__` nor `__context__` retains raw provider/framework content. Preserve cancellation and the stable taxonomy. Add direct object-inspection tests.
+2. Either reject injected chat models carrying callbacks or explicitly document that only ATI production composition with no content callbacks is supported. Prefer an adapter-owned callback policy that cannot silently export prompts. Add a test with a model-level recording callback.
+3. Define and enforce one byte bound for the final rendered user prompt. Prefer `ensure_ascii=False` plus a direct UTF-8 byte check after rendering and before budget reservation. Keep the independent normalized-facts and DTO bounds; never truncate.
+4. Pass `actor_id` and `request_id` through `LlmAccountingService.reserve_call()` into `update_budget()`. Add unit and PostgreSQL history assertions without placing prompt/model content in metadata.
+5. Add an `InvestigationBudget` model-level invariant requiring each consumed counter to be within its corresponding maximum, or narrow the invariant to LLM fields if changing provider/replan semantics is outside scope. Preserve zero as a valid disabling limit.
+6. Make `ati.update_investigation_budget` reject missing, null, nonnumeric, fractional, or structurally invalid required budget fields with the dedicated safe SQLSTATE. Add direct-function tests proving no state/history mutation.
+7. Record a distinct `decision_validated` event in the transaction-order test fake before it returns the typed result, then assert persistence enters afterward. Keep production code free of test hooks.
+8. Add one infrastructure composition function for the complete manually invokable Evidence Analyst stack, using one bootstrapped Settings instance and SecretsResolver. Do not add API, LangGraph, dispatcher, pivot, or stopping integration.
+9. Keep the overflow test deterministic. Optimize setup only through established test helpers or set-oriented fixture SQL; do not add a production row-by-row or JSONB persistence path.
+10. In future remediation, make completion-marker transitions visible in commit/diff history and restore `[DONE]` only after the canonical gates pass.
+
+### Acceptance checks
+
+- Raw provider/framework exceptions are not reachable from mapped ATI errors.
+- Production LLM composition cannot export prompt/model content through callbacks accidentally.
+- The configured final-prompt byte bound covers the exact UTF-8 prompt sent to the model.
+- LLM reservation history carries actor/request correlation without sensitive content.
+- Invalid transient and direct-SQL budget shapes fail typed and leave no mutation.
+- Transaction-order tests explicitly distinguish model return, typed validation, and persistence entry.
+- One composition helper constructs the bounded analyst stack without changing PR 19C/PR 21 scope.
+- Canonical QA and integration gates continue to pass.

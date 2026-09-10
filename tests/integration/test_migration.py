@@ -62,6 +62,7 @@ EXPECTED_FUNCTIONS = {
     "append_assessment",
     "set_investigation_assessment",
     "soft_delete_assessment",
+    "update_investigation_budget",
 }
 
 
