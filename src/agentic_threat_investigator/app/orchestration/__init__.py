@@ -9,6 +9,7 @@ budget enforcement, LLM behavior, adaptive pivots, jobs, or workers.
 """
 
 from .composition import build_provider_investigation_graph
+from .dispatcher import LocalTaskDispatcher, TaskDispatcher
 from .executor import InvestigationBoundWorkExecutor, WorkExecutor
 from .graph import (
     InvestigationGraphBindingConflictError,
@@ -31,6 +32,8 @@ from .provider_executor import (
 
 __all__ = [
     "WorkExecutor",
+    "TaskDispatcher",
+    "LocalTaskDispatcher",
     "InvestigationBoundWorkExecutor",
     "OrchestrationGraphState",
     "InvestigationGraphContextMismatchError",

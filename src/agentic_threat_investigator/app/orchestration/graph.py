@@ -8,7 +8,7 @@ Implements the minimal deterministic workflow:
           -> select_work -> (pending work -> execute_work | no work -> END)
 
 This is orchestration mechanics only: no real provider calls, LLM behavior,
-adaptive pivots, budget enforcement, or stopping policy. The executor is
+adaptive pivots, budget enforcement, or stopping policy. The dispatcher is
 injected; no dependency is hidden in module globals.
 """
 
@@ -18,10 +18,11 @@ from uuid import UUID
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from agentic_threat_investigator.app.orchestration.executor import (
-    InvestigationBoundWorkExecutor,
-    WorkExecutor,
+from agentic_threat_investigator.app.orchestration.dispatcher import (
+    TaskDispatcher,
+    ensure_task_dispatcher,
 )
+from agentic_threat_investigator.app.orchestration.executor import WorkExecutor
 from agentic_threat_investigator.app.orchestration.models import (
     record_provider_outcome,
     select_provider_work,
@@ -105,11 +106,11 @@ async def select_work(state: OrchestrationGraphState) -> OrchestrationGraphState
 
 
 async def execute_work(
-    executor: WorkExecutor, state: OrchestrationGraphState
+    dispatcher: TaskDispatcher, state: OrchestrationGraphState
 ) -> OrchestrationGraphState:
-    """Execute the current work item through the injected executor.
+    """Execute the current work item through the injected dispatcher.
 
-    The node requires a selected current work item, delegates execution,
+    The node requires a selected current work item, delegates dispatch,
     and records the outcome; it does not update completed collections or
     counters directly.
     """
@@ -118,7 +119,7 @@ async def execute_work(
     work_item = investigation.current_provider_work
     if work_item is None:
         raise ValueError("execute_work requires a selected current provider work item")
-    outcome = await executor.execute(work_item)
+    outcome = await dispatcher.dispatch(work_item)
     if outcome.work_item != work_item:
         raise ValueError("executor outcome does not match the executed work item")
     return {
@@ -149,7 +150,7 @@ def _route_after_select(state: OrchestrationGraphState) -> str:
 
 
 def build_investigation_graph(
-    executor: WorkExecutor,
+    dispatcher: TaskDispatcher | WorkExecutor,
     *,
     expected_investigation_id: UUID | None = None,
 ) -> CompiledStateGraph[
@@ -157,39 +158,36 @@ def build_investigation_graph(
 ]:
     """Build the deterministic PR 19A orchestration graph.
 
-    The executor is injected by the caller; no global mutable registry,
+    The dispatcher is injected by the caller; no global mutable registry,
     service locator, provider bootstrap, database connection, or checkpointer
     is involved.
 
-    Binding derivation: when the executor exposes a bound investigation
-    identity (an :class:`InvestigationBoundWorkExecutor`), that identity is
-    adopted automatically as the graph's binding even when the caller omits
-    the explicit argument, so direct public composition cannot bypass
-    investigation isolation. An explicit ``expected_investigation_id`` that
-    conflicts with the executor's own bound identity raises
-    :class:`InvestigationGraphBindingConflictError` at construction. Every
-    invocation validates the wrapped state's investigation ID during
-    ``initialize`` and raises :class:`InvestigationGraphContextMismatchError`
+    Binding derivation: when the dispatcher exposes a bound investigation
+    identity, that identity is adopted automatically as the graph's binding
+    even when the caller omits the explicit argument, so direct public
+    composition cannot bypass investigation isolation. An explicit
+    ``expected_investigation_id`` that conflicts with the dispatcher's own
+    bound identity raises :class:`InvestigationGraphBindingConflictError` at
+    construction. Every invocation validates the wrapped state's investigation
+    ID during ``initialize`` and raises :class:`InvestigationGraphContextMismatchError`
     on mismatch, before work selection and every I/O seam. The effective ID
     is an injected graph-instance invariant, never copied into checkpoint
-    state. Ordinary ``WorkExecutor`` values with no explicit expected ID
-    remain unbound, preserving all PR 19A fake-executor behavior.
+    state. Ordinary unbound dispatchers remain generic. A bare WorkExecutor
+    is accepted only as a backward-compatible local adaptation of the old
+    builder contract.
     """
-    executor_investigation_id = (
-        executor.bound_investigation_id
-        if isinstance(executor, InvestigationBoundWorkExecutor)
-        else None
-    )
+    effective_dispatcher = ensure_task_dispatcher(dispatcher)
+    dispatcher_investigation_id = effective_dispatcher.bound_investigation_id
     if (
         expected_investigation_id is not None
-        and executor_investigation_id is not None
-        and expected_investigation_id != executor_investigation_id
+        and dispatcher_investigation_id is not None
+        and expected_investigation_id != dispatcher_investigation_id
     ):
         raise InvestigationGraphBindingConflictError()
     effective_investigation_id = (
         expected_investigation_id
         if expected_investigation_id is not None
-        else executor_investigation_id
+        else dispatcher_investigation_id
     )
 
     builder: StateGraph[OrchestrationGraphState] = StateGraph(OrchestrationGraphState)
@@ -219,7 +217,7 @@ def build_investigation_graph(
     async def execute_work_node(
         state: OrchestrationGraphState,
     ) -> OrchestrationGraphState:
-        return await execute_work(executor, state)
+        return await execute_work(effective_dispatcher, state)
 
     builder.add_node("execute_work", execute_work_node)
     builder.add_node("record_outcome", record_outcome)

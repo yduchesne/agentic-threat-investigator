@@ -1,6 +1,14 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Deterministic LangGraph orchestration skeleton tests (PR 19A)."""
+"""Deterministic LangGraph orchestration skeleton tests (PR 19A/C).
+
+Primary graph tests exercise the injected :class:`TaskDispatcher` seam
+(``FakeTaskDispatcher``) and do not require ``LocalTaskDispatcher`` or
+``ProviderWorkExecutor``. Investigation binding is additionally covered
+through the production-style ``LocalTaskDispatcher`` wrapping a bound
+executor. One explicit test preserves the legacy bare-``WorkExecutor``
+compatibility input.
+"""
 
 # pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
 
@@ -15,9 +23,12 @@ from agentic_threat_investigator.app.orchestration import (
     build_investigation_graph,
     enqueue_provider_work,
 )
+from agentic_threat_investigator.app.orchestration.dispatcher import (
+    LocalTaskDispatcher,
+    TaskDispatcher,
+)
 from agentic_threat_investigator.app.orchestration.executor import (
     InvestigationBoundWorkExecutor,
-    WorkExecutor,
 )
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
@@ -29,10 +40,11 @@ from agentic_threat_investigator.domain.investigation import (
 )
 from tests.support.orchestration_fixtures import (
     SCENARIO_IP_ID,
+    FakeTaskDispatcher,
     FakeWorkExecutor,
+    scenario_dispatcher,
     scenario_dns_outcome,
     scenario_dns_work_item,
-    scenario_executor,
     scenario_initial_state,
     scenario_investigation_state,
     scenario_rdap_outcome,
@@ -42,45 +54,45 @@ from tests.support.orchestration_fixtures import (
 
 async def _run(
     initial_state: InvestigationState | None = None,
-    executor: WorkExecutor | None = None,
+    dispatcher: TaskDispatcher | None = None,
 ) -> InvestigationState:
     state = initial_state if initial_state is not None else scenario_initial_state()
-    work_executor = executor if executor is not None else scenario_executor()
-    result = await build_investigation_graph(work_executor).ainvoke(
+    task_dispatcher = dispatcher if dispatcher is not None else scenario_dispatcher()
+    result = await build_investigation_graph(task_dispatcher).ainvoke(
         {"investigation": state}
     )
     return cast(InvestigationState, result["investigation"])
 
 
 class TestGraphTermination:
-    """Deterministic graph termination behavior."""
+    """Deterministic graph termination behavior through the dispatcher."""
 
     @pytest.mark.asyncio
     async def test_zero_work_graph_terminates_deterministically(self) -> None:
-        executor = scenario_executor()
-        state = await _run(scenario_investigation_state(), executor)
-        assert not executor.requested
+        dispatcher = scenario_dispatcher()
+        state = await _run(scenario_investigation_state(), dispatcher)
+        assert not dispatcher.requested
         assert state.pending_provider_work == []
         assert state.current_provider_work is None
         assert state.budget.provider_calls_used == 0
 
     @pytest.mark.asyncio
-    async def test_one_work_item_executes_exactly_once(self) -> None:
-        executor = scenario_executor()
+    async def test_one_work_item_dispatches_exactly_once(self) -> None:
+        dispatcher = scenario_dispatcher()
         state = await _run(
             enqueue_provider_work(
                 scenario_investigation_state(), [scenario_dns_work_item()]
             ),
-            executor,
+            dispatcher,
         )
-        assert executor.requested == [scenario_dns_work_item()]
+        assert dispatcher.requested == [scenario_dns_work_item()]
         assert state.completed_provider_work == [scenario_dns_work_item()]
 
     @pytest.mark.asyncio
-    async def test_multiple_work_items_execute_fifo(self) -> None:
-        executor = scenario_executor()
-        state = await _run(scenario_initial_state(), executor)
-        assert executor.requested == [
+    async def test_multiple_work_items_dispatched_fifo(self) -> None:
+        dispatcher = scenario_dispatcher()
+        state = await _run(scenario_initial_state(), dispatcher)
+        assert dispatcher.requested == [
             scenario_dns_work_item(),
             scenario_rdap_work_item(),
         ]
@@ -127,14 +139,14 @@ class TestGraphWorkMechanics:
                 recoverable=True,
             ),
         )
-        executor = FakeWorkExecutor(
+        dispatcher = FakeTaskDispatcher(
             {
                 scenario_dns_work_item(): failure,
                 scenario_rdap_work_item(): scenario_rdap_outcome(),
             }
         )
-        state = await _run(scenario_initial_state(), executor)
-        assert executor.requested == [
+        state = await _run(scenario_initial_state(), dispatcher)
+        assert dispatcher.requested == [
             scenario_dns_work_item(),
             scenario_rdap_work_item(),
         ]
@@ -146,14 +158,14 @@ class TestGraphWorkMechanics:
         assert state.errors[0].code == "provider_failure"
 
     @pytest.mark.asyncio
-    async def test_duplicate_queued_work_executes_only_once(self) -> None:
+    async def test_duplicate_queued_work_dispatched_only_once(self) -> None:
         state = enqueue_provider_work(
             scenario_investigation_state(),
             [scenario_dns_work_item(), scenario_dns_work_item()],
         )
-        executor = scenario_executor()
-        state = await _run(state, executor)
-        assert executor.requested == [scenario_dns_work_item()]
+        dispatcher = scenario_dispatcher()
+        state = await _run(state, dispatcher)
+        assert dispatcher.requested == [scenario_dns_work_item()]
         assert state.completed_provider_work == [scenario_dns_work_item()]
 
     @pytest.mark.asyncio
@@ -161,22 +173,84 @@ class TestGraphWorkMechanics:
         state = await _run()
         assert state.budget.provider_calls_used == 2
 
-    @pytest.mark.asyncio
-    async def test_executor_outcome_mismatch_rejected(self) -> None:
-        class MismatchedExecutor(WorkExecutor):
-            """Executor returning an outcome for a different work item."""
 
-            async def execute(
-                self, work_item: ProviderWorkItem
-            ) -> ProviderExecutionOutcome:
-                return ProviderExecutionOutcome(
+class TestGraphDispatcherSafety:
+    """The graph rejects crossed outcomes and propagates dispatcher errors."""
+
+    @pytest.mark.asyncio
+    async def test_outcome_mismatch_rejected_before_bookkeeping(self) -> None:
+        """A dispatcher outcome for another item fails before record_outcome."""
+        dispatcher = FakeTaskDispatcher(
+            {
+                scenario_dns_work_item(): ProviderExecutionOutcome(
                     work_item=scenario_rdap_work_item(),
                     status=ProviderExecutionStatus.SUCCEEDED,
                 )
-
-        graph = build_investigation_graph(MismatchedExecutor())
+            }
+        )
+        graph = build_investigation_graph(dispatcher)
         with pytest.raises(ValueError, match="does not match"):
             await graph.ainvoke({"investigation": scenario_initial_state()})
+        # The mismatched item was dispatched once and then rejected: no
+        # completion, outcome recording, or counter increment happened.
+        assert dispatcher.requested == [scenario_dns_work_item()]
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_exception_reaches_caller_unchanged(self) -> None:
+        """A dispatcher exception propagates and records no outcome."""
+
+        class RaisingDispatcher(
+            TaskDispatcher
+        ):  # pylint: disable=too-few-public-methods
+            def __init__(self, exc: BaseException) -> None:
+                self._exc = exc
+                self.requested: list[ProviderWorkItem] = []
+
+            async def dispatch(
+                self, work_item: ProviderWorkItem
+            ) -> ProviderExecutionOutcome:
+                self.requested.append(work_item)
+                raise self._exc
+
+        exc = RuntimeError("dispatch failed upstream")
+        dispatcher = RaisingDispatcher(exc)
+        graph = build_investigation_graph(dispatcher)
+        with pytest.raises(RuntimeError) as raised:
+            await graph.ainvoke({"investigation": scenario_initial_state()})
+        # The exact exception object reaches the caller unchanged; the graph
+        # never continued into record_outcome, so no outcome was recorded.
+        assert raised.value is exc
+        assert dispatcher.requested == [scenario_dns_work_item()]
+
+
+class TestGraphLegacyWorkExecutorCompatibility:
+    """Compatibility coverage only for the bare-WorkExecutor builder input.
+
+    The backward-compatible ``WorkExecutor`` parameter is retained for direct
+    callers of PR 19A. These tests confirm the compatibility adapter; the
+    primary graph seam tests use ``TaskDispatcher``/``FakeTaskDispatcher``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_bare_work_executor_adapted_by_builder(self) -> None:
+        executor: FakeWorkExecutor = FakeWorkExecutor(
+            {
+                scenario_dns_work_item(): scenario_dns_outcome(),
+                scenario_rdap_work_item(): scenario_rdap_outcome(),
+            }
+        )
+        result = await build_investigation_graph(executor).ainvoke(
+            {"investigation": scenario_initial_state()}
+        )
+        state = cast(InvestigationState, result["investigation"])
+        assert executor.requested == [
+            scenario_dns_work_item(),
+            scenario_rdap_work_item(),
+        ]
+        assert state.completed_provider_work == [
+            scenario_dns_work_item(),
+            scenario_rdap_work_item(),
+        ]
 
 
 class TestGraphContextBinding:
@@ -185,10 +259,10 @@ class TestGraphContextBinding:
     @pytest.mark.asyncio
     async def test_matching_investigation_id_runs_normally(self) -> None:
         """A bound graph accepts its own investigation ID unchanged."""
-        executor = scenario_executor()
+        dispatcher = scenario_dispatcher()
         state = scenario_investigation_state()
         graph = build_investigation_graph(
-            executor,
+            dispatcher,
             expected_investigation_id=state.investigation_id,
         )
         result = await graph.ainvoke(
@@ -196,28 +270,31 @@ class TestGraphContextBinding:
         )
         recorded = cast(InvestigationState, result["investigation"])
         # Existing deterministic outcome/counter behavior is unchanged.
-        assert executor.requested == [scenario_dns_work_item()]
+        assert dispatcher.requested == [scenario_dns_work_item()]
         assert recorded.completed_provider_work == [scenario_dns_work_item()]
         assert recorded.budget.provider_calls_used == 1
         assert recorded.investigation_id == state.investigation_id
 
     @pytest.mark.asyncio
-    async def test_mismatched_investigation_id_fails_before_executor(self) -> None:
-        """A bound graph rejects another investigation before any execution."""
+    async def test_mismatched_investigation_id_fails_before_dispatcher(self) -> None:
+        """A bound graph rejects another investigation before any dispatch."""
+
         state = scenario_investigation_state()
         expected = UUID("00000000-0000-0000-0000-0000000000bb")
         assert expected != state.investigation_id
 
-        class ExplodingExecutor(WorkExecutor):  # pylint: disable=too-few-public-methods
-            """Fail the test if the executor is ever invoked."""
+        class ExplodingDispatcher(  # pylint: disable=too-few-public-methods
+            TaskDispatcher
+        ):
+            """Fail the test if the dispatcher is ever invoked."""
 
-            async def execute(
+            async def dispatch(
                 self, work_item: ProviderWorkItem
             ) -> ProviderExecutionOutcome:
-                raise AssertionError("executor must not be called")
+                raise AssertionError("dispatcher must not be called")
 
         graph = build_investigation_graph(
-            ExplodingExecutor(),
+            ExplodingDispatcher(),
             expected_investigation_id=expected,
         )
         with pytest.raises(InvestigationGraphContextMismatchError) as raised:
@@ -238,14 +315,14 @@ class TestGraphContextBinding:
         assert str(state.investigation_id) not in message
 
     @pytest.mark.asyncio
-    async def test_unbound_graph_remains_usable(self) -> None:
-        """Legacy PR 19A fake graph works without an expected investigation ID."""
-        executor = scenario_executor()
-        result = await build_investigation_graph(executor).ainvoke(
+    async def test_unbound_dispatcher_remains_usable(self) -> None:
+        """An unbound fake dispatcher works without an expected investigation ID."""
+        dispatcher = scenario_dispatcher()
+        result = await build_investigation_graph(dispatcher).ainvoke(
             {"investigation": scenario_initial_state()}
         )
         state = cast(InvestigationState, result["investigation"])
-        assert executor.requested == [
+        assert dispatcher.requested == [
             scenario_dns_work_item(),
             scenario_rdap_work_item(),
         ]
@@ -275,22 +352,22 @@ class BoundFakeExecutor(  # pylint: disable=too-few-public-methods
         return self._investigation_id
 
     async def execute(self, work_item: ProviderWorkItem) -> ProviderExecutionOutcome:
-        """Record and return the deterministic scenario outcome when matching."""
+        """Execute one item when matching; fail any unexpected call."""
         self.executed.append(work_item)
         if work_item != scenario_dns_work_item():
             raise AssertionError("bound executor received unexpected work")
         return scenario_dns_outcome()
 
 
-class TestGraphAutomaticExecutorBinding:
-    """The generic builder adopts an InvestigationBoundWorkExecutor's binding."""
+class TestGraphBindingThroughLocalDispatcher:
+    """Binding is preserved across the production LocalTaskDispatcher seam."""
 
     @pytest.mark.asyncio
-    async def test_automatic_matching_binding_executes(self) -> None:
-        """An omitted expected ID adopts the executor's matching bound ID."""
+    async def test_omitted_expected_id_adopts_wrapped_binding(self) -> None:
+        """A local dispatcher's wrapped executor binding is adopted."""
         state = scenario_investigation_state()
         executor = BoundFakeExecutor(state.investigation_id)
-        graph = build_investigation_graph(executor)
+        graph = build_investigation_graph(LocalTaskDispatcher(executor))
         result = await graph.ainvoke(
             {"investigation": enqueue_provider_work(state, [scenario_dns_work_item()])}
         )
@@ -300,13 +377,13 @@ class TestGraphAutomaticExecutorBinding:
         assert recorded.budget.provider_calls_used == 1
 
     @pytest.mark.asyncio
-    async def test_automatic_mismatch_rejected_before_execution(self) -> None:
-        """An omitted expected ID still rejects a mismatched state."""
+    async def test_wrapped_binding_rejects_mismatched_state(self) -> None:
+        """A bound local dispatcher rejects another investigation's state."""
         state = scenario_investigation_state()
         other = UUID("00000000-0000-0000-0000-0000000000bb")
         assert other != state.investigation_id
         executor = BoundFakeExecutor(other)
-        graph = build_investigation_graph(executor)
+        graph = build_investigation_graph(LocalTaskDispatcher(executor))
         with pytest.raises(InvestigationGraphContextMismatchError):
             await graph.ainvoke(
                 {
@@ -315,15 +392,16 @@ class TestGraphAutomaticExecutorBinding:
                     )
                 }
             )
+        # The dispatcher/executor was never called for the rejected state.
         assert not executor.executed
 
     @pytest.mark.asyncio
     async def test_explicit_matching_binding_executes(self) -> None:
-        """An explicit expected ID equal to the executor's binding is accepted."""
+        """An explicit expected ID equal to the wrapped binding is accepted."""
         state = scenario_investigation_state()
         executor = BoundFakeExecutor(state.investigation_id)
         graph = build_investigation_graph(
-            executor,
+            LocalTaskDispatcher(executor),
             expected_investigation_id=state.investigation_id,
         )
         result = await graph.ainvoke(
@@ -340,7 +418,7 @@ class TestGraphAutomaticExecutorBinding:
         executor = BoundFakeExecutor(state.investigation_id)
         with pytest.raises(InvestigationGraphBindingConflictError) as raised:
             build_investigation_graph(
-                executor,
+                LocalTaskDispatcher(executor),
                 expected_investigation_id=other,
             )
         message = str(raised.value)
@@ -352,18 +430,18 @@ class TestGraphAutomaticExecutorBinding:
         assert str(other) not in message
 
     @pytest.mark.asyncio
-    async def test_unbound_work_executor_remains_compatible(self) -> None:
-        """An ordinary PR 19A WorkExecutor with no expected ID stays unbound."""
-        executor = scenario_executor()
-        result = await build_investigation_graph(executor).ainvoke(
-            {"investigation": scenario_initial_state()}
+    async def test_unbound_dispatcher_with_explicit_expected_id(self) -> None:
+        """A generic unbound dispatcher honors an explicit expected ID."""
+        state = scenario_investigation_state()
+        dispatcher = scenario_dispatcher()
+        graph = build_investigation_graph(
+            dispatcher,
+            expected_investigation_id=state.investigation_id,
         )
-        state = cast(InvestigationState, result["investigation"])
-        assert executor.requested == [
-            scenario_dns_work_item(),
-            scenario_rdap_work_item(),
-        ]
-        assert state.completed_provider_work == [
-            scenario_dns_work_item(),
-            scenario_rdap_work_item(),
-        ]
+        result = await graph.ainvoke(
+            {"investigation": enqueue_provider_work(state, [scenario_dns_work_item()])}
+        )
+        recorded = cast(InvestigationState, result["investigation"])
+        assert dispatcher.requested == [scenario_dns_work_item()]
+        assert recorded.completed_provider_work == [scenario_dns_work_item()]
+        assert recorded.budget.provider_calls_used == 1

@@ -34,6 +34,7 @@ from agentic_threat_investigator.app.orchestration import (
 from agentic_threat_investigator.app.orchestration.composition import (
     build_provider_investigation_graph,
 )
+from agentic_threat_investigator.app.orchestration.dispatcher import LocalTaskDispatcher
 from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
     ProviderWorkExecutor,
@@ -48,6 +49,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
+    ProviderExecutionOutcome,
     ProviderExecutionStatus,
     ProviderWorkItem,
     default_investigation_budget,
@@ -194,8 +196,28 @@ async def seed_root_investigation(
 
 async def test_dns_vertical_slice(
     uow_factory: Callable[[], PostgresUnitOfWork],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The full provider -> extraction -> persistence -> timeline pipeline."""
+    """The full provider -> extraction -> persistence -> timeline pipeline.
+
+    The production graph executes through ``LocalTaskDispatcher``: a
+    recording spy records the queued work item at the dispatch boundary and
+    then delegates to the real dispatcher, proving the factory path
+
+        queued ProviderWorkItem -> LangGraph -> LocalTaskDispatcher
+        -> ProviderWorkExecutor -> synthetic provider HTTP
+        -> Evidence/extraction/persistence -> ProviderExecutionOutcome
+    """
+    dispatched: list[ProviderWorkItem] = []
+    real_dispatch = LocalTaskDispatcher.dispatch
+
+    async def tracking_dispatch(
+        self: LocalTaskDispatcher, work_item: ProviderWorkItem
+    ) -> ProviderExecutionOutcome:
+        dispatched.append(work_item)
+        return await real_dispatch(self, work_item)
+
+    monkeypatch.setattr(LocalTaskDispatcher, "dispatch", tracking_dispatch)
     app = _build_stub_app()
     app.state.dns_responses.update(
         {
@@ -248,6 +270,8 @@ async def test_dns_vertical_slice(
         recorded_state = result["investigation"]
         outcome = recorded_state.last_provider_outcome
         assert outcome is not None
+        # The queued item crossed the dispatch boundary exactly once.
+        assert dispatched == [work_item]
         assert outcome.status is ProviderExecutionStatus.SUCCEEDED
         assert len(outcome.evidence_ids) == 1
         assert len(outcome.discovered_entity_ids) == 1

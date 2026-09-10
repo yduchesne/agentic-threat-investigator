@@ -20,7 +20,7 @@ from agentic_threat_investigator.app.extraction.extractor import extract
 from agentic_threat_investigator.app.investigation_timeline import (
     UnitOfWorkInvestigationTimelineSink,
 )
-from agentic_threat_investigator.app.orchestration.executor import WorkExecutor
+from agentic_threat_investigator.app.orchestration.dispatcher import LocalTaskDispatcher
 from agentic_threat_investigator.app.orchestration.graph import (
     OrchestrationGraphState,
     build_investigation_graph,
@@ -66,7 +66,7 @@ def build_provider_investigation_graph(
     automatically and direct generic-builder composition cannot bypass
     investigation isolation.
     """
-    executor: WorkExecutor = ProviderWorkExecutor(
+    executor = ProviderWorkExecutor(
         entity_reader=UowEntityReader(uow_factory),
         provider_registry=provider_registry,
         extractor=extract,
@@ -74,7 +74,8 @@ def build_provider_investigation_graph(
         timeline_service=UnitOfWorkInvestigationTimelineSink(uow_factory),
         context=context,
     )
+    dispatcher = LocalTaskDispatcher(executor)
     return build_investigation_graph(
-        executor,
+        dispatcher,
         expected_investigation_id=context.investigation_id,
     )

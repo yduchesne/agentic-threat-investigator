@@ -7,6 +7,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+from agentic_threat_investigator.app.orchestration.dispatcher import TaskDispatcher
 from agentic_threat_investigator.app.orchestration.executor import WorkExecutor
 from agentic_threat_investigator.app.orchestration.models import enqueue_provider_work
 from agentic_threat_investigator.domain.identifiers import SourceId
@@ -67,8 +68,10 @@ def scenario_rdap_outcome() -> ProviderExecutionOutcome:
 class FakeWorkExecutor(WorkExecutor):
     """Deterministic in-memory executor driven by an explicit outcome mapping.
 
-    Performs no network, database, or LLM I/O and records every requested
-    work item in execution order for test assertions.
+    Records every requested work item in execution order for test assertions.
+    Performs no network, database, or LLM I/O. This is the legacy PR 19A
+    compatibility fixture: primary graph tests use
+    :class:`FakeTaskDispatcher` instead.
     """
 
     def __init__(
@@ -82,6 +85,39 @@ class FakeWorkExecutor(WorkExecutor):
 
         self.requested.append(work_item)
         return self._outcomes[work_item]
+
+
+class FakeTaskDispatcher(TaskDispatcher):
+    """Deterministic in-memory dispatcher driven by an explicit outcome mapping.
+
+    ``dispatch`` records the exact requested work item in call order and
+    returns the configured deterministic outcome. It performs no state
+    mutation and no external I/O, so the graph seam can be exercised without
+    any concrete ``LocalTaskDispatcher`` or ``ProviderWorkExecutor``.
+    """
+
+    def __init__(
+        self, outcomes: dict[ProviderWorkItem, ProviderExecutionOutcome]
+    ) -> None:
+        self._outcomes = dict(outcomes)
+        self.requested: list[ProviderWorkItem] = []
+
+    async def dispatch(self, work_item: ProviderWorkItem) -> ProviderExecutionOutcome:
+        """Record the item and return its configured deterministic outcome."""
+
+        self.requested.append(work_item)
+        return self._outcomes[work_item]
+
+
+def scenario_dispatcher() -> FakeTaskDispatcher:
+    """Return the fake dispatcher for the PR 19C minimal scenario."""
+
+    return FakeTaskDispatcher(
+        {
+            scenario_dns_work_item(): scenario_dns_outcome(),
+            scenario_rdap_work_item(): scenario_rdap_outcome(),
+        }
+    )
 
 
 def scenario_executor() -> FakeWorkExecutor:

@@ -18,6 +18,9 @@ from agentic_threat_investigator.app.extraction.models import (
     ExtractionErrorReason,
     ExtractionResult,
 )
+from agentic_threat_investigator.app.orchestration.executor import (
+    InvestigationBoundWorkExecutor,
+)
 from agentic_threat_investigator.app.orchestration.provider_executor import (
     ERROR_EXTRACTION_ERROR,
     ERROR_PERSISTENCE_ERROR,
@@ -26,9 +29,6 @@ from agentic_threat_investigator.app.orchestration.provider_executor import (
     ERROR_TARGET_NOT_FOUND,
     ERROR_TIMELINE_ERROR,
     ERROR_UNSUPPORTED_INDICATOR,
-)
-from agentic_threat_investigator.app.orchestration.executor import (
-    InvestigationBoundWorkExecutor,
 )
 from agentic_threat_investigator.app.provider_observation_persistence import (
     ProviderObservationPersistenceResult,

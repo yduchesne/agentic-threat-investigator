@@ -12,7 +12,7 @@ Integrated the orchestration skeleton with real EvidenceProvider execution, PR 1
 
 `ProviderWorkExecutor` remains the component that performs provider work.
 
-## PR 19C — Investigation task dispatcher abstraction
+## PR 19C — Investigation task dispatcher abstraction [DONE]
 
 Introduce an explicit application-layer dispatch boundary between orchestration and execution without introducing distributed infrastructure.
 
