@@ -190,15 +190,17 @@ class ProviderExecutionStatus(str, Enum):
 class ProviderExecutionOutcome(BaseModel):
     """Typed operational result of executing one :class:`ProviderWorkItem`.
 
-    Contains operational identifiers only: no evidence, provider payloads,
-    relationships, assessments, or hidden reasoning.
+    Contains operational identifiers only: no evidence objects, provider
+    payloads, relationship objects, assessments, or hidden reasoning.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     work_item: ProviderWorkItem
     status: ProviderExecutionStatus
+    evidence_ids: tuple[UUID, ...] = ()
     discovered_entity_ids: tuple[UUID, ...] = ()
+    relationship_ids: tuple[UUID, ...] = ()
     error: InvestigationError | None = None
 
 

@@ -75,6 +75,7 @@ async def reset_application_data(
         "relationship",
         "entity",
         "domain_object_history",
+        "investigation_timeline_event",
     )
     async with integration_engine.begin() as connection:
         await connection.execute(

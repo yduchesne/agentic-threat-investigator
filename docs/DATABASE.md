@@ -42,6 +42,7 @@ Insert-only:
 - Evidence
 - RelationshipObservation
 - AuditEvent
+- InvestigationTimelineEvent
 
 Normal application code exposes no deletion operation for these records.
 
@@ -451,6 +452,50 @@ AuditEvent is append-only and immutable. It is stored in `ati.audit_event` with 
 Security-relevant successful mutations and their audit event should commit transactionally together. Failed or denied operations that do not commit use an independent transaction.
 
 Denied/failed events use an appropriate independent audit transaction when the primary mutation does not commit.
+
+## Investigation timeline persistence
+
+`ati.investigation_timeline_event` (migration 0013, SQL API v0010) stores the
+append-only, analyst-facing workflow timeline. It is deliberately separate
+from `AuditEvent`, `domain_object_history`, application logs, and trace
+backends.
+
+Table semantics:
+
+- `id uuid PRIMARY KEY` (caller-supplied event identity);
+- `investigation_id uuid NOT NULL REFERENCES ati.investigation(id)`; the
+  foreign key rejects events for unknown investigations;
+- `event_type text NOT NULL` constrained to the six documented timeline
+  event types;
+- `occurred_at timestamptz NOT NULL` (timezone-aware UTC);
+- optional `provider` (source URN), `target_entity_id`,
+  `evidence_ids uuid[]`, `entity_ids uuid[]`, `relationship_ids uuid[]`,
+  and `error_code text`;
+- `error_code`, when present, is bounded to 64 ASCII characters matching
+  `^[a-z][a-z0-9_]{0,63}$` by a CHECK constraint mirroring the domain
+  contract, so the database rejects an invalid code even if model
+  validation is bypassed;
+- `sequence bigint NOT NULL` drawn from
+  `ati.investigation_timeline_event_seq`, giving a deterministic
+  chronological read order even for events sharing one timestamp. The
+  sequence is `OWNED BY` its table column, so the 0013 downgrade drops
+  both deterministically.
+
+The repository (`PostgresInvestigationTimelineRepository`) exposes exactly
+two operations: `append` (insert and flush inside the caller's UnitOfWork
+transaction; it never commits) and `list_by_investigation` (chronological
+`occurred_at` then `sequence` order).
+
+Append-only enforcement boundary: normal application code is append-only
+through the `InvestigationTimelineRepository` ABC — there is no update,
+delete, upsert, soft-delete, or versioning path anywhere in the application
+stack, and no ATI routine (function/procedure) mutates timeline events.
+Direct owner/admin SQL is outside the application immutability boundary;
+deployment-role privilege separation (a restricted runtime role) is future
+hardening if required, not a v0.1 guarantee. No row-level triggers or generic
+history mechanisms are used. Timeline appends are not transactionally atomic
+with PR 18C provider-observation persistence; a failed append never rolls
+back already committed domain data.
 
 ## Time
 

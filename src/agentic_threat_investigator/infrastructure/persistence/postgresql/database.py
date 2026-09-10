@@ -16,6 +16,7 @@ from agentic_threat_investigator.app.persistence import UnitOfWork
 from agentic_threat_investigator.app.persistence.repositories import (
     AuditEventRepository,
     CredentialRepository,
+    InvestigationTimelineRepository,
     SessionRepository,
     UserRepository,
 )
@@ -43,6 +44,7 @@ from .source_repositories import (
     PostgresIngestionCheckpointRepository,
     PostgresSourceRecordRepository,
 )
+from .timeline_repositories import PostgresInvestigationTimelineRepository
 
 
 class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attributes
@@ -70,6 +72,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         self.ingestion_checkpoints = cast(PostgresIngestionCheckpointRepository, None)
         self.documents = cast(PostgresDocumentRepository, None)
         self.document_chunks = cast(PostgresDocumentChunkRepository, None)
+        self.timeline_events = cast(InvestigationTimelineRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -100,6 +103,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         self.document_chunks = PostgresDocumentChunkRepository(
             self.session, self._batch_size
         )
+        self.timeline_events = PostgresInvestigationTimelineRepository(self.session)
         return self
 
     async def __aexit__(
@@ -136,6 +140,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             )
             self.documents = cast(PostgresDocumentRepository, None)
             self.document_chunks = cast(PostgresDocumentChunkRepository, None)
+            self.timeline_events = cast(InvestigationTimelineRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

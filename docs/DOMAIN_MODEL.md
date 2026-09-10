@@ -591,9 +591,23 @@ class ProviderExecutionStatus(str, Enum):
 class ProviderExecutionOutcome(BaseModel):
     work_item: ProviderWorkItem
     status: ProviderExecutionStatus
+    evidence_ids: tuple[UUID, ...] = ()
     discovered_entity_ids: tuple[UUID, ...] = ()
+    relationship_ids: tuple[UUID, ...] = ()
     error: InvestigationError | None = None
 ```
+
+ProviderResult execution-status contract (approved): a mixed result carrying
+both Evidence and provider errors is a valid partial provider result. The
+executor persists valid Evidence in provider-return order and returns
+`SUCCEEDED` when at least one Evidence observation committed and no
+extraction, persistence, or timeline failure followed; otherwise `FAILED`
+takes precedence and all previously committed IDs remain in the outcome.
+Only the first provider error, in provider-return order, is retained — its
+stable code and retryability, never its free-form message — and the
+`PROVIDER_WORK_COMPLETED` timeline event carries that code as its
+`error_code`. Errors without Evidence fail the work; an all-empty result
+succeeds. No `PARTIAL` execution status exists in PR 19B.
 
 The work identity is exactly `(provider, entity_id, depth)` and is used only
 for deterministic queue duplicate suppression. Work items carry operational
@@ -610,9 +624,10 @@ are pure functions over `InvestigationState`:
     inspection, or pivot policy;
 -   recording an outcome (success or failure) moves the work item from
     pending to completed exactly once, records
-    `last_provider_outcome`, merges `discovered_entity_ids` preserving
-    first-seen order, appends the outcome's typed `InvestigationError` when
-    present, increments `budget.provider_calls_used` exactly once, and
+    `last_provider_outcome`, merges `evidence_ids`, `relationship_ids`,
+    and `discovered_entity_ids` preserving first-seen order, appends the
+    outcome's typed `InvestigationError` when present, increments
+    `budget.provider_calls_used` exactly once, and
     clears `current_provider_work`;
 -   a work item never exists simultaneously in pending and completed
     collections, and failure is still completed work (retry policy is not
@@ -624,6 +639,76 @@ stopping policy remain PR 21. The state remains JSON-serializable via
 `model_dump(mode="json")` and reconstructable through Pydantic validation,
 and the persistence layer stores the new fields inside the schemaless
 `operational_state` JSONB document (no migration required).
+
+## Investigation timeline (PR 19B)
+
+The analyst-facing workflow timeline is a dedicated append-only domain model
+(`domain/investigation_timeline.py`), distinct from `AuditEvent`,
+domain-object history, application logs, and distributed tracing:
+
+```python
+class InvestigationTimelineEventType(str, Enum):
+    INVESTIGATION_STARTED = "investigation_started"
+    PROVIDER_WORK_STARTED = "provider_work_started"
+    PROVIDER_WORK_COMPLETED = "provider_work_completed"
+    PROVIDER_WORK_FAILED = "provider_work_failed"
+    EVIDENCE_PERSISTED = "evidence_persisted"
+    ENTITIES_DISCOVERED = "entities_discovered"
+
+class InvestigationTimelineEvent(BaseModel):
+    id: UUID
+    investigation_id: UUID
+    type: InvestigationTimelineEventType
+    occurred_at: datetime  # timezone-aware, normalized to UTC
+    provider: SourceId | None = None
+    target_entity_id: UUID | None = None
+    evidence_ids: tuple[UUID, ...] = ()
+    entity_ids: tuple[UUID, ...] = ()
+    relationship_ids: tuple[UUID, ...] = ()
+    error_code: str | None = None
+```
+
+Invariants:
+
+-   events are immutable; there is no update or delete operation anywhere
+    in the stack (domain, repository, or database API);
+-   events carry typed identifiers and a stable event type only. There is
+    deliberately no free-form `reason` field: presentation prose, when
+    required, is derived deterministically from the event type and fields.
+    Raw provider bodies, stack traces, prompts, secrets, and
+    chain-of-thought never appear in timeline events;
+-   `EVIDENCE_PERSISTED` is emitted only after PR 18C commits the
+    observation; `PROVIDER_WORK_COMPLETED` is emitted only after all
+    intended processing completes; a failed append never rolls back already
+    committed domain data and surfaces a typed `timeline_error` instead.
+
+Event-shape contract (enforced by a Pydantic `model_validator(mode="after")`
+and mirrored by PostgreSQL CHECK constraints for the error-code grammar):
+
+-   `INVESTIGATION_STARTED`: `provider`, `target_entity_id`, and
+    `error_code` are `None`; all ID tuples are empty.
+-   `PROVIDER_WORK_STARTED`: `provider` and `target_entity_id` are required;
+    `error_code` is `None`; all ID tuples are empty.
+-   `EVIDENCE_PERSISTED`: `provider` and `target_entity_id` are required;
+    exactly one Evidence ID is required; Entity/Relationship ID tuples may
+    be empty; `error_code` is `None`.
+-   `PROVIDER_WORK_COMPLETED`: `provider` and `target_entity_id` are
+    required; aggregate ID tuples may be empty; `error_code` may carry the
+    retained first provider error for the approved mixed-result contract.
+-   `PROVIDER_WORK_FAILED`: `provider`, `target_entity_id`, and `error_code`
+    are required; all ID tuples are empty because committed IDs live in the
+    operational outcome and prior `EVIDENCE_PERSISTED` events.
+-   `ENTITIES_DISCOVERED`: at least one Entity ID is required; `error_code`
+    is `None`; the executor does not emit this currently-unused event.
+
+`error_code` is bounded to 64 ASCII characters matching
+`^[a-z][a-z0-9_]{0,63}$`; leading/trailing whitespace is rejected, never
+stripped or normalized. The same grammar is enforced by the database CHECK
+constraint so an invalid code is rejected even if model validation is
+bypassed. Append-only enforcement is an application boundary: the repository
+ABC exposes append and chronological read only, and no ATI routine mutates
+timeline events; direct owner/admin SQL is outside that boundary, with
+runtime-role privilege separation deferred as future hardening.
 
 ## Stopping
 

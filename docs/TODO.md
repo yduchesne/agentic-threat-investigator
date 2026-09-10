@@ -803,6 +803,97 @@ The generic secret-resolution example near the end of `docs/CONFIGURATION.md` st
 - No example implies that `CONFIG["abuseipdb"]` or `abuseipdb.enabled` is supported.
 - The documented secret reference remains `ATI_ABUSEIPDB_API_KEY` by default.
 
+## PR 19B post-hardening secondary follow-up
+
+**Priority:** MEDIUM
+
+**Origin:** Review of `.plans/pr-19b-fixes-04.md` implementation. The remaining
+HIGH context-binding defect is handled only by `.plans/pr-19b-fixes-05.md`.
+
+### Problem
+
+The fixes-04 implementation passes QA and integration gates and completes its
+listed production hardening. These lower-severity test/documentation details
+remain:
+
+- `test_timeline_migration_downgrade_and_re_upgrade()` says migration 0013
+  “downgrades to v0011” in its summary even though it correctly downgrades to
+  revision 0012.
+- The direct-SQL invalid timeline `error_code` test catches `IntegrityError`
+  but does not assert SQLSTATE `23514` or the exact
+  `investigation_timeline_event_error_code_check` constraint, so another
+  integrity failure could satisfy it.
+- Timeline event-shape invariants are enforced by Pydantic but not mirrored by
+  PostgreSQL checks. This matches the documented application append-only
+  boundary, but privileged/direct SQL can create a row that the repository
+  cannot deserialize. The final fixes-04 inspection wording overstated that
+  every event shape was validated in SQL.
+- The composition-factory unit test checks node names only. The PostgreSQL
+  vertical slice exercises the assembled factory, but the unit test does not
+  independently prove that the expected reader, extractor, persistence
+  service, timeline sink, and executor are wired.
+- UoW lifecycle integration tests invoke `__aenter__()`/`__aexit__()` manually.
+  They prove reset behavior but are more fragile than a small helper or normal
+  `async with` plus retained-UoW assertions.
+- The fixes-05 composition tests annotate the exploding UoW factory as returning
+  `object` and suppress the resulting argument-type error; the fake provider's
+  `investigate()` parameter also uses `object` rather than the ABC's `UUID`.
+  Production typing is strict, but these unit-test annotations are weaker than
+  the interfaces they are intended to verify.
+- The fixes-05 PostgreSQL regression uses function-local imports and repeated
+  `# type: ignore[union-attr]` access to `reader.session`. Existing assertions
+  establish an active UoW, but a small typed query helper would make the durable
+  absence checks clearer and avoid scattered ignores. The fixes-06 direct-
+  builder regression duplicates the same durable-absence query block.
+- The fixes-06 direct-builder unit test constructs `FakeEntityReader` inline
+  and does not retain it to assert that no target lookup occurred. The graph's
+  initialize-first implementation and exploding integration transport make the
+  behavior clear, but the test does not directly pin the plan's zero-reader-
+  call assertion.
+- `test_bound_investigation_id_has_no_mutation_path()` proves that the read-only
+  property has no setter, but its name can be read as proving the executor's
+  private `_context` reference is immutable. The context value object is frozen;
+  reassignment of the private attribute is an implementation-discipline issue,
+  not something this test establishes.
+
+### Intended fix
+
+1. Correct the migration lifecycle docstring to say revision 0012; make no
+   migration behavior change.
+2. Assert SQLSTATE `23514` and the exact check-constraint diagnostic for the
+   invalid error-code insert, then verify no row remains after rollback.
+3. Decide whether database-owner SQL must obey event-shape rules. If yes, add
+   named CHECK constraints mirroring only the documented Pydantic shapes and
+   migration tests. If no, revise final verification wording to state that
+   event shapes are application-enforced while error-code grammar is also
+   database-enforced.
+4. Strengthen the composition unit test through injected constructor/factory
+   seams or a bounded fake-UoW execution; do not expose production internals or
+   duplicate the PostgreSQL vertical slice.
+5. Refactor UoW lifecycle tests to minimize direct magic-method calls while
+   retaining normal-exit, rollback-exit, reset, and re-entry coverage.
+6. Type the exploding UoW factory as returning `UnitOfWork` (it may still raise
+   unconditionally), use `UUID` in the fake provider override, and remove the
+   associated argument-type suppressions.
+7. Move fixes-05/06 integration imports to module scope and use one typed
+   active-session/query helper for both durable absence assertions instead of
+   duplicated query blocks and repeated `union-attr` ignores.
+8. Retain the `FakeEntityReader` in the direct-builder unit regression and
+   assert its request list remains empty when initialize rejects mismatched
+   state.
+9. Rename the bound-ID property test to state precisely that the public
+   property is read-only, or explicitly freeze executor context assignment if
+   that stronger invariant is required. Do not test private mutation merely to
+   imply a public security boundary.
+
+### Acceptance checks
+
+- Migration documentation names revision 0012 accurately.
+- The error-code database test proves the intended named CHECK failed.
+- Documentation accurately states the Python/SQL event-shape boundary.
+- Composition and UoW lifecycle tests remain deterministic and focused.
+- `./build.sh --qa` and `./integration-test.sh` pass.
+
 ## PR 19A secondary orchestration hardening
 
 **Priority:** MEDIUM

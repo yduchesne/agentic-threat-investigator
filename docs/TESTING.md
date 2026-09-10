@@ -197,7 +197,98 @@ Priority unit-test areas include:
   validation, FIFO queue selection, duplicate suppression, outcome
   bookkeeping, provider-call counter accounting, JSON state round-trip,
   and graph termination on queue exhaustion via the LangGraph skeleton
-  in `app/orchestration`.
+  in `app/orchestration`;
+- deterministic provider execution (PR 19B): target/provider resolution,
+  applicability validation, empty-success and error-only outcomes,
+  cancellation propagation, extraction-before-persistence sequencing,
+  per-Evidence PR 18C invocation, outcome ID bookkeeping (evidence,
+  relationship, discovered entity merges; one provider-call increment per
+  work item), and timeline event ordering/failure semantics, via fakes in
+  `tests/unit/app/orchestration/test_provider_executor.py` (shared
+  deterministic fakes/builders in `tests/support/provider_executor_fixtures.py`);
+- provider-output provenance and partial-failure regressions (PR 19B
+  fixes): binding validation of the returned provider, owning
+  investigation, and persisted target (type, exact canonical value,
+  subject identifier; malformed/noncanonical subjects provably reach zero
+  extraction and zero persistence; a two-Evidence tuple with one invalid
+  item proves full preflight), retention of all committed
+  Evidence/Entity/Relationship IDs when a later Evidence fails extraction
+  or persistence (including through state bookkeeping and when the failure
+  timeline event itself cannot append), canonical first-seen aggregate ID
+  lists across outcomes and completion events, and bounded secret-free
+  logging of caught provider/persistence/timeline exceptions (adversarial
+  injected exception text never appears in any log message or record and
+  every record has `exc_info is None`), via
+  `tests/unit/app/orchestration/test_provider_executor_regressions.py`;
+- timeline event-shape and error-code contract (PR 19B): table-driven
+  domain tests for every valid event type and each invalid field
+  combination, including blank, padded, uppercase, punctuation, and
+  65-character error codes, via
+  `tests/unit/domain/test_investigation_timeline.py`, plus a database
+  integration assertion that an invalid code is rejected even when model
+  validation is bypassed;
+- migration lifecycle and schema contract (PR 19B): migration 0013
+  downgrades to 0012 and re-upgrades to head, proving the timeline table
+  and owned sequence absence at 0012 and clean reinstall with checks,
+  index, and sequence ownership; the schema contract asserts the
+  error-code CHECK and that no ATI routine mutates timeline events, via
+  `tests/integration/test_migration.py`;
+- UnitOfWork lifecycle (PR 19B): a closed UoW exposes no stale timeline
+  repository and re-enters with a fresh repository, including the
+  rollback path, via `tests/integration/test_investigation_timeline_repository.py`;
+- production composition (PR 19B): `build_provider_investigation_graph`
+  assembles the real seams without global state and the compiled graph is
+  invoked asynchronously in the vertical slice, via
+  `tests/unit/app/orchestration/test_composition.py` and the pipeline test;
+- graph context binding (PR 19B): a provider-backed compiled graph is bound
+  to one investigation ID; invoking it with a state for another
+  investigation raises `InvestigationGraphContextMismatchError` during
+  `initialize` before queue selection, target lookup, timeline emission,
+  provider I/O, extraction, or persistence. Production executors implement
+  `InvestigationBoundWorkExecutor`, so the generic graph builder
+  automatically adopts their bound investigation ID — direct public
+  composition cannot bypass isolation — and an explicit conflicting ID fails
+  at graph construction with `InvestigationGraphBindingConflictError`.
+  Generic PR 19A graphs without an expected ID and ordinary unbound
+  `WorkExecutor` values remain unchanged. Unit coverage (all five binding
+  cases, the direct-builder bypass, and the construction conflict) lives in
+  `tests/unit/app/orchestration/test_graph.py`, `test_composition.py`, and
+  `test_provider_executor.py`; two PostgreSQL regressions in
+  `tests/integration/test_provider_execution_pipeline.py` (factory path and
+  direct generic-builder path) prove durable absence (no Evidence, timeline
+  event, Relationship, RelationshipObservation, or state mutation for either
+  investigation) using exploding transports.
+
+### Deterministic vertical-slice provider execution (PR 19B)
+
+`tests/integration/test_provider_execution_pipeline.py` proves the real
+pipeline against the isolated migrated PostgreSQL database and the
+in-process synthetic HTTP boundary (real `httpx.AsyncClient` over
+`ASGITransport` into an ATI-authored FastAPI stub upstream guarded by a
+host allowlist; no public internet):
+
+```text
+persisted DOMAIN root
+  -> queued GOOGLE_PUBLIC_DNS work
+  -> real GooglePublicDnsProvider over the synthetic upstream
+  -> normalized DNS Evidence
+  -> PR 18B deterministic extraction
+  -> PR 18C atomic persistence
+  -> ProviderExecutionOutcome + persisted timeline events
+```
+
+The slice runs through the public `build_provider_investigation_graph`
+factory and invokes the compiled graph asynchronously; it asserts the
+persisted Evidence row, the discovered IP entity, the stable relationship
+and its immutable observation, the outcome/state ID bookkeeping
+(`provider_calls_used == 1`), the durable Investigation's
+`root_entity_ids == [root.id]` (the fixture persists the actual root Entity
+UUID), the started/evidence-persisted/completed timeline sequence, and that
+discovered entities are never automatically enqueued. The provider's
+internal HTTP parsing is not mocked. Timeline repository integration tests
+cover append, chronological read, exact foreign-key SQLSTATE 23503 with
+rollback and closed-UoW assertions, rollback, append-only semantics, and
+the database error-code rejection.
 
 ## Provider contract tests
 
