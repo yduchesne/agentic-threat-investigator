@@ -60,7 +60,11 @@ def build_provider_investigation_graph(
     lookup, timeline emission, provider I/O, extraction, or persistence when
     the state belongs to a different investigation. Validation executes at
     graph initialization on every invocation; it is never performed only at
-    construction time.
+    construction time. Passing the context ID explicitly is defense in depth:
+    ``ProviderWorkExecutor`` also exposes it as an
+    ``InvestigationBoundWorkExecutor``, so the generic graph builder adopts it
+    automatically and direct generic-builder composition cannot bypass
+    investigation isolation.
     """
     executor: WorkExecutor = ProviderWorkExecutor(
         entity_reader=UowEntityReader(uow_factory),

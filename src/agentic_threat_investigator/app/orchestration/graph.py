@@ -18,7 +18,10 @@ from uuid import UUID
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from agentic_threat_investigator.app.orchestration.executor import WorkExecutor
+from agentic_threat_investigator.app.orchestration.executor import (
+    InvestigationBoundWorkExecutor,
+    WorkExecutor,
+)
 from agentic_threat_investigator.app.orchestration.models import (
     record_provider_outcome,
     select_provider_work,
@@ -46,6 +49,26 @@ class InvestigationGraphContextMismatchError(ValueError):
         super().__init__(
             "orchestration graph state does not match the bound investigation "
             "context"
+        )
+
+
+class InvestigationGraphBindingConflictError(ValueError):
+    """Raised when an explicit graph binding conflicts with its executor.
+
+    The caller supplied an explicit ``expected_investigation_id`` that differs
+    from the executor's own bound investigation identity. Building the graph
+    would produce an executor that writes under one investigation while the
+    initialize node accepts another. The conflict is rejected at graph
+    construction, before any invocation or I/O. The message is a fixed safe
+    string that never embeds identifiers, entity values, provider results, or
+    payloads.
+    """
+
+    def __init__(self) -> None:
+        """Build the fixed safe binding-conflict message."""
+        super().__init__(
+            "orchestration graph binding conflicts with the executor "
+            "investigation context"
         )
 
 
@@ -138,14 +161,36 @@ def build_investigation_graph(
     service locator, provider bootstrap, database connection, or checkpointer
     is involved.
 
-    When ``expected_investigation_id`` is supplied, the graph is bound to one
-    investigation: every invocation validates the wrapped state's
-    investigation ID during ``initialize`` and raises
-    :class:`InvestigationGraphContextMismatchError` on mismatch, before work
-    selection and every I/O seam. The expected ID is an injected graph-instance
-    invariant, never copied into checkpoint state. When omitted, all PR 19A
-    behavior is preserved so existing fake-executor callers need no changes.
+    Binding derivation: when the executor exposes a bound investigation
+    identity (an :class:`InvestigationBoundWorkExecutor`), that identity is
+    adopted automatically as the graph's binding even when the caller omits
+    the explicit argument, so direct public composition cannot bypass
+    investigation isolation. An explicit ``expected_investigation_id`` that
+    conflicts with the executor's own bound identity raises
+    :class:`InvestigationGraphBindingConflictError` at construction. Every
+    invocation validates the wrapped state's investigation ID during
+    ``initialize`` and raises :class:`InvestigationGraphContextMismatchError`
+    on mismatch, before work selection and every I/O seam. The effective ID
+    is an injected graph-instance invariant, never copied into checkpoint
+    state. Ordinary ``WorkExecutor`` values with no explicit expected ID
+    remain unbound, preserving all PR 19A fake-executor behavior.
     """
+    executor_investigation_id = (
+        executor.bound_investigation_id
+        if isinstance(executor, InvestigationBoundWorkExecutor)
+        else None
+    )
+    if (
+        expected_investigation_id is not None
+        and executor_investigation_id is not None
+        and expected_investigation_id != executor_investigation_id
+    ):
+        raise InvestigationGraphBindingConflictError()
+    effective_investigation_id = (
+        expected_investigation_id
+        if expected_investigation_id is not None
+        else executor_investigation_id
+    )
 
     builder: StateGraph[OrchestrationGraphState] = StateGraph(OrchestrationGraphState)
 
@@ -160,8 +205,11 @@ def build_investigation_graph(
         ``initialize`` node name so no node or edge is added.
         """
         validated = await initialize(state)
-        if expected_investigation_id is not None:
-            if validated["investigation"].investigation_id != expected_investigation_id:
+        if effective_investigation_id is not None:
+            if (
+                validated["investigation"].investigation_id
+                != effective_investigation_id
+            ):
                 raise InvestigationGraphContextMismatchError()
         return validated
 

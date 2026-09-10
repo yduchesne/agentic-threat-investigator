@@ -27,6 +27,9 @@ from agentic_threat_investigator.app.orchestration.provider_executor import (
     ERROR_TIMELINE_ERROR,
     ERROR_UNSUPPORTED_INDICATOR,
 )
+from agentic_threat_investigator.app.orchestration.executor import (
+    InvestigationBoundWorkExecutor,
+)
 from agentic_threat_investigator.app.provider_observation_persistence import (
     ProviderObservationPersistenceResult,
 )
@@ -608,3 +611,39 @@ class TestTimelineSemantics:
         executor = build_executor(provider, domain_entity(), timeline=timeline)
         await executor.execute(dns_work_item())
         assert all(event.occurred_at == FIXED_TS for event in timeline.events)
+
+
+class TestExecutorInvestigationBinding:
+    """ProviderWorkExecutor exposes its bound investigation identity."""
+
+    def test_executor_is_investigation_bound(self) -> None:
+        """ProviderWorkExecutor implements InvestigationBoundWorkExecutor."""
+        executor = build_executor(
+            FakeEvidenceProvider(
+                ProviderResult(provider=SourceId.GOOGLE_PUBLIC_DNS.value)
+            ),
+            domain_entity(),
+        )
+        assert isinstance(executor, InvestigationBoundWorkExecutor)
+
+    def test_bound_investigation_id_matches_context(self) -> None:
+        """The bound ID equals the exact ProviderExecutionContext ID."""
+        executor = build_executor(
+            FakeEvidenceProvider(
+                ProviderResult(provider=SourceId.GOOGLE_PUBLIC_DNS.value)
+            ),
+            domain_entity(),
+        )
+        assert executor.bound_investigation_id == INVESTIGATION_ID
+
+    def test_bound_investigation_id_has_no_mutation_path(self) -> None:
+        """No setter or mutation path can change the bound ID."""
+        executor = build_executor(
+            FakeEvidenceProvider(
+                ProviderResult(provider=SourceId.GOOGLE_PUBLIC_DNS.value)
+            ),
+            domain_entity(),
+        )
+        with pytest.raises(AttributeError):
+            executor.bound_investigation_id = uuid4()  # type: ignore[misc]
+        assert executor.bound_investigation_id == INVESTIGATION_ID

@@ -28,6 +28,7 @@ from sqlalchemy import select
 
 from agentic_threat_investigator.app.orchestration import (
     InvestigationGraphContextMismatchError,
+    build_investigation_graph,
     enqueue_provider_work,
 )
 from agentic_threat_investigator.app.orchestration.composition import (
@@ -35,6 +36,11 @@ from agentic_threat_investigator.app.orchestration.composition import (
 )
 from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
+    ProviderWorkExecutor,
+    UowEntityReader,
+)
+from agentic_threat_investigator.app.provider_observation_persistence import (
+    ProviderObservationPersistenceService,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.identifiers import SourceId
@@ -460,6 +466,113 @@ async def test_context_mismatch_fails_before_any_persistence(
             assert len(observation_count.scalars().all()) == 0
             # Neither durable Investigation operational state was mutated by
             # the rejected invocation.
+            for investigation_id in (investigation_a, investigation_b):
+                durable = await reader.investigations.get_by_id(investigation_id)
+                assert durable is not None
+                assert durable.last_provider_outcome is None
+                assert durable.completed_provider_work == []
+                assert durable.budget.provider_calls_used == 0
+
+
+async def test_direct_builder_bypass_cannot_process_other_investigation(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Direct generic-builder composition of ProviderWorkExecutor stays bound.
+
+    A caller who builds the generic graph from a production executor without
+    passing an expected investigation ID still gets automatic binding from the
+    executor's context. Invoking it with state B raises the typed mismatch
+    error before provider HTTP or database work, and durable absence is
+    verified with a fresh UoW.
+    """
+    from agentic_threat_investigator.app.extraction.extractor import extract
+    from agentic_threat_investigator.app.investigation_timeline import (
+        UnitOfWorkInvestigationTimelineSink,
+    )
+
+    class _ExplodingTransport(httpx.AsyncBaseTransport):
+        """Fail the test if any provider HTTP I/O is attempted."""
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            raise RuntimeError("provider HTTP I/O must not occur for a bypass")
+
+    async with httpx.AsyncClient(transport=_ExplodingTransport()) as client:
+        http = ProviderHttpClient(client=client)
+        provider = GooglePublicDnsProvider(http, clock=lambda: _FIXED_TS)
+
+        async with uow_factory() as uow:
+            investigation_a, root = await seed_root_investigation(uow)
+            investigation_b = uuid4()
+            await uow.investigations.create(
+                InvestigationState(
+                    investigation_id=investigation_b,
+                    status=InvestigationStatus.RUNNING,
+                    trigger_type=InvestigationTriggerType.MANUAL,
+                    root_entity_ids=[root.id or uuid4()],
+                    objective="Assess the root indicator.",
+                    budget=default_investigation_budget(),
+                    started_at=_FIXED_TS,
+                )
+            )
+            await uow.commit()
+
+        # Direct composition: generic builder WITHOUT an expected ID. The
+        # executor's own bound investigation ID is adopted automatically.
+        executor = ProviderWorkExecutor(
+            entity_reader=UowEntityReader(uow_factory),
+            provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
+            extractor=extract,
+            persistence_service=ProviderObservationPersistenceService(uow_factory),
+            timeline_service=UnitOfWorkInvestigationTimelineSink(uow_factory),
+            context=ProviderExecutionContext(
+                investigation_id=investigation_a,
+                clock=lambda: _FIXED_TS,
+            ),
+        )
+        graph = build_investigation_graph(executor)
+
+        assert root.id is not None
+        work_item = ProviderWorkItem(
+            provider=SourceId.GOOGLE_PUBLIC_DNS, entity_id=root.id, depth=0
+        )
+        state_b = enqueue_provider_work(
+            InvestigationState(
+                investigation_id=investigation_b,
+                status=InvestigationStatus.RUNNING,
+                trigger_type=InvestigationTriggerType.MANUAL,
+                root_entity_ids=[root.id],
+                objective="Assess the root indicator.",
+                budget=default_investigation_budget(),
+                started_at=_FIXED_TS,
+            ),
+            [work_item],
+        )
+        with pytest.raises(InvestigationGraphContextMismatchError):
+            await graph.ainvoke({"investigation": state_b})
+
+        # Durable absence: no Evidence, timeline event, Relationship, or
+        # RelationshipObservation was created, and neither durable
+        # Investigation operational state was mutated.
+        async with uow_factory() as reader:
+            for investigation_id in (investigation_a, investigation_b):
+                evidence_count = await reader.session.execute(  # type: ignore[union-attr]
+                    select(EvidenceRow).where(
+                        EvidenceRow.investigation_id == investigation_id
+                    )
+                )
+                assert len(evidence_count.scalars().all()) == 0
+                timeline = await reader.timeline_events.list_by_investigation(
+                    investigation_id
+                )
+                assert timeline == []
+            relationship_count = await reader.session.execute(  # type: ignore[union-attr]
+                select(RelationshipRow)
+            )
+            assert len(relationship_count.scalars().all()) == 0
+            observation_count = await reader.session.execute(  # type: ignore[union-attr]
+                select(RelationshipObservationRow)
+            )
+            assert len(observation_count.scalars().all()) == 0
             for investigation_id in (investigation_a, investigation_b):
                 durable = await reader.investigations.get_by_id(investigation_id)
                 assert durable is not None

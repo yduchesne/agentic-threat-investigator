@@ -244,14 +244,20 @@ Priority unit-test areas include:
   to one investigation ID; invoking it with a state for another
   investigation raises `InvestigationGraphContextMismatchError` during
   `initialize` before queue selection, target lookup, timeline emission,
-  provider I/O, extraction, or persistence. Generic PR 19A graphs without an
-  expected ID remain unchanged. Unit coverage lives in
-  `tests/unit/app/orchestration/test_graph.py` and
-  `tests/unit/app/orchestration/test_composition.py`; the PostgreSQL
-  regression in `tests/integration/test_provider_execution_pipeline.py`
-  proves durable absence (no Evidence, timeline event, Relationship,
-  RelationshipObservation, or state mutation for either investigation) using
-  an exploding transport.
+  provider I/O, extraction, or persistence. Production executors implement
+  `InvestigationBoundWorkExecutor`, so the generic graph builder
+  automatically adopts their bound investigation ID — direct public
+  composition cannot bypass isolation — and an explicit conflicting ID fails
+  at graph construction with `InvestigationGraphBindingConflictError`.
+  Generic PR 19A graphs without an expected ID and ordinary unbound
+  `WorkExecutor` values remain unchanged. Unit coverage (all five binding
+  cases, the direct-builder bypass, and the construction conflict) lives in
+  `tests/unit/app/orchestration/test_graph.py`, `test_composition.py`, and
+  `test_provider_executor.py`; two PostgreSQL regressions in
+  `tests/integration/test_provider_execution_pipeline.py` (factory path and
+  direct generic-builder path) prove durable absence (no Evidence, timeline
+  event, Relationship, RelationshipObservation, or state mutation for either
+  investigation) using exploding transports.
 
 ### Deterministic vertical-slice provider execution (PR 19B)
 

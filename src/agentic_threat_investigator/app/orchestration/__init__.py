@@ -9,8 +9,9 @@ budget enforcement, LLM behavior, adaptive pivots, jobs, or workers.
 """
 
 from .composition import build_provider_investigation_graph
-from .executor import WorkExecutor
+from .executor import InvestigationBoundWorkExecutor, WorkExecutor
 from .graph import (
+    InvestigationGraphBindingConflictError,
     InvestigationGraphContextMismatchError,
     OrchestrationGraphState,
     build_investigation_graph,
@@ -30,8 +31,10 @@ from .provider_executor import (
 
 __all__ = [
     "WorkExecutor",
+    "InvestigationBoundWorkExecutor",
     "OrchestrationGraphState",
     "InvestigationGraphContextMismatchError",
+    "InvestigationGraphBindingConflictError",
     "ProviderExecutionContext",
     "ProviderWorkExecutor",
     "EntityReader",

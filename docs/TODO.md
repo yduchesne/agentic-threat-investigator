@@ -835,6 +835,15 @@ remain:
 - UoW lifecycle integration tests invoke `__aenter__()`/`__aexit__()` manually.
   They prove reset behavior but are more fragile than a small helper or normal
   `async with` plus retained-UoW assertions.
+- The fixes-05 composition tests annotate the exploding UoW factory as returning
+  `object` and suppress the resulting argument-type error; the fake provider's
+  `investigate()` parameter also uses `object` rather than the ABC's `UUID`.
+  Production typing is strict, but these unit-test annotations are weaker than
+  the interfaces they are intended to verify.
+- The fixes-05 PostgreSQL regression uses function-local imports and repeated
+  `# type: ignore[union-attr]` access to `reader.session`. Existing assertions
+  establish an active UoW, but a small typed query helper would make the durable
+  absence checks clearer and avoid scattered ignores.
 
 ### Intended fix
 
@@ -852,6 +861,12 @@ remain:
    duplicate the PostgreSQL vertical slice.
 5. Refactor UoW lifecycle tests to minimize direct magic-method calls while
    retaining normal-exit, rollback-exit, reset, and re-entry coverage.
+6. Type the exploding UoW factory as returning `UnitOfWork` (it may still raise
+   unconditionally), use `UUID` in the fake provider override, and remove the
+   associated argument-type suppressions.
+7. Move fixes-05 integration imports to module scope and use one typed active-
+   session/query helper for durable absence assertions instead of repeated
+   `union-attr` ignores.
 
 ### Acceptance checks
 

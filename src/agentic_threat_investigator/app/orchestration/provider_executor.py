@@ -67,7 +67,9 @@ from agentic_threat_investigator.app.extraction.models import (
 from agentic_threat_investigator.app.investigation_timeline import (
     InvestigationTimelineSink,
 )
-from agentic_threat_investigator.app.orchestration.executor import WorkExecutor
+from agentic_threat_investigator.app.orchestration.executor import (
+    InvestigationBoundWorkExecutor,
+)
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.provider_observation_persistence import (
     ProviderObservationPersistenceResult,
@@ -190,8 +192,22 @@ class UowEntityReader(EntityReader):  # pylint: disable=too-few-public-methods
             return await uow.entities.get_by_id(entity_id)
 
 
-class ProviderWorkExecutor(WorkExecutor):  # pylint: disable=too-few-public-methods
-    """Execute one approved provider work item through the real ATI seams."""
+class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
+    InvestigationBoundWorkExecutor
+):
+    """Execute one approved provider work item through the real ATI seams.
+
+    Bound to exactly one ``ProviderExecutionContext.investigation_id``: every
+    provider call, Evidence validation/persistence, and timeline event uses
+    that identity. Exposing it as :class:`InvestigationBoundWorkExecutor` lets
+    the generic graph builder adopt it automatically as the graph binding so
+    direct composition cannot bypass investigation isolation.
+    """
+
+    @property
+    def bound_investigation_id(self) -> UUID:
+        """Return the authoritative investigation identity of this executor."""
+        return self._context.investigation_id
 
     # The explicit constructor dependencies are the injected composition seam.
     # pylint: disable=too-many-arguments
