@@ -285,13 +285,15 @@ async def test_matching_investigation_zero_work_terminates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_direct_builder_bypass_is_automatically_bound() -> None:
-    """Direct generic-builder use of ProviderWorkExecutor cannot bypass binding.
+async def test_local_dispatcher_bound_by_wrapped_production_executor() -> None:
+    """A LocalTaskDispatcher exposes its wrapped executor's binding.
 
-    A caller who constructs the production executor for investigation A and
-    builds the generic graph without an expected ID still gets automatic
-    binding: invoking it with state B raises the typed mismatch error before
-    the entity reader, provider, or any persistence/timeline seam runs.
+    A caller who wraps the production executor for investigation A in a
+    ``LocalTaskDispatcher`` and builds the generic graph without an expected
+    ID still gets automatic binding: invoking the graph with state B raises
+    the typed mismatch error before the entity reader, provider, or any
+    persistence/timeline seam runs. The graph never accepts the executor
+    directly; the dispatcher is the explicit seam.
     """
     investigation_a = UUID("00000000-0000-0000-0000-0000000000aa")
     investigation_b = UUID("00000000-0000-0000-0000-0000000000bb")
@@ -308,7 +310,8 @@ async def test_direct_builder_bypass_is_automatically_bound() -> None:
             clock=fixed_clock,
         ),
     )
-    graph = build_investigation_graph(executor)
+    dispatcher = LocalTaskDispatcher(executor)
+    graph = build_investigation_graph(dispatcher)
     with pytest.raises(InvestigationGraphContextMismatchError) as raised:
         await graph.ainvoke({"investigation": _state_for(investigation_b)})
     assert provider.supports_calls == 0
@@ -321,8 +324,8 @@ async def test_direct_builder_bypass_is_automatically_bound() -> None:
     )
 
 
-def test_direct_builder_conflict_rejected_at_construction() -> None:
-    """An explicit conflicting ID with a provider executor fails at construction."""
+def test_local_dispatcher_conflict_rejected_at_construction() -> None:
+    """An explicit conflicting ID with a wrapped provider executor fails early."""
     investigation_a = UUID("00000000-0000-0000-0000-0000000000aa")
     investigation_b = UUID("00000000-0000-0000-0000-0000000000bb")
     provider = _FakeProvider()
@@ -330,7 +333,7 @@ def test_direct_builder_conflict_rejected_at_construction() -> None:
     executor = ProviderWorkExecutor(
         entity_reader=FakeEntityReader({uuid4(): domain_entity()}),
         provider_registry=registry,
-        extractor=lambda _evidence: ExtractionResult(),
+        extractor=lambda _: ExtractionResult(),
         persistence_service=FakePersistenceService(),
         timeline_service=None,
         context=ProviderExecutionContext(
@@ -338,14 +341,15 @@ def test_direct_builder_conflict_rejected_at_construction() -> None:
             clock=fixed_clock,
         ),
     )
+    dispatcher = LocalTaskDispatcher(executor)
     with pytest.raises(InvestigationGraphBindingConflictError) as raised:
         build_investigation_graph(
-            executor,
+            dispatcher,
             expected_investigation_id=investigation_b,
         )
     message = str(raised.value)
     assert message == (
-        "orchestration graph binding conflicts with the executor "
+        "orchestration graph binding conflicts with the dispatcher "
         "investigation context"
     )
     assert str(investigation_a) not in message

@@ -120,17 +120,6 @@ def scenario_dispatcher() -> FakeTaskDispatcher:
     )
 
 
-def scenario_executor() -> FakeWorkExecutor:
-    """Return the fake executor for the PR 19A minimal scenario."""
-
-    return FakeWorkExecutor(
-        {
-            scenario_dns_work_item(): scenario_dns_outcome(),
-            scenario_rdap_work_item(): scenario_rdap_outcome(),
-        }
-    )
-
-
 def scenario_investigation_state() -> InvestigationState:
     """Return the fixed initial investigation state for the PR 19A scenario."""
 

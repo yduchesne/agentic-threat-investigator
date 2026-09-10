@@ -50,12 +50,3 @@ class LocalTaskDispatcher(TaskDispatcher):
     async def dispatch(self, work_item: ProviderWorkItem) -> ProviderExecutionOutcome:
         """Delegate exactly once and preserve its result, errors, and cancellation."""
         return await self._executor.execute(work_item)
-
-
-def ensure_task_dispatcher(
-    dispatcher: TaskDispatcher | WorkExecutor,
-) -> TaskDispatcher:
-    """Return a dispatcher, adapting the legacy executor builder input if needed."""
-    if isinstance(dispatcher, TaskDispatcher):
-        return dispatcher
-    return LocalTaskDispatcher(dispatcher)

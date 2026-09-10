@@ -541,7 +541,8 @@ async def test_direct_builder_bypass_cannot_process_other_investigation(
             await uow.commit()
 
         # Direct composition: generic builder WITHOUT an expected ID. The
-        # executor's own bound investigation ID is adopted automatically.
+        # dispatcher locally wraps the production executor, whose own bound
+        # investigation ID is exposed and adopted automatically.
         executor = ProviderWorkExecutor(
             entity_reader=UowEntityReader(uow_factory),
             provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
@@ -553,7 +554,8 @@ async def test_direct_builder_bypass_cannot_process_other_investigation(
                 clock=lambda: _FIXED_TS,
             ),
         )
-        graph = build_investigation_graph(executor)
+        dispatcher = LocalTaskDispatcher(executor)
+        graph = build_investigation_graph(dispatcher)
 
         assert root.id is not None
         work_item = ProviderWorkItem(

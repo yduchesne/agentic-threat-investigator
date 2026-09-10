@@ -4,10 +4,9 @@
 
 Primary graph tests exercise the injected :class:`TaskDispatcher` seam
 (``FakeTaskDispatcher``) and do not require ``LocalTaskDispatcher`` or
-``ProviderWorkExecutor``. Investigation binding is additionally covered
-through the production-style ``LocalTaskDispatcher`` wrapping a bound
-executor. One explicit test preserves the legacy bare-``WorkExecutor``
-compatibility input.
+``ProviderWorkExecutor``. ``build_investigation_graph`` accepts only a
+``TaskDispatcher``; investigation binding is additionally covered through the
+production-style ``LocalTaskDispatcher`` wrapping a bound executor.
 """
 
 # pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
@@ -41,7 +40,6 @@ from agentic_threat_investigator.domain.investigation import (
 from tests.support.orchestration_fixtures import (
     SCENARIO_IP_ID,
     FakeTaskDispatcher,
-    FakeWorkExecutor,
     scenario_dispatcher,
     scenario_dns_outcome,
     scenario_dns_work_item,
@@ -189,7 +187,7 @@ class TestGraphDispatcherSafety:
             }
         )
         graph = build_investigation_graph(dispatcher)
-        with pytest.raises(ValueError, match="does not match"):
+        with pytest.raises(ValueError, match="dispatcher outcome does not match"):
             await graph.ainvoke({"investigation": scenario_initial_state()})
         # The mismatched item was dispatched once and then rejected: no
         # completion, outcome recording, or counter increment happened.
@@ -221,36 +219,6 @@ class TestGraphDispatcherSafety:
         # never continued into record_outcome, so no outcome was recorded.
         assert raised.value is exc
         assert dispatcher.requested == [scenario_dns_work_item()]
-
-
-class TestGraphLegacyWorkExecutorCompatibility:
-    """Compatibility coverage only for the bare-WorkExecutor builder input.
-
-    The backward-compatible ``WorkExecutor`` parameter is retained for direct
-    callers of PR 19A. These tests confirm the compatibility adapter; the
-    primary graph seam tests use ``TaskDispatcher``/``FakeTaskDispatcher``.
-    """
-
-    @pytest.mark.asyncio
-    async def test_bare_work_executor_adapted_by_builder(self) -> None:
-        executor: FakeWorkExecutor = FakeWorkExecutor(
-            {
-                scenario_dns_work_item(): scenario_dns_outcome(),
-                scenario_rdap_work_item(): scenario_rdap_outcome(),
-            }
-        )
-        result = await build_investigation_graph(executor).ainvoke(
-            {"investigation": scenario_initial_state()}
-        )
-        state = cast(InvestigationState, result["investigation"])
-        assert executor.requested == [
-            scenario_dns_work_item(),
-            scenario_rdap_work_item(),
-        ]
-        assert state.completed_provider_work == [
-            scenario_dns_work_item(),
-            scenario_rdap_work_item(),
-        ]
 
 
 class TestGraphContextBinding:
@@ -423,7 +391,7 @@ class TestGraphBindingThroughLocalDispatcher:
             )
         message = str(raised.value)
         assert message == (
-            "orchestration graph binding conflicts with the executor "
+            "orchestration graph binding conflicts with the dispatcher "
             "investigation context"
         )
         assert str(state.investigation_id) not in message

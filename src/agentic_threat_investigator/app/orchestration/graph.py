@@ -18,11 +18,7 @@ from uuid import UUID
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from agentic_threat_investigator.app.orchestration.dispatcher import (
-    TaskDispatcher,
-    ensure_task_dispatcher,
-)
-from agentic_threat_investigator.app.orchestration.executor import WorkExecutor
+from agentic_threat_investigator.app.orchestration.dispatcher import TaskDispatcher
 from agentic_threat_investigator.app.orchestration.models import (
     record_provider_outcome,
     select_provider_work,
@@ -54,21 +50,20 @@ class InvestigationGraphContextMismatchError(ValueError):
 
 
 class InvestigationGraphBindingConflictError(ValueError):
-    """Raised when an explicit graph binding conflicts with its executor.
+    """Raised when an explicit graph binding conflicts with the dispatcher.
 
     The caller supplied an explicit ``expected_investigation_id`` that differs
-    from the executor's own bound investigation identity. Building the graph
-    would produce an executor that writes under one investigation while the
-    initialize node accepts another. The conflict is rejected at graph
-    construction, before any invocation or I/O. The message is a fixed safe
-    string that never embeds identifiers, entity values, provider results, or
-    payloads.
+    from the dispatcher's bound execution destination identity. Building the
+    graph would dispatch work under one investigation while the initialize
+    node accepts another. The conflict is rejected at graph construction,
+    before any invocation or I/O. The message is a fixed safe string that
+    never embeds identifiers, entity values, provider results, or payloads.
     """
 
     def __init__(self) -> None:
         """Build the fixed safe binding-conflict message."""
         super().__init__(
-            "orchestration graph binding conflicts with the executor "
+            "orchestration graph binding conflicts with the dispatcher "
             "investigation context"
         )
 
@@ -121,7 +116,7 @@ async def execute_work(
         raise ValueError("execute_work requires a selected current provider work item")
     outcome = await dispatcher.dispatch(work_item)
     if outcome.work_item != work_item:
-        raise ValueError("executor outcome does not match the executed work item")
+        raise ValueError("dispatcher outcome does not match the dispatched work item")
     return {
         "investigation": investigation.model_copy(
             update={"last_provider_outcome": outcome}
@@ -150,7 +145,7 @@ def _route_after_select(state: OrchestrationGraphState) -> str:
 
 
 def build_investigation_graph(
-    dispatcher: TaskDispatcher | WorkExecutor,
+    dispatcher: TaskDispatcher,
     *,
     expected_investigation_id: UUID | None = None,
 ) -> CompiledStateGraph[
@@ -160,7 +155,8 @@ def build_investigation_graph(
 
     The dispatcher is injected by the caller; no global mutable registry,
     service locator, provider bootstrap, database connection, or checkpointer
-    is involved.
+    is involved. ``LocalTaskDispatcher`` is the explicit executor-to-dispatcher
+    adapter and must be constructed by the caller, never here.
 
     Binding derivation: when the dispatcher exposes a bound investigation
     identity, that identity is adopted automatically as the graph's binding
@@ -172,12 +168,9 @@ def build_investigation_graph(
     ID during ``initialize`` and raises :class:`InvestigationGraphContextMismatchError`
     on mismatch, before work selection and every I/O seam. The effective ID
     is an injected graph-instance invariant, never copied into checkpoint
-    state. Ordinary unbound dispatchers remain generic. A bare WorkExecutor
-    is accepted only as a backward-compatible local adaptation of the old
-    builder contract.
+    state. Ordinary unbound dispatchers remain generic.
     """
-    effective_dispatcher = ensure_task_dispatcher(dispatcher)
-    dispatcher_investigation_id = effective_dispatcher.bound_investigation_id
+    dispatcher_investigation_id = dispatcher.bound_investigation_id
     if (
         expected_investigation_id is not None
         and dispatcher_investigation_id is not None
@@ -217,7 +210,7 @@ def build_investigation_graph(
     async def execute_work_node(
         state: OrchestrationGraphState,
     ) -> OrchestrationGraphState:
-        return await execute_work(effective_dispatcher, state)
+        return await execute_work(dispatcher, state)
 
     builder.add_node("execute_work", execute_work_node)
     builder.add_node("record_outcome", record_outcome)
