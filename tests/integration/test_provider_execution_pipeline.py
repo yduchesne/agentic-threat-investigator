@@ -498,16 +498,17 @@ async def test_context_mismatch_fails_before_any_persistence(
                 assert durable.budget.provider_calls_used == 0
 
 
-async def test_direct_builder_bypass_cannot_process_other_investigation(
+async def test_local_dispatcher_binding_rejects_other_investigation(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Direct generic-builder composition of ProviderWorkExecutor stays bound.
+    """A local dispatcher preserves its production executor's binding.
 
-    A caller who builds the generic graph from a production executor without
-    passing an expected investigation ID still gets automatic binding from the
-    executor's context. Invoking it with state B raises the typed mismatch
-    error before provider HTTP or database work, and durable absence is
-    verified with a fresh UoW.
+    A caller who wraps a bound ``ProviderWorkExecutor`` in
+    ``LocalTaskDispatcher`` and passes only that dispatcher to the generic
+    graph gets automatic binding without an explicit expected investigation
+    ID. Invoking the graph with state B raises the typed mismatch error before
+    dispatch, provider HTTP, or database work, and durable absence is verified
+    with a fresh UoW.
     """
     from agentic_threat_investigator.app.extraction.extractor import extract
     from agentic_threat_investigator.app.investigation_timeline import (
@@ -518,7 +519,9 @@ async def test_direct_builder_bypass_cannot_process_other_investigation(
         """Fail the test if any provider HTTP I/O is attempted."""
 
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-            raise RuntimeError("provider HTTP I/O must not occur for a bypass")
+            raise RuntimeError(
+                "provider HTTP I/O must not occur for a binding mismatch"
+            )
 
     async with httpx.AsyncClient(transport=_ExplodingTransport()) as client:
         http = ProviderHttpClient(client=client)
@@ -540,9 +543,9 @@ async def test_direct_builder_bypass_cannot_process_other_investigation(
             )
             await uow.commit()
 
-        # Direct composition: generic builder WITHOUT an expected ID. The
-        # dispatcher locally wraps the production executor, whose own bound
-        # investigation ID is exposed and adopted automatically.
+        # Explicit local composition without an expected ID: the dispatcher
+        # wraps the production executor and exposes its authoritative binding,
+        # which the generic graph adopts automatically.
         executor = ProviderWorkExecutor(
             entity_reader=UowEntityReader(uow_factory),
             provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
