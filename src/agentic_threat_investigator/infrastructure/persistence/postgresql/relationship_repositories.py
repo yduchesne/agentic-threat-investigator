@@ -36,7 +36,7 @@ from .errors import (
     SQLSTATE_VERSION_CONFLICT,
     sqlstate,
 )
-from .models import EntityRow, EvidenceRow, RelationshipRow
+from .models import EntityRow, EvidenceRow, RelationshipObservationRow, RelationshipRow
 
 
 def _relationship(row: RelationshipRow) -> Relationship:
@@ -54,6 +54,16 @@ class PostgresRelationshipRepository(RelationshipRepository):
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_by_id(
+        self, relationship_id: UUID, *, include_deleted: bool = False
+    ) -> Relationship | None:
+        """Return the visible relationship with the given identifier, if any."""
+        query = select(RelationshipRow).where(RelationshipRow.id == relationship_id)
+        if not include_deleted:
+            query = query.where(RelationshipRow.deleted_at.is_(None))
+        row = (await self.session.execute(query)).scalar_one_or_none()
+        return None if row is None else _relationship(row)
 
     async def get_by_identity(
         self,
@@ -163,6 +173,22 @@ class PostgresRelationshipObservationRepository(
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
+        """Return an immutable observation by its identity."""
+        row = await self.session.get(RelationshipObservationRow, observation_id)
+        if row is None:
+            return None
+        return RelationshipObservation(
+            id=row.id,
+            relationship_id=row.relationship_id,
+            evidence_id=row.evidence_id,
+            investigation_id=row.investigation_id,
+            observed_at=row.observed_at,
+            retrieved_at=row.retrieved_at,
+            source=row.source,
+            confidence=row.confidence,
+        )
 
     async def append(
         self, observation: RelationshipObservation

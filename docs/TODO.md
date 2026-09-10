@@ -4,6 +4,7 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 
 ## Contents
 
+- [Complete PR 20A secondary validation and test hardening](#complete-pr-20a-secondary-validation-and-test-hardening)
 - [Complete PR 18C secondary persistence hardening](#complete-pr-18c-secondary-persistence-hardening)
 - [Complete PR 18B secondary extraction-contract hardening](#complete-pr-18b-secondary-extraction-contract-hardening)
 - [Complete PR 18A secondary validation and test hardening](#complete-pr-18a-secondary-validation-and-test-hardening)
@@ -24,6 +25,141 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 - [Complete AbuseIPDB boundary regression coverage](#complete-abuseipdb-boundary-regression-coverage)
 - [Align the configuration example with the implemented AbuseIPDB composition](#align-the-configuration-example-with-the-implemented-abuseipdb-composition)
 - [Reject rather than normalize padded AbuseIPDB credentials](#reject-rather-than-normalize-padded-abuseipdb-credentials)
+
+## Complete PR 20A secondary validation and test hardening
+
+**Priority:** MEDIUM
+
+**Origin:** Reviews of `.plans/pr-20a-fixes-01.md` and
+`.plans/pr-20a-fixes-02.md`. The HIGH current-pointer race and unbounded
+Assessment input defects were remediated by the fixes-02 implementation.
+
+### Problem
+
+The fixes-01 implementation passes the current QA and PostgreSQL integration
+gates and addresses the primary provenance, migration, deletion-service, and
+database-staging requirements. The following lower-severity defense-in-depth
+and test-quality details remain:
+
+- `ati.append_assessment` does not explicitly reject null or invalid scalar
+  Finding fields. In PostgreSQL, predicates such as `category NOT IN (...)`,
+  `btrim(statement) = ''`, and `kind NOT IN (...)` evaluate to unknown for
+  null input, so null category/disposition/statement/confidence/support-kind
+  values can reach table constraints and surface as generic database errors
+  instead of the documented typed Assessment validation taxonomy.
+- Invalid or null top-level verdict, confidence, and summary values similarly
+  rely on table constraints for repository-bypassing calls. Normal Pydantic
+  construction rejects these values, so this is database-boundary error
+  consistency rather than a normal application-path integrity bypass.
+- Null elements in the optional ordered string arrays are not rejected by the
+  stored function. Normal Pydantic construction rejects them, but a direct SQL
+  caller can persist an Assessment that repository deserialization cannot
+  validate.
+- The graph soft-delete race tests coordinate transactions with fixed
+  `asyncio.sleep()` delays. They pass now, but scheduler or database latency can
+  make them flaky and they do not prove from PostgreSQL lock state that the
+  intended row lock has been acquired before the competing operation starts.
+- `AssessmentProvenanceContext` copies and protects its mappings, but the term
+  “immutable snapshot” is shallow for mutable mapped values such as `Entity`.
+  The validator currently performs synchronously after context construction
+  and only reads Entity membership, so this does not create a demonstrated
+  provenance bypass; the documentation should describe the precise guarantee
+  or the snapshot should copy/freeze values needed by validation.
+- `AssessmentPersistenceService` and `PostgresAssessmentRepository` retain
+  independent default limits of 100. Current call sites inject 100 explicitly
+  and `PostgresUnitOfWork` passes its configured value to the repository, but
+  the service default permits a future composition site to omit
+  `settings.db_batch_size`, and independently supplied service/repository
+  limits can drift. This remains bounded and the repository still fails
+  closed, but the service can perform more provenance reads than the effective
+  repository limit permits.
+- `assessment_collection_sizes()` eagerly computes the flattened support sum
+  before `enforce_assessment_collection_bounds()` checks the already-known
+  Finding count. An oversized in-memory Findings tuple is still rejected
+  before UnitOfWork entry, but the check needlessly traverses every Finding and
+  every support instead of stopping at limit-plus-one.
+- `ASSESSMENT_BOUNDED_COLLECTIONS` duplicates the keys produced by
+  `assessment_collection_sizes()` but is not used to drive validation or
+  tests. The two definitions can drift silently.
+- The database hard-limit integration test combines oversized Findings and
+  supports in one case and covers oversized analyzed Evidence in a second
+  case. It does not independently prove which first case triggered `U20AD`,
+  does not exercise any of the three ordered string arrays, and verifies only
+  an empty Assessment listing rather than history/audit/pointer/version
+  non-mutation.
+- `_LockProbe.wait_for_holds()` checks any heavyweight relation lock, not the
+  tuple lock promised by its name/docstring. In the pointer-wins test, the
+  subsequent wait on the blocked Assessment implies execution passed the
+  Investigation `FOR UPDATE`, but the helper itself does not prove row-lock
+  ownership. The deletion-wins test also relies on PostgreSQL waiter queue
+  order after observing two generic lock waits.
+- The deletion-wins concurrency test invokes the repository directly and then
+  reproduces `AssessmentPersistenceService` audit construction inside the
+  test. This proves one atomic transaction but duplicates production service
+  behavior instead of exercising it through an injectable synchronization
+  seam.
+- Fixes-02 required removing and restoring the PR 20A `[DONE]` marker around
+  production remediation, but `docs/PR_PLAN.md` has no worktree diff; the
+  marker remained present throughout the changes. The final marker is correct,
+  but the required completion-marker discipline was not followed.
+
+### Intended fix
+
+1. Make every stored-function scalar/child validation null-safe with explicit
+   `IS NULL` checks before vocabulary and blank-string checks. Return the
+   existing dedicated structure SQLSTATE for malformed Findings/support and an
+   appropriate typed Assessment SQLSTATE for malformed top-level values.
+2. Reject null entries in limitations, unresolved questions, and recommended
+   next steps before parent insertion. Preserve valid empty arrays and exact
+   ordering.
+3. Add direct-function PostgreSQL tests for each null field class. Assert the
+   intended SQLSTATE mapping and prove no parent, child, history, audit, or
+   pointer mutation remains.
+4. Replace fixed sleeps in Relationship/Entity soft-delete races with bounded
+   events plus PostgreSQL lock/wait-state observation. Fail with a timeout and
+   useful non-secret diagnostic instead of sleeping an assumed duration.
+5. Clarify that `AssessmentProvenanceContext` provides copied read-only mapping
+   membership. If mutable mapped values can affect future validation rules,
+   snapshot only the immutable scalar fields the validator needs rather than
+   deep-copying unrestricted payloads.
+6. Require explicit `batch_size` injection for
+   `AssessmentPersistenceService`, or add one composition factory that obtains
+   both service and UnitOfWork limits from the same bootstrapped Settings
+   instance. Keep repository defense in depth, but prevent silent limit drift.
+7. Enforce bounds in short-circuit order: check O(1) collection lengths first,
+   then count flattened support only across an already-bounded Findings tuple
+   and stop as soon as limit-plus-one is reached. Use one canonical collection
+   definition rather than an unused parallel tuple of names.
+8. Split database hard-limit coverage by input array class, including each
+   ordered string array. Assert `U20AD` for the intended case and verify no
+   parent, child, history, audit, pointer, or allocated durable version remains.
+9. Make lock-test helpers prove the relevant tuple/blocking relationship, not
+   merely a table-level relation lock. Prefer blocker PID relationships from
+   `pg_blocking_pids()` plus the known statement phase, and avoid assumptions
+   about waiter fairness.
+10. Exercise deletion-wins through the application service by adding a
+    test-only repository/UoW coordination wrapper rather than copying audit
+    event construction into the integration test. Do not add production test
+    switches.
+11. For future remediation, remove `[DONE]` before the first production change
+    and restore it only after all gates pass; ensure commit/diff history
+    actually contains both transitions.
+
+### Acceptance checks
+
+- Null malformed SQL inputs always fail through the typed Assessment taxonomy.
+- A direct SQL caller cannot persist null ordered-string elements that break
+  domain deserialization.
+- Malformed calls leave no partial durable state.
+- Graph race tests prove lock ordering without timing assumptions.
+- Context immutability documentation matches the actual guarantee.
+- Service and repository limits derive from one injected configuration and
+  oversized checks short-circuit without unbounded traversal.
+- Every hard-limit array class has accurate no-partial-state coverage.
+- Pointer/deletion concurrency tests prove the intended blocker relationship
+  and exercise production service audit behavior without copied logic.
+- Completion-marker transitions match the remediation history.
+- `./build.sh --qa` and `./integration-test.sh` pass.
 
 ## Complete PR 18C secondary persistence hardening
 

@@ -297,6 +297,69 @@ class RelationshipObservationRow(Base):  # pylint: disable=too-few-public-method
     version: Mapped[int] = mapped_column(BigInteger)
 
 
+class AssessmentRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for a versioned, insert-only analytical Assessment."""
+
+    __tablename__ = "assessment"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    investigation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    verdict: Mapped[str] = mapped_column(String)
+    confidence: Mapped[str] = mapped_column(String)
+    summary: Mapped[str] = mapped_column(String)
+    analyzed_evidence_ids: Mapped[list[UUID]] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), default=list
+    )
+    limitations: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
+    unresolved_questions: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
+    recommended_next_steps: Mapped[list[str]] = mapped_column(
+        ARRAY(String), default=list
+    )
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
+
+class AssessmentFindingRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for one Finding within a persisted Assessment."""
+
+    __tablename__ = "assessment_finding"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    assessment_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("ati.assessment.id")
+    )
+    ordinal: Mapped[int]
+    category: Mapped[str] = mapped_column(String)
+    disposition: Mapped[str] = mapped_column(String)
+    statement: Mapped[str] = mapped_column(String)
+    confidence: Mapped[str] = mapped_column(String)
+
+
+class AssessmentFindingSupportRow(Base):  # pylint: disable=too-few-public-methods
+    """Database row for one typed support reference of a Finding."""
+
+    __tablename__ = "assessment_finding_support"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    finding_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("ati.assessment_finding.id")
+    )
+    ordinal: Mapped[int]
+    kind: Mapped[str] = mapped_column(String)
+    evidence_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    relationship_observation_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True)
+    )
+
+
 class InvestigationTimelineEventRow(Base):  # pylint: disable=too-few-public-methods
     """Database row for an immutable analyst-facing investigation timeline event."""
 

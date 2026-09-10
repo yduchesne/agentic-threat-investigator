@@ -41,3 +41,15 @@ def test_session_service_reexports_the_token_service() -> None:
 def test_rate_limit_module_imports_without_members() -> None:
     """The compatibility rate-limit module imports cleanly."""
     assert rate_limit.__doc__ is not None
+
+
+def test_assessment_contracts_are_public() -> None:
+    """PR 20A validator, service, and errors are exported from the app boundary."""
+    assert app.AssessmentPersistenceService.__name__ == "AssessmentPersistenceService"
+    assert app.AssessmentProvenanceValidator.__name__ == "AssessmentProvenanceValidator"
+    assert app.AssessmentValidationError.__name__ == "AssessmentValidationError"
+    assert (
+        app.AssessmentEvidenceReferenceError.__name__
+        == "AssessmentEvidenceReferenceError"
+    )
+    assert app.AssessmentProvenanceContext.__name__ == "AssessmentProvenanceContext"

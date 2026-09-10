@@ -440,6 +440,41 @@ They validate:
   references with no residual observation or history rows; and migration
   0012 contract checks covering the FK, the `ati.soft_delete_relationship`
   signature, and an isolated downgrade/re-upgrade cycle.
+- PR 20A versioned Assessment persistence: direct and graph support
+  round-trips (Evidence with zero relationships; one evidence feeding
+  several observations; repeated observations of one edge; ordered
+  Findings/supports/string collections), cross-Investigation and
+  provenance-mismatch rejections (including uncited analyzed Evidence,
+  wrong-Investigation observations, and substitute observations of the
+  same Relationship), database-enforced Finding/support structural
+  rejection (no support, unknown/gapped/duplicate ordinals, invalid
+  discriminator), deleted Relationship/endpoint-Entity ineligibility,
+  empty-evidence INCONCLUSIVE round-trip and no-evidence
+  SUSPICIOUS/BENIGN/MALICIOUS rejection, version 1 then version 2 with
+  version 1 unchanged and distinct later versions, the Investigation
+  assessment pointer only changing after durable success, stale
+  expected-version conflict with no partial Assessment, failed-append
+  rollback of parent/history/audit/pointer, locked-row concurrency races
+  (Assessment creation serialized against Relationship and Entity soft
+  deletion), the approved deletion policy (current-Assessment deletion
+  rejected, superseded deletion with DELETE history and transactional
+  ASSESSMENT_DELETE audit, stale-version delete rollback), and migration
+  0014 checks covering the normalized schema, the empty-table guard
+  (nonempty legacy rows block the upgrade and survive), and an isolated
+  downgrade/re-upgrade cycle. Two additional deterministic concurrency
+  tests observe PostgreSQL lock state (`pg_stat_activity`/`pg_locks` with
+  bounded timeouts, never fixed sleeps) to prove that concurrent pointer
+  assignment and Assessment deletion serialize on the owning Investigation
+  row lock in both orders: pointer-wins (deletion rejected with the
+  current-reference conflict, no DELETE history/audit) and deletion-wins
+  (pointer assignment to the deleted A rejected, exactly one DELETE
+  history and audit row). Input bounds are tested at three layers: unit
+  tests proving each bounded candidate collection is rejected before any
+  UnitOfWork entry plus exactly-at-limit acceptance, repository unit tests
+  with a recording session proving oversized inputs never execute SQL, and
+  a PostgreSQL test bypassing Python bounds to prove the database
+  defensive hard ceiling (10,000) rejects plus-one inputs before any
+  staging or mutation.
 
 Do not replace critical PostgreSQL integration coverage with SQLite.
 
@@ -571,7 +606,7 @@ Tests must verify preservation of:
 - stable IDs;
 - enum/URN values;
 - verdict/confidence;
-- Evidence references;
+- typed Finding provenance (Evidence and RelationshipObservation references);
 - research/chunk citations;
 - list ordering where semantically relevant;
 - optional/empty semantics.

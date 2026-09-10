@@ -22,6 +22,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 from agentic_threat_investigator.config import Settings
 
+from .assessment_repositories import PostgresAssessmentRepository
 from .audit_repositories import PostgresAuditEventRepository
 from .composites import register_batch_composites
 from .identity_repositories import (
@@ -64,6 +65,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         )
         self.evidence = cast(PostgresEvidenceRepository, None)
         self.investigations = cast(PostgresInvestigationRepository, None)
+        self.assessments = cast(PostgresAssessmentRepository, None)
         self.users = cast(UserRepository, None)
         self.credentials = cast(CredentialRepository, None)
         self.sessions = cast(SessionRepository, None)
@@ -94,6 +96,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
         )
         self.evidence = PostgresEvidenceRepository(self.session)
         self.investigations = PostgresInvestigationRepository(self.session)
+        self.assessments = PostgresAssessmentRepository(self.session, self._batch_size)
         self.audit_events = PostgresAuditEventRepository(self.session)
         self.source_records = PostgresSourceRecordRepository(
             self.session, self._batch_size
@@ -133,6 +136,7 @@ class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attri
             )
             self.evidence = cast(PostgresEvidenceRepository, None)
             self.investigations = cast(PostgresInvestigationRepository, None)
+            self.assessments = cast(PostgresAssessmentRepository, None)
             self.audit_events = cast(PostgresAuditEventRepository, None)
             self.source_records = cast(PostgresSourceRecordRepository, None)
             self.ingestion_checkpoints = cast(

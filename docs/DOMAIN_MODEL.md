@@ -310,9 +310,38 @@ class AssessmentConfidence(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
 
-class EvidenceReference(BaseModel):
+class FindingCategory(str, Enum):
+    REPUTATION = "reputation"
+    GEOLOCATION = "geolocation"
+    REGISTRATION = "registration"
+    NETWORK = "network"
+    ASSOCIATION = "association"
+
+class FindingDisposition(str, Enum):
+    SUPPORTING = "supporting"
+    CONTRADICTING = "contradicting"
+
+class EvidenceSupport(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    kind: Literal["evidence"]
     evidence_id: UUID
-    rationale: str
+
+class RelationshipSupport(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    kind: Literal["relationship_observation"]
+    relationship_observation_id: UUID
+
+FindingSupport = Annotated[
+    EvidenceSupport | RelationshipSupport, Field(discriminator="kind")
+]
+
+class AnalyticalFinding(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    category: FindingCategory
+    disposition: FindingDisposition
+    statement: str
+    confidence: AssessmentConfidence
+    support: tuple[FindingSupport, ...]
 
 class Assessment(BaseModel):
     id: UUID | None = None
@@ -320,15 +349,38 @@ class Assessment(BaseModel):
     verdict: Verdict
     confidence: AssessmentConfidence
     summary: str
-    analyzed_evidence_ids: list[UUID]
-    supporting_evidence: list[EvidenceReference] = Field(default_factory=list)
-    contradicting_evidence: list[EvidenceReference] = Field(default_factory=list)
-    limitations: list[str] = Field(default_factory=list)
-    unresolved_questions: list[str] = Field(default_factory=list)
-    recommended_next_steps: list[str] = Field(default_factory=list)
+    analyzed_evidence_ids: tuple[UUID, ...]
+    findings: tuple[AnalyticalFinding, ...] = ()
+    limitations: tuple[str, ...] = ()
+    unresolved_questions: tuple[str, ...] = ()
+    recommended_next_steps: tuple[str, ...] = ()
+    version: int | None = None
+    created_at: datetime | None = None
+    deleted_at: datetime | None = None
+    deleted_by_actor_id: UUID | None = None
 ```
 
-Assessment is ATI's interpretation of evidence. Every material conclusion must be traceable to evidence IDs.
+Assessment is ATI's interpretation of evidence. Verdict and confidence are
+stable typed fields; contradictions are structured Findings with a
+``CONTRADICTING`` disposition, never prose recovered from ``summary``. The
+flat ``supporting_evidence``/``contradicting_evidence`` reference model is
+superseded by typed Finding support.
+
+Every material Finding has typed persisted provenance:
+
+- a direct source-fact claim (reputation score/report counts, approximate
+  geolocation, registration metadata, timestamps) cites the exact
+  analyzed ``Evidence`` via ``EvidenceSupport``;
+- a graph-backed claim (``RelationshipObservation`` -> ``Evidence`` ->
+  ``Relationship`` -> source/target Entities) cites the exact
+  ``RelationshipObservation`` via ``RelationshipSupport``. A bare
+  ``Relationship`` or a redundant ``(evidence_id, relationship_id)`` pair is
+  never valid graph support, and another observation of the same
+  Relationship cannot substitute.
+
+``Evidence`` may validly have zero ``RelationshipObservations``; ``Relationship``
+has 1..N observations over its history; each ``RelationshipObservation`` links
+exactly one ``Evidence`` and one ``Relationship``.
 
 Verdict semantics:
 
@@ -337,9 +389,27 @@ Verdict semantics:
 - MALICIOUS: evidence materially supports malicious activity/infrastructure.
 - INCONCLUSIVE: evidence is absent, insufficient, weak, or materially conflicting.
 
-"Nothing malicious found" is not equivalent to BENIGN.
-
+"Nothing malicious found" is not equivalent to BENIGN; an empty analyzed set is
+approved only for an ``INCONCLUSIVE`` Assessment with no material Findings.
 Confidence expresses confidence in the verdict, not severity.
+
+Assessments are versioned analytical outputs: each analysis persists a new
+Assessment row (never a silent overwrite), historical Assessments retain
+their exact Findings and support references forever, and the Investigation
+carries a current-assessment pointer to the latest durable output.
+
+The support discriminator is an explicit, required ``kind`` field shared by
+the durable JSON representation and the SQL ``kind`` column:
+``"evidence"`` for direct source facts, ``"relationship_observation"`` for
+graph facts. The union is a Pydantic discriminated union keyed on ``kind``,
+so malformed payloads (missing/unknown discriminator, discriminator paired
+with the wrong ID field, or a bare ``relationship_id``) are rejected at
+parsing time and durable output always carries the stable discriminator.
+
+PR 20A delivers the deterministic provenance validator's application seam: a
+candidate Assessment passes deterministic validation and then persists
+atomically with its Investigation pointer. Assessing how well the LLM grounds
+its claims semantically is PR 20C evaluation, not part of the validator.
 
 ## Structured agent results
 

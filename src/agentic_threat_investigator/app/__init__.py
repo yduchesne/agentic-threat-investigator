@@ -1,5 +1,15 @@
 """Application layer public contracts."""
 
+from .assessment_persistence import AssessmentPersistenceService
+from .assessment_provenance import (
+    AssessmentEvidenceReferenceError,
+    AssessmentInvestigationMismatchError,
+    AssessmentProvenanceContext,
+    AssessmentProvenanceMismatchError,
+    AssessmentProvenanceValidator,
+    AssessmentRelationshipObservationReferenceError,
+    AssessmentValidationError,
+)
 from .document_indexing import (
     CHUNKING_VERSION,
     ChunkDraft,
@@ -50,6 +60,14 @@ from .sources import (
 __all__ = [
     "CHECKPOINTING",
     "CHUNKING_VERSION",
+    "AssessmentEvidenceReferenceError",
+    "AssessmentInvestigationMismatchError",
+    "AssessmentPersistenceService",
+    "AssessmentProvenanceContext",
+    "AssessmentProvenanceMismatchError",
+    "AssessmentProvenanceValidator",
+    "AssessmentRelationshipObservationReferenceError",
+    "AssessmentValidationError",
     "ChunkDraft",
     "DocumentBuilder",
     "DocumentIndexingConflictError",
