@@ -14,6 +14,9 @@
 - [Core architectural rule](#core-architectural-rule)
 - [Asynchronous investigation execution](#asynchronous-investigation-execution)
 - [LangGraph topology](#langgraph-topology)
+  - [Current LangGraph implementation status (PR 19A–19C)](#current-langgraph-implementation-status-pr-19a19c)
+  - [Real provider execution path (PR 19B–19C)](#real-provider-execution-path-pr-19b19c)
+  - [Dispatch versus execution](#dispatch-versus-execution)
 - [Agent boundaries](#agent-boundaries)
 - [Structured agent results and presentation](#structured-agent-results-and-presentation)
 - [Provider architecture](#provider-architecture)
@@ -51,6 +54,8 @@ React / TypeScript UI
      LangGraph
         |
 +-----------------------------+
+| Coordinator / orchestration |
+|                             |
 | Coordinator                 |
 | Infrastructure Collector    |
 | Threat Intel Collector      |
@@ -59,7 +64,14 @@ React / TypeScript UI
 | Report Writer               |
 +-----------------------------+
         |
+   TaskDispatcher
+        |
+ LocalTaskDispatcher
+        |
 +-----------------------------+
+| Execution components        |
+|                             |
+| WorkExecutor                |
 | Evidence Providers          |
 | RAG Retriever               |
 | LLM Client                  |
@@ -100,6 +112,8 @@ React/TypeScript analyst workbench consuming the stable `/api/v1` contract.
 
 > Providers retrieve. Collectors coordinate retrieval. Repositories persist. Application workflows decide persistence. Agents decide investigative actions within policy.
 
+> Orchestration selects and authorizes work. Dispatchers route already-selected work. Executors perform it. Dispatchers do not make investigative decisions.
+
 ## Asynchronous investigation execution
 
 Investigation creation is asynchronous.
@@ -115,10 +129,24 @@ worker claims job
         |
 execute LangGraph
         |
+LocalTaskDispatcher dispatches selected work
+        |
+WorkExecutor performs selected work
+        |
 persist state/results
 ```
 
-Long-running investigation work must not execute as an in-process FastAPI background task.
+Two separate mechanisms participate:
+
+```text
+PostgreSQL job queue
+    durable investigation-level background scheduling
+
+TaskDispatcher
+    dispatch of already-selected work within a running investigation
+```
+
+In v0.1, a worker claims an investigation job, runs LangGraph, and LangGraph hands authorized work to `LocalTaskDispatcher`, which delegates to a local `WorkExecutor`. Long-running investigation work must not execute as an in-process FastAPI background task. PR 19C does not replace the PostgreSQL job queue.
 
 v0.1 uses a PostgreSQL-backed job queue rather than introducing Redis/Kafka solely for background work.
 
@@ -158,23 +186,27 @@ END
 
 The persisted domain objects are authoritative. `InvestigationState` carries identifiers, queues, budgets, status, and outcomes rather than copies of all domain objects.
 
-### Current LangGraph implementation status (PR 19A)
+### Current LangGraph implementation status (PR 19A–19C)
 
-The first LangGraph implementation is a **deterministic orchestration skeleton** (PR 19A) under `app/orchestration/`. It proves typed work can be queued, executed through an injected deterministic `WorkExecutor`, recorded, and terminated on queue exhaustion:
+The LangGraph implementation began as a **deterministic orchestration skeleton** in PR 19A under `app/orchestration/`. PR 19C preserves its topology and queue mechanics while routing already-selected work through an injected deterministic `TaskDispatcher`:
 
 ```text
 START -> initialize -> select_work -> execute_work -> record_outcome -> select_work
                      ^-- (pending work -> execute_work | no work -> END)
 ```
 
-The skeleton implements mechanics only: FIFO selection, duplicate suppression for identical work, provider-call counter increments, and serializable operational state. Real provider execution arrived with PR 19B; LLM/Evidence Analyst behavior is PR 20; adaptive coordinator/pivot behavior, budget enforcement, stopping policy, and trajectory evaluation arrive with PR 21. The domain layer does not depend on LangGraph; only `app/orchestration/graph.py` does.
+The `execute_work` node calls `TaskDispatcher.dispatch(...)`; topology, queue mechanics, and outcome recording remain unchanged. The skeleton implements mechanics only: FIFO selection, duplicate suppression for identical work, provider-call counter increments, and serializable operational state. Real provider execution arrived with PR 19B; LLM/Evidence Analyst behavior is PR 20; adaptive coordinator/pivot behavior, budget enforcement, stopping policy, and trajectory evaluation arrive with PR 21. The domain layer does not depend on LangGraph; only `app/orchestration/graph.py` does.
 
-### Real provider execution path (PR 19B)
+### Real provider execution path (PR 19B–19C)
 
-The production `WorkExecutor` is `ProviderWorkExecutor` (`app/orchestration/provider_executor.py`), composed with explicit injected dependencies: an `EntityReader` (short UnitOfWork-backed target lookup closed before any provider I/O), a typed provider registry (`Mapping[SourceId, EvidenceProvider]` keyed by enum members, built from `ProviderComposition.provider_registry()`), the PR 18B deterministic extractor, the PR 18C `ProviderObservationPersistenceService`, and an `InvestigationTimelineSink`. It implements `InvestigationBoundWorkExecutor`, exposing its one authoritative `ProviderExecutionContext.investigation_id` through `bound_investigation_id`. The public composition seam `build_provider_investigation_graph(uow_factory, provider_registry, context)` in `app/orchestration/composition.py` assembles all production dependencies and returns the compiled PR 19A graph for a later worker entry point; it constructs no HTTP clients, providers, settings, engines, or global registries. The compiled production graph is bound to exactly one investigation ID: the generic `build_investigation_graph()` automatically adopts a bound executor's investigation identity even when the caller omits the explicit expected ID, so direct public composition cannot bypass isolation; an explicit conflicting ID fails at graph construction with `InvestigationGraphBindingConflictError`, and every invocation validates the wrapped `InvestigationState`'s investigation ID in the `initialize` node before work selection or any I/O, raising the typed `InvestigationGraphContextMismatchError` (a fixed safe message with no identifiers) with no timeline event. Ordinary unbound `WorkExecutor` values and explicit expected IDs remain fully supported for the generic PR 19A graph. Its per-work-item flow:
+The production dispatcher is `LocalTaskDispatcher`, which delegates in-process to the production `WorkExecutor`, `ProviderWorkExecutor` (`app/orchestration/provider_executor.py`). `ProviderWorkExecutor` is composed with explicit injected dependencies: an `EntityReader` (short UnitOfWork-backed target lookup closed before any provider I/O), a typed provider registry (`Mapping[SourceId, EvidenceProvider]` keyed by enum members, built from `ProviderComposition.provider_registry()`), the PR 18B deterministic extractor, the PR 18C `ProviderObservationPersistenceService`, and an `InvestigationTimelineSink`. It implements `InvestigationBoundWorkExecutor`, exposing its one authoritative `ProviderExecutionContext.investigation_id` through `bound_investigation_id`.
+
+The public composition seam `build_provider_investigation_graph(uow_factory, provider_registry, context)` in `app/orchestration/composition.py` assembles `ProviderWorkExecutor`, wraps it with `LocalTaskDispatcher`, and injects the dispatcher into the compiled graph; it constructs no HTTP clients, providers, settings, engines, or global registries. Investigation binding is preserved across the wrapper: the generic graph builder automatically adopts a bound dispatcher's investigation identity, an explicit conflicting ID fails at graph construction with `InvestigationGraphBindingConflictError`, and every invocation validates the wrapped `InvestigationState` in `initialize` before work selection, dispatch, or I/O. A mismatch raises `InvestigationGraphContextMismatchError` with a fixed safe message and no timeline event. Ordinary unbound dispatchers and explicit expected IDs remain supported. The per-work-item flow is:
 
 ```text
 ProviderWorkItem (provider, entity_id, depth)
+  -> LocalTaskDispatcher
+  -> ProviderWorkExecutor
   -> resolve persisted target Entity (short transaction, closed)
   -> validate provider applicability (provider.supports)
   -> append PROVIDER_WORK_STARTED timeline event
@@ -182,7 +214,7 @@ ProviderWorkItem (provider, entity_id, depth)
   -> validate the complete returned ProviderResult against the selected
          provider, owning investigation, and persisted target
   -> for each normalized Evidence, in provider-return order:
-         assign the Evidence identity if the provider did not
+         assign the Evidence identity if the provider did not provide one
          PR 18B deterministic extraction (outside transactions)
          PR 18C atomic observation persistence
          append EVIDENCE_PERSISTED timeline event
@@ -190,7 +222,7 @@ ProviderWorkItem (provider, entity_id, depth)
   -> ProviderExecutionOutcome (evidence/entity/relationship IDs + safe error)
 ```
 
-Returned provider data is validated before any extraction or persistence. The
+`ProviderWorkExecutor` remains the owner of provider semantics, persistence sequencing, and provider timeline behavior. Returned provider data is validated before any extraction or persistence. The
 persisted Entity resolved for `work_item.entity_id` is authoritative: it must
 carry exactly that entity ID and an already-canonical value, or a faulty
 reader could substitute another Entity while timeline events retain the
@@ -238,6 +270,16 @@ instead. `asyncio.CancelledError` propagates unchanged.
 Extracted entities update `discovered_entity_ids` only; PR 21 owns whether
 they become pivots. The provider-call counter increments exactly once per
 executed work item.
+
+### Dispatch versus execution
+
+```text
+Coordinator/LangGraph: WHAT should run?
+TaskDispatcher:       HOW/WHERE selected work is handed off?
+WorkExecutor:         HOW is concrete work performed?
+```
+
+PR 19C's `LocalTaskDispatcher` performs trivial, same-process delegation. A future implementation may replace it without coupling orchestration to transport details, but NATS/JetStream is neither implemented nor a v0.1 dependency. The dispatcher does not select pivots, assess evidence, choose goals, or otherwise make investigative decisions.
 
 The investigation timeline (`domain/investigation_timeline.py`, table `ati.investigation_timeline_event`) is a distinct, append-only, analyst-facing workflow history. It is separate from AuditEvent (governance/security), domain-object history, structured logs, and trace backends. Events carry typed identifiers, a stable event type, and an optional bounded error code only: no prose reasoning, raw payloads, secrets, stack traces, or chain-of-thought. Timeline appends run in their own short transactions and are deliberately not transactionally atomic with PR 18C persistence; a failed append surfaces a typed `timeline_error` without rolling back committed domain data.
 
@@ -459,6 +501,7 @@ No observability backend is required for correct execution.
 - SQLAlchemy/repository implementations.
 - Alembic migrations.
 - LangChain/LangGraph.
+- Task dispatch: application-layer `TaskDispatcher`; v0.1 implementation: `LocalTaskDispatcher`.
 - LangSmith initially.
 - React + TypeScript.
 - React Flow.

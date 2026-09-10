@@ -640,6 +640,10 @@ stopping policy remain PR 21. The state remains JSON-serializable via
 and the persistence layer stores the new fields inside the schemaless
 `operational_state` JSONB document (no migration required).
 
+### Dispatch boundary (application only)
+
+Dispatch is an application execution concern. The domain continues to represent investigation state, work items, outcomes, Evidence, and analytical semantics. `TaskDispatcher` is not a persisted domain entity, and transport-specific concepts such as broker envelopes, delivery attempts, workers, acknowledgements, leases, and routing are not domain entities.
+
 ## Investigation timeline (PR 19B)
 
 The analyst-facing workflow timeline is a dedicated append-only domain model

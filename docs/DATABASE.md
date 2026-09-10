@@ -24,6 +24,8 @@
 - [RAG persistence](#rag-persistence)
 - [Authentication persistence](#authentication-persistence)
 - [Audit persistence](#audit-persistence)
+- [Investigation timeline persistence](#investigation-timeline-persistence)
+- [Task dispatch persistence](#task-dispatch-persistence)
 - [Time](#time)
 - [Indexing principles](#indexing-principles)
 
@@ -496,6 +498,12 @@ hardening if required, not a v0.1 guarantee. No row-level triggers or generic
 history mechanisms are used. Timeline appends are not transactionally atomic
 with PR 18C provider-observation persistence; a failed append never rolls
 back already committed domain data.
+
+## Task dispatch persistence
+
+PR 19C makes no schema change. Local in-process dispatch requires no dispatch, delivery, worker, acknowledgement, lease, or broker-outbox tables.
+
+The existing PostgreSQL investigation job mechanism remains the durable investigation-level scheduler; it is separate from `TaskDispatcher`, which hands already-selected work to an executor within a running investigation.
 
 ## Time
 

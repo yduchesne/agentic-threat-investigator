@@ -28,6 +28,7 @@
 - [Progress updates](#progress-updates)
 - [Versioning](#versioning)
 - [No implementation leakage](#no-implementation-leakage)
+- [Internal task dispatch](#internal-task-dispatch)
 - [Resource versions and history](#resource-versions-and-history)
 
 ## Principles
@@ -385,6 +386,10 @@ Within `/api/v1`:
 ## No implementation leakage
 
 Public responses do not expose internal identifiers such as LangGraph checkpoint IDs, reducer names, raw tool-call internals, ORM metadata, or model-provider implementation state unless a future explicit debug interface is designed.
+
+## Internal task dispatch
+
+PR 19C makes no REST API change. `TaskDispatcher` is an internal application boundary and does not appear in request or response DTOs. Public contracts do not expose dispatcher implementations, worker IDs, broker subjects, delivery attempts, or acknowledgement status.
 
 ## Resource versions and history
 
