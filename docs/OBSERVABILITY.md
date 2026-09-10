@@ -9,6 +9,7 @@
 - [Future open-source replacement](#future-open-source-replacement)
 - [Correlation](#correlation)
 - [Provider telemetry](#provider-telemetry)
+- [Task dispatch](#task-dispatch)
 - [LLM telemetry](#llm-telemetry)
 - [RAG telemetry](#rag-telemetry)
 - [Data minimization](#data-minimization)
@@ -145,6 +146,12 @@ Record normalized metadata such as:
 - typed error category.
 
 Do not log credentials or authorization headers.
+
+## Task dispatch
+
+Local dispatch is an internal application boundary. PR 19C adds no investigation timeline event solely for local dispatch.
+
+Tracing may instrument dispatch, but tracing is not timeline or domain history, must not expose secrets, and must not imply broker delivery, acknowledgement, redelivery, or other distributed semantics that do not exist in v0.1.
 
 ## LLM telemetry
 

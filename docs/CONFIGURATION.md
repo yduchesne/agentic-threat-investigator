@@ -18,6 +18,7 @@
 - [Environment variables and configuration values](#environment-variables-and-configuration-values)
 - [Configuration loading lifecycle](#configuration-loading-lifecycle)
 - [Process consistency](#process-consistency)
+- [Task dispatch configuration](#task-dispatch-configuration)
 - [Authentication settings](#authentication-settings)
 - [Provider settings](#provider-settings)
 - [Configuration and secrets](#configuration-and-secrets)
@@ -403,6 +404,12 @@ The same profile mechanism applies to ATI processes including:
 - migration tooling where application configuration is required.
 
 Each process receives `ATI_CONFIG_PROFILE` through its environment.
+
+## Task dispatch configuration
+
+PR 19C requires no new production configuration. `LocalTaskDispatcher` is selected by application composition, not by a runtime dispatcher setting.
+
+v0.1 does not define a dispatcher type, broker URL, subjects, acknowledgement timeout, redelivery policy, or distributed-worker settings.
 
 ## Authentication settings
 

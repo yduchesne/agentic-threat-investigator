@@ -173,7 +173,16 @@ This avoids environment drift between Python services.
 
 The API persists asynchronous work.
 
-The worker claims jobs from PostgreSQL and executes LangGraph investigations.
+The worker claims jobs from PostgreSQL and executes LangGraph investigations:
+
+```text
+worker process
+ -> LangGraph
+ -> LocalTaskDispatcher
+ -> local WorkExecutor
+```
+
+No external broker is required for dispatch within a running investigation. This in-investigation dispatch boundary is separate from the PostgreSQL-backed durable investigation job mechanism. PR 19C adds no broker service or port to the v0.1 Compose topology.
 
 Investigation execution must survive API container restart because it is not tied to the HTTP-serving process.
 

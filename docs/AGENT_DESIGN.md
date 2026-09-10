@@ -10,6 +10,7 @@
   - [Threat Research / Context Agent](#threat-research-context-agent)
   - [Evidence Analyst](#evidence-analyst)
   - [Report Writer](#report-writer)
+- [Execution boundary](#execution-boundary)
 - [Provider contract](#provider-contract)
 - [Provider failure behavior](#provider-failure-behavior)
 - [Provider URL, path, and redirect safety](#provider-url-path-and-redirect-safety)
@@ -84,6 +85,19 @@ Responsibilities:
 Transforms structured evidence, research, relationships, and Assessment into the final analyst-facing report.
 
 It cannot change the verdict or introduce unsupported facts.
+
+## Execution boundary
+
+```text
+Coordinator / agent policy
+ -> authorized work
+ -> TaskDispatcher
+ -> executor/handler
+```
+
+The Coordinator and deterministic policy decide what work is eligible and authorized. The dispatcher only routes that already-selected work to an execution mechanism. It does not decide pivots, assess Evidence, choose goals, bypass deterministic policy, or expose broker mechanics to agents.
+
+PR 19C introduces only the concrete provider-work contract already required by the running investigation. Task contracts should be generalized only when a real second work category requires it; speculative agent envelopes are not part of this boundary.
 
 ## Provider contract
 

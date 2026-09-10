@@ -193,11 +193,15 @@ Priority unit-test areas include:
 - report/assessment structural validation;
 - structured agent-result validation and serialization;
 - deterministic report/presentation formatting;
-- deterministic orchestration mechanics (PR 19A): typed work-item
-  validation, FIFO queue selection, duplicate suppression, outcome
-  bookkeeping, provider-call counter accounting, JSON state round-trip,
-  and graph termination on queue exhaustion via the LangGraph skeleton
-  in `app/orchestration`;
+- deterministic orchestration mechanics (PR 19A, updated by PR 19C): typed
+  work-item validation, FIFO queue selection, duplicate suppression, outcome
+  bookkeeping, provider-call counter accounting, JSON state round-trip, and
+  graph termination on queue exhaustion via the LangGraph skeleton in
+  `app/orchestration`, with graph mechanics tested against `TaskDispatcher`;
+- local dispatch (PR 19C): `LocalTaskDispatcher` delegates the exact selected
+  item exactly once, preserves the exact outcome, propagates exceptions and
+  cancellation unchanged, and performs no state, persistence, or timeline
+  mutation;
 - deterministic provider execution (PR 19B): target/provider resolution,
   applicability validation, empty-success and error-only outcomes,
   cancellation propagation, extraction-before-persistence sequencing,
@@ -236,21 +240,24 @@ Priority unit-test areas include:
 - UnitOfWork lifecycle (PR 19B): a closed UoW exposes no stale timeline
   repository and re-enters with a fresh repository, including the
   rollback path, via `tests/integration/test_investigation_timeline_repository.py`;
-- production composition (PR 19B): `build_provider_investigation_graph`
-  assembles the real seams without global state and the compiled graph is
-  invoked asynchronously in the vertical slice, via
-  `tests/unit/app/orchestration/test_composition.py` and the pipeline test;
+- production composition (PR 19B, updated by PR 19C):
+  `build_provider_investigation_graph` assembles `ProviderWorkExecutor`, wraps
+  it in `LocalTaskDispatcher`, and injects that dispatcher into the compiled
+  graph without global state. The compiled graph is invoked asynchronously in
+  the vertical slice, via `tests/unit/app/orchestration/test_composition.py`
+  and the pipeline test;
 - graph context binding (PR 19B): a provider-backed compiled graph is bound
   to one investigation ID; invoking it with a state for another
   investigation raises `InvestigationGraphContextMismatchError` during
   `initialize` before queue selection, target lookup, timeline emission,
-  provider I/O, extraction, or persistence. Production executors implement
-  `InvestigationBoundWorkExecutor`, so the generic graph builder
-  automatically adopts their bound investigation ID — direct public
-  composition cannot bypass isolation — and an explicit conflicting ID fails
-  at graph construction with `InvestigationGraphBindingConflictError`.
-  Generic PR 19A graphs without an expected ID and ordinary unbound
-  `WorkExecutor` values remain unchanged. Unit coverage (all five binding
+  provider I/O, extraction, or persistence. The binding path is
+  `graph -> LocalTaskDispatcher -> bound ProviderWorkExecutor`: automatic
+  investigation binding is preserved through the dispatcher, direct public
+  composition cannot bypass isolation, an explicit conflicting ID fails at
+  construction with `InvestigationGraphBindingConflictError`, and a wrong
+  invocation state fails before dispatch or I/O. Generic graphs without an
+  expected ID and ordinary unbound dispatchers remain supported. Unit coverage
+  (all five binding
   cases, the direct-builder bypass, and the construction conflict) lives in
   `tests/unit/app/orchestration/test_graph.py`, `test_composition.py`, and
   `test_provider_executor.py`; two PostgreSQL regressions in
@@ -270,6 +277,9 @@ host allowlist; no public internet):
 ```text
 persisted DOMAIN root
   -> queued GOOGLE_PUBLIC_DNS work
+  -> LangGraph
+  -> LocalTaskDispatcher
+  -> ProviderWorkExecutor
   -> real GooglePublicDnsProvider over the synthetic upstream
   -> normalized DNS Evidence
   -> PR 18B deterministic extraction
@@ -278,7 +288,8 @@ persisted DOMAIN root
 ```
 
 The slice runs through the public `build_provider_investigation_graph`
-factory and invokes the compiled graph asynchronously; it asserts the
+factory along the `ProviderWorkExecutor -> LocalTaskDispatcher -> compiled
+graph` composition path and invokes the graph asynchronously; it asserts the
 persisted Evidence row, the discovered IP entity, the stable relationship
 and its immutable observation, the outcome/state ID bookkeeping
 (`provider_calls_used == 1`), the durable Investigation's
@@ -478,11 +489,12 @@ Provider-shaped fixture data should avoid copying third-party payloads wholesale
 The test suite should provide deterministic implementations such as:
 
 - `FakeEvidenceProvider`;
+- `FakeTaskDispatcher` (PR 19C): a deterministic dispatcher used by graph
+  tests so orchestration mechanics do not depend on executor behavior;
 - `FakeWorkExecutor` (PR 19A, in `tests/support/orchestration_fixtures.py`):
   a deterministic in-memory `WorkExecutor` driven by an explicit
   `ProviderWorkItem -> ProviderExecutionOutcome` mapping with no network,
-  database, or LLM I/O, used to prove orchestration mechanics without
-  live providers;
+  database, or LLM I/O, retained for dispatcher and executor tests;
 - `FakeLlmClient`;
 - fake embedding model;
 - fixed retriever;
