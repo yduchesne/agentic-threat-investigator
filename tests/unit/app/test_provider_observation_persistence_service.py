@@ -197,6 +197,14 @@ class FakeRelationshipRepository(RelationshipRepository):
             (source_entity_id, RelationshipType(relationship_type), target_entity_id)
         )
 
+    async def get_by_id(
+        self, relationship_id: UUID, *, include_deleted: bool = False
+    ) -> Relationship | None:
+        """Return the row with the given identifier, if any."""
+        return next(
+            (row for row in self.rows.values() if row.id == relationship_id), None
+        )
+
     async def upsert(
         self, relationship: Relationship, *, expected_version: int | None = None
     ) -> Relationship:
@@ -235,6 +243,10 @@ class FakeObservationRepository(RelationshipObservationRepository):
             raise RuntimeError("injected observation failure")
         self.rows.append(observation)
         return observation
+
+    async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
+        """Return the immutable observation with the given identity, if any."""
+        return next((row for row in self.rows if row.id == observation_id), None)
 
 
 class FakeEvidenceRepository(EvidenceRepository):
@@ -295,6 +307,14 @@ class FakeInvestigationRepository(InvestigationRepository):
 
     async def create(
         self, state: InvestigationState, **_: object
+    ) -> InvestigationWriteResult:
+        raise NotImplementedError
+
+    async def update_assessment_reference(
+        self,
+        investigation_id: UUID,
+        assessment_id: UUID,
+        **_: object,
     ) -> InvestigationWriteResult:
         raise NotImplementedError
 

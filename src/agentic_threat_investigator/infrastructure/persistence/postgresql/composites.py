@@ -14,6 +14,8 @@ async def register_batch_composites(connection: AsyncConnection[Any]) -> None:
         "ati.source_record_batch_item",
         "ati.document_batch_item",
         "ati.document_chunk_batch_item",
+        "ati.assessment_finding_item",
+        "ati.assessment_finding_support_item",
     ):
         info = await CompositeInfo.fetch(connection, type_name)
         register_composite(cast(CompositeInfo, info), connection)

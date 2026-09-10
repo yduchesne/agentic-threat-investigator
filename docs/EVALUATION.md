@@ -349,6 +349,16 @@ unsupported material research claims = 0%
 
 The Evidence Analyst is a primary evaluation target.
 
+PR 20A defines the durable Assessment contract the analyst fills: verdict,
+confidence, and structured `AnalyticalFinding`s whose typed support cite
+`Evidence` (direct source facts) or the exact `RelationshipObservation`
+(graph facts; never a bare Relationship). Deterministic provenance
+validation (existence, same investigation, analyzed-set membership, exact
+observation chain, eligible non-deleted graph resources) is zero-tolerance
+and runs before persistence; historical versions never change. Semantic
+grounding — whether the cited support actually entails the Finding statement
+or verdict — is PR 20C evaluation, not a deterministic gate.
+
 Evaluate:
 
 - verdict correctness within an allowed envelope;

@@ -9,9 +9,13 @@ import pytest
 from pydantic import ValidationError
 
 from agentic_threat_investigator.domain.assessment import (
+    AnalyticalFinding,
     Assessment,
     AssessmentConfidence,
-    EvidenceReference,
+    EvidenceSupport,
+    FindingCategory,
+    FindingDisposition,
+    RelationshipSupport,
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
@@ -134,14 +138,13 @@ def test_assessment_requires_verdict_confidence_and_summary() -> None:
         verdict=Verdict.SUSPICIOUS,
         confidence=AssessmentConfidence.MEDIUM,
         summary="Registration and DNS evidence is inconsistent.",
-        analyzed_evidence_ids=[uuid4(), uuid4()],
+        analyzed_evidence_ids=(uuid4(), uuid4()),
     )
 
-    assert assessment.supporting_evidence == []
-    assert assessment.contradicting_evidence == []
-    assert assessment.limitations == []
-    assert assessment.unresolved_questions == []
-    assert assessment.recommended_next_steps == []
+    assert assessment.findings == ()
+    assert assessment.limitations == ()
+    assert assessment.unresolved_questions == ()
+    assert assessment.recommended_next_steps == ()
 
 
 def test_assessment_rejects_missing_analyzed_evidence() -> None:
@@ -156,18 +159,114 @@ def test_assessment_rejects_missing_analyzed_evidence() -> None:
         )  # type: ignore[call-arg]
 
 
-def test_evidence_reference_requires_rationale() -> None:
-    """Evidence references pair an evidence id with its rationale."""
+def test_assessment_rejects_duplicate_analyzed_evidence() -> None:
+    """Duplicate analyzed Evidence identities are contract violations."""
 
-    reference = EvidenceReference(
-        evidence_id=uuid4(),
-        rationale="Domain resolves to a known-bad address.",
+    evidence_id = uuid4()
+    with pytest.raises(ValidationError, match="duplicates"):
+        Assessment(
+            investigation_id=uuid4(),
+            verdict=Verdict.INCONCLUSIVE,
+            confidence=AssessmentConfidence.LOW,
+            summary="Insufficient evidence.",
+            analyzed_evidence_ids=(evidence_id, evidence_id),
+        )
+
+
+def test_assessment_sequences_are_immutable_tuples() -> None:
+    """Assessment sequences are tuples and cannot be reassigned or mutated."""
+
+    assessment = Assessment(
+        investigation_id=uuid4(),
+        verdict=Verdict.INCONCLUSIVE,
+        confidence=AssessmentConfidence.LOW,
+        summary="Insufficient evidence.",
+        analyzed_evidence_ids=(),
+        limitations=("no provider hits",),
     )
 
-    assert reference.evidence_id is not None
+    assert isinstance(assessment.analyzed_evidence_ids, tuple)
+    assert isinstance(assessment.findings, tuple)
+    assert isinstance(assessment.limitations, tuple)
+    with pytest.raises(ValidationError, match="frozen"):
+        assessment.analyzed_evidence_ids = (uuid4(),)
+    with pytest.raises(AttributeError, match="no attribute 'append'"):
+        assessment.limitations.append("extra")  # type: ignore[attr-defined]
+
+
+def test_evidence_support_identifies_exactly_one_evidence() -> None:
+    """EvidenceSupport carries the exact analyzed Evidence identity."""
+
+    support = EvidenceSupport(kind="evidence", evidence_id=uuid4())
+
+    assert support.evidence_id is not None
 
     with pytest.raises(ValidationError):
-        EvidenceReference(evidence_id=uuid4())  # type: ignore[call-arg]
+        EvidenceSupport()  # type: ignore[call-arg]
+    with pytest.raises(ValidationError, match="extra"):
+        EvidenceSupport(kind="evidence", evidence_id=uuid4(), rationale="not a valid field")  # type: ignore[call-arg]
+
+
+def test_relationship_support_identifies_exactly_one_observation() -> None:
+    """RelationshipSupport carries the exact observation identity."""
+
+    support = RelationshipSupport(
+        kind="relationship_observation", relationship_observation_id=uuid4()
+    )
+
+    assert support.relationship_observation_id is not None
+
+    with pytest.raises(ValidationError):
+        RelationshipSupport()  # type: ignore[call-arg]
+
+
+def test_finding_requires_nonblank_statement_and_support() -> None:
+    """Material Findings need a nonblank statement and at least one support."""
+
+    finding = AnalyticalFinding(
+        category=FindingCategory.REPUTATION,
+        disposition=FindingDisposition.SUPPORTING,
+        statement="Reputation sources flag the domain.",
+        confidence=AssessmentConfidence.HIGH,
+        support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
+    )
+
+    assert finding.category is FindingCategory.REPUTATION
+    assert finding.disposition is FindingDisposition.SUPPORTING
+
+    with pytest.raises(ValidationError, match="blank"):
+        AnalyticalFinding(
+            category=FindingCategory.REPUTATION,
+            disposition=FindingDisposition.SUPPORTING,
+            statement="   ",
+            confidence=AssessmentConfidence.HIGH,
+            support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
+        )
+    with pytest.raises(ValidationError, match="at least one support"):
+        AnalyticalFinding(
+            category=FindingCategory.REPUTATION,
+            disposition=FindingDisposition.SUPPORTING,
+            statement="No support here.",
+            confidence=AssessmentConfidence.HIGH,
+            support=(),
+        )
+
+
+def test_finding_rejects_duplicate_support() -> None:
+    """Duplicate support is rejected rather than silently repaired."""
+
+    evidence_id = uuid4()
+    with pytest.raises(ValidationError, match="unique"):
+        AnalyticalFinding(
+            category=FindingCategory.REPUTATION,
+            disposition=FindingDisposition.SUPPORTING,
+            statement="One evidence cannot be cited twice.",
+            confidence=AssessmentConfidence.HIGH,
+            support=(
+                EvidenceSupport(kind="evidence", evidence_id=evidence_id),
+                EvidenceSupport(kind="evidence", evidence_id=evidence_id),
+            ),
+        )
 
 
 def test_geo_location_requires_provider_and_precision() -> None:

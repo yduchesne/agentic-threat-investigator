@@ -194,8 +194,8 @@ Present the analyst-facing report:
 
 - executive summary;
 - verdict/confidence;
-- supporting evidence;
-- contradicting evidence;
+- supporting Findings;
+- contradicting Findings;
 - infrastructure;
 - threat context;
 - limitations;

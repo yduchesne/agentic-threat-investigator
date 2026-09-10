@@ -356,6 +356,46 @@ This makes structured ATI data the single semantic source for API
 responses, frontend rendering, exported reports, and deterministic test
 comparisons.
 
+### Assessment validation and persistence (PR 20A)
+
+A candidate `Assessment` (produced by the Evidence Analyst in PR 20B) must
+pass deterministic provenance validation before it can persist. The seam
+keeps repository reads separate from pure rules:
+
+```text
+repositories
+  -> AssessmentProvenanceContext (immutable snapshot)
+  -> AssessmentProvenanceValidator (no provider/network/LLM call)
+  -> one short UnitOfWork
+       -> persist Assessment (versioned analytical output)
+       -> advance Investigation assessment_id pointer
+       -> audit event
+       -> commit
+```
+
+Direct source-fact claims cite Evidence; graph-backed claims cite the exact
+RelationshipObservation. Cross-investigation support is rejected, an empty
+analyzed set is approved only for INCONCLUSIVE, and a later analysis never
+silently overwrites a prior conclusion: it appends a new Assessment version
+and moves the Investigation's pointer to it after durable success. The
+immutable validation context snapshots every loaded map, and the stored
+function revalidates the complete analyzed set, Finding/support structure,
+and exact observation chain under deterministic row locks as defense in
+depth; Assessment soft deletion is rejected while an Investigation still
+points at the Assessment.
+
+Every Assessment-pointer operation (pointer assignment and Assessment soft
+deletion) acquires row locks in the canonical order owning Investigation
+first, then the target Assessment, so concurrent pointer assignment and
+deletion serialize on the Investigation row and can never commit to a
+visible Investigation pointing at a deleted Assessment. Assessment
+candidate collections (analyzed Evidence, Findings, flattened Finding
+supports, and each ordered string collection) are bounded before any
+UnitOfWork entry or provenance read by the application service, again by
+the repository before SQL, and by the database's larger defensive hard
+ceiling before staging; oversized aggregates are rejected with only the
+collection name, count, and limit.
+
 ### Report pipeline
 
 The report path is:

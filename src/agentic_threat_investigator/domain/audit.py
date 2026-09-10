@@ -37,6 +37,8 @@ class AuditAction(str, Enum):
     INVESTIGATION_UPDATE_STATUS = "urn:ati:action:investigation:update_status"
     INVESTIGATION_DELETE = "urn:ati:action:investigation:delete"
     EVIDENCE_RECORD = "urn:ati:action:evidence:record"
+    ASSESSMENT_CREATE = "urn:ati:action:assessment:create"
+    ASSESSMENT_DELETE = "urn:ati:action:assessment:delete"
 
 
 _FORBIDDEN = re.compile(

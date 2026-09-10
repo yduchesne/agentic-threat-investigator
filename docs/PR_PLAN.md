@@ -50,7 +50,7 @@ PR 19C does **not** introduce NATS, JetStream, Kafka, Redis, broker subjects/top
 
 A future `DistributedTaskDispatcher` may replace `LocalTaskDispatcher` without requiring Coordinator/LangGraph code to know transport details. Distributed dispatch is not a v0.1 requirement.
 
-## PR 20A — Assessment model and provenance validation
+## PR 20A — Assessment model and provenance validation [DONE]
 
 Deliver the deterministic analytical domain/persistence foundation:
 

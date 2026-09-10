@@ -19,6 +19,7 @@ from typing import Self
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from agentic_threat_investigator.domain.assessment import Assessment
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
 from agentic_threat_investigator.domain.documents import Document, DocumentChunk
 from agentic_threat_investigator.domain.entities import Entity
@@ -84,6 +85,85 @@ class EvidenceDuplicateIdentityError(ValueError):
         """Record the conflicting evidence identity."""
         super().__init__(f"evidence observation already exists: {evidence_id}")
         self.evidence_id = evidence_id
+
+
+class AssessmentDuplicateIdentityError(ValueError):
+    """Raised when an assessment analytical version already exists."""
+
+    def __init__(self, assessment_id: UUID) -> None:
+        """Record the conflicting assessment identity."""
+        super().__init__(f"assessment already exists: {assessment_id}")
+        self.assessment_id = assessment_id
+
+
+class AssessmentSizeLimitExceededError(ValueError):
+    """Raised when an Assessment candidate collection exceeds the configured limit.
+
+    The message reports only the collection name, the count, and the limit;
+    it never includes Finding statements, Evidence payloads, summary text,
+    or any other analytical content.
+    """
+
+    def __init__(self, collection: str, count: int, limit: int) -> None:
+        """Record the oversized collection identity and its count."""
+        super().__init__(f"assessment {collection} size {count} exceeds limit {limit}")
+        self.collection = collection
+        self.count = count
+        self.limit = limit
+
+
+ASSESSMENT_BOUNDED_COLLECTIONS = (
+    "analyzed_evidence_ids",
+    "findings",
+    "finding_support",
+    "limitations",
+    "unresolved_questions",
+    "recommended_next_steps",
+)
+"""The candidate collections independently bounded by the Assessment limit."""
+
+
+def assessment_collection_sizes(assessment: Assessment) -> dict[str, int]:
+    """Return the size of every bounded Assessment candidate collection."""
+    return {
+        "analyzed_evidence_ids": len(assessment.analyzed_evidence_ids),
+        "findings": len(assessment.findings),
+        "finding_support": sum(len(finding.support) for finding in assessment.findings),
+        "limitations": len(assessment.limitations),
+        "unresolved_questions": len(assessment.unresolved_questions),
+        "recommended_next_steps": len(assessment.recommended_next_steps),
+    }
+
+
+def enforce_assessment_collection_bounds(assessment: Assessment, limit: int) -> None:
+    """Reject any bounded Assessment candidate collection above the limit.
+
+    Shared by the application service (before the UnitOfWork and any
+    provenance read) and the PostgreSQL repository (before SQL serialization
+    and execution), so oversized aggregates are rejected untouched with only
+    the collection name, count, and limit reported.
+    """
+    for collection, count in assessment_collection_sizes(assessment).items():
+        if count > limit:
+            raise AssessmentSizeLimitExceededError(collection, count, limit)
+
+
+class AssessmentCurrentReferenceConflictError(LookupError):
+    """Raised when deleting the current Assessment of a visible Investigation.
+
+    Approved PR 20A deletion policy: a soft deletion is rejected while any
+    visible Investigation still points at the Assessment, so a visible
+    Investigation can never retain a pointer to a deleted/invisible
+    Assessment.
+    """
+
+    def __init__(self, assessment_id: UUID) -> None:
+        """Record the referenced current Assessment identity."""
+        super().__init__(
+            f"assessment is the current assessment of a visible investigation: "
+            f"{assessment_id}"
+        )
+        self.assessment_id = assessment_id
 
 
 class SoftDeletedIdentityError(ValueError):
@@ -368,6 +448,12 @@ class RelationshipRepository(ABC):  # pragma: no cover
     """Repository for stable relationship identities."""
 
     @abstractmethod
+    async def get_by_id(
+        self, relationship_id: UUID, *, include_deleted: bool = False
+    ) -> Relationship | None:
+        """Return the visible relationship with the given identifier, if any."""
+
+    @abstractmethod
     async def get_by_identity(
         self,
         source_entity_id: UUID,
@@ -405,6 +491,10 @@ class RelationshipObservationRepository(
         self, observation: RelationshipObservation
     ) -> RelationshipObservation:
         """Append a new immutable observation row."""
+
+    @abstractmethod
+    async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
+        """Return an immutable observation by its identity."""
 
 
 class EvidenceRepository(
@@ -465,6 +555,24 @@ class InvestigationRepository(ABC):  # pragma: no cover
         """Return the visible investigation resource, if any."""
 
     @abstractmethod
+    async def update_assessment_reference(
+        self,
+        investigation_id: UUID,
+        assessment_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Point the investigation at its current/final Assessment version.
+
+        The pointer lives in the operational state of the mutable
+        investigation resource; a stale expected version or a reference to an
+        Assessment that does not belong to the investigation produces a typed
+        conflict with no partial mutation.
+        """
+
+    @abstractmethod
     async def update_status(
         self,
         investigation_id: UUID,
@@ -486,6 +594,60 @@ class InvestigationRepository(ABC):  # pragma: no cover
         expected_version: int | None = None,
     ) -> InvestigationWriteResult:
         """Soft-delete the resource and return its post-deletion version."""
+
+
+class AssessmentRepository(ABC):  # pragma: no cover
+    """Repository for versioned, insert-only analytical Assessment outputs.
+
+    A later analysis creates a new persisted Assessment row rather than
+    silently mutating a prior conclusion; there is deliberately no
+    update-in-place operation.
+    """
+
+    @abstractmethod
+    async def insert(
+        self,
+        assessment: Assessment,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+    ) -> Assessment:
+        """Persist a new Assessment version and return it with database metadata.
+
+        A duplicate assessment identity or any malformed/cross-investigation
+        support reference is a typed error and mutates nothing.
+        """
+
+    @abstractmethod
+    async def get_by_id(
+        self, assessment_id: UUID, *, include_deleted: bool = False
+    ) -> Assessment | None:
+        """Return the visible Assessment with its exact Findings and supports."""
+
+    @abstractmethod
+    async def list_for_investigation(
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Assessment]:
+        """Return bounded Assessments in deterministic newest-first order."""
+
+    @abstractmethod
+    async def soft_delete(
+        self,
+        assessment_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> Assessment:
+        """Soft-delete the Assessment and return its post-deletion state.
+
+        Deletion is rejected with a typed conflict while any visible
+        Investigation still points at the Assessment.
+        """
 
 
 class UserRepository(ABC):  # pylint: disable=too-few-public-methods  # pragma: no cover
@@ -572,6 +734,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     relationship_observations: RelationshipObservationRepository
     evidence: EvidenceRepository
     investigations: InvestigationRepository
+    assessments: AssessmentRepository
     users: UserRepository
     credentials: CredentialRepository
     sessions: SessionRepository

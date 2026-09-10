@@ -20,6 +20,9 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentic_threat_investigator.app.assessment_provenance import (
+    AssessmentProvenanceMismatchError,
+)
 from agentic_threat_investigator.app.persistence.repositories import (
     BatchOutcome,
     InvestigationDuplicateIdentityError,
@@ -36,6 +39,7 @@ from agentic_threat_investigator.domain.investigation import (
 )
 
 from .errors import (
+    SQLSTATE_ASSESSMENT_REFERENCE_INVALID,
     SQLSTATE_INVALID_TRANSITION,
     SQLSTATE_INVESTIGATION_DUPLICATE,
     SQLSTATE_INVESTIGATION_NOT_FOUND,
@@ -171,6 +175,58 @@ class PostgresInvestigationRepository(InvestigationRepository):
             raise
         written_id, version, _created = result.one()
         return InvestigationWriteResult(written_id, int(version), BatchOutcome.INSERTED)
+
+    async def update_assessment_reference(
+        self,
+        investigation_id: UUID,
+        assessment_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Point the investigation at its current Assessment through the SQL API.
+
+        The database owns the operational-state mutation, version allocation,
+        and UPDATE history; the pointer only advances after the Assessment
+        row itself has been durably inserted in the same transaction.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, outcome FROM ati.set_investigation_assessment(
+                        :id, :assessment_id, :actor_id, :request_id, :expected_version)
+                """),
+                {
+                    "id": investigation_id,
+                    "assessment_id": assessment_id,
+                    "actor_id": actor_id,
+                    "request_id": request_id,
+                    "expected_version": expected_version,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_INVESTIGATION_NOT_FOUND:
+                raise InvestigationNotFoundError(str(investigation_id)) from error
+            if state == SQLSTATE_VERSION_CONFLICT:
+                raise InvestigationVersionConflictError(
+                    investigation_id, expected_version or 0
+                ) from error
+            if state == SQLSTATE_ASSESSMENT_REFERENCE_INVALID:
+                # The target Assessment is missing, does not belong to this
+                # Investigation, or was soft-deleted (possibly concurrently).
+                raise AssessmentProvenanceMismatchError(
+                    f"assessment reference is invalid for investigation "
+                    f"{investigation_id}: {assessment_id}"
+                ) from error
+            raise
+        written_result_id, written_version, outcome = result.one()
+        return InvestigationWriteResult(
+            written_result_id,
+            int(written_version),
+            BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
+        )
 
     async def update_status(
         self,

@@ -20,6 +20,8 @@ EXPECTED_TABLES = {
     "evidence",
     "investigation",
     "assessment",
+    "assessment_finding",
+    "assessment_finding_support",
     "user",
     "credential",
     "session",
@@ -57,6 +59,9 @@ EXPECTED_FUNCTIONS = {
     "upsert_relationship",
     "append_relationship_observation",
     "soft_delete_relationship",
+    "append_assessment",
+    "set_investigation_assessment",
+    "soft_delete_assessment",
 }
 
 
@@ -548,4 +553,174 @@ async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
         } <= checks
         assert count == 1
     finally:
+        command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_assessment_schema_contract() -> None:
+    """v0011 installs normalized tables, checks, FKs, and write functions."""
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            checks = {row[0]: row[1] for row in await connection.execute(text("""
+                        SELECT con.conname, pg_get_constraintdef(con.oid)
+                        FROM pg_constraint con
+                        JOIN pg_class rel ON rel.oid = con.conrelid
+                        JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                        WHERE ns.nspname = 'ati'
+                          AND rel.relname IN (
+                            'assessment',
+                            'assessment_finding',
+                            'assessment_finding_support'
+                          )
+                          AND con.contype IN ('c', 'f', 'u')
+                    """))}
+            columns = {(row[0], row[1]) for row in await connection.execute(text("""
+                        SELECT table_name, column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'ati'
+                          AND table_name IN (
+                            'assessment',
+                            'assessment_finding',
+                            'assessment_finding_support'
+                          )
+                    """))}
+    finally:
+        await engine.dispose()
+    assert ("assessment", "version") in columns
+    assert ("assessment", "deleted_at") in columns
+    assert ("assessment_finding", "ordinal") in columns
+    assert ("assessment_finding_support", "kind") in columns
+    # Provenance integrity is relational.
+    assert any("evidence(id)" in definition for definition in checks.values())
+    assert any(
+        "relationship_observation(id)" in definition for definition in checks.values()
+    )
+    # The finding discriminator is exclusive, not nullable-field inferred.
+    assert any("kind = 'evidence'" in definition for definition in checks.values())
+    assert any(
+        "kind = 'relationship_observation'" in definition
+        for definition in checks.values()
+    )
+    # No-evidence Assessments may only be inconclusive.
+    assert any(
+        "cardinality(analyzed_evidence_ids)" in definition
+        for definition in checks.values()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_assessment_migration_downgrade_and_re_upgrade() -> None:
+    """Migration 0014 downgrades to the flat table and re-upgrades cleanly."""
+    alembic_cfg = Config("alembic.ini")
+
+    async def table_state() -> tuple[bool, bool]:
+        """Return (normalized tables present, flat table present)."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                tables = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT table_name FROM information_schema.tables "
+                            "WHERE table_schema = 'ati'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        return (
+            {"assessment", "assessment_finding", "assessment_finding_support"}
+            <= tables,
+            "assessment" in tables,
+        )
+
+    try:
+        command.downgrade(alembic_cfg, "0013_investigation_timeline")
+        normalized, flat = await table_state()
+        assert not normalized
+        assert flat
+        command.upgrade(alembic_cfg, "head")
+        normalized, _ = await table_state()
+        assert normalized
+    finally:
+        command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_assessment_migration_rejects_nonempty_legacy_table() -> None:
+    """Migration 0014 refuses to drop a nonempty legacy Assessment table."""
+    alembic_cfg = Config("alembic.ini")
+
+    async def legacy_row_count() -> int:
+        """Return the number of rows in the flat legacy table."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                return int(
+                    await connection.scalar(text("SELECT count(*) FROM ati.assessment"))
+                )
+        finally:
+            await engine.dispose()
+
+    async def normalized_tables_present() -> bool:
+        """Return whether the normalized child tables were installed."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                tables = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT table_name FROM information_schema.tables "
+                            "WHERE table_schema = 'ati'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        return {"assessment_finding", "assessment_finding_support"} <= tables
+
+    try:
+        command.downgrade(alembic_cfg, "0013_investigation_timeline")
+        # Insert one legal flat row (the legacy table has no FK constraints).
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(text("""
+                        INSERT INTO ati.assessment (
+                          id, investigation_id, verdict, confidence, summary,
+                          analyzed_evidence_ids, supporting_evidence,
+                          contradicting_evidence, limitations,
+                          unresolved_questions, recommended_next_steps,
+                          version)
+                        VALUES (
+                          gen_random_uuid(), gen_random_uuid(), 'suspicious',
+                          'medium', 'legacy flat row', '[]'::jsonb, '[]'::jsonb,
+                          '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 1)
+                    """))
+                await connection.commit()
+        finally:
+            await engine.dispose()
+
+        with pytest.raises(RuntimeError, match="refuses to drop ati.assessment"):
+            command.upgrade(alembic_cfg, "head")
+
+        # The legacy row survived, no normalized schema was partially installed,
+        # and the flat table is still present.
+        assert await legacy_row_count() == 1
+        assert not await normalized_tables_present()
+    finally:
+        # Clean up the guard row and restore head for later tests.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(text("DELETE FROM ati.assessment"))
+                await connection.commit()
+        finally:
+            await engine.dispose()
         command.upgrade(alembic_cfg, "head")

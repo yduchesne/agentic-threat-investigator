@@ -66,7 +66,9 @@ Produce one of:
 - `malicious`
 - `inconclusive`
 
-with LOW, MEDIUM, or HIGH confidence and explicit supporting and contradicting evidence.
+with LOW, MEDIUM, or HIGH confidence and provenance-backed Findings whose
+supporting/contradicting dispositions cite exact Evidence or
+RelationshipObservation references.
 
 Absence of malicious evidence does not imply a benign verdict.
 

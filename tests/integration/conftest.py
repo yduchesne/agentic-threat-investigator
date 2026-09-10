@@ -68,6 +68,8 @@ async def reset_application_data(
         "session",
         "credential",
         '"user"',
+        "assessment_finding_support",
+        "assessment_finding",
         "assessment",
         "investigation",
         "evidence",

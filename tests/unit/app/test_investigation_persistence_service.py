@@ -111,6 +111,21 @@ class FakeInvestigationRepository(InvestigationRepository):
             raise self.update_error
         return self.update_result
 
+    async def update_assessment_reference(
+        self,
+        investigation_id: UUID,
+        assessment_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Record the pointer update and return the configured result."""
+        self.record("update_assessment_reference", investigation_id, assessment_id)
+        if self.update_error is not None:
+            raise self.update_error
+        return self.update_result
+
     async def soft_delete(
         self,
         investigation_id: UUID,

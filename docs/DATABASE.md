@@ -109,7 +109,11 @@ New version/row rather than silent overwrite:
 - InvestigationReport
 - ResearchResult where applicable
 
-An Investigation may point to the current/final version.
+An Investigation may point to the current/final version. `Assessment` rows are
+insert-only: a later analysis appends a new `ati.assessment` row with a
+fresh database-allocated version and immutable CREATE history, and the
+`Investigation` operational-state pointer (`assessment_id`) moves to the
+newest durable output only after that row commits.
 
 ### Mutable operational records
 
@@ -256,6 +260,97 @@ version, or deletion metadata.
 `started_at` is required and non-null. Investigation timestamps are
 timezone-aware UTC: the domain rejects naive values and normalizes accepted
 offsets to UTC, and the database stores `timestamptz`.
+
+## Assessment persistence
+
+Assessment persistence (migration 0014, SQL API v0011) is normalized, not an
+opaque JSONB blob, so provenance stays relational:
+
+```text
+assessment (verdict, confidence, summary, analyzed_evidence_ids uuid[],
+            limitations/unresolved_questions/recommended_next_steps text[],
+            version, created_at, deleted_at, deleted_by_actor_id)
+  -> investigation(id)
+  |- assessment_finding (assessment_id, ordinal, category, disposition,
+                         statement, confidence) UNIQUE(assessment_id, ordinal)
+      |- assessment_finding_support (finding_id, ordinal, kind,
+                                     evidence_id, relationship_observation_id)
+         UNIQUE(finding_id, ordinal)
+
+EvidenceSupport -> evidence(id) (FK)
+RelationshipSupport -> relationship_observation(id) (FK)
+```
+
+The support discriminator is an explicit ``kind`` column
+(``'evidence'`` / ``'relationship_observation'``) with an exclusive CHECK,
+never inferred from nullable id fields. FKs supplement application
+validation; they do not replace cross-investigation validation, which the
+stored functions revalidate under the parent Investigation row lock.
+
+``ati.append_assessment`` follows the repository batch-persistence rule:
+the resource-specific composite arrays are expanded once into
+transaction-local temporary staging tables (analyzed Evidence, Findings,
+supports) and every validation/insertion is set-oriented from those tables.
+Validation covers the complete analyzed set — every analyzed Evidence ID,
+whether or not any Finding cites it, must resolve to persisted Evidence of
+this Investigation — plus Finding/support structure (positive unique
+contiguous ordinals, nonblank statements, allowed vocabulary, at least one
+support per Finding, resolvable finding ordinals, exactly one discriminator
+with exactly its matching ID field, no duplicate ``(kind, referenced id)``
+within a Finding). Referenced Relationships and both endpoint Entities are
+locked in a deterministic UUID order (entities before relationships) with a
+lock mode that conflicts with the soft-delete UPDATE row locks, then
+revalidated after locking, so a concurrent soft deletion can never
+invalidate the eligibility snapshot. Every malformed or ineligible input
+fails atomically with a typed SQLSTATE before the Assessment version is
+allocated, leaving no parent, child, history, audit, or pointer row.
+
+Authoritative write path (versioned SQL API v0011):
+
+- `ati.append_assessment(...)` locks and validates the visible parent
+  Investigation, stages and validates the complete input, allocates the
+  Assessment version from `ati.assessment_version_seq`,
+  makes the INSERT authoritative for the supplied identity (duplicate is a
+  typed conflict), persists Assessment/Finding/support atomically set-wise
+  from the staging tables, verifies no staged support row was silently
+  dropped, and writes one immutable CREATE history entry with
+  actor/request/investigation correlation;
+- `ati.set_investigation_assessment(...)` advances `operational_state`'s
+  `assessment_id` with database-owned optimistic-concurrency, a no-op for an
+  identical pointer (no version/history), and UPDATE history otherwise. It
+  acquires row locks in the canonical order — owning Investigation row
+  `FOR UPDATE`, then the target Assessment row `FOR UPDATE` — and verifies
+  the target belongs to that Investigation and is still visible after the
+  lock, so a concurrent soft deletion serializes behind the pointer mutation
+  and a visible Investigation is never pointed at a deleted Assessment;
+- `ati.soft_delete_assessment(...)` follows the standard soft-deletion
+  conventions with DELETE history, but only for superseded Assessments:
+  the approved PR 20A policy rejects deletion (dedicated `U20AB` typed
+  conflict) while the Assessment's visible owning Investigation still points
+  at it as its current analytical output. Deletion first discovers the owning
+  Investigation without locking, then locks the owning Investigation row
+  `FOR UPDATE` before the Assessment row `FOR UPDATE` (the same canonical
+  lock order), revalidates existence/ownership/visibility and the expected
+  Assessment version under those locks, and reads the pointer from the
+  already-locked Investigation row — so a visible Investigation can never
+  point at a deleted Assessment. The application service emits one
+  transactional `ASSESSMENT_DELETE` audit event in the same UnitOfWork;
+- every Assessment input array is bounded in two places: the application
+  service and the repository enforce the configured `db_batch_size` (default
+  100) independently against analyzed Evidence, Findings, flattened Finding
+  supports, and each ordered string collection before any provenance read or
+  SQL, and `ati.append_assessment` rejects any array above the database
+  defensive hard ceiling of 10,000 (dedicated `U20AD`) before staging or
+  mutation. Oversized aggregates are never truncated, split, deduplicated,
+  or silently repaired, and an oversized candidate fails with a message
+  containing only the collection name, count, and limit.
+
+Migration 0014 applies the approved legacy-data policy: the v0002 flat
+``ati.assessment`` table is treated as guaranteed empty (no repository or
+service ever wrote to it), and the migration explicitly counts the old table
+and fails with a clear error BEFORE the drop if any row exists, so legacy
+Assessment data can never be silently destroyed. A nonempty table requires a
+maintainer-approved data-migration mapping before this migration may run.
 
 ## Transactions and Unit of Work
 
