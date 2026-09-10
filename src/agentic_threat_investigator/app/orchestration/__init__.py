@@ -10,7 +10,11 @@ budget enforcement, LLM behavior, adaptive pivots, jobs, or workers.
 
 from .composition import build_provider_investigation_graph
 from .executor import WorkExecutor
-from .graph import OrchestrationGraphState, build_investigation_graph
+from .graph import (
+    InvestigationGraphContextMismatchError,
+    OrchestrationGraphState,
+    build_investigation_graph,
+)
 from .models import (
     enqueue_provider_work,
     record_provider_outcome,
@@ -27,6 +31,7 @@ from .provider_executor import (
 __all__ = [
     "WorkExecutor",
     "OrchestrationGraphState",
+    "InvestigationGraphContextMismatchError",
     "ProviderExecutionContext",
     "ProviderWorkExecutor",
     "EntityReader",

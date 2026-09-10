@@ -26,10 +26,13 @@ from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
+from agentic_threat_investigator.app.orchestration import (
+    InvestigationGraphContextMismatchError,
+    enqueue_provider_work,
+)
 from agentic_threat_investigator.app.orchestration.composition import (
     build_provider_investigation_graph,
 )
-from agentic_threat_investigator.app.orchestration.models import enqueue_provider_work
 from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
 )
@@ -361,3 +364,105 @@ async def test_dns_missing_root_never_calls_provider(
             ]
             failed = timeline[0]
             assert failed.error_code == "target_not_found"
+
+
+async def test_context_mismatch_fails_before_any_persistence(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A graph bound to investigation A rejects state B before every I/O seam.
+
+    The mismatch is raised during graph initialization, so no provider HTTP,
+    extraction, persistence, or timeline activity may occur. Durable absence
+    is verified with a fresh UoW: no Evidence, timeline event, Relationship,
+    or RelationshipObservation exists for either investigation, and neither
+    durable Investigation operational state was mutated.
+    """
+    from agentic_threat_investigator.app.orchestration import (
+        InvestigationGraphContextMismatchError,
+    )
+
+    class _ExplodingTransport(httpx.AsyncBaseTransport):
+        """Fail the test if any provider HTTP I/O is attempted."""
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            raise RuntimeError("provider HTTP I/O must not occur for a mismatch")
+
+    async with httpx.AsyncClient(transport=_ExplodingTransport()) as client:
+        http = ProviderHttpClient(client=client)
+        provider = GooglePublicDnsProvider(http, clock=lambda: _FIXED_TS)
+
+        async with uow_factory() as uow:
+            investigation_a, root = await seed_root_investigation(uow)
+            investigation_b = uuid4()
+            await uow.investigations.create(
+                InvestigationState(
+                    investigation_id=investigation_b,
+                    status=InvestigationStatus.RUNNING,
+                    trigger_type=InvestigationTriggerType.MANUAL,
+                    root_entity_ids=[root.id or uuid4()],
+                    objective="Assess the root indicator.",
+                    budget=default_investigation_budget(),
+                    started_at=_FIXED_TS,
+                )
+            )
+            await uow.commit()
+
+        graph = build_provider_investigation_graph(
+            uow_factory=uow_factory,
+            provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
+            context=ProviderExecutionContext(
+                investigation_id=investigation_a,
+                clock=lambda: _FIXED_TS,
+            ),
+        )
+        assert root.id is not None
+        work_item = ProviderWorkItem(
+            provider=SourceId.GOOGLE_PUBLIC_DNS, entity_id=root.id, depth=0
+        )
+        # The graph is bound to investigation A but is invoked with state B.
+        state_b = enqueue_provider_work(
+            InvestigationState(
+                investigation_id=investigation_b,
+                status=InvestigationStatus.RUNNING,
+                trigger_type=InvestigationTriggerType.MANUAL,
+                root_entity_ids=[root.id],
+                objective="Assess the root indicator.",
+                budget=default_investigation_budget(),
+                started_at=_FIXED_TS,
+            ),
+            [work_item],
+        )
+        with pytest.raises(InvestigationGraphContextMismatchError):
+            await graph.ainvoke({"investigation": state_b})
+
+        # Durable absence: no Evidence, timeline event, Relationship, or
+        # RelationshipObservation was created for either investigation, and
+        # neither durable Investigation operational state was mutated.
+        async with uow_factory() as reader:
+            for investigation_id in (investigation_a, investigation_b):
+                evidence_count = await reader.session.execute(  # type: ignore[union-attr]
+                    select(EvidenceRow).where(
+                        EvidenceRow.investigation_id == investigation_id
+                    )
+                )
+                assert len(evidence_count.scalars().all()) == 0
+                timeline = await reader.timeline_events.list_by_investigation(
+                    investigation_id
+                )
+                assert timeline == []
+            relationship_count = await reader.session.execute(  # type: ignore[union-attr]
+                select(RelationshipRow)
+            )
+            assert len(relationship_count.scalars().all()) == 0
+            observation_count = await reader.session.execute(  # type: ignore[union-attr]
+                select(RelationshipObservationRow)
+            )
+            assert len(observation_count.scalars().all()) == 0
+            # Neither durable Investigation operational state was mutated by
+            # the rejected invocation.
+            for investigation_id in (investigation_a, investigation_b):
+                durable = await reader.investigations.get_by_id(investigation_id)
+                assert durable is not None
+                assert durable.last_provider_outcome is None
+                assert durable.completed_provider_work == []
+                assert durable.budget.provider_calls_used == 0

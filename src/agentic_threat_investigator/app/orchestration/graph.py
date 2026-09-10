@@ -13,6 +13,7 @@ injected; no dependency is hidden in module globals.
 """
 
 from typing import TypedDict
+from uuid import UUID
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -23,6 +24,29 @@ from agentic_threat_investigator.app.orchestration.models import (
     select_provider_work,
 )
 from agentic_threat_investigator.domain.investigation import InvestigationState
+
+
+class InvestigationGraphContextMismatchError(ValueError):
+    """Raised when graph input does not match its bound investigation.
+
+    A graph built for one ``ProviderExecutionContext.investigation_id`` must
+    never process an ``InvestigationState`` belonging to another investigation:
+    the executor would otherwise call providers, persist evidence, and write
+    timeline events under the bound investigation while the unchanged
+    ``record_outcome`` node merges the outcome into the unrelated in-memory
+    state. This is an application-level composition error, independent of
+    LangGraph runtime internals and persistence, raised during graph
+    initialization before work selection and every I/O seam. The message is a
+    fixed safe string that never embeds identifiers, entity values, provider
+    results, or payloads.
+    """
+
+    def __init__(self) -> None:
+        """Build the fixed safe composition-error message."""
+        super().__init__(
+            "orchestration graph state does not match the bound investigation "
+            "context"
+        )
 
 
 class OrchestrationGraphState(TypedDict):
@@ -103,6 +127,8 @@ def _route_after_select(state: OrchestrationGraphState) -> str:
 
 def build_investigation_graph(
     executor: WorkExecutor,
+    *,
+    expected_investigation_id: UUID | None = None,
 ) -> CompiledStateGraph[
     OrchestrationGraphState, None, OrchestrationGraphState, OrchestrationGraphState
 ]:
@@ -111,10 +137,35 @@ def build_investigation_graph(
     The executor is injected by the caller; no global mutable registry,
     service locator, provider bootstrap, database connection, or checkpointer
     is involved.
+
+    When ``expected_investigation_id`` is supplied, the graph is bound to one
+    investigation: every invocation validates the wrapped state's
+    investigation ID during ``initialize`` and raises
+    :class:`InvestigationGraphContextMismatchError` on mismatch, before work
+    selection and every I/O seam. The expected ID is an injected graph-instance
+    invariant, never copied into checkpoint state. When omitted, all PR 19A
+    behavior is preserved so existing fake-executor callers need no changes.
     """
 
     builder: StateGraph[OrchestrationGraphState] = StateGraph(OrchestrationGraphState)
-    builder.add_node("initialize", initialize)
+
+    async def initialize_node(
+        state: OrchestrationGraphState,
+    ) -> OrchestrationGraphState:
+        """Validate the wrapped state and its bound investigation identity.
+
+        Runs the existing public :func:`initialize` contract first, then, when
+        the graph is bound to one investigation, rejects any state belonging to
+        a different investigation. The closure is registered under the existing
+        ``initialize`` node name so no node or edge is added.
+        """
+        validated = await initialize(state)
+        if expected_investigation_id is not None:
+            if validated["investigation"].investigation_id != expected_investigation_id:
+                raise InvestigationGraphContextMismatchError()
+        return validated
+
+    builder.add_node("initialize", initialize_node)
     builder.add_node("select_work", select_work)
 
     async def execute_work_node(

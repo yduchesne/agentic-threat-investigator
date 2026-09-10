@@ -52,6 +52,15 @@ def build_provider_investigation_graph(
     reader, the PR 18B extraction dispatcher, the PR 18C atomic persistence
     service, the UnitOfWork-backed timeline sink, the provider executor, and
     the existing PR 19A graph topology. No global state is created.
+
+    The compiled graph is bound to exactly one investigation ID
+    (``context.investigation_id``): every invocation validates the wrapped
+    state's investigation ID during ``initialize`` and raises
+    ``InvestigationGraphContextMismatchError`` before work selection, target
+    lookup, timeline emission, provider I/O, extraction, or persistence when
+    the state belongs to a different investigation. Validation executes at
+    graph initialization on every invocation; it is never performed only at
+    construction time.
     """
     executor: WorkExecutor = ProviderWorkExecutor(
         entity_reader=UowEntityReader(uow_factory),
@@ -61,4 +70,7 @@ def build_provider_investigation_graph(
         timeline_service=UnitOfWorkInvestigationTimelineSink(uow_factory),
         context=context,
     )
-    return build_investigation_graph(executor)
+    return build_investigation_graph(
+        executor,
+        expected_investigation_id=context.investigation_id,
+    )

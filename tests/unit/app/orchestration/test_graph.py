@@ -5,10 +5,12 @@
 # pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
 
 from typing import cast
+from uuid import UUID
 
 import pytest
 
 from agentic_threat_investigator.app.orchestration import (
+    InvestigationGraphContextMismatchError,
     build_investigation_graph,
     enqueue_provider_work,
 )
@@ -170,3 +172,79 @@ class TestGraphWorkMechanics:
         graph = build_investigation_graph(MismatchedExecutor())
         with pytest.raises(ValueError, match="does not match"):
             await graph.ainvoke({"investigation": scenario_initial_state()})
+
+
+class TestGraphContextBinding:
+    """Graphs bound to one investigation reject state for another."""
+
+    @pytest.mark.asyncio
+    async def test_matching_investigation_id_runs_normally(self) -> None:
+        """A bound graph accepts its own investigation ID unchanged."""
+        executor = scenario_executor()
+        state = scenario_investigation_state()
+        graph = build_investigation_graph(
+            executor,
+            expected_investigation_id=state.investigation_id,
+        )
+        result = await graph.ainvoke(
+            {"investigation": enqueue_provider_work(state, [scenario_dns_work_item()])}
+        )
+        recorded = cast(InvestigationState, result["investigation"])
+        # Existing deterministic outcome/counter behavior is unchanged.
+        assert executor.requested == [scenario_dns_work_item()]
+        assert recorded.completed_provider_work == [scenario_dns_work_item()]
+        assert recorded.budget.provider_calls_used == 1
+        assert recorded.investigation_id == state.investigation_id
+
+    @pytest.mark.asyncio
+    async def test_mismatched_investigation_id_fails_before_executor(self) -> None:
+        """A bound graph rejects another investigation before any execution."""
+        state = scenario_investigation_state()
+        expected = UUID("00000000-0000-0000-0000-0000000000bb")
+        assert expected != state.investigation_id
+
+        class ExplodingExecutor(WorkExecutor):  # pylint: disable=too-few-public-methods
+            """Fail the test if the executor is ever invoked."""
+
+            async def execute(
+                self, work_item: ProviderWorkItem
+            ) -> ProviderExecutionOutcome:
+                raise AssertionError("executor must not be called")
+
+        graph = build_investigation_graph(
+            ExplodingExecutor(),
+            expected_investigation_id=expected,
+        )
+        with pytest.raises(InvestigationGraphContextMismatchError) as raised:
+            await graph.ainvoke(
+                {
+                    "investigation": enqueue_provider_work(
+                        state, [scenario_dns_work_item()]
+                    )
+                }
+            )
+        # The fixed safe message contains neither UUID string.
+        message = str(raised.value)
+        assert message == (
+            "orchestration graph state does not match the bound investigation "
+            "context"
+        )
+        assert str(expected) not in message
+        assert str(state.investigation_id) not in message
+
+    @pytest.mark.asyncio
+    async def test_unbound_graph_remains_usable(self) -> None:
+        """Legacy PR 19A fake graph works without an expected investigation ID."""
+        executor = scenario_executor()
+        result = await build_investigation_graph(executor).ainvoke(
+            {"investigation": scenario_initial_state()}
+        )
+        state = cast(InvestigationState, result["investigation"])
+        assert executor.requested == [
+            scenario_dns_work_item(),
+            scenario_rdap_work_item(),
+        ]
+        assert state.completed_provider_work == [
+            scenario_dns_work_item(),
+            scenario_rdap_work_item(),
+        ]

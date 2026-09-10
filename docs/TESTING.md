@@ -239,7 +239,19 @@ Priority unit-test areas include:
 - production composition (PR 19B): `build_provider_investigation_graph`
   assembles the real seams without global state and the compiled graph is
   invoked asynchronously in the vertical slice, via
-  `tests/unit/app/orchestration/test_composition.py` and the pipeline test.
+  `tests/unit/app/orchestration/test_composition.py` and the pipeline test;
+- graph context binding (PR 19B): a provider-backed compiled graph is bound
+  to one investigation ID; invoking it with a state for another
+  investigation raises `InvestigationGraphContextMismatchError` during
+  `initialize` before queue selection, target lookup, timeline emission,
+  provider I/O, extraction, or persistence. Generic PR 19A graphs without an
+  expected ID remain unchanged. Unit coverage lives in
+  `tests/unit/app/orchestration/test_graph.py` and
+  `tests/unit/app/orchestration/test_composition.py`; the PostgreSQL
+  regression in `tests/integration/test_provider_execution_pipeline.py`
+  proves durable absence (no Evidence, timeline event, Relationship,
+  RelationshipObservation, or state mutation for either investigation) using
+  an exploding transport.
 
 ### Deterministic vertical-slice provider execution (PR 19B)
 
