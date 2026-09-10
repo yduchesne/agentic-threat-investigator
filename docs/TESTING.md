@@ -589,6 +589,72 @@ structured-output operation.
 The fake should also support deterministic invalid-output/failure cases needed
 to test bounded repair and `INVALID_STRUCTURED_OUTPUT` handling.
 
+Deterministic PR 20B coverage requirements:
+
+- one successful call increments the Investigation LLM budget by exactly one;
+- an invalid first attempt plus a successful repair increments by two and the
+  second User Prompt carries the bounded schema-repair instruction;
+- prompt construction occurs BEFORE reservation: an initial-prompt
+  construction failure consumes zero budget, makes zero model calls, and
+  touches no persistence/audit state; a repair-prompt construction failure
+  keeps the prior real attempt counted (one reservation, one call) without
+  reserving the nonexistent repair call;
+- a non-retryable ``INVALID_STRUCTURED_OUTPUT`` error is NOT retried (one
+  call, one reservation, no Assessment, strict propagation);
+- attempt counts are hard-limited to ``1..2`` even on direct constructor
+  use;
+- an input-loading failure and the no-evidence short circuit never consume
+  budget (no model call happens at all);
+- a cancellation during the model boundary propagates unchanged AND the
+  actually-attempted invocation stays durably reserved;
+- an attempted call that then times out/provides garbage persists no
+  Assessment and moves no Investigation pointer;
+- an exhausted attempt budget (or LLM budget) fails with no partial
+  persistence;
+- invalid support references (unknown/cross-Investigation Evidence or
+  RelationshipObservation, substitute observation, soft-deleted graph
+  resource) are rejected by the PR 20A validator with no pointer update and
+  the durable LLM count reflects every actual invocation.
+
+The loader bounds are fail-closed: direct construction enforces the same
+hard ceilings as ``Settings`` (evidence 1..500, observations 1..1000, input
+bytes 1000..1000000, normalized-facts bytes 1000..1000000); the aggregate
+normalized-facts size is independently byte-bounded (UTF-8, never counting
+Python characters and never inspecting raw payloads); and a 1001st
+observation at a 1000 bound raises ``EvidenceAnalystInputBoundsError``
+before any model call via the sentinel probe, never a silent clamp.
+
+### Evidence Analyst vertical slice (PR 20B)
+
+Integration tests run the complete application path against isolated
+real PostgreSQL with `FakeLlmClient` standing in for the model:
+
+```text
+persist Investigation + Evidence (+ Relationship/Observation)
+ -> EvidenceAnalystInputLoader (raw_payload excluded from model prompts)
+ -> EvidenceAnalyst + LlmAccountingService
+ -> FakeLlmClient (asserts the shared real-UnitOfWork transaction counter
+    is zero while the model boundary runs; records prompts)
+ -> Assessment validation/persistence
+ -> durable Assessment + Investigation pointer + budget counters
+```
+
+The transaction coverage instruments the actual ``PostgresUnitOfWork``
+instances composed into the analyst stack (loader, LLM accounting,
+Assessment persistence) with a shared enter/exit tracker; the fake LLM
+asserts the active count is exactly zero and the event order proves the read
+loader exited before accounting started, the reservation UnitOfWork exited
+before the model call, and Assessment persistence begins only after a typed
+decision exists.
+
+Coverage includes evidence-only, graph-backed, mixed-support, explicitly
+contradicting, and no-evidence INCONCLUSIVE styles; invalid/cross-Investigation
+citations; substitute-observation and deleted-graph rejection; structured-
+output and persistence failures leaving no pointer; appended later analysis
+versions with the earlier Assessment unchanged; and durable LLM accounting.
+The observation listing read added for analyst input is covered separately
+against real PostgreSQL (scope, determinism, exclusion, paging).
+
 ### Serialization tests
 
 For persisted/API-visible structured agent results, test:

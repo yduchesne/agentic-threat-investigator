@@ -126,6 +126,18 @@ class FakeInvestigationRepository(InvestigationRepository):
             raise self.update_error
         return self.update_result
 
+    async def update_budget(
+        self,
+        investigation_id: UUID,
+        budget: object,
+        **_: object,
+    ) -> InvestigationWriteResult:
+        """Record the budget update and return the configured result."""
+        self.record("update_budget", investigation_id)
+        if self.update_error is not None:
+            raise self.update_error
+        return self.update_result
+
     async def soft_delete(
         self,
         investigation_id: UUID,

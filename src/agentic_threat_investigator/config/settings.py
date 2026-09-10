@@ -128,6 +128,26 @@ class Settings(BaseSettings):
         default=None, gt=0, allow_inf_nan=False
     )
     urlhaus_auth_key_secret: str = "ATI_URLHAUS_AUTH_KEY"
+    # LLM settings (PR 20B). The secret setting carries only the NAME of the
+    # environment variable holding the provider API key; the key value is
+    # resolved outside configuration during composition and never stored or
+    # logged here. Deterministic analysis configuration defaults to
+    # temperature 0. Structured-output attempts are explicitly bounded: the
+    # initial attempt plus at most one schema-repair retry.
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: float = Field(default=60.0, gt=0, allow_inf_nan=False)
+    llm_max_structured_output_attempts: int = Field(default=2, ge=1, le=2)
+    llm_api_key_secret: str = "ATI_OPENAI_API_KEY"
+    llm_temperature: float = Field(default=0.0, ge=0, le=2, allow_inf_nan=False)
+    llm_max_tokens: int | None = Field(default=None, gt=0)
+    # Deterministic analyst context bounds (PR 20B). The same persisted
+    # investigation state must produce the same bounded analyst input; an
+    # oversize input fails with a typed application error before any model
+    # call rather than being silently truncated.
+    llm_max_evidence_items: int = Field(default=100, ge=1, le=500)
+    llm_max_relationship_observations: int = Field(default=200, ge=1, le=1000)
+    llm_max_normalized_facts_bytes: int = Field(default=131_072, ge=1000, le=1_000_000)
+    llm_max_input_bytes: int = Field(default=262_144, ge=1_000, le=1_000_000)
     # Credential-free local artifact URI of the DB-IP IP to City Lite MMDB.
     # Blank (default) disables the DB-IP City Lite provider. This is a plain
     # artifact location, not a secret; it is validated as an authority-free
@@ -205,6 +225,52 @@ class Settings(BaseSettings):
         if not value.strip():
             raise ValueError("urlhaus_auth_key_secret must not be blank")
         return value.strip()
+
+    @field_validator("llm_api_key_secret")
+    @classmethod
+    def validate_llm_api_key_secret(cls, value: str) -> str:
+        """Require a non-blank secret reference name (never an API key value)."""
+        if not value.strip():
+            raise ValueError("llm_api_key_secret must not be blank")
+        return value.strip()
+
+    @field_validator("llm_model")
+    @classmethod
+    def validate_llm_model(cls, value: str) -> str:
+        """Require a non-blank model identifier."""
+        if not value.strip():
+            raise ValueError("llm_model must not be blank")
+        return value.strip()
+
+    @field_validator(
+        "llm_max_structured_output_attempts",
+        "llm_max_evidence_items",
+        "llm_max_relationship_observations",
+        "llm_max_normalized_facts_bytes",
+        "llm_max_input_bytes",
+        "llm_max_tokens",
+        mode="before",
+    )
+    @classmethod
+    def validate_llm_integer_types(cls, value: object) -> object:
+        """Reject coercive non-integers while retaining environment text parsing."""
+        if value is None:
+            return value
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ValueError("LLM integer setting must be an integer")
+        return value
+
+    @field_validator(
+        "llm_timeout_seconds",
+        "llm_temperature",
+        mode="before",
+    )
+    @classmethod
+    def validate_llm_real_types(cls, value: object) -> object:
+        """Reject booleans masquerading as LLM numeric settings."""
+        if isinstance(value, bool):
+            raise ValueError("LLM numeric setting must be a real number")
+        return value
 
     @field_validator("dbip_city_lite_artifact_uri")
     @classmethod

@@ -85,7 +85,13 @@ Graph-backed Findings cite `RelationshipObservation`, not a bare Relationship or
 
 No LLM is introduced in PR 20A.
 
-## PR 20B — Evidence Analyst LLM execution
+## PR 20B — Evidence Analyst LLM execution [DONE]
+
+Delivered `LlmClient` `abc.ABC`, the LangChain structured-output adapter,
+`FakeLlmClient`, typed analyst input, structured Pydantic output, PR 20A
+provenance validation/persistence integration, durable LLM-budget
+accounting, safe failure behavior, and deterministic fake-LLM unit and
+real-PostgreSQL integration coverage.
 
 Deliver `LlmClient` `abc.ABC`, LangChain adapter, `FakeLlmClient`, typed analyst input, structured Pydantic output, PR 20A provenance validation/persistence integration, safe failure behavior, and deterministic fake-LLM tests.
 

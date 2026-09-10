@@ -26,6 +26,12 @@ from .embeddings import (
     EmbeddingError,
     EmbeddingInputError,
 )
+from .evidence_analyst import (
+    EvidenceAnalyst,
+    EvidenceAnalystInputBoundsError,
+    EvidenceAnalystInputLoader,
+    LlmAccountingService,
+)
 from .extraction import (
     EntityIdentity,
     EvidenceExtractionError,
@@ -42,6 +48,7 @@ from .ingestion import (
     IngestionSummary,
 )
 from .investigation_persistence import InvestigationPersistenceService
+from .llm import LlmClient, LlmError, LlmErrorCode
 from .provider_observation_persistence import (
     ProviderObservationPersistenceResult,
     ProviderObservationPersistenceService,
@@ -95,6 +102,13 @@ __all__ = [
     "IngestionService",
     "IngestionSummary",
     "InvestigationPersistenceService",
+    "LlmAccountingService",
+    "LlmClient",
+    "LlmError",
+    "LlmErrorCode",
+    "EvidenceAnalyst",
+    "EvidenceAnalystInputBoundsError",
+    "EvidenceAnalystInputLoader",
     "ProviderObservationPersistenceResult",
     "ProviderObservationPersistenceService",
     "ObjectStore",

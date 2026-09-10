@@ -26,6 +26,7 @@ from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.identity import Credential, Session, User
 from agentic_threat_investigator.domain.investigation import (
+    InvestigationBudget,
     InvestigationState,
     InvestigationStatus,
 )
@@ -496,6 +497,23 @@ class RelationshipObservationRepository(
     async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
         """Return an immutable observation by its identity."""
 
+    @abstractmethod
+    async def list_for_investigation(
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RelationshipObservation]:
+        """Return bounded observations backed by the Investigation's Evidence.
+
+        Every returned observation resolves to Evidence belonging to the
+        supplied Investigation, so the Evidence Analyst never sees
+        observations rendered from another Investigation's Evidence. Ordering
+        is deterministic by retrieved/observed time with a stable UUID
+        tie-breaker.
+        """
+
 
 class EvidenceRepository(
     ABC
@@ -570,6 +588,24 @@ class InvestigationRepository(ABC):  # pragma: no cover
         investigation resource; a stale expected version or a reference to an
         Assessment that does not belong to the investigation produces a typed
         conflict with no partial mutation.
+        """
+
+    @abstractmethod
+    async def update_budget(
+        self,
+        investigation_id: UUID,
+        budget: InvestigationBudget,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Replace the budget under version/history semantics.
+
+        The database validates the supplied budget (nonnegative counters,
+        consumed counters within limits), allocates the version, and writes
+        immutable history atomically. A semantically identical budget is an
+        UNCHANGED no-op that consumes neither a revision nor history.
         """
 
     @abstractmethod

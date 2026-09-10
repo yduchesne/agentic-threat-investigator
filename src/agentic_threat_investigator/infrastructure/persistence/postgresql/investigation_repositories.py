@@ -33,6 +33,8 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 from agentic_threat_investigator.domain.investigation import (
     InvalidInvestigationStatusTransitionError,
+    InvestigationBudget,
+    InvestigationBudgetExhaustedError,
     InvestigationState,
     InvestigationStatus,
     require_status_transition,
@@ -40,9 +42,11 @@ from agentic_threat_investigator.domain.investigation import (
 
 from .errors import (
     SQLSTATE_ASSESSMENT_REFERENCE_INVALID,
+    SQLSTATE_BUDGET_COUNTERS_INVALID,
     SQLSTATE_INVALID_TRANSITION,
     SQLSTATE_INVESTIGATION_DUPLICATE,
     SQLSTATE_INVESTIGATION_NOT_FOUND,
+    SQLSTATE_LLM_BUDGET_EXHAUSTED,
     SQLSTATE_VERSION_CONFLICT,
     sqlstate,
 )
@@ -175,6 +179,61 @@ class PostgresInvestigationRepository(InvestigationRepository):
             raise
         written_id, version, _created = result.one()
         return InvestigationWriteResult(written_id, int(version), BatchOutcome.INSERTED)
+
+    async def update_budget(
+        self,
+        investigation_id: UUID,
+        budget: InvestigationBudget,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Replace the budget under Investigation version/history semantics.
+
+        The database revalidates the counters and performs the versioned
+        UPDATE and immutable history write; a stale expected version surfaces
+        as ``InvestigationVersionConflictError``, an exhausted or malformed
+        budget as the typed budget errors, all with no partial mutation. An
+        identical budget is an UNCHANGED no-op.
+        """
+        serialized = json.dumps(budget.model_dump(mode="json"))
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, outcome FROM ati.update_investigation_budget(
+                        :id, CAST(:budget AS jsonb), :actor_id, :request_id,
+                        :expected_version)
+                """),
+                {
+                    "id": investigation_id,
+                    "budget": serialized,
+                    "actor_id": actor_id,
+                    "request_id": request_id,
+                    "expected_version": expected_version,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_INVESTIGATION_NOT_FOUND:
+                raise InvestigationNotFoundError(str(investigation_id)) from error
+            if state == SQLSTATE_VERSION_CONFLICT:
+                raise InvestigationVersionConflictError(
+                    investigation_id, expected_version or 0
+                ) from error
+            if state == SQLSTATE_LLM_BUDGET_EXHAUSTED:
+                raise InvestigationBudgetExhaustedError(
+                    "investigation LLM budget exhausted"
+                ) from error
+            if state == SQLSTATE_BUDGET_COUNTERS_INVALID:
+                raise ValueError("invalid investigation budget counters") from error
+            raise
+        written_id, version, outcome = result.one()
+        return InvestigationWriteResult(
+            written_id,
+            int(version),
+            BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
+        )
 
     async def update_assessment_reference(
         self,

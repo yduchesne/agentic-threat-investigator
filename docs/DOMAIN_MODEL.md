@@ -460,14 +460,36 @@ The exact implementation model may evolve, but these invariants do not:
 - deterministic policy validates eligibility and budgets;
 - prose is not parsed to determine the action.
 
-### Evidence Analyst result
+### Evidence Analyst result (PR 20B)
 
-`Assessment` is the authoritative Evidence Analyst output.
+The model returns the semantic-only :class:`EvidenceAnalystDecision`, never
+database-owned Assessment metadata:
 
-Verdict and confidence are typed fields. Supporting/contradicting
-evidence references, limitations, unresolved questions, and recommended
-next steps remain explicit structured fields rather than being recovered
-from a prose report.
+```python
+class EvidenceAnalystDecision(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    verdict: Verdict
+    confidence: AssessmentConfidence
+    summary: str
+    findings: tuple[AnalyticalFinding, ...] = ()
+    limitations: tuple[str, ...] = ()
+    unresolved_questions: tuple[str, ...] = ()
+    recommended_next_steps: tuple[str, ...] = ()
+```
+
+The model sets only semantic analytical content. The application stamps
+authoritative identities: ``investigation_id`` and
+``analyzed_evidence_ids`` (set exactly to the Evidence deliberately supplied
+in the analyst input), and every persistence-owned field (``id``,
+``version``, ``created_at``, deletion metadata). The model cannot invent
+analyzed Evidence IDs or omit Evidence to make a citation validate.
+
+``EvidenceAnalystDecision`` is validated by Pydantic and then converted into
+the authoritative ``Assessment`` via explicit construction (never
+``model_construct()``), which PR 20A validates and persists.
+
+Assessing how well the LLM grounds its claims is PR 20C evaluation; the
+deterministic semantic content and provenance contract live here.
 
 ### Threat Research result
 
@@ -566,11 +588,24 @@ class InvestigationBudget(BaseModel):
     max_entities: int
     max_provider_calls: int
     max_replans: int
+    max_llm_calls: int = 10
     provider_calls_used: int = 0
     replans_used: int = 0
+    llm_calls_used: int = 0
 ```
 
-The budget is extended by implementation with separate LLM call limits/counters.
+LLM accounting (PR 20B) counts every actual model invocation, including
+structured-output repair attempts: ``llm_calls_used`` is durably reserved
+through versioned Investigation updates before each call, so an attempted
+call is always counted and an exhausted budget fails typed before another
+invocation. Prompt construction for each attempt occurs BEFORE the durable
+reservation: a prompt-construction failure consumes no LLM budget, a
+reservation is written only immediately before entering the ``LlmClient``
+for that attempt, and a failed repair-prompt build never reserves a
+nonexistent repair call. Input-loading and persistence failures never
+increment the counter.
+Consumed counters can never exceed their limits, and a zero
+``max_llm_calls`` disables model calls entirely.
 
 ### Investigation lifecycle
 
