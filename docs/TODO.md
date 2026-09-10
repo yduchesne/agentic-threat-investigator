@@ -843,7 +843,18 @@ remain:
 - The fixes-05 PostgreSQL regression uses function-local imports and repeated
   `# type: ignore[union-attr]` access to `reader.session`. Existing assertions
   establish an active UoW, but a small typed query helper would make the durable
-  absence checks clearer and avoid scattered ignores.
+  absence checks clearer and avoid scattered ignores. The fixes-06 direct-
+  builder regression duplicates the same durable-absence query block.
+- The fixes-06 direct-builder unit test constructs `FakeEntityReader` inline
+  and does not retain it to assert that no target lookup occurred. The graph's
+  initialize-first implementation and exploding integration transport make the
+  behavior clear, but the test does not directly pin the plan's zero-reader-
+  call assertion.
+- `test_bound_investigation_id_has_no_mutation_path()` proves that the read-only
+  property has no setter, but its name can be read as proving the executor's
+  private `_context` reference is immutable. The context value object is frozen;
+  reassignment of the private attribute is an implementation-discipline issue,
+  not something this test establishes.
 
 ### Intended fix
 
@@ -864,9 +875,16 @@ remain:
 6. Type the exploding UoW factory as returning `UnitOfWork` (it may still raise
    unconditionally), use `UUID` in the fake provider override, and remove the
    associated argument-type suppressions.
-7. Move fixes-05 integration imports to module scope and use one typed active-
-   session/query helper for durable absence assertions instead of repeated
-   `union-attr` ignores.
+7. Move fixes-05/06 integration imports to module scope and use one typed
+   active-session/query helper for both durable absence assertions instead of
+   duplicated query blocks and repeated `union-attr` ignores.
+8. Retain the `FakeEntityReader` in the direct-builder unit regression and
+   assert its request list remains empty when initialize rejects mismatched
+   state.
+9. Rename the bound-ID property test to state precisely that the public
+   property is read-only, or explicitly freeze executor context assignment if
+   that stronger invariant is required. Do not test private mutation merely to
+   imply a public security boundary.
 
 ### Acceptance checks
 
