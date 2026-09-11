@@ -195,11 +195,54 @@ new v0.1 feature phases:
 PR 22 remains the next feature PR (Threat Research / RAG); PR 27 generic
 evaluation-platform scope is not absorbed into PR 21.
 
-## PR 22 — Threat Research RAG agent
+## PR 22 — Threat Research / RAG agent
 
-Deliver conditional research triggering, Research Agent, RAG claim/chunk citations, persisted research results, retrieval/synthesis evaluations, and no-relevant-context behavior.
+Add investigation-time contextual research as a bounded, provenance-preserving capability. PR 22 turns the research markers introduced by PR 21 into an executable workflow while preserving ATI's epistemic separation between observed Evidence, retrieved knowledge, research synthesis, and analytical Assessment.
 
-RAG supplies contextual research, not live IOC facts. Execution must respect the PR 19C dispatch boundary rather than adding infrastructure-specific coupling to LangGraph.
+**Responsibility boundary:**
+
+```text
+EvidenceProvider
+    -> observes investigation facts
+    -> Evidence / RelationshipObservation
+
+Research retrieval
+    -> retrieves contextual knowledge
+    -> DocumentChunk
+
+Research Agent
+    -> synthesizes cited contextual claims
+    -> persisted structured research result
+
+Evidence Analyst
+    -> evaluates investigation evidence
+    -> Assessment
+```
+
+RAG supplies contextual research, not live IOC facts. Retrieved or synthesized research must not be converted into `Evidence` merely because it was retrieved during an Investigation, and the Research Agent must not alter verdict/confidence or otherwise own Assessment semantics.
+
+**Deliver:**
+- deterministic Coordinator integration for entities already marked as requiring research, including bounded request/deduplication/completion state and the `research_requested` timeline action;
+- an application-layer research/retrieval abstraction (`abc.ABC`) that keeps LangGraph and agents independent of pgvector/LangChain storage details;
+- a structured-output Research Agent whose claims cite stable `DocumentChunk` identifiers and cannot emit authoritative uncited factual claims;
+- persisted, investigation-bound structured research results with stable provenance back to retrieved chunks;
+- an initial curated research corpus drawn from approved free sources such as MITRE ATT&CK and relevant CISA material, with ingestion/indexing kept separate from investigation-time retrieval;
+- pgvector-backed semantic retrieval behind the application abstraction, with deterministic filtering/bounds and no direct vector-store coupling from Coordinator policy;
+- explicit no-relevant-context behavior: an empty or low-relevance retrieval result is a normal research outcome, not an error and never evidence that an IOC is benign;
+- untrusted-content handling: retrieved documents are data, cannot issue instructions, invoke tools, override system/application policy, or expand investigative authority;
+- short transaction boundaries: retrieval and LLM execution occur outside long-lived PostgreSQL transactions, with persistence through existing application/repository seams;
+- deterministic retrieval tests and FakeLlmClient-based synthesis tests covering relevant context, irrelevant/no context, contradictory context, citation validity, duplicate research requests, bounded execution, and safe failure;
+- a narrow repository-owned RAG evaluation baseline for retrieval relevance/coverage and structured synthesis/citation correctness, without absorbing the generic PR 27 evaluator platform.
+
+**Coordinator integration:**
+
+PR 21 already records `research_required_for_entity_ids`; PR 22 consumes that state. Research execution must be bounded and idempotent: the same unchanged entity/research context is not repeatedly researched, completed research is reflected durably in Investigation state, and Coordinator resumes normal deterministic decision-making after research completion. Research does not authorize new pivots by itself; any subsequent pivot remains subject to normal Coordinator policy.
+
+Execution must respect the PR 19C dispatch boundary and PR 21C `InvestigationRunner` lifecycle rather than introducing infrastructure-specific coupling into LangGraph.
+
+**Non-goals:**
+
+No general web-browsing research agent, paid intelligence feeds, live IOC collection through RAG, threat-actor attribution, ontology/knowledge-graph inference, unrestricted recursive research, report generation, Assessment ownership, LLM-based Coordinator policy, distributed task infrastructure, or generic PR 27 evaluation/release framework. PR 22 must not blur the boundary between source Evidence and contextual research.
 
 ## PR 23 — Report Writer and investigation API
 
