@@ -28,7 +28,7 @@ DEFAULT_MAX_DEPTH = 2
 """Initial configurable default maximum pivot depth."""
 
 DEFAULT_MAX_ENTITIES = 10
-"""Initial configurable default maximum discovered entities."""
+"""Initial configurable default maximum unique admitted investigation entities."""
 
 DEFAULT_MAX_PROVIDER_CALLS = 40
 """Initial configurable default maximum provider calls."""

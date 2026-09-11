@@ -283,10 +283,12 @@ class CoordinatorPolicy:
                 seen.add(entry.entity_id)
 
         # A discovered entity without traversal metadata is malformed state.
+        # The guard does not depend on traversal being non-empty: even a
+        # completely empty traversal with discoveries present fails closed.
         missing = set(state.discovered_entity_ids) - {
             entry.entity_id for entry in state.traversal
         }
-        if state.traversal and missing:
+        if missing:
             raise ValueError(
                 "discovered entity lacks traversal metadata after discovery"
             )
@@ -316,7 +318,9 @@ class CoordinatorPolicy:
         missing = set(state.discovered_entity_ids) - {
             entry.entity_id for entry in state.traversal
         }
-        if state.traversal and missing:
+        # The guard does not depend on traversal being non-empty: even a
+        # completely empty traversal with discoveries present fails closed.
+        if missing:
             raise ValueError(
                 "discovered entity lacks traversal metadata after discovery"
             )
