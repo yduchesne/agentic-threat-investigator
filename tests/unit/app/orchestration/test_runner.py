@@ -664,6 +664,64 @@ async def test_unsupported_non_terminal_status_fails_closed(
 
 
 @pytest.mark.asyncio
+async def test_runner_missing_investigation_key_in_graph_result_raises_lifecycle_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A graph result omitting the ``investigation`` key fails closed.
+
+    The runner contract must never leak a raw ``KeyError`` from the
+    result-decoding boundary: malformed output is normalized to
+    :class:`InvestigationRunnerLifecycleError`.
+    """
+    store: dict[UUID, InvestigationState] = {
+        INVESTIGATION_A: _state(INVESTIGATION_A, status=InvestigationStatus.RUNNING)
+    }
+
+    async def handler(input: object, config: object) -> dict[str, object]:
+        del input, config
+        return {}
+
+    tracker = _UowTracker()
+    analysis_factory = _AnalysisFactorySpy()
+    graph = _FakeGraph(handler)
+    spy = _GraphFactorySpy(graph)
+    monkeypatch.setattr(runner_module, "build_provider_investigation_graph", spy)
+    runner = _runner(store, tracker, analysis_factory)
+    with pytest.raises(InvestigationRunnerLifecycleError):
+        await runner.run(INVESTIGATION_A)
+    # The executor construction and graph invocation happened, but the
+    # malformed result aborted the lifecycle before any final durable reload.
+    assert analysis_factory.calls == [INVESTIGATION_A]
+    assert len(spy.calls) == 1
+    assert tracker.events == ["open", "close"]
+    assert tracker.current_open == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malformed", [None, object(), ["not-a-mapping"]])
+async def test_non_mapping_graph_result_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, malformed: object
+) -> None:
+    """A graph result that is not a mapping is rejected through the typed error."""
+    store: dict[UUID, InvestigationState] = {
+        INVESTIGATION_A: _state(INVESTIGATION_A, status=InvestigationStatus.RUNNING)
+    }
+
+    async def handler(input: object, config: object) -> dict[str, object]:
+        del input, config
+        return cast(dict[str, object], malformed)
+
+    tracker = _UowTracker()
+    graph = _FakeGraph(handler)
+    spy = _GraphFactorySpy(graph)
+    monkeypatch.setattr(runner_module, "build_provider_investigation_graph", spy)
+    runner = _runner(store, tracker, _AnalysisFactorySpy())
+    with pytest.raises(InvestigationRunnerLifecycleError):
+        await runner.run(INVESTIGATION_A)
+    assert tracker.current_open == 0
+
+
+@pytest.mark.asyncio
 async def test_non_state_graph_output_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

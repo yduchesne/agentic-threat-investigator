@@ -1513,13 +1513,14 @@ async def test_runner_missing_investigation_is_typed_not_found(
         analysis_executor_factory=analysis_factory,
         clock=lambda: _FIXED_TS,
     )
+    missing_id = uuid4()
     with pytest.raises(InvestigationNotFoundError):
-        await runner.run(uuid4())
+        await runner.run(missing_id)
     assert provider.calls == []
     assert analysis_factory_calls == []
-    # No timeline events were written for the absent Investigation.
+    # No timeline events were written for the same absent Investigation ID.
     async with uow_factory() as uow:
-        events = await uow.timeline_events.list_by_investigation(uuid4())
+        events = await uow.timeline_events.list_by_investigation(missing_id)
     assert events == []
 
 
