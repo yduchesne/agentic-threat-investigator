@@ -401,6 +401,10 @@ This makes structured ATI data the single semantic source for API
 responses, frontend rendering, exported reports, and deterministic test
 comparisons.
 
+### Application-level investigation runner (PR 21C)
+
+The application seam that future API and job/monitor entry points call to execute one persisted Investigation is `InvestigationRunner` (`app/orchestration/runner.py`), an `abc.ABC` with a single `run(investigation_id)` operation returning the authoritative durable terminal `InvestigationState`. The in-process production implementation, `LocalInvestigationRunner`, receives only already-composed application/infrastructure seams: a `UnitOfWork` factory, the enabled provider registry, a per-investigation `AnalysisExecutor` factory, an optional clock, and a bound recursion limit. It loads the authoritative persisted Investigation in one short UnitOfWork (closed before any graph/provider/LLM work), treats terminal investigations as idempotent no-ops, fails closed with a typed lifecycle error on any other non-terminal status, creates a fresh investigation-bound analysis executor and a fresh compiled graph per invocation, delegates graph composition to the existing `build_provider_investigation_graph`, invokes the graph outside any enclosing transaction, requires a terminal graph outcome, then reloads and returns the authoritative durable state after validating it against the graph output (`InvestigationRunnerPersistenceMismatchError` on contradiction). Missing investigations raise the existing `InvestigationNotFoundError` (no fatal stop is invented), and `asyncio.CancelledError` propagates unchanged.
+
 ### Assessment validation and persistence (PR 20A)
 
 A candidate `Assessment` (produced by the Evidence Analyst in PR 20B) must

@@ -13,7 +13,11 @@ the graph never accepts or adapts executors directly.
 PR 21 extends the package with coordinator-driven pivot authorization, analysis
 execution, and deterministic stopping. ``build_investigation_graph`` requires
 all coordinator dependencies; ``build_legacy_investigation_graph`` exists
-only for isolated mechanics tests.
+only for isolated mechanics tests. PR 21C adds the application-level
+:class:`InvestigationRunner` seam (:class:`LocalInvestigationRunner`) that
+loads the authoritative persisted Investigation, executes it through the
+production coordinator graph outside any enclosing transaction, and returns
+the authoritative durable terminal state.
 """
 
 from .composition import (
@@ -63,6 +67,12 @@ from .provider_executor import (
     ProviderWorkExecutor,
     UowEntityReader,
 )
+from .runner import (
+    InvestigationRunner,
+    InvestigationRunnerLifecycleError,
+    InvestigationRunnerPersistenceMismatchError,
+    LocalInvestigationRunner,
+)
 from .services import (
     CoordinatorContextLoader,
     CoordinatorTransitionService,
@@ -100,6 +110,10 @@ __all__ = [
     "AuthorizeWithoutPivotError",
     "ProviderExecutionContext",
     "ProviderWorkExecutor",
+    "InvestigationRunner",
+    "InvestigationRunnerLifecycleError",
+    "InvestigationRunnerPersistenceMismatchError",
+    "LocalInvestigationRunner",
     "EntityReader",
     "UowEntityReader",
     "build_investigation_graph",
