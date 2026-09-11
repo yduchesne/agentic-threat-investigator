@@ -1,0 +1,122 @@
+{
+  "id": "shared_asn",
+  "version": 1,
+  "description": "Sharing an ASN with a known malicious IP must not independently establish that the target is MALICIOUS; with no direct target evidence the acceptable envelope is INCONCLUSIVE.",
+  "tags": [
+    "evidence-analyst",
+    "shared-asn-regression",
+    "inconclusive"
+  ],
+  "fixture": {
+    "objective": "Assess whether the target IP is malicious because it shares an ASN with a known malicious host.",
+    "root_entity": "target_ip",
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.45"
+      },
+      {
+        "label": "malicious_ip",
+        "type": "ip_address",
+        "value": "45.133.1.2"
+      },
+      {
+        "label": "shared_asn",
+        "type": "asn",
+        "value": "AS51055"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "ipinfo_target_asn",
+        "type": "urn:ati:evidence:network",
+        "subject": "target_ip",
+        "source": "urn:ati:source:ipinfo_lite",
+        "facts": {
+          "asn": "AS51055",
+          "org": "Example Hosting"
+        }
+      },
+      {
+        "label": "ipinfo_malicious_asn",
+        "type": "urn:ati:evidence:network",
+        "subject": "malicious_ip",
+        "source": "urn:ati:source:ipinfo_lite",
+        "facts": {
+          "asn": "AS51055",
+          "org": "Example Hosting"
+        }
+      },
+      {
+        "label": "threatfox_malicious_ip",
+        "type": "urn:ati:evidence:threat_intelligence",
+        "subject": "malicious_ip",
+        "source": "urn:ati:source:threatfox",
+        "facts": {
+          "malware": "trickbot",
+          "ioc_type": "ip"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "label": "target_belongs_to_shared_asn",
+        "type": "urn:ati:relationship:network:belongs_to",
+        "source": "target_ip",
+        "target": "shared_asn"
+      },
+      {
+        "label": "malicious_belongs_to_shared_asn",
+        "type": "urn:ati:relationship:network:belongs_to",
+        "source": "malicious_ip",
+        "target": "shared_asn"
+      }
+    ],
+    "observations": [
+      {
+        "label": "target_belongs_to_asn",
+        "relationship": "target_belongs_to_shared_asn",
+        "evidence": "ipinfo_target_asn",
+        "source": "urn:ati:source:ipinfo_lite",
+        "confidence": 0.7
+      },
+      {
+        "label": "malicious_belongs_to_asn",
+        "relationship": "malicious_belongs_to_shared_asn",
+        "evidence": "ipinfo_malicious_asn",
+        "source": "urn:ati:source:ipinfo_lite",
+        "confidence": 0.7
+      }
+    ]
+  },
+  "expected": {
+    "allowed_verdicts": [
+      "inconclusive"
+    ],
+    "allowed_confidence": [
+      "low",
+      "medium"
+    ],
+    "forbidden_findings": [
+      {
+        "disposition": "supporting",
+        "evidence_support": [
+          "ipinfo_target_asn",
+          "ipinfo_malicious_asn"
+        ],
+        "relationship_support": [
+          "target_belongs_to_asn",
+          "malicious_belongs_to_asn"
+        ]
+      }
+    ],
+    "forbidden_evidence_support": [
+      "ipinfo_target_asn",
+      "ipinfo_malicious_asn"
+    ],
+    "required_limitations": [
+      "Sharing an ASN with a malicious host does not establish maliciousness."
+    ]
+  }
+}

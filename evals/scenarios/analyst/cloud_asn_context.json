@@ -1,0 +1,61 @@
+{
+  "id": "cloud_asn_context",
+  "version": 1,
+  "description": "Membership in a known cloud/hosting ASN is contextual and must not independently establish BENIGN; with no other evidence the acceptable envelope is INCONCLUSIVE.",
+  "tags": [
+    "evidence-analyst",
+    "cloud-asn-regression",
+    "inconclusive"
+  ],
+  "fixture": {
+    "objective": "Assess whether cloud ASN ownership indicates anything about the target IP's maliciousness.",
+    "root_entity": "target_ip",
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.44"
+      },
+      {
+        "label": "cloud_asn",
+        "type": "asn",
+        "value": "AS15133"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "ipinfo_cloud_asn",
+        "type": "urn:ati:evidence:network",
+        "subject": "target_ip",
+        "source": "urn:ati:source:ipinfo_lite",
+        "facts": {
+          "asn": "AS15133",
+          "org": "M247 Ltd"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "allowed_verdicts": [
+      "inconclusive"
+    ],
+    "allowed_confidence": [
+      "low",
+      "medium"
+    ],
+    "forbidden_findings": [
+      {
+        "disposition": "supporting",
+        "evidence_support": [
+          "ipinfo_cloud_asn"
+        ]
+      }
+    ],
+    "forbidden_evidence_support": [
+      "ipinfo_cloud_asn"
+    ],
+    "required_limitations": [
+      "Hosting in a cloud ASN does not establish benignity."
+    ]
+  }
+}

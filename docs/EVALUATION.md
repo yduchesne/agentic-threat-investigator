@@ -367,6 +367,90 @@ only through the PR 20A seam. PR 20C evaluation consumes the persisted
 `Assessment` outputs of this unchanged execution contract; it does not rerun
 or reinterpret model output.
 
+### PR 20C delivered slice
+
+PR 20C delivered the deterministic Evidence Analyst evaluation baseline. It
+answers, for a persisted Assessment produced through the unchanged PR 20B
+path, whether the analyst made an acceptable analytical decision for a known
+scenario. The delivered capabilities:
+
+- **Repository-owned, versioned scenarios** under
+  `evals/scenarios/analyst/`. Each `AnalystScenario` pairs one deterministic
+  fixture (Investigation/Entities/Evidence/Relationships/RelationshipObservations)
+  with one `ExpectedAssessment` envelope. Scenario files never contain
+  runtime UUIDs, model prompt text, or secrets. Corpus identity is the exact
+  ``(scenario.id, scenario.version)`` pair: two files may carry the same
+  stable id at different positive versions, but a repeated id at the same
+  version is rejected.
+- **Fail-closed authoring validation.** Duplicate entries inside any
+  expectation label/phrase collection and duplicate JSON object keys at any
+  nesting depth are rejected before set conversion, so inputs such as
+  ``["provider_a", "provider_a"]`` can never silently collapse. Every
+  fixture label and support reference must be a stable, bounded, lowercase
+  semantic label matching ``^[a-z0-9][a-z0-9._-]*$`` (max 64 characters).
+- **Semantic labels instead of UUIDs.** Human-authored expectations reference
+  stable fixture labels ("threatfox_async_rat_association"); fixture
+  materialization resolves each label to the exact persisted UUID through
+  `AnalystScenarioResolution`. Evaluation after that is exact UUID identity.
+- **Envelope semantics, never exact snapshots.** `allowed_verdicts` and
+  `allowed_confidence` are the acceptable envelopes; `summary` and Finding
+  `statement` text are never compared; extra structurally valid Findings are
+  allowed unless matched by a forbidden expectation or forbidden support
+  semantics.
+- **Structural Finding matching.** Required/forbidden Findings match on
+  category, disposition, support identity, and (where constrained)
+  confidence. No fuzzy string similarity, embeddings, stemming, or
+  LLM-as-judge is used.
+- **Deterministic contextual-evidence regressions.** Each scenario declares
+  contextual-only labels (`forbidden_evidence_support`/
+  `forbidden_relationship_support`). They may only be cited by
+  GEOLOCATION-category SUPPORTING Findings; any other citation is
+  `CONTEXTUAL_EVIDENCE_MISUSED` (and `UNSUPPORTED_MATERIAL_FINDING` when the
+  finding is entirely contextual-only). This is how the suite encodes
+  "city/country is not maliciousness evidence" without parsing prose.
+- **Explicit contradiction requirements.** Scenarios may require a pair of
+  SUPPORTING and CONTRADICTING Findings with declared support; the evaluator
+  never decides on its own that a provider disagreement is a contradiction.
+- **Exact canonical phrase checks** for limitations, unresolved questions,
+  and next steps (normalized whitespace only), driven by FakeLlmClient
+  canonical decisions so expectation and fake output can never drift.
+- **Stable bounded failure codes and deterministic metrics.** Failures are
+  emitted in a documented group order with no set/hash dependency; metrics
+  derive from the same comparisons that produce failures and are
+  denominator-safe. `required_support_satisfied` is the best single
+  shape-matching, clean candidate's required-label coverage, summed across
+  required Finding expectations: a candidate that carries some (not all) of
+  the required support, or that carries all of it but has disallowed Finding
+  confidence, still contributes the labels it actually cites. Support
+  satisfaction never depends on the union of several Findings and is never
+  erased by a confidence mismatch; a Finding is satisfied only when one
+  clean candidate carries the complete required set at allowed confidence.
+  Best-candidate tie-breaking controls support metrics and missing-label
+  diagnostics only — any fully supported candidate may satisfy the
+  confidence constraint, regardless of declaration order or the metric
+  tie-breaker.
+- **FakeLlmClient CI.** Normal CI requires no external LLM key, no internet,
+  no provider credential, and no LangSmith service. Real-model semantic
+  evaluation remains scheduled/manual future scope.
+
+The mandatory regression corpus (8 scenarios) covers: direct threat support;
+graph-backed malware association; no reputation hit does not imply BENIGN;
+known cloud ASN does not imply BENIGN; shared ASN with a malicious IOC does
+not imply MALICIOUS; city/country is not maliciousness evidence; conflicting
+providers require contradiction handling; and materially stale evidence
+requires an explicit staleness limitation.
+
+PR 20C is deliberately analyst-specific. It is **not** the generic
+`Evaluator`/`EvalCase` platform described in
+[Evaluator architecture](#evaluator-architecture): no generic evaluation
+framework, LLM-judge system, LangSmith dataset/experiment execution, or
+end-to-end trajectory evaluation was built. Those remain future scope.
+
+The research-specific regression (malware research does not prove the
+specific IOC is malicious) requires the PR 22 `ResearchResult`/chunk runtime
+types, which do not exist yet; the executable RAG case is explicitly deferred
+to PR 22/27 with no temporary runtime research infrastructure added here.
+
 Evaluate:
 
 - verdict correctness within an allowed envelope;

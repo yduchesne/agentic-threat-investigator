@@ -656,6 +656,75 @@ versions with the earlier Assessment unchanged; and durable LLM accounting.
 The observation listing read added for analyst input is covered separately
 against real PostgreSQL (scope, determinism, exclusion, paging).
 
+### Evidence Analyst evaluation vertical slices (PR 20C)
+
+`tests/integration/test_evidence_analyst_evaluation.py` runs the repository-
+owned analyst scenarios end to end against isolated real PostgreSQL with
+`FakeLlmClient`:
+
+```text
+AnalystScenario JSON -> AnalystScenarioMaterializer (UnitOfWork seam)
+ -> existing EvidenceAnalystInputLoader
+ -> existing EvidenceAnalyst + LlmAccountingService
+ -> FakeLlmClient (canonical decision built from the scenario expectations)
+ -> existing PR 20A validation/persistence
+ -> persisted Assessment read back through the repository
+ -> EvidenceAnalystEvaluator
+```
+
+Documented properties of the PR 20C slice:
+
+- **Evaluator consumes persisted Assessments only.** Inputs are scenario,
+  resolution, and the repository-read-back Assessment; no raw LLM response,
+  pre-persistence decision, prompt, or provider response object is ever
+  evaluated (see `EVALUATION.md`).
+- **Deterministic fixtures win over a second model.** Scenario truth -
+  allowed verdict/confidence envelopes, required/forbidden support,
+  contradiction pairs, canonical limitation/question/next-step phrases -
+  drives both the scripted fake decision and the evaluator, so they can
+  never drift.
+- **Semantic labels resolve to exact UUIDs.** Expectation labels point into
+  the fixture; materialization returns `AnalystScenarioResolution`. The
+  evaluator fails closed on unknown labels. Corpus identity is the exact
+  `(id, version)` pair: distinct versions of one stable id may coexist.
+- **Fail-closed authoring validation.** Duplicate entries inside any
+  expectation label/phrase collection and duplicate JSON object keys at any
+  nesting depth are rejected before set conversion; every fixture label and
+  support reference must be a stable bounded lowercase semantic label
+  (`^[a-z0-9][a-z0-9._-]*$`, ≤ 64 characters); invalid UTF-8 scenario
+  bytes surface as `AnalystScenarioLoadError`, never a raw decoding error.
+- **Repository-confirmed persisted IDs only.** `AnalystScenarioMaterializer`
+  fails closed when a repository returns `id=None` instead of substituting
+  a planned UUID, and records the repository-returned identity (including
+  canonical redirects) everywhere dependent rows reference it.
+- **Truthful support metrics.** `required_support_satisfied` reflects the
+  best single shape-matching, clean candidate's required-label coverage;
+  support split across Findings never counts twice, missing-label messages
+  name labels absent from that one candidate, and disallowed Finding
+  confidence does not erase otherwise present support. Tie-breaking controls
+  support metrics and diagnostics only; any fully supported candidate may
+  satisfy the confidence requirement.
+- **Behavioral failure is not persistence failure.** Negative slices prove a
+  structurally valid (PR 20A-accepted) Assessment that is behaviorally wrong
+  still persists exactly one durable row while the evaluator rejects it with
+  the stable bounded codes (for example MALICIOUS-on-geolocation-only,
+  missing required limitation, one-sided contradiction).
+- **No live LLM in CI.** Normal PR tests require no external model key, no
+  internet, no provider credential, and no LangSmith service.
+
+Unit coverage (`tests/unit/evaluation/analyst/`) exercises every bounded
+failure code with passing and failing cases, deterministic failure ordering,
+metrics derived from the same comparisons (including partial-support
+coverage and confidence-not-erasing-support), scenario/DTO validation
+exhaustively (duplicate labels, duplicate JSON keys, invalid semantic
+labels, unknown fixture references, blank/naive fields, empty envelopes,
+extra-field rejection), scenario loader fail-closed behavior (malformed
+JSON, invalid UTF-8, duplicate top-level and nested object keys,
+duplicate `(id, version)` identities, deterministic discovery order),
+committed-corpus integrity, and deterministic materializer identity
+derivation against an in-memory `UnitOfWork` (including fail-closed
+`id=None` repositories and repository-confirmed redirects).
+
 ### Serialization tests
 
 For persisted/API-visible structured agent results, test:

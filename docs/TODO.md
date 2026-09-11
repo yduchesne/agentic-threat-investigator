@@ -26,6 +26,7 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 - [Align the configuration example with the implemented AbuseIPDB composition](#align-the-configuration-example-with-the-implemented-abuseipdb-composition)
 - [Reject rather than normalize padded AbuseIPDB credentials](#reject-rather-than-normalize-padded-abuseipdb-credentials)
 - [Complete PR 20B secondary execution hardening](#complete-pr-20b-secondary-execution-hardening)
+- [Complete PR 20C secondary evaluation hardening](#complete-pr-20c-secondary-evaluation-hardening)
 
 ## Complete PR 20A secondary validation and test hardening
 
@@ -1134,3 +1135,32 @@ The following lower-severity hardening and test-precision items remain. They are
 - Transaction-order tests explicitly distinguish model return, typed validation, and persistence entry.
 - One composition helper constructs the bounded analyst stack without changing PR 19C/PR 21 scope.
 - Canonical QA and integration gates continue to pass.
+
+## Complete PR 20C secondary evaluation hardening
+
+**Priority:** MEDIUM
+
+**Origin:** Reviews through `.plans/pr-20c-fixes-03.md`. The fixes-02 and fixes-03 implementations address the HIGH validation, identity, metric, candidate-selection, and loading gaps. The items below are defense-in-depth and hygiene only; they cannot change evaluation results through the canonical loader→materializer→analyst→evaluator path.
+
+### Problem
+
+The following lower-severity details remain:
+
+- `FixtureEvidence.facts` is a plain mutable `dict`, and `AnalystScenarioResolution` mappings are stored as mutable dictionaries inside otherwise-frozen models. `frozen=True` blocks attribute assignment on the model but not item mutation of the stored mapping, so a caller that mutates a resolution mapping (or a fixture `facts` dict) after construction changes evaluation input silently. Canonical callers construct-then-use once, so no current path is affected; the models simply do not enforce the documented immutability contract.
+- `tests/support/evaluation_fixtures.py` defines an unused `_FIXED` datetime constant.
+- `AnalystEvaluationMetrics.satisfied_bounded()` uses the typo `"required findinds"` in its validation-error label. This affects only a manually constructed invalid metrics object's diagnostic text; evaluator-produced counts remain valid.
+
+### Intended fix
+
+1. Freeze `FixtureEvidence.facts` with the existing `freeze_mapping` helper from `domain/immutable_json.py` (empty-`FrozenDict` factory plus an after-validator), keeping JSON validation and the materializer's existing `dict(evidence.facts)` thaw.
+2. Freeze the four `AnalystScenarioResolution` mappings into an immutable mapping that still supports `Mapping[str, UUID]` lookup and deterministic JSON serialization. Prefer a small private UUID-map freezer in the evaluation models rather than changing the shared `FrozenDict` JSON contract.
+3. Add tests proving: mutating the original `facts` input or a nested mapping/list after construction does not alter the fixture; direct mutation of `FixtureEvidence.facts` and nested values raises `TypeError`; mutating an original resolution input dictionary after construction does not alter the resolution; assignment/deletion/update through each stored resolution mapping raises `TypeError`; and scenario/resolution `model_dump_json()` round-trips.
+4. Remove or use the unused `_FIXED` constant in `tests/support/evaluation_fixtures.py`.
+5. Correct the metrics validation-error label from `"required findinds"` to `"required findings"` and add one focused assertion for the corrected diagnostic.
+
+### Acceptance checks
+
+- Fixture facts and resolution mappings cannot be mutated after construction and do not alias caller-owned containers.
+- Round-trip serialization of a scenario and a resolution remains JSON-compatible.
+- Metrics validation errors use the correctly spelled collection name.
+- The evaluator's existing no-mutation test and all canonical QA/integration gates continue to pass.

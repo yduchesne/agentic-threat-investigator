@@ -1,0 +1,57 @@
+{
+  "id": "geolocation_context",
+  "version": 1,
+  "description": "City/country geolocation is contextual-only and must never support a material verdict; with nothing else the acceptable envelope is INCONCLUSIVE and the approximation must be stated as a limitation.",
+  "tags": [
+    "evidence-analyst",
+    "geolocation-regression",
+    "contextual-only"
+  ],
+  "fixture": {
+    "objective": "Assess whether the target IP is malicious based on its geolocation.",
+    "root_entity": "target_ip",
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.46"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "dbip_city_context",
+        "type": "urn:ati:evidence:geolocation",
+        "subject": "target_ip",
+        "source": "urn:ati:source:dbip_city_lite",
+        "facts": {
+          "city": "Amsterdam",
+          "country": "NL",
+          "accuracy_radius_km": 500
+        }
+      }
+    ]
+  },
+  "expected": {
+    "allowed_verdicts": [
+      "inconclusive"
+    ],
+    "allowed_confidence": [
+      "low",
+      "medium"
+    ],
+    "forbidden_findings": [
+      {
+        "disposition": "supporting",
+        "evidence_support": [
+          "dbip_city_context"
+        ]
+      }
+    ],
+    "forbidden_evidence_support": [
+      "dbip_city_context"
+    ],
+    "required_limitations": [
+      "IP geolocation is approximate and does not establish maliciousness."
+    ]
+  }
+}

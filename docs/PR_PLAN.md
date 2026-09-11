@@ -99,11 +99,39 @@ The Evidence Analyst does not collect Evidence, mutate graph objects, decide piv
 
 Execution must respect the PR 19C dispatch boundary; do not broaden PR 19C into distributed execution.
 
-## PR 20C — Evidence Analyst evaluation framework
+## PR 20C — Evidence Analyst evaluation baseline [DONE]
 
-Deliver behavioral evaluation covering verdict correctness, confidence calibration, Finding completeness, Evidence support, RelationshipObservation support, semantic grounding, contradictions, unsupported claims, invalid citations, stale/conflicting evidence, contextual-vs-maliciousness regressions, limitations, unresolved questions, and recommended next steps.
+Delivered a narrow, repository-owned, deterministic evaluation baseline for the
+Evidence Analyst. PR 20C answers one question about a persisted `Assessment`
+produced through the unchanged PR 20B execution path: *was the analyst's
+persisted analytical decision acceptable for a known scenario?*
 
-Hard provenance invariants remain zero-tolerance.
+Deliverables:
+
+- `AnalystScenario` DTOs (fixture + `ExpectedAssessment` envelope) under
+  `src/agentic_threat_investigator/evaluation/analyst/`;
+- deterministic `EvidenceAnalystEvaluator` consuming only persisted
+  Assessments with stable bounded failure codes and denominator-safe metrics;
+- strict scenario loading (`evals/scenarios/analyst/*.json`) with semantic
+  labels resolved to exact persisted UUIDs through
+  `AnalystScenarioResolution`;
+- deterministic fixture materialization through the application `UnitOfWork`
+  seam (`AnalystScenarioMaterializer`);
+- 8 repository-owned core scenarios covering direct Evidence support,
+  RelationshipObservation support, no-hit-not-BENIGN, cloud-ASN-not-BENIGN,
+  shared-ASN-not-MALICIOUS, city/country-contextual-only, conflicting-provider
+  contradiction handling, and stale-evidence limitations;
+- FakeLlmClient-driven real-PostgreSQL vertical slices proving both the
+  passing canonical path and that a structurally valid Assessment can fail
+  behavioral evaluation;
+- unit coverage of every failure code, model/scenario validation, loader
+  fail-closed behavior, deterministic ordering, and label resolution;
+- `EVALUATION.md`/`TESTING.md` updates describing the delivered slice.
+
+PR 20C deliberately does **not** implement the generic evaluator platform,
+LLM-as-judge evaluation, LangSmith execution, trajectory/pivot/stopping
+evaluation, RAG evaluation, or release thresholds. Those remain future
+architecture (PR 27) scope; this PR leaves extension seams only.
 
 ## PR 21 — Adaptive pivots and stopping
 
