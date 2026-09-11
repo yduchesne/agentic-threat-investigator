@@ -694,6 +694,71 @@ class TestCoordinatorEntityBudgetAdmission:
         with pytest.raises(ValueError, match="traversal metadata"):
             CoordinatorPolicy._admitted_entity_ids(malformed)
 
+    def test_candidate_order_fails_closed_on_entirely_empty_traversal(self) -> None:
+        """U1: discoveries with a completely empty traversal fail closed.
+
+        A transient state carrying discovered identities but an empty
+        traversal collection previously bypassed the malformed-state guard in
+        ``_candidate_order()`` because the guard was conditional on traversal
+        being non-empty. Candidate ordering must reject it even when no
+        traversal entry exists at all.
+        """
+        policy = _policy()
+        state = _state(
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            traversal=[],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DISCOVERED_IP_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        with pytest.raises(ValueError, match="traversal metadata"):
+            policy._candidate_order(state, context)
+
+    def test_admitted_helper_fails_closed_on_entirely_empty_traversal(self) -> None:
+        """U2: discoveries with a completely empty traversal fail closed.
+
+        Mirrors the ``_candidate_order()`` case: ``_admitted_entity_ids()``
+        must reject a discovered entity lacking traversal metadata even when
+        the traversal collection is completely empty. This independently
+        proves the helper no longer depends on traversal containing some
+        other entries.
+        """
+        state = _state(
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            traversal=[],
+        )
+        with pytest.raises(ValueError, match="traversal metadata"):
+            CoordinatorPolicy._admitted_entity_ids(state)
+
+    def test_no_discoveries_with_empty_traversal_remains_valid(self) -> None:
+        """U5: no discoveries and an empty traversal is not malformed.
+
+        The fail-closed rule covers discovered entities lacking traversal
+        metadata only; it must never turn an empty traversal into an error by
+        itself. Root-only candidate ordering and root admission are unchanged.
+        """
+        policy = _policy()
+        state = _state(traversal=[])
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+            ]
+        )
+        assert policy._candidate_order(state, context) == (_ROOT_DOMAIN_ID,)
+        assert CoordinatorPolicy._admitted_entity_ids(state) == (_ROOT_DOMAIN_ID,)
+
 
 class TestCoordinatorSuppressionAfterTimingChange:
     """Duplicate suppression must not depend on the investigated marker (PR 21B).
