@@ -353,12 +353,18 @@ class CoordinatorTrajectoryEvaluator:
             and final_state.budget.replans_used > scenario.expected.max_replans
         ):
             failures.append(CoordinatorEvaluationFailureCode.REPLAN_BUDGET_VIOLATION)
+        # ENTITY_BUDGET_VIOLATION only when a pivot action's entity count is
+        # strictly above the budget: an exact-capacity (:code:`entity_count ==
+        # max_entities`) pivot onto an already-admitted entity is legal under
+        # the deterministic admission rule (PR 21B). The evaluator still does
+        # not independently reconstruct coordinator admission policy; that
+        # broader hardening belongs to PR 21D.
         if scenario.expected.max_entities is not None and any(
             item.action in (ACTION_PIVOT_ENQUEUED, ACTION_PIVOT_EXECUTED)
             and item.depth is not None
             and item.depth > 0
             and item.entity_count is not None
-            and item.entity_count >= scenario.expected.max_entities
+            and item.entity_count > scenario.expected.max_entities
             for item in actions
         ):
             failures.append(CoordinatorEvaluationFailureCode.ENTITY_BUDGET_VIOLATION)

@@ -245,6 +245,35 @@ class _NeverCalledIpProvider(EvidenceProvider):
         raise AssertionError("blocked trajectory must not call provider")
 
 
+class _RecordingThreatFoxProvider(EvidenceProvider):
+    """Deterministic offline IP provider that records every invocation.
+
+    Returns no evidence so the executed work stays a pure bookkeeping round:
+    the provider-call count and the investigated/traversal transitions are
+    observed without adding analysis or research steps.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[UUID] = []
+
+    @property
+    def id(self) -> str:
+        """Return the stable ThreatFox source URN."""
+        return SourceId.THREATFOX.value
+
+    def supports(self, entity: Entity) -> bool:
+        """Support only IP-address entities."""
+        return entity.type is EntityType.IP_ADDRESS
+
+    async def investigate(
+        self, investigation_id: UUID, entity: Entity
+    ) -> ProviderResult:
+        """Record the call and return an empty deterministic result."""
+        assert entity.id is not None
+        self.calls.append(entity.id)
+        return ProviderResult(provider=SourceId.THREATFOX.value, evidence=())
+
+
 def _analyst_for(
     session_factory: async_sessionmaker[AsyncSession], llm: FakeLlmClient
 ) -> EvidenceAnalyst:
@@ -885,3 +914,319 @@ async def test_coordinator_sql_rejects_foreign_outcome_and_active_stop(
         durable = await uow.investigations.get_by_id(investigation_id)
     assert durable is not None
     assert durable.version == created.version
+
+
+async def test_postgresql_exact_capacity_discovered_pivot_executes(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """I1/U1: an admitted discovered IP pivots at exact capacity (PR 21B).
+
+    max_entities=2 with one root DOMAIN (already investigated) and one
+    discovered IP: the IP is the second unique entity and therefore admitted,
+    so its depth-1 pivot is authorized, selected, and executed with a single
+    provider call, and the durable state records the investigated transition
+    exactly once at selection time.
+    """
+    investigation_id = uuid4()
+    root_id = uuid4()
+    ip_id = uuid4()
+    budget = default_investigation_budget().model_copy(update={"max_entities": 2})
+    state = InvestigationState(
+        investigation_id=investigation_id,
+        status=InvestigationStatus.RUNNING,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[root_id],
+        discovered_entity_ids=[ip_id],
+        investigated_entity_ids=[root_id],
+        objective="Pivot the admitted discovered IP at exact capacity.",
+        budget=budget,
+        started_at=_FIXED_TS,
+        traversal=[
+            EntityTraversalState(
+                entity_id=root_id,
+                first_discovery_ordinal=0,
+                minimum_depth=0,
+                best_investigated_depth=0,
+            ),
+            EntityTraversalState(
+                entity_id=ip_id,
+                first_discovery_ordinal=1,
+                minimum_depth=1,
+            ),
+        ],
+    )
+    async with uow_factory() as uow:
+        await uow.entities.upsert(
+            Entity(id=root_id, type=EntityType.DOMAIN, value="exact-capacity.test")
+        )
+        await uow.entities.upsert(
+            Entity(id=ip_id, type=EntityType.IP_ADDRESS, value="203.0.113.10")
+        )
+        created = await uow.investigations.create(state)
+        await uow.commit()
+    state = state.model_copy(update={"version": created.version})
+
+    ip_provider = _RecordingThreatFoxProvider()
+    graph = build_provider_investigation_graph(
+        uow_factory=uow_factory,
+        provider_registry={SourceId.THREATFOX: ip_provider},
+        context=ProviderExecutionContext(
+            investigation_id=investigation_id, clock=lambda: _FIXED_TS
+        ),
+        analysis_executor=FakeAnalysisExecutor(
+            (), bound_investigation_id=investigation_id
+        ),
+    )
+    recorded: InvestigationState | None = None
+    transitions = 0
+    async for snapshot in graph.astream(
+        {"investigation": state},
+        stream_mode="values",
+        config={"recursion_limit": 24},
+    ):
+        transitions += 1
+        candidate = snapshot.get("investigation")
+        if isinstance(candidate, InvestigationState):
+            recorded = candidate
+    assert recorded is not None
+    assert 0 < transitions <= 24
+    # The admitted IP executed exactly once; the entity budget never stopped.
+    assert ip_provider.calls == [ip_id]
+    assert recorded.budget.provider_calls_used == 1
+    assert recorded.stop_reason != StopReason.ENTITY_BUDGET_EXHAUSTED.value
+    # IP is investigated exactly once and its execution depth is durable.
+    assert recorded.investigated_entity_ids == [root_id, ip_id]
+    assert len(recorded.investigated_entity_ids) == len(
+        set(recorded.investigated_entity_ids)
+    )
+    ip_entry = next(entry for entry in recorded.traversal if entry.entity_id == ip_id)
+    assert ip_entry.best_investigated_depth == 1
+
+    async with uow_factory() as uow:
+        durable = await uow.investigations.get_by_id(investigation_id)
+    assert durable is not None
+    assert (
+        durable.stop_reason
+        == recorded.stop_reason
+        == StopReason.NO_ELIGIBLE_PIVOTS.value
+    )
+    assert durable.investigated_entity_ids == recorded.investigated_entity_ids
+    durable_ip = next(entry for entry in durable.traversal if entry.entity_id == ip_id)
+    assert durable_ip.best_investigated_depth == 1
+    assert all(
+        pivot.status is PivotStatus.COMPLETED for pivot in durable.pending_pivots
+    ), [pivot.status for pivot in durable.pending_pivots]
+
+
+async def test_postgresql_overflow_discovery_persisted_but_not_pivoted(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """I2/U2: a persisted overflow discovery never authorizes a pivot (PR 21B).
+
+    max_entities=2 with root + ip_a admitted (both investigated) and ip_b
+    overflowing: ip_b remains durable in the Entity repository, in
+    ``discovered_entity_ids``, and in traversal, but receives no pivot or
+    provider work and the entity budget is the sole blocker.
+    """
+    investigation_id = uuid4()
+    root_id = uuid4()
+    ip_a_id = uuid4()
+    ip_b_id = uuid4()
+    budget = default_investigation_budget().model_copy(update={"max_entities": 2})
+    state = InvestigationState(
+        investigation_id=investigation_id,
+        status=InvestigationStatus.RUNNING,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[root_id],
+        discovered_entity_ids=[ip_a_id, ip_b_id],
+        investigated_entity_ids=[root_id, ip_a_id],
+        objective="Persist overflow discoveries without authorizing them.",
+        budget=budget,
+        started_at=_FIXED_TS,
+        traversal=[
+            EntityTraversalState(
+                entity_id=root_id,
+                first_discovery_ordinal=0,
+                minimum_depth=0,
+                best_investigated_depth=0,
+            ),
+            EntityTraversalState(
+                entity_id=ip_a_id,
+                first_discovery_ordinal=1,
+                minimum_depth=1,
+                best_investigated_depth=1,
+            ),
+            EntityTraversalState(
+                entity_id=ip_b_id,
+                first_discovery_ordinal=2,
+                minimum_depth=1,
+            ),
+        ],
+    )
+    async with uow_factory() as uow:
+        await uow.entities.upsert(
+            Entity(id=root_id, type=EntityType.DOMAIN, value="overflow-root.test")
+        )
+        await uow.entities.upsert(
+            Entity(id=ip_a_id, type=EntityType.IP_ADDRESS, value="203.0.113.20")
+        )
+        await uow.entities.upsert(
+            Entity(id=ip_b_id, type=EntityType.IP_ADDRESS, value="203.0.113.21")
+        )
+        created = await uow.investigations.create(state)
+        await uow.commit()
+    state = state.model_copy(update={"version": created.version})
+
+    ip_provider = _NeverCalledIpProvider()
+    graph = build_provider_investigation_graph(
+        uow_factory=uow_factory,
+        provider_registry={SourceId.THREATFOX: ip_provider},
+        context=ProviderExecutionContext(
+            investigation_id=investigation_id, clock=lambda: _FIXED_TS
+        ),
+        analysis_executor=FakeAnalysisExecutor(
+            (), bound_investigation_id=investigation_id
+        ),
+    )
+    recorded: InvestigationState | None = None
+    async for snapshot in graph.astream(
+        {"investigation": state},
+        stream_mode="values",
+        config={"recursion_limit": 12},
+    ):
+        candidate = snapshot.get("investigation")
+        if isinstance(candidate, InvestigationState):
+            recorded = candidate
+    assert recorded is not None
+    assert recorded.status is InvestigationStatus.COMPLETED
+    assert recorded.stop_reason == StopReason.ENTITY_BUDGET_EXHAUSTED.value
+    assert recorded.pending_pivots == []
+    assert recorded.pending_provider_work == []
+    assert ip_b_id not in recorded.investigated_entity_ids
+    assert ip_b_id in recorded.discovered_entity_ids
+    assert any(entry.entity_id == ip_b_id for entry in recorded.traversal)
+
+    async with uow_factory() as uow:
+        durable = await uow.investigations.get_by_id(investigation_id)
+        overflow = await uow.entities.get_by_id(ip_b_id)
+    assert durable is not None
+    assert durable.stop_reason == StopReason.ENTITY_BUDGET_EXHAUSTED.value
+    assert ip_b_id in durable.discovered_entity_ids
+    assert any(entry.entity_id == ip_b_id for entry in durable.traversal)
+    assert ip_b_id not in durable.investigated_entity_ids
+    assert durable.pending_pivots == []
+    assert durable.pending_provider_work == []
+    # Persisted != admitted: the overflow Entity row still exists.
+    assert overflow is not None
+    assert overflow.deleted_at is None
+
+
+async def test_postgresql_authorization_does_not_prematurely_investigate(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """I3/I4: durable authorization precedes the investigated transition (PR 21B).
+
+    Persisting an AUTHORIZE_PIVOT transition leaves the target absent from
+    ``investigated_entity_ids`` with no best depth; the subsequent
+    SELECT_PROVIDER_WORK transition marks it investigated exactly once, sets
+    the execution depth, and moves the pivot to IN_PROGRESS in the same
+    durable write.
+    """
+    from agentic_threat_investigator.app.orchestration.models import (
+        apply_work_selection,
+        authorize_pivot,
+        select_provider_work,
+    )
+    from agentic_threat_investigator.app.orchestration.services import (
+        UowCoordinatorTransitionService,
+    )
+
+    investigation_id = uuid4()
+    root_id = uuid4()
+    ip_id = uuid4()
+    work = ProviderWorkItem(provider=SourceId.THREATFOX, entity_id=ip_id, depth=1)
+    state = InvestigationState(
+        investigation_id=investigation_id,
+        status=InvestigationStatus.RUNNING,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[root_id],
+        discovered_entity_ids=[ip_id],
+        investigated_entity_ids=[root_id],
+        objective="Authorize without marking investigated.",
+        budget=default_investigation_budget().model_copy(update={"max_entities": 2}),
+        started_at=_FIXED_TS,
+        traversal=[
+            EntityTraversalState(
+                entity_id=root_id,
+                first_discovery_ordinal=0,
+                minimum_depth=0,
+                best_investigated_depth=0,
+            ),
+            EntityTraversalState(
+                entity_id=ip_id,
+                first_discovery_ordinal=1,
+                minimum_depth=1,
+            ),
+        ],
+    )
+    async with uow_factory() as uow:
+        await uow.entities.upsert(
+            Entity(id=root_id, type=EntityType.DOMAIN, value="auth-only.test")
+        )
+        await uow.entities.upsert(
+            Entity(id=ip_id, type=EntityType.IP_ADDRESS, value="203.0.113.30")
+        )
+        created = await uow.investigations.create(state)
+        await uow.commit()
+    state = state.model_copy(update={"version": created.version})
+
+    service = UowCoordinatorTransitionService(
+        uow_factory, bound_investigation_id=investigation_id
+    )
+    authorized = authorize_pivot(
+        state,
+        PivotRequest(entity_id=ip_id, reason="eligible_pivot", depth=1),
+        [work],
+    )
+    persisted_auth = await service.persist(
+        investigation_id,
+        CoordinatorTransitionKind.AUTHORIZE_PIVOT,
+        authorized,
+        expected_version=created.version,
+    )
+    # Authorization persisted: pivot + work queued, target not investigated.
+    assert [pivot.entity_id for pivot in persisted_auth.pending_pivots] == [ip_id]
+    assert persisted_auth.pending_provider_work == [work]
+    assert persisted_auth.investigated_entity_ids == [root_id]
+    auth_ip = next(
+        entry for entry in persisted_auth.traversal if entry.entity_id == ip_id
+    )
+    assert auth_ip.best_investigated_depth is None
+    assert persisted_auth.version is not None
+
+    selected = select_provider_work(persisted_auth)
+    applied = apply_work_selection(selected)
+    validated = InvestigationState.model_validate(applied.model_dump())
+    persisted_sel = await service.persist(
+        investigation_id,
+        CoordinatorTransitionKind.SELECT_PROVIDER_WORK,
+        validated,
+        expected_version=persisted_auth.version,
+    )
+    # Selection persisted: investigated exactly once, depth recorded, pivot
+    # IN_PROGRESS — all in the same durable transition.
+    assert persisted_sel.investigated_entity_ids == [root_id, ip_id]
+    assert persisted_sel.investigated_entity_ids.count(ip_id) == 1
+    sel_ip = next(
+        entry for entry in persisted_sel.traversal if entry.entity_id == ip_id
+    )
+    assert sel_ip.best_investigated_depth == 1
+    pivot = next(p for p in persisted_sel.pending_pivots if p.entity_id == ip_id)
+    assert pivot.status is PivotStatus.IN_PROGRESS
+
+    async with uow_factory() as uow:
+        durable = await uow.investigations.get_by_id(investigation_id)
+    assert durable is not None
+    assert durable.investigated_entity_ids == [root_id, ip_id]
+    durable_ip = next(entry for entry in durable.traversal if entry.entity_id == ip_id)
+    assert durable_ip.best_investigated_depth == 1

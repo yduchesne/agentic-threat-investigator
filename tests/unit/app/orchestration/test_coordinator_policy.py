@@ -7,8 +7,11 @@ enforcement, duplicate suppression, stop reason precedence, and replan
 semantics. All tests are synchronous and use in-memory state/context only.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
+
+import pytest
 
 from agentic_threat_investigator.app.orchestration.coordinator import (
     CoordinatorAction,
@@ -16,6 +19,7 @@ from agentic_threat_investigator.app.orchestration.coordinator import (
     CoordinatorPolicy,
     CoordinatorPolicyContext,
     MappingProviderWorkPlanner,
+    PivotRejectionReason,
     ProviderWorkPlanner,
 )
 from agentic_threat_investigator.domain.assessment import (
@@ -32,6 +36,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
+    PivotRequest,
     PivotStatus,
     ProviderWorkItem,
     StopReason,
@@ -41,6 +46,9 @@ _ROOT_DOMAIN_ID = UUID("00000000-0000-0000-0000-000000000001")
 _DISCOVERED_IP_ID = UUID("00000000-0000-0000-0000-000000000002")
 _MALWARE_ID = UUID("00000000-0000-0000-0000-000000000003")
 _OTHER_ENTITY = UUID("00000000-0000-0000-0000-000000000004")
+_DOMAIN_B_ID = UUID("00000000-0000-0000-0000-000000000005")
+_IP_A_ID = UUID("00000000-0000-0000-0000-000000000006")
+_IP_B_ID = UUID("00000000-0000-0000-0000-000000000007")
 
 
 def _small_budget(**overrides: int) -> InvestigationBudget:
@@ -454,8 +462,15 @@ class TestCoordinatorReplan:
         assert decision.pivots
         assert decision.pivots[0].entity_id == _ROOT_DOMAIN_ID
 
-    def test_discovered_expansion_blocked_at_entity_budget_capacity(self) -> None:
-        """A discovered-entity expansion pivot is blocked at capacity."""
+    def test_sole_discovered_entity_within_capacity_is_admitted(self) -> None:
+        """A discovered entity within deterministic capacity is authorized.
+
+        With no roots and ``max_entities=1``, the sole discovered entity is
+        the first (and only) unique entity in the ordered working set, so it
+        is admitted and eligible (PR 21B deterministic admission); the old
+        ``len(roots | discovered) >= max_entities`` global check would have
+        blocked it incorrectly.
+        """
         policy = _policy()
         state = _state(
             analysis_disposition=AnalysisDisposition.NEEDS_MORE_EVIDENCE.value,
@@ -473,11 +488,400 @@ class TestCoordinatorReplan:
             ]
         )
         decision = policy.decide(state=state, context=context)
-        # Only the discovered IP is a candidate and it is blocked by the
-        # entity budget (working set size 2 >= max_entities 1) as the sole
-        # blocker.
+        assert decision.action is CoordinatorAction.AUTHORIZE_PIVOT
+        assert decision.pivots
+        assert decision.pivots[0].entity_id == _DISCOVERED_IP_ID
+
+
+class TestCoordinatorEntityBudgetAdmission:
+    """Deterministic entity-budget admission semantics (PR 21B).
+
+    ``max_entities`` is bounded admission over unique roots then discovered
+    entities in first-discovery order: an already-admitted entity remains
+    eligible at exact capacity while persisted overflow discoveries are
+    rejected with ``ENTITY_BUDGET``.
+    """
+
+    def test_discovered_entity_at_exact_capacity_is_admitted(self) -> None:
+        """U1: root + one IP with max_entities=2 admits the IP pivot."""
+        policy = _policy()
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DISCOVERED_IP_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.AUTHORIZE_PIVOT
+        assert len(decision.pivots) == 1
+        assert decision.pivots[0].entity_id == _DISCOVERED_IP_ID
+        assert decision.pivots[0].depth == 1
+        assert any(item.entity_id == _DISCOVERED_IP_ID for item in decision.work_items)
+        assert not any(
+            rejection.reason is PivotRejectionReason.ENTITY_BUDGET
+            for rejection in decision.rejections
+        )
+
+    def test_first_overflow_discovery_is_rejected(self) -> None:
+        """U2: third unique entity beyond max_entities=2 is ENTITY_BUDGET."""
+        policy = _policy()
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_IP_A_ID, _IP_B_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID, _IP_A_ID],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_IP_A_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_IP_B_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
         assert decision.action is CoordinatorAction.STOP
         assert decision.stop_reason is StopReason.ENTITY_BUDGET_EXHAUSTED
+        overflow = next(
+            rejection
+            for rejection in decision.rejections
+            if rejection.entity_id == _IP_B_ID
+        )
+        assert overflow.reason is PivotRejectionReason.ENTITY_BUDGET
+        assert overflow.proposed_depth == 1
+
+    def test_later_overflow_entity_does_not_invalidate_earlier_admitted(self) -> None:
+        """U3: an admitted IP stays eligible even when an overflow IP exists.
+
+        Ordered working set is [root, ip_a, ip_b]; ip_a is the second entity
+        and therefore admitted, so it is authorized even though three
+        persisted/discovered entities exist and ``max_entities=2``.
+        """
+        policy = _policy()
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_IP_A_ID, _IP_B_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_IP_A_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_IP_B_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.AUTHORIZE_PIVOT
+        assert len(decision.pivots) == 1
+        assert decision.pivots[0].entity_id == _IP_A_ID
+        assert decision.pivots[0].depth == 1
+        assert not any(
+            rejection.reason is PivotRejectionReason.ENTITY_BUDGET
+            for rejection in decision.rejections
+        )
+
+    def test_multiple_roots_consume_admission_capacity(self) -> None:
+        """U4: roots count toward max_entities; the discovered IP overflows."""
+        policy = _policy()
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            root_entity_ids=[_ROOT_DOMAIN_ID, _DOMAIN_B_ID],
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID, _DOMAIN_B_ID],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DOMAIN_B_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DISCOVERED_IP_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.STOP
+        assert decision.stop_reason is StopReason.ENTITY_BUDGET_EXHAUSTED
+        assert any(
+            rejection.entity_id == _DISCOVERED_IP_ID
+            and rejection.reason is PivotRejectionReason.ENTITY_BUDGET
+            for rejection in decision.rejections
+        )
+
+    def test_duplicate_ids_do_not_consume_capacity_twice(self) -> None:
+        """U5: admission capacity is based on unique entity IDs only.
+
+        The same identity appearing through both root and discovery
+        bookkeeping counts once; the real discovery IP still fits in the
+        remaining capacity.
+        """
+        state = InvestigationState(
+            investigation_id=UUID("00000000-0000-0000-0000-0000000000a1"),
+            status=InvestigationStatus.RUNNING,
+            trigger_type=InvestigationTriggerType.MANUAL,
+            root_entity_ids=[_ROOT_DOMAIN_ID, _DOMAIN_B_ID],
+            discovered_entity_ids=[_ROOT_DOMAIN_ID, _DISCOVERED_IP_ID],
+            objective="Capacity counts unique IDs.",
+            budget=_small_budget(max_entities=3, max_replans=2),
+            started_at=datetime(2026, 1, 1, tzinfo=UTC),
+            traversal=[
+                EntityTraversalState(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    first_discovery_ordinal=0,
+                    minimum_depth=0,
+                ),
+                EntityTraversalState(
+                    entity_id=_DOMAIN_B_ID,
+                    first_discovery_ordinal=1,
+                    minimum_depth=0,
+                ),
+                EntityTraversalState(
+                    entity_id=_DISCOVERED_IP_ID,
+                    first_discovery_ordinal=2,
+                    minimum_depth=1,
+                ),
+            ],
+        )
+        admitted = CoordinatorPolicy._admitted_entity_ids(state)
+        assert admitted == (_ROOT_DOMAIN_ID, _DOMAIN_B_ID, _DISCOVERED_IP_ID)
+
+    def test_admitted_helper_truncates_at_max_entities(self) -> None:
+        """The helper never returns more than max_entities unique IDs."""
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_IP_A_ID, _IP_B_ID],
+        )
+        admitted = CoordinatorPolicy._admitted_entity_ids(state)
+        assert admitted == (_ROOT_DOMAIN_ID, _IP_A_ID)
+
+    def test_admitted_helper_fails_closed_on_malformed_traversal(self) -> None:
+        """A discovered entity without traversal metadata fails closed."""
+        state = _state(discovered_entity_ids=[_DISCOVERED_IP_ID])
+        malformed = state.model_copy(update={"traversal": [state.traversal[0]]})
+        with pytest.raises(ValueError, match="traversal metadata"):
+            CoordinatorPolicy._admitted_entity_ids(malformed)
+
+
+class TestCoordinatorSuppressionAfterTimingChange:
+    """Duplicate suppression must not depend on the investigated marker (PR 21B).
+
+    Since authorization no longer marks an entity investigated, suppression
+    between authorization and execution must come from pending pivot/work
+    state and execution-depth bookkeeping.
+    """
+
+    def test_pending_provider_work_suppresses_reauthorization(self) -> None:
+        """Case 6.1a: pending work executes first; no duplicate pivot."""
+        policy = _policy()
+        work = ProviderWorkItem(
+            provider=SourceId.ABUSEIPDB,
+            entity_id=_DISCOVERED_IP_ID,
+            depth=1,
+        )
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID],
+            pending_pivots=[
+                PivotRequest(
+                    entity_id=_DISCOVERED_IP_ID,
+                    reason="eligible_pivot",
+                    depth=1,
+                    status=PivotStatus.PENDING,
+                )
+            ],
+            pending_provider_work=[work],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DISCOVERED_IP_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.EXECUTE_PROVIDER_WORK
+        assert decision.pivots == ()
+
+    def test_pending_pivot_suppresses_reauthorization(self) -> None:
+        """Case 6.1b: a pending pivot blocks the same pivot when work drained.
+
+        The entity is NOT yet investigated (authorization happened but
+        selection/execution never started), so suppression must come from the
+        pending pivot itself, not from the investigated marker.
+        """
+        policy = _policy()
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID],
+            pending_pivots=[
+                PivotRequest(
+                    entity_id=_DISCOVERED_IP_ID,
+                    reason="eligible_pivot",
+                    depth=1,
+                    status=PivotStatus.PENDING,
+                )
+            ],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DISCOVERED_IP_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.pivots == ()
+        rejection = next(
+            rejection
+            for rejection in decision.rejections
+            if rejection.entity_id == _DISCOVERED_IP_ID
+        )
+        # Suppression comes from the pending pivot itself: the candidate is
+        # rejected as a DUPLICATE_PIVOT without ever being authorized again.
+        assert rejection.reason is PivotRejectionReason.DUPLICATE_PIVOT
+
+    def test_current_work_is_suppressed(self) -> None:
+        """Case 6.2: selected/in-progress work is not reauthorized."""
+        policy = _policy()
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID, _DISCOVERED_IP_ID],
+            current_provider_work=ProviderWorkItem(
+                provider=SourceId.ABUSEIPDB,
+                entity_id=_DISCOVERED_IP_ID,
+                depth=1,
+            ),
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DISCOVERED_IP_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.pivots == ()
+
+    def test_completed_work_is_suppressed(self) -> None:
+        """Case 6.3: completed equivalent work is not reauthorized."""
+        policy = _policy()
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID, _DISCOVERED_IP_ID],
+            completed_provider_work=[
+                ProviderWorkItem(
+                    provider=SourceId.ABUSEIPDB,
+                    entity_id=_DISCOVERED_IP_ID,
+                    depth=1,
+                )
+            ],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DISCOVERED_IP_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.pivots == ()
+
+    def test_shallower_rediscovery_remains_eligible(self) -> None:
+        """Case 6.4: prior execution at depth 3 does not block depth 1."""
+        policy = _policy()
+        state = _state(
+            budget=_small_budget(max_entities=2, max_replans=2),
+            discovered_entity_ids=[_DISCOVERED_IP_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID, _DISCOVERED_IP_ID],
+        )
+        entries = [
+            EntityTraversalState(
+                entity_id=_ROOT_DOMAIN_ID,
+                first_discovery_ordinal=0,
+                minimum_depth=0,
+                best_investigated_depth=0,
+            ),
+            EntityTraversalState(
+                entity_id=_DISCOVERED_IP_ID,
+                first_discovery_ordinal=1,
+                minimum_depth=1,
+                best_investigated_depth=3,
+            ),
+        ]
+        state = state.model_copy(update={"traversal": entries})
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID,
+                    entity_type=EntityType.DOMAIN,
+                ),
+                CoordinatorEntityView(
+                    entity_id=_DISCOVERED_IP_ID,
+                    entity_type=EntityType.IP_ADDRESS,
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.AUTHORIZE_PIVOT
+        assert decision.pivots[0].entity_id == _DISCOVERED_IP_ID
+        assert decision.pivots[0].depth == 1
 
 
 class TestCoordinatorAnalysisRequest:

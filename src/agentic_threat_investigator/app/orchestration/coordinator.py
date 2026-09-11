@@ -301,6 +301,43 @@ class CoordinatorPolicy:
         return tuple(candidates)
 
     @staticmethod
+    def _admitted_entity_ids(state: InvestigationState) -> tuple[UUID, ...]:
+        """Return the deterministic admitted working set within ``max_entities``.
+
+        Admission is derived, never stored: unique roots in
+        ``root_entity_ids`` order first, then discovered entities in durable
+        first-discovery traversal order, deduplicated by entity ID, truncated
+        to ``budget.max_entities``. Persisted overflow discoveries remain
+        represented as discoveries but are not admitted: provider expansion
+        through them is rejected with ``ENTITY_BUDGET`` while nothing is ever
+        deleted (Invariant B). A discovered entity without traversal metadata
+        is malformed state and fails closed exactly like candidate ordering.
+        """
+        missing = set(state.discovered_entity_ids) - {
+            entry.entity_id for entry in state.traversal
+        }
+        if state.traversal and missing:
+            raise ValueError(
+                "discovered entity lacks traversal metadata after discovery"
+            )
+        admitted: list[UUID] = []
+        seen: set[UUID] = set()
+        capacity = state.budget.max_entities
+        for entity_id in state.root_entity_ids:
+            if entity_id in seen or len(admitted) >= capacity:
+                continue
+            seen.add(entity_id)
+            admitted.append(entity_id)
+        for entry in state.traversal:
+            if entry.entity_id not in state.discovered_entity_ids:
+                continue
+            if entry.entity_id in seen or len(admitted) >= capacity:
+                continue
+            seen.add(entry.entity_id)
+            admitted.append(entry.entity_id)
+        return tuple(admitted)
+
+    @staticmethod
     def _new_researchable_markers(
         state: InvestigationState, context: CoordinatorPolicyContext
     ) -> list[UUID]:
@@ -344,6 +381,7 @@ class CoordinatorPolicy:
     ) -> CoordinatorDecision:
         """Evaluate candidates in deterministic order and authorize the first eligible pivot."""
         candidates = self._candidate_order(state, context)
+        admitted_entity_ids = self._admitted_entity_ids(state)
         views = {entity.entity_id: entity for entity in context.entities}
         missing = set(context.missing_entity_ids)
 
@@ -400,14 +438,15 @@ class CoordinatorPolicy:
                 reject(entity_id, depth, PivotRejectionReason.DUPLICATE_PIVOT)
                 continue
 
-            working_set = set(state.root_entity_ids) | set(state.discovered_entity_ids)
-            if entity_id not in working_set:
+            known = set(state.root_entity_ids) | set(state.discovered_entity_ids)
+            if entity_id not in known:
                 reject(entity_id, depth, PivotRejectionReason.UNKNOWN_TARGET)
                 continue
-            if (
-                len(working_set) >= state.budget.max_entities
-                and entity_id not in state.root_entity_ids
-            ):
+            # Admission is deterministic capacity over unique roots (in order)
+            # then discoveries (in first-discovery order). A persisted
+            # overflow discovery is not authorized for expansion, but an
+            # already-admitted entity is eligible even at exact capacity.
+            if entity_id not in admitted_entity_ids:
                 reject(entity_id, depth, PivotRejectionReason.ENTITY_BUDGET)
                 continue
 
