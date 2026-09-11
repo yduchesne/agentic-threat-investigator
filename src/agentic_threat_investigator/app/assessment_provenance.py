@@ -101,7 +101,7 @@ class AssessmentProvenanceContext:
         object.__setattr__(self, "entities", MappingProxyType(dict(self.entities)))
 
 
-class AssessmentProvenanceValidator:  # pylint: disable=too-few-public-methods
+class AssessmentProvenanceValidator:
     """Deterministic validation of Assessment provenance rules.
 
     No provider, network, dispatcher, or LLM call is ever performed; the

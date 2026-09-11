@@ -67,7 +67,6 @@ def test_response_type_variable_is_pydantic_bound() -> None:
     assert bounds is not None and issubclass(bounds, BaseModel)
 
 
-# pylint: disable=too-few-public-methods
 class _WorkingClient(LlmClient):
     """A minimal conforming implementation returning a typed result."""
 
@@ -109,7 +108,6 @@ async def test_client_returns_exactly_the_requested_model() -> None:
 def test_abstract_client_cannot_be_instantiated() -> None:
     """The ABC itself cannot be instantiated directly."""
     with pytest.raises(TypeError):
-        # pylint: disable=abstract-class-instantiated
         LlmClient()  # type: ignore[abstract]
 
 

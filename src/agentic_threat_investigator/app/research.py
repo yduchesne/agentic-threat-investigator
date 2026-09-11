@@ -10,7 +10,7 @@ class ResearchRetrievalError(RuntimeError):
     """Raised when a retriever cannot produce a contract-valid result."""
 
 
-class ResearchRetriever(ABC):  # pylint: disable=too-few-public-methods
+class ResearchRetriever(ABC):
     """Narrow application boundary for bounded research retrieval."""
 
     @abstractmethod

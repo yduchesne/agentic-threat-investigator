@@ -2,12 +2,10 @@
 """Async persistence contracts owned by the application layer.
 
 Repository interfaces declare only the operations their resource supports;
-narrow single-operation interfaces are intentional, so the Pylint minimum
-public-method rule does not apply to them.
+narrow single-operation interfaces are intentional.
 """
 
 # Filtered audit listing deliberately exposes several independent query fields.
-# pylint: disable=too-many-arguments
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
@@ -362,9 +360,7 @@ class IngestionCheckpointRepository(ABC):
         """Clear progress for exactly one artifact identity."""
 
 
-class AuditEventRepository(
-    ABC
-):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class AuditEventRepository(ABC):  # pragma: no cover
     """Append-only repository for immutable audit events."""
 
     @abstractmethod
@@ -388,9 +384,7 @@ class AuditEventRepository(
         """Return bounded events matching the supplied filters."""
 
 
-class InvestigationTimelineRepository(
-    ABC
-):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class InvestigationTimelineRepository(ABC):  # pragma: no cover
     """Append-only repository for analyst-facing investigation timeline events.
 
     Timeline events are immutable: no update or delete operation exists.
@@ -482,9 +476,7 @@ class RelationshipRepository(ABC):  # pragma: no cover
         """Soft-delete the relationship and return its post-deletion state."""
 
 
-class RelationshipObservationRepository(
-    ABC
-):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class RelationshipObservationRepository(ABC):  # pragma: no cover
     """Append-only relationship observation repository."""
 
     @abstractmethod
@@ -515,9 +507,7 @@ class RelationshipObservationRepository(
         """
 
 
-class EvidenceRepository(
-    ABC
-):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class EvidenceRepository(ABC):  # pragma: no cover
     """Append-only evidence repository; immutable observations."""
 
     @abstractmethod
@@ -686,7 +676,7 @@ class AssessmentRepository(ABC):  # pragma: no cover
         """
 
 
-class UserRepository(ABC):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class UserRepository(ABC):  # pragma: no cover
     """Repository for local users."""
 
     @abstractmethod
@@ -710,9 +700,7 @@ class UserRepository(ABC):  # pylint: disable=too-few-public-methods  # pragma: 
         """Count enabled, non-deleted administrators transactionally."""
 
 
-class CredentialRepository(
-    ABC
-):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class CredentialRepository(ABC):  # pragma: no cover
     """Repository for password credentials."""
 
     @abstractmethod
@@ -732,9 +720,7 @@ class CredentialRepository(
         """Return a user's credential."""
 
 
-class SessionRepository(
-    ABC
-):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class SessionRepository(ABC):  # pragma: no cover
     """Repository for revocable sessions."""
 
     @abstractmethod

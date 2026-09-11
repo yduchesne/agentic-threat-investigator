@@ -48,7 +48,7 @@ from .source_repositories import (
 from .timeline_repositories import PostgresInvestigationTimelineRepository
 
 
-class PostgresUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attributes
+class PostgresUnitOfWork(UnitOfWork):
     # The UoW deliberately exposes one repository per persistence boundary.
     """Expose one SQLAlchemy transaction to all repositories."""
 

@@ -64,7 +64,7 @@ class LlmError(RuntimeError):
         self.retryable = retryable
 
 
-class LlmClient(ABC):  # pylint: disable=too-few-public-methods
+class LlmClient(ABC):
     """Generate one schema-validated structured output from a model.
 
     Implementations are single-attempt transports: bounded structured-output

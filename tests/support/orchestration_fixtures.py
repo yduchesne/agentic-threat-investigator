@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Deterministic fake executor and PR 19A orchestration scenario fixtures."""
 
-# pylint: disable=too-few-public-methods
-
 from datetime import UTC, datetime
 from uuid import UUID
 

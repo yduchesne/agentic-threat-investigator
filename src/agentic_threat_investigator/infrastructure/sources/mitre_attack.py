@@ -355,7 +355,7 @@ def _checkpoint_index(checkpoint: str | None, total: int) -> int:
     return index
 
 
-class MitreAttackBatchSource(BatchSource):  # pylint: disable=too-few-public-methods
+class MitreAttackBatchSource(BatchSource):
     """Read and checkpoint a MITRE ATT&CK STIX 2.1 artifact."""
 
     source_id = SourceId.MITRE_ATTACK.value

@@ -1756,7 +1756,7 @@ class TestTransportRetryIntegration:
             assert len(app.state.rdap_requests) == 0
 
 
-class TestNoPersistenceSideEffect:  # pylint: disable=too-few-public-methods
+class TestNoPersistenceSideEffect:
     """Provider invocation alone writes no evidence to the database."""
 
     async def test_provider_call_does_not_persist_to_database(

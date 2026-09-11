@@ -31,9 +31,7 @@ def _finite_vector(vector: list[float], dimension: int) -> None:
         raise ResearchRetrievalError("embedding result has an invalid vector")
 
 
-class PgVectorResearchRetriever(
-    ResearchRetriever
-):  # pylint: disable=too-few-public-methods
+class PgVectorResearchRetriever(ResearchRetriever):
     """Retrieve compatible, visible chunks using PostgreSQL cosine distance."""
 
     def __init__(
@@ -44,9 +42,7 @@ class PgVectorResearchRetriever(
         self._session_factory = session_factory
         self._embedding_client = embedding_client
 
-    async def retrieve(  # pylint: disable=too-many-locals
-        self, query: ResearchQuery
-    ) -> list[RetrievedChunk]:
+    async def retrieve(self, query: ResearchQuery) -> list[RetrievedChunk]:
         """Embed the query first, then execute one bounded filtered SQL query."""
         model_info = self._embedding_client.model_info
         if model_info.dimension != DOCUMENT_CHUNK_EMBEDDING_DIMENSION:

@@ -7,10 +7,8 @@ lifecycle, and that every failure path rolls the whole observation back.
 """
 
 # Fixture arguments intentionally reuse fixture names, and the fake
-# repositories deliberately mirror the production contracts.
-# Pylint sees the fake ABCs and builders as structural boilerplate.
-# pylint: disable=redefined-outer-name,too-many-arguments
-# pylint: disable=too-few-public-methods,too-many-instance-attributes
+# repositories deliberately mirror the production contracts; the fake ABCs
+# and builders are intentional structural boilerplate.
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -77,7 +75,7 @@ def entity_builder(
 
 def dns_extraction(evidence_id: UUID | None) -> ExtractionResult:
     """Build the canonical DNS extraction for the fixture Evidence."""
-    assert evidence_id is not None  # noqa: S101 - callers build persisted Evidence
+    assert evidence_id is not None  # callers build persisted Evidence
     return ExtractionResult(
         entities=(entity_builder(EntityType.IP_ADDRESS, _IP_VALUE),),
         relationships=(
@@ -110,7 +108,7 @@ def evidence_builder(**overrides: object) -> Evidence:
 
 def require_id(evidence: Evidence) -> UUID:
     """Narrow the optional Evidence identity for assertion construction."""
-    assert evidence.id is not None  # noqa: S101 - builders always set one
+    assert evidence.id is not None  # builders always set one
     return evidence.id
 
 
@@ -274,7 +272,7 @@ class FakeEvidenceRepository(EvidenceRepository):
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
     ) -> Evidence:
-        assert evidence.id is not None  # noqa: S101 - preflight guarantees it
+        assert evidence.id is not None  # preflight guarantees it
         self.calls.append((actor_id, request_id))
         if self.fail:
             raise RuntimeError("injected evidence failure")
@@ -743,7 +741,7 @@ def _entity_id(
     match = next(
         e for e in result.entities if e.type is entity_type and e.value == value
     )
-    assert match.id is not None  # noqa: S101 - persisted entities always have IDs
+    assert match.id is not None  # persisted entities always have IDs
     return match.id
 
 
@@ -830,7 +828,7 @@ async def test_soft_deleted_entity_is_a_fail_closed_error() -> None:
     existing = await entities.upsert(
         Entity(type=EntityType.IP_ADDRESS, value=_IP_VALUE)
     )
-    assert existing.id is not None  # noqa: S101 - the fake assigns IDs
+    assert existing.id is not None  # the fake assigns IDs
     await entities.soft_delete(existing.id)
     entities.upsert_calls.clear()
     service = ProviderObservationPersistenceService(parts.factory())

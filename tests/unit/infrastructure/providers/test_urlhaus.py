@@ -6,7 +6,6 @@
 # provider-family shapes (see ThreatFox/AbuseIPDB); per-block R0801
 # suppression is not supported by Pylint, so duplicate-code is
 # disabled at module scope for the deliberately accepted duplication.
-# pylint: disable=duplicate-code
 
 Covers the strict response-record schema, the pure identity-matching
 rules, envelope/query-status handling, evidence normalization, payload

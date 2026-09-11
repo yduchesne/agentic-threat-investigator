@@ -39,7 +39,7 @@ _FIXED_TS = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 @pytest.mark.unit
 @pytest.mark.provider_contract
 @pytest.mark.asyncio
-class TestRdapContract:  # pylint: disable=too-many-public-methods
+class TestRdapContract:
     """Deterministic provider contract tests for RdapProvider."""
 
     async def test_supports_matrix(self) -> None:

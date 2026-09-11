@@ -9,8 +9,6 @@ Primary graph tests exercise the injected :class:`TaskDispatcher` seam
 production-style ``LocalTaskDispatcher`` wrapping a bound executor.
 """
 
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
-
 from typing import cast
 from uuid import UUID
 
@@ -197,9 +195,7 @@ class TestGraphDispatcherSafety:
     async def test_dispatcher_exception_reaches_caller_unchanged(self) -> None:
         """A dispatcher exception propagates and records no outcome."""
 
-        class RaisingDispatcher(
-            TaskDispatcher
-        ):  # pylint: disable=too-few-public-methods
+        class RaisingDispatcher(TaskDispatcher):
             def __init__(self, exc: BaseException) -> None:
                 self._exc = exc
                 self.requested: list[ProviderWorkItem] = []
@@ -251,9 +247,7 @@ class TestGraphContextBinding:
         expected = UUID("00000000-0000-0000-0000-0000000000bb")
         assert expected != state.investigation_id
 
-        class ExplodingDispatcher(  # pylint: disable=too-few-public-methods
-            TaskDispatcher
-        ):
+        class ExplodingDispatcher(TaskDispatcher):
             """Fail the test if the dispatcher is ever invoked."""
 
             async def dispatch(
@@ -276,8 +270,7 @@ class TestGraphContextBinding:
         # The fixed safe message contains neither UUID string.
         message = str(raised.value)
         assert message == (
-            "orchestration graph state does not match the bound investigation "
-            "context"
+            "orchestration graph state does not match the bound investigation context"
         )
         assert str(expected) not in message
         assert str(state.investigation_id) not in message
@@ -300,9 +293,7 @@ class TestGraphContextBinding:
         ]
 
 
-class BoundFakeExecutor(  # pylint: disable=too-few-public-methods
-    InvestigationBoundWorkExecutor
-):
+class BoundFakeExecutor(InvestigationBoundWorkExecutor):
     """Deterministic bound executor recording executions.
 
     Matching invocations succeed with the scenario DNS outcome; a

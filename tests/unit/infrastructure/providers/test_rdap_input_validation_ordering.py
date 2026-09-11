@@ -30,7 +30,7 @@ from .rdap_contract_helpers import _FIXED_UUID
 @pytest.mark.unit
 @pytest.mark.provider_contract
 @pytest.mark.asyncio
-class TestRdapInputValidationOrdering:  # pylint: disable=too-few-public-methods
+class TestRdapInputValidationOrdering:
     """Malformed queried domain names are rejected before any HTTP I/O."""
 
     @pytest.mark.parametrize(

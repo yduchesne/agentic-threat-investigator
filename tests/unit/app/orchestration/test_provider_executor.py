@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for the PR 19B real provider work executor."""
 
-# pylint: disable=redefined-outer-name,protected-access,too-few-public-methods,unused-argument,missing-class-docstring,duplicate-code
 # The executor test harness intentionally composes comparable deterministic
-# scenarios; R0801 duplicate-code is not supported per-block by Pylint, so it
-# is disabled at module scope per repository convention.
+# scenarios; duplicate-code-style duplication is not checked by the enabled
+# Ruff rules, so the comparable structure is accepted per repository
+# convention.
 
 import asyncio
 from typing import Any
@@ -312,9 +312,7 @@ class TestExtractionPersistenceSequencing:
             seen.append("extract")
             return ExtractionResult()
 
-        class RecordingPersistence(  # pylint: disable=too-few-public-methods
-            FakePersistenceService
-        ):
+        class RecordingPersistence(FakePersistenceService):
             async def persist(
                 self,
                 evidence: Evidence,
@@ -428,18 +426,14 @@ class TestExtractionPersistenceSequencing:
         """Provider I/O completes before persistence is invoked at all."""
         events: list[str] = []
 
-        class OrderedProvider(
-            FakeEvidenceProvider
-        ):  # pylint: disable=too-few-public-methods
+        class OrderedProvider(FakeEvidenceProvider):
             async def investigate(
                 self, investigation_id: UUID, entity: Entity
             ) -> ProviderResult:
                 events.append("provider")
                 return await super().investigate(investigation_id, entity)
 
-        class OrderedPersistence(
-            FakePersistenceService
-        ):  # pylint: disable=too-few-public-methods
+        class OrderedPersistence(FakePersistenceService):
             async def persist(
                 self,
                 evidence: Evidence,
@@ -492,14 +486,12 @@ class TestTimelineSemantics:
         """The started event is appended before the provider call executes."""
         order: list[str] = []
 
-        class OrderedSink(FakeTimelineSink):  # pylint: disable=too-few-public-methods
+        class OrderedSink(FakeTimelineSink):
             async def append(self, event: Any) -> None:
                 order.append(f"timeline:{event.type.value}")
                 await super().append(event)
 
-        class OrderedProvider(
-            FakeEvidenceProvider
-        ):  # pylint: disable=too-few-public-methods
+        class OrderedProvider(FakeEvidenceProvider):
             async def investigate(
                 self, investigation_id: UUID, entity: Entity
             ) -> ProviderResult:

@@ -21,7 +21,6 @@ win.asyncrat (AsyncRAT)
 # The evidence-builder helpers in extraction test modules intentionally
 # share the normalized Evidence construction shape (see the established
 # provider fixture family); the duplication is test-only and accepted.
-# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -63,7 +62,6 @@ RETRIEVED_AT = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 # One explicit argument per fixture dimension is intentional for tests.
-# pylint: disable=too-many-arguments,too-many-positional-arguments
 def evidence(
     *,
     source: str,

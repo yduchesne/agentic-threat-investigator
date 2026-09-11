@@ -3,7 +3,6 @@
 
 # The mapper under test is the repository module's private row mapper; the
 # mapper-level precedence contract is the point of these tests.
-# pylint: disable=protected-access
 
 from datetime import UTC, datetime
 from uuid import UUID, uuid4

@@ -45,9 +45,7 @@ ATI treats automated quality gates as mandatory engineering requirements.
 Python tooling:
 
 - `uv` — environment, dependency, lockfile, and command management.
-- Black — formatting.
-- isort — import ordering.
-- Pylint — linting.
+- Ruff — formatting, import ordering, linting.
 - Mypy — static type checking.
 - Pytest — tests.
 - pytest-cov — coverage.
@@ -73,8 +71,8 @@ Typical commands:
 
 ```bash
 uv sync --locked
-uv run black .
-uv run pylint ...
+uv run ruff format .
+uv run ruff check .
 uv run mypy ...
 uv run pytest
 ```
@@ -83,49 +81,52 @@ Do not maintain parallel hand-edited `requirements.txt` dependency definitions u
 
 ## Formatting
 
-Black is authoritative for Python formatting.
+Ruff formatter is authoritative for Python formatting.
 
 Development:
 
 ```bash
-uv run black .
+uv run ruff format src tests
 ```
 
 CI:
 
 ```bash
-uv run black --check .
+uv run ruff format --check src tests
 ```
 
 No competing Python formatter is introduced.
 
 ## Imports
 
-isort owns import ordering and is configured to remain compatible with Black.
-
-```toml
-[tool.isort]
-profile = "black"
-```
+Ruff's `I` rules own import ordering; the first-party package is declared in
+`[tool.ruff.lint.isort]`.
 
 Commands:
 
 ```bash
-uv run isort .
-uv run isort --check-only .
+uv run ruff check src tests --select I
+uv run ruff check src tests --select I --fix
 ```
 
 ## Linting
 
-Pylint is the Python linter.
-
-CI uses rule-based pass/fail behavior rather than a cosmetic minimum score.
+Ruff is the Python linter. Enabled rule families are explicit in
+`pyproject.toml` ([`tool.ruff.lint.select`]); enabled violations are binary
+pass/fail — one violation fails the gate.
 
 Project-wide exceptions belong in repository configuration when architecturally justified.
 
-Local suppressions are exceptional and should include an explanatory comment when the reason is not obvious.
+Local suppressions are exceptional and must use an explicit code:
 
-Avoid accumulating blanket `# pylint: disable=...` directives.
+```python
+# noqa: <CODE>
+```
+
+Only narrowly scoped `# noqa` directives are allowed; bare `# noqa` and
+blanket file/global suppressions are prohibited unless independently
+justified and approved. Every non-obvious suppression should keep a short
+justification. Ruff's `RUF100` gate reports any unused suppression.
 
 ## Static typing
 
@@ -818,8 +819,7 @@ Pre-commit provides fast developer feedback for inexpensive deterministic checks
 
 - trailing whitespace;
 - end-of-file normalization;
-- Black;
-- isort;
+- Ruff check (with safe fixes) and Ruff format;
 - selected fast checks.
 
 Do not require slow database integration or real-model evaluation for every local commit.
@@ -837,9 +837,8 @@ make quality
 It should run the required source-quality/test checks in a stable order, conceptually:
 
 ```text
-Black --check
-isort --check-only
-Pylint
+Ruff format --check
+Ruff check
 Mypy
 Pytest deterministic suites
 ```
@@ -855,7 +854,7 @@ A coding agent or developer must not make a failing gate pass by:
 - weakening global configuration;
 - lowering a coverage requirement without justification;
 - adding broad `type: ignore`;
-- adding broad Pylint suppression;
+- adding broad Ruff/`noqa` suppression;
 - skipping failing tests;
 - deleting assertions;
 - disabling migration checks;
@@ -870,9 +869,8 @@ Every PR should eventually run approximately:
 ```text
 uv sync --locked
       |
-Black --check
-isort --check-only
-Pylint
+Ruff format --check
+Ruff check
 Mypy
       |
 unit tests

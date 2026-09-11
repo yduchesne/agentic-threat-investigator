@@ -108,7 +108,7 @@ def test_source_batch_rejects_invalid_content(
         SourceBatch(records, checkpoint=checkpoint)
 
 
-class _Source(BatchSource):  # pylint: disable=too-few-public-methods
+class _Source(BatchSource):
     """Test helper for Source."""
 
     source_id = "feed-a"
@@ -140,8 +140,6 @@ async def test_batch_source_receives_artifact_and_checkpoint() -> None:
 def test_ports_are_abstract() -> None:
     """Verify ports are abstract."""
     with pytest.raises(TypeError):
-        # pylint: disable-next=abstract-class-instantiated
         BatchSource()  # type: ignore[abstract]
     with pytest.raises(TypeError):
-        # pylint: disable-next=abstract-class-instantiated
         ObjectStore()  # type: ignore[abstract]

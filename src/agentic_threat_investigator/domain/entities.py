@@ -264,7 +264,6 @@ def canonicalize_url(value: str) -> str:
     Raises ``ValueError`` for any input outside the contract. The branch
     count is intrinsic to the explicit per-rejection contract rules.
     """
-    # pylint: disable=too-many-branches
     # Only plain ASCII spaces are trimmed from the ends; tab, newline,
     # and other control characters anywhere in the URL are rejected so
     # they can never be silently dropped by broader Unicode trimming.

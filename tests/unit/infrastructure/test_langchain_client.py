@@ -1,4 +1,3 @@
-# pylint: disable=redefined-outer-name,too-few-public-methods,duplicate-code
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for the LangChain structured-output adapter.
 
@@ -82,7 +81,7 @@ class FakeStructuredRunnable:
         return self.result
 
 
-class FakeChatModel(BaseChatModel):  # pylint: disable=too-few-public-methods
+class FakeChatModel(BaseChatModel):
     """A chat model whose structured-output handoff is fully scripted."""
 
     structured_schemas: list[type[BaseModel]] = Field(default_factory=list)
@@ -120,7 +119,7 @@ class FakeChatModel(BaseChatModel):  # pylint: disable=too-few-public-methods
         del include_raw, kwargs
         if self.setup_error is not None:
             raise self.setup_error
-        self.structured_schemas.append(schema)  # pylint: disable=no-member
+        self.structured_schemas.append(schema)
         self.runnable.schema = schema
         return self.runnable
 

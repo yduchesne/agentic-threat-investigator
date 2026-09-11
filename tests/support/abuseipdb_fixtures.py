@@ -39,7 +39,7 @@ SYNTHETIC_IPV4_ENTITY = Entity(type=EntityType.IP_ADDRESS, value=SYNTHETIC_IPV4)
 """Reusable immutable entity for the synthetic IPv4 address."""
 
 
-class _Removed:  # pylint: disable=too-few-public-methods
+class _Removed:
     """Sentinel marking a member as absent from the synthetic response."""
 
 

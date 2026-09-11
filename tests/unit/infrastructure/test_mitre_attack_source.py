@@ -25,7 +25,7 @@ from agentic_threat_investigator.infrastructure.sources.mitre_attack import (
 )
 
 
-class MemoryObjectStore(ObjectStore):  # pylint: disable=too-few-public-methods
+class MemoryObjectStore(ObjectStore):
     """Return one deterministic in-memory artifact."""
 
     def __init__(self, content: bytes) -> None:

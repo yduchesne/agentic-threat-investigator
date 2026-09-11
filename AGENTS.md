@@ -46,16 +46,20 @@ Use `uv`.
 
 Before considering work complete, run the repository canonical quality command, expected to cover:
 
-- Black;
-- isort;
-- Pylint;
+- Ruff formatter;
+- Ruff linter/import sorting;
 - strict Mypy;
 - Pytest;
 - applicable integration tests.
 
+Ruff is authoritative for Python formatting, import sorting, and linting.
+Use explicit Ruff rule codes for any local suppression. Bare `# noqa` and
+blanket file/global suppressions are prohibited unless independently
+justified and approved.
+
 Additionally:
 
-- Do not make a quality gate pass by weakening configuration, adding broad suppressions, skipping tests, or deleting
+- Do not make a quality gate pass by weakening configuration, adding broad Ruff/noqa suppressions, skipping tests, or deleting
   assertions without independent justification.
 - Source code must use type hints.
 - Keep generated Python bytecode out of source control; `__pycache__/` directories under `src/` must remain ignored and must never be committed.
@@ -88,11 +92,11 @@ When implementation intentionally changes a confirmed contract, update the relev
 
 Do not add speculative functionality to documentation or implementation.
 
-Additionally: 
+Additionally:
 
 - Classes, interfaces, modules should have docstrings.
 - Public functions and methods should have docstrings.
-- For methods that are inherited from an interface: do not repeat the docstrings of the interface. 
+- For methods that are inherited from an interface: do not repeat the docstrings of the interface.
   Create specific docstrings that describe the override logic that the level of implementations.
 - After completing the implementation of functionality corresponding to a PR item in
   [PR_PLAN.md](docs/PR_PLAN.md), add the `[DONE]` marker at the end of the PR item. Do so prior to
@@ -142,6 +146,3 @@ Additionally:
 - Resolve secrets in bootstrap/composition and pass credentials to constructed providers/infrastructure components.
 - Do not make providers depend directly on `SecretsResolver` unless an explicit architecture change is documented.
 - Never embed credentials in artifact URIs or log/persist resolved secret values.
-
-
-  

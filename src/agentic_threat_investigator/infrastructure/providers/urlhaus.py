@@ -31,7 +31,6 @@ before any normalization.
 # shapes (see ThreatFox/AbuseIPDB); per-block R0801 suppression is not
 # supported by Pylint, so duplicate-code is disabled at module scope for
 # the deliberately accepted duplication.
-# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -661,7 +660,6 @@ class UrlhausProvider(EvidenceProvider):
         statuses are never success. The return count is intrinsic to the
         exhaustive explicit terminal-outcome mapping.
         """
-        # pylint: disable=too-many-return-statements
         if not isinstance(response_json, dict):
             return _malformed_result(self.id, "URLhaus response must be a JSON object")
 
@@ -815,7 +813,6 @@ class UrlhausProvider(EvidenceProvider):
         source timestamp is a typed ``INVALID_RESPONSE``, never an escaping
         exception from ``max()``.
         """
-        # pylint: disable=too-many-arguments
         subject = EvidenceEntityRef(
             id=context.entity.id,
             type=context.entity.type,
@@ -831,7 +828,7 @@ class UrlhausProvider(EvidenceProvider):
                     ),
                 )
                 for index, (record, canonical_url) in enumerate(
-                    zip(records, canonical_urls)
+                    zip(records, canonical_urls, strict=True)
                 )
             ]
         }

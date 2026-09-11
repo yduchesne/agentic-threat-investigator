@@ -43,9 +43,9 @@ from tests.support.threatfox_fixtures import (
     FIXED_KEY,
     FIXED_TS,
     FIXED_UUID,
+    MATCH_FACT_KEYS,
     asyncrat_domain_record,
     asyncrat_ip_port_record,
-    MATCH_FACT_KEYS,
     investigate,
     threatfox_no_result_response,
     threatfox_provider,
@@ -65,7 +65,7 @@ _IP_ENTITY = Entity(type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP)
 # -- HTTP request contract ---------------------------------------------------
 
 
-class _CapturingHandler:  # pylint: disable=too-few-public-methods
+class _CapturingHandler:
     """Captures requests and serves a canned response."""
 
     def __init__(self, response: httpx.Response) -> None:

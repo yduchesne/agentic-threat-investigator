@@ -3,7 +3,6 @@
 
 # Test doubles intentionally expose narrow async seams; recorded empty
 # sequences are asserted explicitly against the observed values.
-# pylint: disable=too-few-public-methods,unused-argument,use-implicit-booleaness-not-comparison
 
 from datetime import datetime, timezone
 from typing import Any, cast

@@ -11,10 +11,10 @@ Shared deterministic fakes and builders live in
 executor through them and never import from the other executor test module.
 """
 
-# pylint: disable=redefined-outer-name,protected-access,too-few-public-methods,unused-argument,missing-class-docstring,missing-function-docstring,duplicate-code
 # The executor test harness intentionally composes comparable deterministic
-# scenarios; R0801 duplicate-code is not supported per-block by Pylint, so it
-# is disabled at module scope per repository convention.
+# scenarios; duplicate-code-style duplication is not checked by the enabled
+# Ruff rules, so the comparable structure is accepted per repository
+# convention.
 
 import logging
 from uuid import UUID, uuid4

@@ -123,9 +123,9 @@ async def test_upgrade_head_installs_expected_schema() -> None:
             }
     finally:
         await engine.dispose()
-    assert EXPECTED_TABLES <= tables
-    assert EXPECTED_SEQUENCES <= sequences
-    assert EXPECTED_FUNCTIONS <= functions
+    assert tables >= EXPECTED_TABLES
+    assert sequences >= EXPECTED_SEQUENCES
+    assert functions >= EXPECTED_FUNCTIONS
     # The migration search path installs extensions into the ati schema so all
     # database objects, including pgvector support, live there.
     assert {"vector", "pgcrypto"} <= extensions
@@ -167,18 +167,25 @@ async def test_audit_schema_contract() -> None:
     engine = _test_engine()
     try:
         async with engine.connect() as connection:
-            check = await connection.scalar(text("""
+            check = await connection.scalar(
+                text("""
                 SELECT pg_get_constraintdef(con.oid)
                 FROM pg_constraint con
                 JOIN pg_class rel ON rel.oid = con.conrelid
                 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                 WHERE ns.nspname = 'ati' AND rel.relname = 'audit_event'
                   AND con.contype = 'c'
-            """))
-            indexes = {row[0] for row in await connection.execute(text("""
+            """)
+            )
+            indexes = {
+                row[0]
+                for row in await connection.execute(
+                    text("""
                     SELECT indexname FROM pg_indexes
                     WHERE schemaname = 'ati' AND tablename = 'audit_event'
-                """))}
+                """)
+                )
+            }
     finally:
         await engine.dispose()
     assert check and "success" in check and "failure" in check and "denied" in check
@@ -197,21 +204,29 @@ async def test_identity_schema_contract() -> None:
     try:
         async with engine.connect() as connection:
             columns = {
-                (row[0], row[1], row[2]) for row in await connection.execute(text("""
+                (row[0], row[1], row[2])
+                for row in await connection.execute(
+                    text("""
                     SELECT table_name, column_name, is_nullable
                     FROM information_schema.columns
                     WHERE table_schema = 'ati'
                       AND table_name IN ('user', 'credential', 'session')
-                """))
+                """)
+                )
             }
-            constraints = {row[0] for row in await connection.execute(text("""
+            constraints = {
+                row[0]
+                for row in await connection.execute(
+                    text("""
                     SELECT con.conname
                     FROM pg_constraint con
                     JOIN pg_class rel ON rel.oid = con.conrelid
                     JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                     WHERE ns.nspname = 'ati'
                       AND rel.relname IN ('user', 'credential', 'session')
-                """))}
+                """)
+                )
+            }
     finally:
         await engine.dispose()
     assert ("user", "username", "NO") in columns
@@ -269,15 +284,18 @@ async def test_graph_integrity_schema_contract() -> None:
     engine = _test_engine()
     try:
         async with engine.connect() as connection:
-            foreign_key = await connection.scalar(text("""
+            foreign_key = await connection.scalar(
+                text("""
                 SELECT pg_get_constraintdef(con.oid)
                 FROM pg_constraint con
                 JOIN pg_class rel ON rel.oid = con.conrelid
                 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                 WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
                   AND con.conname = 'relationship_observation_evidence_fk'
-            """))
-            parameters = await connection.execute(text("""
+            """)
+            )
+            parameters = await connection.execute(
+                text("""
                 SELECT p.parameter_name, p.data_type
                 FROM information_schema.parameters p
                 JOIN information_schema.routines r
@@ -286,7 +304,8 @@ async def test_graph_integrity_schema_contract() -> None:
                  AND r.specific_name = p.specific_name
                 WHERE p.parameter_mode = 'IN'
                 ORDER BY p.ordinal_position
-            """))
+            """)
+            )
     finally:
         await engine.dispose()
     assert foreign_key is not None
@@ -321,13 +340,15 @@ async def test_graph_integrity_migration_downgrade_and_re_upgrade() -> None:
                         )
                     )
                 }
-                foreign_key = await connection.scalar(text("""
+                foreign_key = await connection.scalar(
+                    text("""
                     SELECT con.conname FROM pg_constraint con
                     JOIN pg_class rel ON rel.oid = con.conrelid
                     JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                     WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
                       AND con.conname = 'relationship_observation_evidence_fk'
-                """))
+                """)
+                )
         finally:
             await engine.dispose()
         return "soft_delete_relationship" in functions, foreign_key is not None
@@ -366,7 +387,10 @@ async def test_timeline_schema_contract() -> None:
     engine = _test_engine()
     try:
         async with engine.connect() as connection:
-            checks = {row[0]: row[1] for row in await connection.execute(text("""
+            checks = {
+                row[0]: row[1]
+                for row in await connection.execute(
+                    text("""
                         SELECT con.conname, pg_get_constraintdef(con.oid)
                         FROM pg_constraint con
                         JOIN pg_class rel ON rel.oid = con.conrelid
@@ -374,13 +398,17 @@ async def test_timeline_schema_contract() -> None:
                         WHERE ns.nspname = 'ati'
                           AND rel.relname = 'investigation_timeline_event'
                           AND con.contype = 'c'
-                    """))}
-            sequence_owner = await connection.scalar(text("""
+                    """)
+                )
+            }
+            sequence_owner = await connection.scalar(
+                text("""
                 SELECT pg_get_serial_sequence(
                     'ati.investigation_timeline_event',
                     'sequence'
                 )
-            """))
+            """)
+            )
             routines = {
                 row[0]
                 for row in await connection.execute(
@@ -471,13 +499,15 @@ async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
                         )
                     )
                 }
-                foreign_key = await connection.scalar(text("""
+                foreign_key = await connection.scalar(
+                    text("""
                     SELECT con.conname FROM pg_constraint con
                     JOIN pg_class rel ON rel.oid = con.conrelid
                     JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                     WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
                       AND con.conname = 'relationship_observation_evidence_fk'
-                """))
+                """)
+                )
         finally:
             await engine.dispose()
         assert {
@@ -496,11 +526,13 @@ async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
         engine = _test_engine()
         try:
             async with engine.connect() as connection:
-                owner = await connection.scalar(text("""
+                owner = await connection.scalar(
+                    text("""
                     SELECT pg_get_serial_sequence(
                         'ati.investigation_timeline_event', 'sequence'
                     )
-                """))
+                """)
+                )
                 indexes = {
                     row[0]
                     for row in await connection.execute(
@@ -511,15 +543,21 @@ async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
                         )
                     )
                 }
-                checks = {row[0] for row in await connection.execute(text("""
+                checks = {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
                             SELECT con.conname FROM pg_constraint con
                             JOIN pg_class rel ON rel.oid = con.conrelid
                             JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                             WHERE ns.nspname = 'ati'
                               AND rel.relname = 'investigation_timeline_event'
                               AND con.contype = 'c'
-                        """))}
-                await connection.execute(text("""
+                        """)
+                    )
+                }
+                await connection.execute(
+                    text("""
                         DO $$
                         DECLARE
                           investigation_id uuid;
@@ -540,7 +578,8 @@ async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
                                   gen_random_uuid());
                         END
                         $$;
-                    """))
+                    """)
+                )
                 count = await connection.scalar(
                     text("SELECT count(*) FROM ati.investigation_timeline_event")
                 )
@@ -564,7 +603,10 @@ async def test_assessment_schema_contract() -> None:
     engine = _test_engine()
     try:
         async with engine.connect() as connection:
-            checks = {row[0]: row[1] for row in await connection.execute(text("""
+            checks = {
+                row[0]: row[1]
+                for row in await connection.execute(
+                    text("""
                         SELECT con.conname, pg_get_constraintdef(con.oid)
                         FROM pg_constraint con
                         JOIN pg_class rel ON rel.oid = con.conrelid
@@ -576,8 +618,13 @@ async def test_assessment_schema_contract() -> None:
                             'assessment_finding_support'
                           )
                           AND con.contype IN ('c', 'f', 'u')
-                    """))}
-            columns = {(row[0], row[1]) for row in await connection.execute(text("""
+                    """)
+                )
+            }
+            columns = {
+                (row[0], row[1])
+                for row in await connection.execute(
+                    text("""
                         SELECT table_name, column_name
                         FROM information_schema.columns
                         WHERE table_schema = 'ati'
@@ -586,7 +633,9 @@ async def test_assessment_schema_contract() -> None:
                             'assessment_finding',
                             'assessment_finding_support'
                           )
-                    """))}
+                    """)
+                )
+            }
     finally:
         await engine.dispose()
     assert ("assessment", "version") in columns
@@ -692,7 +741,8 @@ async def test_assessment_migration_rejects_nonempty_legacy_table() -> None:
         engine = _test_engine()
         try:
             async with engine.connect() as connection:
-                await connection.execute(text("""
+                await connection.execute(
+                    text("""
                         INSERT INTO ati.assessment (
                           id, investigation_id, verdict, confidence, summary,
                           analyzed_evidence_ids, supporting_evidence,
@@ -703,7 +753,8 @@ async def test_assessment_migration_rejects_nonempty_legacy_table() -> None:
                           gen_random_uuid(), gen_random_uuid(), 'suspicious',
                           'medium', 'legacy flat row', '[]'::jsonb, '[]'::jsonb,
                           '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 1)
-                    """))
+                    """)
+                )
                 await connection.commit()
         finally:
             await engine.dispose()

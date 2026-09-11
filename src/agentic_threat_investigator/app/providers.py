@@ -87,9 +87,7 @@ class ProviderError(BaseModel):
 
     @field_validator("retryable", mode="before")
     @classmethod
-    def _validate_retryable_consistency(
-        cls, value: bool, info: ValidationInfo
-    ) -> bool:  # pylint: disable=invalid-name
+    def _validate_retryable_consistency(cls, value: bool, info: ValidationInfo) -> bool:
         """Ensure the code's natural retryability matches the declared flag."""
         code = info.data.get("code")
         if code is not None:
@@ -170,7 +168,7 @@ class ProviderResult(BaseModel):
         return value
 
 
-class EvidenceProvider(ABC):  # pylint: disable=too-few-public-methods
+class EvidenceProvider(ABC):
     """Abstract live evidence provider.
 
     Providers retrieve external information and normalize it into ATI

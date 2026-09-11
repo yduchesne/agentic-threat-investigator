@@ -519,7 +519,7 @@ host" became "the returned canonical URL's own host".
 
 Restore the exact pre-`4187ef4` wording of the three docstrings in
 `src/agentic_threat_investigator/infrastructure/providers/urlhaus.py` while
-keeping lines within the Black/Pylint limits.
+keeping lines within the Ruff line-length limits.
 
 1. `_build_match_facts()` must restore the two dropped statements so the
    docstring conveys: "Payload metadata is fact-only and never becomes an
@@ -542,7 +542,7 @@ keeping lines within the Black/Pylint limits.
   matches the `_host_record_identity` docstring.
 - `rg -nF "own parsed host" src/agentic_threat_investigator/infrastructure/providers/urlhaus.py`
   matches the `_direct_record_identity` docstring.
-- `./build.sh --qa` passes (Black and Pylint accept the restored lines).
+- `./build.sh --qa` passes (Ruff accepts the restored lines).
 
 ## Type the URLhaus host duplicate-comparison value without `Any`
 
@@ -615,7 +615,7 @@ removed.
 
 ## Integration-test harness isolation
 
-**Priority:** MEDIUM  
+**Priority:** MEDIUM
 **Origin:** PR 13 review; pre-existing code, not an IPinfo provider defect.
 
 ### Problem
@@ -761,7 +761,7 @@ the section no longer follows the surrounding document's heading spacing.
 
 ## Remove categorical IPinfo redistribution wording
 
-**Priority:** LOW  
+**Priority:** LOW
 **Origin:** PR 13 documentation review.
 
 ### Problem

@@ -35,9 +35,6 @@ from agentic_threat_investigator.infrastructure.providers.threatfox import (
 )
 from tests.support.provider_http import no_op_sleep, static_client, zero_jitter
 
-# pylint: disable=duplicate-code
-
-
 CANONICAL_ASYNCRAT_MALWARE = "win.asyncrat"
 """Official ThreatFox machine malware label for AsyncRAT (Malpedia family)."""
 
@@ -150,7 +147,7 @@ FIXED_TS = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 FIXED_KEY = "test-threatfox-auth-key"
 
 
-class _Removed:  # pylint: disable=too-few-public-methods
+class _Removed:
     """Sentinel marking a member as absent from the synthetic response."""
 
 

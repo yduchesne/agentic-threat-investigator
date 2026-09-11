@@ -15,14 +15,14 @@ On a supported Linux distribution, run:
 
 This installs missing development prerequisites, `uv`, Python dependencies,
 frontend dependencies, and the pre-commit hook. Run the deterministic quality
-suite (formatting check, Pylint, strict Mypy, unit tests, and frontend lint)
+suite (Ruff formatting/lint, strict Mypy, unit tests, and frontend lint)
 with:
 
 ```bash
 ./build.sh --qa
 ```
 
-To format Python sources with Black:
+To format Python sources and apply safe lint fixes with Ruff:
 
 ```bash
 ./build.sh --fmt

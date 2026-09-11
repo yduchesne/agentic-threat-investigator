@@ -2,7 +2,6 @@
 """PostgreSQL integration tests for MITRE ATT&CK ingestion."""
 
 # The reference fixture intentionally matches the unit fixture prescribed by the PR plan.
-# pylint: disable=duplicate-code
 
 import json
 from collections.abc import AsyncIterator, Callable
@@ -212,7 +211,7 @@ async def _write_bundle(
     return _artifact(uri)
 
 
-class _InterruptAfterFirstBatch(BatchSource):  # pylint: disable=too-few-public-methods
+class _InterruptAfterFirstBatch(BatchSource):
     """Delegate one batch and then emulate an artifact-processing interruption."""
 
     source_id = "urn:ati:source:mitre_attack"

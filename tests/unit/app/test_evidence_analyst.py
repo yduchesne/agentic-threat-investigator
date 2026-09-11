@@ -12,7 +12,6 @@ LLM reservation. No real external model or database participates.
 # analyst service intentionally takes one explicit dependency per seam.
 # The graph/decision scaffolds are shared across the PR 20B test suites; the
 # duplication is test-only and deliberately accepted.
-# pylint: disable=redefined-outer-name,too-many-instance-attributes,too-many-lines,too-few-public-methods,too-many-arguments,duplicate-code
 
 import asyncio
 from collections.abc import Callable, Sequence
@@ -449,9 +448,7 @@ class FakeAuditRepository(AuditEventRepository):
         return self.events
 
 
-class FakePersistenceUnitOfWork(
-    UnitOfWork
-):  # pylint: disable=too-many-instance-attributes
+class FakePersistenceUnitOfWork(UnitOfWork):
     """In-memory transaction boundary for the persistence seam."""
 
     assessments: FakeAssessmentRepository
@@ -473,7 +470,6 @@ class FakePersistenceUnitOfWork(
         investigations: FakeInvestigationRepository,
     ) -> None:
         # One explicit argument per dependency is the UnitOfWork convention.
-        # pylint: disable=too-many-arguments
         self.investigations = investigations
         self.evidence = FakeEvidenceRepository({world.evidence_id: world.evidence})
         self.relationship_observations = FakeObservationRepository(
@@ -988,7 +984,7 @@ async def test_no_evidence_short_circuits_without_llm(
         harness.accounting_repo,
     )
     world.with_observation = False
-    analyst._input_loader = FakeLoader(  # pylint: disable=protected-access
+    analyst._input_loader = FakeLoader(
         EvidenceAnalystInput(
             investigation_id=world.investigation_id,
             objective="Assess the root indicator.",

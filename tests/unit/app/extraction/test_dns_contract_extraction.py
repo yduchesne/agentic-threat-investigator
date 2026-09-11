@@ -12,7 +12,6 @@ partial output.
 # The evidence-builder helpers intentionally share the normalized Evidence
 # construction shape with the other extraction test modules; the duplication
 # is test-only and accepted.
-# pylint: disable=duplicate-code
 """
 
 from datetime import UTC, datetime

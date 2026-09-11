@@ -57,7 +57,7 @@ class ArtifactReference:
         object.__setattr__(self, "metadata", freeze_mapping(self.metadata))
 
 
-class ObjectStore(ABC):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class ObjectStore(ABC):  # pragma: no cover
     """Read existing artifacts addressed by canonical URIs."""
 
     @abstractmethod
@@ -104,7 +104,7 @@ class SourceBatch:
         return self.records[0].normalization_version
 
 
-class BatchSource(ABC):  # pylint: disable=too-few-public-methods  # pragma: no cover
+class BatchSource(ABC):  # pragma: no cover
     """Normalize one selected artifact into bounded asynchronous batches."""
 
     source_id: str

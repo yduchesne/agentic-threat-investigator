@@ -2,7 +2,6 @@
 """Unit tests for the FastAPI application factory and its lifespan wiring."""
 
 # Engine doubles intentionally expose only the disposal seam.
-# pylint: disable=too-few-public-methods,unused-argument
 
 from typing import Any
 

@@ -149,7 +149,7 @@ class TestGoogleDnsStrictNameBoundaries:
 @pytest.mark.unit
 @pytest.mark.provider_contract
 @pytest.mark.asyncio
-class TestGoogleDnsInputValidationOrdering:  # pylint: disable=too-few-public-methods
+class TestGoogleDnsInputValidationOrdering:
     """Malformed queried domain names are rejected before any HTTP I/O.
 
     The shared validation helper must strictly validate the original entity

@@ -1,7 +1,6 @@
 """Tests for audit domain rules and transaction emitters."""
 
 # Test doubles intentionally expose narrow async seams.
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods,unnecessary-lambda
 
 from types import TracebackType
 from typing import Any, cast

@@ -448,9 +448,10 @@ def _validate_answer_set(
         saw_terminal = True
     if rr_type == "MX":
         mx_answers = [answer for answer in normalized if answer["record_type"] == "MX"]
-        if any(answer["exchange"] == "." for answer in mx_answers):
-            if len(mx_answers) != 1 or mx_answers[0]["preference"] != 0:
-                return False
+        if any(answer["exchange"] == "." for answer in mx_answers) and (
+            len(mx_answers) != 1 or mx_answers[0]["preference"] != 0
+        ):
+            return False
     return True
 
 

@@ -23,7 +23,6 @@ no model call.
 # The analyze signature mirrors the confirmed PR 20B contract: one explicit
 # argument per correlation/concurrency dimension (actor, request, expected
 # version).
-# pylint: disable=too-many-arguments
 
 from __future__ import annotations
 
@@ -58,7 +57,7 @@ _NO_EVIDENCE_SUMMARY = "No evidence was available for analysis."
 _NO_EVIDENCE_LIMITATION = "No evidence was available for this investigation."
 
 
-class EvidenceAnalyst:  # pylint: disable=too-few-public-methods
+class EvidenceAnalyst:
     """Run one Evidence Analyst execution for an Investigation.
 
     ``max_structured_output_attempts`` bounds the explicit schema-repair
@@ -162,7 +161,7 @@ class EvidenceAnalyst:  # pylint: disable=too-few-public-methods
                     response_model=EvidenceAnalystDecision,
                     operation_name=OPERATION_EVIDENCE_ANALYSIS,
                 )
-            except asyncio.CancelledError:  # pylint: disable=try-except-raise
+            except asyncio.CancelledError:
                 # Cooperative cancellation propagates unchanged; the handler
                 # only prevents the LlmError mapping below from catching it.
                 raise

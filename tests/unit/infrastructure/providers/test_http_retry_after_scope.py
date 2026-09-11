@@ -25,7 +25,7 @@ def _zero_jitter() -> float:
     return 0.5
 
 
-class _RecordingSleep:  # pylint: disable=too-few-public-methods
+class _RecordingSleep:
     """Records sleep calls for assertion."""
 
     def __init__(self) -> None:

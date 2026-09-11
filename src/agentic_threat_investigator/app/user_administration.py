@@ -19,7 +19,7 @@ class AdministratorInvariantError(ValueError):
     """Raised when an operation would remove the final administrator."""
 
 
-class BootstrapAdminService:  # pylint: disable=too-few-public-methods
+class BootstrapAdminService:
     """Create exactly one configured bootstrap administrator."""
 
     def __init__(
@@ -57,7 +57,7 @@ class BootstrapAdminService:  # pylint: disable=too-few-public-methods
             return user
 
 
-class UserAdministrationService:  # pylint: disable=too-few-public-methods
+class UserAdministrationService:
     """Enforce authorization and the at-least-one-admin invariant."""
 
     def __init__(

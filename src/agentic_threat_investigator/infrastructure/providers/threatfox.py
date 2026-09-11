@@ -290,7 +290,6 @@ def parse_source_ip_ioc(value: str) -> tuple[str, int | None] | None:
     rejected rather than guessed. The branch and return counts are
     intrinsic to the explicit per-form unambiguity rules below.
     """
-    # pylint: disable=too-many-return-statements,too-many-branches
     if value.startswith("["):
         closing = value.find("]")
         if closing == -1:
@@ -500,7 +499,6 @@ class ThreatFoxProvider(EvidenceProvider):
         statuses are never success. The return count is intrinsic to the
         exhaustive explicit terminal-outcome mapping.
         """
-        # pylint: disable=too-many-return-statements
         if not isinstance(response_json, dict):
             return _malformed_result(
                 self.id, "ThreatFox response must be a JSON object"

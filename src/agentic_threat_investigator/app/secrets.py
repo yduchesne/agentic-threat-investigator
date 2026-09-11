@@ -68,7 +68,7 @@ class EnvVarSecretsResolver(SecretsResolver):
     # The ``os.environ`` default is intentional, not an accidental mutable
     # default: the process environment is the documented v0.1 secret store and
     # must be observed live; tests inject an explicit mapping instead.
-    def __init__(  # pylint: disable=dangerous-default-value
+    def __init__(
         self,
         env: Mapping[str, str] = os.environ,
     ) -> None:

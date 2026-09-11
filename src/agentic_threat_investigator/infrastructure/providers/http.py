@@ -67,7 +67,7 @@ _STATUS_CODE_MAP = {
 
 
 @dataclass(frozen=True)
-class HttpOutcome:  # pylint: disable=too-many-instance-attributes
+class HttpOutcome:
     """Internal result metadata after a provider HTTP request.
 
     When the request succeeded ``final_error_code`` is None and
@@ -391,7 +391,7 @@ def parse_retry_after_header(
     return math.ceil(delta_seconds)
 
 
-class _AdmissionWaiter:  # pylint: disable=too-few-public-methods
+class _AdmissionWaiter:
     """A FIFO rate-admission waiter holding one reserved future start slot.
 
     ``slot`` is the absolute monotonic start time reserved for this waiter.
@@ -579,14 +579,14 @@ class BoundedLimiter:
         self.release()
 
 
-class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
+class ProviderHttpClient:
     """Bounded, retry-capable HTTP client for live evidence providers.
 
     Enforces HTTPS URL validation, timeout, no-redirects, bounded streaming,
     and post-jitter retry delay clamping.
     """
 
-    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def __init__(
         self,
         *,
         client: httpx.AsyncClient | None = None,
@@ -713,7 +713,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
                 delay = max(delay, float(retry_after_seconds))
         return max(0.0, min(delay, max_delay))
 
-    async def request_json(  # pylint: disable=too-many-arguments
+    async def request_json(
         self,
         method: str,
         url: str,
@@ -764,7 +764,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
             media_types,
         )
 
-    async def _execute_retry_loop(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    async def _execute_retry_loop(
         self,
         method: str,
         url: str,
@@ -828,7 +828,7 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         assert last_outcome is not None
         return last_outcome
 
-    async def _execute_attempt(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    async def _execute_attempt(
         self,
         method: str,
         url: str,
@@ -843,7 +843,6 @@ class ProviderHttpClient:  # pylint: disable=too-many-instance-attributes
         """Execute a single attempt with streaming, Content-Type, and bounds checks."""
         # The per-outcome HttpOutcome construction blocks are the accepted
         # cost of explicit, typed failure classification.
-        # pylint: disable=too-many-locals
         data: dict[str, str] | None = None
         if form_body is not None:
             data = form_body

@@ -78,7 +78,7 @@ class _Embedder(EmbeddingClient):
         return [EmbeddedText(index, [1.0, 0.0]) for index, _ in enumerate(texts, 1)]
 
 
-class _Documents:  # pylint: disable=too-few-public-methods
+class _Documents:
     def __init__(self, state: _State) -> None:
         self._state = state
 
@@ -93,7 +93,7 @@ class _Documents:  # pylint: disable=too-few-public-methods
         ]
 
 
-class _Chunks:  # pylint: disable=too-few-public-methods
+class _Chunks:
     def __init__(self, state: _State) -> None:
         self._state = state
 

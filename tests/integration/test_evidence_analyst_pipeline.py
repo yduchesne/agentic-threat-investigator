@@ -11,10 +11,8 @@ The graph/decision fixtures deliberately mirror the unit-suite shapes; the
 duplication is test-only and accepted.
 """
 
-# pylint: disable=redefined-outer-name,too-many-locals,too-many-instance-attributes,duplicate-code
-
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import Self
 from uuid import UUID, uuid4
@@ -82,8 +80,7 @@ class Graph:
         self.investigation_id = uuid4()
         self.source_entity_id = uuid4()
         self.target_value = (
-            f"192.0.{int(uuid4().hex[:4], 16) % 255}."
-            f"{int(uuid4().hex[4:8], 16) % 255}"
+            f"192.0.{int(uuid4().hex[:4], 16) % 255}.{int(uuid4().hex[4:8], 16) % 255}"
         )
         self.target_entity_id = uuid4()
         self.evidence_id = uuid4()

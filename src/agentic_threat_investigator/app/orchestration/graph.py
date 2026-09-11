@@ -44,8 +44,7 @@ class InvestigationGraphContextMismatchError(ValueError):
     def __init__(self) -> None:
         """Build the fixed safe composition-error message."""
         super().__init__(
-            "orchestration graph state does not match the bound investigation "
-            "context"
+            "orchestration graph state does not match the bound investigation context"
         )
 
 
@@ -196,12 +195,12 @@ def build_investigation_graph(
         ``initialize`` node name so no node or edge is added.
         """
         validated = await initialize(state)
-        if effective_investigation_id is not None:
-            if (
-                validated["investigation"].investigation_id
-                != effective_investigation_id
-            ):
-                raise InvestigationGraphContextMismatchError()
+        if (
+            effective_investigation_id is not None
+            and validated["investigation"].investigation_id
+            != effective_investigation_id
+        ):
+            raise InvestigationGraphContextMismatchError()
         return validated
 
     builder.add_node("initialize", initialize_node)

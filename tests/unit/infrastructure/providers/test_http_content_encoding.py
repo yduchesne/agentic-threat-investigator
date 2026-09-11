@@ -174,7 +174,7 @@ class TestMalformedContentEncoding:
 @pytest.mark.unit
 @pytest.mark.provider_contract
 @pytest.mark.asyncio
-class TestGoogleDnsMalformedContentEncoding:  # pylint: disable=too-few-public-methods
+class TestGoogleDnsMalformedContentEncoding:
     """Provider-contract behavior of Google DNS with malformed content encoding."""
 
     async def test_partial_evidence_plus_typed_error(self) -> None:

@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Real-PostgreSQL integration coverage for investigation persistence."""
 
-# pylint: disable=redefined-outer-name
-
 import asyncio
 import json
 from collections.abc import Callable
@@ -616,12 +614,16 @@ async def test_started_at_column_is_not_nullable(
     """The schema requires a non-null started_at."""
     async with uow_factory() as uow:
         assert uow.session is not None
-        nullable = (await uow.session.execute(text("""
+        nullable = (
+            await uow.session.execute(
+                text("""
                     SELECT is_nullable FROM information_schema.columns
                     WHERE table_schema = 'ati'
                       AND table_name = 'investigation'
                       AND column_name = 'started_at'
-                """))).scalar_one()
+                """)
+            )
+        ).scalar_one()
         assert nullable == "NO"
 
 

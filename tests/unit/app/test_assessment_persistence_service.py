@@ -9,7 +9,6 @@ has succeeded.
 
 # Fixture arguments intentionally reuse fixture names and the fakes mirror
 # the repository seam shape used by the other persistence-service suites.
-# pylint: disable=redefined-outer-name,duplicate-code
 
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
@@ -91,7 +90,6 @@ def visible_investigation(investigation_id: UUID) -> InvestigationState:
 
 # The World exists only to assemble one deterministic fixture chain, and the
 # fake UnitOfWork deliberately takes one explicit repository per seam.
-# pylint: disable=too-few-public-methods,too-many-instance-attributes
 
 
 class FakeInvestigationRepository(InvestigationRepository):
@@ -118,7 +116,6 @@ class FakeInvestigationRepository(InvestigationRepository):
     ) -> InvestigationWriteResult:
         # One explicit argument per correlation/concurrency dimension mirrors
         # the real repository contract.
-        # pylint: disable=too-many-arguments
         self.pointer_calls.append((investigation_id, assessment_id, expected_version))
         if self.pointer_error is not None:
             raise self.pointer_error
@@ -299,7 +296,7 @@ class FakeAssessmentRepository(AssessmentRepository):
         self.delete_calls.append((assessment_id, actor_id, expected_version))
         if self.delete_error is not None:
             raise self.delete_error
-        deleted = self.deleted or Assessment.model_construct(
+        return self.deleted or Assessment.model_construct(
             id=assessment_id,
             investigation_id=uuid4(),
             verdict=Verdict.SUSPICIOUS,
@@ -308,7 +305,6 @@ class FakeAssessmentRepository(AssessmentRepository):
             analyzed_evidence_ids=(),
             version=(expected_version or 1) + 1,
         )
-        return deleted
 
 
 class FakeAuditRepository(AuditEventRepository):
@@ -328,7 +324,7 @@ class FakeAuditRepository(AuditEventRepository):
         return self.events
 
 
-class FakeUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attributes
+class FakeUnitOfWork(UnitOfWork):
     """In-memory transaction boundary with deterministic commit accounting.
 
     Every repository seam is exposed as one typed attribute; seven of the
@@ -356,7 +352,6 @@ class FakeUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attribute
     ) -> None:
         # One explicit argument per repository seam is the UnitOfWork
         # convention; the count is intrinsic to the boundary.
-        # pylint: disable=too-many-arguments
         self.investigations = investigations
         self.evidence = evidence
         self.relationship_observations = observations

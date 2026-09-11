@@ -6,8 +6,6 @@
 # The Graph fixture carries one terminal UUID per persisted identity, and
 # the deterministic race tests deliberately capture broad exceptions and
 # many locals to record outcomes while proving PostgreSQL lock state.
-# pylint: disable=redefined-outer-name,too-many-lines,too-many-instance-attributes
-# pylint: disable=too-many-locals,too-many-statements,broad-exception-caught
 
 import asyncio
 import time
@@ -77,7 +75,7 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.database 
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
 
-class Graph:  # pylint: disable=too-few-public-methods
+class Graph:
     """A seeded evidence/relationship/observation graph for one investigation.
 
     The single public method seeds a complete, eligible provenance chain;
@@ -91,8 +89,7 @@ class Graph:  # pylint: disable=too-few-public-methods
         # The target IP must be unique per graph: entities deduplicate on
         # canonical value, so a shared value would reuse another graph's row.
         self.target_value = (
-            f"192.0.{int(uuid4().hex[:4], 16) % 255}."
-            f"{int(uuid4().hex[4:8], 16) % 255}"
+            f"192.0.{int(uuid4().hex[:4], 16) % 255}.{int(uuid4().hex[4:8], 16) % 255}"
         )
         self.target_entity_id = uuid4()
         self.evidence_id = uuid4()
@@ -2068,9 +2065,9 @@ async def test_pointer_deletion_race_deletion_wins(
     await asyncio.wait_for(pointer_task, 15)
 
     assert isinstance(outcomes.get("deleter"), Assessment), outcomes
-    assert isinstance(
-        outcomes.get("pointer"), AssessmentProvenanceMismatchError
-    ), outcomes
+    assert isinstance(outcomes.get("pointer"), AssessmentProvenanceMismatchError), (
+        outcomes
+    )
 
     async with uow_factory() as uow:
         assert await pointer_of(uow, graph.investigation_id) == b_ref

@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Tests for PR 19A typed orchestration models and serialization."""
 
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
-
 import pytest
 from pydantic import ValidationError
 

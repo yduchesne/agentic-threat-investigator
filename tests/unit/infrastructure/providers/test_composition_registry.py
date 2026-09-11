@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Provider-composition registry coverage (PR 19B)."""
 
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods,redefined-outer-name
-
 import pytest
 
 from agentic_threat_investigator.app.secrets import SecretsResolver

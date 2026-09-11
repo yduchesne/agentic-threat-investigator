@@ -3,7 +3,6 @@
 
 # Fakes expose narrow async repository seams; rate-limiter internals are the
 # object under test for the memory-bound assertions.
-# pylint: disable=too-few-public-methods,protected-access,unused-argument,use-implicit-booleaness-not-comparison
 
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, cast

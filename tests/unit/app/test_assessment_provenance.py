@@ -5,8 +5,6 @@ The synthetic chain factories intentionally mirror the other persistence
 service fixtures; the shared shape is conventional in this suite.
 """
 
-# pylint: disable=duplicate-code
-
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -58,7 +56,7 @@ def investigation_id() -> UUID:
     return uuid4()
 
 
-class Chain:  # pylint: disable=too-many-instance-attributes
+class Chain:
     """A complete, eligible provenance chain with concrete stable identities.
 
     The count of terminal UUID attributes is intentional: every identity is

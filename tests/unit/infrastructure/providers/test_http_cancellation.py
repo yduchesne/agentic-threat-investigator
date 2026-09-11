@@ -23,7 +23,7 @@ from agentic_threat_investigator.infrastructure.providers.http import (
 from .limiter_fakes import FakeRateClock, GatedSleep
 
 
-class _RecordingSleep:  # pylint: disable=too-few-public-methods
+class _RecordingSleep:
     """Records sleep calls for assertion."""
 
     def __init__(self) -> None:

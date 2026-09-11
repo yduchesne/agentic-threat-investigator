@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Bookkeeping tests for extended provider-execution outcome IDs (PR 19B)."""
 
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
-
 from uuid import UUID
 
 import pytest

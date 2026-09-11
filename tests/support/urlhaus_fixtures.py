@@ -34,9 +34,6 @@ from agentic_threat_investigator.infrastructure.providers.http import ProviderHt
 from agentic_threat_investigator.infrastructure.providers.urlhaus import UrlhausProvider
 from tests.support.provider_http import no_op_sleep, static_client, zero_jitter
 
-# pylint: disable=duplicate-code
-
-
 CANONICAL_URLHAUS_DOMAIN = "malicious-domain.test"
 """Synthetic documentation-safe host of the canonical URLhaus scenario."""
 
@@ -188,7 +185,7 @@ FIXED_TS = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 FIXED_KEY = "test-urlhaus-auth-key"
 
 
-class _Removed:  # pylint: disable=too-few-public-methods
+class _Removed:
     """Sentinel marking a member as absent from the synthetic response."""
 
 

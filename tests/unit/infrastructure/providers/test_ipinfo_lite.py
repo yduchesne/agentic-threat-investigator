@@ -37,7 +37,7 @@ _FIXED_TS = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 _FIXED_TOKEN = "test-ipinfo-token"
 
 
-class _Removed:  # pylint: disable=too-few-public-methods
+class _Removed:
     """Sentinel marking a member as absent from the synthetic response."""
 
 
@@ -818,7 +818,8 @@ class TestIpinfoLiteProviderFailures:
         """An injected naive clock is rejected as a configuration error."""
         async with _client_static(httpx.Response(200, json=_lite_response())) as client:
             provider = _provider(
-                client, clock=lambda: datetime(2026, 1, 15, 12, 0, 0)  # Naive
+                client,
+                clock=lambda: datetime(2026, 1, 15, 12, 0, 0),  # Naive
             )
             with pytest.raises(ValueError, match="timezone-aware"):
                 await provider.investigate(

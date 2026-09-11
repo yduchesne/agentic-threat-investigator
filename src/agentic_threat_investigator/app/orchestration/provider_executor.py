@@ -162,7 +162,7 @@ class ProviderExecutionContext:
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
 
 
-class EntityReader(ABC):  # pylint: disable=too-few-public-methods
+class EntityReader(ABC):
     """Read one persisted canonical entity by identifier.
 
     Implementations must use a short transaction that is fully closed before
@@ -175,7 +175,7 @@ class EntityReader(ABC):  # pylint: disable=too-few-public-methods
         """Return the visible entity, or ``None`` when missing or soft-deleted."""
 
 
-class UowEntityReader(EntityReader):  # pylint: disable=too-few-public-methods
+class UowEntityReader(EntityReader):
     """Read one persisted entity through a short UnitOfWork transaction.
 
     The transaction is fully closed before any provider network I/O occurs;
@@ -192,9 +192,7 @@ class UowEntityReader(EntityReader):  # pylint: disable=too-few-public-methods
             return await uow.entities.get_by_id(entity_id)
 
 
-class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
-    InvestigationBoundWorkExecutor
-):
+class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
     """Execute one approved provider work item through the real ATI seams.
 
     Bound to exactly one ``ProviderExecutionContext.investigation_id``: every
@@ -210,7 +208,6 @@ class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
         return self._context.investigation_id
 
     # The explicit constructor dependencies are the injected composition seam.
-    # pylint: disable=too-many-arguments
     def __init__(
         self,
         *,
@@ -233,7 +230,6 @@ class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
         # The return count is intrinsic to the distinct deterministic failure
         # gates; the narrow disable follows repository convention for such
         # validation-heavy flows.
-        # pylint: disable=too-many-return-statements
         provider = self._provider_registry.get(work_item.provider)
         if provider is None:
             return await self._fail_work(
@@ -275,9 +271,9 @@ class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
             # emitted for the interrupted work (PR 19B cancellation contract;
             # the narrow handler is documented, hence the W0706 disable).
             result = await provider.investigate(self._context.investigation_id, target)
-        except asyncio.CancelledError:  # pylint: disable=try-except-raise
+        except asyncio.CancelledError:
             raise
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:  # noqa: BLE001 - provider failures become bounded failure events
             self._log_bounded_failure(
                 ERROR_PROVIDER_ERROR,
                 source_id=work_item.provider.value,
@@ -325,7 +321,6 @@ class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
         """
         # The return count is intrinsic to the independent binding gates; the
         # narrow disable follows repository convention.
-        # pylint: disable=too-many-return-statements
         if provider.id != work_item.provider.value:
             return ERROR_PROVIDER_BINDING
         if (
@@ -392,7 +387,6 @@ class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
         intrinsic cost of deterministic per-observation sequencing; the narrow
         disable follows repository convention.
         """
-        # pylint: disable=too-many-locals
         evidence_ids: list[UUID] = []
         relationship_ids: list[UUID] = []
         discovered: list[UUID] = []
@@ -426,7 +420,7 @@ class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
                     actor_id=self._context.actor_id,
                     request_id=self._context.request_id,
                 )
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:  # noqa: BLE001 - persistence failures become bounded failure events
                 self._log_bounded_failure(
                     ERROR_PERSISTENCE_ERROR,
                     source_id=work_item.provider.value,
@@ -440,7 +434,7 @@ class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
                     relationship_ids=relationship_ids,
                 )
 
-            assert persisted.evidence.id is not None  # noqa: S101 - DB invariant
+            assert persisted.evidence.id is not None  # DB invariant
             _append_unique(evidence_ids, persisted.evidence.id)
             for relationship in persisted.relationships:
                 if relationship.id is not None:
@@ -675,7 +669,7 @@ class ProviderWorkExecutor(  # pylint: disable=too-few-public-methods
             return None
         try:
             await self._timeline_service.append(event)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:  # noqa: BLE001 - timeline failures never escape the sink
             self._log_bounded_failure(
                 ERROR_TIMELINE_ERROR,
                 source_id=(

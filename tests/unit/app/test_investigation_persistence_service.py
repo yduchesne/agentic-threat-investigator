@@ -9,7 +9,6 @@ never own the transaction lifecycle.
 # Fixture arguments intentionally reuse fixture names, and the fake
 # repository interfaces deliberately carry one explicit argument per
 # correlation/concurrency dimension.
-# pylint: disable=redefined-outer-name,too-many-arguments
 
 from collections.abc import Iterator
 from datetime import UTC, datetime

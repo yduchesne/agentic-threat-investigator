@@ -45,7 +45,7 @@ LOGGER = logging.getLogger(__name__)
 ASSESSMENT_OBJECT_TYPE = "assessment"
 
 
-class AssessmentPersistenceService:  # pylint: disable=too-few-public-methods
+class AssessmentPersistenceService:
     """Persist one validated Assessment atomically with its Investigation pointer.
 
     No provider, network, dispatcher, or LLM call is performed; the service
@@ -176,7 +176,6 @@ class AssessmentPersistenceService:  # pylint: disable=too-few-public-methods
         """
         # Loading several correlated resource maps in one loop per resource is
         # intrinsic; the branch/local counts reflect that shape.
-        # pylint: disable=too-many-locals,too-many-branches
         investigation = await uow.investigations.get_by_id(assessment.investigation_id)
         evidence_ids = set(assessment.analyzed_evidence_ids)
         observation_ids: set[UUID] = set()

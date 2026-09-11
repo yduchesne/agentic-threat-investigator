@@ -134,4 +134,3 @@ if [[ ! -d frontend/node_modules ]]; then (cd frontend && npm ci) >/dev/null; fi
 (cd frontend && npm run build)
 
 echo "Integration tests passed; frontend production bundle built."
-

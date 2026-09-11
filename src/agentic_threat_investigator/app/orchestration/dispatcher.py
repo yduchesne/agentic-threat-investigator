@@ -20,7 +20,7 @@ from agentic_threat_investigator.domain.investigation import (
 )
 
 
-class TaskDispatcher(ABC):  # pylint: disable=too-few-public-methods
+class TaskDispatcher(ABC):
     """Hand one authorized provider work item to an execution destination."""
 
     @property

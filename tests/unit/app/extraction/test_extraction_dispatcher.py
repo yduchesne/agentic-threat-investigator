@@ -5,7 +5,6 @@
 # The evidence-builder helpers in extraction test modules intentionally
 # share the normalized Evidence construction shape (see the established
 # provider fixture family); the duplication is test-only and accepted.
-# pylint: disable=duplicate-code
 
 from datetime import UTC, datetime
 from uuid import uuid4
