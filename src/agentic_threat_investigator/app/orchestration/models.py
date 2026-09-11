@@ -177,8 +177,12 @@ def authorize_pivot(
     """Record an authorized pivot and enqueue its provider work.
 
     Accepts a ``PivotRequest`` from the coordinator policy and adds it to
-    ``pending_pivots``. The entity is also added to ``investigated_entity_ids``
-    to prevent re-investigation. Work items are enqueued for execution.
+    ``pending_pivots``. Work items are enqueued for execution. The entity is
+    NOT added to ``investigated_entity_ids`` here: authorization means only
+    "approved and queued"; the entity becomes investigated when its provider
+    work is actually selected for execution (see
+    :func:`apply_work_selection`), so an authorized-but-never-selected pivot
+    remains resumably uninvestigated.
 
     This is a pure helper function that does not validate eligibility (that
     is the coordinator policy's responsibility).
@@ -186,10 +190,6 @@ def authorize_pivot(
     from agentic_threat_investigator.domain.investigation import PivotRequest
 
     assert isinstance(pivot_request, PivotRequest)
-
-    investigated = list(state.investigated_entity_ids)
-    if pivot_request.entity_id not in investigated:
-        investigated.append(pivot_request.entity_id)
 
     known = set(state.pending_provider_work) | set(state.completed_provider_work)
     queued: list[ProviderWorkItem] = []
@@ -202,7 +202,6 @@ def authorize_pivot(
         update={
             "pending_pivots": [*state.pending_pivots, pivot_request],
             "pending_provider_work": [*state.pending_provider_work, *queued],
-            "investigated_entity_ids": investigated,
         }
     )
 
@@ -253,9 +252,11 @@ def apply_work_selection(
 
     The selected ``current_provider_work`` item's matching PENDING pivot
     (same entity and depth) transitions to IN_PROGRESS when this is its first
-    work, and the entity's traversal entry records the executed depth in
-    ``best_investigated_depth`` (retaining the shallowest recorded depth).
-    Pure helper; persistence is the caller's responsibility.
+    work, the entity's traversal entry records the executed depth in
+    ``best_investigated_depth`` (retaining the shallowest recorded depth), and
+    the entity is added to ``investigated_entity_ids`` exactly once: selection
+    is the transition at which execution actually starts. Pure helper;
+    persistence is the caller's responsibility.
     """
     selected = state.current_provider_work
     if selected is None:
@@ -273,6 +274,11 @@ def apply_work_selection(
             changed = True
             break
 
+    investigated = list(state.investigated_entity_ids)
+    investigated_changed = selected.entity_id not in investigated
+    if investigated_changed:
+        investigated.append(selected.entity_id)
+
     # Seed root traversal entries from root_entity_ids when none exist yet so
     # an executed root reliably records best_investigated_depth before any
     # provider outcome exists (traversal is otherwise built by outcomes).
@@ -289,12 +295,15 @@ def apply_work_selection(
                 traversal_changed = True
             break
 
-    if not changed and not traversal_changed:
+    if not changed and not traversal_changed and not investigated_changed:
         return state
     return state.model_copy(
         update={
             "pending_pivots": pivots,
             "traversal": traversal if traversal_changed else state.traversal,
+            "investigated_entity_ids": (
+                investigated if investigated_changed else state.investigated_entity_ids
+            ),
         }
     )
 

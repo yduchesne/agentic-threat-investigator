@@ -331,7 +331,7 @@ class TestEvaluatorFailures:
                     action=ACTION_PIVOT_ENQUEUED,
                     entity_id=_IP,
                     depth=1,
-                    entity_count=1,
+                    entity_count=2,
                 ),
                 CoordinatorActionRecord(
                     action=ACTION_INVESTIGATION_STOPPED,
@@ -516,6 +516,89 @@ class TestEvaluatorFailures:
         )
         assert CoordinatorEvaluationFailureCode.NON_TERMINATION in result.failures
         assert result.metrics["termination"] == 0.0
+
+
+class TestEvaluatorEntityBudgetBoundary:
+    """Entity-budget evaluation at the exact-capacity boundary (PR 21B).
+
+    The evaluator must not flag a depth>0 pivot whose entity count equals
+    ``max_entities``: under deterministic admission the pivoted entity is
+    admitted and the pivot is legal. Only a strictly above-budget count is a
+    violation. The evaluator still does not independently reconstruct
+    coordinator admission policy; that broader hardening belongs to PR 21D.
+    """
+
+    def test_exact_capacity_pivot_is_not_a_violation(self) -> None:
+        """Case 7.1: entity_count == max_entities is not a violation."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(
+                expected=ExpectedCoordinatorTrajectory(
+                    expected_stop_reason=StopReason.SUFFICIENT_EVIDENCE,
+                    max_entities=2,
+                )
+            ),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED,
+                    entity_id=_IP,
+                    depth=1,
+                    entity_count=2,
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED,
+                    entity_id=_IP,
+                    depth=1,
+                    entity_count=2,
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert result.passed
+        assert (
+            CoordinatorEvaluationFailureCode.ENTITY_BUDGET_VIOLATION
+            not in result.failures
+        )
+
+    def test_above_budget_pivot_is_a_violation(self) -> None:
+        """Case 7.2: entity_count > max_entities remains a violation."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(
+                expected=ExpectedCoordinatorTrajectory(
+                    expected_stop_reason=StopReason.SUFFICIENT_EVIDENCE,
+                    max_entities=2,
+                )
+            ),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED,
+                    entity_id=_IP,
+                    depth=1,
+                    entity_count=3,
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED,
+                    entity_id=_IP,
+                    depth=1,
+                    entity_count=3,
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert (
+            CoordinatorEvaluationFailureCode.ENTITY_BUDGET_VIOLATION in result.failures
+        )
 
 
 def _budget_with_provider_calls(calls: int) -> object:
