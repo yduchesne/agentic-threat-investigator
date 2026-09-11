@@ -31,6 +31,7 @@ from agentic_threat_investigator.domain.assessment import (
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.immutable_json import FrozenDict
+from agentic_threat_investigator.domain.investigation import AnalysisDisposition
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 _RETRIEVED_AT = datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC)
@@ -42,6 +43,7 @@ def decision_factory(**overrides: object) -> EvidenceAnalystDecision:
         "verdict": Verdict.SUSPICIOUS,
         "confidence": AssessmentConfidence.MEDIUM,
         "summary": "Evidence supports the verdict.",
+        "disposition": AnalysisDisposition.SUFFICIENT,
         "findings": (
             AnalyticalFinding(
                 category=FindingCategory.NETWORK,

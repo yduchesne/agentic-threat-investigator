@@ -182,6 +182,17 @@ Priority unit-test areas include:
 - entity canonicalization;
 - pivot-policy helpers;
 - budget accounting;
+- coordinator policy (PR 21): deterministic candidate ordering from
+  traversal, same-or-better-depth suppression, root work at entity-budget
+  capacity, exact depth/entity/provider/replan boundaries, stop-reason
+  precedence, and replan-only-with-new-work semantics;
+- coordinator scenario loading (PR 21): a strict 13-scenario corpus under
+  `evals/scenarios/coordinator/` that fails closed on malformed JSON,
+  duplicate IDs, unsupported versions, blank fixture names, unknown
+  fields, and duplicate labels;
+- coordinator trajectory evaluation (PR 21): every failure code, bounded
+  `[0.0, 1.0]` metrics, depth-aware provider-work matching, transition
+  bounds, and deterministic failure ordering;
 - relationship extraction;
 - deterministic source extraction (PR 18B) including per-source
   malformed-fact rejection and deterministic deduplication;

@@ -1,0 +1,21 @@
+{
+  "id": "already-investigated-ip",
+  "version": 1,
+  "description": "An IP already investigated at the same depth is not pivoted again.",
+  "fixture": {
+    "name": "already-investigated-ip"
+  },
+  "expected": {
+    "required_pivots": [],
+    "forbidden_pivots": [
+      "resolved_ip"
+    ],
+    "required_provider_work": [
+      "dns_root_domain"
+    ],
+    "expected_stop_reason": "sufficient_evidence",
+    "max_provider_calls": 1,
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

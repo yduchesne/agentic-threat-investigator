@@ -8,22 +8,51 @@ workflow skeleton that depends only on the ``TaskDispatcher`` boundary, the PR
 contracts/local dispatch with its production composition factory. Because
 ``LocalTaskDispatcher`` is the single explicit executor-to-dispatcher
 adapter, callers/composition must construct it around a ``WorkExecutor``;
-the graph never accepts or adapts executors directly. The package performs
-no provider-selection policy, budget enforcement, LLM behavior, adaptive
-pivots, jobs, or workers.
+the graph never accepts or adapts executors directly.
+
+PR 21 extends the package with coordinator-driven pivot authorization, analysis
+execution, and deterministic stopping. ``build_investigation_graph`` requires
+all coordinator dependencies; ``build_legacy_investigation_graph`` exists
+only for isolated mechanics tests.
 """
 
-from .composition import build_provider_investigation_graph
+from .composition import (
+    PROVIDER_SOURCE_ORDER,
+    build_provider_investigation_graph,
+)
+from .coordinator import (
+    AnalysisExecutor,
+    AnalysisOutcome,
+    CoordinatorAction,
+    CoordinatorDecision,
+    CoordinatorEntityView,
+    CoordinatorPolicy,
+    CoordinatorPolicyContext,
+    FakeAnalysisExecutor,
+    MappingProviderWorkPlanner,
+    PivotRejection,
+    PivotRejectionReason,
+    ProviderWorkPlanner,
+)
 from .dispatcher import LocalTaskDispatcher, TaskDispatcher
 from .executor import InvestigationBoundWorkExecutor, WorkExecutor
 from .graph import (
+    AuthorizeWithoutPivotError,
+    CoordinatorDependencyError,
     InvestigationGraphBindingConflictError,
     InvestigationGraphContextMismatchError,
+    MissingCoordinatorDecisionError,
     OrchestrationGraphState,
+    StopWithoutReasonError,
+    UnknownCoordinatorActionError,
     build_investigation_graph,
+    build_legacy_investigation_graph,
 )
 from .models import (
+    authorize_pivot,
     enqueue_provider_work,
+    finalize_stop_state,
+    record_analysis,
     record_provider_outcome,
     select_next_provider_work,
     select_provider_work,
@@ -34,6 +63,27 @@ from .provider_executor import (
     ProviderWorkExecutor,
     UowEntityReader,
 )
+from .services import (
+    CoordinatorContextLoader,
+    CoordinatorTransitionService,
+    EvidenceAnalystAnalysisExecutor,
+    InvestigationStatusWriter,
+    UowCoordinatorContextLoader,
+    UowCoordinatorTransitionService,
+    UowInvestigationStatusWriter,
+)
+from .timeline_actions import (
+    ACTION_ASSESSMENT_REQUESTED,
+    ACTION_ENTITY_DISCOVERED,
+    ACTION_INVESTIGATION_STOPPED,
+    ACTION_PIVOT_ENQUEUED,
+    ACTION_PIVOT_EXECUTED,
+    ACTION_PIVOT_SKIPPED,
+    ACTION_PROVIDER_QUERY,
+    DeterministicTimelineActionService,
+    TimelineActionService,
+    convert_timeline_actions,
+)
 
 __all__ = [
     "WorkExecutor",
@@ -43,14 +93,53 @@ __all__ = [
     "OrchestrationGraphState",
     "InvestigationGraphContextMismatchError",
     "InvestigationGraphBindingConflictError",
+    "CoordinatorDependencyError",
+    "MissingCoordinatorDecisionError",
+    "UnknownCoordinatorActionError",
+    "StopWithoutReasonError",
+    "AuthorizeWithoutPivotError",
     "ProviderExecutionContext",
     "ProviderWorkExecutor",
     "EntityReader",
     "UowEntityReader",
     "build_investigation_graph",
+    "build_legacy_investigation_graph",
     "build_provider_investigation_graph",
+    "PROVIDER_SOURCE_ORDER",
     "enqueue_provider_work",
     "record_provider_outcome",
     "select_next_provider_work",
     "select_provider_work",
+    "authorize_pivot",
+    "finalize_stop_state",
+    "record_analysis",
+    "CoordinatorAction",
+    "CoordinatorDecision",
+    "CoordinatorEntityView",
+    "CoordinatorPolicy",
+    "CoordinatorPolicyContext",
+    "AnalysisExecutor",
+    "AnalysisOutcome",
+    "FakeAnalysisExecutor",
+    "MappingProviderWorkPlanner",
+    "PivotRejection",
+    "PivotRejectionReason",
+    "ProviderWorkPlanner",
+    "CoordinatorContextLoader",
+    "CoordinatorTransitionService",
+    "EvidenceAnalystAnalysisExecutor",
+    "InvestigationStatusWriter",
+    "UowCoordinatorContextLoader",
+    "UowCoordinatorTransitionService",
+    "UowInvestigationStatusWriter",
+    "ACTION_PROVIDER_QUERY",
+    "ACTION_ENTITY_DISCOVERED",
+    "ACTION_PIVOT_ENQUEUED",
+    "ACTION_PIVOT_EXECUTED",
+    "ACTION_PIVOT_SKIPPED",
+    "ACTION_ASSESSMENT_REQUESTED",
+    "ACTION_INVESTIGATION_STOPPED",
+    "DeterministicTimelineActionService",
+    "TimelineActionService",
+    "convert_timeline_actions",
 ]

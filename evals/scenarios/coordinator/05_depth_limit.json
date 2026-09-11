@@ -1,0 +1,18 @@
+{
+  "id": "depth-limit",
+  "version": 1,
+  "description": "A discovered entity beyond max_depth never becomes a pivot.",
+  "fixture": {
+    "name": "depth-limit"
+  },
+  "expected": {
+    "required_pivots": [],
+    "forbidden_pivots": [
+      "deep_ip"
+    ],
+    "expected_stop_reason": "depth_limit_reached",
+    "max_provider_calls": 1,
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

@@ -5,9 +5,21 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+from agentic_threat_investigator.app.orchestration.coordinator import (
+    CoordinatorEntityView,
+    CoordinatorPolicyContext,
+)
 from agentic_threat_investigator.app.orchestration.dispatcher import TaskDispatcher
 from agentic_threat_investigator.app.orchestration.executor import WorkExecutor
 from agentic_threat_investigator.app.orchestration.models import enqueue_provider_work
+from agentic_threat_investigator.app.orchestration.services import (
+    CoordinatorContextLoader,
+    CoordinatorTransitionService,
+    InvestigationStatusWriter,
+)
+from agentic_threat_investigator.app.persistence.repositories import (
+    InvestigationNotFoundError,
+)
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
@@ -16,7 +28,11 @@ from agentic_threat_investigator.domain.investigation import (
     ProviderExecutionOutcome,
     ProviderExecutionStatus,
     ProviderWorkItem,
+    StopReason,
     default_investigation_budget,
+)
+from agentic_threat_investigator.domain.investigation_timeline import (
+    InvestigationTimelineEvent,
 )
 
 SCENARIO_DOMAIN_ID = UUID("00000000-0000-0000-0000-0000000000d1")
@@ -139,3 +155,86 @@ def scenario_initial_state() -> InvestigationState:
         scenario_investigation_state(),
         [scenario_dns_work_item(), scenario_rdap_work_item()],
     )
+
+
+class FakeContextLoader(CoordinatorContextLoader):
+    """Return a fixed policy context without opening any transaction."""
+
+    def __init__(
+        self,
+        context: CoordinatorPolicyContext | None = None,
+        *,
+        entities: tuple[CoordinatorEntityView, ...] = (),
+    ) -> None:
+        self._context = context or CoordinatorPolicyContext(entities=entities)
+
+    async def load(
+        self, investigation_id: UUID, expected_version: int
+    ) -> CoordinatorPolicyContext:
+        del investigation_id, expected_version
+        return self._context
+
+
+class NoopTransitionService(CoordinatorTransitionService):
+    """Return the supplied state without persisting; records calls."""
+
+    def __init__(self) -> None:
+        self.persisted: list[tuple[UUID, InvestigationState]] = []
+        self.appended_events: list[InvestigationTimelineEvent] = []
+        self._last: InvestigationState | None = None
+
+    async def persist(
+        self,
+        investigation_id: UUID,
+        transition_kind: object,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+        events: tuple[InvestigationTimelineEvent, ...] = (),
+        consumes_replan: bool = False,
+    ) -> InvestigationState:
+        del transition_kind, actor_id, request_id, expected_version, consumes_replan
+        self.persisted.append((investigation_id, state))
+        self.appended_events.extend(events)
+        self._last = state
+        return state
+
+    async def reload(self, investigation_id: UUID) -> InvestigationState:
+        del investigation_id
+        if self._last is None:
+            raise InvestigationNotFoundError("no persisted investigation state")
+        return self._last
+
+    async def emit(self, event: InvestigationTimelineEvent) -> None:
+        self.appended_events.append(event)
+
+
+class NoopStatusWriter(InvestigationStatusWriter):
+    """Return the supplied terminal state without persisting; records calls."""
+
+    def __init__(self) -> None:
+        self.finalized: list[tuple[UUID, StopReason]] = []
+        self.appended_events: list[object] = []
+
+    async def finalize(
+        self,
+        investigation_id: UUID,
+        stop_reason: StopReason,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+        events: tuple[InvestigationTimelineEvent, ...] = (),
+    ) -> InvestigationState:
+        del actor_id, request_id, expected_version
+        self.finalized.append((investigation_id, stop_reason))
+        self.appended_events.extend(events)
+        return state
+
+
+def empty_context_loader() -> FakeContextLoader:
+    """Return a context loader that yields no candidates (no pivot path)."""
+    return FakeContextLoader()

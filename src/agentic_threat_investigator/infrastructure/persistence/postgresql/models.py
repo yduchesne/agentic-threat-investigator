@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     text,
 )
@@ -367,7 +368,9 @@ class InvestigationTimelineEventRow(Base):
         CheckConstraint(
             "event_type IN ('investigation_started', 'provider_work_started', "
             "'provider_work_completed', 'provider_work_failed', "
-            "'evidence_persisted', 'entities_discovered')",
+            "'evidence_persisted', 'entities_discovered', 'pivot_enqueued', "
+            "'pivot_executed', 'pivot_skipped', 'assessment_requested', "
+            "'investigation_stopped')",
             name="investigation_timeline_event_type_check",
         ),
         CheckConstraint(
@@ -392,6 +395,11 @@ class InvestigationTimelineEventRow(Base):
         ARRAY(PGUUID(as_uuid=True)), default=list
     )
     error_code: Mapped[str | None] = mapped_column(String)
+    pivot_depth: Mapped[int | None] = mapped_column(Integer)
+    reason_code: Mapped[str | None] = mapped_column(String)
+    provider_calls_used: Mapped[int | None] = mapped_column(BigInteger)
+    replans_used: Mapped[int | None] = mapped_column(BigInteger)
+    entity_count: Mapped[int | None] = mapped_column(Integer)
     sequence: Mapped[int] = mapped_column(
         BigInteger,
         server_default=text("nextval('ati.investigation_timeline_event_seq')"),

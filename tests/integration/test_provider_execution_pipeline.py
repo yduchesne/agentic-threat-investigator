@@ -24,9 +24,15 @@ from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
+from agentic_threat_investigator.app.extraction.extractor import extract
+from agentic_threat_investigator.app.investigation_timeline import (
+    UnitOfWorkInvestigationTimelineSink,
+)
 from agentic_threat_investigator.app.orchestration import (
+    AnalysisOutcome,
+    FakeAnalysisExecutor,
     InvestigationGraphContextMismatchError,
-    build_investigation_graph,
+    build_legacy_investigation_graph,
     enqueue_provider_work,
 )
 from agentic_threat_investigator.app.orchestration.composition import (
@@ -44,6 +50,7 @@ from agentic_threat_investigator.app.provider_observation_persistence import (
 from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
+    AnalysisDisposition,
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
@@ -68,6 +75,30 @@ from agentic_threat_investigator.infrastructure.providers.google_dns import (
     GooglePublicDnsProvider,
 )
 from agentic_threat_investigator.infrastructure.providers.http import ProviderHttpClient
+from tests.support.orchestration_fixtures import (
+    NoopStatusWriter,
+    NoopTransitionService,
+    empty_context_loader,
+)
+
+
+def _sufficient_analysis_executor() -> FakeAnalysisExecutor:
+    """Return a fake analyst that declares SUFFICIENT once.
+
+    The analyze node defaults the analyzed evidence set to the complete
+    current evidence, so a single SUFFICIENT outcome stops the coordinator
+    after the provider pipeline drains without authorizing pivots.
+    """
+    return FakeAnalysisExecutor(
+        (
+            AnalysisOutcome(
+                assessment_id=uuid4(),
+                disposition=AnalysisDisposition.SUFFICIENT,
+                investigation_version=1,
+            ),
+        )
+    )
+
 
 pytestmark = [
     pytest.mark.integration,
@@ -166,7 +197,7 @@ def _zero_jitter() -> float:
 
 async def seed_root_investigation(
     uow: PostgresUnitOfWork,
-) -> tuple[UUID, Entity]:
+) -> tuple[UUID, Entity, int]:
     """Persist one RUNNING investigation whose durable root is the DOMAIN entity.
 
     The root Entity UUID is allocated once and reused: the canonical DOMAIN
@@ -179,7 +210,7 @@ async def seed_root_investigation(
     root = await uow.entities.upsert(
         Entity(id=root_id, type=EntityType.DOMAIN, value=_DOMAIN_VALUE)
     )
-    await uow.investigations.create(
+    created = await uow.investigations.create(
         InvestigationState(
             investigation_id=investigation_id,
             status=InvestigationStatus.RUNNING,
@@ -191,7 +222,7 @@ async def seed_root_investigation(
         )
     )
     await uow.commit()
-    return investigation_id, root
+    return investigation_id, root, created.version
 
 
 async def test_dns_vertical_slice(
@@ -239,16 +270,24 @@ async def test_dns_vertical_slice(
         provider = GooglePublicDnsProvider(http, clock=lambda: _FIXED_TS)
 
         async with uow_factory() as uow:
-            investigation_id, root = await seed_root_investigation(uow)
+            investigation_id, root, created_version = await seed_root_investigation(uow)
 
-        graph = build_provider_investigation_graph(
-            uow_factory=uow_factory,
+        # PR 19 provider-execution mechanics: the legacy graph drains the
+        # queue and ends (the strict PR 21 analyze node requires real
+        # Analysis persistence, which this mechanics test does not exercise).
+        executor = ProviderWorkExecutor(
+            entity_reader=UowEntityReader(uow_factory),
             provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
+            extractor=extract,
+            persistence_service=ProviderObservationPersistenceService(uow_factory),
+            timeline_service=UnitOfWorkInvestigationTimelineSink(uow_factory),
             context=ProviderExecutionContext(
                 investigation_id=investigation_id,
                 clock=lambda: _FIXED_TS,
             ),
         )
+        dispatcher = LocalTaskDispatcher(executor)
+        graph = build_legacy_investigation_graph(dispatcher)
 
         assert root.id is not None
         work_item = ProviderWorkItem(
@@ -263,6 +302,7 @@ async def test_dns_vertical_slice(
                 objective="Assess the root indicator.",
                 budget=default_investigation_budget(),
                 started_at=_FIXED_TS,
+                version=created_version,
             ),
             [work_item],
         )
@@ -350,7 +390,9 @@ async def test_dns_missing_root_never_calls_provider(
         http = ProviderHttpClient(client=client)
         provider = GooglePublicDnsProvider(http, clock=lambda: _FIXED_TS)
         async with uow_factory() as uow:
-            investigation_id, _root = await seed_root_investigation(uow)
+            investigation_id, _root, created_version = await seed_root_investigation(
+                uow
+            )
 
         graph = build_provider_investigation_graph(
             uow_factory=uow_factory,
@@ -359,6 +401,10 @@ async def test_dns_missing_root_never_calls_provider(
                 investigation_id=investigation_id,
                 clock=lambda: _FIXED_TS,
             ),
+            analysis_executor=_sufficient_analysis_executor(),
+            context_loader=empty_context_loader(),
+            transition_service=NoopTransitionService(),
+            status_writer=NoopStatusWriter(),
         )
         missing_work = ProviderWorkItem(
             provider=SourceId.GOOGLE_PUBLIC_DNS, entity_id=uuid4(), depth=0
@@ -372,6 +418,7 @@ async def test_dns_missing_root_never_calls_provider(
                 objective="Assess the root indicator.",
                 budget=default_investigation_budget(),
                 started_at=_FIXED_TS,
+                version=created_version,
             ),
             [missing_work],
         )
@@ -408,6 +455,7 @@ async def test_context_mismatch_fails_before_any_persistence(
     """
     from agentic_threat_investigator.app.orchestration import (
         InvestigationGraphContextMismatchError,
+        build_provider_investigation_graph,
     )
 
     class _ExplodingTransport(httpx.AsyncBaseTransport):
@@ -421,7 +469,7 @@ async def test_context_mismatch_fails_before_any_persistence(
         provider = GooglePublicDnsProvider(http, clock=lambda: _FIXED_TS)
 
         async with uow_factory() as uow:
-            investigation_a, root = await seed_root_investigation(uow)
+            investigation_a, root, created_version = await seed_root_investigation(uow)
             investigation_b = uuid4()
             await uow.investigations.create(
                 InvestigationState(
@@ -443,6 +491,10 @@ async def test_context_mismatch_fails_before_any_persistence(
                 investigation_id=investigation_a,
                 clock=lambda: _FIXED_TS,
             ),
+            analysis_executor=_sufficient_analysis_executor(),
+            context_loader=empty_context_loader(),
+            transition_service=NoopTransitionService(),
+            status_writer=NoopStatusWriter(),
         )
         assert root.id is not None
         work_item = ProviderWorkItem(
@@ -458,6 +510,7 @@ async def test_context_mismatch_fails_before_any_persistence(
                 objective="Assess the root indicator.",
                 budget=default_investigation_budget(),
                 started_at=_FIXED_TS,
+                version=created_version,
             ),
             [work_item],
         )
@@ -527,7 +580,7 @@ async def test_local_dispatcher_binding_rejects_other_investigation(
         provider = GooglePublicDnsProvider(http, clock=lambda: _FIXED_TS)
 
         async with uow_factory() as uow:
-            investigation_a, root = await seed_root_investigation(uow)
+            investigation_a, root, created_version = await seed_root_investigation(uow)
             investigation_b = uuid4()
             await uow.investigations.create(
                 InvestigationState(
@@ -557,7 +610,7 @@ async def test_local_dispatcher_binding_rejects_other_investigation(
             ),
         )
         dispatcher = LocalTaskDispatcher(executor)
-        graph = build_investigation_graph(dispatcher)
+        graph = build_legacy_investigation_graph(dispatcher)
 
         assert root.id is not None
         work_item = ProviderWorkItem(
@@ -572,6 +625,7 @@ async def test_local_dispatcher_binding_rejects_other_investigation(
                 objective="Assess the root indicator.",
                 budget=default_investigation_budget(),
                 started_at=_FIXED_TS,
+                version=created_version,
             ),
             [work_item],
         )

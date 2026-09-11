@@ -24,6 +24,7 @@ from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.identity import Credential, Session, User
 from agentic_threat_investigator.domain.investigation import (
+    CoordinatorTransitionKind,
     InvestigationBudget,
     InvestigationState,
     InvestigationStatus,
@@ -62,6 +63,10 @@ class InvestigationDuplicateIdentityError(ValueError):
         """Record the conflicting investigation identity."""
         super().__init__(f"investigation already exists: {investigation_id}")
         self.investigation_id = investigation_id
+
+
+class CoordinatorTransitionPersistenceError(RuntimeError):
+    """A coordinator transition was rejected by durable persistence."""
 
 
 class InvestigationVersionConflictError(RuntimeError):
@@ -581,6 +586,30 @@ class InvestigationRepository(ABC):  # pragma: no cover
         """
 
     @abstractmethod
+    async def set_analysis_result(
+        self,
+        investigation_id: UUID,
+        assessment_id: UUID,
+        analyzed_evidence_ids: list[UUID],
+        disposition: object,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+    ) -> InvestigationWriteResult:
+        """Atomically record one coherent analysis result (PR 21).
+
+        A single Investigation version/history row records the current
+        Assessment pointer, the exact ordered analyzed Evidence identities,
+        and the typed disposition. The database verifies the Assessment is
+        visible and belongs to the Investigation, that the supplied analyzed
+        IDs exactly equal the Assessment's persisted analyzed IDs and all
+        belong to the Investigation, and that the disposition is a bounded
+        enum value. ``disposition`` is a bounded ``AnalysisDisposition``
+        value serialized as its enum value.
+        """
+
+    @abstractmethod
     async def update_budget(
         self,
         investigation_id: UUID,
@@ -609,6 +638,33 @@ class InvestigationRepository(ABC):  # pragma: no cover
         expected_version: int | None = None,
     ) -> InvestigationWriteResult:
         """Change the status with database-owned version/history semantics."""
+
+    @abstractmethod
+    async def update_coordinator_state(
+        self,
+        investigation_id: UUID,
+        transition_kind: CoordinatorTransitionKind,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+        consumes_replan: bool = False,
+    ) -> InvestigationWriteResult:
+        """Atomically persist coordinator operational state (PR 21).
+
+        The transition kind bounds the allowed field/counter changes, the
+        optimistic ``expected_version`` must be supplied, and the state must
+        belong to the target investigation. One versioned mutation with
+        immutable history replaces the operational JSON document (pivots,
+        queued provider work, research markers, traversal metadata,
+        analyzed-evidence/disposition state), the budget, and the status. The
+        database revalidates budget monotonicity and maxima and the status
+        lifecycle, allocates the version, and sets terminal timestamps
+        (``completed_at``) when the transition is terminal. A semantically
+        identical state is an UNCHANGED no-op that consumes neither a
+        revision nor history.
+        """
 
     @abstractmethod
     async def soft_delete(

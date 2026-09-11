@@ -27,6 +27,7 @@ Deferred findings that are outside the CRITICAL/HIGH remediation scope of the cu
 - [Reject rather than normalize padded AbuseIPDB credentials](#reject-rather-than-normalize-padded-abuseipdb-credentials)
 - [Complete PR 20B secondary execution hardening](#complete-pr-20b-secondary-execution-hardening)
 - [Complete PR 20C secondary evaluation hardening](#complete-pr-20c-secondary-evaluation-hardening)
+- [Complete PR 21 secondary orchestration cleanup](#complete-pr-21-secondary-orchestration-cleanup)
 
 ## Complete PR 20A secondary validation and test hardening
 
@@ -1164,3 +1165,70 @@ The following lower-severity details remain:
 - Round-trip serialization of a scenario and a resolution remains JSON-compatible.
 - Metrics validation errors use the correctly spelled collection name.
 - The evaluator's existing no-mutation test and all canonical QA/integration gates continue to pass.
+
+## Complete PR 21 secondary orchestration cleanup
+
+**Priority:** MEDIUM
+
+**Origin:** Review of `.plans/pr-21-fixes-02.md`. CRITICAL and HIGH PR 21 correctness work remains in that remediation plan; this section contains only lower-severity cleanup and API-hygiene items.
+
+### Problem
+
+The following items do not independently break the coordinator's security or core trajectory once the CRITICAL/HIGH fixes are implemented:
+
+- `CoordinatorDependencyError` remains public even though the coordinator graph builder now requires every dependency in its Python signature, so the exception has no reachable construction path.
+- `build_legacy_investigation_graph()` is described as test-only but is exported from the public orchestration package. This unnecessarily preserves a production-importable queue-exhaustion path.
+- `InvestigationStatusWriter` duplicates the coordinator transition service's persistence operation and discards its explicit `stop_reason` argument because the reason is already embedded in the supplied state.
+- `CoordinatorPolicy._find_entity()` is unused.
+- `CoordinatorActionRecord.action` and the action constants are plain strings rather than one shared enum, reducing static exhaustiveness even though malformed values cannot currently authorize runtime work.
+- The evaluator emits a non-required `denied_candidate_count` metric and detects skipped pivots with a string-suffix check. This is scope/API clutter rather than a hard-gate bypass.
+- Coordinator test helpers annotate budget builders as `object` instead of `InvestigationBudget`, weakening test readability while strict production typing remains intact.
+- `InvestigationTimelineEvent` documentation still enumerates only the older provider event shapes even though validators now include coordinator event types.
+- Coordinator evaluation remains a single large module instead of the PR 20C-style package split. Once correctness and the real vertical slice are complete, separating models, loader, evaluator, and materializer would improve ownership without changing behavior.
+- Loader tests import private `_ScenarioValidator` directly instead of exercising only the public fail-closed loader contract.
+- `InvestigationRepository.update_analysis_metadata()` and `update_coordinator_state()` accept `object` and use `hasattr(..., "value")` rather than their domain enum types. Normal production callers pass enums, so this is static API precision rather than a demonstrated bypass.
+- `EvidenceAnalysisResult` lives in a top-level application module solely to avoid package-initializer import cycles. A later package export cleanup could provide a clearer public ownership boundary.
+- `CoordinatorPolicy._candidate_order()` contains the same missing-traversal validation block twice.
+- `convert_timeline_actions()` is annotated as `tuple[object, ...]`, forcing the canonical integration test to use `# type: ignore[arg-type]` instead of exposing the precise `tuple[CoordinatorActionRecord, ...]` result.
+- `DeterministicTimelineActionService` injects its clock but calls global `uuid4()` directly. Event IDs remain valid and persisted, but fully reproducible action fixtures would benefit from an injected UUID factory.
+- The canonical coordinator integration test imports private HTTP-stub helpers from another integration test module and wraps Google DNS with test-specific applicability. This passes, but dedicated support fixtures would make the vertical slice independent of test-module collection details.
+- Coordinator action wire constants are duplicated in orchestration and evaluation modules, so a future edit can make emission and evaluation disagree without a type error.
+- The timeline migration enforces event-type and reason-code vocabularies but does not reproduce every Pydantic event-shape/nonnegative-counter rule as database CHECK constraints. Normal repository writes validate the domain model, so this is defense in depth for direct SQL callers.
+- `CoordinatorDecision` temporarily exposes both detached `rejection_reasons` and candidate-specific `rejections`; maintaining both representations can drift once compatibility is no longer needed.
+- Fatal context and policy failures currently share the `coordinator_context_error` code, reducing operational diagnostic precision without changing terminal safety.
+- `AnalysisPersistenceMismatchError` accepts arbitrary constructor text even though current call sites supply fixed safe messages; dedicated subclasses/codes would make the bounded taxonomy more explicit.
+- The pointer-only Assessment persistence path internally constructs an `EvidenceAnalysisResult` with an EXHAUSTED fallback disposition and then discards it. The public return remains Assessment, so behavior is correct, but a narrower private result type would avoid implying an analytical decision where none was requested.
+
+### Intended fix
+
+1. Remove `CoordinatorDependencyError` and its export unless a real partial-composition API is reintroduced.
+2. Keep the legacy graph builder private to the module or move legacy mechanics into test support. Do not export it from `app.orchestration`.
+3. Collapse `InvestigationStatusWriter` into a specifically named terminal method on `CoordinatorTransitionService`, or remove the redundant `stop_reason` argument. Keep terminal persistence atomic and database-owned.
+4. Delete `_find_entity()`.
+5. Replace action string constants with one frozen `CoordinatorActionUrn` enum shared by timeline conversion and evaluation models. Retain exact URN wire values.
+6. Remove `denied_candidate_count` unless a documented PR 21 scenario consumes it. If retained later, count a typed skipped action rather than using `endswith()`.
+7. Type test budget helpers as `InvestigationBudget`.
+8. Expand the timeline model docstring to list every delivered coordinator event shape and its allowed fields.
+9. After the coordinator baseline is functionally complete, split the monolithic evaluation module into `models.py`, `loader.py`, `evaluator.py`, and `materializer.py` without changing the public wire contract.
+10. Test strict validation through the public loader; avoid importing `_ScenarioValidator` from tests.
+11. Type repository transition parameters as `AnalysisDisposition` and `CoordinatorTransitionKind`; remove duck-typed `object`/`hasattr` conversion.
+12. Re-export the analysis result from the evidence-analyst application package through a cycle-safe module layout, or document the top-level module as the intentional public seam.
+13. Remove the duplicate missing-traversal policy block.
+14. Give `convert_timeline_actions()` its exact action-record return annotation and remove the integration-test type ignore.
+15. Inject an event-ID factory alongside the timeline clock for reproducible action fixtures; production may still default to UUID4.
+16. Move shared DNS HTTP-stub helpers into `tests/support/` and avoid importing private names from another test module. Keep the synthetic provider behavior unchanged.
+17. Define action URNs once in a cycle-safe typed module shared by orchestration and evaluation.
+18. Add database CHECK constraints for nonnegative coordinator counters and event-specific null/required fields if direct SQL timeline hardening is desired. Keep Pydantic validation authoritative for normal application writes.
+19. Remove detached `rejection_reasons` after callers migrate to candidate-specific `rejections`; derive a reason tuple only at a compatibility boundary if still required.
+20. Split fatal context-load and pure-policy failures into distinct bounded operational codes for diagnostics.
+21. Replace free-form mismatch constructor messages with a bounded analysis-persistence mismatch code enum or dedicated fixed-message subclasses.
+22. Refactor the pointer-only Assessment persistence private return so it does not synthesize an unused EXHAUSTED disposition.
+
+### Acceptance checks
+
+- The public orchestration API exposes no test-only legacy execution path or unreachable exception.
+- Terminal persistence has one clear application abstraction.
+- Action URNs are statically exhaustive and retain their exact serialized values.
+- Coordinator metrics contain only documented PR 21 metrics.
+- Test helper types and timeline documentation match their implementations.
+- `./build.sh --qa` and `./build.sh --intg` continue to pass.

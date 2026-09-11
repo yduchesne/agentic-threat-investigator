@@ -212,7 +212,46 @@ Evaluation operates on observable actions and state transitions, not hidden chai
 
 The Investigation Coordinator receives the largest dedicated behavioral suite.
 
-Evaluate:
+PR 21 delivers a deterministic, repository-owned coordinator evaluation
+baseline (`evaluation/coordinator.py`): scenario JSON files under
+`evals/scenarios/coordinator/` load strictly (unknown fields, duplicate IDs,
+unsupported versions, blank fixture names, duplicate expectation labels, and
+empty directories all fail closed), fixtures resolve semantic labels to
+runtime identities (`evaluation/scenario_fixtures.py`), and the evaluator
+consumes the durable timeline actions produced by the production graph. Each
+scenario carries an explicit `max_transitions` bound; `NON_TERMINATION`
+covers a non-terminal state, a missing `investigation_stopped` action, a stop
+action/state mismatch, and observed-transition overrun. A pivot execution
+without a preceding matching `PIVOT_ENQUEUED` is policy-invalid, and all
+rates are computed from unique violating actions so no rate exceeds 1.0.
+
+Evaluation consumes durable structured actions and the authoritative final
+`InvestigationState` — never logs, never prose. The documented action URNs are
+`urn:ati:action:provider_query`, `entity_discovered`, `pivot_enqueued`,
+`pivot_executed`, `assessment_requested`, and `investigation_stopped`.
+
+Designed metrics (all denominator-safe, bounded to `[0.0, 1.0]`):
+
+```text
+required_pivot_recall
+invalid_pivot_rate
+invented_entity_pivot_rate
+policy_invalid_pivot_rate
+duplicate_action_rate
+stop_decision_accuracy
+budget_violation_rate
+termination
+```
+
+Hard gates for every deterministic scenario: `invented_entity_pivot_rate = 0`,
+`policy_invalid_pivot_rate = 0`, `budget_violation_rate = 0`, and
+`termination = true` under an explicit transition bound.
+
+Boundary from PR 27: PR 21 evaluation ends at Coordinator/pivot/stopping
+behavior. No semantic-relevance scoring, LLM-as-judge, cost/latency scoring,
+generic EvalRun persistence, or release thresholds are implemented.
+
+Also evaluate:
 
 - valid pivot selection;
 - missed required pivots;
@@ -224,19 +263,6 @@ Evaluate:
 - replanning behavior;
 - budget compliance;
 - relevance to the investigation objective.
-
-Suggested metrics:
-
-```text
-pivot_precision
-required_pivot_recall
-invalid_pivot_rate
-invented_entity_pivot_rate
-duplicate_action_rate
-stop_decision_accuracy
-unnecessary_action_rate
-budget_violation_rate
-```
 
 Hard requirements:
 

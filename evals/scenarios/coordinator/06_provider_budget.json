@@ -1,0 +1,15 @@
+{
+  "id": "provider-budget",
+  "version": 1,
+  "description": "Provider budget exhaustion stops with the specific reason.",
+  "fixture": {
+    "name": "provider-budget"
+  },
+  "expected": {
+    "required_pivots": [],
+    "expected_stop_reason": "provider_budget_exhausted",
+    "max_provider_calls": 1,
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

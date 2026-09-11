@@ -1,0 +1,14 @@
+{
+  "id": "replan-limit",
+  "version": 1,
+  "description": "Replan budget exhaustion stops with the specific reason.",
+  "fixture": {
+    "name": "replan-limit"
+  },
+  "expected": {
+    "required_pivots": [],
+    "expected_stop_reason": "replan_limit_reached",
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

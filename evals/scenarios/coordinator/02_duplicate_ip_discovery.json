@@ -1,0 +1,21 @@
+{
+  "id": "duplicate-ip-discovery",
+  "version": 1,
+  "description": "The same IP is discovered twice; only one pivot executes.",
+  "fixture": {
+    "name": "duplicate-ip"
+  },
+  "expected": {
+    "required_pivots": [
+      "resolved_ip"
+    ],
+    "forbidden_pivots": [],
+    "required_provider_work": [
+      "abuseipdb_resolved_ip"
+    ],
+    "expected_stop_reason": "sufficient_evidence",
+    "max_provider_calls": 3,
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "sufficient-evidence-stop",
+  "version": 1,
+  "description": "Sufficient evidence causes an immediate stop after analysis.",
+  "fixture": {
+    "name": "sufficient-evidence"
+  },
+  "expected": {
+    "required_pivots": [
+      "root_domain"
+    ],
+    "expected_stop_reason": "sufficient_evidence",
+    "max_replans": 0,
+    "max_transitions": 40
+  }
+}

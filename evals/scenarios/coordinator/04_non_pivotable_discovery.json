@@ -1,0 +1,18 @@
+{
+  "id": "non-pivotable-discovery",
+  "version": 1,
+  "description": "A discovery with no deterministic provider path is never pivoted.",
+  "fixture": {
+    "name": "non-pivotable-discovery"
+  },
+  "expected": {
+    "required_pivots": [],
+    "forbidden_pivots": [
+      "no_provider_entity"
+    ],
+    "expected_stop_reason": "no_eligible_pivots",
+    "max_provider_calls": 1,
+    "max_replans": 0,
+    "max_transitions": 40
+  }
+}

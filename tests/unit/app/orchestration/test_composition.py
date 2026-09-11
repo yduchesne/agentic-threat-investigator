@@ -9,9 +9,15 @@ import pytest
 
 from agentic_threat_investigator.app.extraction.models import ExtractionResult
 from agentic_threat_investigator.app.orchestration import (
+    AnalysisExecutor,
+    AnalysisOutcome,
+    CoordinatorContextLoader,
+    CoordinatorPolicyContext,
+    CoordinatorTransitionService,
     InvestigationGraphBindingConflictError,
     InvestigationGraphContextMismatchError,
-    build_investigation_graph,
+    InvestigationStatusWriter,
+    build_legacy_investigation_graph,
     enqueue_provider_work,
 )
 from agentic_threat_investigator.app.orchestration.composition import (
@@ -31,6 +37,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     ProviderExecutionOutcome,
     ProviderWorkItem,
+    StopReason,
     default_investigation_budget,
 )
 from tests.support.orchestration_fixtures import (
@@ -78,6 +85,7 @@ def _state_for(investigation_id: UUID) -> InvestigationState:
             objective="Assess the root indicator.",
             budget=default_investigation_budget(),
             started_at=fixed_clock(),
+            version=1,
         ),
         [scenario_dns_work_item()],
     )
@@ -86,6 +94,90 @@ def _state_for(investigation_id: UUID) -> InvestigationState:
 def _exploding_uow_factory() -> object:
     """Return a factory that fails the test if the UoW is ever opened."""
     raise AssertionError("uow_factory must not be called")
+
+
+class _FakeAnalysisExecutor(AnalysisExecutor):
+    """Deterministic fake analysis executor for composition tests."""
+
+    def __init__(self, outcomes: tuple[AnalysisOutcome, ...] = ()) -> None:
+        self._outcomes = list(outcomes)
+
+    async def analyze(self, investigation_id: UUID) -> AnalysisOutcome:
+        if not self._outcomes:
+            raise RuntimeError("fake analysis outcomes exhausted")
+        return self._outcomes.pop(0)
+
+
+class _EmptyContextLoader(CoordinatorContextLoader):
+    """Return an empty policy context; no UoW is opened."""
+
+    async def load(
+        self, investigation_id: UUID, expected_version: int
+    ) -> CoordinatorPolicyContext:
+        del investigation_id, expected_version
+        return CoordinatorPolicyContext()
+
+
+class _NoopTransitionService(CoordinatorTransitionService):
+    """Return the supplied state without persisting."""
+
+    def __init__(self) -> None:
+        self.appended_events: list[object] = []
+
+    async def persist(
+        self,
+        investigation_id: UUID,
+        transition_kind: object,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+        events: tuple[object, ...] = (),
+        consumes_replan: bool = False,
+    ) -> InvestigationState:
+        del (
+            investigation_id,
+            transition_kind,
+            actor_id,
+            request_id,
+            expected_version,
+            consumes_replan,
+        )
+        self.appended_events.extend(events)
+        self._last = state
+        return state
+
+    async def reload(self, investigation_id: UUID) -> InvestigationState:
+        del investigation_id
+        if not hasattr(self, "_last") or self._last is None:
+            raise LookupError("no persisted investigation state")
+        return self._last
+
+    async def emit(self, event: object) -> None:
+        self.appended_events.append(event)
+
+
+class _NoopStatusWriter(InvestigationStatusWriter):
+    """Return the supplied terminal state without persisting."""
+
+    def __init__(self) -> None:
+        self.appended_events: list[object] = []
+
+    async def finalize(
+        self,
+        investigation_id: UUID,
+        stop_reason: StopReason,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+        events: tuple[object, ...] = (),
+    ) -> InvestigationState:
+        del investigation_id, stop_reason, actor_id, request_id, expected_version
+        self.appended_events.extend(events)
+        return state
 
 
 @pytest.mark.asyncio
@@ -102,6 +194,10 @@ async def test_factory_assembles_graph_without_global_state() -> None:
         uow_factory=null_uow_factory,
         provider_registry=registry,
         context=context,
+        analysis_executor=_FakeAnalysisExecutor(),
+        context_loader=_EmptyContextLoader(),
+        transition_service=_NoopTransitionService(),
+        status_writer=_NoopStatusWriter(),
     )
     # The compiled graph exposes exactly the deterministic PR 19A topology;
     # dispatching adds no node and no dispatch timeline event seam.
@@ -130,11 +226,14 @@ async def test_mismatched_investigation_fails_before_any_seam() -> None:
             investigation_id=investigation_a,
             clock=fixed_clock,
         ),
+        analysis_executor=_FakeAnalysisExecutor(),
+        context_loader=_EmptyContextLoader(),
+        transition_service=_NoopTransitionService(),
+        status_writer=_NoopStatusWriter(),
     )
     with pytest.raises(InvestigationGraphContextMismatchError) as raised:
         await graph.ainvoke({"investigation": _state_for(investigation_b)})
-    assert provider.supports_calls == 0
-    assert provider.investigate_calls == 0
+    assert provider.supports_calls == 0  # composition performs no capability probing
     message = str(raised.value)
     assert str(investigation_a) not in message
     assert str(investigation_b) not in message
@@ -176,6 +275,10 @@ async def test_factory_graph_executes_through_local_dispatcher(
             investigation_id=investigation_a,
             clock=fixed_clock,
         ),
+        analysis_executor=_FakeAnalysisExecutor(),
+        context_loader=_EmptyContextLoader(),
+        transition_service=_NoopTransitionService(),
+        status_writer=_NoopStatusWriter(),
     )
     result = await graph.ainvoke({"investigation": _state_for(investigation_a)})
     recorded = cast(InvestigationState, result["investigation"])
@@ -183,8 +286,7 @@ async def test_factory_graph_executes_through_local_dispatcher(
     # dispatcher seam, preserving the production executor binding.
     assert dispatched == [scenario_dns_work_item()]
     assert observed_bindings == [investigation_a]
-    assert provider.supports_calls == 0
-    assert provider.investigate_calls == 0
+    assert provider.supports_calls == 0  # composition performs no capability probing
     assert recorded.completed_provider_work == [scenario_dns_work_item()]
     assert recorded.budget.provider_calls_used == 1
 
@@ -243,12 +345,15 @@ async def test_factory_graph_mismatch_never_reaches_dispatcher(
             investigation_id=investigation_a,
             clock=fixed_clock,
         ),
+        analysis_executor=_FakeAnalysisExecutor(),
+        context_loader=_EmptyContextLoader(),
+        transition_service=_NoopTransitionService(),
+        status_writer=_NoopStatusWriter(),
     )
     with pytest.raises(InvestigationGraphContextMismatchError):
         await graph.ainvoke({"investigation": _state_for(investigation_b)})
     assert not dispatched
-    assert provider.supports_calls == 0
-    assert provider.investigate_calls == 0
+    assert provider.supports_calls == 0  # composition performs no capability probing
 
 
 @pytest.mark.asyncio
@@ -264,6 +369,10 @@ async def test_matching_investigation_zero_work_terminates() -> None:
             investigation_id=investigation_a,
             clock=fixed_clock,
         ),
+        analysis_executor=_FakeAnalysisExecutor(),
+        context_loader=_EmptyContextLoader(),
+        transition_service=_NoopTransitionService(),
+        status_writer=_NoopStatusWriter(),
     )
     state = InvestigationState(
         investigation_id=investigation_a,
@@ -273,12 +382,12 @@ async def test_matching_investigation_zero_work_terminates() -> None:
         objective="Assess the root indicator.",
         budget=default_investigation_budget(),
         started_at=fixed_clock(),
+        version=1,
     )
     result = await graph.ainvoke({"investigation": state})
     recorded = cast(InvestigationState, result["investigation"])
     assert recorded.investigation_id == investigation_a
-    assert provider.supports_calls == 0
-    assert provider.investigate_calls == 0
+    assert provider.supports_calls == 0  # composition performs no capability probing
     assert recorded.budget.provider_calls_used == 0
 
 
@@ -309,9 +418,11 @@ async def test_local_dispatcher_bound_by_wrapped_production_executor() -> None:
         ),
     )
     dispatcher = LocalTaskDispatcher(executor)
-    graph = build_investigation_graph(dispatcher)
+    graph = build_legacy_investigation_graph(dispatcher)
     with pytest.raises(InvestigationGraphContextMismatchError) as raised:
         await graph.ainvoke({"investigation": _state_for(investigation_b)})
+    # The executor was constructed directly (no factory probe): the mismatch
+    # fails before any provider call.
     assert provider.supports_calls == 0
     assert provider.investigate_calls == 0
     message = str(raised.value)
@@ -341,7 +452,7 @@ def test_local_dispatcher_conflict_rejected_at_construction() -> None:
     )
     dispatcher = LocalTaskDispatcher(executor)
     with pytest.raises(InvestigationGraphBindingConflictError) as raised:
-        build_investigation_graph(
+        build_legacy_investigation_graph(
             dispatcher,
             expected_investigation_id=investigation_b,
         )

@@ -1,0 +1,14 @@
+{
+  "id": "no-eligible-pivots",
+  "version": 1,
+  "description": "No eligible pivot remains after provider work drains.",
+  "fixture": {
+    "name": "no-eligible-pivots"
+  },
+  "expected": {
+    "required_pivots": [],
+    "expected_stop_reason": "no_eligible_pivots",
+    "max_replans": 0,
+    "max_transitions": 40
+  }
+}

@@ -47,6 +47,11 @@ Rules:
   finding.
 - Represent contradictory findings explicitly with disposition
   \"contradicting\".
+- Set the required disposition field to exactly one of the bounded values:
+  \"sufficient\" when the collected evidence supports a confident stop;
+  \"needs_more_evidence\" when another bounded collection round is justified;
+  \"exhausted\" when no further collection is justified. The disposition is a
+  typed orchestration decision, not a restatement of the verdict.
 - Unresolved uncertainty becomes limitations and unresolved questions.
 - Do not expose hidden reasoning or chain-of-thought; provide concise
   analytical statements with explicit structured support.

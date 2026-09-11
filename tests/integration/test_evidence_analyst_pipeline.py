@@ -54,6 +54,7 @@ from agentic_threat_investigator.domain.evidence import (
     EvidenceType,
 )
 from agentic_threat_investigator.domain.investigation import (
+    AnalysisDisposition,
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
@@ -189,6 +190,7 @@ class Graph:
                 if support
                 else ()
             ),
+            disposition=AnalysisDisposition.SUFFICIENT,
         )
 
 
@@ -865,5 +867,5 @@ async def test_llm_accounting_persists_across_attempts(
     async with uow_factory() as uow:
         state = await uow.investigations.get_by_id(graph.investigation_id)
         assert state is not None and state.budget.llm_calls_used == 2
-        # create + two reservations + pointer update
+        # create + two reservations + one coherent analysis transition
         assert state.version == created + 3

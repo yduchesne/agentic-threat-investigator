@@ -1,0 +1,15 @@
+{
+  "id": "entity-budget",
+  "version": 1,
+  "description": "Entity working-set exhaustion blocks discovered-entity expansion.",
+  "fixture": {
+    "name": "entity-budget"
+  },
+  "expected": {
+    "required_pivots": [],
+    "expected_stop_reason": "entity_budget_exhausted",
+    "max_provider_calls": 2,
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

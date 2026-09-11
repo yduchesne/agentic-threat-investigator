@@ -43,6 +43,11 @@ class PostgresInvestigationTimelineRepository(InvestigationTimelineRepository):
             entity_ids=tuple(row.entity_ids),
             relationship_ids=tuple(row.relationship_ids),
             error_code=row.error_code,
+            pivot_depth=row.pivot_depth,
+            reason_code=row.reason_code,
+            provider_calls_used=row.provider_calls_used,
+            replans_used=row.replans_used,
+            entity_count=row.entity_count,
         )
 
     async def append(self, event: InvestigationTimelineEvent) -> None:
@@ -58,6 +63,11 @@ class PostgresInvestigationTimelineRepository(InvestigationTimelineRepository):
             entity_ids=list(event.entity_ids),
             relationship_ids=list(event.relationship_ids),
             error_code=event.error_code,
+            pivot_depth=event.pivot_depth,
+            reason_code=event.reason_code,
+            provider_calls_used=event.provider_calls_used,
+            replans_used=event.replans_used,
+            entity_count=event.entity_count,
         )
         self._session.add(row)
         await self._session.flush()
