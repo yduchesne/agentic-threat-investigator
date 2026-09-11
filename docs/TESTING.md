@@ -186,13 +186,30 @@ Priority unit-test areas include:
   traversal, same-or-better-depth suppression, root work at entity-budget
   capacity, exact depth/entity/provider/replan boundaries, stop-reason
   precedence, and replan-only-with-new-work semantics;
-- coordinator scenario loading (PR 21): a strict 13-scenario corpus under
-  `evals/scenarios/coordinator/` that fails closed on malformed JSON,
-  duplicate IDs, unsupported versions, blank fixture names, unknown
-  fields, and duplicate labels;
-- coordinator trajectory evaluation (PR 21): every failure code, bounded
-  `[0.0, 1.0]` metrics, depth-aware provider-work matching, transition
-  bounds, and deterministic failure ordering;
+- coordinator scenario loading (PR 21, updated by PR 21D): a strict
+  13-scenario corpus under `evals/scenarios/coordinator/` that fails closed
+  on malformed JSON, duplicate IDs, unsupported versions, blank fixture
+  names, unknown fields, duplicate labels, and — since PR 21D — a missing
+  `allowed_pivots` oracle, duplicate allowed pivot identities, blank or
+  negative pivot entries, required pivots not represented in `allowed_pivots`,
+  and forbidden pivots appearing in `allowed_pivots`;
+- coordinator trajectory evaluation (PR 21, updated by PR 21D): every
+  failure code, bounded `[0.0, 1.0]` metrics, depth-aware provider-work
+  matching, transition bounds, deterministic failure ordering, and the
+  independent per-scenario pivot oracle — pivot authorization
+  (`PIVOT_ENQUEUED`) and `PIVOT_EXECUTED` are each validated against
+  `allowed_pivots` (entity + exact depth), execution additionally requires a
+  preceding matching enqueue, an illegal enqueue fails even when never
+  executed, and policy-invalid rates count unique pivot identities;
+- PR 21B/21D admission and corpus semantics: the entity budget is evaluated
+  only above exact capacity (`entity_count > max_entities`); an
+  exact-capacity pivot onto an already-admitted entity remains legal. Every
+  repository-owned scenario executes through the real Coordinator graph from
+  its deterministic checkpoint and evaluates cleanly (zero
+  invented/policy-invalid pivots, zero budget violations, full termination)
+  in `tests/unit/app/orchestration/test_coordinator_trajectories.py`, and
+  the canonical PostgreSQL trajectory evaluates through the loaded oracle in
+  `tests/integration/test_coordinator_trajectory.py`;
 - relationship extraction;
 - deterministic source extraction (PR 18B) including per-source
   malformed-fact rejection and deterministic deduplication;
@@ -207,9 +224,15 @@ Priority unit-test areas include:
 - deterministic report/presentation formatting;
 - deterministic orchestration mechanics (PR 19A, updated by PR 19C): typed
   work-item validation, FIFO queue selection, duplicate suppression, outcome
-  bookkeeping, provider-call counter accounting, JSON state round-trip, and
-  graph termination on queue exhaustion via the LangGraph skeleton in
-  `app/orchestration`, with graph mechanics tested against `TaskDispatcher`;
+  bookkeeping, provider-call counter accounting, and JSON state round-trip.
+  Queue-exhaustion termination is legacy PR 19A mechanics exercised only
+  through the explicitly named `build_legacy_investigation_graph` test
+  helper; it does not describe the production graph, which is
+  Coordinator-driven (coordinator -> execute provider work -> authorize
+  pivot -> request analysis -> stop). Queue exhaustion no longer terminates
+  production investigation execution directly: it returns control to the
+  Coordinator, which selects the next bounded decision or a specific
+  stop reason. Graph mechanics are tested against `TaskDispatcher`;
 - local dispatch (PR 19C): `LocalTaskDispatcher` delegates the exact selected
   item exactly once, preserves the exact outcome, propagates exceptions and
   cancellation unchanged, and performs no state, persistence, or timeline

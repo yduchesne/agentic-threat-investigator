@@ -329,9 +329,13 @@ def resolve_coordinator_scenario(
             f"{sorted(work_overlap)}"
         )
 
-    # Entity labels referenced by required/forbidden pivots and provider work.
+    # Entity labels referenced by required/forbidden pivots, the scenario's
+    # allowed-pivot oracle, and provider work.
     referenced_entities: set[str] = set(required | forbidden)
     referenced_entities.update(scenario.expected.required_research_markers)
+    referenced_entities.update(
+        pivot.entity for pivot in scenario.expected.allowed_pivots
+    )
     referenced_work: set[str] = set(required_work | forbidden_work)
     for work_label in referenced_work:
         work = provider_work.get(work_label)

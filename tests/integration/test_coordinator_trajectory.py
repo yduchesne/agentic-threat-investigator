@@ -428,7 +428,7 @@ async def test_canonical_domain_ip_sufficient_trajectory(
         scenario=scenario,
         resolution=resolution,
         final_state=recorded,
-        actions=actions,  # type: ignore[arg-type]
+        actions=actions,
         observed_transitions=observed_transitions,
     )
     assert result.passed, result.failures

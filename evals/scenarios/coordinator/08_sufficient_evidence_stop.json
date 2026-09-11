@@ -9,6 +9,12 @@
     "required_pivots": [
       "root_domain"
     ],
+    "allowed_pivots": [
+      {
+        "entity": "root_domain",
+        "depth": 0
+      }
+    ],
     "expected_stop_reason": "sufficient_evidence",
     "max_replans": 0,
     "max_transitions": 40

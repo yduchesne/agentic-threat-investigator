@@ -169,6 +169,32 @@ PR 21 consumes PR 19A queue/state mechanics, PR 19B provider execution, PR 19C d
 
 The dispatcher does not decide investigative policy; it dispatches only work already selected/authorized by orchestration.
 
+### PR 21 completion follow-ups
+
+PR 21 stays `[DONE]`; its delivered state on `main` includes the following
+follow-up PRs, which closed the remaining hardening gaps without introducing
+new v0.1 feature phases:
+
+- **PR 21B** — admitted-entity budget semantics (exact-capacity pivots of
+  already-admitted entities remain legal; only overflow discoveries are
+  rejected), investigated-state timing, and fail-closed traversal-metadata
+  validation.
+- **PR 21C / 21C2** — the production `LocalInvestigationRunner` application
+  seam: authoritative load through a short UnitOfWork, graph execution
+  outside any enclosing transaction, and an authoritative durable reload as
+  the runner result; canonical PostgreSQL execution through the production
+  graph; terminal idempotency; investigation binding/isolation; and typed
+  malformed-graph-output handling.
+- **PR 21D** — the independent per-scenario pivot-policy oracle
+  (`allowed_pivots` with semantic entity labels and exact depths),
+  evaluator metric hardening (unique-identity policy-invalid counting,
+  illegal enqueue detection even when never executed, bounded
+  `invalid_pivot_rate`/`policy_invalid_pivot_rate`), and documentation
+  reconciliation (`EVALUATION.md`, `TESTING.md`).
+
+PR 22 remains the next feature PR (Threat Research / RAG); PR 27 generic
+evaluation-platform scope is not absorbed into PR 21.
+
 ## PR 22 — Threat Research RAG agent
 
 Deliver conditional research triggering, Research Agent, RAG claim/chunk citations, persisted research results, retrieval/synthesis evaluations, and no-relevant-context behavior.
