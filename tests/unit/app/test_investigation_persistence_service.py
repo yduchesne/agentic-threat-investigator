@@ -110,6 +110,45 @@ class FakeInvestigationRepository(InvestigationRepository):
             raise self.update_error
         return self.update_result
 
+    async def update_coordinator_state(
+        self,
+        investigation_id: UUID,
+        transition_kind: object,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+        consumes_replan: bool = False,
+    ) -> InvestigationWriteResult:
+        """Test fake: accept the transition and report a new version."""
+        self.record("update_coordinator_state", investigation_id)
+        if self.update_error is not None:
+            raise self.update_error
+        return InvestigationWriteResult(investigation_id, 7, BatchOutcome.UPDATED)
+
+    async def set_analysis_result(
+        self,
+        investigation_id: UUID,
+        assessment_id: UUID,
+        analyzed_evidence_ids: list[UUID],
+        disposition: object,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+    ) -> InvestigationWriteResult:
+        """Test fake: accept and report a new version."""
+        del (
+            assessment_id,
+            analyzed_evidence_ids,
+            disposition,
+            actor_id,
+            request_id,
+            expected_version,
+        )
+        return InvestigationWriteResult(investigation_id, 8, BatchOutcome.UPDATED)
+
     async def update_assessment_reference(
         self,
         investigation_id: UUID,

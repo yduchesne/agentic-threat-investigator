@@ -585,6 +585,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             occurred_at=self._context.clock(),
             provider=work_item.provider,
             target_entity_id=work_item.entity_id,
+            pivot_depth=work_item.depth,
         )
 
     def _evidence_persisted_event(

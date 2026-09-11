@@ -1,0 +1,23 @@
+{
+  "id": "cycle-suppression",
+  "version": 1,
+  "description": "domain -> IP -> domain -> IP never repeats equivalent execution.",
+  "fixture": {
+    "name": "cycle-suppression"
+  },
+  "expected": {
+    "required_pivots": [
+      "resolved_ip"
+    ],
+    "forbidden_pivots": [
+      "root_domain"
+    ],
+    "required_provider_work": [
+      "abuseipdb_resolved_ip"
+    ],
+    "expected_stop_reason": "sufficient_evidence",
+    "max_provider_calls": 2,
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

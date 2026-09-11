@@ -17,7 +17,7 @@ import pytest
 from agentic_threat_investigator.app.orchestration import (
     InvestigationGraphBindingConflictError,
     InvestigationGraphContextMismatchError,
-    build_investigation_graph,
+    build_legacy_investigation_graph,
     enqueue_provider_work,
 )
 from agentic_threat_investigator.app.orchestration.dispatcher import (
@@ -54,7 +54,7 @@ async def _run(
 ) -> InvestigationState:
     state = initial_state if initial_state is not None else scenario_initial_state()
     task_dispatcher = dispatcher if dispatcher is not None else scenario_dispatcher()
-    result = await build_investigation_graph(task_dispatcher).ainvoke(
+    result = await build_legacy_investigation_graph(task_dispatcher).ainvoke(
         {"investigation": state}
     )
     return cast(InvestigationState, result["investigation"])
@@ -184,7 +184,7 @@ class TestGraphDispatcherSafety:
                 )
             }
         )
-        graph = build_investigation_graph(dispatcher)
+        graph = build_legacy_investigation_graph(dispatcher)
         with pytest.raises(ValueError, match="dispatcher outcome does not match"):
             await graph.ainvoke({"investigation": scenario_initial_state()})
         # The mismatched item was dispatched once and then rejected: no
@@ -208,7 +208,7 @@ class TestGraphDispatcherSafety:
 
         exc = RuntimeError("dispatch failed upstream")
         dispatcher = RaisingDispatcher(exc)
-        graph = build_investigation_graph(dispatcher)
+        graph = build_legacy_investigation_graph(dispatcher)
         with pytest.raises(RuntimeError) as raised:
             await graph.ainvoke({"investigation": scenario_initial_state()})
         # The exact exception object reaches the caller unchanged; the graph
@@ -225,7 +225,7 @@ class TestGraphContextBinding:
         """A bound graph accepts its own investigation ID unchanged."""
         dispatcher = scenario_dispatcher()
         state = scenario_investigation_state()
-        graph = build_investigation_graph(
+        graph = build_legacy_investigation_graph(
             dispatcher,
             expected_investigation_id=state.investigation_id,
         )
@@ -255,7 +255,7 @@ class TestGraphContextBinding:
             ) -> ProviderExecutionOutcome:
                 raise AssertionError("dispatcher must not be called")
 
-        graph = build_investigation_graph(
+        graph = build_legacy_investigation_graph(
             ExplodingDispatcher(),
             expected_investigation_id=expected,
         )
@@ -279,7 +279,7 @@ class TestGraphContextBinding:
     async def test_unbound_dispatcher_remains_usable(self) -> None:
         """An unbound fake dispatcher works without an expected investigation ID."""
         dispatcher = scenario_dispatcher()
-        result = await build_investigation_graph(dispatcher).ainvoke(
+        result = await build_legacy_investigation_graph(dispatcher).ainvoke(
             {"investigation": scenario_initial_state()}
         )
         state = cast(InvestigationState, result["investigation"])
@@ -326,7 +326,7 @@ class TestGraphBindingThroughLocalDispatcher:
         """A local dispatcher's wrapped executor binding is adopted."""
         state = scenario_investigation_state()
         executor = BoundFakeExecutor(state.investigation_id)
-        graph = build_investigation_graph(LocalTaskDispatcher(executor))
+        graph = build_legacy_investigation_graph(LocalTaskDispatcher(executor))
         result = await graph.ainvoke(
             {"investigation": enqueue_provider_work(state, [scenario_dns_work_item()])}
         )
@@ -342,7 +342,7 @@ class TestGraphBindingThroughLocalDispatcher:
         other = UUID("00000000-0000-0000-0000-0000000000bb")
         assert other != state.investigation_id
         executor = BoundFakeExecutor(other)
-        graph = build_investigation_graph(LocalTaskDispatcher(executor))
+        graph = build_legacy_investigation_graph(LocalTaskDispatcher(executor))
         with pytest.raises(InvestigationGraphContextMismatchError):
             await graph.ainvoke(
                 {
@@ -359,7 +359,7 @@ class TestGraphBindingThroughLocalDispatcher:
         """An explicit expected ID equal to the wrapped binding is accepted."""
         state = scenario_investigation_state()
         executor = BoundFakeExecutor(state.investigation_id)
-        graph = build_investigation_graph(
+        graph = build_legacy_investigation_graph(
             LocalTaskDispatcher(executor),
             expected_investigation_id=state.investigation_id,
         )
@@ -376,7 +376,7 @@ class TestGraphBindingThroughLocalDispatcher:
         other = UUID("00000000-0000-0000-0000-0000000000bb")
         executor = BoundFakeExecutor(state.investigation_id)
         with pytest.raises(InvestigationGraphBindingConflictError) as raised:
-            build_investigation_graph(
+            build_legacy_investigation_graph(
                 LocalTaskDispatcher(executor),
                 expected_investigation_id=other,
             )
@@ -393,7 +393,7 @@ class TestGraphBindingThroughLocalDispatcher:
         """A generic unbound dispatcher honors an explicit expected ID."""
         state = scenario_investigation_state()
         dispatcher = scenario_dispatcher()
-        graph = build_investigation_graph(
+        graph = build_legacy_investigation_graph(
             dispatcher,
             expected_investigation_id=state.investigation_id,
         )

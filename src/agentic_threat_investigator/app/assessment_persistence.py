@@ -19,11 +19,13 @@ import logging
 from collections.abc import Callable
 from uuid import UUID
 
+from agentic_threat_investigator.app.analysis_result import EvidenceAnalysisResult
 from agentic_threat_investigator.app.assessment_provenance import (
     AssessmentProvenanceContext,
     AssessmentProvenanceValidator,
 )
 from agentic_threat_investigator.app.persistence.repositories import (
+    InvestigationNotFoundError,
     UnitOfWork,
     enforce_assessment_collection_bounds,
 )
@@ -35,6 +37,7 @@ from agentic_threat_investigator.domain.audit import (
 )
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
+from agentic_threat_investigator.domain.investigation import AnalysisDisposition
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -81,6 +84,50 @@ class AssessmentPersistenceService:
         has been durably inserted. Oversized candidate collections are
         rejected before the UnitOfWork is entered.
         """
+        result = await self._persist(
+            assessment,
+            actor_id=actor_id,
+            request_id=request_id,
+            expected_investigation_version=expected_investigation_version,
+        )
+        return result.assessment
+
+    async def persist_assessment_with_result(
+        self,
+        assessment: Assessment,
+        disposition: AnalysisDisposition,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_investigation_version: int | None = None,
+    ) -> EvidenceAnalysisResult:
+        """Persist one Assessment atomically with its analysis metadata (PR 21).
+
+        One short transaction writes the new immutable Assessment, the
+        Investigation current Assessment pointer, the exact analyzed Evidence
+        identities, the typed disposition, and the Investigation version/
+        history update. The returned result carries the authoritative
+        Investigation version after the transaction so the caller never
+        persists coordinator state against a stale version.
+        """
+        return await self._persist(
+            assessment,
+            disposition=disposition,
+            actor_id=actor_id,
+            request_id=request_id,
+            expected_investigation_version=expected_investigation_version,
+        )
+
+    async def _persist(
+        self,
+        assessment: Assessment,
+        *,
+        disposition: AnalysisDisposition | None = None,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_investigation_version: int | None = None,
+    ) -> EvidenceAnalysisResult:
+        """Validate and persist the Assessment atomically with metadata."""
         # Reject oversized candidate collections before the UnitOfWork is
         # entered and before any provenance read; only the collection name,
         # count, and limit are reported.
@@ -93,13 +140,42 @@ class AssessmentPersistenceService:
             )
             if persisted.id is None:  # pragma: no cover - insert assigns an id
                 raise RuntimeError("assessment persistence returned no identity")
-            await uow.investigations.update_assessment_reference(
-                assessment.investigation_id,
-                persisted.id,
-                actor_id=actor_id,
-                request_id=request_id,
-                expected_version=expected_investigation_version,
-            )
+            if disposition is not None:
+                # The analysis write requires the exact pre-write Investigation
+                # version. The analyst flow supplies it from the durable LLM
+                # reservation chain; the no-evidence path reads it fresh.
+                expected_version = expected_investigation_version
+                if expected_version is None:
+                    current_state = await uow.investigations.get_by_id(
+                        assessment.investigation_id
+                    )
+                    if current_state is None or current_state.version is None:
+                        raise InvestigationNotFoundError(
+                            str(assessment.investigation_id)
+                        )
+                    expected_version = current_state.version
+                # One coherent Investigation transition records the pointer,
+                # the exact analyzed Evidence identities, and the disposition
+                # in a single version/history row.
+                analysis_result = await uow.investigations.set_analysis_result(
+                    assessment.investigation_id,
+                    persisted.id,
+                    list(assessment.analyzed_evidence_ids),
+                    disposition,
+                    actor_id=actor_id,
+                    request_id=request_id,
+                    expected_version=expected_version,
+                )
+                latest_version = analysis_result.version
+            else:
+                pointer_result = await uow.investigations.update_assessment_reference(
+                    assessment.investigation_id,
+                    persisted.id,
+                    actor_id=actor_id,
+                    request_id=request_id,
+                    expected_version=expected_investigation_version,
+                )
+                latest_version = pointer_result.version
             await uow.audit_events.append(
                 AuditEvent(
                     action=AuditAction.ASSESSMENT_CREATE,
@@ -120,7 +196,11 @@ class AssessmentPersistenceService:
             assessment.investigation_id,
             persisted.version,
         )
-        return persisted
+        return EvidenceAnalysisResult(
+            assessment=persisted,
+            disposition=disposition or AnalysisDisposition.EXHAUSTED,
+            investigation_version=latest_version,
+        )
 
     async def delete_assessment(
         self,

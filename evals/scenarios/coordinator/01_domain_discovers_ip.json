@@ -1,0 +1,23 @@
+{
+  "id": "domain-discovers-ip",
+  "version": 1,
+  "description": "Root domain DNS work discovers an actionable IP, which is pivoted and analyzed to a sufficient stop.",
+  "fixture": {
+    "name": "canonical-domain-ip"
+  },
+  "expected": {
+    "required_pivots": [
+      "resolved_ip"
+    ],
+    "forbidden_pivots": [],
+    "required_provider_work": [
+      "dns_root_domain",
+      "threatfox_resolved_ip"
+    ],
+    "forbidden_provider_work": [],
+    "expected_stop_reason": "sufficient_evidence",
+    "max_provider_calls": 2,
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

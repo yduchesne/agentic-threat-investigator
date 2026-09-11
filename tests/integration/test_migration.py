@@ -63,6 +63,9 @@ EXPECTED_FUNCTIONS = {
     "set_investigation_assessment",
     "soft_delete_assessment",
     "update_investigation_budget",
+    "update_investigation_coordinator_state",
+    "set_investigation_analysis_result",
+    "jsonb_array_starts_with",
 }
 
 
@@ -775,4 +778,68 @@ async def test_assessment_migration_rejects_nonempty_legacy_table() -> None:
                 await connection.commit()
         finally:
             await engine.dispose()
+        command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_coordinator_migrations_downgrade_and_re_upgrade() -> None:
+    """PR 21 functions and timeline columns are reversible and restorable."""
+    alembic_cfg = Config("alembic.ini")
+
+    async def installed_state() -> tuple[set[str], set[str]]:
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                functions = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT routine_name FROM information_schema.routines "
+                            "WHERE routine_schema='ati'"
+                        )
+                    )
+                }
+                columns = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_schema='ati' "
+                            "AND table_name='investigation_timeline_event'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        return functions, columns
+
+    coordinator_functions = {
+        "update_investigation_coordinator_state",
+        "set_investigation_analysis_result",
+        "jsonb_array_starts_with",
+    }
+    coordinator_columns = {
+        "pivot_depth",
+        "reason_code",
+        "provider_calls_used",
+        "replans_used",
+        "entity_count",
+    }
+    try:
+        command.downgrade(alembic_cfg, "0015_llm_accounting")
+        functions, columns = await installed_state()
+        assert coordinator_functions.isdisjoint(functions)
+        assert coordinator_columns.isdisjoint(columns)
+
+        command.upgrade(alembic_cfg, "0016_coordinator_transition")
+        functions, columns = await installed_state()
+        assert coordinator_functions <= functions
+        assert coordinator_columns.isdisjoint(columns)
+
+        command.upgrade(alembic_cfg, "head")
+        functions, columns = await installed_state()
+        assert coordinator_functions <= functions
+        assert coordinator_columns <= columns
+    finally:
         command.upgrade(alembic_cfg, "head")

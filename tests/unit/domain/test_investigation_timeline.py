@@ -249,6 +249,89 @@ class TestInvestigationTimelineEvent:
         with pytest.raises(ValidationError):
             _event(type=event_type, **overrides)
 
+    def test_pivot_enqueued_requires_entity_ids_without_provider(self) -> None:
+        """PIVOT_ENQUEUED events need only entity IDs; no provider/target."""
+        event = _event(
+            type=InvestigationTimelineEventType.PIVOT_ENQUEUED,
+            provider=None,
+            target_entity_id=None,
+            entity_ids=(uuid4(),),
+        )
+        assert event.entity_ids
+        with pytest.raises(ValidationError):
+            _event(
+                type=InvestigationTimelineEventType.PIVOT_ENQUEUED,
+                provider=None,
+                target_entity_id=None,
+                entity_ids=(),
+            )
+
+    def test_pivot_skipped_requires_entity_ids_without_provider(self) -> None:
+        """PIVOT_SKIPPED events need only entity IDs; no provider/target."""
+        event = _event(
+            type=InvestigationTimelineEventType.PIVOT_SKIPPED,
+            provider=None,
+            target_entity_id=None,
+            entity_ids=(uuid4(),),
+            reason_code="duplicate_pivot",
+        )
+        assert event.entity_ids
+        assert event.reason_code == "duplicate_pivot"
+        with pytest.raises(ValidationError):
+            _event(
+                type=InvestigationTimelineEventType.PIVOT_SKIPPED,
+                provider=None,
+                target_entity_id=None,
+                entity_ids=(),
+                reason_code="duplicate_pivot",
+            )
+        with pytest.raises(ValidationError):
+            _event(
+                type=InvestigationTimelineEventType.PIVOT_SKIPPED,
+                provider=None,
+                target_entity_id=None,
+                entity_ids=(uuid4(),),
+            )
+
+    def test_assessment_requested_requires_no_provider_or_target(self) -> None:
+        """ASSESSMENT_REQUESTED events carry no provider/target/tuples."""
+        event = _event(
+            type=InvestigationTimelineEventType.ASSESSMENT_REQUESTED,
+            provider=None,
+            target_entity_id=None,
+        )
+        assert event.error_code is None
+        with pytest.raises(ValidationError):
+            _event(
+                type=InvestigationTimelineEventType.ASSESSMENT_REQUESTED,
+                provider=SourceId.GOOGLE_PUBLIC_DNS,
+            )
+
+    def test_investigation_stopped_requires_no_provider_or_target(self) -> None:
+        """INVESTIGATION_STOPPED events carry no provider/target/tuples."""
+        event = _event(
+            type=InvestigationTimelineEventType.INVESTIGATION_STOPPED,
+            provider=None,
+            target_entity_id=None,
+            reason_code="sufficient_evidence",
+        )
+        assert event.error_code is None
+        assert event.reason_code == "sufficient_evidence"
+        with pytest.raises(ValidationError):
+            _event(
+                type=InvestigationTimelineEventType.INVESTIGATION_STOPPED,
+                provider=None,
+                target_entity_id=None,
+                reason_code="sufficient_evidence",
+                error_code="fatal_error",
+            )
+        with pytest.raises(ValidationError):
+            _event(
+                type=InvestigationTimelineEventType.INVESTIGATION_STOPPED,
+                provider=None,
+                target_entity_id=None,
+            )
+
 
 class TestUnitOfWorkTimelineSink:
     """The UoW-backed sink appends exactly once per event."""

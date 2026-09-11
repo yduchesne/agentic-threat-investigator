@@ -351,6 +351,22 @@ def test_invalid_status_transition_raises_typed_error() -> None:
         )
 
 
+def test_persisted_running_discoveries_require_traversal_metadata() -> None:
+    """Resumable state cannot silently lose discovery depth/order."""
+    with pytest.raises(ValidationError, match="require traversal metadata"):
+        InvestigationState(
+            investigation_id=uuid4(),
+            status=InvestigationStatus.RUNNING,
+            trigger_type=InvestigationTriggerType.MANUAL,
+            root_entity_ids=[uuid4()],
+            discovered_entity_ids=[uuid4()],
+            objective="Reject ambiguous resumed discoveries.",
+            budget=default_investigation_budget(),
+            started_at=_STARTED_AT,
+            version=1,
+        )
+
+
 def test_valid_status_transition_passes_domain_validation() -> None:
     """Confirmed transitions pass domain validation without raising."""
 

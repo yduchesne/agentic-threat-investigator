@@ -34,6 +34,7 @@ from agentic_threat_investigator.domain.assessment import (
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.immutable_json import FrozenDict, freeze_mapping
+from agentic_threat_investigator.domain.investigation import AnalysisDisposition
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 
@@ -141,6 +142,13 @@ class EvidenceAnalystDecision(BaseModel):
     ``investigation_id``, ``analyzed_evidence_ids``, and every
     persistence-owned field when it constructs the authoritative
     :class:`~agentic_threat_investigator.domain.assessment.Assessment`.
+
+    ``disposition`` is the required bounded orchestration decision:
+    ``SUFFICIENT`` (the collected evidence supports a confident stop),
+    ``NEEDS_MORE_EVIDENCE`` (another bounded collection round is justified),
+    or ``EXHAUSTED`` (no further collection is justified). It is a typed
+    semantic output, never derived by the application from verdict,
+    confidence, findings, or recommendation prose.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -148,6 +156,7 @@ class EvidenceAnalystDecision(BaseModel):
     verdict: Verdict
     confidence: AssessmentConfidence
     summary: str
+    disposition: AnalysisDisposition
     findings: tuple[AnalyticalFinding, ...] = ()
     limitations: tuple[str, ...] = ()
     unresolved_questions: tuple[str, ...] = ()

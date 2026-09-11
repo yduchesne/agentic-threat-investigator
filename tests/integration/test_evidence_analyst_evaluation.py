@@ -49,6 +49,7 @@ from agentic_threat_investigator.domain.assessment import (
     FindingDisposition,
     Verdict,
 )
+from agentic_threat_investigator.domain.investigation import AnalysisDisposition
 from agentic_threat_investigator.evaluation.analyst import (
     AnalystEvaluationFailureCode,
     AnalystScenario,
@@ -190,6 +191,7 @@ async def test_behaviorally_bad_assessment_still_persists_and_fails(
                 confidence=AssessmentConfidence.MEDIUM,
             ),
         ),
+        disposition=AnalysisDisposition.EXHAUSTED,
     )
     llm = FakeLlmClient()
     llm.set_default(bad_decision)

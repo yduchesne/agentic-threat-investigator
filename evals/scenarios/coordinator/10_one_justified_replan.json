@@ -1,0 +1,20 @@
+{
+  "id": "one-justified-replan",
+  "version": 1,
+  "description": "NEEDS_MORE_EVIDENCE authorizes exactly one additional round then sufficient.",
+  "fixture": {
+    "name": "one-replan"
+  },
+  "expected": {
+    "required_pivots": [
+      "resolved_ip"
+    ],
+    "required_provider_work": [
+      "abuseipdb_resolved_ip"
+    ],
+    "expected_stop_reason": "sufficient_evidence",
+    "max_provider_calls": 2,
+    "max_replans": 1,
+    "max_transitions": 40
+  }
+}

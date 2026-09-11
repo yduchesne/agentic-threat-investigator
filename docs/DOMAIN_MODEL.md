@@ -460,6 +460,46 @@ The exact implementation model may evolve, but these invariants do not:
 - deterministic policy validates eligibility and budgets;
 - prose is not parsed to determine the action.
 
+### Discovery traversal, investigated depth, and entity budget (PR 21)
+
+Each known entity has one typed traversal entry
+(`EntityTraversalState`): `first_discovery_ordinal`, `minimum_depth`, and
+`best_investigated_depth`.
+
+- Roots occupy the leading ordinals in `root_entity_ids` order at depth 0;
+  provider discoveries follow in first-discovery order at
+  `parent work depth + 1`. Rediscovery keeps the first ordinal and lowers
+  only `minimum_depth`.
+- `best_investigated_depth` is the shallowest depth at which a pivot
+  actually entered execution. It is independent of `minimum_depth`, so an
+  entity investigated at depth 3 and later rediscovered at depth 1 can be
+  legitimately re-investigated at the shallower depth.
+- Same-or-better-depth suppression compares the proposed pivot depth with
+  `best_investigated_depth`; equivalent pending pivots and provider work are
+  compared by entity and same-or-better depth.
+- The entity budget bounds expansion to additional unique discovered
+  entities. Roots are already admitted and may receive their initial bounded
+  provider work even when the unique working-set size equals the maximum;
+  persisted discoveries are never deleted to repair an overage.
+- The provider counter increments exactly once per actually executed
+  `ProviderWorkItem`; the replan counter increments exactly once per
+  authorized additional collection round after `NEEDS_MORE_EVIDENCE`;
+  LLM-call accounting remains owned by PR 20B.
+
+### Pivot lifecycle (PR 21)
+
+Each authorized pivot transitions deterministically:
+
+```text
+PENDING -> IN_PROGRESS -> COMPLETED
+PENDING -> SKIPPED
+```
+
+`PENDING` when authorization commits, `IN_PROGRESS` immediately before the
+first provider dispatch, `COMPLETED` after all authorized provider work for
+that pivot is durably recorded (including failed outcomes), and `SKIPPED`
+when an authorized request is invalidated before execution.
+
 ### Evidence Analyst result (PR 20B)
 
 The model returns the semantic-only :class:`EvidenceAnalystDecision`, never
@@ -471,11 +511,28 @@ class EvidenceAnalystDecision(BaseModel):
     verdict: Verdict
     confidence: AssessmentConfidence
     summary: str
+    disposition: AnalysisDisposition
     findings: tuple[AnalyticalFinding, ...] = ()
     limitations: tuple[str, ...] = ()
     unresolved_questions: tuple[str, ...] = ()
     recommended_next_steps: tuple[str, ...] = ()
 ```
+
+``disposition`` is a required bounded typed decision
+(`SUFFICIENT` | `NEEDS_MORE_EVIDENCE` | `EXHAUSTED`) that drives
+orchestration. It is never derived by the application from verdict,
+confidence, findings, or recommendation prose; the model emits it as a
+semantic output. A no-Evidence analysis short-circuits to a documented
+`EXHAUSTED` Assessment with no LLM call.
+
+After Assessment persistence the application produces one typed
+`EvidenceAnalysisResult` carrying the persisted Assessment, the disposition,
+and the authoritative Investigation version allocated by the same
+transaction that wrote the Assessment, the current Assessment pointer, the
+exact analyzed Evidence identities, and the disposition into Investigation
+operational state. The coordinator adopts that authoritative state and never
+substitutes the in-memory evidence list for an empty analyzed set, and never
+fabricates an Assessment identity.
 
 The model sets only semantic analytical content. The application stamps
 authoritative identities: ``investigation_id`` and

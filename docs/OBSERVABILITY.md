@@ -182,6 +182,25 @@ Do not log credentials or authorization headers.
 
 Local dispatch is an internal application boundary. PR 19C adds no investigation timeline event solely for local dispatch.
 
+PR 21 extends the analyst-facing timeline with stable coordinator event types
+(`PIVOT_ENQUEUED`, `PIVOT_EXECUTED`, `PIVOT_SKIPPED`,
+`ASSESSMENT_REQUESTED`, `INVESTIGATION_STOPPED`), bounded fields
+(`pivot_depth`, `reason_code`, `provider_calls_used`, `replans_used`,
+`entity_count`), and the documented action URN vocabulary
+(`urn:ati:action:provider_query`, `entity_discovered`, `pivot_enqueued`,
+`pivot_executed`, `pivot_skipped`, `assessment_requested`,
+`investigation_stopped`) consumed by coordinator trajectory evaluation.
+Graph transitions append their matching events in the same UnitOfWork
+transaction as the state change (PIVOT_ENQUEUED with authorization,
+PIVOT_EXECUTED when a pivot enters execution, ENTITIES_DISCOVERED with
+outcome recording, INVESTIGATION_STOPPED with the terminal transition);
+ASSESSMENT_REQUESTED is appended in a short committed transaction before
+analyst execution. A single deterministic converter
+(`convert_timeline_actions`) maps ordered events to evaluator action records.
+Events carry typed identifiers and bounded depth/reason/counter fields only —
+never provider payloads, secrets, prompts, or free-form model reasoning — and
+remain append-only.
+
 Tracing may instrument dispatch, but tracing is not timeline or domain history, must not expose secrets, and must not imply broker delivery, acknowledgement, redelivery, or other distributed semantics that do not exist in v0.1.
 
 ## LLM telemetry

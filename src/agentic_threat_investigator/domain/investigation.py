@@ -7,11 +7,19 @@ outcomes rather than copies of all domain objects. The persisted domain
 objects remain authoritative.
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.identifiers import SourceId
@@ -181,6 +189,12 @@ class InvestigationBudget(BaseModel):
     including structured-output repair attempts. Input-loading and
     persistence failures never increment the counter; an exhausted budget
     raises a typed error before another model call is attempted.
+
+    Transient budget documents are validated before persistence: every
+    consumed counter is a nonnegative integer within its maximum, and every
+    maximum is nonnegative. Monotonicity across coordinator transitions is
+    enforced by the stored function (a counter may never decrease, and only
+    the owning transition may change it).
     """
 
     max_depth: int
@@ -191,6 +205,33 @@ class InvestigationBudget(BaseModel):
     provider_calls_used: int = 0
     replans_used: int = 0
     llm_calls_used: int = Field(default=0, ge=0)
+
+    @field_validator("max_depth", "max_entities", "max_provider_calls", "max_replans")
+    @classmethod
+    def maxima_nonnegative(cls, value: int) -> int:
+        """Reject negative maximum values."""
+        if value < 0:
+            raise ValueError("budget maxima must be nonnegative")
+        return value
+
+    @field_validator("provider_calls_used", "replans_used")
+    @classmethod
+    def counters_nonnegative(cls, value: int) -> int:
+        """Reject negative consumed counters."""
+        if value < 0:
+            raise ValueError("budget consumed counters must be nonnegative")
+        return value
+
+    @model_validator(mode="after")
+    def counters_within_maxima(self) -> "InvestigationBudget":
+        """Reject any consumed counter above its maximum."""
+        if self.provider_calls_used > self.max_provider_calls:
+            raise ValueError("provider_calls_used exceeds max_provider_calls")
+        if self.replans_used > self.max_replans:
+            raise ValueError("replans_used exceeds max_replans")
+        if self.llm_calls_used > self.max_llm_calls:
+            raise ValueError("llm_calls_used exceeds max_llm_calls")
+        return self
 
     @property
     def llm_calls_remaining(self) -> int:
@@ -245,6 +286,150 @@ class ProviderExecutionOutcome(BaseModel):
     error: InvestigationError | None = None
 
 
+class EntityTraversalState(BaseModel):
+    """Durable discovery metadata for one entity in an investigation.
+
+    Tracks the deterministic first-discovery order and the minimum depth at
+    which the entity was discovered, so pivot policy can order candidates and
+    suppress same-or-worse-depth replay without relying on set/dict ordering
+    or on ``investigated_entity_ids`` (which cannot encode depth).
+
+    ``first_discovery_ordinal`` is the 0-based position in discovery order;
+    roots occupy the leading ordinals in ``root_entity_ids`` order before any
+    provider discovery is recorded. ``minimum_depth`` is 0 for root entities
+    and ``parent work depth + 1`` for provider-discovered entities; a
+    rediscovery may lower it but never raises it.
+
+    ``best_investigated_depth`` retains the shallowest depth at which the
+    entity was actually investigated (its pivot entered execution). It is
+    independent of ``minimum_depth``: an entity investigated at depth 3 and
+    later rediscovered at depth 1 has ``best_investigated_depth == 3`` and
+    ``minimum_depth == 1``, so the shallower rediscovery is not suppressed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entity_id: UUID
+    first_discovery_ordinal: int = Field(ge=0)
+    minimum_depth: int = Field(ge=0)
+    best_investigated_depth: int | None = Field(default=None, ge=0)
+
+    def record_investigation(self, depth: int) -> "EntityTraversalState":
+        """Return a copy with the shallowest executed investigation depth."""
+        current = self.best_investigated_depth
+        if current is None or depth < current:
+            return self.model_copy(update={"best_investigated_depth": depth})
+        return self
+
+
+class EntityTraversalStateBuilder:
+    """Deterministic builder for :class:`EntityTraversalState` entries.
+
+    Keeps the first-discovery ordinal of every known entity (roots first in
+    ``root_entity_ids`` order, then provider discoveries in provider-result
+    order) and the minimum known depth. Duplicate ordinals are rejected.
+    """
+
+    def __init__(self, root_entity_ids: list[UUID]) -> None:
+        """Seed the builder with root entities at depth zero."""
+        self._entries: list[EntityTraversalState] = []
+        self._depth_by_id: dict[UUID, int] = {}
+        self._ordinal_by_id: dict[UUID, int] = {}
+        ordinal = 0
+        for entity_id in root_entity_ids:
+            if entity_id not in self._ordinal_by_id:
+                self._ordinal_by_id[entity_id] = ordinal
+                self._depth_by_id[entity_id] = 0
+                self._entries.append(
+                    EntityTraversalState(
+                        entity_id=entity_id,
+                        first_discovery_ordinal=ordinal,
+                        minimum_depth=0,
+                    )
+                )
+                ordinal += 1
+
+    def record_discovery(self, entity_id: UUID, parent_depth: int) -> None:
+        """Record one provider discovery at ``parent_depth + 1``.
+
+        A new entity receives the next ordinal and depth ``parent_depth + 1``.
+        A rediscovery keeps the first ordinal and lowers the minimum depth only
+        when the proposed depth is shallower.
+        """
+        proposed_depth = parent_depth + 1
+        if entity_id not in self._ordinal_by_id:
+            ordinal = len(self._entries)
+            self._ordinal_by_id[entity_id] = ordinal
+            self._depth_by_id[entity_id] = proposed_depth
+            self._entries.append(
+                EntityTraversalState(
+                    entity_id=entity_id,
+                    first_discovery_ordinal=ordinal,
+                    minimum_depth=proposed_depth,
+                )
+            )
+            return
+        current_depth = self._depth_by_id[entity_id]
+        if proposed_depth < current_depth:
+            self._depth_by_id[entity_id] = proposed_depth
+            self._update_depth(entity_id, proposed_depth)
+
+    def record_discovery_at_ordinal(
+        self,
+        entity_id: UUID,
+        ordinal: int,
+        depth: int,
+        *,
+        best_depth: int | None = None,
+    ) -> None:
+        """Replay one already-known traversal entry into the builder.
+
+        Used to rebuild traversal state from persisted entries without
+        re-ordering roots or discoveries. Duplicate entities are rejected so
+        a malformed persisted traversal cannot be silently repaired. The
+        optional ``best_depth`` replays the historic investigated depth.
+        """
+        if entity_id in self._ordinal_by_id:
+            raise ValueError(f"traversal entry duplicated for entity {entity_id}")
+        if ordinal != len(self._entries):
+            raise ValueError("traversal ordinals must be contiguous from zero")
+        self._ordinal_by_id[entity_id] = ordinal
+        self._depth_by_id[entity_id] = depth
+        self._entries.append(
+            EntityTraversalState(
+                entity_id=entity_id,
+                first_discovery_ordinal=ordinal,
+                minimum_depth=depth,
+                best_investigated_depth=best_depth,
+            )
+        )
+
+    def _update_depth(self, entity_id: UUID, depth: int) -> None:
+        """Rewrite one entry's minimum depth, preserving execution history.
+
+        A shallower rediscovery lowers only ``minimum_depth``; the recorded
+        ``best_investigated_depth`` is always carried over so historical
+        execution depth is never erased by rediscovery.
+        """
+        for index, entry in enumerate(self._entries):
+            if entry.entity_id == entity_id:
+                self._entries[index] = EntityTraversalState(
+                    entity_id=entry.entity_id,
+                    first_discovery_ordinal=entry.first_discovery_ordinal,
+                    minimum_depth=depth,
+                    best_investigated_depth=entry.best_investigated_depth,
+                )
+                return
+
+    def entries(self) -> tuple[EntityTraversalState, ...]:
+        """Return the ordered traversal entries."""
+        return tuple(self._entries)
+
+    def minimum_depth(self, entity_id: UUID) -> int | None:
+        """Return the minimum depth of an entity, or ``None`` when unknown."""
+        return self._depth_by_id.get(entity_id)
+
+
 class InvestigationState(BaseModel):
     """Operational workflow state for one investigation.
 
@@ -274,6 +459,9 @@ class InvestigationState(BaseModel):
     last_provider_outcome: ProviderExecutionOutcome | None = None
     investigated_entity_ids: list[UUID] = Field(default_factory=list)
     research_required_for_entity_ids: list[UUID] = Field(default_factory=list)
+    analyzed_evidence_ids: list[UUID] = Field(default_factory=list)
+    analysis_disposition: AnalysisDisposition | None = None
+    traversal: list[EntityTraversalState] = Field(default_factory=list)
     research_result_ids: list[UUID] = Field(default_factory=list)
     assessment_id: UUID | None = None
     report_id: UUID | None = None
@@ -298,6 +486,96 @@ class InvestigationState(BaseModel):
             raise ValueError("investigation timestamps must be timezone-aware")
         return value.astimezone(UTC)
 
+    @field_validator("traversal")
+    @classmethod
+    def traversal_entries_valid(
+        cls, value: list[EntityTraversalState]
+    ) -> list[EntityTraversalState]:
+        """Reject malformed traversal entries.
+
+        Entries must have unique entity IDs and unique ordinal values, and
+        must be ordered by ordinal. An entry may reference a root or a
+        discovered entity; cross-field coherence with
+        ``root_entity_ids``/``discovered_entity_ids`` is validated by
+        :meth:`traversal_coherent_with_discoveries`.
+        """
+        seen_ids: set[UUID] = set()
+        seen_ordinals: set[int] = set()
+        previous_ordinal = -1
+        for expected_ordinal, entry in enumerate(value):
+            if entry.entity_id in seen_ids:
+                raise ValueError(
+                    f"traversal entry duplicated for entity {entry.entity_id}"
+                )
+            seen_ids.add(entry.entity_id)
+            if entry.first_discovery_ordinal in seen_ordinals:
+                raise ValueError(
+                    "traversal first_discovery_ordinal values must be unique"
+                )
+            seen_ordinals.add(entry.first_discovery_ordinal)
+            if entry.first_discovery_ordinal <= previous_ordinal:
+                raise ValueError("traversal entries must be ordered by ordinal")
+            if entry.first_discovery_ordinal != expected_ordinal:
+                raise ValueError("traversal ordinals must be contiguous from zero")
+            previous_ordinal = entry.first_discovery_ordinal
+        return value
+
+    @field_validator("analyzed_evidence_ids")
+    @classmethod
+    def analyzed_evidence_ids_unique(cls, value: list[UUID]) -> list[UUID]:
+        """Reject duplicate analyzed Evidence identities."""
+        if len(value) != len(set(value)):
+            raise ValueError("analyzed_evidence_ids must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def traversal_coherent_with_discoveries(self) -> "InvestigationState":
+        """Reject traversal metadata that contradicts root/discovery lists.
+
+        Every traversal entry must name a root or a discovered entity; every
+        discovered entity recorded by provider execution must have an entry
+        when the traversal has been populated. Roots are validated to have
+        depth zero when represented.
+        """
+        if (
+            self.status is InvestigationStatus.RUNNING
+            and self.version is not None
+            and self.discovered_entity_ids
+            and not self.traversal
+        ):
+            raise ValueError(
+                "persisted running investigation discoveries require traversal metadata"
+            )
+        known = set(self.root_entity_ids) | set(self.discovered_entity_ids)
+        traversal_ids = {entry.entity_id for entry in self.traversal}
+        unknown = traversal_ids - known
+        if unknown:
+            raise ValueError(
+                "traversal references an entity absent from roots/discoveries"
+            )
+        if self.traversal:
+            unique_roots = list(dict.fromkeys(self.root_entity_ids))
+            root_prefix = [
+                entry.entity_id for entry in self.traversal[: len(unique_roots)]
+            ]
+            if root_prefix != unique_roots:
+                raise ValueError(
+                    "root traversal entries must be the leading root order"
+                )
+        for entry in self.traversal:
+            if entry.entity_id in self.root_entity_ids and entry.minimum_depth != 0:
+                raise ValueError("root traversal entries must have minimum_depth 0")
+        # A discovered entity missing traversal metadata is only a hard error
+        # when the traversal has been populated at all (i.e. provider
+        # execution already recorded discoveries).
+        if self.traversal:
+            missing = set(self.discovered_entity_ids) - traversal_ids
+            if missing:
+                raise ValueError(
+                    "discovered entity lacks traversal metadata after discovery"
+                )
+        return self
+
 
 class StopReason(str, Enum):
     """Stable reasons why an investigation stopped."""
@@ -317,6 +595,22 @@ class AnalysisDisposition(str, Enum):
     SUFFICIENT = "sufficient"
     NEEDS_MORE_EVIDENCE = "needs_more_evidence"
     EXHAUSTED = "exhausted"
+
+
+class CoordinatorTransitionKind(str, Enum):
+    """Bounded coordinator persistence transitions (PR 21).
+
+    Each transition kind restricts which operational fields and budget
+    counters may change in one versioned write, so a repository-bypassing
+    caller cannot reuse budgets, lower counters, change limits, spoof
+    references, or replace unrelated workflow state.
+    """
+
+    SELECT_PROVIDER_WORK = "select_provider_work"
+    RECORD_PROVIDER_OUTCOME = "record_provider_outcome"
+    AUTHORIZE_PIVOT = "authorize_pivot"
+    MARK_RESEARCH_REQUIRED = "mark_research_required"
+    FINALIZE_STOP = "finalize_stop"
 
 
 class PivotClass(str, Enum):

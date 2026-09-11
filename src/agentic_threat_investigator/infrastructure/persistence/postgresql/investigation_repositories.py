@@ -24,6 +24,7 @@ from agentic_threat_investigator.app.assessment_provenance import (
 )
 from agentic_threat_investigator.app.persistence.repositories import (
     BatchOutcome,
+    CoordinatorTransitionPersistenceError,
     InvestigationDuplicateIdentityError,
     InvestigationNotFoundError,
     InvestigationRepository,
@@ -31,6 +32,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationWriteResult,
 )
 from agentic_threat_investigator.domain.investigation import (
+    CoordinatorTransitionKind,
     InvalidInvestigationStatusTransitionError,
     InvestigationBudget,
     InvestigationBudgetExhaustedError,
@@ -42,10 +44,12 @@ from agentic_threat_investigator.domain.investigation import (
 from .errors import (
     SQLSTATE_ASSESSMENT_REFERENCE_INVALID,
     SQLSTATE_BUDGET_COUNTERS_INVALID,
+    SQLSTATE_COORDINATOR_STATE_INVALID,
     SQLSTATE_INVALID_TRANSITION,
     SQLSTATE_INVESTIGATION_DUPLICATE,
     SQLSTATE_INVESTIGATION_NOT_FOUND,
     SQLSTATE_LLM_BUDGET_EXHAUSTED,
+    SQLSTATE_OPTIMISTIC_VERSION_REQUIRED,
     SQLSTATE_VERSION_CONFLICT,
     sqlstate,
 )
@@ -71,6 +75,9 @@ _OPERATIONAL_FIELDS = (
     "report_id",
     "stop_reason",
     "errors",
+    "analyzed_evidence_ids",
+    "analysis_disposition",
+    "traversal",
 )
 
 
@@ -336,6 +343,156 @@ class PostgresInvestigationRepository(InvestigationRepository):
             if state == SQLSTATE_VERSION_CONFLICT:
                 raise InvestigationVersionConflictError(
                     investigation_id, expected_version or 0
+                ) from error
+            raise
+        written_id, version, outcome = result.one()
+        return InvestigationWriteResult(
+            written_id,
+            int(version),
+            BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
+        )
+
+    async def set_analysis_result(
+        self,
+        investigation_id: UUID,
+        assessment_id: UUID,
+        analyzed_evidence_ids: list[UUID],
+        disposition: object,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+    ) -> InvestigationWriteResult:
+        """Atomically record one coherent analysis result (PR 21).
+
+        The stored function locks the Investigation and target Assessment,
+        verifies ownership and exact analyzed Evidence identity equality,
+        fails on stale/missing versions, and writes the pointer, the analyzed
+        set, and the disposition in ONE version/history row.
+        """
+        disposition_value = (
+            disposition.value if hasattr(disposition, "value") else disposition
+        )
+        serialized_ids = json.dumps(analyzed_evidence_ids, default=str)
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, outcome
+                    FROM ati.set_investigation_analysis_result(
+                        :id, :assessment_id, CAST(:analyzed_ids AS jsonb),
+                        :disposition, :actor_id, :request_id,
+                        :expected_version)
+                """),
+                {
+                    "id": investigation_id,
+                    "assessment_id": assessment_id,
+                    "analyzed_ids": serialized_ids,
+                    "disposition": disposition_value,
+                    "actor_id": actor_id,
+                    "request_id": request_id,
+                    "expected_version": expected_version,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_INVESTIGATION_NOT_FOUND:
+                raise InvestigationNotFoundError(str(investigation_id)) from error
+            if state == SQLSTATE_VERSION_CONFLICT:
+                raise InvestigationVersionConflictError(
+                    investigation_id, expected_version
+                ) from error
+            if state == SQLSTATE_ASSESSMENT_REFERENCE_INVALID:
+                raise AssessmentProvenanceMismatchError(
+                    f"assessment reference is invalid for investigation "
+                    f"{investigation_id}: {assessment_id}"
+                ) from error
+            if state == SQLSTATE_COORDINATOR_STATE_INVALID:
+                raise ValueError(
+                    f"invalid analysis result for investigation {investigation_id}"
+                ) from error
+            raise
+        written_id, version, outcome = result.one()
+        return InvestigationWriteResult(
+            written_id,
+            int(version),
+            BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
+        )
+
+    async def update_coordinator_state(
+        self,
+        investigation_id: UUID,
+        transition_kind: CoordinatorTransitionKind,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+        consumes_replan: bool = False,
+    ) -> InvestigationWriteResult:
+        """Atomically persist coordinator operational state (PR 21).
+
+        The transition kind bounds the allowed field/counter changes, the
+        optimistic ``expected_version`` is mandatory, and the supplied state
+        must belong to the target investigation. The stored function locks the
+        row, revalidates budget monotonicity/maxima and the status lifecycle,
+        replaces the operational JSON document and budget, allocates the
+        version, writes immutable history, and sets ``completed_at`` when the
+        transition is terminal. A semantically identical state is an
+        UNCHANGED no-op.
+        """
+        if state.investigation_id != investigation_id:
+            raise ValueError(
+                "coordinator transition state investigation does not match "
+                "the target investigation"
+            )
+        kind_value = (
+            transition_kind.value
+            if hasattr(transition_kind, "value")
+            else str(transition_kind)
+        )
+        budget, operational = _serialized(state)
+        status = state.status.value
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, outcome
+                    FROM ati.update_investigation_coordinator_state(
+                        :id, :transition_kind, :status, CAST(:budget AS jsonb),
+                        CAST(:operational_state AS jsonb), :consumes_replan, :actor_id,
+                        :request_id, :expected_version)
+                """),
+                {
+                    "id": investigation_id,
+                    "transition_kind": kind_value,
+                    "status": status,
+                    "budget": budget,
+                    "operational_state": operational,
+                    "consumes_replan": consumes_replan,
+                    "actor_id": actor_id,
+                    "request_id": request_id,
+                    "expected_version": expected_version,
+                },
+            )
+        except DBAPIError as error:
+            state_code = sqlstate(error)
+            if state_code == SQLSTATE_INVESTIGATION_NOT_FOUND:
+                raise InvestigationNotFoundError(str(investigation_id)) from error
+            if state_code == SQLSTATE_VERSION_CONFLICT:
+                raise InvestigationVersionConflictError(
+                    investigation_id, expected_version
+                ) from error
+            if state_code == SQLSTATE_INVALID_TRANSITION:
+                raise InvalidInvestigationStatusTransitionError(
+                    f"investigation {investigation_id} no longer permits "
+                    f"transition to {status}"
+                ) from error
+            if state_code in (
+                SQLSTATE_COORDINATOR_STATE_INVALID,
+                SQLSTATE_OPTIMISTIC_VERSION_REQUIRED,
+            ):
+                raise CoordinatorTransitionPersistenceError(
+                    f"invalid coordinator {kind_value} transition for "
+                    f"investigation {investigation_id}"
                 ) from error
             raise
         written_id, version, outcome = result.one()

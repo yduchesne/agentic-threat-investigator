@@ -29,6 +29,7 @@ from agentic_threat_investigator.domain.assessment import (
     RelationshipSupport,
     Verdict,
 )
+from agentic_threat_investigator.domain.investigation import AnalysisDisposition
 from agentic_threat_investigator.evaluation.analyst.models import (
     AnalystScenario,
     AnalystScenarioResolution,
@@ -167,6 +168,7 @@ def canonical_decision(
             sorted(scenario.expected.required_unresolved_questions)
         ),
         recommended_next_steps=tuple(sorted(scenario.expected.required_next_steps)),
+        disposition=AnalysisDisposition.SUFFICIENT,
     )
 
 

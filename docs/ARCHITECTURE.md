@@ -186,22 +186,67 @@ END
 
 The persisted domain objects are authoritative. `InvestigationState` carries identifiers, queues, budgets, status, and outcomes rather than copies of all domain objects.
 
-### Current LangGraph implementation status (PR 19A–19C)
+### Current LangGraph implementation status (PR 19A–21)
 
-The LangGraph implementation began as a **deterministic orchestration skeleton** in PR 19A under `app/orchestration/`. PR 19C preserves its topology and queue mechanics while routing already-selected work through an injected deterministic `TaskDispatcher`:
+The LangGraph implementation began as a **deterministic orchestration skeleton** in PR 19A under `app/orchestration/`. PR 19C routing already-selected work through an injected deterministic `TaskDispatcher`. PR 21 extends the graph with a coordinator-driven topology that adds pivot authorization, analysis synchronization, and deterministic stopping:
 
 ```text
-START -> initialize -> select_work -> execute_work -> record_outcome -> select_work
-                     ^-- (pending work -> execute_work | no work -> END)
+START -> initialize -> coordinator -> { EXECUTE_PROVIDER_WORK
+                                       | REQUEST_ANALYSIS
+                                       | AUTHORIZE_PIVOT
+                                       | STOP }
+
+Provider work path: select_work -> execute_work -> record_outcome -> coordinator
+Analysis path:       analyze -> coordinator
+Pivot path:          authorize_pivot -> coordinator
+Stop path:           finalize_stop -> END
 ```
 
-The `execute_work` node calls `TaskDispatcher.dispatch(...)`; topology, queue mechanics, and outcome recording remain unchanged. The skeleton implements mechanics only: FIFO selection, duplicate suppression for identical work, provider-call counter increments, and serializable operational state. Real provider execution arrived with PR 19B; LLM/Evidence Analyst behavior is PR 20; adaptive coordinator/pivot behavior, budget enforcement, stopping policy, and trajectory evaluation arrive with PR 21. The domain layer does not depend on LangGraph; only `app/orchestration/graph.py` does.
+The coordinator node applies `CoordinatorPolicy`, a pure deterministic
+application-layer policy that decides what action is authorized next. Queue
+exhaustion never terminates the production graph: the coordinator decides
+whether to pivot, analyze, or stop. The graph fails closed when a transition
+node runs without a stored decision or when any coordinator dependency is
+partially injected at construction. The legacy queue-exhaustion topology is
+available only through the explicitly named `build_legacy_investigation_graph`
+test helper; production composition never selects it.
+
+`build_investigation_graph` requires all coordinator dependencies:
+`CoordinatorPolicy` (pure policy), `CoordinatorContextLoader` (read-only
+policy context), `AnalysisExecutor` (seam around the PR 20B Evidence Analyst),
+`CoordinatorTransitionService` (atomic coordinator state writes), and
+`InvestigationStatusWriter` (terminal transitions; the database owns
+`completed_at`). The policy is stateless and performs no DB, LLM, network,
+provider, or clock access; `finalize_stop_state` likewise never reads a
+clock.
+
+The production factory `build_provider_investigation_graph` injects a
+deterministic planner over the ordered enabled provider registry
+(`RegistryProviderWorkPlanner`): applicability is evaluated per candidate
+against each enabled provider's own `supports(Entity)` contract using the
+exact persisted entity value — never a cached type matrix or canonical-sample
+probing — plus the UoW-backed context loader, transition service, status
+writer, timeline action service, fatal stop service, and the
+bootstrap-supplied analysis executor and provider registry. Discovery depth
+is computed from typed `EntityTraversalState` entries (first-discovery
+ordinal and minimum depth), never from set/dict iteration or default-zero
+fallbacks. A persisted in-progress provider work item (no retry token exists)
+fails to a bounded fatal stop rather than re-issuing an external call.
+
+The domain layer does not depend on LangGraph; only `app/orchestration/graph.py` does.
 
 ### Real provider execution path (PR 19B–19C)
 
 The production dispatcher is `LocalTaskDispatcher`, which delegates in-process to the production `WorkExecutor`, `ProviderWorkExecutor` (`app/orchestration/provider_executor.py`). `ProviderWorkExecutor` is composed with explicit injected dependencies: an `EntityReader` (short UnitOfWork-backed target lookup closed before any provider I/O), a typed provider registry (`Mapping[SourceId, EvidenceProvider]` keyed by enum members, built from `ProviderComposition.provider_registry()`), the PR 18B deterministic extractor, the PR 18C `ProviderObservationPersistenceService`, and an `InvestigationTimelineSink`. It implements `InvestigationBoundWorkExecutor`, exposing its one authoritative `ProviderExecutionContext.investigation_id` through `bound_investigation_id`.
 
-The public composition seam `build_provider_investigation_graph(uow_factory, provider_registry, context)` in `app/orchestration/composition.py` assembles `ProviderWorkExecutor`, wraps it with `LocalTaskDispatcher`, and injects the dispatcher into the compiled graph; it constructs no HTTP clients, providers, settings, engines, or global registries. Investigation binding is preserved across the wrapper: the generic graph builder automatically adopts a bound dispatcher's investigation identity, an explicit conflicting ID fails at graph construction with `InvestigationGraphBindingConflictError`, and every invocation validates the wrapped `InvestigationState` in `initialize` before work selection, dispatch, or I/O. A mismatch raises `InvestigationGraphContextMismatchError` with a fixed safe message and no timeline event. Ordinary unbound dispatchers and explicit expected IDs remain supported. The per-work-item flow is:
+The public composition seam
+`build_provider_investigation_graph(uow_factory, provider_registry, context, analysis_executor, ...)`
+in `app/orchestration/composition.py` assembles `ProviderWorkExecutor`, wraps it
+with `LocalTaskDispatcher`, injects the PR 21 coordinator policy (with
+deterministic `PROVIDER_APPLICABILITY`), the UoW-backed context loader,
+transition service, and status writer, plus the bootstrap-supplied analysis
+executor, and wires them into the compiled coordinator graph; it constructs
+no HTTP clients, providers, settings, engines, or global registries. Investigation binding is preserved across the wrapper: the generic graph builder automatically adopts a bound dispatcher's investigation identity, an explicit conflicting ID fails at graph construction with `InvestigationGraphBindingConflictError`, and every invocation validates the wrapped `InvestigationState` in `initialize` before work selection, dispatch, or I/O. A mismatch raises `InvestigationGraphContextMismatchError` with a fixed safe message and no timeline event. Ordinary unbound dispatchers and explicit expected IDs remain supported. The per-work-item flow is:
 
 ```text
 ProviderWorkItem (provider, entity_id, depth)

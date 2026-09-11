@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
+from agentic_threat_investigator.app.analysis_result import EvidenceAnalysisResult
 from agentic_threat_investigator.app.assessment_persistence import (
     AssessmentPersistenceService,
 )
@@ -52,6 +53,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     Verdict,
 )
+from agentic_threat_investigator.domain.investigation import AnalysisDisposition
 
 _NO_EVIDENCE_SUMMARY = "No evidence was available for analysis."
 _NO_EVIDENCE_LIMITATION = "No evidence was available for this investigation."
@@ -98,13 +100,40 @@ class EvidenceAnalyst:
     ) -> Assessment:
         """Load, analyze, construct, and persist one Assessment.
 
+        Compatibility wrapper around :meth:`analyze_with_result` returning
+        only the persisted Assessment (PR 20B contract).
+
         An exhausted LLM budget, exhausted structured-output attempts, LLM
         timeout/provider failure, invalid support references, or a stale
         Investigation version fail without producing any partial Assessment.
         """
+        result = await self.analyze_with_result(
+            investigation_id,
+            actor_id=actor_id,
+            request_id=request_id,
+            expected_investigation_version=expected_investigation_version,
+        )
+        return result.assessment
+
+    async def analyze_with_result(
+        self,
+        investigation_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_investigation_version: int | None = None,
+    ) -> EvidenceAnalysisResult:
+        """Analyze and persist one Assessment with its typed result (PR 21).
+
+        One transaction persists the Assessment, the Investigation Assessment
+        pointer, the exact analyzed Evidence identities, the typed
+        disposition, and the version/history update; the returned result
+        carries the authoritative Investigation version after that
+        transaction.
+        """
         analyst_input = await self._input_loader.load(investigation_id)
         if not analyst_input.evidence:
-            return await self._persist_no_evidence(
+            return await self._persist_no_evidence_result(
                 analyst_input,
                 actor_id=actor_id,
                 request_id=request_id,
@@ -116,7 +145,7 @@ class EvidenceAnalyst:
             investigation_id,
             expected_version=expected_investigation_version,
         )
-        return await self._persist_decision(
+        return await self._persist_decision_result(
             analyst_input,
             decision,
             latest_version=latest_version,
@@ -181,7 +210,7 @@ class EvidenceAnalyst:
             LlmErrorCode.INVALID_STRUCTURED_OUTPUT, retryable=False
         )
 
-    async def _persist_decision(
+    async def _persist_decision_result(
         self,
         analyst_input: EvidenceAnalystInput,
         decision: EvidenceAnalystDecision,
@@ -189,8 +218,8 @@ class EvidenceAnalyst:
         latest_version: int,
         actor_id: UUID | None,
         request_id: UUID | None,
-    ) -> Assessment:
-        """Stamp authoritative IDs and persist once through the PR 20A seam."""
+    ) -> EvidenceAnalysisResult:
+        """Stamp authoritative IDs and persist once with the typed result."""
         assessment = Assessment(
             investigation_id=analyst_input.investigation_id,
             analyzed_evidence_ids=tuple(
@@ -204,8 +233,9 @@ class EvidenceAnalyst:
             unresolved_questions=decision.unresolved_questions,
             recommended_next_steps=decision.recommended_next_steps,
         )
-        return await self._assessment_persistence.persist_assessment(
+        return await self._assessment_persistence.persist_assessment_with_result(
             assessment,
+            decision.disposition,
             actor_id=actor_id,
             request_id=request_id,
             expected_investigation_version=latest_version,
@@ -225,6 +255,28 @@ class EvidenceAnalyst:
         in the domain, and the caller's expected Investigation version still
         guards this persistence.
         """
+        result = await self._persist_no_evidence_result(
+            analyst_input,
+            actor_id=actor_id,
+            request_id=request_id,
+            expected_investigation_version=expected_investigation_version,
+        )
+        return result.assessment
+
+    async def _persist_no_evidence_result(
+        self,
+        analyst_input: EvidenceAnalystInput,
+        *,
+        actor_id: UUID | None,
+        request_id: UUID | None,
+        expected_investigation_version: int | None,
+    ) -> EvidenceAnalysisResult:
+        """Persist the deterministic no-evidence EXHAUSTED result (PR 21).
+
+        No model call is spent, the disposition is explicitly ``EXHAUSTED``,
+        and the exact analyzed set is empty. This is a documented typed
+        decision, never inference from verdict.
+        """
         assessment = Assessment(
             investigation_id=analyst_input.investigation_id,
             verdict=Verdict.INCONCLUSIVE,
@@ -233,8 +285,9 @@ class EvidenceAnalyst:
             analyzed_evidence_ids=(),
             limitations=(_NO_EVIDENCE_LIMITATION,),
         )
-        return await self._assessment_persistence.persist_assessment(
+        return await self._assessment_persistence.persist_assessment_with_result(
             assessment,
+            AnalysisDisposition.EXHAUSTED,
             actor_id=actor_id,
             request_id=request_id,
             expected_investigation_version=expected_investigation_version,

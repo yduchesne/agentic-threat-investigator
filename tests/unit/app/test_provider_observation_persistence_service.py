@@ -27,6 +27,7 @@ from agentic_threat_investigator.app.extraction.models import (
 )
 from agentic_threat_investigator.app.persistence.repositories import (
     AuditEventRepository,
+    BatchOutcome,
     EntityRepository,
     EvidenceDuplicateIdentityError,
     EvidenceRepository,
@@ -337,6 +338,42 @@ class FakeInvestigationRepository(InvestigationRepository):
         self, *args: object, **_: object
     ) -> InvestigationWriteResult:
         raise NotImplementedError
+
+    async def update_coordinator_state(
+        self,
+        investigation_id: UUID,
+        transition_kind: object,
+        state: InvestigationState,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+        consumes_replan: bool = False,
+    ) -> InvestigationWriteResult:
+        """Test fake: accept the transition and report a new version."""
+        return InvestigationWriteResult(investigation_id, 7, BatchOutcome.UPDATED)
+
+    async def set_analysis_result(
+        self,
+        investigation_id: UUID,
+        assessment_id: UUID,
+        analyzed_evidence_ids: list[UUID],
+        disposition: object,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+    ) -> InvestigationWriteResult:
+        """Test fake: accept and report a new version."""
+        del (
+            assessment_id,
+            analyzed_evidence_ids,
+            disposition,
+            actor_id,
+            request_id,
+            expected_version,
+        )
+        return InvestigationWriteResult(investigation_id, 8, BatchOutcome.UPDATED)
 
     async def soft_delete(self, *args: object, **_: object) -> InvestigationWriteResult:
         raise NotImplementedError

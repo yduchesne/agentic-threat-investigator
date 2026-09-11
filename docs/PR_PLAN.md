@@ -133,9 +133,37 @@ LLM-as-judge evaluation, LangSmith execution, trajectory/pivot/stopping
 evaluation, RAG evaluation, or release thresholds. Those remain future
 architecture (PR 27) scope; this PR leaves extension seams only.
 
-## PR 21 — Adaptive pivots and stopping
+## PR 21 — Adaptive pivots and stopping [DONE]
 
-Deliver evidence-driven pivots, deterministic pivot-policy validation, budgets, duplicate suppression, stopping rules/reasons, canonical trajectory, and coordinator trajectory evaluations.
+Delivered the deterministic coordinator policy, typed traversal state
+(first-discovery order, minimum depth, and best investigated depth), the
+coordinator-driven production graph, transition-kind-bounded PostgreSQL
+persistence with mandatory optimistic concurrency, required typed analyst
+disposition persisted as one coherent Investigation transition, durable
+provider selection/outcomes, bounded pivot lifecycle, enabled-provider
+planning, structured coordinator timeline actions, and the strict
+13-scenario coordinator trajectory baseline. Canonical PostgreSQL and layered
+scenario trajectories execute offline with measured transition bounds; QA and
+PostgreSQL integration gates pass.
+
+**Key deliverables:**
+- `CoordinatorPolicy` (`app/orchestration/coordinator.py`): pure deterministic application-layer policy deciding pivot eligibility, depth/budget enforcement, duplicate/cycle suppression, stop reason precedence, and replan semantics.
+- `CoordinatorPolicyContext`: read-only entity view and current assessment snapshot materialized from a short UoW before policy execution.
+- `RegistryProviderWorkPlanner`: deterministic provider-work planning over enabled providers using each provider's exact persisted entity applicability, with `MappingProviderWorkPlanner` retained for tests.
+- `AnalysisExecutor` ABC + `FakeAnalysisExecutor`: typed seam between LangGraph and the PR 20B Evidence Analyst.
+- `CoordinatorDecision`: bounded decision (EXECUTE_PROVIDER_WORK, REQUEST_ANALYSIS, AUTHORIZE_PIVOT, STOP) with typed work/pivot/research lists.
+- Extended LangGraph topology: coordinator-driven flow replacing queue-exhaustion->END with coordinator->{pivot|analyze|stop} routing.
+- New `InvestigationTimelineEventType` values: `PIVOT_ENQUEUED`, `PIVOT_EXECUTED`, `PIVOT_SKIPPED`, `ASSESSMENT_REQUESTED`, `INVESTIGATION_STOPPED`.
+- `InvestigationState.analyzed_evidence_ids` and `analysis_disposition` fields for unchanged-evidence guard and disposition tracking.
+- `authorize_pivot`, `record_analysis`, `finalize_stop_state` helpers in orchestration models.
+- `CoordinatorTrajectoryEvaluator`, `CoordinatorScenario`, and `CoordinatorEvaluationResult` in `evaluation/coordinator.py` with deterministic metrics and hard-gate failure codes.
+- `EntityTraversalState`: typed discovery metadata (first-discovery ordinal + minimum depth) with coherence validators.
+- `CoordinatorPolicyContextLoader`, `CoordinatorTransitionService`, and `EvidenceAnalystAnalysisExecutor` application services.
+- `ati.update_investigation_coordinator_state` stored function (migration 0016) for atomic coordinator transitions with version/history and database-owned `completed_at`.
+- Production composition injects the coordinator policy, planner, context loader, transition service, status writer, and analysis executor; the legacy queue-exhaustion graph is available only through the explicitly named `build_legacy_investigation_graph` test helper.
+- Unit tests cover eligibility, budgets, duplicate suppression, stop reasons, replan semantics, analysis requests, deterministic ordering, traversal coherence, timeline event shapes, and evaluator failure codes.
+
+**Non-goals preserved:** no LLM-based coordinator, no RAG, no generic task bus, no PR 27 evaluator platform, no dispatch policy, no invented entities.
 
 PR 21 consumes PR 19A queue/state mechanics, PR 19B provider execution, PR 19C dispatch, and PR 20A/20B validated analytical output. PR 20C provides the analyst evaluation baseline.
 
