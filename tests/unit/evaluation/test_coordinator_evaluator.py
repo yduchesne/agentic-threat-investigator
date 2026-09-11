@@ -30,10 +30,12 @@ from agentic_threat_investigator.evaluation.coordinator import (
     CoordinatorScenarioResolution,
     CoordinatorTrajectoryEvaluator,
     ExpectedCoordinatorTrajectory,
+    ExpectedPivot,
 )
 
 _ROOT = UUID("00000000-0000-0000-0000-0000000000a1")
 _IP = UUID("00000000-0000-0000-0000-0000000000a2")
+_IP2 = UUID("00000000-0000-0000-0000-0000000000a4")
 _MALWARE = UUID("00000000-0000-0000-0000-0000000000a3")
 _INVENTED = UUID("00000000-0000-0000-0000-0000000000ff")
 
@@ -56,12 +58,17 @@ def _state(**overrides: Any) -> InvestigationState:
 
 
 def _scenario(**overrides: Any) -> CoordinatorScenario:
-    """Build a scenario expecting one pivot and sufficient stop."""
+    """Build a scenario expecting one pivot and sufficient stop.
+
+    The default legal pivot oracle is ``resolved_ip`` at depth 1 (PR 21D);
+    explicit envelope overrides may supply a different oracle.
+    """
     params: dict[str, Any] = {
         "id": "scenario.domain-dns-ip",
         "version": 1,
         "fixture": CoordinatorFixtureReference(name="domain-dns-ip"),
         "expected": ExpectedCoordinatorTrajectory(
+            allowed_pivots=(ExpectedPivot(entity="resolved_ip", depth=1),),
             required_pivots=("resolved_ip",),
             expected_stop_reason=StopReason.SUFFICIENT_EVIDENCE,
         ),
@@ -518,6 +525,310 @@ class TestEvaluatorFailures:
         assert result.metrics["termination"] == 0.0
 
 
+class TestEvaluatorPivotOracle:
+    """Independent scenario pivot oracle evaluation (PR 21D).
+
+    The evaluator validates pivot authorization and execution against each
+    scenario's exhaustive ``allowed_pivots`` oracle (entity + exact depth)
+    while preserving enqueue-before-execute ordering. Metrics count unique
+    observed pivot identities so an illegal identity enqueued and later
+    executed is never double-counted.
+    """
+
+    @staticmethod
+    def _oracle_free_expected(**overrides: Any) -> ExpectedCoordinatorTrajectory:
+        """Build an expectation envelope whose legal pivot oracle is empty."""
+        params: dict[str, Any] = {
+            "allowed_pivots": (),
+            "required_pivots": (),
+            "expected_stop_reason": StopReason.SUFFICIENT_EVIDENCE,
+        }
+        params.update(overrides)
+        return ExpectedCoordinatorTrajectory(**params)
+
+    def test_allowed_pivot_enqueued_then_executed_is_valid(self) -> None:
+        """D1: a legal identity enqueued then executed at the exact depth passes."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert result.passed
+        assert result.metrics["policy_invalid_pivot_rate"] == 0.0
+
+    def test_allowed_pivot_executed_without_enqueue_is_invalid(self) -> None:
+        """D2: execution without any preceding authorization is policy-invalid."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT in result.failures
+        assert result.metrics["policy_invalid_pivot_rate"] == 1.0
+
+    def test_execution_before_matching_enqueue_is_invalid(self) -> None:
+        """D3: an enqueue after execution never authorizes the earlier pivot."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT in result.failures
+        assert result.metrics["policy_invalid_pivot_rate"] == 1.0
+
+    def test_illegal_pivot_enqueued_and_executed_is_invalid(self) -> None:
+        """D4: an illegal identity enqueued then executed still fails.
+
+        This is the central PR 21D defect: enqueue followed by execution of
+        the same identity must NOT make the pivot policy-valid when the
+        identity is absent from the scenario oracle.
+        """
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(expected=self._oracle_free_expected()),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT in result.failures
+        assert result.metrics["policy_invalid_pivot_rate"] == 1.0
+
+    def test_illegal_enqueue_only_is_invalid(self) -> None:
+        """D5: a defective authorization is detected even when never executed."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(expected=self._oracle_free_expected()),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT in result.failures
+        assert result.metrics["policy_invalid_pivot_rate"] == 1.0
+        # No execution happened, so the executed-only rate stays zero.
+        assert result.metrics["invalid_pivot_rate"] == 0.0
+
+    def test_allowed_entity_at_wrong_depth_is_invalid(self) -> None:
+        """D6: depth is part of the pivot identity; depth 2 is a different identity."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED, entity_id=_IP, depth=2
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP, depth=2
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT in result.failures
+        assert result.metrics["policy_invalid_pivot_rate"] == 1.0
+
+    def test_enqueue_a_execute_b_is_invalid(self) -> None:
+        """D7: an execution of an identity other than the authorized one is invalid."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(),
+            resolution=_resolution(
+                entities={"resolved_ip": _IP, "root_domain": _ROOT, "second_ip": _IP2}
+            ),
+            final_state=_state(discovered_entity_ids=[_IP, _IP2]),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP2, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT in result.failures
+        # The legal A identity is observed; only B is invalid.
+        assert result.metrics["policy_invalid_pivot_rate"] == 0.5
+
+    def test_invented_and_policy_invalid_pivot_keeps_both_gates_bounded(self) -> None:
+        """D9: an invented executed pivot triggers both hard gates at rate 1.0."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(expected=self._oracle_free_expected()),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_INVENTED, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert CoordinatorEvaluationFailureCode.INVENTED_ENTITY_PIVOT in result.failures
+        assert CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT in result.failures
+        assert result.metrics["invented_entity_pivot_rate"] == 1.0
+        assert result.metrics["policy_invalid_pivot_rate"] == 1.0
+        assert result.metrics["invalid_pivot_rate"] == 1.0
+
+    def test_one_legal_one_illegal_identity_gives_half_rate(self) -> None:
+        """D10: one legal and one illegal observed identity yields 0.5."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP, depth=2
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert result.metrics["policy_invalid_pivot_rate"] == 0.5
+        assert 0.0 <= result.metrics["policy_invalid_pivot_rate"] <= 1.0
+
+    def test_illegal_identity_enqueued_and_executed_counts_once(self) -> None:
+        """D11: enqueue + execute of one illegal identity contributes once."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(expected=self._oracle_free_expected()),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_ENQUEUED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_PIVOT_EXECUTED, entity_id=_IP, depth=1
+                ),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert result.metrics["policy_invalid_pivot_rate"] == 1.0
+        # One unique invalid identity, never 2.0, and one failure code entry.
+        assert (
+            result.failures.count(CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT)
+            == 1
+        )
+
+    def test_zero_pivot_actions_keep_policy_rate_zero(self) -> None:
+        """D12: no pivot actions means a denominator-safe zero policy rate."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert (
+            CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT not in result.failures
+        )
+        assert result.metrics["policy_invalid_pivot_rate"] == 0.0
+        assert result.metrics["invalid_pivot_rate"] == 0.0
+
+    def test_malformed_pivot_action_is_policy_invalid_without_crashing(self) -> None:
+        """A pivot action without a usable identity fails closed, never crashes."""
+        result = CoordinatorTrajectoryEvaluator().evaluate(
+            observed_transitions=1,
+            scenario=_scenario(expected=self._oracle_free_expected()),
+            resolution=_resolution(),
+            final_state=_state(),
+            actions=_actions(
+                CoordinatorActionRecord(action=ACTION_PIVOT_ENQUEUED, depth=1),
+                CoordinatorActionRecord(action=ACTION_PIVOT_EXECUTED),
+                CoordinatorActionRecord(
+                    action=ACTION_INVESTIGATION_STOPPED,
+                    reason=StopReason.SUFFICIENT_EVIDENCE.value,
+                ),
+            ),
+        )
+        assert CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT in result.failures
+        # No usable identity exists, so both rates stay denominator-safe.
+        assert result.metrics["policy_invalid_pivot_rate"] == 0.0
+        assert result.metrics["invalid_pivot_rate"] == 0.0
+
+
 class TestEvaluatorEntityBudgetBoundary:
     """Entity-budget evaluation at the exact-capacity boundary (PR 21B).
 
@@ -534,6 +845,7 @@ class TestEvaluatorEntityBudgetBoundary:
             observed_transitions=1,
             scenario=_scenario(
                 expected=ExpectedCoordinatorTrajectory(
+                    allowed_pivots=(ExpectedPivot(entity="resolved_ip", depth=1),),
                     expected_stop_reason=StopReason.SUFFICIENT_EVIDENCE,
                     max_entities=2,
                 )

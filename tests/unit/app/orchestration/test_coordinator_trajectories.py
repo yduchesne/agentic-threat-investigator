@@ -43,6 +43,7 @@ from agentic_threat_investigator.app.orchestration.services import (
 )
 from agentic_threat_investigator.app.orchestration.timeline_actions import (
     DeterministicTimelineActionService,
+    convert_timeline_actions,
 )
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.identifiers import SourceId
@@ -64,6 +65,7 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
 from agentic_threat_investigator.evaluation.coordinator import (
+    CoordinatorTrajectoryEvaluator,
     load_coordinator_scenarios_directory,
 )
 from agentic_threat_investigator.evaluation.scenario_fixtures import (
@@ -587,6 +589,26 @@ async def test_every_repository_scenario_uses_real_coordinator_policy(
         if item.id == scenario_id
     )
     assert final.stop_reason == scenario.expected.expected_stop_reason.value
+
+    # PR 21D corpus regression: every repository scenario executes from its
+    # deterministic checkpoint and evaluates cleanly under the independent
+    # pivot oracle — no invented pivots, no policy-invalid pivot, no budget
+    # violation, and a fully terminal trajectory.
+    resolution = CoordinatorScenarioMaterializer().resolve_runtime(
+        scenario, resolve_coordinator_scenario(scenario).entities
+    )
+    actions = tuple(convert_timeline_actions(tuple(service.appended)))
+    result = CoordinatorTrajectoryEvaluator().evaluate(
+        scenario=scenario,
+        resolution=resolution,
+        final_state=final,
+        actions=actions,
+        observed_transitions=transitions,
+    )
+    assert result.metrics["invented_entity_pivot_rate"] == 0.0
+    assert result.metrics["policy_invalid_pivot_rate"] == 0.0
+    assert result.metrics["budget_violation_rate"] == 0.0
+    assert result.metrics["termination"] == 1.0
 
 
 @pytest.mark.parametrize(

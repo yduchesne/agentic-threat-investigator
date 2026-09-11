@@ -10,6 +10,7 @@
     "forbidden_pivots": [
       "no_provider_entity"
     ],
+    "allowed_pivots": [],
     "expected_stop_reason": "no_eligible_pivots",
     "max_provider_calls": 1,
     "max_replans": 0,

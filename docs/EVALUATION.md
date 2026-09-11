@@ -182,17 +182,23 @@ DNS -> DNS again -> irrelevant ASN expansion -> duplicate investigation
 
 Trajectory evaluation uses stable machine-readable action URNs rather than parsing human-readable logs.
 
-Examples:
+Currently emitted by the PR 21 Coordinator/graph:
 
 ```text
 urn:ati:action:provider_query
 urn:ati:action:entity_discovered
 urn:ati:action:pivot_enqueued
 urn:ati:action:pivot_executed
-urn:ati:action:research_requested
+urn:ati:action:pivot_skipped
 urn:ati:action:assessment_requested
 urn:ati:action:investigation_stopped
-urn:ati:action:report_generated
+```
+
+Planned future actions that are **not** emitted yet:
+
+```text
+urn:ati:action:research_requested    # PR 22 research execution
+urn:ati:action:report_generated      # later report flow
 ```
 
 Action events should carry structured fields such as:
@@ -221,14 +227,32 @@ runtime identities (`evaluation/scenario_fixtures.py`), and the evaluator
 consumes the durable timeline actions produced by the production graph. Each
 scenario carries an explicit `max_transitions` bound; `NON_TERMINATION`
 covers a non-terminal state, a missing `investigation_stopped` action, a stop
-action/state mismatch, and observed-transition overrun. A pivot execution
-without a preceding matching `PIVOT_ENQUEUED` is policy-invalid, and all
-rates are computed from unique violating actions so no rate exceeds 1.0.
+action/state mismatch, and observed-transition overrun.
+
+PR 21D adds an **independent scenario pivot-policy oracle**: every scenario
+JSON must explicitly declare `allowed_pivots` — the exhaustive legal pivot
+universe for that scenario as semantic entity label + exact depth
+(`ExpectedPivot`), even when empty. Omission fails loading (it must never
+silently mean "no pivot is legal"). The evaluator never re-implements
+`CoordinatorPolicy`: pivot legality is decided by the scenario oracle alone.
+A pivot identity is `(entity_id, depth)`, so `resolved_ip` at depth 1 and at
+depth 2 are different policy identities. The evaluator independently checks
+both authorization and execution:
+
+- `PIVOT_ENQUEUED` (or `PIVOT_EXECUTED`) outside `allowed_pivots` is
+  policy-invalid;
+- `PIVOT_EXECUTED` without a preceding matching `PIVOT_ENQUEUED` is
+  policy-invalid (enqueue-before-execute ordering is preserved);
+- an illegal enqueue is a violation even if it never executes;
+- a pivot action without a usable entity/depth identity is policy-invalid
+  without crashing the evaluator.
 
 Evaluation consumes durable structured actions and the authoritative final
-`InvestigationState` — never logs, never prose. The documented action URNs are
-`urn:ati:action:provider_query`, `entity_discovered`, `pivot_enqueued`,
-`pivot_executed`, `assessment_requested`, and `investigation_stopped`.
+`InvestigationState` — never logs, never prose. The currently emitted action
+URNs are `urn:ati:action:provider_query`, `entity_discovered`,
+`pivot_enqueued`, `pivot_executed`, `pivot_skipped`, `assessment_requested`,
+and `investigation_stopped`. `research_requested` and `report_generated` are
+future PR 22/report-flow actions and are not emitted yet.
 
 Designed metrics (all denominator-safe, bounded to `[0.0, 1.0]`):
 
@@ -243,13 +267,42 @@ budget_violation_rate
 termination
 ```
 
+Policy-invalid accounting uses unique observed pivot identities:
+
+```text
+policy_invalid_pivot_rate =
+    unique policy-invalid observed pivot identities /
+    unique observed pivot identities
+```
+
+where an identity is observed when it appears in an enqueue or execution with
+a usable entity/depth, and invalid means outside the allowed oracle or
+executed without a preceding matching enqueue. An identity enqueued and then
+executed is still one identity, so a single illegal pivot can never push the
+rate above `1.0`. With zero observed identities the rate is `0.0`.
+
+`invalid_pivot_rate` is the union over unique executed pivot identities of
+invented (target outside `root_entity_ids` ∪ `discovered_entity_ids`) and
+policy-invalid executions:
+
+```text
+invalid_pivot_rate =
+    unique invalid executed pivot identities /
+    unique executed pivot identities
+```
+
+The same pivot never counts twice and the rate stays in `[0.0, 1.0]`; with
+zero executed identities it is `0.0`. An illegal enqueue-only action raises
+`policy_invalid_pivot_rate` but not `invalid_pivot_rate`, because that metric
+concerns executed pivots.
+
 Hard gates for every deterministic scenario: `invented_entity_pivot_rate = 0`,
 `policy_invalid_pivot_rate = 0`, `budget_violation_rate = 0`, and
 `termination = true` under an explicit transition bound.
 
-Boundary from PR 27: PR 21 evaluation ends at Coordinator/pivot/stopping
-behavior. No semantic-relevance scoring, LLM-as-judge, cost/latency scoring,
-generic EvalRun persistence, or release thresholds are implemented.
+Scope boundary: PR 21/21D evaluation remains fully deterministic. There is no
+LLM-as-judge, no generic PR 27 evaluator platform, no evaluation persistence,
+no release thresholds, and no PR 22 RAG evaluation execution.
 
 Also evaluate:
 

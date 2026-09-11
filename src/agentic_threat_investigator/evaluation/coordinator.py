@@ -1,12 +1,18 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Pure deterministic coordinator trajectory evaluation (PR 21).
+"""Pure deterministic coordinator trajectory evaluation (PR 21/21D).
 
 The evaluator consumes structured action records (never logs), a resolved
 scenario, and the authoritative final ``InvestigationState``. It is
 synchronous and pure: no database, network, LLM, environment, or clock
 access. Hard-gate invariants (invented/policy-invalid pivots, budget
 violations, non-termination) are evaluated rather than hardcoded.
+
+Each scenario declares an exhaustive legal pivot oracle
+(``allowed_pivots``: semantic entity label + exact depth). The evaluator
+independently checks pivot authorization (``PIVOT_ENQUEUED``) and
+``PIVOT_EXECUTED`` against that oracle and requires execution to follow a
+matching enqueue; it never re-implements CoordinatorPolicy.
 """
 
 import json
@@ -66,9 +72,18 @@ class _ScenarioValidator(BaseModel):
 
     @model_validator(mode="after")
     def labels_unique(self) -> "_ScenarioValidator":
-        """Reject duplicate labels and require an explicit transition bound."""
-        if "max_transitions" not in self.expected.model_fields_set:
-            raise ValueError("max_transitions must be explicitly provided")
+        """Reject duplicate labels and enforce allowed-pivot consistency.
+
+        ``allowed_pivots`` and ``max_transitions`` must both be explicitly
+        present in scenario JSON; omission must never silently mean "no
+        pivot is legal". Exact ``(entity label, depth)`` identities must be
+        unique, every ``required_pivots`` label must be represented in
+        ``allowed_pivots``, and no ``forbidden_pivots`` label may appear in
+        ``allowed_pivots``.
+        """
+        for field in ("allowed_pivots", "max_transitions"):
+            if field not in self.expected.model_fields_set:
+                raise ValueError(f"{field} must be explicitly provided")
         for field in (
             "required_pivots",
             "forbidden_pivots",
@@ -79,6 +94,25 @@ class _ScenarioValidator(BaseModel):
             values = getattr(self.expected, field)
             if len(values) != len(set(values)):
                 raise ValueError(f"{field} must not contain duplicate labels")
+        allowed = self.expected.allowed_pivots
+        allowed_identities = [(pivot.entity, pivot.depth) for pivot in allowed]
+        if len(allowed_identities) != len(set(allowed_identities)):
+            raise ValueError(
+                "allowed_pivots must not contain duplicate entity/depth identities"
+            )
+        allowed_labels = {pivot.entity for pivot in allowed}
+        missing_required = sorted(set(self.expected.required_pivots) - allowed_labels)
+        if missing_required:
+            raise ValueError(
+                "required_pivots must be represented in allowed_pivots: "
+                + ", ".join(missing_required)
+            )
+        forbidden_overlap = sorted(set(self.expected.forbidden_pivots) & allowed_labels)
+        if forbidden_overlap:
+            raise ValueError(
+                "forbidden_pivots must not appear in allowed_pivots: "
+                + ", ".join(forbidden_overlap)
+            )
         return self
 
 
@@ -161,11 +195,36 @@ class CoordinatorFixtureReference(BaseModel):
     name: str
 
 
+class ExpectedPivot(BaseModel):
+    """One exhaustive legal pivot identity declared by a scenario.
+
+    Identity is the semantic entity label plus the exact expected depth:
+    ``resolved_ip`` at depth 1 and ``resolved_ip`` at depth 2 are different
+    policy identities (PR 21D Invariant B).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entity: str
+    depth: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def entity_present(self) -> "ExpectedPivot":
+        """Reject blank semantic entity labels."""
+        if not self.entity.strip():
+            raise ValueError("expected pivot entity label must not be blank")
+        return self
+
+
 class ExpectedCoordinatorTrajectory(BaseModel):
     """Scenario envelope for deterministic coordinator behavior."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    # The exhaustive legal pivot universe for the scenario: an observed
+    # PIVOT_ENQUEUED/PIVOT_EXECUTED outside this set is policy-invalid.
+    # The JSON loader requires the field to be explicitly present.
+    allowed_pivots: tuple[ExpectedPivot, ...] = ()
     required_pivots: tuple[str, ...] = ()
     forbidden_pivots: tuple[str, ...] = ()
     required_provider_work: tuple[str, ...] = ()
@@ -356,9 +415,9 @@ class CoordinatorTrajectoryEvaluator:
         # ENTITY_BUDGET_VIOLATION only when a pivot action's entity count is
         # strictly above the budget: an exact-capacity (:code:`entity_count ==
         # max_entities`) pivot onto an already-admitted entity is legal under
-        # the deterministic admission rule (PR 21B). The evaluator still does
-        # not independently reconstruct coordinator admission policy; that
-        # broader hardening belongs to PR 21D.
+        # the deterministic admission rule (PR 21B). The evaluator does not
+        # reconstruct coordinator admission policy; it evaluates the recorded
+        # budget counters against the scenario envelope.
         if scenario.expected.max_entities is not None and any(
             item.action in (ACTION_PIVOT_ENQUEUED, ACTION_PIVOT_EXECUTED)
             and item.depth is not None
@@ -377,18 +436,48 @@ class CoordinatorTrajectoryEvaluator:
         ):
             failures.append(CoordinatorEvaluationFailureCode.DEPTH_BUDGET_VIOLATION)
 
-        # Authorization is order-sensitive: an enqueue authorizes only a
-        # later execution for the exact entity/depth identity.
-        seen_enqueues: set[tuple[UUID | None, int | None]] = set()
-        policy_invalid_flags: list[bool] = []
+        # Independent pivot-policy check (PR 21D). The scenario owns an
+        # exhaustive legal pivot oracle; the evaluator never reconstructs
+        # CoordinatorPolicy. A pivot identity is ``(entity_id, depth)``:
+        #  - an ENQUEUED or EXECUTED identity outside ``allowed_pivot_keys``
+        #    is policy-invalid (authorization is independently validated);
+        #  - an EXECUTED identity without a preceding matching ENQUEUED is
+        #    policy-invalid (order validation is preserved);
+        #  - a pivot action without a usable identity is policy-invalid but
+        #    never crashes the evaluator.
+        # Metrics count unique observed identities so one illegal identity
+        # enqueued and later executed contributes once, never twice.
+        allowed_pivot_keys: set[tuple[UUID, int]] = set()
+        for pivot in scenario.expected.allowed_pivots:
+            allowed_entity_id = resolution.entities.get(pivot.entity)
+            if allowed_entity_id is None:
+                raise ValueError(
+                    "allowed pivot entity is unresolved in scenario resolution: "
+                    f"{pivot.entity!r}"
+                )
+            allowed_pivot_keys.add((allowed_entity_id, pivot.depth))
+        observed_pivot_keys: set[tuple[UUID, int]] = set()
+        invalid_policy_keys: set[tuple[UUID, int]] = set()
+        seen_enqueues: set[tuple[UUID, int]] = set()
+        malformed_pivot_actions = 0
         for item in actions:
+            if item.action not in (ACTION_PIVOT_ENQUEUED, ACTION_PIVOT_EXECUTED):
+                continue
+            if item.entity_id is None or item.depth is None:
+                malformed_pivot_actions += 1
+                continue
             key = (item.entity_id, item.depth)
+            observed_pivot_keys.add(key)
             if item.action == ACTION_PIVOT_ENQUEUED:
                 seen_enqueues.add(key)
-            elif item.action == ACTION_PIVOT_EXECUTED and item.entity_id is not None:
-                policy_invalid_flags.append(key not in seen_enqueues)
-        policy_invalid = sum(policy_invalid_flags)
-        if policy_invalid:
+                if key not in allowed_pivot_keys:
+                    invalid_policy_keys.add(key)
+            else:
+                if key not in allowed_pivot_keys:
+                    invalid_policy_keys.add(key)
+                if key not in seen_enqueues:
+                    invalid_policy_keys.add(key)
+        if malformed_pivot_actions or invalid_policy_keys:
             failures.append(CoordinatorEvaluationFailureCode.POLICY_INVALID_PIVOT)
 
         stopped_actions = [
@@ -455,14 +544,30 @@ class CoordinatorTrajectoryEvaluator:
         denied = sum(1 for item in actions if item.action.endswith("pivot_skipped"))
         authorized = len(pivot_ids)
         invented_flags = [item.entity_id not in known for item in pivot_executed]
-        invalid_count = sum(
-            invented or unauthorized
-            for invented, unauthorized in zip(
-                invented_flags, policy_invalid_flags, strict=True
-            )
+        # invalid_pivot_rate is the union over unique executed pivot
+        # identities of invented and policy-invalid executions; one pivot
+        # never counts twice and the rate stays in [0.0, 1.0].
+        executed_pivot_keys = {
+            (item.entity_id, item.depth)
+            for item in pivot_executed
+            if item.depth is not None
+        }
+        invented_executed_keys = {
+            key for key in executed_pivot_keys if key[0] not in known
+        }
+        policy_invalid_executed_keys = invalid_policy_keys & executed_pivot_keys
+        invalid_executed_keys = invented_executed_keys | policy_invalid_executed_keys
+        invalid_pivot_rate = (
+            len(invalid_executed_keys) / len(executed_pivot_keys)
+            if executed_pivot_keys
+            else 0.0
         )
         invented_unique = sum(invented_flags)
-        invalid_pivot_rate = invalid_count / authorized if authorized else 0.0
+        policy_invalid_pivot_rate = (
+            len(invalid_policy_keys) / len(observed_pivot_keys)
+            if observed_pivot_keys
+            else 0.0
+        )
         duplicate_count = duplicate_pivots + duplicate_queries + duplicate_stops
         duplicate_denominator = len(pivot_ids) + len(query_keys) + len(stopped_actions)
         return CoordinatorEvaluationResult(
@@ -474,9 +579,7 @@ class CoordinatorTrajectoryEvaluator:
                 "invented_entity_pivot_rate": float(
                     invented_unique / authorized if authorized else 0.0
                 ),
-                "policy_invalid_pivot_rate": float(
-                    policy_invalid / authorized if authorized else 0.0
-                ),
+                "policy_invalid_pivot_rate": float(policy_invalid_pivot_rate),
                 "duplicate_action_rate": float(
                     duplicate_count / duplicate_denominator
                     if duplicate_denominator

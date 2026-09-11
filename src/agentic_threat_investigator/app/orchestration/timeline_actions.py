@@ -28,6 +28,9 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.evaluation.coordinator import (
+    CoordinatorActionRecord,
+)
 
 # Stable PR 21 action URNs shared by emission and evaluation.
 ACTION_PROVIDER_QUERY = "urn:ati:action:provider_query"
@@ -203,16 +206,13 @@ def _utc_now() -> datetime:
 
 def convert_timeline_actions(
     events: tuple[InvestigationTimelineEvent, ...] | list[InvestigationTimelineEvent],
-) -> tuple[object, ...]:
+) -> tuple[CoordinatorActionRecord, ...]:
     """Convert ordered timeline events into CoordinatorActionRecord values.
 
     Deterministic converter: every coordinator/provider event maps to exactly
     one structured action record with the documented action URN, entity ID,
     provider, and depth; logs and prose are never inspected.
     """
-    from agentic_threat_investigator.evaluation.coordinator import (
-        CoordinatorActionRecord,
-    )
 
     records: list[CoordinatorActionRecord] = []
     for event in events:

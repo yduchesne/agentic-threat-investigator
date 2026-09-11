@@ -10,6 +10,12 @@
       "resolved_ip"
     ],
     "forbidden_pivots": [],
+    "allowed_pivots": [
+      {
+        "entity": "resolved_ip",
+        "depth": 1
+      }
+    ],
     "required_provider_work": [
       "abuseipdb_resolved_ip"
     ],

@@ -10,6 +10,7 @@
     "forbidden_pivots": [
       "deep_ip"
     ],
+    "allowed_pivots": [],
     "expected_stop_reason": "depth_limit_reached",
     "max_provider_calls": 1,
     "max_replans": 1,

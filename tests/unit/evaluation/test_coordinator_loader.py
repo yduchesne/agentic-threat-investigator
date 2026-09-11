@@ -4,6 +4,7 @@
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
@@ -248,3 +249,175 @@ def test_empty_corpus_directory_fails_closed(tmp_path: Path) -> None:
     """Loading an empty scenario directory is a deterministic load error."""
     with pytest.raises(CoordinatorScenarioLoadError):
         load_coordinator_scenarios_directory(tmp_path)
+
+
+def _valid_scenario_json(*, allowed_pivots: object = ()) -> dict[str, object]:
+    """Build a strict-loading-valid scenario envelope with explicit pivots."""
+    expected: dict[str, object] = {
+        "allowed_pivots": allowed_pivots,
+        "expected_stop_reason": "no_eligible_pivots",
+        "max_transitions": 40,
+    }
+    return {
+        "id": "s-oracle",
+        "version": 1,
+        "fixture": {"name": "f"},
+        "expected": expected,
+    }
+
+
+# --- PR 21D scenario oracle authoring matrix (S1-S9) ------------------------
+
+
+def test_s1_allowed_pivots_omitted_fails_closed(tmp_path: Path) -> None:
+    """S1: omission must never silently mean 'no pivot is legal'."""
+    expected: dict[str, object] = {
+        "expected_stop_reason": "no_eligible_pivots",
+        "max_transitions": 40,
+    }
+    raw: dict[str, object] = {
+        "id": "s-omitted",
+        "version": 1,
+        "fixture": {"name": "f"},
+        "expected": expected,
+    }
+    (tmp_path / "missing.json").write_text(json.dumps(raw))
+    with pytest.raises(CoordinatorScenarioLoadError, match="allowed_pivots"):
+        load_coordinator_scenarios_directory(tmp_path)
+
+
+def test_s2_blank_allowed_entity_label_fails_closed(tmp_path: Path) -> None:
+    """S2: a blank allowed-pivot entity label is rejected at load."""
+    (tmp_path / "blank.json").write_text(
+        json.dumps(_valid_scenario_json(allowed_pivots=[{"entity": "  ", "depth": 1}]))
+    )
+    with pytest.raises(CoordinatorScenarioLoadError):
+        load_coordinator_scenarios_directory(tmp_path)
+
+
+def test_s3_negative_allowed_depth_fails_closed(tmp_path: Path) -> None:
+    """S3: a negative allowed-pivot depth is rejected at load."""
+    (tmp_path / "negative.json").write_text(
+        json.dumps(_valid_scenario_json(allowed_pivots=[{"entity": "ip", "depth": -1}]))
+    )
+    with pytest.raises(CoordinatorScenarioLoadError):
+        load_coordinator_scenarios_directory(tmp_path)
+
+
+def test_s4_duplicate_allowed_identity_fails_closed(tmp_path: Path) -> None:
+    """S4: duplicate (entity label, depth) allowed identities are rejected."""
+    duplicate = [
+        {"entity": "resolved_ip", "depth": 1},
+        {"entity": "resolved_ip", "depth": 1},
+    ]
+    (tmp_path / "dup.json").write_text(
+        json.dumps(_valid_scenario_json(allowed_pivots=duplicate))
+    )
+    with pytest.raises(CoordinatorScenarioLoadError, match="duplicate"):
+        load_coordinator_scenarios_directory(tmp_path)
+
+
+def test_s5_unknown_allowed_entity_label_fails_resolution() -> None:
+    """S5: an allowed label outside the fixture universe is a typed error."""
+    from agentic_threat_investigator.domain.investigation import StopReason
+    from agentic_threat_investigator.evaluation.coordinator import (
+        CoordinatorFixtureReference,
+        CoordinatorScenario,
+        ExpectedCoordinatorTrajectory,
+        ExpectedPivot,
+    )
+    from agentic_threat_investigator.evaluation.scenario_fixtures import (
+        CoordinatorFixtureError,
+        resolve_coordinator_scenario,
+    )
+
+    bogus = CoordinatorScenario(
+        id="unknown-allowed",
+        version=1,
+        fixture=CoordinatorFixtureReference(name="canonical-domain-ip"),
+        expected=ExpectedCoordinatorTrajectory(
+            allowed_pivots=(ExpectedPivot(entity="does_not_exist", depth=1),),
+            expected_stop_reason=StopReason.SUFFICIENT_EVIDENCE,
+        ),
+    )
+    with pytest.raises(CoordinatorFixtureError, match="does_not_exist"):
+        resolve_coordinator_scenario(bogus)
+
+
+def test_s6_required_pivot_not_in_allowed_set_fails_closed(tmp_path: Path) -> None:
+    """S6: every required pivot label must be represented in allowed_pivots."""
+    expected: dict[str, object] = {
+        "allowed_pivots": [{"entity": "other", "depth": 1}],
+        "required_pivots": ["resolved_ip"],
+        "expected_stop_reason": "no_eligible_pivots",
+        "max_transitions": 40,
+    }
+    raw: dict[str, object] = {
+        "id": "s-uncovered",
+        "version": 1,
+        "fixture": {"name": "f"},
+        "expected": expected,
+    }
+    (tmp_path / "uncovered.json").write_text(json.dumps(raw))
+    with pytest.raises(CoordinatorScenarioLoadError, match="required_pivots"):
+        load_coordinator_scenarios_directory(tmp_path)
+
+
+def test_s7_forbidden_pivot_in_allowed_set_fails_closed(tmp_path: Path) -> None:
+    """S7: a forbidden pivot label may never appear in allowed_pivots."""
+    expected: dict[str, object] = {
+        "allowed_pivots": [{"entity": "resolved_ip", "depth": 1}],
+        "forbidden_pivots": ["resolved_ip"],
+        "expected_stop_reason": "no_eligible_pivots",
+        "max_transitions": 40,
+    }
+    raw: dict[str, object] = {
+        "id": "s-conflict",
+        "version": 1,
+        "fixture": {"name": "f"},
+        "expected": expected,
+    }
+    (tmp_path / "conflict.json").write_text(json.dumps(raw))
+    with pytest.raises(CoordinatorScenarioLoadError, match="forbidden_pivots"):
+        load_coordinator_scenarios_directory(tmp_path)
+
+
+def test_s8_valid_empty_allowed_set_is_accepted(tmp_path: Path) -> None:
+    """S8: an explicitly empty allowed set is a valid scenario oracle."""
+    (tmp_path / "empty.json").write_text(
+        json.dumps(_valid_scenario_json(allowed_pivots=[]))
+    )
+    scenarios = load_coordinator_scenarios_directory(tmp_path)
+    assert len(scenarios) == 1
+    assert scenarios[0].expected.allowed_pivots == ()
+
+
+def test_s9_valid_allowed_pivot_resolves_to_expected_identity() -> None:
+    """S9: a valid allowed pivot label resolves deterministically via the fixture."""
+    from agentic_threat_investigator.domain.investigation import StopReason
+    from agentic_threat_investigator.evaluation.coordinator import (
+        CoordinatorFixtureReference,
+        CoordinatorScenario,
+        ExpectedCoordinatorTrajectory,
+        ExpectedPivot,
+    )
+    from agentic_threat_investigator.evaluation.scenario_fixtures import (
+        resolve_coordinator_scenario,
+    )
+
+    scenario = CoordinatorScenario(
+        id="valid-allowed",
+        version=1,
+        fixture=CoordinatorFixtureReference(name="canonical-domain-ip"),
+        expected=ExpectedCoordinatorTrajectory(
+            allowed_pivots=(ExpectedPivot(entity="resolved_ip", depth=1),),
+            expected_stop_reason=StopReason.SUFFICIENT_EVIDENCE,
+        ),
+    )
+    resolution = resolve_coordinator_scenario(scenario)
+    pivot = scenario.expected.allowed_pivots[0]
+    target = resolution.entities[pivot.entity]
+    assert isinstance(target, UUID)
+    assert target != resolution.entities["root_domain"]
+    # Deterministic: resolving twice yields the same resolved identity.
+    assert resolve_coordinator_scenario(scenario).entities[pivot.entity] == target
