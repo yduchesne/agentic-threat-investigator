@@ -45,6 +45,9 @@ from agentic_threat_investigator.app.orchestration.models import (
 from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
 )
+from agentic_threat_investigator.app.orchestration.runner import (
+    LocalInvestigationRunner,
+)
 from agentic_threat_investigator.app.orchestration.services import (
     EvidenceAnalystAnalysisExecutor,
 )
@@ -53,6 +56,7 @@ from agentic_threat_investigator.app.orchestration.timeline_actions import (
 )
 from agentic_threat_investigator.app.persistence.repositories import (
     CoordinatorTransitionPersistenceError,
+    InvestigationNotFoundError,
 )
 from agentic_threat_investigator.app.providers import (
     EvidenceProvider,
@@ -209,6 +213,9 @@ class _ThreatFoxIpProvider(EvidenceProvider):
 class _NeverCalledDomainProvider(EvidenceProvider):
     """Expose DOMAIN applicability while failing if provider I/O is attempted."""
 
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
     @property
     def id(self) -> str:
         """Return the deterministic source identity."""
@@ -222,6 +229,7 @@ class _NeverCalledDomainProvider(EvidenceProvider):
         self, investigation_id: UUID, entity: Entity
     ) -> ProviderResult:
         del investigation_id, entity
+        self.calls.append(1)
         raise AssertionError("budget-stop trajectory must not call provider")
 
 
@@ -1230,3 +1238,342 @@ async def test_postgresql_authorization_does_not_prematurely_investigate(
     assert durable.investigated_entity_ids == [root_id, ip_id]
     durable_ip = next(entry for entry in durable.traversal if entry.entity_id == ip_id)
     assert durable_ip.best_investigated_depth == 1
+
+
+# --- PR 21C: LocalInvestigationRunner through the real durable stack -------
+
+
+async def test_canonical_domain_ip_sufficient_trajectory_through_runner(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """I1: the canonical trajectory executes through LocalInvestigationRunner.
+
+    The runner receives only the investigation ID, loads the authoritative
+    persisted state, composes the production graph through the existing
+    factory, executes it outside any enclosing transaction, and returns the
+    authoritative durable terminal state.
+    """
+    app = _build_stub_app()
+    app.state.dns_responses.update(
+        {
+            (_DOMAIN_VALUE, "A"): _dns_a_response(),
+            (_DOMAIN_VALUE, "AAAA"): _dns_empty_response(),
+            (_DOMAIN_VALUE, "CNAME"): _dns_empty_response(),
+            (_DOMAIN_VALUE, "MX"): _dns_empty_response(),
+            (_DOMAIN_VALUE, "NS"): _dns_empty_response(),
+            (_DOMAIN_VALUE, "TXT"): _dns_empty_response(),
+            (_DOMAIN_VALUE, "SOA"): _dns_empty_response(),
+        }
+    )
+    transport = HostAllowlistASGITransport(app, allowed_hosts={_GOOGLE_DNS_HOST})
+    scenario = next(
+        item
+        for item in load_coordinator_scenarios_directory("evals/scenarios/coordinator")
+        if item.id == "domain-discovers-ip"
+    )
+    materializer = CoordinatorScenarioMaterializer()
+    materialized = await materializer.materialize(scenario, uow_factory)
+    state = materialized.initial_state
+    investigation_id = state.investigation_id
+    root_id = state.root_entity_ids[0]
+    provider_calls = 0
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        http = ProviderHttpClient(client=client)
+        dns_provider = GooglePublicDnsProvider(http, clock=lambda: _FIXED_TS)
+
+        llm = FakeLlmClient()
+        for index, disposition in enumerate(materialized.analyst_dispositions):
+            llm.enqueue(
+                EvidenceAnalystDecision(
+                    verdict=Verdict.SUSPICIOUS,
+                    confidence=(
+                        AssessmentConfidence.MEDIUM
+                        if disposition is AnalysisDisposition.SUFFICIENT
+                        else AssessmentConfidence.LOW
+                    ),
+                    summary=f"Fixture-owned analysis step {index + 1}.",
+                    disposition=disposition,
+                )
+            )
+        analyst = _analyst_for(session_factory, llm)
+        dns_provider_wrapper = _DomainDnsProvider(dns_provider)
+        threatfox_provider = _ThreatFoxIpProvider(_MALWARE_ID)
+        available: dict[SourceId, EvidenceProvider] = {
+            SourceId.GOOGLE_PUBLIC_DNS: dns_provider_wrapper,
+            SourceId.THREATFOX: threatfox_provider,
+        }
+        registry = {
+            script.provider: available[script.provider]
+            for script in materialized.provider_scripts
+        }
+        runner = LocalInvestigationRunner(
+            uow_factory=uow_factory,
+            provider_registry=registry,
+            analysis_executor_factory=lambda investigation_id: (
+                EvidenceAnalystAnalysisExecutor(
+                    analyst, bound_investigation_id=investigation_id
+                )
+            ),
+            clock=lambda: _FIXED_TS,
+            recursion_limit=40,
+        )
+        final: InvestigationState = await runner.run(investigation_id)
+        provider_calls = len(dns_provider_wrapper.calls) + len(threatfox_provider.calls)
+
+    assert final.status is InvestigationStatus.COMPLETED
+    assert final.stop_reason == StopReason.SUFFICIENT_EVIDENCE.value
+    assert final.completed_at is not None
+    # Exactly two provider calls: DNS + ThreatFox IP pivot.
+    assert final.budget.provider_calls_used == 2
+    assert provider_calls == 2
+    # Exactly one authorized additional collection round (the replan).
+    assert final.budget.replans_used == 1
+    # The Evidence Analyst ran with the real pipeline and a real Assessment.
+    assert final.assessment_id is not None
+    assert final.analysis_disposition is AnalysisDisposition.SUFFICIENT
+    assert final.analyzed_evidence_ids
+    # Malware was only marked research-required; no research results exist.
+    assert len(final.research_required_for_entity_ids) == 1
+    assert not final.research_result_ids
+    assert final.pending_provider_work == []
+    assert final.current_provider_work is None
+    # Root and discovered-IP investigation depths are durable.
+    root_entry = next(e for e in final.traversal if e.entity_id == root_id)
+    assert root_entry.best_investigated_depth == 0
+    resolution = await materializer.resolve_persisted(scenario, uow_factory)
+    ip_id = resolution.entities["resolved_ip"]
+    ip_entry = next(e for e in final.traversal if e.entity_id == ip_id)
+    assert ip_entry.best_investigated_depth == 1
+    assert all(
+        pivot.status is PivotStatus.COMPLETED for pivot in final.pending_pivots
+    ), [pivot.status for pivot in final.pending_pivots]
+
+    # The runner result is the authoritative durable state: an independent
+    # reload matches it exactly, and live timeline events exist for the
+    # executed trajectory.
+    async with uow_factory() as uow:
+        durable = await uow.investigations.get_by_id(investigation_id)
+        events = await uow.timeline_events.list_by_investigation(investigation_id)
+    assert durable is not None
+    assert durable == final
+    event_types = {event.type for event in events}
+    assert InvestigationTimelineEventType.PIVOT_ENQUEUED in event_types
+    assert InvestigationTimelineEventType.PIVOT_EXECUTED in event_types
+    assert InvestigationTimelineEventType.ENTITIES_DISCOVERED in event_types
+    assert InvestigationTimelineEventType.ASSESSMENT_REQUESTED in event_types
+    assert InvestigationTimelineEventType.INVESTIGATION_STOPPED in event_types
+
+
+async def test_runner_terminal_investigation_is_idempotent_noop(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """I2: a persisted COMPLETED Investigation is an idempotent no-op.
+
+    The runner returns the durable state unchanged: no provider calls, no
+    analysis executor construction, no timeline events, and no version bump.
+    """
+    investigation_id = uuid4()
+    root_id = uuid4()
+    state = InvestigationState(
+        investigation_id=investigation_id,
+        status=InvestigationStatus.COMPLETED,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[root_id],
+        objective="Runner must not re-run a terminal investigation.",
+        budget=default_investigation_budget(),
+        started_at=_FIXED_TS,
+        stop_reason=StopReason.SUFFICIENT_EVIDENCE.value,
+    )
+    async with uow_factory() as uow:
+        await uow.entities.upsert(
+            Entity(id=root_id, type=EntityType.DOMAIN, value="completed-noop.test")
+        )
+        created = await uow.investigations.create(state)
+        await uow.commit()
+
+    provider = _NeverCalledDomainProvider()
+    analysis_factory_calls: list[UUID] = []
+
+    def analysis_factory(investigation_id: UUID) -> FakeAnalysisExecutor:
+        analysis_factory_calls.append(investigation_id)
+        return FakeAnalysisExecutor((), bound_investigation_id=investigation_id)
+
+    runner = LocalInvestigationRunner(
+        uow_factory=uow_factory,
+        provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
+        analysis_executor_factory=analysis_factory,
+        clock=lambda: _FIXED_TS,
+    )
+    result = await runner.run(investigation_id)
+    assert result.status is InvestigationStatus.COMPLETED
+    assert provider.calls == []
+    assert analysis_factory_calls == []
+
+    async with uow_factory() as uow:
+        durable = await uow.investigations.get_by_id(investigation_id)
+        events = await uow.timeline_events.list_by_investigation(investigation_id)
+    assert durable is not None
+    assert durable.version == created.version
+    assert durable == result
+    assert events == []
+
+
+async def test_runner_cross_investigation_binding_isolation(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """I3: a wrongly bound analysis executor fails before any provider/LLM work.
+
+    The executor factory deliberately returns a B-bound executor for
+    investigation A; the production graph factory rejects the conflicting
+    binding at composition, before graph execution, provider I/O, or any
+    mutation of either Investigation.
+    """
+    investigation_a = uuid4()
+    investigation_b = uuid4()
+    root_a = uuid4()
+    root_b = uuid4()
+
+    async def seed(investigation_id: UUID, root_id: UUID, value: str) -> int:
+        """Persist one RUNNING investigation and return its DB-assigned version."""
+        state = InvestigationState(
+            investigation_id=investigation_id,
+            status=InvestigationStatus.RUNNING,
+            trigger_type=InvestigationTriggerType.MANUAL,
+            root_entity_ids=[root_id],
+            objective="Prove runner cross-investigation isolation.",
+            budget=default_investigation_budget(),
+            started_at=_FIXED_TS,
+        )
+        async with uow_factory() as uow:
+            await uow.entities.upsert(
+                Entity(id=root_id, type=EntityType.DOMAIN, value=value)
+            )
+            created = await uow.investigations.create(state)
+            await uow.commit()
+        assert created.version is not None
+        return created.version
+
+    await seed(investigation_a, root_a, "isolation-a.test")
+    created_b_version = await seed(investigation_b, root_b, "isolation-b.test")
+
+    provider = _NeverCalledDomainProvider()
+
+    def wrong_binding_factory(
+        investigation_id: UUID,
+    ) -> FakeAnalysisExecutor:
+        del investigation_id
+        return FakeAnalysisExecutor((), bound_investigation_id=investigation_b)
+
+    runner = LocalInvestigationRunner(
+        uow_factory=uow_factory,
+        provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
+        analysis_executor_factory=wrong_binding_factory,
+        clock=lambda: _FIXED_TS,
+    )
+    with pytest.raises(ValueError, match="binding conflict"):
+        await runner.run(investigation_a)
+    assert provider.calls == []
+
+    # Investigation B is entirely untouched: still RUNNING, version 1, and
+    # no timeline events were emitted for either investigation.
+    async with uow_factory() as uow:
+        durable_a = await uow.investigations.get_by_id(investigation_a)
+        durable_b = await uow.investigations.get_by_id(investigation_b)
+        events_a = await uow.timeline_events.list_by_investigation(investigation_a)
+        events_b = await uow.timeline_events.list_by_investigation(investigation_b)
+    assert durable_a is not None
+    assert durable_a.status is InvestigationStatus.RUNNING
+    assert durable_b is not None
+    assert durable_b.status is InvestigationStatus.RUNNING
+    assert durable_b.version == created_b_version
+    assert events_a == []
+    assert events_b == []
+
+
+async def test_runner_missing_investigation_is_typed_not_found(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """I4: a random investigation ID raises the typed not-found error.
+
+    No writes, timeline events, provider calls, or analysis constructions
+    occur for an absent Investigation.
+    """
+    provider = _NeverCalledDomainProvider()
+    analysis_factory_calls: list[UUID] = []
+
+    def analysis_factory(investigation_id: UUID) -> FakeAnalysisExecutor:
+        analysis_factory_calls.append(investigation_id)
+        return FakeAnalysisExecutor((), bound_investigation_id=investigation_id)
+
+    runner = LocalInvestigationRunner(
+        uow_factory=uow_factory,
+        provider_registry={SourceId.GOOGLE_PUBLIC_DNS: provider},
+        analysis_executor_factory=analysis_factory,
+        clock=lambda: _FIXED_TS,
+    )
+    with pytest.raises(InvestigationNotFoundError):
+        await runner.run(uuid4())
+    assert provider.calls == []
+    assert analysis_factory_calls == []
+    # No timeline events were written for the absent Investigation.
+    async with uow_factory() as uow:
+        events = await uow.timeline_events.list_by_investigation(uuid4())
+    assert events == []
+
+
+async def test_runner_analysis_failure_remains_graph_owned(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """I5: an unrecoverable analyst failure stays a single bounded fatal stop.
+
+    The graph owns the analysis failure transition: the durable result is
+    FAILED/FATAL_ERROR with exactly one ``analysis_execution_error`` and the
+    runner adds no second failure transition, then returns the authoritative
+    durable state.
+    """
+    investigation_id = uuid4()
+    root_id = uuid4()
+    state = InvestigationState(
+        investigation_id=investigation_id,
+        status=InvestigationStatus.RUNNING,
+        trigger_type=InvestigationTriggerType.MANUAL,
+        root_entity_ids=[root_id],
+        evidence_ids=[uuid4()],
+        objective="Fatalize an unavailable analyst through the runner.",
+        budget=default_investigation_budget(),
+        started_at=_FIXED_TS,
+    )
+    async with uow_factory() as uow:
+        await uow.entities.upsert(
+            Entity(id=root_id, type=EntityType.DOMAIN, value="fatal-runner.test")
+        )
+        created = await uow.investigations.create(state)
+        await uow.commit()
+
+    runner = LocalInvestigationRunner(
+        uow_factory=uow_factory,
+        provider_registry={},
+        analysis_executor_factory=lambda investigation_id: FakeAnalysisExecutor(
+            (), bound_investigation_id=investigation_id
+        ),
+        clock=lambda: _FIXED_TS,
+    )
+    result = await runner.run(investigation_id)
+    assert result.status is InvestigationStatus.FAILED
+    assert result.stop_reason == StopReason.FATAL_ERROR.value
+    assert sum(error.code == "analysis_execution_error" for error in result.errors) == 1
+
+    async with uow_factory() as uow:
+        durable = await uow.investigations.get_by_id(investigation_id)
+    assert durable is not None
+    assert durable == result
+    assert durable.status is InvestigationStatus.FAILED
+    assert durable.stop_reason == StopReason.FATAL_ERROR.value
+    assert (
+        sum(error.code == "analysis_execution_error" for error in durable.errors) == 1
+    )
+    assert created.version is not None
+    assert durable.version is not None
+    assert durable.version > created.version

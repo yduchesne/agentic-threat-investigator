@@ -258,6 +258,19 @@ Priority unit-test areas include:
   graph without global state. The compiled graph is invoked asynchronously in
   the vertical slice, via `tests/unit/app/orchestration/test_composition.py`
   and the pipeline test;
+- application-level runner (PR 21C): `LocalInvestigationRunner` loads the
+  authoritative persisted Investigation through a short UnitOfWork, closes it
+  before graph execution, treats terminal investigations as idempotent
+  no-ops, creates a fresh bound analysis executor and graph per invocation
+  (cross-investigation isolation, conflicting bindings fail before provider
+  or graph work), passes the exact persisted state into the graph, fails
+  closed on non-terminal graph output and on graph/durable mismatches,
+  returns the authoritative durable reload, propagates cancellation
+  unchanged, and rejects non-positive recursion limits — via
+  `tests/unit/app/orchestration/test_runner.py` with fakes only, plus the
+  canonical PostgreSQL trajectory, terminal-idempotency, isolation,
+  missing-ID, and graph-owned analysis-failure cases in
+  `tests/integration/test_coordinator_trajectory.py`;
 - graph context binding (PR 19B): a provider-backed compiled graph is bound
   to one investigation ID; invoking it with a state for another
   investigation raises `InvestigationGraphContextMismatchError` during
