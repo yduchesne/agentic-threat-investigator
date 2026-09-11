@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Direct unit tests for the PR 19C task dispatch boundary."""
 
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
-
 import asyncio
 from uuid import UUID
 
@@ -27,7 +25,7 @@ from tests.support.orchestration_fixtures import (
 )
 
 
-class RecordingExecutor(WorkExecutor):  # pylint: disable=too-few-public-methods
+class RecordingExecutor(WorkExecutor):
     """Work executor recording calls and returning one configured outcome."""
 
     def __init__(self, outcome: ProviderExecutionOutcome) -> None:
@@ -40,7 +38,7 @@ class RecordingExecutor(WorkExecutor):  # pylint: disable=too-few-public-methods
         return self._outcome
 
 
-class RaisingExecutor(WorkExecutor):  # pylint: disable=too-few-public-methods
+class RaisingExecutor(WorkExecutor):
     """Work executor raising an injected exception for every call."""
 
     def __init__(self, exc: BaseException) -> None:
@@ -52,9 +50,7 @@ class RaisingExecutor(WorkExecutor):  # pylint: disable=too-few-public-methods
         raise self._exc
 
 
-class BoundRecordingExecutor(  # pylint: disable=too-few-public-methods
-    InvestigationBoundWorkExecutor
-):
+class BoundRecordingExecutor(InvestigationBoundWorkExecutor):
     """Bound executor recording calls for binding-exposure assertions."""
 
     def __init__(

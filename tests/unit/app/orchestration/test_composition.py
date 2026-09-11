@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for the PR 19B production graph composition factory."""
 
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
-
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -49,7 +47,7 @@ from tests.support.provider_executor_fixtures import (
 )
 
 
-class _FakeProvider(EvidenceProvider):  # pylint: disable=too-few-public-methods
+class _FakeProvider(EvidenceProvider):
     def __init__(self) -> None:
         self.supports_calls = 0
         self.investigate_calls = 0
@@ -141,7 +139,7 @@ async def test_mismatched_investigation_fails_before_any_seam() -> None:
     assert str(investigation_a) not in message
     assert str(investigation_b) not in message
     assert message == (
-        "orchestration graph state does not match the bound investigation " "context"
+        "orchestration graph state does not match the bound investigation context"
     )
 
 
@@ -320,7 +318,7 @@ async def test_local_dispatcher_bound_by_wrapped_production_executor() -> None:
     assert str(investigation_a) not in message
     assert str(investigation_b) not in message
     assert message == (
-        "orchestration graph state does not match the bound investigation " "context"
+        "orchestration graph state does not match the bound investigation context"
     )
 
 

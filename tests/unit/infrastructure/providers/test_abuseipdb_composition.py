@@ -33,7 +33,7 @@ _FAKE_KEY = "fake-test-abuseipdb-key"
 _FAKE_TOKEN = "fake-test-token"
 
 
-class _KeyringResolver(SecretsResolver):  # pylint: disable=too-few-public-methods
+class _KeyringResolver(SecretsResolver):
     """Deterministic resolver returning credential values from a keyring."""
 
     def __init__(self, **values: str) -> None:
@@ -60,7 +60,7 @@ class _ClosingClient(ProviderHttpClient):
         await super().aclose()
 
 
-class _SequentialFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
+class _SequentialFactory(HttpClientFactory):
     """Factory yielding tracking clients in creation order."""
 
     def __init__(self, closed: list[str]) -> None:
@@ -125,10 +125,8 @@ async def test_composition_wires_abuseipdb_settings(
 
         # White-box assertions proving bootstrap resolution and settings
         # wiring; the values are fake test credentials only.
-        # pylint: disable=protected-access
         assert comp.abuseipdb._api_key == _FAKE_KEY
         assert comp.abuseipdb._max_age_in_days == 90
-        # pylint: enable=protected-access
 
 
 @pytest.mark.parametrize("blank_key", ["", "   ", "\t"])

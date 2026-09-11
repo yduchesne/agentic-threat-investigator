@@ -12,7 +12,6 @@ the HTTP transport.
 # provider-family test shapes (see ThreatFox/AbuseIPDB); per-block R0801
 # suppression is not supported by Pylint, so duplicate-code is disabled at
 # module scope for the deliberately accepted duplication.
-# pylint: disable=duplicate-code
 
 from __future__ import annotations
 

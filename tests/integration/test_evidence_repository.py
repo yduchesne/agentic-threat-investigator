@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Real-PostgreSQL integration coverage for immutable evidence persistence."""
 
-# pylint: disable=redefined-outer-name
-
 import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -10,7 +8,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_threat_investigator.app.investigation_persistence import (
     InvestigationPersistenceService,
@@ -482,12 +479,20 @@ async def test_evidence_listing_index_exists_with_deterministic_order(
     """The listing query path has its matching deterministic-order index."""
     async with uow_factory() as uow:
         assert uow.session is not None
-        index_definitions = (await uow.session.execute(text("""
+        index_definitions = (
+            (
+                await uow.session.execute(
+                    text("""
                     SELECT indexdef FROM pg_indexes
                     WHERE schemaname = 'ati'
                       AND tablename = 'evidence'
                       AND indexname = 'evidence_investigation_listing_idx'
-                """))).scalars().all()
+                """)
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert len(index_definitions) == 1
         definition = index_definitions[0].replace('"', "")
         # ASC is the default order and may be omitted by pg_get_indexdef.

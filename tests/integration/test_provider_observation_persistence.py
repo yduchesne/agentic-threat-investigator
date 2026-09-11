@@ -7,12 +7,9 @@ database, asserting atomicity, stable-identity reuse, immutable observations,
 history/version invariants, and the documented soft-deleted identity policy.
 """
 
-# pylint: disable=redefined-outer-name
-
 import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
-from types import TracebackType
 from typing import Self
 from uuid import UUID, uuid4
 
@@ -161,13 +158,13 @@ def threatfox_evidence(investigation_id: UUID) -> Evidence:
 
 def require_id(evidence: Evidence) -> UUID:
     """Narrow the optional Evidence identity for extraction construction."""
-    assert evidence.id is not None  # noqa: S101 - fixtures always set one
+    assert evidence.id is not None  # fixtures always set one
     return evidence.id
 
 
 async def count(uow: PostgresUnitOfWork, query: str) -> int:
     """Run one bounded count query inside the unit of work."""
-    assert uow.session is not None  # noqa: S101 - the UoW is active
+    assert uow.session is not None  # the UoW is active
     result = await uow.session.execute(text(query))
     return int(result.scalar_one())
 
@@ -190,7 +187,7 @@ async def _history_count(
     uow: PostgresUnitOfWork, object_type: str, object_id: UUID | None = None
 ) -> int:
     """Count history rows for one object type and optional identity."""
-    assert uow.session is not None  # noqa: S101 - the UoW is active
+    assert uow.session is not None  # the UoW is active
     if object_id is None:
         result = await uow.session.execute(
             text(
@@ -212,7 +209,7 @@ async def _history_count(
 
 async def _audit_count(uow: PostgresUnitOfWork, object_id: UUID) -> int:
     """Count audit events recorded for one evidence identity."""
-    assert uow.session is not None  # noqa: S101 - the UoW is active
+    assert uow.session is not None  # the UoW is active
     result = await uow.session.execute(
         text(
             "SELECT count(*) FROM ati.audit_event "
@@ -225,7 +222,7 @@ async def _audit_count(uow: PostgresUnitOfWork, object_id: UUID) -> int:
 
 async def _single_row(uow: PostgresUnitOfWork, query: str) -> tuple[int, int]:
     """Return the first row of one bounded verification query."""
-    assert uow.session is not None  # noqa: S101 - the UoW is active
+    assert uow.session is not None  # the UoW is active
     result = await uow.session.execute(text(query))
     row = result.one()
     return int(row[0]), int(row[1])
@@ -284,7 +281,7 @@ async def test_dns_scenario_persists_the_canonical_graph(
         assert await _history_count(uow, "evidence", evidence.id) == 1
         assert await _history_count(uow, "relationship") == 1
         assert await _history_count(uow, "relationship_observation") == 1
-        assert evidence.id is not None  # noqa: S101 - the service persists it
+        assert evidence.id is not None  # the service persists it
         assert await _audit_count(uow, evidence.id) == 1
 
 
@@ -302,7 +299,7 @@ async def test_threatfox_reuses_the_ip_and_creates_malware(
     address = next(e for e in dns_result.entities if e.type is EntityType.IP_ADDRESS)
 
     second = threatfox_evidence(investigation_id)
-    assert second.id is not None  # noqa: S101 - built with a fixed identity
+    assert second.id is not None  # built with a fixed identity
     threat_result = await service.persist(second, threatfox_extraction(second.id))
 
     reused_ip = next(
@@ -342,7 +339,7 @@ async def test_new_evidence_same_edge_appends_observation(
     await service.persist(first, dns_extraction(first.id))  # type: ignore[arg-type]
 
     second = dns_evidence(investigation_id)
-    result = await service.persist(second, dns_extraction(second.id))  # type: ignore[arg-type]
+    await service.persist(second, dns_extraction(second.id))  # type: ignore[arg-type]
 
     async with uow_factory() as uow:
         assert await entity_count(uow, "domain") == 1
@@ -569,7 +566,7 @@ async def test_soft_deleted_entity_rediscovery_fails_closed(
     address = next(e for e in result.entities if e.type is EntityType.IP_ADDRESS)
 
     async with uow_factory() as uow:
-        assert address.id is not None  # noqa: S101 - persisted above
+        assert address.id is not None  # persisted above
         await uow.entities.soft_delete(address.id)
 
     reputation = Evidence(
@@ -637,7 +634,9 @@ async def test_canonical_graph_is_reconstructed_from_durable_rows(
 
     async with uow_factory() as uow:
         assert uow.session is not None
-        rows = (await uow.session.execute(text("""
+        rows = (
+            await uow.session.execute(
+                text("""
                     SELECT source.entity_type, source.canonical_value,
                            r.relationship_type_urn,
                            target.entity_type, target.canonical_value
@@ -646,7 +645,9 @@ async def test_canonical_graph_is_reconstructed_from_durable_rows(
                     JOIN ati.entity target ON target.id = r.target_entity_id
                     WHERE r.deleted_at IS NULL
                     ORDER BY r.relationship_type_urn
-                """))).fetchall()
+                """)
+            )
+        ).fetchall()
     edges = {(row[0], row[1], row[2], row[3], row[4]) for row in rows}
     assert edges == {
         ("domain", _DOMAIN, RelationshipType.RESOLVES_TO.value, "ip_address", _IP),
@@ -710,7 +711,7 @@ class _EntityDeleteRaceUow(PostgresUnitOfWork):
 
     async def __aenter__(self) -> Self:
         entered = await super().__aenter__()
-        assert self.session is not None  # noqa: S101 - the UoW is active
+        assert self.session is not None  # the UoW is active
         self.entities = _PausedReadEntityRepository(
             self.session,
             self._batch_size,
@@ -760,7 +761,7 @@ class _SimulatedRaceUow(PostgresUnitOfWork):
 
     async def __aenter__(self) -> Self:
         entered = await super().__aenter__()
-        assert self.session is not None  # noqa: S101 - the UoW is active
+        assert self.session is not None  # the UoW is active
         self.entities = _SimulatedRaceEntityRepository(
             self.session, self._batch_size, self._race_identity
         )
@@ -803,7 +804,7 @@ async def test_concurrent_entity_soft_deletion_is_rejected_under_the_row_lock(
     await asyncio.wait_for(read_done.wait(), 5)
 
     async with uow_factory() as uow:
-        assert subject.id is not None  # noqa: S101 - persisted above
+        assert subject.id is not None  # persisted above
         await uow.entities.soft_delete(subject.id)
 
     delete_committed.set()
@@ -846,7 +847,7 @@ async def test_canonical_race_recovery_rejects_a_soft_deleted_row(
     address = next(e for e in dns_result.entities if e.type is EntityType.IP_ADDRESS)
 
     async with uow_factory() as uow:
-        assert address.id is not None  # noqa: S101 - persisted above
+        assert address.id is not None  # persisted above
         await uow.entities.soft_delete(address.id)
 
     race_identity = (EntityType.IP_ADDRESS, _IP)
@@ -883,7 +884,7 @@ async def test_soft_deleted_entity_write_is_database_enforced(
         written = await uow.entities.upsert(
             Entity(type=EntityType.DOMAIN, value=_DOMAIN)
         )
-        assert written.id is not None  # noqa: S101 - persisted above
+        assert written.id is not None  # persisted above
         await uow.entities.soft_delete(written.id)
 
     async with uow_factory() as uow:

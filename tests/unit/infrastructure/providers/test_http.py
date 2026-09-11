@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -297,7 +298,7 @@ class TestPolicyValidation:
 # -- Fake clock/sleep/jitter helpers --------------------------------------
 
 
-class _FakeClock:  # pylint: disable=too-few-public-methods
+class _FakeClock:
     """Deterministic monotonic clock for retry/limiter tests."""
 
     def __init__(self, ticks: list[float] | None = None) -> None:
@@ -310,7 +311,7 @@ class _FakeClock:  # pylint: disable=too-few-public-methods
         return val
 
 
-class _FakeUtcClock:  # pylint: disable=too-few-public-methods
+class _FakeUtcClock:
     """Deterministic UTC clock for Retry-After header tests."""
 
     def __init__(self, fixed_time: datetime | None = None) -> None:
@@ -320,7 +321,7 @@ class _FakeUtcClock:  # pylint: disable=too-few-public-methods
         return self._fixed
 
 
-class _RecordingSleep:  # pylint: disable=too-few-public-methods
+class _RecordingSleep:
     """Records sleep calls for assertion."""
 
     def __init__(self) -> None:
@@ -845,10 +846,8 @@ class TestBoundedLimiter:
         await sleep_started.wait()
         task.cancel()
 
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
         # Unblock sleep so subsequent acquire can complete without blocking
         sleep_blocker.set()

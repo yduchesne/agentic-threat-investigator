@@ -68,7 +68,7 @@ def _token_count(text: str) -> int:
     return max(1, math.ceil(len(text.split()) * 4 / 3))
 
 
-class TokenBoundedChunker:  # pylint: disable=too-few-public-methods
+class TokenBoundedChunker:
     """Deterministic section-aware paragraph chunker."""
 
     def __init__(self, target_tokens: int, max_tokens: int) -> None:
@@ -207,10 +207,10 @@ class DocumentIndexingSummary:
     chunks_replaced: int
 
 
-class DocumentIndexingService:  # pylint: disable=too-few-public-methods
+class DocumentIndexingService:
     """Build and persist documents with embedding I/O outside transactions."""
 
-    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def __init__(
         self,
         uow_factory: Callable[[], UnitOfWork],
         builder: DocumentBuilder,

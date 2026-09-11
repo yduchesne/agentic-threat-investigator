@@ -7,8 +7,6 @@ exclusion, and paging. The seeded graph mirrors the provider-pipeline shape:
 Investigation -> Evidence -> Relationship -> RelationshipObservation rows.
 """
 
-# pylint: disable=redefined-outer-name
-
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4

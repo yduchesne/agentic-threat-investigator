@@ -185,9 +185,7 @@ class PostgresRelationshipRepository(RelationshipRepository):
         return _relationship(row)
 
 
-class PostgresRelationshipObservationRepository(
-    RelationshipObservationRepository
-):  # pylint: disable=too-few-public-methods
+class PostgresRelationshipObservationRepository(RelationshipObservationRepository):
     """Append immutable relationship observations."""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -273,9 +271,7 @@ class PostgresRelationshipObservationRepository(
         return observation
 
 
-class PostgresEvidenceRepository(
-    EvidenceRepository
-):  # pylint: disable=too-few-public-methods
+class PostgresEvidenceRepository(EvidenceRepository):
     """Append and read immutable evidence rows in the caller's transaction."""
 
     def __init__(self, session: AsyncSession) -> None:

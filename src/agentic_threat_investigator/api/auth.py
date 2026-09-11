@@ -2,7 +2,6 @@
 """Contract-pinned local authentication endpoints."""
 
 # The module-level dependency is replaced by application bootstrap.
-# pylint: disable=global-statement,too-many-arguments,too-many-positional-arguments,broad-exception-caught
 import secrets
 from typing import Annotated, cast
 
@@ -141,11 +140,14 @@ async def logout(
                 request.app.state.settings.public_base_url,
             )
         except CsrfError as exc:
-            try:
+            # contextlib.suppress() would drop the Bandit B110 token on this
+            # deliberate swallow; the explicit try/except/pass form keeps the
+            # security suppression target stable.
+            try:  # noqa: SIM105
                 await service.audit.emit(
                     AuditAction.AUTH_CSRF_REJECTED, AuditOutcome.DENIED
                 )
-            except Exception:  # audit failure must not alter the security response
+            except Exception:  # noqa: BLE001 - audit failure must not alter the security response
                 pass  # nosec B110 - deliberate: audit failure must not mask the 403
             raise HTTPException(
                 status_code=403, detail="CSRF validation failed"

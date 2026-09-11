@@ -45,7 +45,7 @@ def _record(name: str, rr_type: int, data: str, ttl: int = 300) -> dict[str, Any
     return {"name": name, "type": rr_type, "TTL": ttl, "data": data}
 
 
-class _RecordingSleep:  # pylint: disable=too-few-public-methods
+class _RecordingSleep:
     """Records sleep calls for exact retry-attempt assertions."""
 
     def __init__(self) -> None:

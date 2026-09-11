@@ -55,7 +55,7 @@ EntityIdentityKey = tuple[EntityType, str]
 
 
 @dataclass(frozen=True)
-class ProviderObservationPersistenceResult:  # pylint: disable=too-few-public-methods
+class ProviderObservationPersistenceResult:
     """Objects written by one atomic provider-observation transaction."""
 
     evidence: Evidence
@@ -81,7 +81,7 @@ def _evidence_audit_event(
     )
 
 
-class ProviderObservationPersistenceService:  # pylint: disable=too-few-public-methods
+class ProviderObservationPersistenceService:
     """Persist one already-normalized and already-extracted observation atomically.
 
     The service owns the UnitOfWork boundary only: repositories never commit,
@@ -92,7 +92,7 @@ class ProviderObservationPersistenceService:  # pylint: disable=too-few-public-m
     def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
         self._uow_factory = uow_factory
 
-    async def persist(  # pylint: disable=too-many-locals
+    async def persist(
         self,
         evidence: Evidence,
         extraction: ExtractionResult,
@@ -153,7 +153,7 @@ class ProviderObservationPersistenceService:  # pylint: disable=too-few-public-m
                 spec.type.value, spec.value, include_deleted=True
             )
             if existing is not None and existing.deleted_at is not None:
-                assert existing.id is not None  # noqa: S101 - database invariant
+                assert existing.id is not None  # database invariant
                 raise SoftDeletedIdentityError("entity", existing.id)
             written = await uow.entities.upsert(
                 Entity(

@@ -85,9 +85,7 @@ def _fake_secrets() -> _StaticSecretsResolver:
     )
 
 
-class _SpyHttpClientFactory(  # pylint: disable=too-few-public-methods
-    HttpClientFactory
-):
+class _SpyHttpClientFactory(HttpClientFactory):
     """Deterministic factory capturing construction arguments."""
 
     def __init__(self, *, fail_on_call: int | None = None) -> None:
@@ -189,7 +187,7 @@ async def test_composition_closes_both_clients_on_individual_failure() -> None:
         _FailingClient("sixth"),
     ]
 
-    class _CannedFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
+    class _CannedFactory(HttpClientFactory):
         def create(
             self, policy: ProviderHttpPolicy, limiter: BoundedLimiter
         ) -> ProviderHttpClient:
@@ -219,9 +217,7 @@ async def test_composition_rolls_back_on_partial_construction_failure() -> None:
             closed.append(self._name)
             await super().aclose()
 
-    class _FailOnSecondFactory(  # pylint: disable=too-few-public-methods
-        HttpClientFactory
-    ):
+    class _FailOnSecondFactory(HttpClientFactory):
         def __init__(self) -> None:
             self.call_count = 0
 
@@ -276,7 +272,7 @@ async def test_composition_aclose_cancellation_closes_remaining_client() -> None
         _OrderTrackingClient("sixth"),
     ]
 
-    class _CannedFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
+    class _CannedFactory(HttpClientFactory):
         def create(
             self, policy: ProviderHttpPolicy, limiter: BoundedLimiter
         ) -> ProviderHttpClient:
@@ -326,9 +322,7 @@ async def test_composition_wires_ipinfo_settings(
 
     seen_settings: list[RateLimiterSettings] = []
 
-    class _RecordingBoundedLimiter(  # pylint: disable=too-few-public-methods
-        BoundedLimiter
-    ):
+    class _RecordingBoundedLimiter(BoundedLimiter):
         """Spy recording the exact limiter settings each provider receives."""
 
         def __init__(self, limiter_settings: RateLimiterSettings) -> None:
@@ -409,7 +403,7 @@ async def test_composition_passes_resolved_token_to_provider() -> None:
     ) as comp:
         # White-box assertion proving bootstrap resolution wired the resolved
         # credential into the provider; the value is a fake test token only.
-        resolved = comp.ipinfo_lite._token  # pylint: disable=protected-access
+        resolved = comp.ipinfo_lite._token
         assert resolved == _FAKE_TOKEN
 
 
@@ -427,7 +421,7 @@ async def test_composition_resolves_token_from_environment(
     async with await ProviderComposition.create(
         settings, http_client_factory=factory
     ) as comp:
-        resolved = comp.ipinfo_lite._token  # pylint: disable=protected-access
+        resolved = comp.ipinfo_lite._token
         assert resolved == _FAKE_TOKEN
 
 
@@ -446,9 +440,7 @@ async def test_composition_missing_required_token_fails_before_client_creation()
             closed.append(self._name)
             await super().aclose()
 
-    class _FailOnThirdFactory(  # pylint: disable=too-few-public-methods
-        HttpClientFactory
-    ):
+    class _FailOnThirdFactory(HttpClientFactory):
         def __init__(self) -> None:
             self.call_count = 0
 
@@ -488,7 +480,7 @@ async def test_composition_blank_token_fails_before_client_creation(
             closed.append(self._name)
             await super().aclose()
 
-    class _CountingFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
+    class _CountingFactory(HttpClientFactory):
         def __init__(self) -> None:
             self.call_count = 0
 
@@ -532,9 +524,7 @@ async def test_composition_later_failure_closes_ipinfo_client(
             closed.append(self._name)
             await super().aclose()
 
-    class _PassThroughFactory(  # pylint: disable=too-few-public-methods
-        HttpClientFactory
-    ):
+    class _PassThroughFactory(HttpClientFactory):
         def __init__(self) -> None:
             self.call_count = 0
 
@@ -576,7 +566,7 @@ async def test_composition_normal_close_closes_all_clients_once() -> None:
             closed.append(self._name)
             await super().aclose()
 
-    class _TrackingFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
+    class _TrackingFactory(HttpClientFactory):
         def __init__(self) -> None:
             self.call_count = 0
 
@@ -713,9 +703,7 @@ class TestDbIpCityLiteComposition:
                 closed.append(self._name)
                 await super().aclose()
 
-        class _PassThroughFactory(  # pylint: disable=too-few-public-methods
-            HttpClientFactory
-        ):
+        class _PassThroughFactory(HttpClientFactory):
             def __init__(self) -> None:
                 self.call_count = 0
 
@@ -801,9 +789,7 @@ class TestDbIpCityLiteComposition:
                 closed.append(self._name)
                 await super().aclose()
 
-        class _PassThroughFactory(  # pylint: disable=too-few-public-methods
-            HttpClientFactory
-        ):
+        class _PassThroughFactory(HttpClientFactory):
             def __init__(self) -> None:
                 self.call_count = 0
 
@@ -857,7 +843,7 @@ class TestDbIpCityLiteComposition:
 
             def lookup(self, ip: str) -> None:
                 """Never called in this test."""
-                return None
+                return
 
             def close(self) -> None:
                 """Record the attempt and fail."""
@@ -886,9 +872,7 @@ class TestDbIpCityLiteComposition:
                 closed.append(self._name)
                 await super().aclose()
 
-        class _PassThroughFactory(  # pylint: disable=too-few-public-methods
-            HttpClientFactory
-        ):
+        class _PassThroughFactory(HttpClientFactory):
             def __init__(self) -> None:
                 self.call_count = 0
 
@@ -930,7 +914,7 @@ class TestDbIpCityLiteComposition:
 
             def lookup(self, ip: str) -> None:
                 """Never called in this test."""
-                return None
+                return
 
             def close(self) -> None:
                 """Record the attempt and fail."""
@@ -961,9 +945,7 @@ class TestDbIpCityLiteComposition:
                 closed.append(self._name)
                 raise RuntimeError(f"{self._name} close boom")
 
-        class _ExplodingFactory(  # pylint: disable=too-few-public-methods
-            HttpClientFactory
-        ):
+        class _ExplodingFactory(HttpClientFactory):
             def __init__(self) -> None:
                 self.call_count = 0
 

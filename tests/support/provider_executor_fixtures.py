@@ -11,7 +11,6 @@ can assert sequencing, zero-invocation, and redaction behavior.
 # The deterministic fakes intentionally expose a single public operation each
 # (get/investigate/persist/append) and share comparable composition blocks
 # with the executor test modules; these fakes are test support, not API.
-# pylint: disable=too-few-public-methods,duplicate-code
 
 from __future__ import annotations
 
@@ -190,8 +189,7 @@ class FakePersistenceService(ProviderObservationPersistenceService):
         self.calls.append((evidence, extraction))
         if self._raises is not None:
             raise self._raises
-        result = self._results[len(self.calls) - 1]
-        return result
+        return self._results[len(self.calls) - 1]
 
 
 class FakeTimelineSink(InvestigationTimelineSink):

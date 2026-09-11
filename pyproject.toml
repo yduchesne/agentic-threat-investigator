@@ -42,10 +42,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "black>=26.3,<27",
-  "isort>=5.13,<6",
   "mypy>=1.13,<2",
-  "pylint>=3.3,<4",
+  "ruff>=0.16.7,<0.17",
   "pytest>=9,<10",
   "pytest-cov>=6,<7",
   "pytest-asyncio>=1.0,<2",
@@ -60,24 +58,91 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_threat_investigator"]
 
-[tool.black]
+[tool.ruff]
 line-length = 88
-target-version = ["py314"]
+target-version = "py314"
 
-[tool.isort]
-profile = "black"
-line_length = 88
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+# Ruff is ATI's single Python formatter/linter/import sorter (see
+# AGENTS.md and docs/TESTING.md). The rule set below is intentional:
+#
+# - E/F/W/I: pycodestyle + Pyflakes + isort baseline (E501 deliberately
+#   excluded, see ignore below).
+# - B/BLE: flake8-bugbear correctness plus flake8-blind-except, which is
+#   the faithful non-Pylint-code equivalent of Pylint's
+#   broad-exception-caught (W0718).
+# - C4/SIM/RET: comprehension/simplification/return-consistency families;
+#   findings are small, reviewed, and safe-autofixed only.
+# - ARG: flake8-unused-arguments, the semantic equivalent of Pylint's
+#   unused-argument (W0613); enforced for src (see per-file-ignores for the
+#   test-tree rationale).
+# - D100/D101/D103: docstring gates mirroring the Pylint defaults ATI
+#   relied on (missing-module/class/function docstring). D102 (public
+#   methods) and D107 (__init__) are intentionally NOT enabled: AGENTS.md
+#   forbids repeating interface docstrings and Pylint exempted __init__
+#   (no-docstring-rgx) under the old contract.
+# - RUF100: unused-noqa detection, keeping every suppression honest.
+#
+# Candidate families evaluated but NOT enabled (documented in the PR
+# migration map): TRY (580 tryceratops findings, mostly TRY003 message
+# style; only W0707 sites existed under Pylint), UP (68 pyupgrade
+# modernization findings, style-only, no old-contract equivalent), N (20
+# pep8-naming findings on intentional RDAP schema-mirroring field names),
+# ASYNC (3 test-only findings), E501 (formatter-incompatible, see ignore),
+# RUF012/RUF001/RUF043/RUF036/RUF005 (Ruff-native style findings incl.
+# intentional ambiguous test data and SQLAlchemy mapping defaults), and all
+# PL* Pylint-derived codes (this PR deliberately translates to Flake8-style
+# codes instead; see plan).
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "W",
+  "I",
+  "B",
+  "BLE",
+  "C4",
+  "SIM",
+  "RET",
+  "ARG",
+  "D100",
+  "D101",
+  "D103",
+  "RUF100",
+]
+ignore = [
+  # E501 is formatter-incompatible: Ruff's formatter aims at the line
+  # length but does not guarantee it, and the long lines are intentional
+  # (URLs, SQL fragments, error templates). Pylint's 100-column default did
+  # not flag them either, so enabling E501 at 88 would strengthen the
+  # contract.
+  "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# ARG (Pylint unused-argument/W0613 parity) is enforced for production code
+# only. Under the old Pylint contract only seven test files suppressed
+# unused-argument (via file-level pragmas); Ruff's ARG001/ARG002 fire far
+# more aggressively (134 sites) on parametrized fixtures, monkeypatched
+# fakes, and interface-conformance signatures that the test harness needs.
+"tests/**" = ["ARG"]
+# Docstring exemptions mirror the old file-level Pylint suppressions
+# (missing-function-docstring/missing-class-docstring) in these two test
+# files, where helpers intentionally carry no docstrings.
+"tests/unit/test_audit.py" = ["D101", "D103"]
+"tests/unit/test_identity_services.py" = ["D101", "D103"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agentic_threat_investigator"]
 
 [tool.mypy]
 strict = true
 python_version = "3.14"
 mypy_path = "src"
-
-[tool.pylint.main]
-py-version = "3.14"
-source-roots = ["src"]
-load-plugins = []
-fail-under = 10.0
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]

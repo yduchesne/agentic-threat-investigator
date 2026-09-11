@@ -46,7 +46,7 @@ class IngestionSummary:
     changed: tuple[IngestionRecordResult, ...]
 
 
-class IngestionService:  # pylint: disable=too-few-public-methods
+class IngestionService:
     """Coordinate source normalization and short atomic persistence transactions."""
 
     def __init__(self, uow_factory: Callable[[], UnitOfWork], batch_size: int) -> None:

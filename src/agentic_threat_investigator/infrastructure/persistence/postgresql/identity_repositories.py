@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """PostgreSQL adapters for local identity resources."""
 
-# SQLAlchemy's dynamic func namespace is incorrectly flagged by pylint.
-# pylint: disable=not-callable
+# SQLAlchemy's func namespace attributes are resolved dynamically at runtime.
 
 import json
 from datetime import datetime, timezone

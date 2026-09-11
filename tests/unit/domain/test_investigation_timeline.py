@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for the investigation timeline domain model and app seam."""
 
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods,redefined-outer-name
-
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4

@@ -106,7 +106,11 @@ def test_support_models_reject_extra_fields() -> None:
     with pytest.raises(ValidationError, match="extra"):
         EvidenceSupport(kind="evidence", evidence_id=uuid4(), rationale="not supported")  # type: ignore[call-arg]
     with pytest.raises(ValidationError, match="extra"):
-        RelationshipSupport(kind="relationship_observation", relationship_observation_id=uuid4(), evidence_id=uuid4())  # type: ignore[call-arg]
+        RelationshipSupport(
+            kind="relationship_observation",
+            relationship_observation_id=uuid4(),
+            evidence_id=uuid4(),
+        )  # type: ignore[call-arg]
 
 
 def test_support_references_are_immutable() -> None:

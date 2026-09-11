@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Real-PostgreSQL coverage for the append-only investigation timeline."""
 
-# pylint: disable=redefined-outer-name
-
 from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4

@@ -32,7 +32,6 @@ pytestmark = pytest.mark.asyncio
 # test_abuseipdb_composition.py so each provider's wiring, secret
 # resolution, and rollback tests stay symmetrical; the duplication is
 # test-only and deliberately accepted.
-# pylint: disable=duplicate-code
 
 _THREATFOX_KEY_SECRET_NAME = "ATI_THREATFOX_AUTH_KEY"
 _FAKE_KEY = "fake-test-threatfox-key"
@@ -40,7 +39,7 @@ _FAKE_TOKEN = "fake-test-token"
 _FAKE_ABUSEIPDB_KEY = "fake-test-abuseipdb-key"
 
 
-class _KeyringResolver(SecretsResolver):  # pylint: disable=too-few-public-methods
+class _KeyringResolver(SecretsResolver):
     """Deterministic resolver returning credential values from a keyring."""
 
     def __init__(self, **values: str) -> None:
@@ -67,7 +66,7 @@ class _ClosingClient(ProviderHttpClient):
         await super().aclose()
 
 
-class _SequentialFactory(HttpClientFactory):  # pylint: disable=too-few-public-methods
+class _SequentialFactory(HttpClientFactory):
     """Factory yielding tracking clients in creation order."""
 
     def __init__(self, closed: list[str]) -> None:
@@ -136,9 +135,7 @@ async def test_composition_wires_threatfox_settings(
 
         # White-box assertion proving bootstrap resolution and settings
         # wiring; the value is a fake test credential only.
-        # pylint: disable=protected-access
         assert comp.threatfox._auth_key == _FAKE_KEY
-        # pylint: enable=protected-access
 
 
 @pytest.mark.parametrize("blank_key", ["", "   ", "\t"])

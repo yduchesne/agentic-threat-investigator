@@ -11,7 +11,6 @@ of an untyped criteria map.
 """
 
 # Explicit actor/request/expected-version arguments are intentional.
-# pylint: disable=too-many-arguments
 
 import json
 from uuid import UUID

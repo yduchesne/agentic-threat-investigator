@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Add immutable audit event persistence."""
+
 from alembic import op
 
 revision = "0004_audit"

@@ -4,7 +4,6 @@
 # Fixture arguments intentionally reuse fixture names; the fakes mirror the
 # repository seam shape used by the persistence-service suites, and the single
 # World fixture carries one terminal identity per persisted row.
-# pylint: disable=redefined-outer-name,too-many-instance-attributes,too-few-public-methods,duplicate-code
 
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -214,7 +213,7 @@ class FakeEntityRepository(EntityRepository):
         raise NotImplementedError
 
 
-class FakeUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attributes
+class FakeUnitOfWork(UnitOfWork):
     """In-memory transaction boundary tracking close/commit/rollback."""
 
     entities: FakeEntityRepository
@@ -234,7 +233,6 @@ class FakeUnitOfWork(UnitOfWork):  # pylint: disable=too-many-instance-attribute
     ) -> None:
         # One explicit argument per repository seam is the UnitOfWork
         # convention; the count is intrinsic to the boundary.
-        # pylint: disable=too-many-arguments
         self.investigations = investigations
         self.evidence = evidence
         self.relationship_observations = observations

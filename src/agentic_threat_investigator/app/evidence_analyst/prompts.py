@@ -66,8 +66,7 @@ repair, do not include the previous response, and do not add commentary.
 def _render_entity_value(value: Any) -> str:
     """Return a compact deterministic rendering of one analyst entity."""
     return (
-        f"id={value['entity_id']} type={value['entity_type']} "
-        f"value={value['value']!r}"
+        f"id={value['entity_id']} type={value['entity_type']} value={value['value']!r}"
     )
 
 

@@ -25,7 +25,7 @@ from agentic_threat_investigator.infrastructure.sources.mitre_attack_documents i
 )
 
 
-class _MemoryStore(ObjectStore):  # pylint: disable=too-few-public-methods
+class _MemoryStore(ObjectStore):
     """Serve one synthetic pre-existing artifact without network access."""
 
     def __init__(self, content: bytes) -> None:

@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Tests for deterministic provider-work queue mechanics (PR 19A)."""
 
-# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
-
 import pytest
 
 from agentic_threat_investigator.app.orchestration.models import (

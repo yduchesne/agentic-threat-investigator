@@ -59,7 +59,7 @@ from agentic_threat_investigator.app.llm import (
 _TRACE_METADATA_KEYS = ("investigation_id",)
 
 
-class LangChainLlmClient(LlmClient):  # pylint: disable=too-few-public-methods
+class LangChainLlmClient(LlmClient):
     """Generate typed structured output through an injected chat model.
 
     Each ``generate_structured`` invocation performs exactly one model
@@ -131,7 +131,7 @@ class LangChainLlmClient(LlmClient):  # pylint: disable=too-few-public-methods
                     ],
                     config=config or None,
                 )
-        except asyncio.CancelledError:  # pylint: disable=try-except-raise
+        except asyncio.CancelledError:
             # Cooperative cancellation must propagate unchanged; the
             # try/except exists only to prevent the error mapping below.
             raise
@@ -158,7 +158,7 @@ class LangChainLlmClient(LlmClient):  # pylint: disable=too-few-public-methods
             # Conservative mapped failure: the bounded message carries only
             # the stable category, never provider error text.
             raise LlmError(LlmErrorCode.PROVIDER_FAILURE, retryable=False) from None
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:  # noqa: BLE001 - unexpected failures map to the stable provider category
             # Any unexpected transport/framework failure becomes the stable
             # provider category; nothing provider-specific escapes this seam.
             raise LlmError(LlmErrorCode.PROVIDER_FAILURE, retryable=False) from None

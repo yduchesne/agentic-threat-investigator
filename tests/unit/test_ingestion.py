@@ -47,7 +47,7 @@ class _State:
     )
 
 
-class _Records:  # pylint: disable=too-few-public-methods
+class _Records:
     """Test helper for Records."""
 
     def __init__(self, state: _State) -> None:
@@ -143,9 +143,7 @@ class _Uow(UnitOfWork):
         self.state.rollbacks += 1
 
 
-class _Source(  # pylint: disable=too-many-instance-attributes,too-few-public-methods
-    BatchSource
-):
+class _Source(BatchSource):
     """Test helper for Source."""
 
     source_id = "feed-a"

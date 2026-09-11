@@ -2,7 +2,6 @@
 """Application audit emitters and transaction-aware audit wiring."""
 
 # The structured event contract intentionally has optional context fields.
-# pylint: disable=too-few-public-methods,too-many-arguments,broad-exception-caught
 from abc import ABC, abstractmethod
 from typing import Any, Callable
 from uuid import UUID
@@ -127,5 +126,5 @@ class StandaloneAuditEmitter(AuditEmitter):
                     metadata=metadata,
                     request_id=request_id,
                 )
-        except Exception:  # pragma: no cover - logging policy belongs to deployment
+        except Exception:  # noqa: BLE001 - logging policy belongs to deployment  # pragma: no cover
             return

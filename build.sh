@@ -10,10 +10,11 @@ Usage: ./build.sh [OPTION]
 Run an ATI build operation.
 
 Options:
-  --chk     Run the static quality checks and unit tests: Pylint, strict
+  --chk     Run the static quality checks and unit tests: Ruff lint, strict
             Mypy, and the unit test suites (Python and frontend).
-  --fmt     Format Python sources with Black.
-  --qa      Run Black in check mode and then the same operations as --chk,
+  --fmt     Apply Ruff lint-safe fixes (including import sorting) and then
+            format Python sources with the Ruff formatter.
+  --qa      Check Ruff formatting, then run the same operations as --chk,
             plus the frontend lint.
   --unit    Run the unit test suites only (Python and frontend).
   --intg    Run the PostgreSQL integration tests (via ./integration-test.sh)
@@ -23,6 +24,12 @@ Options:
             audits.
   -h, --help  Show this help message and exit.
 USAGE
+}
+
+run_python_static_checks() {
+  echo '== Python: static checks =='
+  uv run ruff check src tests
+  uv run mypy src tests
 }
 
 run_python_unit_tests() {
@@ -65,9 +72,7 @@ run_security_checks() {
 }
 
 run_quality_checks() {
-  echo '== Python: static checks =='
-  uv run pylint src tests
-  uv run mypy src tests
+  run_python_static_checks
   echo '== Python: unit tests and coverage =='
   run_python_unit_tests
   echo '== Frontend: unit tests =='
@@ -82,12 +87,13 @@ case "${1:-}" in
     run_quality_checks
     ;;
   --fmt)
-    echo '== Python: formatting sources =='
-    uv run black src tests
+    echo '== Python: lint-safe fixes and formatting =='
+    uv run ruff check src tests --fix
+    uv run ruff format src tests
     ;;
   --qa)
     echo '== Python: formatting check =='
-    uv run black --check src tests
+    uv run ruff format --check src tests
     run_quality_checks
     echo '== Frontend: lint =='
     run_frontend_lint

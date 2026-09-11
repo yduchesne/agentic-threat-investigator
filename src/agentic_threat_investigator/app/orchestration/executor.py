@@ -16,7 +16,7 @@ from agentic_threat_investigator.domain.investigation import (
 )
 
 
-class WorkExecutor(ABC):  # pylint: disable=too-few-public-methods
+class WorkExecutor(ABC):
     """Execute one approved provider work item and report its outcome.
 
     Implementations must remain deterministic for the orchestration

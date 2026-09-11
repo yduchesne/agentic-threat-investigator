@@ -20,7 +20,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 
 
-class LlmAccountingService:  # pylint: disable=too-few-public-methods
+class LlmAccountingService:
     """Reserve LLM invocations against the persisted Investigation budget."""
 
     def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:

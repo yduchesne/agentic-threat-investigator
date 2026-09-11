@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """SQLAlchemy mappings for the PR 3 persistence schema.
 
-ORM row mappings carry mapped state rather than behavior, so the Pylint
-minimum public-method rule does not apply to them.
+ORM row mappings carry mapped state rather than behavior.
 """
 
 from datetime import datetime
@@ -25,11 +24,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import UserDefinedType
 
 
-class Base(DeclarativeBase):  # pylint: disable=too-few-public-methods
+class Base(DeclarativeBase):
     """Base for ATI ORM mappings."""
 
 
-class Vector1536(UserDefinedType[Any]):  # pylint: disable=too-few-public-methods
+class Vector1536(UserDefinedType[Any]):
     """SQLAlchemy DDL representation of ATI's fixed pgvector dimension."""
 
     cache_ok = True
@@ -48,7 +47,7 @@ class Vector1536(UserDefinedType[Any]):  # pylint: disable=too-few-public-method
         return "vector(1536)"
 
 
-class AuditEventRow(Base):  # pylint: disable=too-few-public-methods
+class AuditEventRow(Base):
     """Database row for an immutable audit event."""
 
     __tablename__ = "audit_event"
@@ -68,7 +67,7 @@ class AuditEventRow(Base):  # pylint: disable=too-few-public-methods
     )
 
 
-class EntityRow(Base):  # pylint: disable=too-few-public-methods
+class EntityRow(Base):
     """Database row for an entity."""
 
     __tablename__ = "entity"
@@ -90,7 +89,7 @@ class EntityRow(Base):  # pylint: disable=too-few-public-methods
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
-class SourceRecordRow(Base):  # pylint: disable=too-few-public-methods
+class SourceRecordRow(Base):
     """Current normalized state for one external source identity."""
 
     __tablename__ = "source_record"
@@ -114,7 +113,7 @@ class SourceRecordRow(Base):  # pylint: disable=too-few-public-methods
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class DocumentRow(Base):  # pylint: disable=too-few-public-methods
+class DocumentRow(Base):
     """Current versioned narrative document state."""
 
     __tablename__ = "document"
@@ -139,7 +138,7 @@ class DocumentRow(Base):  # pylint: disable=too-few-public-methods
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
-class DocumentChunkRow(Base):  # pylint: disable=too-few-public-methods
+class DocumentChunkRow(Base):
     """Current replaceable pgvector indexing artifact."""
 
     __tablename__ = "document_chunk"
@@ -162,7 +161,7 @@ class DocumentChunkRow(Base):  # pylint: disable=too-few-public-methods
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class IngestionCheckpointRow(Base):  # pylint: disable=too-few-public-methods
+class IngestionCheckpointRow(Base):
     """Mutable operational progress for one artifact and normalizer version."""
 
     __tablename__ = "ingestion_checkpoint"
@@ -175,7 +174,7 @@ class IngestionCheckpointRow(Base):  # pylint: disable=too-few-public-methods
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class UserRow(Base):  # pylint: disable=too-few-public-methods
+class UserRow(Base):
     """Database row for a local user."""
 
     __tablename__ = "user"
@@ -196,7 +195,7 @@ class UserRow(Base):  # pylint: disable=too-few-public-methods
     )
 
 
-class CredentialRow(Base):  # pylint: disable=too-few-public-methods
+class CredentialRow(Base):
     """Database row for a user's password credential."""
 
     __tablename__ = "credential"
@@ -208,7 +207,7 @@ class CredentialRow(Base):  # pylint: disable=too-few-public-methods
     password_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class SessionRow(Base):  # pylint: disable=too-few-public-methods
+class SessionRow(Base):
     """Database row for a revocable server-side session."""
 
     __tablename__ = "session"
@@ -224,7 +223,7 @@ class SessionRow(Base):  # pylint: disable=too-few-public-methods
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class RelationshipRow(Base):  # pylint: disable=too-few-public-methods
+class RelationshipRow(Base):
     """Database row for a relationship."""
 
     __tablename__ = "relationship"
@@ -240,7 +239,7 @@ class RelationshipRow(Base):  # pylint: disable=too-few-public-methods
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
-class InvestigationRow(Base):  # pylint: disable=too-few-public-methods
+class InvestigationRow(Base):
     """Database row for the mutable, versioned investigation resource."""
 
     __tablename__ = "investigation"
@@ -262,7 +261,7 @@ class InvestigationRow(Base):  # pylint: disable=too-few-public-methods
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
-class EvidenceRow(Base):  # pylint: disable=too-few-public-methods
+class EvidenceRow(Base):
     """Database row for immutable evidence."""
 
     __tablename__ = "evidence"
@@ -281,7 +280,7 @@ class EvidenceRow(Base):  # pylint: disable=too-few-public-methods
     version: Mapped[int] = mapped_column(BigInteger)
 
 
-class RelationshipObservationRow(Base):  # pylint: disable=too-few-public-methods
+class RelationshipObservationRow(Base):
     """Database row for an immutable relationship observation."""
 
     __tablename__ = "relationship_observation"
@@ -297,7 +296,7 @@ class RelationshipObservationRow(Base):  # pylint: disable=too-few-public-method
     version: Mapped[int] = mapped_column(BigInteger)
 
 
-class AssessmentRow(Base):  # pylint: disable=too-few-public-methods
+class AssessmentRow(Base):
     """Database row for a versioned, insert-only analytical Assessment."""
 
     __tablename__ = "assessment"
@@ -323,7 +322,7 @@ class AssessmentRow(Base):  # pylint: disable=too-few-public-methods
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
-class AssessmentFindingRow(Base):  # pylint: disable=too-few-public-methods
+class AssessmentFindingRow(Base):
     """Database row for one Finding within a persisted Assessment."""
 
     __tablename__ = "assessment_finding"
@@ -341,7 +340,7 @@ class AssessmentFindingRow(Base):  # pylint: disable=too-few-public-methods
     confidence: Mapped[str] = mapped_column(String)
 
 
-class AssessmentFindingSupportRow(Base):  # pylint: disable=too-few-public-methods
+class AssessmentFindingSupportRow(Base):
     """Database row for one typed support reference of a Finding."""
 
     __tablename__ = "assessment_finding_support"
@@ -360,7 +359,7 @@ class AssessmentFindingSupportRow(Base):  # pylint: disable=too-few-public-metho
     )
 
 
-class InvestigationTimelineEventRow(Base):  # pylint: disable=too-few-public-methods
+class InvestigationTimelineEventRow(Base):
     """Database row for an immutable analyst-facing investigation timeline event."""
 
     __tablename__ = "investigation_timeline_event"

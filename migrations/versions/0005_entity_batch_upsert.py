@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Install the canonical composite-array entity batch upsert function."""
+
 from pathlib import Path
 
 from alembic import op

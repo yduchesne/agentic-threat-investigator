@@ -81,7 +81,7 @@ def _evidence_subject(subject: EntityRef) -> AnalystEntity:
     )
 
 
-class EvidenceAnalystInputLoader:  # pylint: disable=too-few-public-methods
+class EvidenceAnalystInputLoader:
     """Assemble the immutable, bounded analyst input for one Investigation.
 
     ``max_evidence_items``, ``max_relationship_observations``,
@@ -92,7 +92,7 @@ class EvidenceAnalystInputLoader:  # pylint: disable=too-few-public-methods
     bypass them.
     """
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(
         self,
         uow_factory: Callable[[], UnitOfWork],
         *,
@@ -146,7 +146,6 @@ class EvidenceAnalystInputLoader:  # pylint: disable=too-few-public-methods
         """Assemble the input while the read-only transaction is open."""
         # Loading several correlated resource maps in one loop per resource is
         # intrinsic; the branch/local counts reflect that shape.
-        # pylint: disable=too-many-locals,too-many-branches
         investigation = await uow.investigations.get_by_id(investigation_id)
         if investigation is None:
             raise InvestigationNotFoundError(str(investigation_id))

@@ -204,7 +204,9 @@ def test_evidence_support_identifies_exactly_one_evidence() -> None:
     with pytest.raises(ValidationError):
         EvidenceSupport()  # type: ignore[call-arg]
     with pytest.raises(ValidationError, match="extra"):
-        EvidenceSupport(kind="evidence", evidence_id=uuid4(), rationale="not a valid field")  # type: ignore[call-arg]
+        EvidenceSupport(
+            kind="evidence", evidence_id=uuid4(), rationale="not a valid field"
+        )  # type: ignore[call-arg]
 
 
 def test_relationship_support_identifies_exactly_one_observation() -> None:

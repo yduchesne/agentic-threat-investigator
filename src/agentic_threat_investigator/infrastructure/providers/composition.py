@@ -52,7 +52,7 @@ from agentic_threat_investigator.infrastructure.providers.threatfox import (
 from agentic_threat_investigator.infrastructure.providers.urlhaus import UrlhausProvider
 
 
-class HttpClientFactory(ABC):  # pylint: disable=too-few-public-methods
+class HttpClientFactory(ABC):
     """Factory for constructing configured, owned provider HTTP clients.
 
     This is an architectural client-construction abstraction: production
@@ -67,9 +67,7 @@ class HttpClientFactory(ABC):  # pylint: disable=too-few-public-methods
         """Construct one provider HTTP client for the given policy and limiter."""
 
 
-class DefaultHttpClientFactory(  # pylint: disable=too-few-public-methods
-    HttpClientFactory
-):
+class DefaultHttpClientFactory(HttpClientFactory):
     """Default factory constructing owned ``ProviderHttpClient`` instances."""
 
     def create(
@@ -103,7 +101,7 @@ async def _compose_dbip_city_lite(
     return provider, database
 
 
-class ProviderComposition:  # pylint: disable=too-many-instance-attributes
+class ProviderComposition:
     """Owned provider instances and their shared HTTP infrastructure.
 
     One named attribute per composed provider is deliberate: the extra
@@ -131,7 +129,6 @@ class ProviderComposition:  # pylint: disable=too-many-instance-attributes
     @classmethod
     # The explicit one-step-per-provider composition is deliberate; the
     # named locals are the accepted cost of transparent, typed wiring.
-    # pylint: disable=too-many-locals
     async def create(
         cls,
         settings: Settings,
@@ -355,14 +352,14 @@ class ProviderComposition:  # pylint: disable=too-many-instance-attributes
         for database in self._databases:
             try:
                 database.close()
-            except Exception as exc:  # pylint: disable=broad-exception-caught
+            except Exception as exc:  # noqa: BLE001
                 errors.append(exc)
         for client in self._clients:
             try:
                 await client.aclose()
             except asyncio.CancelledError as exc:
                 errors.append(exc)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
+            except Exception as exc:  # noqa: BLE001
                 errors.append(exc)
         if errors:
             raise errors[0]

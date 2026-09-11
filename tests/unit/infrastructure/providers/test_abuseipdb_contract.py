@@ -580,7 +580,8 @@ class TestAbuseIpdbProviderFailures:
             client
         ):
             provider = build_provider(
-                client, clock=lambda: datetime(2026, 1, 15, 12, 0, 0)  # Naive
+                client,
+                clock=lambda: datetime(2026, 1, 15, 12, 0, 0),  # Naive
             )
             with pytest.raises(ValueError, match="timezone-aware"):
                 await provider.investigate(

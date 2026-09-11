@@ -14,8 +14,6 @@ One deterministic synthetic provider path exercises the full pipeline:
         -> ProviderExecutionOutcome and persisted timeline events
 """
 
-# pylint: disable=redefined-outer-name
-
 from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -122,12 +120,14 @@ def _build_stub_app() -> FastAPI:
         """Serve synthetic Google DNS JSON responses for /resolve."""
         assert (
             "AgenticThreatInvestigator" in request.headers["User-Agent"]
-        )  # noqa: S101
-        assert request.headers["Accept"] == _DNS_ACCEPT  # noqa: S101
-        entry = responses.get((name, rrtype))
+        )  # Ruff S-family not enabled; Bandit B101 skipped in pyproject.toml
         assert (
-            entry is not None
-        ), f"no stub DNS response for {(name, rrtype)!r}"  # noqa: S101
+            request.headers["Accept"] == _DNS_ACCEPT
+        )  # Ruff S-family not enabled; Bandit B101 skipped in pyproject.toml
+        entry = responses.get((name, rrtype))
+        assert entry is not None, (
+            f"no stub DNS response for {(name, rrtype)!r}"
+        )  # Ruff S-family not enabled; Bandit B101 skipped in pyproject.toml
         return JSONResponse(content=entry)
 
     app.state.dns_responses = responses
@@ -339,7 +339,6 @@ async def test_dns_missing_root_never_calls_provider(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
     """A work item for a missing target fails without provider invocation."""
-    app = _build_stub_app()
 
     class _NoHttpTransport(httpx.AsyncBaseTransport):
         """Fail the test if any provider HTTP I/O is attempted."""

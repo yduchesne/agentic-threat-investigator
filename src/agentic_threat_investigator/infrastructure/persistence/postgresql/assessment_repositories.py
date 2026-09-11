@@ -93,12 +93,11 @@ def raise_assessment_write_error(
         ) from error
     if state == SQLSTATE_ASSESSMENT_REFERENCE_INVALID:
         raise AssessmentProvenanceMismatchError(
-            f"assessment reference is invalid for its investigation: "
-            f"{assessment_id}"
+            f"assessment reference is invalid for its investigation: {assessment_id}"
         ) from error
     if state == SQLSTATE_ASSESSMENT_STRUCTURE_INVALID:
         raise AssessmentProvenanceMismatchError(
-            f"assessment finding/support structure is invalid: " f"{assessment_id}"
+            f"assessment finding/support structure is invalid: {assessment_id}"
         ) from error
     if state == SQLSTATE_ASSESSMENT_GRAPH_CONCURRENT:
         raise AssessmentProvenanceMismatchError(

@@ -899,7 +899,7 @@ class RdapProvider(EvidenceProvider):
             _build_autnum_facts,
         )
 
-    async def _query_authoritative(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    async def _query_authoritative(
         self,
         investigation_id: UUID,
         entity: Entity,

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Add local users, credentials, and server-side sessions."""
+
 from alembic import op
 
 revision = "0003_identity"

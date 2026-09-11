@@ -54,7 +54,9 @@ def downgrade() -> None:
         "DROP FUNCTION IF EXISTS ati.set_investigation_assessment("
         "uuid, uuid, uuid, uuid, bigint)"
     )
-    op.execute("DROP FUNCTION IF EXISTS ati.soft_delete_assessment(uuid, uuid, bigint, uuid)")
+    op.execute(
+        "DROP FUNCTION IF EXISTS ati.soft_delete_assessment(uuid, uuid, bigint, uuid)"
+    )
     op.execute("DROP FUNCTION IF EXISTS ati.soft_delete_assessment(uuid, uuid, bigint)")
     op.execute("DROP TABLE IF EXISTS ati.assessment_finding_support")
     op.execute("DROP TABLE IF EXISTS ati.assessment_finding")

@@ -6,7 +6,6 @@
 # provider-family shapes (see ThreatFox/AbuseIPDB); per-block R0801
 # suppression is not supported by Pylint, so duplicate-code is
 # disabled at module scope for the deliberately accepted duplication.
-# pylint: disable=duplicate-code
 
 Covers bootstrap Auth-Key resolution, settings wiring, and the rollback
 behavior of the composition root when the URLhaus credential is missing
@@ -38,7 +37,7 @@ _URLHAUS_KEY_SECRET_NAME = "ATI_URLHAUS_AUTH_KEY"
 _FAKE_URLHAUS_KEY = "fake-test-urlhaus-key"
 
 
-class _KeyringResolver(SecretsResolver):  # pylint: disable=too-few-public-methods
+class _KeyringResolver(SecretsResolver):
     """Deterministic resolver returning credential values from a keyring."""
 
     def __init__(self, **values: str) -> None:
@@ -106,9 +105,7 @@ async def test_composition_wires_urlhaus_settings(
 
         # White-box assertion proving bootstrap resolution and settings
         # wiring; the value is a fake test credential only.
-        # pylint: disable=protected-access
         assert comp.urlhaus._auth_key == _FAKE_URLHAUS_KEY
-        # pylint: enable=protected-access
 
 
 class _ProbeClient(ProviderHttpClient):
@@ -123,9 +120,7 @@ class _ProbeClient(ProviderHttpClient):
         await super().aclose()
 
 
-class _RollbackProbeFactory(
-    HttpClientFactory
-):  # pylint: disable=too-few-public-methods
+class _RollbackProbeFactory(HttpClientFactory):
     """Factory whose numbered clients feed a shared rollback log."""
 
     def __init__(self, log: list[str]) -> None:
@@ -176,7 +171,7 @@ async def test_composition_missing_urlhaus_key_fails_before_client_creation() ->
     factory = _RollbackProbeFactory(closed)
 
     resolver = _full_resolver()
-    del resolver._values[_URLHAUS_KEY_SECRET_NAME]  # pylint: disable=protected-access
+    del resolver._values[_URLHAUS_KEY_SECRET_NAME]
     with pytest.raises(SecretNotFoundError) as excinfo:
         await ProviderComposition.create(
             settings_from_config({}),

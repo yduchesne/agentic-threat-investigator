@@ -2,7 +2,6 @@
 """Unit tests for durable Investigation LLM-call accounting (PR 20B)."""
 
 # Fixture arguments intentionally reuse fixture names.
-# pylint: disable=redefined-outer-name
 
 from datetime import UTC, datetime
 from typing import Self
@@ -43,7 +42,7 @@ class _FakeRepository(InvestigationRepository):  # pragma: no cover
     ) -> InvestigationState | None:
         return self.state
 
-    async def update_budget(  # pylint: disable=too-many-arguments
+    async def update_budget(
         self,
         investigation_id: UUID,
         budget: InvestigationBudget,

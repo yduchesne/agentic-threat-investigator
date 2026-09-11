@@ -6,7 +6,6 @@
 # provider-family shapes (see ThreatFox/AbuseIPDB); per-block R0801
 # suppression is not supported by Pylint, so duplicate-code is
 # disabled at module scope for the deliberately accepted duplication.
-# pylint: disable=duplicate-code
 
 Covers the exact POST form-body and header contract, typed failure
 mapping for HTTP statuses and body-encoded statuses, retry behavior, and
@@ -54,7 +53,7 @@ _URL_ENTITY = Entity(
 )
 
 
-class _CapturingHandler:  # pylint: disable=too-few-public-methods
+class _CapturingHandler:
     """Captures requests and serves one canned response per dispatch."""
 
     def __init__(self, response: httpx.Response) -> None:

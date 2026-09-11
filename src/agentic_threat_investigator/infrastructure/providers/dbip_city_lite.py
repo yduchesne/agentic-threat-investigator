@@ -59,7 +59,7 @@ class MmdbLookupError(RuntimeError):
     """Raised when an MMDB lookup fails because the database is unreadable."""
 
 
-class CityLiteDatabase(ABC):  # pylint: disable=too-few-public-methods
+class CityLiteDatabase(ABC):
     """Read-only MMDB lookup boundary used by the DB-IP provider.
 
     This infrastructure-local client abstraction keeps third-party reader
@@ -100,7 +100,7 @@ class CityLiteMmdb(CityLiteDatabase):
             self._reader: maxminddb.Reader | None = maxminddb.open_database(
                 io.BytesIO(payload), mode=maxminddb.MODE_FD
             )
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except Exception as exc:
             raise MmdbOpenError("unreadable City Lite MMDB artifact") from exc
         # Product-identity check: only the verified DB-IP City Lite edition
         # may serve evidence under this provider identity. A different valid
@@ -120,7 +120,7 @@ class CityLiteMmdb(CityLiteDatabase):
             raise MmdbLookupError("City Lite MMDB reader is closed")
         try:
             record = self._reader.get(ip)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except Exception as exc:
             raise MmdbLookupError("City Lite MMDB lookup failed") from exc
         if record is None:
             return None

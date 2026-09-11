@@ -35,7 +35,6 @@ from agentic_threat_investigator.domain.investigation import (
 )
 
 # Explicit actor/request/expected-version arguments are intentional.
-# pylint: disable=too-many-arguments
 
 
 LOGGER = logging.getLogger(__name__)
@@ -44,7 +43,7 @@ INVESTIGATION_OBJECT_TYPE = "investigation"
 EVIDENCE_OBJECT_TYPE = "evidence"
 
 
-class InvestigationPersistenceService:  # pylint: disable=too-few-public-methods
+class InvestigationPersistenceService:
     """Persist investigation resources and evidence in short atomic transactions.
 
     Every operation enters one UnitOfWork, mutates through repositories,

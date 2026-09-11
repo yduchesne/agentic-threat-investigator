@@ -25,7 +25,7 @@ from agentic_threat_investigator.domain.investigation_timeline import (
 )
 
 
-class InvestigationTimelineSink(ABC):  # pylint: disable=too-few-public-methods
+class InvestigationTimelineSink(ABC):
     """Append one timeline event through a short explicit transaction."""
 
     @abstractmethod
@@ -33,9 +33,7 @@ class InvestigationTimelineSink(ABC):  # pylint: disable=too-few-public-methods
         """Persist one append-only timeline event."""
 
 
-class UnitOfWorkInvestigationTimelineSink(  # pylint: disable=too-few-public-methods
-    InvestigationTimelineSink
-):
+class UnitOfWorkInvestigationTimelineSink(InvestigationTimelineSink):
     """Append timeline events through one short UnitOfWork transaction."""
 
     def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:

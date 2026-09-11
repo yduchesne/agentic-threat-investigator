@@ -106,8 +106,11 @@ def _write_bytes(writer: mmdb_writer.MMDBWriter) -> bytes:
     The metadata build epoch is frozen around serialization so the fixture
     bytes are reproducible across runs.
     """
-    original_time = getattr(mmdb_writer, "time")
-    setattr(mmdb_writer, "time", types.SimpleNamespace(time=lambda: 0.0))
+    # getattr/setattr stay dynamic on purpose: mmdb_writer does not statically
+    # export ``time``, and the fixture monkeypatches the writer's frozen
+    # epoch. Direct attribute access would fail strict mypy.
+    original_time = getattr(mmdb_writer, "time")  # noqa: B009
+    setattr(mmdb_writer, "time", types.SimpleNamespace(time=lambda: 0.0))  # noqa: B010
     temporary: str | None = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".mmdb", delete=False) as handle:
@@ -116,6 +119,6 @@ def _write_bytes(writer: mmdb_writer.MMDBWriter) -> bytes:
         with open(temporary, "rb") as handle:
             return handle.read()
     finally:
-        setattr(mmdb_writer, "time", original_time)
+        setattr(mmdb_writer, "time", original_time)  # noqa: B010
         if temporary is not None:
             os.unlink(temporary)

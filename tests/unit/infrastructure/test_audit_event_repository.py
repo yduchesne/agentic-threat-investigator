@@ -3,7 +3,6 @@
 
 # Fakes emulate the narrow async session seam and the database's
 # server-side version default.
-# pylint: disable=too-few-public-methods
 
 from datetime import datetime, timezone
 from typing import Any, cast

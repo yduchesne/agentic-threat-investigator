@@ -26,7 +26,7 @@ class FakeLlmCall:
     operation_name: str
 
 
-class FakeLlmClient(LlmClient):  # pylint: disable=too-few-public-methods
+class FakeLlmClient(LlmClient):
     """A scripted, deterministic structured-output fake.
 
     Outcomes are consumed FIFO; when the queue is empty a configured default
@@ -72,12 +72,14 @@ class FakeLlmClient(LlmClient):  # pylint: disable=too-few-public-methods
                 operation_name=operation_name,
             )
         )
-        if self.expected_response_model is not None:
-            if response_model is not self.expected_response_model:
-                raise AssertionError(
-                    f"FakeLlmClient received {response_model.__name__} but was "
-                    f"configured for {self.expected_response_model.__name__}"
-                )
+        if (
+            self.expected_response_model is not None
+            and response_model is not self.expected_response_model
+        ):
+            raise AssertionError(
+                f"FakeLlmClient received {response_model.__name__} but was "
+                f"configured for {self.expected_response_model.__name__}"
+            )
         if self._outcomes:
             outcome = self._outcomes.pop(0)
         elif self._default is not None:
