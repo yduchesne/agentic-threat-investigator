@@ -1,0 +1,74 @@
+{
+  "id": "conflicting_reputation",
+  "version": 1,
+  "description": "A strong malicious reputation signal from one provider and a valid no-hit from another must be represented as an explicit contradiction: one SUPPORTING Finding and one CONTRADICTING Finding.",
+  "tags": [
+    "evidence-analyst",
+    "contradiction",
+    "conflicting-providers"
+  ],
+  "fixture": {
+    "objective": "Assess the target IP given directly conflicting reputation observations.",
+    "root_entity": "target_ip",
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.47"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "abuseipdb_bad_reputation",
+        "type": "urn:ati:evidence:reputation",
+        "subject": "target_ip",
+        "source": "urn:ati:source:abuseipdb",
+        "facts": {
+          "abuse_confidence_score": 95,
+          "usage_type": "Malware",
+          "is_whitelisted": false
+        }
+      },
+      {
+        "label": "threatfox_clean_lookup",
+        "type": "urn:ati:evidence:reputation",
+        "subject": "target_ip",
+        "source": "urn:ati:source:threatfox",
+        "facts": {
+          "found": false,
+          "message": "No matching indicator observed."
+        }
+      }
+    ]
+  },
+  "expected": {
+    "allowed_verdicts": [
+      "inconclusive",
+      "suspicious",
+      "malicious"
+    ],
+    "allowed_confidence": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "required_contradictions": [
+      {
+        "supporting_finding": {
+          "category": "reputation",
+          "disposition": "supporting",
+          "required_evidence_support": [
+            "abuseipdb_bad_reputation"
+          ]
+        },
+        "contradicting_finding": {
+          "category": "reputation",
+          "disposition": "contradicting",
+          "required_evidence_support": [
+            "threatfox_clean_lookup"
+          ]
+        }
+      }
+    ]
+  }
+}

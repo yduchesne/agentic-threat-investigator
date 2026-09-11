@@ -1,0 +1,76 @@
+{
+  "id": "no_reputation_hit",
+  "version": 1,
+  "description": "A valid no-hit reputation observation must not establish BENIGN; the acceptable envelope is INCONCLUSIVE, while geolocation may still appear as contextual support.",
+  "tags": [
+    "evidence-analyst",
+    "no-hit-regression",
+    "inconclusive"
+  ],
+  "fixture": {
+    "objective": "Assess whether the target IP shows any malicious reputation signal.",
+    "root_entity": "target_ip",
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.43"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "abuseipdb_no_hit",
+        "type": "urn:ati:evidence:reputation",
+        "subject": "target_ip",
+        "source": "urn:ati:source:abuseipdb",
+        "facts": {
+          "found": false,
+          "message": "No known abuse for this IP address."
+        }
+      },
+      {
+        "label": "dbip_city_context",
+        "type": "urn:ati:evidence:geolocation",
+        "subject": "target_ip",
+        "source": "urn:ati:source:dbip_city_lite",
+        "facts": {
+          "city": "Amsterdam",
+          "country": "NL",
+          "accuracy_radius_km": 500
+        }
+      }
+    ]
+  },
+  "expected": {
+    "allowed_verdicts": [
+      "inconclusive"
+    ],
+    "allowed_confidence": [
+      "low",
+      "medium"
+    ],
+    "required_findings": [
+      {
+        "category": "geolocation",
+        "disposition": "supporting",
+        "required_evidence_support": [
+          "dbip_city_context"
+        ]
+      }
+    ],
+    "forbidden_findings": [
+      {
+        "disposition": "supporting",
+        "evidence_support": [
+          "abuseipdb_no_hit"
+        ]
+      }
+    ],
+    "forbidden_evidence_support": [
+      "dbip_city_context"
+    ],
+    "required_limitations": [
+      "Absence of a reputation hit does not establish benignity."
+    ]
+  }
+}

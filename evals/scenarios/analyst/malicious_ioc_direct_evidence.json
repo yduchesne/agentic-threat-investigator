@@ -1,0 +1,52 @@
+{
+  "id": "malicious_ioc_direct_evidence",
+  "version": 1,
+  "description": "A target IP with a direct negative reputation observation from a single provider supports a MALICIOUS verdict with a direct Evidence-backed Finding.",
+  "tags": [
+    "evidence-analyst",
+    "direct-evidence",
+    "malicious"
+  ],
+  "fixture": {
+    "objective": "Assess whether the target IP is associated with malicious activity.",
+    "root_entity": "target_ip",
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.49"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "abuseipdb_bad_reputation",
+        "type": "urn:ati:evidence:reputation",
+        "subject": "target_ip",
+        "source": "urn:ati:source:abuseipdb",
+        "facts": {
+          "abuse_confidence_score": 88,
+          "usage_type": "Malware",
+          "is_whitelisted": false
+        }
+      }
+    ]
+  },
+  "expected": {
+    "allowed_verdicts": [
+      "malicious"
+    ],
+    "allowed_confidence": [
+      "medium",
+      "high"
+    ],
+    "required_findings": [
+      {
+        "category": "reputation",
+        "disposition": "supporting",
+        "required_evidence_support": [
+          "abuseipdb_bad_reputation"
+        ]
+      }
+    ]
+  }
+}

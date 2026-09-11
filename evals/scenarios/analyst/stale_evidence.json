@@ -1,0 +1,78 @@
+{
+  "id": "stale_evidence",
+  "version": 1,
+  "description": "Material threat evidence intentionally designated stale by the scenario must be accompanied by an explicit staleness limitation rather than a hidden freshness policy.",
+  "tags": [
+    "evidence-analyst",
+    "stale-evidence",
+    "limitation"
+  ],
+  "fixture": {
+    "objective": "Assess the target IP from reputation evidence that is materially stale.",
+    "root_entity": "target_ip",
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.48"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "abuseipdb_stale_reputation",
+        "type": "urn:ati:evidence:reputation",
+        "subject": "target_ip",
+        "source": "urn:ati:source:abuseipdb",
+        "facts": {
+          "abuse_confidence_score": 82,
+          "usage_type": "Malware",
+          "is_whitelisted": false
+        },
+        "observed_at": "2024-01-01T00:00:00Z",
+        "stale": true
+      },
+      {
+        "label": "dbip_city_context",
+        "type": "urn:ati:evidence:geolocation",
+        "subject": "target_ip",
+        "source": "urn:ati:source:dbip_city_lite",
+        "facts": {
+          "city": "Frankfurt",
+          "country": "DE"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "allowed_verdicts": [
+      "inconclusive",
+      "suspicious"
+    ],
+    "allowed_confidence": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "required_findings": [
+      {
+        "category": "reputation",
+        "disposition": "supporting",
+        "required_evidence_support": [
+          "abuseipdb_stale_reputation"
+        ]
+      }
+    ],
+    "forbidden_evidence_support": [
+      "dbip_city_context"
+    ],
+    "required_limitations": [
+      "The reputation observation is materially stale and needs revalidation."
+    ],
+    "required_unresolved_questions": [
+      "Whether the indicator is still active at analysis time."
+    ],
+    "required_next_steps": [
+      "Revalidate the indicator against a current reputation source."
+    ]
+  }
+}
