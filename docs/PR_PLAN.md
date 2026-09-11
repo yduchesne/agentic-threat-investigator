@@ -195,11 +195,9 @@ new v0.1 feature phases:
 PR 22 remains the next feature PR (Threat Research / RAG); PR 27 generic
 evaluation-platform scope is not absorbed into PR 21.
 
-## PR 22 — Threat Research / RAG agent
+## PR 22 — Threat Research / RAG
 
-Add investigation-time contextual research as a bounded, provenance-preserving capability. PR 22 turns the research markers introduced by PR 21 into an executable workflow while preserving ATI's epistemic separation between observed Evidence, retrieved knowledge, research synthesis, and analytical Assessment.
-
-**Responsibility boundary:**
+Deliver investigation-time contextual research as four bounded follow-up PRs. The split preserves ATI's epistemic separation between observed Evidence, retrieved knowledge, research synthesis, and analytical Assessment while keeping each implementation PR narrow enough for deterministic review and testing.
 
 ```text
 EvidenceProvider
@@ -219,30 +217,153 @@ Evidence Analyst
     -> Assessment
 ```
 
-RAG supplies contextual research, not live IOC facts. Retrieved or synthesized research must not be converted into `Evidence` merely because it was retrieved during an Investigation, and the Research Agent must not alter verdict/confidence or otherwise own Assessment semantics.
+RAG supplies contextual research, not live IOC facts. Retrieved or synthesized research must not become `Evidence` merely because it was retrieved during an Investigation. The Research Agent does not own verdict/confidence or other Assessment semantics.
+
+### Source realism and deterministic testing
+
+PR 22 production capability targets **real upstream research sources and real production adapters**. Automated tests must not replace those production contracts with invented source formats.
+
+The testing rule is:
+
+```text
+Production:
+real corpus adapter
+    -> real upstream format
+    -> real ingestion/chunking/indexing code
+    -> PostgreSQL + pgvector
+    -> real retrieval implementation
+    -> real LLM adapter when configured
+
+Automated tests:
+deterministic local fixtures captured/derived from the real upstream format
+    -> same production parser/normalizer
+    -> same persistence/indexing path
+    -> same PostgreSQL + pgvector retrieval path where under test
+    -> FakeLlmClient only at the LLM boundary
+```
+
+Tests must remain offline and reproducible. They may use small checked-in fixture subsets of MITRE ATT&CK/CISA or synthetic records that conform exactly to the production source contract, but must not introduce a separate "fake source" architecture that bypasses the production parser, repository, indexing, retrieval, or orchestration path being tested. Live Internet access and live LLM calls are not required by CI/integration tests.
+
+### PR 22A — Research storage, corpus ingestion, and retrieval foundation
+
+Establish the deterministic, non-LLM foundation for threat research.
 
 **Deliver:**
-- deterministic Coordinator integration for entities already marked as requiring research, including bounded request/deduplication/completion state and the `research_requested` timeline action;
-- an application-layer research/retrieval abstraction (`abc.ABC`) that keeps LangGraph and agents independent of pgvector/LangChain storage details;
-- a structured-output Research Agent whose claims cite stable `DocumentChunk` identifiers and cannot emit authoritative uncited factual claims;
-- persisted, investigation-bound structured research results with stable provenance back to retrieved chunks;
-- an initial curated research corpus drawn from approved free sources such as MITRE ATT&CK and relevant CISA material, with ingestion/indexing kept separate from investigation-time retrieval;
-- pgvector-backed semantic retrieval behind the application abstraction, with deterministic filtering/bounds and no direct vector-store coupling from Coordinator policy;
-- explicit no-relevant-context behavior: an empty or low-relevance retrieval result is a normal research outcome, not an error and never evidence that an IOC is benign;
-- untrusted-content handling: retrieved documents are data, cannot issue instructions, invoke tools, override system/application policy, or expand investigative authority;
-- short transaction boundaries: retrieval and LLM execution occur outside long-lived PostgreSQL transactions, with persistence through existing application/repository seams;
-- deterministic retrieval tests and FakeLlmClient-based synthesis tests covering relevant context, irrelevant/no context, contradictory context, citation validity, duplicate research requests, bounded execution, and safe failure;
-- a narrow repository-owned RAG evaluation baseline for retrieval relevance/coverage and structured synthesis/citation correctness, without absorbing the generic PR 27 evaluator platform.
+- finalize the research persistence/domain contracts, including the exact lifecycle and provenance semantics for persisted research results/claims;
+- `Document` / `DocumentChunk` storage and stable chunk identifiers suitable for citations;
+- embedding/index persistence using PostgreSQL + pgvector behind repository/application abstractions;
+- an application-layer retrieval contract using `abc.ABC`, keeping agents and LangGraph independent of pgvector/LangChain storage details;
+- deterministic semantic retrieval with explicit filtering, result limits, and stable provenance;
+- corpus ingestion/indexing kept separate from investigation-time retrieval;
+- one canonical initial free corpus source, preferably MITRE ATT&CK, implemented against its real upstream representation and sufficient to prove the complete ingestion -> chunking -> embedding -> retrieval path;
+- deterministic local source fixtures representing that real upstream format for offline tests;
+- deterministic unit and PostgreSQL integration tests that exercise the production parser/normalizer and persistence/retrieval path for ingestion, indexing, provenance, idempotency, and no-result behavior.
 
-**Coordinator integration:**
+**Boundaries:**
+- no LLM Research Agent;
+- no Coordinator/LangGraph research execution;
+- no `research_requested` timeline action;
+- no Assessment changes;
+- no generic evaluation framework;
+- no requirement to ingest every planned CISA/ATT&CK source in this PR;
+- no test-only source implementation that substitutes a different contract for the production corpus adapter.
 
-PR 21 already records `research_required_for_entity_ids`; PR 22 consumes that state. Research execution must be bounded and idempotent: the same unchanged entity/research context is not repeatedly researched, completed research is reflected durably in Investigation state, and Coordinator resumes normal deterministic decision-making after research completion. Research does not authorize new pivots by itself; any subsequent pivot remains subject to normal Coordinator policy.
+The PR must prove that real-format contextual knowledge can be ingested and retrieved through stable application contracts without an LLM or investigation orchestration.
 
-Execution must respect the PR 19C dispatch boundary and PR 21C `InvestigationRunner` lifecycle rather than introducing infrastructure-specific coupling into LangGraph.
+### PR 22B — Structured Research Agent
 
-**Non-goals:**
+Build the Research Agent on the PR 22A retrieval foundation without modifying Coordinator routing.
 
-No general web-browsing research agent, paid intelligence feeds, live IOC collection through RAG, threat-actor attribution, ontology/knowledge-graph inference, unrestricted recursive research, report generation, Assessment ownership, LLM-based Coordinator policy, distributed task infrastructure, or generic PR 27 evaluation/release framework. PR 22 must not blur the boundary between source Evidence and contextual research.
+**Deliver:**
+- bounded immutable Research Agent input DTOs;
+- structured-only LLM output through the existing `LlmClient(ABC)` abstraction;
+- typed research results/claims whose factual claims cite stable `DocumentChunk` identifiers;
+- deterministic validation that citations reference chunks actually supplied to the model;
+- explicit relevant-context, irrelevant/no-context, and contradictory-context behavior;
+- retrieved documents treated as untrusted data: document content cannot issue instructions, invoke tools, override application/system policy, or expand investigative authority;
+- bounded LLM execution and retry semantics consistent with the existing Evidence Analyst pattern;
+- short transaction boundaries: retrieve/load -> close transaction -> LLM -> validate -> short persistence transaction;
+- persistence through the PR 22A research-result seam;
+- tests using real persisted `Document`/`DocumentChunk` records produced through the production research persistence/retrieval path;
+- `FakeLlmClient` only at the model boundary for deterministic unit and real-PostgreSQL integration tests covering citation validity, unsupported citations, no-context behavior, contradictory context, persistence, and safe failure.
+
+**Boundaries:**
+- no Coordinator/graph changes;
+- no `research_requested` timeline action;
+- no web-browsing research agent;
+- no live IOC collection through RAG;
+- no verdict/confidence ownership;
+- no report generation;
+- no generic PR 27 evaluator platform;
+- no mocked retrieval architecture when the integration test is intended to prove the production retrieval/persistence path.
+
+The PR must prove that ATI can produce persisted, structured, provenance-backed contextual research independently of orchestration.
+
+### PR 22C — Coordinator research execution
+
+Integrate the independently working research capability into the production investigation lifecycle.
+
+PR 21 already records `research_required_for_entity_ids`; PR 22C consumes that state.
+
+**Deliver:**
+- deterministic Coordinator semantics for deciding when marked entities require research execution;
+- bounded request, deduplication, completion, exhaustion, and retry/replan behavior;
+- durable state sufficient to prevent repeated research of the same unchanged entity/research context;
+- the `research_requested` timeline action and any strictly necessary existing-action metadata;
+- a research execution application seam composed into the existing production graph without coupling Coordinator policy to pgvector, LangChain, or concrete LLM infrastructure;
+- production LangGraph routing for research execution and return to normal Coordinator decision-making;
+- integration with the PR 21C `InvestigationRunner` lifecycle and existing short-UoW execution model;
+- research completion must not directly authorize pivots: any subsequent pivot remains subject to normal Coordinator policy;
+- canonical PostgreSQL trajectory tests that exercise the real production research execution, persistence, retrieval, and orchestration path using a locally seeded real-format corpus fixture and `FakeLlmClient`;
+- no live Internet or live LLM dependency in automated tests.
+
+**Boundaries:**
+- do not redesign PR 21 Coordinator policy;
+- no LLM-based Coordinator planning;
+- no distributed worker/task infrastructure;
+- no report generation;
+- no attribution;
+- no ontology/knowledge-graph inference;
+- no unrestricted recursive research;
+- no generic evaluation/release framework;
+- no alternate fake research provider that bypasses the production PR 22A/22B application path in the canonical trajectory.
+
+The PR must prove that research can execute as a bounded, idempotent part of the production investigation state machine.
+
+### PR 22D — Threat Research / RAG evaluation and documentation hardening
+
+Add the narrow repository-owned evaluation baseline for PR 22 and reconcile documentation with the delivered research architecture.
+
+**Deliver:**
+- deterministic retrieval evaluation for relevance/coverage using repository-owned fixtures that represent the real production corpus/source contract;
+- structured synthesis evaluation for citation validity, provenance correctness, no-context handling, contradictory context, bounded execution, and safe failure;
+- scenarios proving that contextual research is not silently promoted to source Evidence or Assessment;
+- coordinator-trajectory evaluation updates needed to recognize the delivered research lifecycle without duplicating Coordinator policy;
+- regression coverage for duplicate research requests and research termination;
+- evaluation scenarios that remain fully offline by using deterministic local corpus fixtures and `FakeLlmClient`, while exercising the same production parsing/retrieval/persistence contracts wherever those contracts are under evaluation;
+- documentation reconciliation across `EVALUATION.md`, `TESTING.md`, `ARCHITECTURE.md`, and `PR_PLAN.md`;
+- explicit documentation of the final Evidence -> retrieval -> research -> Assessment epistemic boundaries.
+
+**Boundaries:**
+- deterministic repository-owned baseline only;
+- no LLM-as-judge requirement;
+- no LangSmith evaluation dependency;
+- no generic evaluation-run persistence;
+- no release-threshold framework;
+- no cost/latency/performance evaluation framework;
+- no PR 27 evaluator-platform scope;
+- no new runtime feature behavior merely to satisfy evaluation;
+- no requirement for live source downloads or live LLM calls during evaluation.
+
+The PR must validate the completed PR 22 behavior rather than introduce another research architecture.
+
+### PR 22 overall non-goals
+
+Across PR 22A-D, do not add paid intelligence feeds, a general web-browsing research agent, live IOC facts through RAG, threat-actor attribution, ontology inference, unrestricted recursive research, report generation, Assessment ownership by the Research Agent, LLM-based Coordinator policy, or distributed task infrastructure.
+
+Execution must continue to respect the PR 19C dispatch boundary, PR 20B structured-LLM boundary, PR 21 deterministic Coordinator policy, and PR 21C `InvestigationRunner` lifecycle.
+
+The production/test distinction is deliberate: production adapters target real source contracts; automated tests use deterministic local representations of those contracts and fake only true external/non-deterministic boundaries such as the LLM or network transport. Tests must not gain determinism by bypassing the production code path they are intended to verify.
 
 ## PR 23 — Report Writer and investigation API
 
