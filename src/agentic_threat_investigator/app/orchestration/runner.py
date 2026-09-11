@@ -167,7 +167,14 @@ class LocalInvestigationRunner(InvestigationRunner):
             {"investigation": loaded},
             config={"recursion_limit": self._recursion_limit},
         )
-        graph_final = result["investigation"]
+        # The graph output is untrusted runtime data: require a mapping that
+        # carries a valid InvestigationState under the ``investigation`` key
+        # so malformed output fails through the typed lifecycle contract
+        # instead of leaking a raw KeyError/TypeError. Cancellation raised
+        # by ``ainvoke`` itself is deliberately not intercepted here.
+        if not isinstance(result, Mapping):
+            raise InvestigationRunnerLifecycleError()
+        graph_final = result.get("investigation")
         if not isinstance(graph_final, InvestigationState):
             raise InvestigationRunnerLifecycleError()
         if not is_terminal_status(graph_final.status):
