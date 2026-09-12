@@ -432,9 +432,35 @@ persistence; no release-threshold framework; no cost/latency/performance
 framework; no PR 27 evaluator-platform scope; no research runtime behavior
 change; no live source downloads or live LLM calls during evaluation.
 
+### PR 22E — RelationshipObservation history semantics [DONE]
+
+Corrects persistence semantics so `RelationshipObservation` is the historical
+record itself and is no longer duplicated into `domain_object_history`.
+
+**Delivered:**
+- `RelationshipObservation` remains immutable and append-only; each append
+  creates exactly one immutable `relationship_observation` row with its
+  database-allocated version and provenance, and no `domain_object_history`
+  row (SQL API v0018, migration 0021).
+- `append_relationship_observation` no longer writes redundant
+  `domain_object_history` CREATE rows.
+- Stable `Relationship` history remains unchanged: CREATE history for new
+  edges, reuse as a no-op, and soft-delete history.
+- Existing legacy observation-history rows are preserved/tolerated; the
+  migration is non-destructive.
+- PostgreSQL regression coverage locks the boundary (one observation -> one
+  row/zero history; multiple observations -> zero observation history;
+  Relationship and Evidence history regression; rollback atomicity; legacy
+  migration upgrade path).
+
+**Boundaries honored:** PostgreSQL owns the correction; no application-side
+suppression, no RelationshipObservation update/delete API, no version
+removal, no history/observation browse indexes, no generic history
+framework, and no Evidence/Assessment/Investigation historization change.
+
 ### PR 22 overall non-goals
 
-Across PR 22A-D, do not add paid intelligence feeds, a general web-browsing research agent, live IOC facts through RAG, threat-actor attribution, ontology inference, unrestricted recursive research, report generation, Assessment ownership by the Research Agent, LLM-based Coordinator policy, or distributed task infrastructure.
+Across PR 22A-E, do not add paid intelligence feeds, a general web-browsing research agent, live IOC facts through RAG, threat-actor attribution, ontology inference, unrestricted recursive research, report generation, Assessment ownership by the Research Agent, LLM-based Coordinator policy, or distributed task infrastructure.
 
 Execution must continue to respect the PR 19C dispatch boundary, PR 20B structured-LLM boundary, PR 21 deterministic Coordinator policy, and PR 21C `InvestigationRunner` lifecycle.
 

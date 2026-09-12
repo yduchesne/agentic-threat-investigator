@@ -48,6 +48,9 @@ Insert-only:
 
 Normal application code exposes no deletion operation for these records.
 
+RelationshipObservation rows are themselves immutable historical observations
+and are not duplicated into `domain_object_history`.
+
 ### Stable identities
 
 Upserted by canonical identity:
@@ -67,9 +70,15 @@ Relationship writes route through the versioned SQL API: `ati.upsert_relationshi
 resolves the stable three-part identity, returns observed state unchanged for reuse
 (no version and no history), makes creation race-safe through the authoritative
 unique index, and `ati.append_relationship_observation` appends one immutable
-observation with a database-allocated version and its CREATE history in the same
-transaction. Python repositories never allocate relationship versions or write
-relationship history directly.
+observation as a database-allocated immutable observation row in the same
+transaction, with no `domain_object_history` row. Python repositories never
+allocate relationship versions or write relationship history directly.
+
+Relationship history and RelationshipObservation history are different:
+
+- changes to the stable Relationship resource use `domain_object_history`;
+- observations of that Relationship are recorded directly as immutable
+  RelationshipObservation rows and are not separately historized.
 
 ### Soft-deleted stable identity rediscovery (PR 18C policy)
 
@@ -174,7 +183,9 @@ Replaceable internal artifacts such as regenerated RAG chunks may be physically 
 
 Relationships are durable semantic identities.
 
-Repeated source observations create new RelationshipObservation rows.
+Repeated source observations create new RelationshipObservation rows. Each
+observation row is itself the historical record for that observation and is
+not duplicated into `domain_object_history`.
 
 A DNS relationship is not physically removed because a later lookup no longer observes it. Currentness is a query/view concept based on observations.
 
@@ -460,7 +471,11 @@ Staging tables are dropped before creation so the batch function may execute mor
 
 Every persisted ATI domain resource has a database-assigned `version BIGINT`. Versions are allocated from a dedicated sequence per resource table. They are monotonically increasing table-wide revisions, not per-object contiguous counters; sequence gaps are acceptable.
 
-Every successful CREATE, UPDATE, or semantic soft DELETE creates an immutable `domain_object_history` entry in the same transaction containing object type/id/version, operation, complete post-operation `state JSONB`, `diff JSONB`, actor/request/investigation correlation where applicable, and `occurred_at`. Immutable resources normally receive only CREATE history. History/infrastructure tables are not themselves historized.
+Historized domain resources receive immutable `domain_object_history` entries for successful state transitions according to their resource contract: a CREATE, UPDATE, or semantic soft DELETE creates one entry in the same transaction containing object type/id/version, operation, complete post-operation `state JSONB`, `diff JSONB`, actor/request/investigation correlation where applicable, and `occurred_at`.
+
+Append-only resources that are themselves historical/event records are not automatically duplicated into `domain_object_history`. In particular, RelationshipObservation, AuditEvent, and InvestigationTimelineEvent are not historized there. Evidence retains its separately approved CREATE-history contract.
+
+Legacy databases upgraded from versions before PR 22E (SQL API v0018) may contain redundant RelationshipObservation CREATE history rows. These rows are tolerated but no new such rows are produced.
 
 ### JSONB diff
 
@@ -502,7 +517,7 @@ Any adapter that persists a `SourceRecord` must recompute `source_record_content
 
 Alembic orchestrates schema migrations.
 
-Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0008 (`migrations/sql/ati/v0008/relationship_persistence.sql`) owns relationship/observation writes for PR 18C.
+Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. The shipped v0008 file is never edited in place.
 
 Rules:
 

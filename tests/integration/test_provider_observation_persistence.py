@@ -280,7 +280,9 @@ async def test_dns_scenario_persists_the_canonical_graph(
         assert await _history_count(uow, "entity", address.id) == 1
         assert await _history_count(uow, "evidence", evidence.id) == 1
         assert await _history_count(uow, "relationship") == 1
-        assert await _history_count(uow, "relationship_observation") == 1
+        # RelationshipObservation is itself the historical record: appending
+        # one observation creates one observation row and no history rows.
+        assert await _history_count(uow, "relationship_observation") == 0
         assert evidence.id is not None  # the service persists it
         assert await _audit_count(uow, evidence.id) == 1
 
@@ -318,11 +320,12 @@ async def test_threatfox_reuses_the_ip_and_creates_malware(
         assert await table_count(uow, "evidence") == 2
         assert await table_count(uow, "relationship") == 2
         assert await table_count(uow, "relationship_observation") == 2
+        # The observation row is the history; no duplicate history is written.
         assert (
             await _history_count(
                 uow, "relationship_observation", threat_result.observations[0].id
             )
-            == 1
+            == 0
         )
 
 
@@ -1052,6 +1055,8 @@ async def test_observation_evidence_provenance_is_relationally_enforced(
 
     async with uow_factory() as uow:
         assert await table_count(uow, "relationship_observation") == 1
-        assert await _history_count(uow, "relationship_observation") == 1
+        # The dangling append rolled back completely: the surviving observation
+        # row is the only one, and it carries no history row.
+        assert await _history_count(uow, "relationship_observation") == 0
         assert await table_count(uow, "relationship") == 1
         assert await table_count(uow, "evidence") == 1
