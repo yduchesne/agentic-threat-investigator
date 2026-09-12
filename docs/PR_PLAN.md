@@ -297,9 +297,17 @@ change, report generation, or generic evaluation framework.
 
 The PR must prove that real-format contextual knowledge can be ingested and retrieved through stable application contracts without an LLM or investigation orchestration.
 
-### PR 22B — Structured Research Agent
+### PR 22B — Structured Research Agent [DONE]
 
-Build the Research Agent on the PR 22A retrieval foundation without modifying Coordinator routing.
+Delivered the standalone structured Threat Research / Context Agent on the PR 22A retrieval and persistence foundation, without modifying Coordinator routing:
+
+- immutable bounded `ResearchAgentRequest` (investigation, subject entity, normalized query, retrieval-context filters, `max_results` 1..100) and semantic-only `ResearchAgentClaim`/`ResearchAgentDecision` LLM output contracts in `domain/research_agent.py`, with `extra="forbid"`, trimmed/deduplicated filters, and no persistence-owned/verdict/confidence/pivot/tool fields;
+- deterministic prompt construction (`app/research_agent/prompts.py`, `urn:ati:llm:research_synthesis`) treating retrieved chunk content as untrusted data, with at most one bounded schema-repair attempt;
+- standalone execution service (`app/research_agent/agent.py`): one bounded retrieval pass, citation-membership validation against the exact supplied chunk set (fail-closed `ResearchAgentCitationError`, no post-hoc chunk loading), application-stamped result/claim UUIDs and UTC clock, deterministic first-use durable citation snapshots via `research_citation_from_retrieved_chunk`, and persistence through the existing `ResearchResultPersistenceService`;
+- LLM accounting reuses the investigation-wide `LlmAccountingService`: exactly one durable reservation per actual model invocation, zero reservations for no-context/prompt-build failures, versions chained across a repair attempt, reservation retained when the call fails or is cancelled;
+- deterministic outcomes: empty retrieval short-circuits to a persisted zero-claim/zero-citation result with no model call; retrieved-but-irrelevant context persists `claims=()`; contradictory material is represented as separately cited claims without verdict/confidence;
+- production composition seam (`infrastructure/research_agent_composition.py`) wiring the real `PgVectorResearchRetriever`, `LlmClient`, `ResearchResultPersistenceService`, and `LlmAccountingService`; the agent is not added to the Coordinator/LangGraph graph;
+- unit tests for contracts, deterministic/injection-safe prompts, and application execution (retry/accounting/cancellation/fail-closed), plus canonical PostgreSQL vertical slices (`tests/integration/test_research_agent.py`) using real-format MITRE STIX ingestion, real pgvector retrieval, real persistence, and `FakeLlmClient` only at the model boundary (including a second real-format STIX fixture for contradictory-context coverage).
 
 **Deliver:**
 - bounded immutable Research Agent input DTOs;

@@ -53,3 +53,15 @@ def test_assessment_contracts_are_public() -> None:
         == "AssessmentEvidenceReferenceError"
     )
     assert app.AssessmentProvenanceContext.__name__ == "AssessmentProvenanceContext"
+
+
+def test_research_agent_contracts_are_public() -> None:
+    """PR 22B agent, error, and mapping are exported from the app boundary."""
+    assert app.ResearchAgent.__name__ == "ResearchAgent"
+    assert app.ResearchAgentCitationError.__name__ == "ResearchAgentCitationError"
+    assert app.research_query_from_request.__name__ == "research_query_from_request"
+    from agentic_threat_investigator import domain
+
+    assert domain.ResearchAgentRequest.__name__ == "ResearchAgentRequest"
+    assert domain.ResearchAgentClaim.__name__ == "ResearchAgentClaim"
+    assert domain.ResearchAgentDecision.__name__ == "ResearchAgentDecision"

@@ -740,6 +740,50 @@ retrieval). Durable research provenance is proven separately in
 ResearchResult round trip, reference rejection, rollback, no-Evidence
 creation, and snapshot survival across active chunk replacement).
 
+### Structured Research Agent (PR 22B)
+
+Unit strategy (`tests/unit/domain/test_research_agent.py`,
+`tests/unit/app/research_agent/`):
+
+- immutable request/output contract boundaries (blank query, bounded
+  `max_results` 1..100, filter deduplication, blank filters, claim
+  citation presence/uniqueness, extra-field rejection);
+- deterministic prompt construction and prompt-injection tests: hostile
+  chunk instructions stay inside the untrusted-data section, the system
+  prompt still forbids acting on them, no tool surface exists, and
+  `chunk_id` is never rendered as the model citation token;
+- application execution tests drive the real `ResearchResultPersistenceService`
+  and real `LlmAccountingService` against in-memory seams with a scripted
+  `FakeLlmClient` and a scripted retrieval fake: relevant-context
+  persistence, unsupported-citation fail-closed behavior, no-context and
+  irrelevant-context empty results, contradictory separately-cited claims,
+  reuse/ordering of citation snapshots, retry/repair accounting (at most one
+  repair, retry only retryable `INVALID_STRUCTURED_OUTPUT`, no retry on
+  timeout/config/provider failure), cancellation propagation, constructor
+  attempt bounds, prompt-build and retrieval failures consuming no budget,
+  and append-only repeat executions.
+
+Canonical PostgreSQL vertical slice (`tests/integration/test_research_agent.py`):
+
+```text
+deterministic local STIX 2.1 fixture
+ -> production MitreAttackBatchSource / MitreAttackDocumentBuilder
+ -> DocumentIndexingService + deterministic embeddings
+ -> real PostgreSQL persistence + PgVectorResearchRetriever
+ -> ResearchAgent (production composition incl. LlmAccountingService)
+ -> FakeLlmClient          (model boundary only)
+ -> ResearchResultPersistenceService + real ResearchResultRepository
+```
+
+The slice covers relevant context persistence with real pgvector retrieval and
+copied citation provenance, unsupported-citation rejection with no partial
+state, no-retrieval and irrelevant-context empty results, contradictory
+context represented as separately cited claims (via a second real-format
+STIX fixture), persistence reference validation/rollback, and structured-
+output repair with exactly two accounted LLM calls. `FakeLlmClient` is the
+only fake external model boundary; tests never require live Internet or a
+live LLM.
+
 ### Evidence Analyst evaluation vertical slices (PR 20C)
 
 `tests/integration/test_evidence_analyst_evaluation.py` runs the repository-
