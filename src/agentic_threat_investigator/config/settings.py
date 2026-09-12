@@ -160,6 +160,16 @@ class Settings(BaseSettings):
     llm_max_relationship_observations: int = Field(default=200, ge=1, le=1000)
     llm_max_normalized_facts_bytes: int = Field(default=131_072, ge=1000, le=1_000_000)
     llm_max_input_bytes: int = Field(default=262_144, ge=1_000, le=1_000_000)
+    # Deterministic Report Writer context bounds (PR 23B). The same persisted
+    # investigation state must produce the same bounded report input; an
+    # oversize input fails with a typed application error before any model
+    # call rather than being silently truncated.
+    report_writer_max_findings: int = Field(default=50, ge=1, le=500)
+    report_writer_max_evidence: int = Field(default=100, ge=1, le=500)
+    report_writer_max_relationship_observations: int = Field(default=200, ge=1, le=1000)
+    report_writer_max_research_results: int = Field(default=20, ge=1, le=200)
+    report_writer_max_research_claims: int = Field(default=100, ge=1, le=2000)
+    report_writer_max_input_bytes: int = Field(default=262_144, ge=1_000, le=1_000_000)
     # Analyst-facing collection query page limits (PR 23A). The default is
     # applied when a caller omits a limit; the maximum is the hard ceiling
     # validated by every query service.
@@ -278,6 +288,12 @@ class Settings(BaseSettings):
         "llm_max_normalized_facts_bytes",
         "llm_max_input_bytes",
         "llm_max_tokens",
+        "report_writer_max_findings",
+        "report_writer_max_evidence",
+        "report_writer_max_relationship_observations",
+        "report_writer_max_research_results",
+        "report_writer_max_research_claims",
+        "report_writer_max_input_bytes",
         mode="before",
     )
     @classmethod

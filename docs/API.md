@@ -106,6 +106,20 @@ generated prose.
 Report endpoints return the structured `InvestigationReport`
 representation (or a stable API DTO mapped from it).
 
+PR 23B delivers the domain/application/persistence side of the report
+contract; PR 23C exposes it over HTTP. The report resource semantics are:
+
+- a report is an immutable versioned presentation of the current Assessment;
+  repeated explicit generation appends a new report version;
+- the current report resolves the Investigation's durable `report_id`
+  pointer, never `MAX(version)`;
+- report version listings are keyset-paginated with canonical order
+  `version DESC, id ASC`; soft-deleted reports are hidden;
+- verdict and confidence equal the current Assessment exactly;
+- findings, research context, limitations, unresolved questions, and
+  recommended next steps are authoritative structured snapshots;
+- GET never regenerates a report and never invokes an LLM.
+
 If ATI exposes a human-readable report representation, that
 representation is generated deterministically from the same validated
 structured report. It must not invoke an LLM during request rendering

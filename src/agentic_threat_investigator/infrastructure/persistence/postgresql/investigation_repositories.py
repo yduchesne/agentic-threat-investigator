@@ -30,6 +30,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationRepository,
     InvestigationVersionConflictError,
     InvestigationWriteResult,
+    ReportReferenceInvalidError,
 )
 from agentic_threat_investigator.domain.investigation import (
     CoordinatorTransitionKind,
@@ -50,6 +51,7 @@ from .errors import (
     SQLSTATE_INVESTIGATION_NOT_FOUND,
     SQLSTATE_LLM_BUDGET_EXHAUSTED,
     SQLSTATE_OPTIMISTIC_VERSION_REQUIRED,
+    SQLSTATE_REPORT_REFERENCE_INVALID,
     SQLSTATE_VERSION_CONFLICT,
     sqlstate,
 )
@@ -289,6 +291,57 @@ class PostgresInvestigationRepository(InvestigationRepository):
                 raise AssessmentProvenanceMismatchError(
                     f"assessment reference is invalid for investigation "
                     f"{investigation_id}: {assessment_id}"
+                ) from error
+            raise
+        written_result_id, written_version, outcome = result.one()
+        return InvestigationWriteResult(
+            written_result_id,
+            int(written_version),
+            BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
+        )
+
+    async def update_report_reference(
+        self,
+        investigation_id: UUID,
+        report_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Point the investigation at its current report through the SQL API.
+
+        The database owns the operational-state mutation, version allocation,
+        and UPDATE history; the pointer only advances after the report row
+        itself has been durably inserted in the same transaction.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, outcome FROM ati.set_investigation_report(
+                        :id, :report_id, :actor_id, :request_id, :expected_version)
+                """),
+                {
+                    "id": investigation_id,
+                    "report_id": report_id,
+                    "actor_id": actor_id,
+                    "request_id": request_id,
+                    "expected_version": expected_version,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_INVESTIGATION_NOT_FOUND:
+                raise InvestigationNotFoundError(str(investigation_id)) from error
+            if state == SQLSTATE_VERSION_CONFLICT:
+                raise InvestigationVersionConflictError(
+                    investigation_id, expected_version or 0
+                ) from error
+            if state == SQLSTATE_REPORT_REFERENCE_INVALID:
+                # The target report is missing, does not belong to this
+                # Investigation, or was soft-deleted (possibly concurrently).
+                raise ReportReferenceInvalidError(
+                    investigation_id, report_id
                 ) from error
             raise
         written_result_id, written_version, outcome = result.one()

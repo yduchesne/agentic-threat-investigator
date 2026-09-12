@@ -20,6 +20,7 @@ from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationQueryService,
     RelationshipQueryService,
 )
+from agentic_threat_investigator.app.query.reports import ReportQueryService
 from agentic_threat_investigator.app.query.research import ResearchResultQueryService
 from agentic_threat_investigator.app.query.timeline import TimelineQueryService
 
@@ -31,6 +32,7 @@ from .relationships import (
     PostgresRelationshipObservationQueryService,
     PostgresRelationshipQueryService,
 )
+from .reports import PostgresReportQueryService
 from .research import PostgresResearchResultQueryService
 from .timeline import PostgresTimelineQueryService
 
@@ -60,6 +62,9 @@ class PostgresQueryServices:
             PostgresResearchResultQueryService(session, limits or QueryLimits())
         )
         self.assessments: AssessmentQueryService = PostgresAssessmentQueryService(
+            session, limits or QueryLimits()
+        )
+        self.reports: ReportQueryService = PostgresReportQueryService(
             session, limits or QueryLimits()
         )
         self.timeline_events: TimelineQueryService = PostgresTimelineQueryService(

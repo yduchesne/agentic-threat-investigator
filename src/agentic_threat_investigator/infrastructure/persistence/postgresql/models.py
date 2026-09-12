@@ -401,6 +401,48 @@ class AssessmentFindingSupportRow(Base):
     )
 
 
+class InvestigationReportRow(Base):
+    """Database row for a versioned, insert-only InvestigationReport output.
+
+    Nested report presentation structures (executive summary, finding
+    snapshots, research snapshots) are authoritative typed JSONB snapshots
+    validated by the application domain model; the database enforces root
+    integrity, vocabulary, ceilings, and the current-Assessment invariant.
+    """
+
+    __tablename__ = "investigation_report"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    investigation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    assessment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    verdict: Mapped[str] = mapped_column(String)
+    confidence: Mapped[str] = mapped_column(String)
+    title: Mapped[str] = mapped_column(String)
+    executive_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    findings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    research_context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    limitations: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
+    unresolved_questions: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
+    recommended_next_steps: Mapped[list[str]] = mapped_column(
+        ARRAY(String), default=list
+    )
+    source_evidence_ids: Mapped[list[UUID]] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), default=list
+    )
+    source_relationship_observation_ids: Mapped[list[UUID]] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), default=list
+    )
+    source_research_result_ids: Mapped[list[UUID]] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), default=list
+    )
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
+
 class InvestigationTimelineEventRow(Base):
     """Database row for an immutable analyst-facing investigation timeline event."""
 

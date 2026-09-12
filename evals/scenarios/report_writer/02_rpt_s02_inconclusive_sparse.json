@@ -1,0 +1,22 @@
+{
+  "id": "rpt-s02-inconclusive-sparse",
+  "version": 1,
+  "description": "Inconclusive / sparse evidence: an INCONCLUSIVE/low Assessment with no findings. The report must preserve the inconclusive verdict, retain the limitation and unresolved question, and must not infer a benign verdict from the absence of hits. With no supplied findings or research claims, no narrative statement is authored.",
+  "fixture": "report-inconclusive",
+  "expected": {
+    "verdict": "inconclusive",
+    "confidence": "low",
+    "required_assessment_finding_ordinals": [],
+    "forbidden_assessment_finding_ordinals": [1, 2, 3],
+    "required_research_claim_labels": [],
+    "forbidden_research_claim_labels": [],
+    "required_limitations": ["no evidence was available"],
+    "required_unresolved_questions": ["why no reputation data was retrieved"],
+    "required_next_steps": [],
+    "min_narrative_statements": 0,
+    "max_narrative_statements": 0,
+    "required_phrases": [],
+    "forbidden_phrases": ["benign"],
+    "expected_no_report": false
+  }
+}

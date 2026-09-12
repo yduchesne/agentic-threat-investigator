@@ -164,6 +164,14 @@ class FakeInvestigationRepository(InvestigationRepository):
             raise self.update_error
         return self.update_result
 
+    async def update_report_reference(
+        self,
+        investigation_id: UUID,
+        report_id: UUID,
+        **_: object,
+    ) -> InvestigationWriteResult:
+        raise NotImplementedError
+
     async def update_budget(
         self,
         investigation_id: UUID,

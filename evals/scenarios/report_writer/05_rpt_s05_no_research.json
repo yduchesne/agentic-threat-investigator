@@ -1,0 +1,22 @@
+{
+  "id": "rpt-s05-no-research",
+  "version": 1,
+  "description": "No ResearchResult: a valid report without research context. The writer must not invent context or citations when no ResearchResult was persisted for the Investigation.",
+  "fixture": "report-no-research",
+  "expected": {
+    "verdict": "malicious",
+    "confidence": "high",
+    "required_assessment_finding_ordinals": [1],
+    "forbidden_assessment_finding_ordinals": [],
+    "required_research_claim_labels": [],
+    "forbidden_research_claim_labels": ["invented_context"],
+    "required_limitations": [],
+    "required_unresolved_questions": [],
+    "required_next_steps": [],
+    "min_narrative_statements": 1,
+    "max_narrative_statements": 5,
+    "required_phrases": ["no research context was available"],
+    "forbidden_phrases": [],
+    "expected_no_report": false
+  }
+}

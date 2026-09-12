@@ -692,7 +692,51 @@ Regression cases must include:
 
 Report evaluation prioritizes faithfulness over creativity.
 
-Hard checks:
+PR 23B delivers a repository-owned, deterministic Report Writer behavioral
+baseline under ``src/agentic_threat_investigator/evaluation/report_writer/``
+with scenario JSON under ``evals/scenarios/report_writer/`` (RPT-S01..S08).
+
+Deterministic structural validation (``ReportProvenanceValidator``) proves
+reference closure and source integrity and runs before any report becomes
+authoritative. The behavioral baseline proves expected report behavior on
+known persisted snapshots through stable failure codes:
+
+```text
+VERDICT_MISMATCH                    CONFIDENCE_MISMATCH
+REQUIRED_ASSESSMENT_FINDING_MISSING FORBIDDEN_ASSESSMENT_FINDING_INCLUDED
+REQUIRED_RESEARCH_CLAIM_MISSING     FORBIDDEN_RESEARCH_CLAIM_INCLUDED
+UNSUPPORTED_SOURCE_REFERENCE        REQUIRED_LIMITATION_MISSING
+REQUIRED_UNRESOLVED_QUESTION_MISSING REQUIRED_NEXT_STEP_MISSING
+REPORT_STATEMENT_ENVELOPE_VIOLATION REPORT_STRUCTURE_INVALID
+```
+
+**Deterministic provenance validation is NOT semantic-entailment
+evaluation.** Reference closure proves that a statement references a
+supplied source; it cannot prove the prose faithfully paraphrases that
+source. Semantic fidelity is exercised by the repository-owned scenarios
+(canonical phrase envelopes, exact membership), never by regex fact
+extraction, keyword-overlap grounding, embedding thresholds, or an
+LLM-as-judge. Verdict/confidence mismatch should normally be impossible
+after application stamping; the evaluator retains those checks as a hard
+gate.
+
+Required scenarios:
+
+- RPT-S01 clearly malicious — verdict/confidence preserved, malicious
+  finding included, no unsupported actor attribution;
+- RPT-S02 inconclusive / sparse — INCONCLUSIVE preserved, caveats retained,
+  no "benign" inference from no hits;
+- RPT-S03 conflicting evidence — both sides represented, contradiction not
+  erased, Assessment confidence preserved;
+- RPT-S04 research is context — contextual research included as context,
+  never a finding or verdict source;
+- RPT-S05 no ResearchResult — valid report without invented context;
+- RPT-S06 unsupported reference — validation failure, no persisted report;
+- RPT-S07 verdict-override attempt — schema rejects forbidden fields, no
+  persisted report;
+- RPT-S08 stale Assessment race — typed stale-input conflict, no report.
+
+Hard checks (kept from the v0.1 evaluation contract):
 
 - verdict equals supplied Assessment verdict;
 - confidence equals supplied Assessment confidence;

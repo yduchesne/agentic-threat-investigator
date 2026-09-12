@@ -69,6 +69,7 @@ async def reset_application_data(
         "assessment_finding_support",
         "assessment_finding",
         "assessment",
+        "investigation_report",
         "investigation",
         "evidence",
         "relationship_observation",

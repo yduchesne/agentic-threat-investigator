@@ -541,32 +541,86 @@ boundary are PR 21.
 
 ### Report pipeline
 
-The report path is:
+The report path (PR 23B delivered) is:
 
 ```text
-Evidence + Relationships + Research + Assessment
-                    |
-                    v
-              Report Writer
-                    |
-                    v
-       InvestigationReport (Pydantic)
-                    |
-             validate invariants
-                    |
-                    v
-        persist structured report
-                    |
-          +---------+---------+
-          |                   |
-          v                   v
-       API DTO         deterministic formatter
-                              |
-                         Markdown / HTML
+Investigation
+    |
+    +--> current Assessment
+    |
+    +--> Evidence / RelationshipObservation / Relationship
+    |
+    +--> persisted ResearchResult / ResearchClaim / ResearchCitation
+    |
+    v
+ReportWriterInputLoader        (short read transaction, then closed)
+    |
+    v
+ReportWriterInput              (immutable, bounded, deterministic)
+    |
+    v
+deterministic prompt  ->  Report Writer LLM  ->  ReportWriterOutput
+    |
+    v
+build_investigation_report     (application stamping)
+    |
+    v
+ReportProvenanceValidator      (deterministic closure before persistence)
+    |
+    v
+InvestigationReport (Pydantic)
+    |
+    v
+versioned PostgreSQL persistence (append + CREATE history)
+    |
+    +--> Investigation.report_id pointer (atomic, revalidated under lock)
+    |
+    +--> structured API resource [PR 23C]
+    |
+    +--> deterministic Markdown formatter
 ```
 
-The Report Writer therefore produces structured report content rather
-than a finished free-form document.
+The Report Writer produces structured report content, never a finished
+free-form document. The current persisted Assessment remains the sole
+authority for verdict and confidence: those values are application-stamped
+into the final :class:`InvestigationReport` and the model output schema
+excludes them entirely. Assessment findings are snapshotted application-side
+at their stable ordinals, Research context is snapshotted from persisted
+ResearchClaims/Citations, and every material model-authored narrative
+statement carries at least one typed reference to supplied Assessment or
+Research provenance.
+
+Key delivered components:
+
+- :class:`ReportWriterInputLoader` — one short read-only UnitOfWork
+  materializes the current Assessment (via the Investigation's durable
+  ``assessment_id`` pointer), its analyzed Evidence, the
+  RelationshipObservations referenced by its findings, and bounded persisted
+  ResearchResults, then closes the transaction. Input collections and
+  serialized bytes are independently bounded with typed errors; ``Evidence``
+  is minimized through normalized facts only (never ``raw_payload``).
+- :class:`ReportWriter` — the application execution service: deterministic
+  prompts, existing ``LlmClient.generate_structured``, existing
+  investigation-wide LLM accounting, and at most one explicit schema-repair
+  attempt. LLM calls happen strictly outside database transactions.
+- :class:`ReportProvenanceValidator` — deterministic closure validation
+  (Assessment authority, finding closure, narrative support closure,
+  research closure, caveat equality, source-set closure) before any report
+  becomes authoritative. It proves reference integrity, never semantic
+  entailment.
+- :class:`InvestigationReportPersistenceService` — one short atomic
+  transaction appends the immutable versioned report, advances the
+  Investigation ``report_id`` pointer, and emits the ``REPORT_CREATE`` audit
+  event. The append revalidates under the locked Investigation row that the
+  report's Assessment is still current; a stale input fails atomically.
+- deterministic formatter — pure presentation code rendering the validated
+  structured report (Markdown in v0.1); it never calls the LLM or the
+  database.
+
+Semantic faithfulness of bounded model-authored prose is evaluated by the
+repository-owned Report Writer evaluation baseline (deterministic scenarios
+with stable failure codes), never by an invented heuristic fact checker or
+LLM-as-judge.
 
 ### Framework boundary
 

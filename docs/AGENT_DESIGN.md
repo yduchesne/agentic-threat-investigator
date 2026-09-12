@@ -99,6 +99,38 @@ Transforms structured evidence, research, relationships, and Assessment into the
 
 It cannot change the verdict or introduce unsupported facts.
 
+Delivered semantics (PR 23B):
+
+- the Report Writer is a structured-output agent consuming a bounded,
+  authoritative snapshot of the current Assessment, its analyzed
+  Evidence/RelationshipObservation provenance, and persisted
+  ResearchResults;
+- the current persisted Assessment remains the sole authority for verdict
+  and confidence: the model output schema excludes both fields entirely and
+  the application stamps them from the Assessment;
+- Assessment findings are selected/ordered by the model but snapshotted
+  application-side at their stable ordinals; the model never authors a new
+  finding (no new category, disposition, confidence, or support list);
+- Research claims are selected by exact
+  ``(research_result_id, research_claim_id)`` and snapshotted from the
+  persisted result; research remains context and is never Evidence or
+  verdict authority;
+- every material model-authored narrative statement carries at least one
+  typed reference (``AssessmentFindingRef``/``ResearchClaimRef``) to a
+  supplied source; reference closure is enforced deterministically before
+  persistence;
+- limitations, unresolved questions, and recommended next steps are copied
+  exactly from the current Assessment;
+- no tools, no browsing, no evidence collection, no policy/pivot authority,
+  no new RAG retrieval;
+- Evidence/research text is untrusted data (never instructions), URLs are
+  provenance only;
+- exactly one durable LLM reservation per actual invocation, at most one
+  explicit schema-repair attempt, no free-form fallback;
+- semantic faithfulness of bounded prose is evaluated by the
+  repository-owned deterministic Report Writer baseline; deterministic
+  provenance validation never claims semantic entailment.
+
 ## Execution boundary
 
 ```text
@@ -544,6 +576,28 @@ The Report Writer cannot change the current Assessment
 verdict/confidence and cannot introduce unsupported facts. Deterministic
 validation enforces these invariants before the report becomes
 authoritative.
+
+Execution path:
+
+```text
+ReportWriterInputLoader (read-only UnitOfWork, then closed)
+ -> deterministic prompt
+ -> LlmAccountingService.reserve_call
+ -> LlmClient.generate_structured -> ReportWriterOutput
+ -> build_investigation_report (application stamping)
+ -> ReportProvenanceValidator
+ -> InvestigationReportPersistenceService (one atomic transaction)
+ -> persisted InvestigationReport + Investigation report_id pointer
+```
+
+The Report Writer has no tools, never authorizes pivots, never collects
+Evidence, and never mutates investigation state. A report is generated
+only when the Investigation has a durable current ``assessment_id``; the
+append revalidates under lock that the Assessment is still current, so a
+stale input fails atomically with no report row, history, or pointer
+change. Reports are immutable versioned outputs: repeated explicit
+generation appends a new version and the current report resolves the
+durable ``report_id`` pointer, never ``MAX(version)``.
 
 ### Serialization
 

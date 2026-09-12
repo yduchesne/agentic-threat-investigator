@@ -41,6 +41,7 @@ from .relationship_repositories import (
     PostgresRelationshipObservationRepository,
     PostgresRelationshipRepository,
 )
+from .report_repositories import PostgresInvestigationReportRepository
 from .repositories import PostgresEntityRepository
 from .source_repositories import (
     PostgresIngestionCheckpointRepository,
@@ -67,6 +68,7 @@ class PostgresUnitOfWork(UnitOfWork):
         self.evidence = cast(PostgresEvidenceRepository, None)
         self.investigations = cast(PostgresInvestigationRepository, None)
         self.assessments = cast(PostgresAssessmentRepository, None)
+        self.investigation_reports = cast(PostgresInvestigationReportRepository, None)
         self.users = cast(UserRepository, None)
         self.credentials = cast(CredentialRepository, None)
         self.sessions = cast(SessionRepository, None)
@@ -99,6 +101,9 @@ class PostgresUnitOfWork(UnitOfWork):
         self.evidence = PostgresEvidenceRepository(self.session)
         self.investigations = PostgresInvestigationRepository(self.session)
         self.assessments = PostgresAssessmentRepository(self.session, self._batch_size)
+        self.investigation_reports = PostgresInvestigationReportRepository(
+            self.session, self._batch_size
+        )
         self.audit_events = PostgresAuditEventRepository(self.session)
         self.source_records = PostgresSourceRecordRepository(
             self.session, self._batch_size
@@ -140,6 +145,9 @@ class PostgresUnitOfWork(UnitOfWork):
             self.evidence = cast(PostgresEvidenceRepository, None)
             self.investigations = cast(PostgresInvestigationRepository, None)
             self.assessments = cast(PostgresAssessmentRepository, None)
+            self.investigation_reports = cast(
+                PostgresInvestigationReportRepository, None
+            )
             self.audit_events = cast(PostgresAuditEventRepository, None)
             self.source_records = cast(PostgresSourceRecordRepository, None)
             self.ingestion_checkpoints = cast(

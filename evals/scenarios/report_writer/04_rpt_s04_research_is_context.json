@@ -1,0 +1,22 @@
+{
+  "id": "rpt-s04-research-is-context",
+  "version": 1,
+  "description": "Research context is not Evidence: a SUSPICIOUS Assessment with contextual research claims supplied. The report must include the research claim as context only, must not turn it into an Assessment finding, and must not infer a malicious verdict from research alone.",
+  "fixture": "report-research-context",
+  "expected": {
+    "verdict": "suspicious",
+    "confidence": "medium",
+    "required_assessment_finding_ordinals": [1],
+    "forbidden_assessment_finding_ordinals": [2, 3, 4],
+    "required_research_claim_labels": ["contextual_claim"],
+    "forbidden_research_claim_labels": [],
+    "required_limitations": [],
+    "required_unresolved_questions": [],
+    "required_next_steps": [],
+    "min_narrative_statements": 1,
+    "max_narrative_statements": 5,
+    "required_phrases": ["research provides context only"],
+    "forbidden_phrases": ["research proves malicious"],
+    "expected_no_report": false
+  }
+}

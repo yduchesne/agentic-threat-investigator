@@ -36,6 +36,7 @@ class QueryKind(str, Enum):
     RELATIONSHIP_OBSERVATIONS = "relationship_observations"
     RESEARCH_RESULTS = "research_results"
     ASSESSMENTS = "assessments"
+    REPORTS = "reports"
     TIMELINE = "timeline"
     DOMAIN_HISTORY = "domain_history"
 

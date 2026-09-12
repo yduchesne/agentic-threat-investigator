@@ -36,6 +36,7 @@ from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
 )
+from agentic_threat_investigator.domain.report import InvestigationReport
 from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.domain.source import SourceRecord
 
@@ -169,6 +170,138 @@ class AssessmentCurrentReferenceConflictError(LookupError):
             f"{assessment_id}"
         )
         self.assessment_id = assessment_id
+
+
+class InvestigationReportDuplicateIdentityError(ValueError):
+    """Raised when a report identity already exists; never an update."""
+
+    def __init__(self, report_id: UUID) -> None:
+        """Record the conflicting report identity."""
+        super().__init__(f"investigation report already exists: {report_id}")
+        self.report_id = report_id
+
+
+class StaleReportInputError(RuntimeError):
+    """Raised when a report's Assessment ceased to be current before commit.
+
+    The report append revalidates under the locked Investigation row that
+    ``investigation.assessment_id`` still equals the report's
+    ``assessment_id``; a mismatch means the input snapshot is stale and the
+    caller must regenerate from fresh inputs. No report row, history, or
+    pointer update is committed.
+    """
+
+    def __init__(self, investigation_id: UUID, assessment_id: UUID) -> None:
+        """Record the stale Investigation/Assessment identities."""
+        super().__init__(
+            f"report input is stale: investigation {investigation_id} no longer "
+            f"points at assessment {assessment_id}"
+        )
+        self.investigation_id = investigation_id
+        self.assessment_id = assessment_id
+
+
+class ReportReferenceInvalidError(LookupError):
+    """Raised when an Investigation report pointer cannot be set.
+
+    The target report is missing, invisible, or belongs to another
+    Investigation; the pointer mutation is rejected with no partial change.
+    """
+
+    def __init__(self, investigation_id: UUID, report_id: UUID) -> None:
+        """Record the conflicting Investigation/report identities."""
+        super().__init__(
+            f"report reference is invalid for investigation "
+            f"{investigation_id}: {report_id}"
+        )
+        self.investigation_id = investigation_id
+        self.report_id = report_id
+
+
+class ReportCurrentReferenceConflictError(LookupError):
+    """Raised when deleting the current report of a visible Investigation.
+
+    Approved PR 23B deletion policy mirrors Assessment: a soft deletion is
+    rejected while any visible Investigation still points at the report, so a
+    visible Investigation can never retain a pointer to a deleted report.
+    """
+
+    def __init__(self, report_id: UUID) -> None:
+        """Record the referenced current report identity."""
+        super().__init__(
+            f"report is the current report of a visible investigation: {report_id}"
+        )
+        self.report_id = report_id
+
+
+class ReportCollectionLimitExceededError(ValueError):
+    """Raised when a report candidate collection exceeds the configured limit.
+
+    The message reports only the collection name, the count, and the limit;
+    it never includes narrative text, finding statements, claim text,
+    citations, or source payloads.
+    """
+
+    def __init__(self, collection: str, count: int, limit: int) -> None:
+        """Record the oversized collection identity and its count."""
+        super().__init__(f"report {collection} size {count} exceeds limit {limit}")
+        self.collection = collection
+        self.count = count
+        self.limit = limit
+
+
+REPORT_BOUNDED_COLLECTIONS = (
+    "executive_summary",
+    "narrative_support",
+    "findings",
+    "finding_support",
+    "research_context",
+    "research_citations",
+    "limitations",
+    "unresolved_questions",
+    "recommended_next_steps",
+    "source_evidence_ids",
+    "source_relationship_observation_ids",
+    "source_research_result_ids",
+)
+"""The candidate collections independently bounded by the report limit."""
+
+
+def report_collection_sizes(report: InvestigationReport) -> dict[str, int]:
+    """Return the size of every bounded report candidate collection."""
+    return {
+        "executive_summary": len(report.executive_summary),
+        "narrative_support": sum(
+            len(statement.support) for statement in report.executive_summary
+        ),
+        "findings": len(report.findings),
+        "finding_support": sum(len(finding.support) for finding in report.findings),
+        "research_context": len(report.research_context),
+        "research_citations": sum(
+            len(snapshot.citations) for snapshot in report.research_context
+        ),
+        "limitations": len(report.limitations),
+        "unresolved_questions": len(report.unresolved_questions),
+        "recommended_next_steps": len(report.recommended_next_steps),
+        "source_evidence_ids": len(report.source_evidence_ids),
+        "source_relationship_observation_ids": len(
+            report.source_relationship_observation_ids
+        ),
+        "source_research_result_ids": len(report.source_research_result_ids),
+    }
+
+
+def enforce_report_collection_bounds(report: InvestigationReport, limit: int) -> None:
+    """Reject any bounded report candidate collection above the limit.
+
+    Shared by the application persistence service (before the UnitOfWork and
+    any SQL serialization) and the PostgreSQL repository, so oversized
+    aggregates are rejected untouched with only the collection name, count,
+    and limit reported.
+    """
+    for collection, count in report_collection_sizes(report).items():
+        if count > limit:
+            raise ReportCollectionLimitExceededError(collection, count, limit)
 
 
 class ResearchResultDuplicateIdentityError(ValueError):
@@ -632,6 +765,25 @@ class InvestigationRepository(ABC):  # pragma: no cover
         """
 
     @abstractmethod
+    async def update_report_reference(
+        self,
+        investigation_id: UUID,
+        report_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        """Point the investigation at its current/final report version (PR 23B).
+
+        The pointer lives in the operational state of the mutable
+        investigation resource and is advanced only after the report row
+        itself has been durably inserted in the same transaction. A stale
+        expected version or a reference to a report that does not belong to
+        the investigation produces a typed conflict with no partial mutation.
+        """
+
+    @abstractmethod
     async def set_analysis_result(
         self,
         investigation_id: UUID,
@@ -778,6 +930,52 @@ class AssessmentRepository(ABC):  # pragma: no cover
         """
 
 
+class InvestigationReportRepository(ABC):  # pragma: no cover
+    """Repository for versioned, insert-only report outputs (PR 23B).
+
+    A later report generation creates a new persisted report row rather than
+    silently mutating a prior report; there is deliberately no
+    update-in-place operation. The database owns version allocation and
+    immutable history.
+    """
+
+    @abstractmethod
+    async def append(
+        self,
+        report: InvestigationReport,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+    ) -> InvestigationReport:
+        """Persist a new report version and return it with database metadata.
+
+        A duplicate report identity, a stale Assessment, an oversized
+        candidate, or any cross-investigation reference is a typed error and
+        mutates nothing.
+        """
+
+    @abstractmethod
+    async def get_by_id(
+        self, report_id: UUID, *, include_deleted: bool = False
+    ) -> InvestigationReport | None:
+        """Return the visible report with its exact nested snapshots."""
+
+    @abstractmethod
+    async def soft_delete(
+        self,
+        report_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationReport:
+        """Soft-delete the report and return its post-deletion state.
+
+        Deletion is rejected with a typed conflict while any visible
+        Investigation still points at the report.
+        """
+
+
 class UserRepository(ABC):  # pragma: no cover
     """Repository for local users."""
 
@@ -859,6 +1057,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     evidence: EvidenceRepository
     investigations: InvestigationRepository
     assessments: AssessmentRepository
+    investigation_reports: InvestigationReportRepository
     users: UserRepository
     credentials: CredentialRepository
     sessions: SessionRepository
