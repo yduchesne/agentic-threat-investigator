@@ -791,6 +791,61 @@ output repair with exactly two accounted LLM calls. `FakeLlmClient` is the
 only fake external model boundary; tests never require live Internet or a
 live LLM.
 
+### Coordinator research execution trajectories (PR 22C)
+
+The canonical PR 22C slice (`tests/integration/test_research_trajectory.py`)
+runs the full production research lifecycle against isolated real PostgreSQL:
+
+```text
+domain -> DNS (real provider over synthetic HTTP) -> discovered IP
+ -> ThreatFox (scripted provider) -> RESEARCHABLE malware
+ -> real CoordinatorPolicy + production LangGraph + LocalInvestigationRunner
+ -> MARK_RESEARCH_REQUIRED -> RESEARCH_REQUESTED
+ -> real Research Agent (real pgvector retriever, real result persistence)
+ -> FakeLlmClient (model boundary only)
+ -> COMPLETED / EXHAUSTED -> normal Coordinator stop
+```
+
+The canonical slice never fakes the research architecture: the real
+production Coordinator, graph, runner, real-format MITRE ATT&CK STIX
+fixture, parser/document builder, `DocumentIndexingService`, real
+PostgreSQL/pgvector, real `PgVectorResearchRetriever`, real Research Agent,
+and real ResearchResult persistence all participate, with `FakeLlmClient`
+used only at the external LLM boundary. Provider execution uses the existing
+deterministic production-compatible seam to create the RESEARCHABLE entity.
+
+Covered trajectories:
+
+- I01 — complete trajectory: marker consumed, `RESEARCH_REQUESTED` fired,
+  one authoritative result with valid citation provenance, result linked
+  once, execution COMPLETED, no Evidence/Assessment created by research, no
+  direct research->pivot transition;
+- I02 — no-context result is completed research (zero claims/citations, zero
+  LLM calls, result linked once);
+- I03 — unchanged-context rerun is idempotent (zero additional calls,
+  results, or `RESEARCH_REQUESTED` events);
+- I04 — crash-window reconciliation: a persisted matching result with
+  REQUESTED state is adopted with zero LLM calls and no duplicate rows;
+- I05 — LLM-accounting/version interaction: research reservations advance
+  the Investigation version and completion reloads the authoritative
+  version without overwriting accounting;
+- I06 — bounded recoverable retry: exactly two `RESEARCH_REQUESTED` events,
+  attempts == 2, one result, no third attempt;
+- I07 — exhaustion after two recoverable failures: EXHAUSTED, no result
+  link, no retry on subsequent invocation;
+- I08 — research cannot authorize a pivot: completion returns to
+  Coordinator and the SUFFICIENT disposition stops without any post-research
+  pivot.
+
+The transition allowlist slice (`tests/integration/test_research_execution_transition.py`)
+proves `REQUEST_RESEARCH`/`RECORD_RESEARCH_OUTCOME` accept only approved
+field changes, reject provider/pivot/evidence/assessment mutations and
+duplicate contexts, reject stale expected versions, require authoritative
+result linkage (investigation/subject/query), never link an exhausted
+context, and preserve LLM-accounting version increments. `FakeLlmClient` is
+the only fake external model boundary; tests never require live Internet or
+a live LLM.
+
 ### Evidence Analyst evaluation vertical slices (PR 20C)
 
 `tests/integration/test_evidence_analyst_evaluation.py` runs the repository-

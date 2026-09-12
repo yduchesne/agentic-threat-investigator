@@ -28,6 +28,7 @@ from agentic_threat_investigator.app.orchestration.coordinator import (
     CoordinatorEntityView,
     CoordinatorPolicy,
     ProviderWorkPlanner,
+    ResearchRequestPlanner,
 )
 from agentic_threat_investigator.app.orchestration.dispatcher import LocalTaskDispatcher
 from agentic_threat_investigator.app.orchestration.graph import (
@@ -38,6 +39,12 @@ from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
     ProviderWorkExecutor,
     UowEntityReader,
+)
+from agentic_threat_investigator.app.orchestration.research import (
+    DeterministicResearchRequestPlanner,
+    ResearchExecutionReconciler,
+    ResearchExecutor,
+    UowResearchExecutionReconciler,
 )
 from agentic_threat_investigator.app.orchestration.services import (
     CoordinatorContextLoader,
@@ -153,6 +160,9 @@ def build_provider_investigation_graph(
     context: ProviderExecutionContext,
     analysis_executor: AnalysisExecutor,
     planner: ProviderWorkPlanner | None = None,
+    research_request_planner: ResearchRequestPlanner | None = None,
+    research_executor: ResearchExecutor | None = None,
+    research_reconciler: ResearchExecutionReconciler | None = None,
     context_loader: CoordinatorContextLoader | None = None,
     transition_service: CoordinatorTransitionService | None = None,
     status_writer: InvestigationStatusWriter | None = None,
@@ -185,10 +195,25 @@ def build_provider_investigation_graph(
         raise ValueError(
             "analysis executor binding conflicts with investigation context"
         )
+    effective_reconciler = research_reconciler or (
+        UowResearchExecutionReconciler(uow_factory)
+        if research_executor is not None
+        else None
+    )
+    if (research_executor is not None) != (effective_reconciler is not None):
+        raise ValueError("research executor and reconciler must be provided together")
+    if research_request_planner is not None and research_executor is None:
+        raise ValueError("research request planner requires a research executor")
     coordinator_planner = planner or RegistryProviderWorkPlanner(
         provider_registry, source_order=PROVIDER_SOURCE_ORDER
     )
-    policy = CoordinatorPolicy(coordinator_planner)
+    policy = CoordinatorPolicy(
+        coordinator_planner,
+        research_planner=(
+            research_request_planner
+            or (DeterministicResearchRequestPlanner() if research_executor else None)
+        ),
+    )
 
     executor = ProviderWorkExecutor(
         entity_reader=UowEntityReader(uow_factory),
@@ -221,5 +246,7 @@ def build_provider_investigation_graph(
         or UowFatalStopService(
             uow_factory, bound_investigation_id=context.investigation_id
         ),
+        research_executor=research_executor,
+        research_reconciler=effective_reconciler,
         expected_investigation_id=context.investigation_id,
     )

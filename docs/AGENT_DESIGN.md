@@ -661,6 +661,46 @@ relevance/ranking signal only, never source credibility, factual
 correctness, evidentiary strength, maliciousness, or research/Assessment
 confidence, and it never arbitrates between contradictory sources.
 
+### Coordinator research execution (PR 22C)
+
+The Coordinator consumes the persisted `research_required_for_entity_ids`
+markers and executes at most one due research context per decision through
+the production graph's `research` node:
+
+```text
+MARK_RESEARCH_REQUIRED (PR 21 marker path)
+ -> CoordinatorPolicy selects one due context
+ -> REQUEST_RESEARCH (pure planned request + context fingerprint)
+ -> REQUEST_RESEARCH transition + RESEARCH_REQUESTED timeline event
+    (one short transaction, before any external I/O)
+ -> ResearchExecutor -> ResearchAgent (PR 22B)
+ -> authoritative reload (LLM accounting may have advanced the version)
+ -> COMPLETED / bounded EXHAUSTED via RECORD_RESEARCH_OUTCOME
+ -> Coordinator resumes normal analysis/pivot/stop policy
+```
+
+All orchestration decisions stay in `CoordinatorPolicy`: the Research Agent
+never decides whether research runs, which entity is researched, whether a
+pivot occurs, whether evidence is sufficient, or whether to stop. Research
+completion returns to the Coordinator and never directly authorizes a pivot.
+Research remains contextual knowledge: result identities never enter
+`evidence_ids`, no Evidence or Assessment is created or modified by research,
+and no verdict/confidence semantics are added.
+
+Request construction is deterministic application policy
+(`DeterministicResearchRequestPlanner`) using one stable query template that
+embeds the persisted entity type/value and the investigation objective; no
+LLM query planning exists. Deduplication uses a schema-versioned SHA-256
+context fingerprint; completed or exhausted unchanged contexts are never
+re-executed, while a changed context becomes due again. Orchestration-level
+execution attempts are bounded to two per unchanged context (independent of
+the agent's internal structured-output repair), a persisted empty
+`ResearchResult` is successful completed research, and crash recovery
+reconciles an already-persisted matching result rather than blindly issuing
+another model call. The completion transition reloads the Investigation
+after Research Agent execution so LLM-accounting version increments are
+never overwritten, and research retries never consume Coordinator replans.
+
 ## Observable reasoning
 
 ATI exposes observable actions and concise evidence-backed action rationales, such as why a discovered IP was investigated.

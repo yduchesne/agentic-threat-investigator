@@ -38,6 +38,7 @@ ACTION_ENTITY_DISCOVERED = "urn:ati:action:entity_discovered"
 ACTION_PIVOT_ENQUEUED = "urn:ati:action:pivot_enqueued"
 ACTION_PIVOT_EXECUTED = "urn:ati:action:pivot_executed"
 ACTION_PIVOT_SKIPPED = "urn:ati:action:pivot_skipped"
+ACTION_RESEARCH_REQUESTED = "urn:ati:action:research_requested"
 ACTION_ASSESSMENT_REQUESTED = "urn:ati:action:assessment_requested"
 ACTION_INVESTIGATION_STOPPED = "urn:ati:action:investigation_stopped"
 
@@ -82,6 +83,20 @@ class TimelineActionService(ABC):
         self, *, state: InvestigationState
     ) -> InvestigationTimelineEvent:
         """Build ASSESSMENT_REQUESTED immediately before analyst execution."""
+
+    @abstractmethod
+    def research_requested(
+        self,
+        *,
+        entity_id: UUID,
+        state: InvestigationState,
+    ) -> InvestigationTimelineEvent:
+        """Build RESEARCH_REQUESTED for exactly one authorized context.
+
+        The event records that research was requested, never the research
+        content: query text, entity values, prompts, claims, source URLs,
+        and raw failure text are deliberately absent.
+        """
 
     @abstractmethod
     def investigation_stopped(
@@ -183,6 +198,21 @@ class DeterministicTimelineActionService(TimelineActionService):
             occurred_at=self._clock(),
         ).model_copy(update=self._counters(state))
 
+    def research_requested(
+        self,
+        *,
+        entity_id: UUID,
+        state: InvestigationState,
+    ) -> InvestigationTimelineEvent:
+        """Build RESEARCH_REQUESTED carrying exactly one subject entity ID."""
+        return InvestigationTimelineEvent(
+            id=uuid4(),
+            investigation_id=state.investigation_id,
+            type=InvestigationTimelineEventType.RESEARCH_REQUESTED,
+            occurred_at=self._clock(),
+            entity_ids=(entity_id,),
+        ).model_copy(update=self._counters(state))
+
     def investigation_stopped(
         self,
         *,
@@ -274,6 +304,17 @@ def convert_timeline_actions(
                 )
         elif event.type is InvestigationTimelineEventType.ASSESSMENT_REQUESTED:
             records.append(CoordinatorActionRecord(action=ACTION_ASSESSMENT_REQUESTED))
+        elif event.type is InvestigationTimelineEventType.RESEARCH_REQUESTED:
+            for entity_id in event.entity_ids:
+                records.append(
+                    CoordinatorActionRecord(
+                        action=ACTION_RESEARCH_REQUESTED,
+                        entity_id=entity_id,
+                        provider_calls_used=event.provider_calls_used,
+                        replans_used=event.replans_used,
+                        entity_count=event.entity_count,
+                    )
+                )
         elif event.type is InvestigationTimelineEventType.INVESTIGATION_STOPPED:
             records.append(
                 CoordinatorActionRecord(

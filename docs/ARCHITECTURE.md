@@ -194,11 +194,13 @@ The LangGraph implementation began as a **deterministic orchestration skeleton**
 START -> initialize -> coordinator -> { EXECUTE_PROVIDER_WORK
                                        | REQUEST_ANALYSIS
                                        | AUTHORIZE_PIVOT
+                                       | REQUEST_RESEARCH
                                        | STOP }
 
 Provider work path: select_work -> execute_work -> record_outcome -> coordinator
 Analysis path:       analyze -> coordinator
 Pivot path:          authorize_pivot -> coordinator
+Research path:       research -> coordinator
 Stop path:           finalize_stop -> END
 ```
 
@@ -232,6 +234,26 @@ is computed from typed `EntityTraversalState` entries (first-discovery
 ordinal and minimum depth), never from set/dict iteration or default-zero
 fallbacks. A persisted in-progress provider work item (no retry token exists)
 fails to a bounded fatal stop rather than re-issuing an external call.
+
+PR 22C adds one bounded coordinator action, `REQUEST_RESEARCH`, consuming
+the persisted `research_required_for_entity_ids` markers: after evidence
+synchronization and before any terminal/pivot decision, the Coordinator
+selects at most one due research context in deterministic candidate order,
+plans a bounded contextual question through the pure
+`DeterministicResearchRequestPlanner` (never an LLM), and fingerprints the
+exact context with a schema-versioned SHA-256 identity. The `research` graph
+node persists the `REQUEST_RESEARCH` transition plus a `RESEARCH_REQUESTED`
+timeline event in one short transaction before any Research Agent I/O,
+reconciles an already-persisted matching `ResearchResult` (crash recovery
+never blindly repeats the model call), otherwise executes the PR 22B
+Research Agent through the narrow `ResearchExecutor` seam, reloads the
+authoritative Investigation (LLM accounting may have advanced its version),
+and records durable COMPLETED or bounded EXHAUSTED state through
+`RECORD_RESEARCH_OUTCOME`. Research executions are bounded to two
+orchestration attempts per unchanged context; completion always returns to
+Coordinator policy and never directly authorizes a pivot. Research remains
+contextual knowledge: result identities never enter `evidence_ids` and no
+Assessment is created or modified by research.
 
 The domain layer does not depend on LangGraph; only `app/orchestration/graph.py` does.
 
@@ -640,6 +662,23 @@ anchors, verdicts, confidence, or pivot/tool fields. Retrieved context,
 produces context, the Research Agent persists contextual synthesis, and only
 evidence collection/persistence can create Evidence while only the Evidence
 Analyst creates Assessments.
+
+PR 22C integrates the standalone agent into the production lifecycle as a
+bounded, durable Coordinator synchronization point. The Coordinator owns
+every decision: whether research runs, which marked entity is researched
+next (deterministic root/discovery order, at most one context per decision),
+and whether any later pivot occurs. The Research Agent remains an executor of
+already-authorized work and never decides orchestration policy. Exact
+research contexts are deduplicated by a deterministic, schema-versioned
+fingerprint (subject, entity type/value, query, retrieval filters,
+`max_results`, and the investigation anchor), so a completed or exhausted
+unchanged context is never re-executed while a changed context becomes due
+again. Orchestration-level attempts are bounded to two independently of the
+agent's internal structured-output repair; a crash between result
+persistence and completion recording is reconciled by adopting the
+already-persisted matching `ResearchResult` without another model call. The
+completion transition always reloads the Investigation after Research Agent
+execution so PR 20B LLM accounting version increments are never overwritten.
 
 ## Persistence
 

@@ -45,6 +45,23 @@ persisted Investigation budget (PR 20B).
 """
 
 
+def _unique_execution_strings(value: tuple[str, ...]) -> tuple[str, ...]:
+    """Strip and stably deduplicate a tuple of research filter values."""
+    result: list[str] = []
+    for item in value:
+        stripped = item.strip()
+        if not stripped:
+            raise ValueError("research filter values must not be blank")
+        if stripped not in result:
+            result.append(stripped)
+    return tuple(result)
+
+
+def _unique_execution_uuids(value: tuple[UUID, ...]) -> tuple[UUID, ...]:
+    """Stably deduplicate research context entity identifiers."""
+    return tuple(dict.fromkeys(value))
+
+
 class InvalidInvestigationStatusTransitionError(ValueError):
     """Raised when a status change violates the investigation lifecycle."""
 
@@ -262,6 +279,105 @@ class InvestigationError(BaseModel):
     recoverable: bool
 
 
+MAX_RESEARCH_EXECUTION_ATTEMPTS = 2
+"""The v0.1 hard orchestration bound on research execution attempts.
+
+One exact research context may be requested at most twice: attempt 1, then at
+most one later retry after a recoverable execution failure. The bound is a
+workflow-execution counter, never an LLM-call counter: the Research Agent's
+internal structured-output repair is separately bounded and separately
+accounted.
+"""
+
+
+class ResearchExecutionStatus(str, Enum):
+    """Durable lifecycle of one exact research context (PR 22C).
+
+    ``REQUESTED`` means the durable attempt was authorized before external
+    execution began; ``COMPLETED`` means an authoritative ResearchResult was
+    adopted/linked; ``EXHAUSTED`` means the final allowed orchestration
+    attempt failed recoverably (or crashed) with no durable result, so the
+    unchanged context is no longer due. There is deliberately no RUNNING or
+    FAILED status: external execution happens only after the durable
+    REQUESTED transition, and a recoverable failure keeps the context
+    REQUESTED until the final attempt resolves it.
+    """
+
+    REQUESTED = "requested"
+    COMPLETED = "completed"
+    EXHAUSTED = "exhausted"
+
+
+class ResearchExecutionState(BaseModel):
+    """Durable orchestration lifecycle state for one exact research context.
+
+    The context identity is ``(subject_entity_id, context_fingerprint)``: the
+    fingerprint is a deterministic, schema-versioned hash of the planned
+    request, so an unchanged context never re-executes while a changed
+    context becomes due again. The state preserves the exact planned request
+    fields needed to re-validate equivalence and carries the workflow
+    attempt count and result linkage. It is Investigation workflow state, not
+    a ResearchResult domain object: claim/citation content lives only in the
+    immutable ResearchResult.
+
+    Invariants:
+
+    - ``REQUESTED``: ``result_id`` is ``None``.
+    - ``COMPLETED``: ``result_id`` is required.
+    - ``EXHAUSTED``: ``result_id`` is ``None`` and ``attempts`` equals the
+      hard orchestration bound (:data:`MAX_RESEARCH_EXECUTION_ATTEMPTS`).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    subject_entity_id: UUID
+    context_fingerprint: str
+    query: str
+    entity_ids: tuple[UUID, ...] = ()
+    source_ids: tuple[str, ...] = ()
+    document_types: tuple[str, ...] = ()
+    max_results: int = Field(default=8, ge=1, le=100)
+
+    status: ResearchExecutionStatus
+    attempts: int = Field(default=1, ge=1, le=MAX_RESEARCH_EXECUTION_ATTEMPTS)
+    result_id: UUID | None = None
+
+    @field_validator("query", "context_fingerprint")
+    @classmethod
+    def validate_nonblank(cls, value: str) -> str:
+        """Reject blank query and fingerprint values."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("research execution query/fingerprint must not be blank")
+        return stripped
+
+    _validate_string_filters = field_validator("source_ids", "document_types")(
+        _unique_execution_strings
+    )
+    _validate_entity_filters = field_validator("entity_ids")(_unique_execution_uuids)
+
+    @model_validator(mode="after")
+    def status_result_invariants(self) -> "ResearchExecutionState":
+        """Enforce the status/result/attempt lifecycle invariants."""
+        if (
+            self.status is ResearchExecutionStatus.REQUESTED
+            and self.result_id is not None
+        ):
+            raise ValueError("requested research execution must not carry a result_id")
+        if self.status is ResearchExecutionStatus.COMPLETED and self.result_id is None:
+            raise ValueError("completed research execution requires a result_id")
+        if self.status is ResearchExecutionStatus.EXHAUSTED:
+            if self.result_id is not None:
+                raise ValueError(
+                    "exhausted research execution must not carry a result_id"
+                )
+            if self.attempts != MAX_RESEARCH_EXECUTION_ATTEMPTS:
+                raise ValueError(
+                    "exhausted research execution requires the maximum attempt count"
+                )
+        return self
+
+
 class ProviderExecutionStatus(str, Enum):
     """Outcome status of one fake/deterministic provider work execution."""
 
@@ -459,6 +575,7 @@ class InvestigationState(BaseModel):
     last_provider_outcome: ProviderExecutionOutcome | None = None
     investigated_entity_ids: list[UUID] = Field(default_factory=list)
     research_required_for_entity_ids: list[UUID] = Field(default_factory=list)
+    research_executions: list[ResearchExecutionState] = Field(default_factory=list)
     analyzed_evidence_ids: list[UUID] = Field(default_factory=list)
     analysis_disposition: AnalysisDisposition | None = None
     traversal: list[EntityTraversalState] = Field(default_factory=list)
@@ -527,6 +644,68 @@ class InvestigationState(BaseModel):
         if len(value) != len(set(value)):
             raise ValueError("analyzed_evidence_ids must not contain duplicates")
         return value
+
+    @field_validator("research_executions")
+    @classmethod
+    def research_executions_valid(
+        cls, value: list[ResearchExecutionState]
+    ) -> list[ResearchExecutionState]:
+        """Reject duplicate exact research contexts and duplicate result links.
+
+        One exact context (``subject_entity_id`` + ``context_fingerprint``)
+        has exactly one durable orchestration state; a COMPLETED result ID
+        may never be linked by more than one execution.
+        """
+        contexts: set[tuple[UUID, str]] = set()
+        completed_result_ids: set[UUID] = set()
+        for execution in value:
+            context = (execution.subject_entity_id, execution.context_fingerprint)
+            if context in contexts:
+                raise ValueError(
+                    "research execution contexts must be unique per subject/fingerprint"
+                )
+            contexts.add(context)
+            if execution.result_id is not None:
+                if execution.result_id in completed_result_ids:
+                    raise ValueError(
+                        "research execution result_ids must not repeat across executions"
+                    )
+                completed_result_ids.add(execution.result_id)
+        return value
+
+    @model_validator(mode="after")
+    def research_executions_coherent(self) -> "InvestigationState":
+        """Require research result linkage to be coherent with executions.
+
+        Every COMPLETED execution's ``result_id`` must appear in
+        ``research_result_ids`` exactly once, and every ``research_result_ids``
+        entry must correspond to one COMPLETED execution once executions have
+        been recorded. A pre-22C investigation that carries result identities
+        without execution state (``research_executions`` empty) remains
+        valid so legacy persisted rows are never rejected.
+        """
+        if not self.research_executions:
+            return self
+        linked = set(self.research_result_ids)
+        completed_ids = [
+            execution.result_id
+            for execution in self.research_executions
+            if execution.status is ResearchExecutionStatus.COMPLETED
+        ]
+        for result_id in completed_ids:
+            if result_id is None:
+                continue
+            if result_id not in linked:
+                raise ValueError(
+                    "completed research execution result is not linked in "
+                    "research_result_ids"
+                )
+        for result_id in self.research_result_ids:
+            if result_id not in completed_ids:
+                raise ValueError(
+                    "research_result_ids entry lacks a completed execution"
+                )
+        return self
 
     @model_validator(mode="after")
     def traversal_coherent_with_discoveries(self) -> "InvestigationState":
@@ -610,6 +789,8 @@ class CoordinatorTransitionKind(str, Enum):
     RECORD_PROVIDER_OUTCOME = "record_provider_outcome"
     AUTHORIZE_PIVOT = "authorize_pivot"
     MARK_RESEARCH_REQUIRED = "mark_research_required"
+    REQUEST_RESEARCH = "request_research"
+    RECORD_RESEARCH_OUTCOME = "record_research_outcome"
     FINALIZE_STOP = "finalize_stop"
 
 

@@ -33,6 +33,7 @@ class InvestigationTimelineEventType(str, Enum):
     PIVOT_ENQUEUED = "pivot_enqueued"
     PIVOT_EXECUTED = "pivot_executed"
     PIVOT_SKIPPED = "pivot_skipped"
+    RESEARCH_REQUESTED = "research_requested"
     ASSESSMENT_REQUESTED = "assessment_requested"
     INVESTIGATION_STOPPED = "investigation_stopped"
 
@@ -69,6 +70,12 @@ class InvestigationTimelineEvent(BaseModel):
       provider/target/error_code/reason_code; counters permitted.
     - ``PIVOT_SKIPPED``: at least one Entity ID and a required bounded
       reason_code; no provider/target/error_code.
+    - ``RESEARCH_REQUESTED``: exactly one Entity ID (the subject entity whose
+      exact research context was authorized); no provider/target/error_code,
+      reason_code, or pivot_depth; coordinator counters permitted. The event
+      records that research was requested, never the research content:
+      query text, entity values, prompts, claims, source URLs, and raw
+      failure text are deliberately absent.
     - ``ASSESSMENT_REQUESTED``: no identifier tuples, reason_code, or
       pivot_depth; counters permitted.
     - ``INVESTIGATION_STOPPED``: no identifier tuples or pivot_depth; the
@@ -212,6 +219,25 @@ class InvestigationTimelineEvent(BaseModel):
                 raise ValueError("pivot_skipped events require entity IDs")
             if self.reason_code is None:
                 raise ValueError("pivot_skipped events require a reason_code")
+            return self
+        if event_type is InvestigationTimelineEventType.RESEARCH_REQUESTED:
+            if has_provider or has_target or self.error_code is not None:
+                raise ValueError(
+                    "research_requested events carry no provider, target, or error_code"
+                )
+            if len(self.entity_ids) != 1:
+                raise ValueError(
+                    "research_requested events require exactly one entity ID"
+                )
+            if self.evidence_ids or self.relationship_ids:
+                raise ValueError(
+                    "research_requested events carry no evidence or "
+                    "relationship identifier tuples"
+                )
+            if self.reason_code is not None or self.pivot_depth is not None:
+                raise ValueError(
+                    "research_requested events carry no reason_code or pivot_depth"
+                )
             return self
         if event_type is InvestigationTimelineEventType.ASSESSMENT_REQUESTED:
             if has_provider or has_target or self.error_code is not None:

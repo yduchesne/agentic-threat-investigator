@@ -357,7 +357,7 @@ Delivered:
   behavior changed: only deterministic prompt rendering/instructions, focused
   prompt tests, and documentation were touched.
 
-### PR 22C — Coordinator research execution
+### PR 22C — Coordinator research execution [DONE]
 
 Integrate the independently working research capability into the production investigation lifecycle.
 
