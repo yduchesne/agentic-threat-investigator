@@ -22,6 +22,7 @@ from agentic_threat_investigator.app.query.relationships import (
 )
 from agentic_threat_investigator.app.query.reports import ReportQueryService
 from agentic_threat_investigator.app.query.research import ResearchResultQueryService
+from agentic_threat_investigator.app.query.services import QueryServiceBundle
 from agentic_threat_investigator.app.query.timeline import TimelineQueryService
 
 from .assessments import PostgresAssessmentQueryService
@@ -37,13 +38,14 @@ from .research import PostgresResearchResultQueryService
 from .timeline import PostgresTimelineQueryService
 
 
-class PostgresQueryServices:
+class PostgresQueryServices(QueryServiceBundle):
     """Expose every PR 23A read contract bound to one session."""
 
     def __init__(
         self, session: AsyncSession, limits: QueryLimits | None = None
     ) -> None:
         """Bind the session; defaults to the module-standard page limits."""
+        self._session = session
         self.investigations: InvestigationQueryService = (
             PostgresInvestigationQueryService(session, limits or QueryLimits())
         )
@@ -73,3 +75,7 @@ class PostgresQueryServices:
         self.domain_history: DomainHistoryQueryService = (
             PostgresDomainHistoryQueryService(session, limits or QueryLimits())
         )
+
+    async def close(self) -> None:
+        """Release the bound read session."""
+        await self._session.close()

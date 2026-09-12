@@ -45,6 +45,22 @@ Format:
 
 JSON over HTTP.
 
+## Delivered contract (PR 23C)
+
+The Investigation REST API described in this document is **delivered** and
+served by FastAPI (`src/agentic_threat_investigator/api/`). The delivered
+surface covers authentication, investigation creation (asynchronous,
+idempotent), investigation list/detail, and the Evidence, Relationships,
+RelationshipObservations, Research, Assessment, Report (including the
+deterministic Markdown representation), Timeline, and scoped generic history
+subresources. Every endpoint is documented in the generated OpenAPI document
+(pinned by `tests/fixtures/openapi_v1.json`), declares the cookie-session
+security scheme, and returns the stable error envelope.
+
+Endpoints still in future sections of this document (Monitors, Findings,
+Administration, Map/geolocation) are **not** part of the v0.1 delivered
+surface and must not be consumed.
+
 FastAPI-generated OpenAPI is a supported API artifact.
 
 ## DTO boundary
@@ -158,13 +174,49 @@ Primary endpoints:
 
 Authentication uses server-side sessions and secure cookies.
 
+Delivered behavior:
+
+- `POST /api/v1/auth/login` — body `{"username": "...", "password": "..."}`;
+  a successful login returns `200` with the public user DTO
+  `{"id": "...", "alias": "...", "role": "..."}` and sets two cookies:
+  `ati_session` (HttpOnly, `SameSite=Lax`, `Path=/`, `Secure` outside
+  local/dev profiles) and `ati_csrf` (double-submit CSRF token).
+  Wrong-password and unknown-user failures are indistinguishable and both
+  return `401 invalid_credentials`. Excessive attempts return
+  `429 rate_limited`.
+- `POST /api/v1/auth/logout` — CSRF-protected; revokes the server-side
+  session, expires both cookies, and returns `204`. Already-invalid logout
+  is idempotent.
+- `GET /api/v1/auth/me` — returns the public user DTO for the current
+  session or `401 authentication_required`.
+
+Session tokens are opaque, generated with a CSPRNG (>= 256 bits), and only
+their SHA-256 digest is persisted or logged. The raw token is never returned
+in JSON. State-changing requests must also present the CSRF cookie token in
+the `X-CSRF-Token` header with a matching Origin/Referer.
+
 ## Investigations
 
 - `POST /api/v1/investigations`
 - `GET /api/v1/investigations`
 - `GET /api/v1/investigations/{id}`
 
-Creation is asynchronous and returns `202 Accepted`.
+Creation is asynchronous: a successful `POST` atomically persists the
+PENDING Investigation, its durable PostgreSQL investigation job, the
+mutation audit event, and the actor-scoped idempotency record in one
+transaction, then returns `202 Accepted` with a `Location:
+/api/v1/investigations/{id}` header. The request never executes the
+Investigation and never uses in-process background tasks; a worker claims
+the durable job and invokes `InvestigationRunner` later.
+
+`POST /api/v1/investigations` **requires** an `Idempotency-Key` header
+(1..128 visible ASCII characters). Equivalent replays return the same
+Investigation; reusing a key for a semantically different request returns
+`409 idempotency_conflict`.
+
+Request DTO (`extra="forbid"`, unknown fields rejected):
+- `indicators`: 1..N objects `{"type": "<entity type>", "value": "<raw value>"}`;
+- `objective`: nonblank, bounded.
 
 Example request:
 
@@ -192,14 +244,30 @@ Example response:
 
 ## Investigation subresources
 
-- `/api/v1/investigations/{id}/evidence`
-- `/api/v1/investigations/{id}/relationships`
-- `/api/v1/investigations/{id}/research`
-- `/api/v1/investigations/{id}/assessments`
-- `/api/v1/investigations/{id}/assessments/current`
-- `/api/v1/investigations/{id}/reports`
-- `/api/v1/investigations/{id}/timeline`
-- `/api/v1/investigations/{id}/geolocations`
+Delivered routes (PR 23C):
+
+- `GET /api/v1/investigations/{id}/evidence`
+- `GET /api/v1/investigations/{id}/evidence/{evidence_id}`
+- `GET /api/v1/investigations/{id}/relationships`
+- `GET /api/v1/investigations/{id}/relationships/{relationship_id}`
+- `GET /api/v1/investigations/{id}/relationship-observations`
+- `GET /api/v1/investigations/{id}/research`
+- `GET /api/v1/investigations/{id}/research/{research_result_id}`
+- `GET /api/v1/investigations/{id}/assessments`
+- `GET /api/v1/investigations/{id}/assessments/current`
+- `GET /api/v1/investigations/{id}/assessments/{assessment_id}`
+- `GET /api/v1/investigations/{id}/reports`
+- `GET /api/v1/investigations/{id}/reports/current`
+- `GET /api/v1/investigations/{id}/reports/{report_id}`
+- `GET /api/v1/investigations/{id}/reports/{report_id}/markdown`
+- `GET /api/v1/investigations/{id}/timeline`
+- `GET /api/v1/investigations/{id}/history`
+- `GET /api/v1/investigations/{id}/history/{object_type}/{object_id}`
+- `GET /api/v1/investigations/{id}/history/{object_type}/{object_id}/{version}`
+
+Future (not delivered):
+
+- `GET /api/v1/investigations/{id}/geolocations` (PR 25)
 
 ## Evidence
 
@@ -259,6 +327,39 @@ The timeline is an analyst-facing sequence of observable workflow events such as
 
 It does not expose hidden reasoning, raw prompts, or LangGraph implementation details.
 
+## Reports (delivered)
+
+Report endpoints return the structured `InvestigationReport` DTO mapped from
+the validated persisted report resource:
+
+- version listing uses `version DESC, id ASC` keyset pagination;
+- `GET .../reports/current` resolves the Investigation's durable
+  `report_id` pointer (never `MAX(version)`);
+- detail endpoints verify the report belongs to the path Investigation;
+  cross-Investigation lookups return `404 report_not_found`;
+- `GET .../reports/{report_id}/markdown` returns
+  `text/markdown; charset=utf-8` rendered deterministically by the pure
+  PR 23B formatter; GET never regenerates a report and never invokes an
+  LLM.
+
+## Generic history redaction (delivered)
+
+Generic history identity is `object_type + object_id` (no `natural_key`).
+Raw `state`/`diff` JSONB snapshots are never exposed wholesale: each record
+is projected through a per-object-type public allowlist. Public object
+types:
+
+- `investigation`
+- `entity`
+- `relationship`
+- `assessment`
+- `investigation_report`
+
+Credential/session/password/secret/job/internal orchestration types are not
+browsable through history and fail closed. RelationshipObservation remains
+outside generic history (it is queryable directly as the historical
+resource).
+
 ## Map/geolocation
 
 The geolocation endpoint returns investigation-relevant approximate geographic data and provenance suitable for the map.
@@ -312,9 +413,9 @@ Server configuration controls default and maximum limits.
 
 ### Collection query semantics (PR 23A)
 
-The query/read foundation underlying these future collections is implemented
-and documented in `docs/DATABASE.md`; the HTTP endpoints themselves are not
-implemented yet. The semantics:
+The query/read foundation underlying these collections is implemented and
+documented in `docs/DATABASE.md`, and the HTTP endpoints map HTTP parameters
+directly onto those contracts. The semantics:
 
 - each listed collection has exactly **one canonical v0.1 ordering** (no
   arbitrary client sort selection);
@@ -383,13 +484,32 @@ Never expose Python stack traces, SQL errors, secrets, provider raw responses, o
 
 ## Idempotency
 
-Mutation endpoints where retry duplication matters support an idempotency key.
-
-Most importantly:
+Mutation endpoints where retry duplication matters require an idempotency
+key. Most importantly:
 
 `POST /api/v1/investigations`
 
-A repeated request from the same authenticated actor with the same key and equivalent request returns the same created investigation.
+Delivered semantics:
+
+- the `Idempotency-Key` header is **required** and bounded (1..128 visible
+  ASCII characters);
+- identity is scoped by `authenticated actor ID + operation ("create
+  investigation") + key digest`; different actors may reuse the same raw
+  key independently;
+- only the SHA-256 digest of the key is persisted (never the raw value);
+- the request fingerprint is a canonical SHA-256 over the semantic
+  normalized request (schema marker, sorted canonical indicator identities,
+  normalized objective) — raw HTTP JSON bytes are never fingerprinted, so
+  property reordering and whitespace replays identically;
+- a repeated request from the same authenticated actor with the same key
+  and an equivalent request returns the same created investigation
+  (consistent `202` semantics even after completion);
+- the same key with a semantically different request returns
+  `409 idempotency_conflict`;
+- race safety is owned by the database unique scope; concurrent identical
+  submissions create exactly one Investigation and one logical job;
+- retention policy: no cleanup scheduler exists in v0.1; deployment defines
+  record retention (see `docs/DATABASE.md`).
 
 ## Optimistic concurrency
 

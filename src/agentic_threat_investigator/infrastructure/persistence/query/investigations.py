@@ -16,6 +16,8 @@ Keyset continuation for ``created_at DESC, id ASC``:
     LIMIT :limit_plus_one
 """
 
+from uuid import UUID
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -104,3 +106,19 @@ class PostgresInvestigationQueryService(InvestigationQueryService):
                 sort_values=investigation_sort_values(row.created_at, row.id),
             )
         )
+
+    async def get(self, investigation_id: UUID) -> InvestigationState | None:
+        """Return one visible Investigation by identity, if any.
+
+        Soft-deleted rows are hidden; the returned state carries the
+        authoritative database-owned version and timestamps.
+        """
+        row = (
+            await self._session.execute(
+                select(InvestigationRow).where(
+                    InvestigationRow.id == investigation_id,
+                    InvestigationRow.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        return None if row is None else investigation_state_from_row(row)

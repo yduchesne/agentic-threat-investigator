@@ -443,6 +443,49 @@ class InvestigationReportRow(Base):
     deleted_by_actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
 
 
+class InvestigationJobRow(Base):
+    """Database row for the minimal durable investigation-level job (PR 23C).
+
+    One row exists per Investigation; claim/completion transitions are owned
+    by the versioned SQL functions. Mapped read-only for the repository; the
+    claim functions execute through stored procedures.
+    """
+
+    __tablename__ = "investigation_job"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    investigation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[str | None] = mapped_column(String)
+
+
+class ApiIdempotencyRow(Base):
+    """Database row for one actor-scoped API idempotency record (PR 23C).
+
+    Only the SHA-256 digest of the Idempotency-Key is stored; the raw key is
+    never persisted. The unique (actor_id, operation, key_hash) scope owns
+    race safety for concurrent identical submissions.
+    """
+
+    __tablename__ = "api_idempotency"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    actor_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    operation: Mapped[str] = mapped_column(String)
+    key_hash: Mapped[bytes] = mapped_column(BYTEA)
+    request_fingerprint: Mapped[str] = mapped_column(String)
+    resource_type: Mapped[str] = mapped_column(String)
+    resource_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class InvestigationTimelineEventRow(Base):
     """Database row for an immutable analyst-facing investigation timeline event."""
 

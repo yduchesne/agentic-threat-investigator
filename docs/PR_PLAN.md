@@ -546,14 +546,74 @@ Delivered:
 
 PR 23C remains the Investigation REST API.
 
-### PR 23C — Investigation REST API
+### PR 23C — Investigation REST API [DONE]
 
-Deliver `/api/v1` investigation and subresource endpoints consuming the PR
+Delivered `/api/v1` investigation and subresource endpoints consuming the PR
 23A query contracts (cursor pagination, bounded filters, history/version
 exposure), asynchronous investigation creation semantics, stable errors, and
-idempotency. If async submission/idempotency makes this PR too large after
-detailed planning, split it further (read API first, then
-submission/auth/idempotency).
+idempotency.
+
+Delivered:
+
+- FastAPI application factory (`api/app.py`) composing CORS, request-ID /
+  security-header middleware, the stable error envelope, every /api/v1
+  router, health probes, and the cookie-session OpenAPI security scheme;
+- explicit request/response DTOs (`api/dto/`) with `extra="forbid"` and
+  pure deterministic allowlist mappers (`api/mappers.py`);
+- minimal server-side session authentication (`POST /auth/login`, `POST
+  /auth/logout`, `GET /auth/me`) reusing the Argon2id credential and
+  SHA-256-hashed opaque session tokens (256-bit CSPRNG) behind an HttpOnly
+  SameSite=Lax cookie plus double-submit CSRF cookies and same-origin
+  checks;
+- ANALYST/ADMIN authorization dependencies (``authentication_required`` 401
+  / ``forbidden`` 403) and credentialed CORS with explicit configured
+  origins (wildcard rejected);
+- bounded request IDs echoed in `X-Request-ID` and inside every error
+  envelope;
+- stable public error envelope (`ErrorResponse{code,message,request_id}`)
+  with central typed-exception mapping (cursor, not-found, conflict,
+  stale-version, idempotency codes) and FastAPI validation overridden to
+  the ATI envelope;
+- asynchronous investigation creation: `POST /api/v1/investigations`
+  atomically persists the PENDING Investigation, the durable PostgreSQL
+  investigation job (`ati.investigation_job`, SQL API v0020), the mutation
+  audit event, and the actor-scoped idempotency record
+  (`ati.api_idempotency`) in one transaction, then returns `202 Accepted`
+  with a `Location` header; the request never invokes `InvestigationRunner`;
+- durable idempotency: required bounded `Idempotency-Key` (1..128 visible
+  ASCII), SHA-256 key digests only, canonical semantic request fingerprints,
+  equivalent replays returning the same Investigation, mismatches returning
+  `409 idempotency_conflict`, and database-owned race safety (one
+  Investigation + one logical job under concurrency);
+- Investigation list/detail, Evidence, Relationships,
+  RelationshipObservations (observed/retrieved filters kept distinct),
+  Research, Assessment (version list / current via durable
+  `assessment_id` / detail), Report (version list / current via durable
+  `report_id` / detail / deterministic Markdown), Timeline, and scoped
+  generic history — all read paths reuse the PR 23A keyset contracts and
+  the PR 23B report query layer, with no OFFSET, no total counts, and no
+  raw payloads;
+- generic history redaction: public object-type allowlist
+  (investigation/entity/relationship/assessment/investigation_report) with
+  per-type state/diff projections that never expose operational or auth
+  material;
+- the minimal durable job worker seam (`InvestigationJobWorker`) claiming
+  jobs atomically and invoking `InvestigationRunner` outside any
+transaction; no job administration API (PR 26 scope);
+- OpenAPI snapshot fixture (`tests/fixtures/openapi_v1.json`) pinning
+  explicit operation IDs, public DTOs, error responses, and the cookie
+  scheme;
+- unit + route contract tests (`tests/unit/api/**`), real-PostgreSQL API
+  integration tests (auth, creation transaction, idempotent replay/race/
+mismatch, collections, raw-payload exclusion, durable pointers, history
+  redaction, deterministic Markdown), the canonical async vertical slice
+  (`POST -> job -> worker -> InvestigationRunner -> GET`), and document
+  reconciliation.
+
+PR 24/25/26 scope boundaries are retained: no frontend, no geolocation/map
+endpoints, no monitors/findings/admin/job-administration APIs, no report
+generation/regeneration endpoints, no WebSockets/SSE, and no distributed
+broker.
 
 ## PR 24 — Analyst frontend
 

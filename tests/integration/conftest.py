@@ -71,6 +71,8 @@ async def reset_application_data(
         "assessment",
         "investigation_report",
         "investigation",
+        "investigation_job",
+        "api_idempotency",
         "evidence",
         "relationship_observation",
         "relationship",

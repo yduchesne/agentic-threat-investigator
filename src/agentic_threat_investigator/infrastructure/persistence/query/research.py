@@ -7,6 +7,8 @@ migration 0022 (the pre-existing ASC index continues to serve the internal
 execution reconciliation read).
 """
 
+from uuid import UUID
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,3 +114,21 @@ class PostgresResearchResultQueryService(ResearchResultQueryService):
                 )
             )
         return QueryPage(items=items, next_cursor=next_cursor)
+
+    async def get(
+        self, investigation_id: UUID, result_id: UUID
+    ) -> ResearchResult | None:
+        """Return one ResearchResult bound to the Investigation, if any.
+
+        The binding predicate makes a cross-Investigation lookup fail closed
+        with ``None``.
+        """
+        row = (
+            await self._session.execute(
+                select(ResearchResultRow).where(
+                    ResearchResultRow.id == result_id,
+                    ResearchResultRow.investigation_id == investigation_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return None if row is None else _result_from_row(row)

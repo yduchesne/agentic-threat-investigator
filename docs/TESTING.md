@@ -439,6 +439,38 @@ The following checklist captures recurring failure modes in live-provider implem
 - **Quality-gate limitations:** Green typing, lint, coverage, and test commands do not prove behavioral completeness. Add adversarial contract cases for branches and invariants that aggregate coverage can miss; do not weaken gates or use broad suppressions to hide defects.
 - **Documentation and completion state:** Keep accepted media types, normalization shapes, retry behavior, optional-field policy, and test topology synchronized with implemented behavior. Mark work complete only after the final code and documentation pass all required gates.
 
+## API contract and OpenAPI tests (PR 23C)
+
+The `/api/v1` HTTP adaptation layer is tested at three levels:
+
+- **unit/route contract tests** (`tests/unit/api/**`) exercise pure HTTP
+  contracts with injected application fakes (no database, no LLM, no
+  providers): DTO validation (`extra="forbid"`), pure allowlist mappers,
+  stable error envelopes (including FastAPI validation overridden to the
+  ATI envelope and request-ID echo/replacement), auth route behavior,
+  canonical idempotency fingerprints, filter/cursor mapping per collection,
+  durable-pointer routes, deterministic Markdown, and cross-Investigation
+  404s;
+- **OpenAPI snapshot** (`tests/unit/api/test_openapi.py`) pins the
+  normalized schema to `tests/fixtures/openapi_v1.json`, verifies explicit
+  operation IDs, public DTOs only, error responses, and the accurate
+  cookie-session security scheme (regeneration command is documented in the
+  test module);
+- **real-PostgreSQL API integration tests** (`tests/integration/test_api_*`)
+  exercise the production FastAPI application and the PR 23A/23B services
+  end to end: login/session round trip with only the token digest persisted;
+  the atomic create-Investigation transaction (Investigation + durable job +
+  audit + idempotency record); idempotent replay/race/mismatch; collection
+  routes with cursors surviving HTTP; raw Evidence payload exclusion;
+  durable Assessment/Report pointer correctness (never `MAX(version)`);
+  history redaction/allowlist; deterministic Markdown; and the canonical
+  async vertical slice proving `POST -> durable job -> worker claim ->
+  InvestigationRunner -> terminal Investigation -> HTTP GET` through
+  production persistence/orchestration seams with synthetic providers and
+  `FakeLlmClient`.
+
+These tests require no live Internet or API keys.
+
 ## Database integration tests
 
 Integration tests use real PostgreSQL + pgvector from the supported database family.

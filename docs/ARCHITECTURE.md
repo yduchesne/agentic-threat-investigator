@@ -809,10 +809,13 @@ Analyst-facing data browsing is a dedicated read path, separate from the
 execution-oriented persistence used by orchestration:
 
 ```text
-API [future]
-    -> application query services (app/query/)
-    -> PostgreSQL query implementations (infrastructure/persistence/query/)
+FastAPI (/api/v1, api/)
+    -> authentication/authorization (server-side cookie sessions)
+    -> DTO mapping (api/dto/, api/mappers.py)
+    -> PR 23A query services (app/query/ + infrastructure/persistence/query/)
     -> indexed deterministic keyset queries
+    -> InvestigationSubmissionService (app/investigation_submission.py)
+         -> PostgreSQL durable investigation job (migration 0024, SQL v0020)
 ```
 
 Division of responsibility:
@@ -829,8 +832,36 @@ Division of responsibility:
 - historical RelationshipObservation browsing queries
   `relationship_observation` directly and never `domain_object_history`;
   generic resource-state history uses `object_type + object_id` identity;
-- the future HTTP layer consumes these read contracts directly; it does not
-  invent SQL or query behavior.
+- the HTTP layer (PR 23C) consumes these read contracts directly through a
+  per-request query bundle (`app/query/services.py`); it does not invent
+  SQL or query behavior, and no route imports concrete PostgreSQL
+  repositories.
+
+### API and asynchronous submission (PR 23C)
+
+The delivered `/api/v1` boundary is FastAPI
+(`src/agentic_threat_investigator/api/`), an HTTP adaptation layer only:
+
+```text
+FastAPI request (api/)
+    -> request-ID/security-header middleware
+    -> stable error envelope + central typed exception mapping
+    -> authentication/authorization dependencies
+    -> DTO parsing (extra="forbid") -> application seams
+    -> PR 23A/23B query/report services for every read
+    -> POST /investigations -> InvestigationSubmissionService
+         -> atomically: entities + PENDING Investigation + durable job
+            + audit + idempotency record (one transaction)
+    -> 202 Accepted + Location
+```
+
+The API process and the worker process remain distinct: the FastAPI
+lifespan composes API services only and never launches LangGraph, provider
+polling, or job execution. `InvestigationJobWorker`
+(`app/investigation_worker.py`) claims the durable PostgreSQL job and
+invokes `InvestigationRunner` outside any transaction; the worker process
+composition assembles the provider registry and LLM client from existing
+infrastructure seams.
 
 ## Transactions
 

@@ -77,6 +77,15 @@ class ResearchResultQueryService(ABC):
         exact filter set.
         """
 
+    @abstractmethod
+    async def get(
+        self, investigation_id: UUID, result_id: UUID
+    ) -> ResearchResult | None:
+        """Return one ResearchResult bound to the Investigation, if any.
+
+        A cross-Investigation lookup fails closed by returning ``None``.
+        """
+
 
 def research_result_sort_values(
     created_at: datetime, result_id: UUID

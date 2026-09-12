@@ -7,6 +7,8 @@ Canonical ordering preserves the persisted execution semantics
 new filter composites added in migration 0022.
 """
 
+from uuid import UUID
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,3 +122,22 @@ class PostgresEvidenceQueryService(EvidenceQueryService):
                 )
             )
         return QueryPage(items=items, next_cursor=next_cursor)
+
+    async def get(self, investigation_id: UUID, evidence_id: UUID) -> Evidence | None:
+        """Return one Evidence observation bound to the Investigation, if any.
+
+        The binding predicate makes a cross-Investigation lookup fail closed
+        with ``None``; raw provider payloads are never returned by the read
+        layer (the HTTP layer excludes them explicitly).
+        """
+        row = (
+            await self._session.execute(
+                select(EvidenceRow, EntityRow)
+                .join(EntityRow, EntityRow.id == EvidenceRow.subject_entity_id)
+                .where(
+                    EvidenceRow.id == evidence_id,
+                    EvidenceRow.investigation_id == investigation_id,
+                )
+            )
+        ).first()
+        return None if row is None else _evidence_from_row(row[0], row[1])

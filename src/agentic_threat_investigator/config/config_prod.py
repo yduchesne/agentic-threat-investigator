@@ -6,6 +6,10 @@ from typing import Any
 
 CONFIG: dict[str, Any] = {
     "log_level": "INFO",
-    # Operators must replace this with the externally visible origin.
+    # Production serves the API over HTTPS; the session cookie must be
+    # Secure. Operators must replace the public origin and the frontend
+    # CORS origin with the externally visible values.
+    "session_cookie_secure": True,
     "public_base_url": "http://localhost:8000",
+    "api_cors_origins": ["http://localhost:8080"],
 }

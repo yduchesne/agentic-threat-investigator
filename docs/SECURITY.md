@@ -105,15 +105,53 @@ Sessions have configurable absolute expiry and optional idle timeout.
 
 Logout, user disablement, soft deletion, and password change revoke applicable sessions.
 
+Delivered /api/v1 behavior (PR 23C):
+
+- `POST /api/v1/auth/login` issues the `ati_session` cookie (HttpOnly,
+  `SameSite=Lax`, `Path=/`, `Secure` outside local/dev profiles, max age =
+  configured session lifetime) plus the `ati_csrf` double-submit cookie and
+  returns the public user DTO. The raw session token is never returned in
+  JSON.
+- `GET /api/v1/auth/me` resolves the session through the service; absent,
+  expired, revoked, or disabled-user sessions are indistinguishable at the
+  boundary (`401 authentication_required`).
+- `POST /api/v1/auth/logout` revokes the session and expires both cookies
+  (`204`); already-invalid logout is idempotent.
+- CORS is credentialed with explicit
+  configured `api_cors_origins` only; the wildcard is rejected by settings
+  validation so `allow_credentials=true` can never combine with `*`.
+- CSRF uses the double-submit cookie (`X-CSRF-Token` header must equal the
+  `ati_csrf` cookie) plus the same-origin check above; state-changing routes
+  (`POST /auth/logout`, `POST /investigations`) enforce it and return
+  `403 forbidden` on failure.
+- Request logging emits request ID, method, route template, status,
+  duration, and authenticated actor ID only — never passwords, cookies,
+  session tokens, auth headers, idempotency keys, provider payloads, LLM
+  output, or SQL parameters.
+
 ## CSRF
 
 Because v0.1 uses cookie authentication, state-changing requests require CSRF protection.
 
-Use SameSite plus Origin/Referer validation and a CSRF token strategy. The
+Use SameSite plus Origin/Referer validation and the double-submit CSRF
+token strategy (delivered in PR 23C). The
 expected origin is the configured public base URL, never the Host-derived
 request URL. Origin takes precedence over Referer; either is compared as a
 normalized scheme, host, and effective port, so Referer paths are accepted.
-Invalid origins and invalid configuration fail closed.
+Invalid origins and invalid configuration fail closed. If a future
+deployment requires `SameSite=None`, STOP and implement a reviewed
+anti-CSRF token mechanism instead.
+
+## API error redaction (PR 23C)
+
+Every /api/v1 error response uses the stable envelope
+`{"error": {"code", "message", "request_id"}}`. FastAPI validation failures
+return the ATI envelope (`422 validation_error`). Unexpected exceptions map
+to a generic `500 internal_error`; Python tracebacks, SQL text/errors,
+SQLSTATEs, class names, provider raw responses, LLM/provider internals,
+LangGraph state, and ORM metadata never cross the boundary. Response
+headers include `X-Request-ID`, `X-Content-Type-Options: nosniff`, and
+`Cache-Control: no-store` for API responses.
 
 ## Login protection
 

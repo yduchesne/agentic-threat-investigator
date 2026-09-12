@@ -32,6 +32,8 @@ EXPECTED_TABLES = {
     "document_chunk",
     "research_result",
     "investigation_timeline_event",
+    "investigation_job",
+    "api_idempotency",
     "alembic_version",
 }
 
@@ -69,6 +71,9 @@ EXPECTED_FUNCTIONS = {
     "append_research_result",
     "jsonb_array_starts_with",
     "research_execution_valid",
+    "create_investigation_job",
+    "claim_next_investigation_job",
+    "complete_investigation_job",
 }
 
 

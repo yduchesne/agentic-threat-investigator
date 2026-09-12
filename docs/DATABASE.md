@@ -721,6 +721,40 @@ PR 19C makes no schema change. Local in-process dispatch requires no dispatch, d
 
 The existing PostgreSQL investigation job mechanism remains the durable investigation-level scheduler; it is separate from `TaskDispatcher`, which hands already-selected work to an executor within a running investigation.
 
+## API asynchronous submission and idempotency (PR 23C, migration 0024, SQL API v0020)
+
+`POST /api/v1/investigations` persists the PENDING Investigation, its
+durable investigation job, the mutation audit event, and the actor-scoped
+idempotency record in **one transaction** (one commit or nothing), then
+returns `202 Accepted`. The request never executes the Investigation; a
+worker claims the durable job later.
+
+- `ati.investigation_job` is the minimal durable investigation-level job:
+  one row per Investigation (unique `investigation_id`), status
+  `pending -> claimed -> succeeded|failed`, with `claimed_at`/`completed_at`
+  and a bounded `error_code`. Claiming uses
+  `SELECT ... FOR UPDATE SKIP LOCKED` through
+  `ati.claim_next_investigation_job`, so concurrent workers claim distinct
+  jobs; `ati.complete_investigation_job` only completes a claimed job.
+  Job administration/monitoring vocabulary is PR 26 scope and is not added
+  here.
+- `ati.api_idempotency` stores `(actor_id, operation, key_hash,
+  request_fingerprint, resource_type, resource_id, created_at)` with a
+  unique `(actor_id, operation, key_hash)` scope. Only the SHA-256 digest
+  of the `Idempotency-Key` is stored; the raw key is never persisted. The
+  fingerprint is a canonical SHA-256 over the semantic normalized request.
+- Race safety is database-owned: the unique scope makes concurrent
+  identical submissions resolve to exactly one Investigation and one
+  logical job (the losing insert waits on the winner's transaction and
+  replays the authoritative resource).
+- Equivalent replays return the existing Investigation; the same key with a
+  semantically different request is rejected (`409 idempotency_conflict`)
+  before any mutation.
+- Retention: there is no cleanup scheduler in v0.1. Deployments define
+  retention for `ati.api_idempotency` (and exhausted job rows); both tables
+  are plain operational infrastructure without versioning, history, or
+  triggers.
+
 ## Time
 
 All persisted timestamps are timezone-aware UTC.

@@ -150,6 +150,17 @@ class RelationshipQueryService(ABC):
         ``relationship.id ASC`` with bound cursors.
         """
 
+    @abstractmethod
+    async def get(
+        self, investigation_id: UUID, relationship_id: UUID
+    ) -> Relationship | None:
+        """Return one Relationship visible to the Investigation, if any.
+
+        Visibility derives from RelationshipObservation correlation; a
+        cross-Investigation lookup returns ``None`` so the HTTP layer maps it
+        to a 404 without enumerating resources.
+        """
+
 
 class RelationshipObservationQueryService(ABC):
     """Analyst-facing RelationshipObservation read contract (PR 23A).

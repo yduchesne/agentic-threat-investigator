@@ -29,6 +29,10 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
 )
+from agentic_threat_investigator.domain.investigation_job import (
+    InvestigationJob,
+    InvestigationJobStatus,
+)
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
@@ -82,6 +86,27 @@ class InvestigationVersionConflictError(RuntimeError):
         )
         self.investigation_id = investigation_id
         self.expected_version = expected_version
+
+
+class InvestigationJobNotFoundError(LookupError):
+    """Raised when a durable investigation job is absent."""
+
+
+class InvestigationJobNotClaimedError(RuntimeError):
+    """Raised when a worker completes a job it never claimed."""
+
+
+class InvestigationJobDuplicateError(ValueError):
+    """Raised when a second job is created for one Investigation."""
+
+    def __init__(self, investigation_id: UUID) -> None:
+        """Record the conflicting investigation identity."""
+        super().__init__(f"investigation job already exists: {investigation_id}")
+        self.investigation_id = investigation_id
+
+
+class InvestigationJobInvalidTransitionError(ValueError):
+    """Raised when a job status change violates the job lifecycle."""
 
 
 class EvidenceDuplicateIdentityError(ValueError):
@@ -339,6 +364,68 @@ class SoftDeletedIdentityError(ValueError):
 
 
 @dataclass(frozen=True)
+class IdempotencyRecord:
+    """One durable actor-scoped idempotency record (PR 23C).
+
+    ``key_hash`` is the SHA-256 digest of the raw Idempotency-Key; the raw
+    key is never persisted. ``request_fingerprint`` is the canonical SHA-256
+    of the semantic normalized request, so equivalent replays resolve to the
+    same resource while a semantically different request with the same key
+    fails closed.
+    """
+
+    actor_id: UUID
+    operation: str
+    key_hash: bytes
+    request_fingerprint: str
+    resource_type: str
+    resource_id: UUID
+    created_at: datetime
+    id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        """Reject blank identities and malformed fingerprint/key digests."""
+        if not self.operation.strip():
+            raise ValueError("idempotency operation must not be blank")
+        if not self.resource_type.strip():
+            raise ValueError("idempotency resource_type must not be blank")
+        if len(self.key_hash) != 32:
+            raise ValueError("idempotency key_hash must be a SHA-256 digest")
+        if len(self.request_fingerprint) != 64 or any(
+            char not in "0123456789abcdef" for char in self.request_fingerprint
+        ):
+            raise ValueError("idempotency fingerprint must be a SHA-256 hex digest")
+        if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
+            raise ValueError("idempotency created_at must be timezone-aware")
+
+
+class IdempotencyRepository(ABC):  # pragma: no cover
+    """Repository for durable actor-scoped idempotency records.
+
+    Race safety is owned by the database: ``insert_if_absent`` relies on the
+    unique ``(actor_id, operation, key_hash)`` constraint so concurrent
+    identical submissions resolve to exactly one record and one resource.
+    """
+
+    @abstractmethod
+    async def insert_if_absent(
+        self, record: IdempotencyRecord
+    ) -> IdempotencyRecord | None:
+        """Insert unless the actor/operation/key scope already exists.
+
+        Returns the inserted record, or ``None`` when the unique scope is
+        already present (committed or in-flight). The caller then re-reads
+        the existing record and compares fingerprints.
+        """
+
+    @abstractmethod
+    async def get(
+        self, *, actor_id: UUID, operation: str, key_hash: bytes
+    ) -> IdempotencyRecord | None:
+        """Return the existing record for one actor/operation/key scope."""
+
+
+@dataclass(frozen=True)
 class EntityBatchItem:
     """An entity and its optional optimistic-concurrency expectation."""
 
@@ -566,6 +653,50 @@ class AuditEventRepository(ABC):  # pragma: no cover
         offset: int = 0,
     ) -> list[AuditEvent]:
         """Return bounded events matching the supplied filters."""
+
+
+class InvestigationJobRepository(ABC):  # pragma: no cover
+    """Repository for the durable investigation-level job (PR 23C).
+
+    The database owns claim atomicity (``FOR UPDATE SKIP LOCKED``) and the
+    lifecycle transitions through the versioned SQL functions; this
+    repository never commits and never owns the transaction lifecycle.
+    """
+
+    @abstractmethod
+    async def create(self, job: InvestigationJob) -> InvestigationJob:
+        """Create one durable pending job in the caller's transaction.
+
+        A second job for the same Investigation is rejected with a typed
+        conflict and never becomes an update.
+        """
+
+    @abstractmethod
+    async def get_by_investigation(
+        self, investigation_id: UUID
+    ) -> InvestigationJob | None:
+        """Return the durable job of one Investigation, if any."""
+
+    @abstractmethod
+    async def claim_next(self, claimed_at: datetime) -> InvestigationJob | None:
+        """Atomically claim the oldest pending job, if any.
+
+        Concurrent workers claim distinct jobs; an empty queue returns
+        ``None``.
+        """
+
+    @abstractmethod
+    async def complete(
+        self,
+        job_id: UUID,
+        status: InvestigationJobStatus,
+        completed_at: datetime,
+        error_code: str | None = None,
+    ) -> InvestigationJob:
+        """Complete a claimed job as succeeded or failed.
+
+        A missing or unclaimed job is rejected with a typed error.
+        """
 
 
 class InvestigationTimelineRepository(ABC):  # pragma: no cover
@@ -1068,6 +1199,8 @@ class UnitOfWork(ABC):  # pragma: no cover
     document_chunks: DocumentChunkRepository
     research_results: ResearchResultRepository
     timeline_events: InvestigationTimelineRepository
+    investigation_jobs: InvestigationJobRepository
+    idempotency: IdempotencyRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:

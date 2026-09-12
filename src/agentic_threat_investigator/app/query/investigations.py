@@ -80,6 +80,14 @@ class InvestigationQueryService(ABC):
         UUID tie-breaker; cursors are bound to the exact filter set.
         """
 
+    @abstractmethod
+    async def get(self, investigation_id: UUID) -> InvestigationState | None:
+        """Return one visible Investigation by identity, if any.
+
+        Soft-deleted Investigations are hidden; the returned state carries
+        the authoritative database-owned version and timestamps.
+        """
+
 
 def investigation_sort_values(
     created_at: datetime, investigation_id: UUID

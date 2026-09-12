@@ -175,6 +175,20 @@ class Settings(BaseSettings):
     # validated by every query service.
     query_default_page_size: int = Field(default=50, ge=1)
     query_max_page_size: int = Field(default=200, ge=1)
+    # Credentialed cookie CORS (PR 23C). Explicit configured frontend
+    # origin(s) only; the wildcard is rejected so credentialed requests can
+    # never be sent cross-origin. Defaults to the local dev frontend.
+    api_cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:8080"]
+    )
+    # Submission request bounds (PR 23C) shared by the API DTOs and the
+    # application submission service.
+    api_max_indicator_count: int = Field(default=20, ge=1)
+    api_max_indicator_value_length: int = Field(default=2048, ge=1)
+    api_max_objective_length: int = Field(default=4000, ge=1)
+    # Request body ceiling for /api/v1 (PR 23C): the largest legitimate
+    # create-Investigation request is far below this bound.
+    api_max_request_body_bytes: int = Field(default=65_536, ge=1024)
     # Credential-free local artifact URI of the DB-IP IP to City Lite MMDB.
     # Blank (default) disables the DB-IP City Lite provider. This is a plain
     # artifact location, not a secret; it is validated as an authority-free
@@ -272,13 +286,17 @@ class Settings(BaseSettings):
     @field_validator(
         "query_default_page_size",
         "query_max_page_size",
+        "api_max_indicator_count",
+        "api_max_indicator_value_length",
+        "api_max_objective_length",
+        "api_max_request_body_bytes",
         mode="before",
     )
     @classmethod
     def validate_query_page_size_types(cls, value: object) -> object:
         """Reject coercive non-integers while retaining environment text parsing."""
         if isinstance(value, bool) or not isinstance(value, (int, str)):
-            raise ValueError("query page size setting must be an integer")
+            raise ValueError("bounded integer setting must be an integer")
         return value
 
     @field_validator(
@@ -373,6 +391,38 @@ class Settings(BaseSettings):
                 "provider_retry_max_delay_seconds must be >= provider_retry_base_delay_seconds"
             )
         return self
+
+    @field_validator("api_cors_origins")
+    @classmethod
+    def validate_api_cors_origins(cls, value: list[str]) -> list[str]:
+        """Reject wildcard credentialed CORS and malformed origins.
+
+        Cookie authentication must never combine ``allow_credentials=true``
+        with a wildcard origin; explicit configured origins only.
+        """
+        normalized: list[str] = []
+        for origin in value:
+            stripped = origin.strip().rstrip("/")
+            if not stripped:
+                raise ValueError("api_cors_origins must not contain blank origins")
+            if stripped == "*":
+                raise ValueError(
+                    "api_cors_origins must not use the wildcard with cookies"
+                )
+            try:
+                parsed = urlsplit(stripped)
+                hostname = parsed.hostname
+                _ = parsed.port
+            except ValueError as exc:
+                raise ValueError(
+                    "api_cors_origins contains a malformed origin"
+                ) from exc
+            if not parsed.scheme or not hostname:
+                raise ValueError(
+                    "api_cors_origins entries must be absolute origins with a hostname"
+                )
+            normalized.append(stripped)
+        return normalized
 
     @field_validator("public_base_url")
     @classmethod
