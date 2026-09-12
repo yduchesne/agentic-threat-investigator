@@ -654,6 +654,13 @@ PostgreSQL transaction; persistence is one short atomic insert through the
 PR 22A seam. Contradictory supplied material is represented as separately
 cited claims, never reconciled with a verdict or confidence.
 
+The model-visible retrieved surface is scoped: `source_url` is provenance
+metadata only, grants no browsing/fetching authority, and never justifies
+inferring content ATI did not supply; `similarity_score` is a retrieval
+relevance/ranking signal only, never source credibility, factual
+correctness, evidentiary strength, maliciousness, or research/Assessment
+confidence, and it never arbitrates between contradictory sources.
+
 ## Observable reasoning
 
 ATI exposes observable actions and concise evidence-backed action rationales, such as why a discovered IP was investigated.

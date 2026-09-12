@@ -63,7 +63,11 @@ def test_operation_identifier_is_stable() -> None:
 
 
 def test_prompts_are_byte_deterministic() -> None:
-    """RA-U12: the same request and chunks render identical prompt bytes."""
+    """RA-U12/22B2-U03: identical inputs render identical prompt bytes.
+
+    The chunk fixture carries a ``source_url``, so URL-bearing provenance is
+    part of the byte-determinism contract (PR 22B-2).
+    """
     request = _request()
     chunks = (_chunk(text="First chunk content."), _chunk(text="Second chunk."))
 
@@ -71,6 +75,8 @@ def test_prompts_are_byte_deterministic() -> None:
     second = build_research_agent_prompts(request, chunks)
 
     assert first == second
+    assert chunks[0].source_url is not None
+    assert f"source_url: {chunks[0].source_url}" in first[1]
 
 
 def test_user_prompt_exposes_stable_citation_id_not_chunk_id() -> None:
@@ -101,6 +107,25 @@ def test_user_prompt_renders_provenance_and_query() -> None:
     assert "</untrusted-data>" in user_prompt
 
 
+def test_source_url_renders_exactly_for_non_null_chunk() -> None:
+    """22B2-U01: the exact stored source_url is rendered as provenance."""
+    chunk = _chunk()
+    _system, user_prompt = build_research_agent_prompts(_request(), (chunk,))
+
+    assert chunk.source_url is not None
+    assert f"source_url: {chunk.source_url}" in user_prompt
+
+
+def test_null_source_url_renders_an_empty_field() -> None:
+    """22B2-U02: a missing URL renders an empty field, never Python None."""
+    chunk = _chunk(source_url=None)
+    _system, user_prompt = build_research_agent_prompts(_request(), (chunk,))
+
+    # Exact line boundary: the field keeps its own line with an empty value.
+    assert "\nsource_url: \npublished_at:" in user_prompt
+    assert "source_url: None" not in user_prompt
+
+
 def test_system_prompt_encodes_epistemic_boundaries() -> None:
     """The system prompt forbids tools, invention, verdicts, and IOCs."""
     system_prompt, _user_prompt = build_research_agent_prompts(_request(), ())
@@ -115,6 +140,47 @@ def test_system_prompt_encodes_epistemic_boundaries() -> None:
     assert "no claim rather than speculation" in system_prompt
     assert "contradictory" in system_prompt
     assert "hidden reasoning" in system_prompt
+
+
+def test_source_url_semantics_are_provenance_only() -> None:
+    """22B2-U04..U06: source_url is provenance with no network authority."""
+    system_prompt, _user_prompt = build_research_agent_prompts(_request(), ())
+
+    # U04: provenance metadata framing for the supplied chunk only.
+    assert "provenance metadata for the supplied" in system_prompt
+    # U05: the URL grants no browsing/fetching authority.
+    assert "Do not browse, fetch" in system_prompt
+    # U06: unsupplied URL content may not be inferred.
+    assert "or infer unsupplied content from the URL" in system_prompt
+
+
+def test_similarity_score_is_retrieval_relevance_only() -> None:
+    """22B2-U07..U10: similarity is ranking, not trust or confidence."""
+    system_prompt, _user_prompt = build_research_agent_prompts(_request(), ())
+
+    # U07: the score is defined as retrieval relevance/ranking only.
+    assert (
+        "similarity_score is a retrieval-relevance/ranking signal only."
+        " It is not" in system_prompt
+    )
+    # U08: not source credibility.
+    assert "source credibility" in system_prompt
+    # U09: not factual correctness or evidentiary strength.
+    assert "factual correctness" in system_prompt
+    assert "evidentiary strength" in system_prompt
+    # U10: not maliciousness or research/Assessment confidence.
+    assert "maliciousness" in system_prompt
+    assert "confidence in a research claim or Assessment" in system_prompt
+
+
+def test_similarity_score_never_arbitrates_contradictions() -> None:
+    """22B2-U11: score may not select a winner between conflicting sources."""
+    system_prompt, _user_prompt = build_research_agent_prompts(_request(), ())
+
+    assert (
+        "similarity_score must never be used to decide which contradictory"
+        " source is" in system_prompt
+    )
 
 
 def test_hostile_chunk_text_stays_inside_the_data_section() -> None:

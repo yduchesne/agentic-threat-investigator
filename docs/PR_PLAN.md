@@ -334,6 +334,29 @@ Delivered the standalone structured Threat Research / Context Agent on the PR 22
 
 The PR must prove that ATI can produce persisted, structured, provenance-backed contextual research independently of orchestration.
 
+### PR 22B-2 — Research prompt provenance and retrieval-score semantics [DONE]
+
+Narrow prompt-contract fixup inserted before PR 22C Coordinator integration.
+Delivered:
+
+- `source_url` is now rendered as model-visible provenance metadata for each
+  retrieved chunk; a null URL renders as an empty field and the stored string
+  is otherwise rendered verbatim;
+- URLs do not authorize browsing or fetching and cannot justify inferring
+  content ATI did not supply;
+- `similarity_score` is explicitly documented to the model as a retrieval
+  relevance/ranking signal only;
+- similarity does not mean source credibility, factual correctness,
+  evidentiary strength, maliciousness, or research/Assessment confidence;
+- similarity does not resolve contradictory sources: it must never be used to
+  choose a winner between conflicting supplied chunks;
+- `citation_id` remains the sole authoritative model-visible citation token
+  and `chunk_id` remains hidden;
+- byte-deterministic prompt construction is preserved;
+- no retrieval, persistence, LLM execution, LLM accounting, or Coordinator
+  behavior changed: only deterministic prompt rendering/instructions, focused
+  prompt tests, and documentation were touched.
+
 ### PR 22C — Coordinator research execution
 
 Integrate the independently working research capability into the production investigation lifecycle.

@@ -752,6 +752,13 @@ Unit strategy (`tests/unit/domain/test_research_agent.py`,
   chunk instructions stay inside the untrusted-data section, the system
   prompt still forbids acting on them, no tool surface exists, and
   `chunk_id` is never rendered as the model citation token;
+- deterministic prompt tests for PR 22B-2 provenance/score semantics:
+  exact and empty `source_url` field rendering (null URL never renders Python
+  `None`), URL provenance/no-browsing/no-unsupplied-inference guardrails,
+  `similarity_score` defined as retrieval relevance/ranking only (not
+  credibility, factual correctness, evidentiary strength, maliciousness, or
+  claim/Assessment confidence), and the prohibition on using similarity to
+  choose a winner between contradictory sources;
 - application execution tests drive the real `ResearchResultPersistenceService`
   and real `LlmAccountingService` against in-memory seams with a scripted
   `FakeLlmClient` and a scripted retrieval fake: relevant-context
