@@ -735,6 +735,20 @@ Categories:
 
 All persistent application/domain deletion is soft deletion. Immutable historical observations normally expose no delete operation.
 
+Within the graph, history semantics are distinct:
+
+```text
+Relationship
+    stable semantic edge, historized in domain_object_history
+
+RelationshipObservation
+    immutable time-stamped historical observation, append-only,
+    not duplicated into domain_object_history
+
+domain_object_history
+    state history for designated historized resources
+```
+
 ## Transactions
 
 External provider and LLM calls occur outside database transactions.
