@@ -64,9 +64,20 @@ It does not create verdicts.
 
 ### Threat Research / Context Agent
 
-Uses RAG to explain concepts already discovered by the investigation, including malware, ATT&CK techniques, vulnerabilities, or explicit contextual analyst questions.
+Runs one bounded, standalone contextual research execution on demand (PR 22B):
 
-It cannot establish live IOC facts or produce the final Assessment.
+- one immutable `ResearchAgentRequest` (investigation, contextual subject entity, normalized query, retrieval-context filters, bounded `max_results`);
+- exactly one retrieval pass through `ResearchRetriever`;
+- deterministic prompt construction, then structured-only synthesis through the existing `LlmClient`;
+- the model may cite only stable `DocumentChunk.citation_id` values from the exact chunks supplied to that execution;
+- the application validates citation membership and provenance closure, stamps all durable IDs/timestamps, and persists one immutable `ResearchResult` through `ResearchResultPersistenceService`;
+- empty retrieval deterministically persists a zero-claim/zero-citation result without spending a model call;
+- retrieved documents are untrusted data;
+- the agent has no tools, no web browsing, no recursive retrieval, and no model-side retrieval loop.
+
+It uses RAG to explain concepts already discovered by the investigation, including malware, ATT&CK techniques, vulnerabilities, or explicit contextual analyst questions.
+
+It cannot establish live IOC facts or produce the final Assessment, and it never creates Evidence, Relationships, Relationships observations, or Assessment/verdict/confidence content.
 
 ### Evidence Analyst
 
@@ -612,6 +623,36 @@ compatible corpus returns `[]`. Retrieved text is untrusted context.
 Every material factual research claim must cite retrieved chunks.
 
 No relevant retrieval result produces an explicit limitation rather than hallucinated context.
+
+### Research Agent execution
+
+```text
+ResearchAgentRequest
+ -> ResearchQuery
+ -> ResearchRetriever        (one bounded pass; its transaction closes inside)
+ -> deterministic prompt
+ -> LlmClient                (structured-only synthesis)
+ -> citation-membership validation
+ -> ResearchResult           (application stamps IDs, clock, anchors)
+ -> ResearchResultPersistenceService
+```
+
+One execution performs at most one retrieval pass and at most one bounded
+structured-output sequence. The model-visible citation token is the stable
+`DocumentChunk.citation_id`; `chunk_id` is operational provenance only and is
+deliberately not the model citation contract. A schema-valid claim that cites
+a stable citation ID outside the exact supplied chunk set fails closed before
+any persistence, even when the citation exists elsewhere in the corpus. Empty
+retrieval deterministically persists a zero-claim/zero-citation result without
+spending a model call, and the LLM may return `claims=()` when supplied
+context is irrelevant or insufficient. Structured-output repair is bounded to
+at most one attempt (`max_structured_output_attempts` in `1..2`), repair is
+limited to retryable `INVALID_STRUCTURED_OUTPUT`, every actual invocation is
+durably reserved against the Investigation LLM budget, and cancellation
+propagates unchanged. Retrieval and LLM work never run inside a long
+PostgreSQL transaction; persistence is one short atomic insert through the
+PR 22A seam. Contradictory supplied material is represented as separately
+cited claims, never reconciled with a verdict or confidence.
 
 ## Observable reasoning
 

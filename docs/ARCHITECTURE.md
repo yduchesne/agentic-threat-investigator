@@ -617,6 +617,30 @@ ResearchResult
 - `ResearchCitation` is an immutable self-contained snapshot of one retrieved chunk's full provenance surface, so a persisted research result remains interpretable even when the active chunk row it cited is later replaced or removed.
 - `ResearchResult` is an immutable, append-only contextual research synthesis/provenance container. It is deliberately NOT Evidence and NOT Assessment: it never enters Evidence persistence and never carries Assessment verdict/confidence semantics. Repeat research executions create a new result rather than mutating a prior one.
 
+### Research Agent execution boundary (PR 22B)
+
+```text
+ResearchAgentRequest
+ -> ResearchRetriever
+ -> deterministic prompt
+ -> LlmClient
+ -> citation validation
+ -> ResearchResult
+ -> ResearchResultPersistenceService
+```
+
+The standalone Research Agent executes one bounded request per invocation:
+retrieved context enters an immutable `ResearchResult` only after the model's
+structured claims pass deterministic citation-membership validation against
+the exact chunks supplied to that model execution. Model-visible citations
+use the stable `DocumentChunk.citation_id`; the model never sees or returns
+`chunk_id`, durable result/claim UUIDs, timestamps, investigation/entity
+anchors, verdicts, confidence, or pivot/tool fields. Retrieved context,
+`ResearchResult`, Evidence, and Assessment remain distinct: retrieval
+produces context, the Research Agent persists contextual synthesis, and only
+evidence collection/persistence can create Evidence while only the Evidence
+Analyst creates Assessments.
+
 ## Persistence
 
 PostgreSQL is the authoritative datastore.

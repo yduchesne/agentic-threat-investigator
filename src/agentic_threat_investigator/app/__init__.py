@@ -54,6 +54,11 @@ from .provider_observation_persistence import (
     ProviderObservationPersistenceService,
 )
 from .research import ResearchRetrievalError, ResearchRetriever
+from .research_agent import (
+    ResearchAgent,
+    ResearchAgentCitationError,
+    research_query_from_request,
+)
 from .sources import (
     CHECKPOINTING,
     ArtifactReference,
@@ -93,6 +98,9 @@ __all__ = [
     "RelationshipAssertion",
     "ResearchRetrievalError",
     "ResearchRetriever",
+    "ResearchAgent",
+    "ResearchAgentCitationError",
+    "research_query_from_request",
     "TokenBoundedChunker",
     "ArtifactReference",
     "ArtifactReferenceError",

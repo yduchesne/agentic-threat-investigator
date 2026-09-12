@@ -19,6 +19,11 @@ from .research import (
     RetrievedChunk,
     research_citation_from_retrieved_chunk,
 )
+from .research_agent import (
+    ResearchAgentClaim,
+    ResearchAgentDecision,
+    ResearchAgentRequest,
+)
 from .source import SourceRecord, source_record_content_hash
 
 __all__ = [
@@ -44,4 +49,7 @@ __all__ = [
     "ResearchClaim",
     "ResearchResult",
     "research_citation_from_retrieved_chunk",
+    "ResearchAgentRequest",
+    "ResearchAgentClaim",
+    "ResearchAgentDecision",
 ]
