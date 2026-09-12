@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
+    ResearchExecutionStatus,
     StopReason,
 )
 
@@ -91,6 +92,8 @@ class _ScenarioValidator(BaseModel):
             "required_provider_work",
             "forbidden_provider_work",
             "required_research_markers",
+            "required_research_requests",
+            "forbidden_research_requests",
         ):
             values = getattr(self.expected, field)
             if len(values) != len(set(values)):
@@ -113,6 +116,15 @@ class _ScenarioValidator(BaseModel):
             raise ValueError(
                 "forbidden_pivots must not appear in allowed_pivots: "
                 + ", ".join(forbidden_overlap)
+            )
+        research_overlap = sorted(
+            set(self.expected.required_research_requests)
+            & set(self.expected.forbidden_research_requests)
+        )
+        if research_overlap:
+            raise ValueError(
+                "research labels cannot be both required and forbidden: "
+                + ", ".join(research_overlap)
             )
         return self
 
@@ -231,6 +243,10 @@ class ExpectedCoordinatorTrajectory(BaseModel):
     required_provider_work: tuple[str, ...] = ()
     forbidden_provider_work: tuple[str, ...] = ()
     required_research_markers: tuple[str, ...] = ()
+    required_research_requests: tuple[str, ...] = ()
+    forbidden_research_requests: tuple[str, ...] = ()
+    max_research_requests: int | None = Field(default=None, ge=0)
+    require_research_termination: bool = False
     expected_stop_reason: StopReason
     max_provider_calls: int | None = Field(default=None, ge=0)
     max_entities: int | None = Field(default=None, ge=0)
@@ -267,6 +283,11 @@ class CoordinatorEvaluationFailureCode(str, Enum):
     REQUIRED_PROVIDER_WORK_MISSING = "required_provider_work_missing"
     FORBIDDEN_PROVIDER_WORK_EXECUTED = "forbidden_provider_work_executed"
     REQUIRED_RESEARCH_MARKER_MISSING = "required_research_marker_missing"
+    REQUIRED_RESEARCH_REQUEST_MISSING = "required_research_request_missing"
+    FORBIDDEN_RESEARCH_REQUEST_EXECUTED = "forbidden_research_request_executed"
+    DUPLICATE_RESEARCH_REQUEST = "duplicate_research_request"
+    RESEARCH_REQUEST_BUDGET_VIOLATION = "research_request_budget_violation"
+    RESEARCH_NOT_TERMINATED = "research_not_terminated"
 
 
 class CoordinatorScenarioResolution(BaseModel):
@@ -347,6 +368,75 @@ class CoordinatorTrajectoryEvaluator:
             ):
                 failures.append(
                     CoordinatorEvaluationFailureCode.REQUIRED_RESEARCH_MARKER_MISSING
+                )
+
+        # Delivered research lifecycle (PR 22C/22D). The evaluator recognizes
+        # RESEARCH_REQUESTED actions and final durable research execution
+        # state; it never re-implements CoordinatorPolicy. Required/forbidden
+        # requests resolve semantic entity labels exactly; the declared
+        # bounded request budget is enforced; and a duplicate is a request
+        # beyond the durable authorized attempt total for its subject (a post-
+        # completion/exhaustion re-request), never merely count > 1, so a
+        # legitimate bounded retry is never misclassified.
+        research_requests = [
+            item
+            for item in actions
+            if item.action == ACTION_RESEARCH_REQUESTED and item.entity_id is not None
+        ]
+        request_counts: dict[UUID, int] = {}
+        for item in research_requests:
+            entity_id = item.entity_id
+            if entity_id is None:
+                continue
+            request_counts[entity_id] = request_counts.get(entity_id, 0) + 1
+        request_entity_ids = set(request_counts)
+
+        for label in scenario.expected.required_research_requests:
+            target = resolution.entities.get(label)
+            if target is None or target not in request_entity_ids:
+                failures.append(
+                    CoordinatorEvaluationFailureCode.REQUIRED_RESEARCH_REQUEST_MISSING
+                )
+        for label in scenario.expected.forbidden_research_requests:
+            target = resolution.entities.get(label)
+            if target is not None and target in request_entity_ids:
+                failures.append(
+                    CoordinatorEvaluationFailureCode.FORBIDDEN_RESEARCH_REQUEST_EXECUTED
+                )
+        if (
+            scenario.expected.max_research_requests is not None
+            and len(research_requests) > scenario.expected.max_research_requests
+        ):
+            failures.append(
+                CoordinatorEvaluationFailureCode.RESEARCH_REQUEST_BUDGET_VIOLATION
+            )
+
+        attempts_by_subject: dict[UUID, int] = {}
+        for execution in final_state.research_executions:
+            attempts_by_subject[execution.subject_entity_id] = (
+                attempts_by_subject.get(execution.subject_entity_id, 0)
+                + execution.attempts
+            )
+        duplicate_entities = sum(
+            1
+            for entity_id, count in request_counts.items()
+            if count > attempts_by_subject.get(entity_id, 0)
+        )
+        if duplicate_entities:
+            failures.append(CoordinatorEvaluationFailureCode.DUPLICATE_RESEARCH_REQUEST)
+
+        research_terminated = True
+        if scenario.expected.require_research_termination:
+            dangling_requested = any(
+                execution.status is ResearchExecutionStatus.REQUESTED
+                for execution in final_state.research_executions
+            )
+            if (research_requests and not final_state.research_executions) or (
+                dangling_requested
+            ):
+                research_terminated = False
+                failures.append(
+                    CoordinatorEvaluationFailureCode.RESEARCH_NOT_TERMINATED
                 )
 
         # Duplicate pivots.
@@ -600,5 +690,8 @@ class CoordinatorTrajectoryEvaluator:
                 else 0.0,
                 "termination": 1.0 if terminated else 0.0,
                 "denied_candidate_count": float(denied),
+                "research_request_count": float(len(research_requests)),
+                "duplicate_research_request_count": float(duplicate_entities),
+                "research_terminated": 1.0 if research_terminated else 0.0,
             },
         )

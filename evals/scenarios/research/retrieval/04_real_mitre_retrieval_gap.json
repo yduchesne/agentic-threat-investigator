@@ -1,0 +1,14 @@
+{
+  "id": "real-mitre-retrieval-gap",
+  "version": 1,
+  "description": "A source filter that matches no persisted source produces an explicit retrieval gap.",
+  "query": "obfuscate command-and-control traffic conceal exfiltrated data",
+  "max_results": 5,
+  "source_ids": ["urn:ati:source:missing"],
+  "document_types": [],
+  "expected_relevant_source_records": [],
+  "expected_forbidden_source_records": [],
+  "expected_source_ids": [],
+  "expected_document_types": [],
+  "expected_retrieval_gap": true
+}

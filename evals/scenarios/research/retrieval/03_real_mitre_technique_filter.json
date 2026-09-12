@@ -1,0 +1,17 @@
+{
+  "id": "real-mitre-technique-filter",
+  "version": 1,
+  "description": "A document-type filter to attack_technique isolates the technique record at rank one.",
+  "query": "obfuscate command-and-control traffic conceal exfiltrated data",
+  "max_results": 5,
+  "source_ids": [],
+  "document_types": ["attack_technique"],
+  "expected_relevant_source_records": [
+    "attack-pattern--8a8e9e5e-2b4c-4d6e-8f0a-112233445566"
+  ],
+  "expected_forbidden_source_records": [],
+  "expected_source_ids": ["urn:ati:source:mitre_attack"],
+  "expected_document_types": ["attack_technique"],
+  "expected_max_source_rank": 1,
+  "expected_retrieval_gap": false
+}

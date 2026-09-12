@@ -680,6 +680,46 @@ already-persisted matching `ResearchResult` without another model call. The
 completion transition always reloads the Investigation after Research Agent
 execution so PR 20B LLM accounting version increments are never overwritten.
 
+## Evaluation view (PR 22D)
+
+PR 22D adds a deterministic repository-owned evaluation layer that consumes
+the typed outputs the production runtime already persists:
+
+```text
+production runtime
+ -> persisted ResearchResult / durable timeline + InvestigationState
+ -> repository-owned scenario expectations (semantic labels)
+ -> deterministic evaluators (no DB/network/LLM/clock)
+ -> stable failure codes + denominator-safe metrics
+```
+
+Retrieval evaluation consumes ordered `RetrievedChunk` values from the
+production pgvector retriever; synthesis evaluation consumes the
+repository-read-back `ResearchResult`, the exact citation IDs supplied to
+the model invocation (observed at the retrieval boundary, never substituted),
+and evaluation-only epistemic snapshots of Evidence / RelationshipObservation
+/ Assessment identity-version sets taken immediately before and after an
+isolated research interval. Nothing in the evaluation layer is invoked by
+the runtime, and nothing here adds runtime fields or behavior.
+
+Epistemic boundaries are final:
+
+```text
+Observed source facts
+ -> Evidence / RelationshipObservation
+ -> Evidence Analyst
+ -> Assessment
+
+Corpus knowledge
+ -> DocumentChunk
+ -> Research Agent
+ -> ResearchResult
+```
+
+`ResearchResult` does NOT become Evidence, RelationshipObservation, or
+Assessment: the PR 22D hard promotion gates prove identity/version set
+unchanged across isolated research execution.
+
 ## Persistence
 
 PostgreSQL is the authoritative datastore.

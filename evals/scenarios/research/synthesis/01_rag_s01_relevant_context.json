@@ -1,0 +1,37 @@
+{
+  "id": "rag-s01-relevant-context",
+  "version": 1,
+  "description": "Relevant ATT&CK context: the Research Agent receives the technique chunk and must persist a claim that cites exactly the supplied technique citation.",
+  "fixture": {
+    "name": "mitre-attack-small"
+  },
+  "query": "obfuscate command-and-control traffic conceal exfiltrated data",
+  "source_ids": [],
+  "document_types": [],
+  "max_results": 3,
+  "expected": {
+    "min_claims": 1,
+    "max_claims": 3,
+    "required_citation_labels": [
+      "attack_technique_data_obfuscation"
+    ],
+    "forbidden_citation_labels": [],
+    "required_claims": [
+      {
+        "citation_labels": [
+          "attack_technique_data_obfuscation"
+        ],
+        "required_phrases": [
+          "technique obscures command-and-control traffic"
+        ],
+        "forbidden_phrases": []
+      }
+    ],
+    "expected_empty_result": false,
+    "expect_no_evidence_promotion": true,
+    "expect_no_assessment_promotion": true
+  },
+  "source_records": {
+    "attack_technique_data_obfuscation": "attack-pattern--8a8e9e5e-2b4c-4d6e-8f0a-112233445566"
+  }
+}

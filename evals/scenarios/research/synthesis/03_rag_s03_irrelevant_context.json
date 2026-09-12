@@ -1,0 +1,23 @@
+{
+  "id": "rag-s03-irrelevant-context",
+  "version": 1,
+  "description": "Retrieved-but-irrelevant context: the model deterministically returns claims=() so retrieval is never automatically promoted to claims.",
+  "fixture": {
+    "name": "mitre-attack-small"
+  },
+  "query": "obfuscate command-and-control traffic conceal exfiltrated data",
+  "source_ids": [],
+  "document_types": [],
+  "max_results": 3,
+  "expected": {
+    "min_claims": 0,
+    "max_claims": 0,
+    "required_citation_labels": [],
+    "forbidden_citation_labels": [],
+    "required_claims": [],
+    "expected_empty_result": true,
+    "expect_no_evidence_promotion": true,
+    "expect_no_assessment_promotion": true
+  },
+  "source_records": {}
+}
