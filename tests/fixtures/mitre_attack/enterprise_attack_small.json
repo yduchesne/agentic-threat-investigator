@@ -1,0 +1,98 @@
+{
+  "type": "bundle",
+  "id": "bundle--1e6f6a4c-7f3b-4d5e-9a2c-001122334455",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "id": "identity--0f4e2a9b-8c5d-4e1f-a6b3-556677889900",
+      "name": "ATI Fixture",
+      "identity_class": "organization"
+    },
+    {
+      "type": "marking-definition",
+      "id": "marking-definition--1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "definition_type": "statement",
+      "definition": { "statement": "Synthetic fixture content" }
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--8a8e9e5e-2b4c-4d6e-8f0a-112233445566",
+      "created": "2020-01-01T00:00:00.000Z",
+      "modified": "2023-05-01T00:00:00.000Z",
+      "name": "Data Obfuscation",
+      "description": "Operators obfuscate command-and-control traffic to conceal exfiltrated data.",
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "command-and-control"
+        }
+      ],
+      "x_mitre_attack_id": "T1001",
+      "x_mitre_platforms": ["Linux", "Windows", "macOS"],
+      "x_mitre_is_subtechnique": false,
+      "revoked": false,
+      "x_mitre_deprecated": false,
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "url": "https://attack.mitre.org/techniques/T1001"
+        }
+      ]
+    },
+    {
+      "type": "malware",
+      "id": "malware--3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
+      "created": "2021-06-15T00:00:00.000Z",
+      "modified": "2024-02-20T00:00:00.000Z",
+      "name": "Fixture Ransomware",
+      "description": "A synthetic ransomware family that encrypts local files and demands payment.",
+      "is_family": true,
+      "x_mitre_attack_id": "S1017",
+      "x_mitre_platforms": ["Windows"],
+      "revoked": false,
+      "x_mitre_deprecated": false,
+      "labels": ["malware"]
+    },
+    {
+      "type": "tool",
+      "id": "tool--5e6f7a8b-9c0d-4e1f-2a3b-4c5d6e7f8a9b",
+      "created": "2022-03-10T00:00:00.000Z",
+      "modified": "2024-01-05T00:00:00.000Z",
+      "name": "Fixture Exfil Tool",
+      "description": "A synthetic exfiltration tool that transmits archives over DNS queries.",
+      "x_mitre_attack_id": "S1002",
+      "x_mitre_platforms": ["Linux"],
+      "revoked": false,
+      "x_mitre_deprecated": false
+    },
+    {
+      "type": "intrusion-set",
+      "id": "intrusion-set--7a8b9c0d-1e2f-4a3b-5c6d-7e8f9a0b1c2d",
+      "created": "2019-11-20T00:00:00.000Z",
+      "modified": "2024-03-30T00:00:00.000Z",
+      "name": "Fixture Group Alpha",
+      "description": "A synthetic intrusion set observed exploiting public-facing services.",
+      "aliases": ["AlphaFixture", "ATI-Alpha"],
+      "x_mitre_attack_id": "G1001",
+      "revoked": false,
+      "x_mitre_deprecated": false
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--9b0c1d2e-3f4a-4b5c-6d7e-8f9a0b1c2d3e",
+      "created": "2024-02-20T00:00:00.000Z",
+      "modified": "2024-02-20T00:00:00.000Z",
+      "relationship_type": "uses",
+      "source_ref": "malware--3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
+      "target_ref": "attack-pattern--8a8e9e5e-2b4c-4d6e-8f0a-112233445566"
+    },
+    {
+      "type": "x-mitre-tactic",
+      "id": "x-mitre-tactic--0a1b2c3d-4e5f-4a6b-7c8d-9e0f1a2b3c4d",
+      "name": "Command and Control",
+      "x_mitre_attack_id": "TA0011",
+      "x_mitre_shortname": "command-and-control"
+    }
+  ]
+}

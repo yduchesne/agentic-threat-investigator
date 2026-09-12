@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from agentic_threat_investigator.domain.documents import (
     Document,
     DocumentChunk,
+    document_chunk_citation_id,
     document_chunk_content_hash,
     document_content_hash,
 )
@@ -137,3 +138,86 @@ def test_chunk_rejects_tampered_hash() -> None:
         values = _chunk_values()
         values["content_hash"] = "0" * 64
         DocumentChunk.model_validate(values)
+
+
+_CITATION_DOCUMENT_ID = uuid4()
+
+
+def _cited_chunk(**overrides: object) -> DocumentChunk:
+    """Build a deterministic chunk for citation-identity cases."""
+    values: dict[str, object] = {
+        "document_id": _CITATION_DOCUMENT_ID,
+        "sequence": 1,
+        "text": "Same semantic chunk",
+        "token_count": 3,
+        "embedding_provider": "test",
+        "embedding_model": "test-v1",
+        "embedding_model_version": 1,
+        "embedding_dimension": 2,
+        "embedding": (1.0, 0.0),
+        "metadata": {"section": "Overview", "document_type": "advisory"},
+    }
+    values.update(overrides)
+    return DocumentChunk.model_validate(values)
+
+
+def test_citation_is_stable_across_identity_and_embedding_variation() -> None:
+    """Row identity, vector, and embedding identity never alter citation ID."""
+    baseline = _cited_chunk()
+    row_replaced = _cited_chunk(id=uuid4())
+    re_embedded = _cited_chunk(
+        embedding=(0.0, 1.0, 0.0),
+        embedding_provider="openai",
+        embedding_model="text-embedding-3-small",
+        embedding_model_version=2,
+        embedding_dimension=3,
+    )
+    assert baseline.citation_id is not None
+    assert baseline.id is None  # citation identity is not the row identity
+    assert baseline.citation_id == row_replaced.citation_id
+    assert baseline.citation_id == re_embedded.citation_id
+    assert baseline.content_hash != re_embedded.content_hash
+
+
+def test_citation_changes_with_every_semantic_coordinate() -> None:
+    """Each semantic chunk coordinate independently changes the citation ID."""
+    baseline = _cited_chunk()
+    other_document = _cited_chunk(document_id=uuid4())
+    other_sequence = _cited_chunk(sequence=2)
+    other_text = _cited_chunk(text="Different chunk text")
+    other_metadata = _cited_chunk(metadata={"section": "Details"})
+    assert baseline.citation_id != other_document.citation_id
+    assert baseline.citation_id != other_sequence.citation_id
+    assert baseline.citation_id != other_text.citation_id
+    assert baseline.citation_id != other_metadata.citation_id
+
+
+def test_citation_is_deterministic_across_process_instances() -> None:
+    """Reconstruction from the semantic dump reproduces the same UUID."""
+    baseline = _cited_chunk()
+    rebuilt = _cited_chunk(**baseline.model_dump(mode="python"))
+    assert baseline.citation_id == rebuilt.citation_id
+    assert document_chunk_citation_id(baseline) == baseline.citation_id
+
+
+def test_citation_accepts_explicit_valid_identity() -> None:
+    """A supplied citation ID equal to the derivation is accepted unchanged."""
+    baseline = _cited_chunk()
+    accepted = DocumentChunk.model_validate(
+        {
+            **_cited_chunk().model_dump(mode="python"),
+            "citation_id": baseline.citation_id,
+        }
+    )
+    assert accepted.citation_id == baseline.citation_id
+
+
+def test_citation_rejects_explicit_wrong_identity() -> None:
+    """A supplied citation ID that disagrees with semantics is rejected."""
+    with pytest.raises(ValidationError, match="citation_id"):
+        DocumentChunk.model_validate(
+            {
+                **_cited_chunk().model_dump(mode="python"),
+                "citation_id": uuid4(),
+            }
+        )

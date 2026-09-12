@@ -703,6 +703,43 @@ versions with the earlier Assessment unchanged; and durable LLM accounting.
 The observation listing read added for analyst input is covered separately
 against real PostgreSQL (scope, determinism, exclusion, paging).
 
+### Canonical real-format Threat Research/RAG path (PR 22A)
+
+The canonical PR 22A vertical slice (`tests/integration/test_mitre_real_format_vertical.py`)
+exercises the complete production corpus pipeline against isolated real
+PostgreSQL:
+
+```text
+deterministic local STIX 2.1 fixture
+ -> production FileSystemObjectStore + MitreAttackBatchSource (real parser)
+ -> SourceRecord persistence (checkpoint/idempotency)
+ -> MitreAttackDocumentBuilder (real builder)
+ -> DocumentIndexingService (real chunking/indexing)
+ -> PostgreSQL Document/DocumentChunk persistence (citation identities)
+ -> PgVectorResearchRetriever (real cosine retrieval)
+```
+
+The embedding representation is the only external/non-deterministic boundary
+and is replaced with deterministic offline embeddings; nothing else is faked.
+The fixture rule for PR 22A and later research work:
+
+> Automated tests may replace network acquisition and external embedding
+> service calls, but must exercise the production source parser, document
+> builder, persistence/indexing, and pgvector retrieval path being tested.
+
+The fixture (`tests/fixtures/mitre_attack/enterprise_attack_small.json`) is
+ATI-authored synthetic STIX 2.1 content that conforms exactly to the
+production `MitreAttackBatchSource` input contract; it is a deterministic
+real-format fixture, not a separate fake data source, and is never presented
+as real threat intelligence. The slice proves ingestion, document
+construction provenance, chunk persistence with stable `citation_id` values,
+deterministic retrieval provenance, same-model idempotency, and embedding
+identity migration (chunks replaced, citations stable, identity-filtered
+retrieval). Durable research provenance is proven separately in
+`tests/integration/test_research_result_repository.py` (immutable
+ResearchResult round trip, reference rejection, rollback, no-Evidence
+creation, and snapshot survival across active chunk replacement).
+
 ### Evidence Analyst evaluation vertical slices (PR 20C)
 
 `tests/integration/test_evidence_analyst_evaluation.py` runs the repository-

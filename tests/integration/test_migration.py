@@ -30,6 +30,7 @@ EXPECTED_TABLES = {
     "ingestion_checkpoint",
     "document",
     "document_chunk",
+    "research_result",
     "investigation_timeline_event",
     "alembic_version",
 }
@@ -65,6 +66,7 @@ EXPECTED_FUNCTIONS = {
     "update_investigation_budget",
     "update_investigation_coordinator_state",
     "set_investigation_analysis_result",
+    "append_research_result",
     "jsonb_array_starts_with",
 }
 
@@ -841,5 +843,79 @@ async def test_coordinator_migrations_downgrade_and_re_upgrade() -> None:
         functions, columns = await installed_state()
         assert coordinator_functions <= functions
         assert coordinator_columns <= columns
+    finally:
+        command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_research_foundation_migration_downgrade_and_re_upgrade() -> None:
+    """Migration 0019 downgrades to the v0005 chunk API and re-upgrades cleanly."""
+    alembic_cfg = Config("alembic.ini")
+
+    async def research_state() -> tuple[bool, bool, bool]:
+        """Return (research_result present, citation column present, append fn present)."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                tables = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT table_name FROM information_schema.tables "
+                            "WHERE table_schema = 'ati'"
+                        )
+                    )
+                }
+                columns = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_schema = 'ati' AND table_name = 'document_chunk'"
+                        )
+                    )
+                }
+                functions = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT routine_name FROM information_schema.routines "
+                            "WHERE routine_schema = 'ati'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        return (
+            "research_result" in tables,
+            "citation_id" in columns,
+            "append_research_result" in functions,
+        )
+
+    try:
+        command.downgrade(alembic_cfg, "0018_coordinator_selection")
+        result, citation, append = await research_state()
+        assert not result and not citation and not append
+        # The v0005 chunk replacement API remains installed after downgrade.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                functions = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT routine_name FROM information_schema.routines "
+                            "WHERE routine_schema = 'ati'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        assert "replace_document_chunks" in functions
+
+        command.upgrade(alembic_cfg, "head")
+        result, citation, append = await research_state()
+        assert result and citation and append
     finally:
         command.upgrade(alembic_cfg, "head")

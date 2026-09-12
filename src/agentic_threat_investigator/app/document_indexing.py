@@ -20,7 +20,11 @@ from agentic_threat_investigator.app.persistence.repositories import (
     DocumentChunkBatchResult,
     UnitOfWork,
 )
-from agentic_threat_investigator.domain.documents import Document, DocumentChunk
+from agentic_threat_investigator.domain.documents import (
+    Document,
+    DocumentChunk,
+    EmbeddingModelInfo,
+)
 from agentic_threat_investigator.domain.source import SourceRecord
 
 CHUNKING_VERSION = 1
@@ -311,23 +315,55 @@ class DocumentIndexingService:
                 "chunk batch conflict or invalid ordinals"
             )
 
-    def _changed_chunks(
+    @staticmethod
+    def _embedding_compatible(chunk: DocumentChunk, info: EmbeddingModelInfo) -> bool:
+        """Return whether one persisted chunk matches the active embedding identity.
+
+        Compatibility is exact and compares only the embedding identity
+        fields (provider/model/version/dimension); the vector values
+        themselves are never compared.
+        """
+        return (
+            chunk.embedding_provider == info.provider
+            and chunk.embedding_model == info.model
+            and chunk.embedding_model_version == info.model_version
+            and chunk.embedding_dimension == info.dimension
+        )
+
+    async def _plan_chunk_replacement(
         self,
+        uow: UnitOfWork,
         results: Sequence[DocumentBatchResult],
         embedded: Sequence[_EmbeddedDraft],
     ) -> tuple[list[UUID], list[DocumentChunkBatchItem]]:
-        """Bind embedded drafts to database-assigned changed document IDs."""
-        by_ordinal = {result.ordinal: result for result in results}
-        changed = {
-            result.ordinal: result
-            for result in results
-            if result.outcome in (BatchOutcome.INSERTED, BatchOutcome.UPDATED)
-        }
-        chunks: list[DocumentChunkBatchItem] = []
+        """Bind embedded drafts to documents whose chunk set must be replaced.
+
+        Chunks are replaced for inserted and updated documents and for
+        unchanged documents whose current chunk set is missing or
+        incompatible with the active embedding identity. Documents with an
+        already-compatible complete chunk set remain a true no-op, so pure
+        re-indexing under the same embedding identity does not churn rows.
+        """
         info = self._embedding_client.model_info
+        by_ordinal = {result.ordinal: result for result in results}
+        replaced: dict[int, DocumentBatchResult] = {}
+        for result in results:
+            if result.outcome in (BatchOutcome.INSERTED, BatchOutcome.UPDATED):
+                replaced[result.ordinal] = result
+                continue
+            if result.outcome is not BatchOutcome.UNCHANGED:
+                continue
+            active = await uow.document_chunks.list_by_document(result.document_id)
+            if active and all(
+                self._embedding_compatible(chunk, info) for chunk in active
+            ):
+                continue
+            replaced[result.ordinal] = result
+
+        chunks: list[DocumentChunkBatchItem] = []
         for item in embedded:
             result = by_ordinal[item.document_ordinal]
-            if item.document_ordinal not in changed:
+            if item.document_ordinal not in replaced:
                 continue
             chunks.append(
                 DocumentChunkBatchItem(
@@ -345,7 +381,7 @@ class DocumentIndexingService:
                     )
                 )
             )
-        changed_ids = [result.document_id for result in changed.values()]
+        changed_ids = [result.document_id for result in replaced.values()]
         if changed_ids and not chunks:
             raise DocumentIndexingError("changed documents produced no chunks")
         return changed_ids, chunks
@@ -365,7 +401,9 @@ class DocumentIndexingService:
                 [DocumentBatchItem(document=document) for document in documents]
             )
             self._verify_document_results(document_results, len(documents))
-            changed_ids, chunks = self._changed_chunks(document_results, embedded)
+            changed_ids, chunks = await self._plan_chunk_replacement(
+                uow, document_results, embedded
+            )
             if changed_ids:
                 chunk_results = await uow.document_chunks.replace_batch(
                     changed_ids, chunks

@@ -7,6 +7,7 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.persistence.repositories import (
@@ -18,6 +19,8 @@ from agentic_threat_investigator.app.persistence.repositories import (
     DocumentChunkBatchResult,
     DocumentChunkRepository,
     DocumentRepository,
+    ResearchResultDuplicateIdentityError,
+    ResearchResultRepository,
 )
 from agentic_threat_investigator.config.settings import (
     DOCUMENT_CHUNK_EMBEDDING_DIMENSION,
@@ -29,6 +32,9 @@ from agentic_threat_investigator.domain.documents import (
     document_content_hash,
 )
 from agentic_threat_investigator.domain.immutable_json import thaw_json
+from agentic_threat_investigator.domain.research import ResearchResult
+
+from .errors import SQLSTATE_RESEARCH_RESULT_DUPLICATE, sqlstate
 
 
 def _vector_values(value: object) -> tuple[float, ...]:
@@ -115,6 +121,89 @@ class PostgresDocumentRepository(DocumentRepository):
         return None if row is None else self._document_from_row(row)
 
 
+class PostgresResearchResultRepository(ResearchResultRepository):
+    """Append and read immutable research results in the caller's transaction.
+
+    Claims and citations are authoritative typed JSONB snapshots inside one
+    immutable analytical artifact; the Pydantic domain model remains the
+    contract on read, and the database enforces root foreign keys and
+    duplicate-ID rejection. There is no update or delete path.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _result_from_row(row: Any) -> ResearchResult:
+        """Map one research_result row to its exact typed domain model."""
+        values = dict(row)
+        values["claims"] = tuple(thaw_json(values["claims"]))
+        values["citations"] = tuple(thaw_json(values["citations"]))
+        return ResearchResult.model_validate(values)
+
+    async def add(self, result: ResearchResult) -> None:
+        """Insert one immutable research result through the stored function."""
+        try:
+            await self._session.execute(
+                text("""
+                    SELECT ati.append_research_result(
+                        :id, :investigation_id, :subject_entity_id, :query,
+                        CAST(:claims AS jsonb), CAST(:citations AS jsonb),
+                        :created_at)
+                    """),
+                {
+                    "id": result.id,
+                    "investigation_id": result.investigation_id,
+                    "subject_entity_id": result.subject_entity_id,
+                    "query": result.query,
+                    "claims": Jsonb(
+                        [claim.model_dump(mode="json") for claim in result.claims]
+                    ),
+                    "citations": Jsonb(
+                        [
+                            citation.model_dump(mode="json")
+                            for citation in result.citations
+                        ]
+                    ),
+                    "created_at": result.created_at,
+                },
+            )
+        except DBAPIError as error:
+            if sqlstate(error) == SQLSTATE_RESEARCH_RESULT_DUPLICATE:
+                raise ResearchResultDuplicateIdentityError(result.id) from None
+            raise
+
+    async def get_by_id(self, result_id: UUID) -> ResearchResult | None:
+        """Return one research result with its exact claims and citations."""
+        result = await self._session.execute(
+            text("""
+                SELECT id, investigation_id, subject_entity_id, query,
+                       claims, citations, created_at
+                FROM ati.research_result
+                WHERE id=:id
+                """),
+            {"id": result_id},
+        )
+        row = result.mappings().first()
+        return None if row is None else self._result_from_row(row)
+
+    async def list_by_investigation(
+        self, investigation_id: UUID
+    ) -> list[ResearchResult]:
+        """Return an investigation's results in deterministic (created_at, id) order."""
+        result = await self._session.execute(
+            text("""
+                SELECT id, investigation_id, subject_entity_id, query,
+                       claims, citations, created_at
+                FROM ati.research_result
+                WHERE investigation_id=:investigation_id
+                ORDER BY created_at, id
+                """),
+            {"investigation_id": investigation_id},
+        )
+        return [self._result_from_row(row) for row in result.mappings()]
+
+
 class PostgresDocumentChunkRepository(DocumentChunkRepository):
     """Replace and read pgvector-backed document indexing artifacts."""
 
@@ -138,12 +227,15 @@ class PostgresDocumentChunkRepository(DocumentChunkRepository):
                 raise ValueError("embedding dimension does not match database schema")
             if chunk.content_hash != document_chunk_content_hash(chunk):
                 raise ValueError("chunk content_hash does not match semantic content")
+            if chunk.citation_id is None:
+                raise ValueError("chunk citation_id must be present")
             embedding_literal = (
                 "[" + ",".join(repr(component) for component in chunk.embedding) + "]"
             )
             composite.append(
                 (
                     ordinal,
+                    chunk.citation_id,
                     chunk.document_id,
                     chunk.sequence,
                     chunk.text,
@@ -173,8 +265,8 @@ class PostgresDocumentChunkRepository(DocumentChunkRepository):
         """Return all current chunks in deterministic sequence order."""
         result = await self._session.execute(
             text("""
-                SELECT id, document_id, sequence, text, token_count, embedding,
-                       embedding_provider, embedding_model,
+                SELECT id, citation_id, document_id, sequence, text, token_count,
+                       embedding, embedding_provider, embedding_model,
                        embedding_model_version, embedding_dimension,
                        content_hash, metadata
                 FROM ati.document_chunk

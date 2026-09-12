@@ -148,6 +148,7 @@ class DocumentChunkRow(Base):
     document_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("ati.document.id")
     )
+    citation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     sequence: Mapped[int]
     text: Mapped[str] = mapped_column(String)
     token_count: Mapped[int]

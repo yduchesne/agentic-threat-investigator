@@ -101,6 +101,20 @@ non-cascading foreign key `relationship_observation_evidence_fk`
 (`relationship_observation.evidence_id -> evidence(id)`); a dangling Evidence
 reference is rejected at insert time and observations are immutable afterwards.
 
+### Append-only immutable contextual analytical artifacts (PR 22A)
+
+ResearchResult persists as one immutable root row per research execution,
+with typed ResearchClaim/ResearchCitation JSONB snapshots:
+
+- `ati.research_result` rows are insert-only; there is no update or delete
+  routine and no version/history table;
+- claims/citations are authoritative Pydantic snapshots validated by the
+  application; the database enforces only root integrity (foreign keys,
+  duplicate-ID rejection) and does not learn Research Agent semantics;
+- repeat research executions append a new result rather than mutating a
+  prior one (PR 22C owns execution/deduplication semantics);
+- persisted results never create Evidence/Assessment rows.
+
 ### Versioned analytical outputs
 
 New version/row rather than silent overwrite:
@@ -516,23 +530,38 @@ Document fields include:
 Chunks retain:
 
 - parent document ID;
+- the deterministic semantic citation identity (`citation_id`);
 - sequence;
 - text;
 - token count;
-- embedding model/version;
+- embedding identity (provider/model/version) and the vector;
+- content hash;
 - metadata.
 
 Documents are identified by `(source_id, source_record_id)` and reference the source record through that same composite key. They also retain derived `content`, document type (the source `record_type` vocabulary), and an explicit `chunking_version`; the document semantic hash covers document type, title, source URL, published time, content, normalization/chunking versions, and metadata; source identity, retrieval time, and internal identity are excluded.
 
 Chunks are identified by `(document_id, sequence)`. They are replaceable indexing artifacts: replacement physically rebuilds the complete set, allocates chunk versions, and writes no `domain_object_history` rows or soft-delete state. Each chunk stores embedding provider/model/version/dimension and a semantic hash covering its text, token count, metadata, identity, and embedding metadata (not the vector). The vector column is fixed at dimension 1536 and has an HNSW cosine index.
 
-Embedding configuration stores provider/model/version/dimension sufficiently to support controlled re-embedding.
+`document_chunk.citation_id` is a NOT NULL, globally unique deterministic UUIDv5 derived in the pure domain layer from the chunk's semantic coordinates (document identity, sequence, text, token count, and semantic chunk metadata). It is independent of the replaceable row identity, the vector, and the embedding identity, and it is the durable identity ResearchCitations snapshot. The application supplies citation IDs; PostgreSQL never generates them. The storage guarantee is uniqueness fail-closed: a chunk batch carrying a duplicate citation identity aborts the whole replacement transaction.
+
+Embedding configuration stores provider/model/version/dimension sufficiently to support controlled re-embedding. DocumentIndexingService re-indexes unchanged Documents when their current chunk set is missing or does not exactly match the active embedding identity (provider/model/version/dimension); fully compatible chunk sets remain a true no-op. Re-embedding physically replaces the chunk rows and vectors but preserves each chunk's citation identity, so persisted research citations remain valid across embedding migrations. Embedding I/O always happens outside the persistence transaction.
+
+Migration note (upgrade to 0019): existing derived `document_chunk` rows were
+removed by the migration because the application citation algorithm cannot be
+reproduced exactly in SQL; Documents and all source/investigation/evidence/
+assessment records are preserved, and the corpus must be re-indexed after
+upgrade to rebuild chunks and embeddings. Inaccurate historical citation IDs
+are never retained to avoid reindexing.
 
 PR 11 retrieval joins current chunks to visible documents, filters all four
 embedding identity fields plus optional source/type predicates, and performs
 bounded top-k ordering with the pgvector cosine-distance operator. The database
 performs ranking; Python does not load or reorder the corpus. No compatible
-rows produces an empty result.
+rows produces an empty result. Each retrieved chunk exposes the full
+provenance surface (row chunk_id, stable citation_id, document identity,
+source identity/record, document type, chunk sequence, text, document title/
+URL/published time, similarity score, and metadata) so a durable
+`ResearchCitation` snapshot can be created without reopening the vector index.
 
 ## Authentication persistence
 

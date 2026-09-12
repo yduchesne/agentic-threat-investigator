@@ -4,13 +4,21 @@ from .documents import (
     Document,
     DocumentChunk,
     EmbeddingModelInfo,
+    document_chunk_citation_id,
     document_chunk_content_hash,
     document_content_hash,
 )
 from .entities import Entity, EntityType
 from .evidence import EntityRef, Evidence, EvidenceType
 from .relationships import Relationship, RelationshipObservation, RelationshipType
-from .research import ResearchQuery, RetrievedChunk
+from .research import (
+    ResearchCitation,
+    ResearchClaim,
+    ResearchQuery,
+    ResearchResult,
+    RetrievedChunk,
+    research_citation_from_retrieved_chunk,
+)
 from .source import SourceRecord, source_record_content_hash
 
 __all__ = [
@@ -29,6 +37,11 @@ __all__ = [
     "EmbeddingModelInfo",
     "document_content_hash",
     "document_chunk_content_hash",
+    "document_chunk_citation_id",
     "ResearchQuery",
     "RetrievedChunk",
+    "ResearchCitation",
+    "ResearchClaim",
+    "ResearchResult",
+    "research_citation_from_retrieved_chunk",
 ]

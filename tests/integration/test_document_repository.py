@@ -16,28 +16,36 @@ from agentic_threat_investigator.app.persistence import (
     DocumentChunkBatchItem,
     SourceRecordBatchItem,
 )
-from agentic_threat_investigator.domain.documents import Document, DocumentChunk
+from agentic_threat_investigator.domain.documents import (
+    Document,
+    DocumentChunk,
+    document_chunk_citation_id,
+)
 from agentic_threat_investigator.domain.source import SourceRecord
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
 
 
-def _source_record() -> SourceRecord:
+def _source_record(
+    record_id: str = "record-1", content: str = "Synthetic"
+) -> SourceRecord:
     return SourceRecord(
         source_id="urn:ati:source:test",
-        source_record_id="record-1",
+        source_record_id=record_id,
         record_type="attack_technique",
         normalization_version=1,
         retrieved_at=datetime(2026, 1, 1, tzinfo=UTC),
-        canonical_payload={"name": "Synthetic"},
+        canonical_payload={"name": content},
     )
 
 
-def _document(content: str = "## Overview\nSynthetic") -> Document:
+def _document(
+    content: str = "## Overview\nSynthetic", record_id: str = "record-1"
+) -> Document:
     return Document(
         source_id="urn:ati:source:test",
-        source_record_id="record-1",
+        source_record_id=record_id,
         document_type="attack_technique",
         title="Synthetic",
         retrieved_at=datetime(2026, 1, 1, tzinfo=UTC),
@@ -49,7 +57,14 @@ def _document(content: str = "## Overview\nSynthetic") -> Document:
 
 
 def _chunk(
-    document_id: UUID, sequence: int, *, first: float = 1.0, axis: int = 0
+    document_id: UUID,
+    sequence: int,
+    *,
+    first: float = 1.0,
+    axis: int = 0,
+    provider: str = "hashing",
+    model: str = "ati-hashing-v1",
+    model_version: int = 1,
 ) -> DocumentChunk:
     values = [0.0] * 1536
     values[axis] = first
@@ -59,9 +74,9 @@ def _chunk(
         sequence=sequence,
         text=f"chunk {sequence}",
         token_count=2,
-        embedding_provider="hashing",
-        embedding_model="ati-hashing-v1",
-        embedding_model_version=1,
+        embedding_provider=provider,
+        embedding_model=model,
+        embedding_model_version=model_version,
         embedding_dimension=1536,
         embedding=vector,
         metadata={"section": "Overview"},
@@ -188,6 +203,95 @@ async def test_pgvector_cosine_ordering(
             {"query": query},
         )
     assert [row[0] for row in rows] == [1, 2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_chunk_citation_identity_persists_deterministically(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Chunks persist their citation ID and reload it deterministically."""
+    await _insert_source(uow_factory)
+    async with uow_factory() as uow:
+        await uow.source_records.upsert_batch(
+            [
+                SourceRecordBatchItem(
+                    _source_record(record_id="record-2", content="Second source")
+                )
+            ]
+        )
+    async with uow_factory() as uow:
+        document = await uow.documents.upsert_batch([DocumentBatchItem(_document())])
+        document_id = document[0].document_id
+        first = await uow.document_chunks.replace_batch(
+            [document_id],
+            [
+                DocumentChunkBatchItem(_chunk(document_id, 1)),
+                DocumentChunkBatchItem(_chunk(document_id, 2)),
+            ],
+        )
+        chunks = await uow.document_chunks.list_by_document(document_id)
+        second_document = await uow.documents.upsert_batch(
+            [
+                DocumentBatchItem(
+                    _document(record_id="record-2", content="## Overview\nSecond")
+                )
+            ]
+        )
+        other_id = second_document[0].document_id
+        await uow.document_chunks.replace_batch(
+            [other_id], [DocumentChunkBatchItem(_chunk(other_id, 1))]
+        )
+        other_chunks = await uow.document_chunks.list_by_document(other_id)
+    row_ids = [result.chunk_id for result in first]
+    assert len(set(row_ids)) == 2
+    assert [chunk.sequence for chunk in chunks] == [1, 2]
+    assert all(chunk.id is not None for chunk in chunks)
+    citation_ids = {chunk.citation_id for chunk in chunks}
+    assert len(citation_ids) == 2
+    assert citation_ids == {document_chunk_citation_id(chunk) for chunk in chunks}
+    assert all(citation_id is not None for citation_id in citation_ids)
+    assert citation_ids.isdisjoint({chunk.citation_id for chunk in other_chunks})
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_chunk_replacement_preserves_semantic_citation_identity(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Re-embedding replaces rows/vectors but keeps the citation ID stable."""
+    await _insert_source(uow_factory)
+    async with uow_factory() as uow:
+        document = await uow.documents.upsert_batch([DocumentBatchItem(_document())])
+        document_id = document[0].document_id
+        identity_a = await uow.document_chunks.replace_batch(
+            [document_id], [DocumentChunkBatchItem(_chunk(document_id, 1))]
+        )
+    old_row_id = identity_a[0].chunk_id
+
+    async with uow_factory() as uow:
+        identity_b = await uow.document_chunks.replace_batch(
+            [document_id],
+            [
+                DocumentChunkBatchItem(
+                    _chunk(
+                        document_id,
+                        1,
+                        first=0.25,
+                        provider="other-provider",
+                        model="other-model",
+                        model_version=2,
+                    )
+                )
+            ],
+        )
+        chunks = await uow.document_chunks.list_by_document(document_id)
+    assert identity_b[0].chunk_id != old_row_id
+    assert len(chunks) == 1
+    assert chunks[0].embedding_provider == "other-provider"
+    assert chunks[0].embedding_model == "other-model"
+    assert chunks[0].embedding_model_version == 2
+    assert chunks[0].citation_id == _chunk(document_id, 1).citation_id
 
 
 @pytest.mark.asyncio

@@ -82,8 +82,11 @@ class PgVectorResearchRetriever(ResearchRetriever):
             params["document_types"] = query.document_types
 
         statement = text(
-            """SELECT chunk.id AS chunk_id, chunk.document_id,
-                       document.source_id, chunk.text, document.title,
+            """SELECT chunk.id AS chunk_id,
+                       chunk.citation_id AS citation_id,
+                       chunk.document_id,
+                       document.source_id, document.source_record_id,
+                       chunk.text, document.title,
                        document.source_url, document.published_at,
                        1.0 - (chunk.embedding <=> CAST(:query_embedding AS vector))
                          AS similarity_score,
@@ -124,8 +127,12 @@ class PgVectorResearchRetriever(ResearchRetriever):
                 chunks.append(
                     RetrievedChunk(
                         chunk_id=values["chunk_id"],
+                        citation_id=values["citation_id"],
                         document_id=values["document_id"],
                         source_id=values["source_id"],
+                        source_record_id=values["source_record_id"],
+                        document_type=values["document_type"],
+                        chunk_sequence=values["chunk_sequence"],
                         text=values["text"],
                         title=values["title"],
                         source_url=values["source_url"],
