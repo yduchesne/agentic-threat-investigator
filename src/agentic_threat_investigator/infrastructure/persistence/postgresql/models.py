@@ -185,6 +185,24 @@ class DocumentChunkRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ResearchResultRow(Base):
+    """Database row for one immutable contextual research result.
+
+    Mapped read-only for the PR 23A research query layer; writes always
+    route through the versioned append function.
+    """
+
+    __tablename__ = "research_result"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    investigation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    subject_entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    query: Mapped[str] = mapped_column(String)
+    claims: Mapped[dict[str, Any]] = mapped_column(JSON)
+    citations: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class IngestionCheckpointRow(Base):
     """Mutable operational progress for one artifact and normalizer version."""
 
