@@ -160,6 +160,11 @@ class Settings(BaseSettings):
     llm_max_relationship_observations: int = Field(default=200, ge=1, le=1000)
     llm_max_normalized_facts_bytes: int = Field(default=131_072, ge=1000, le=1_000_000)
     llm_max_input_bytes: int = Field(default=262_144, ge=1_000, le=1_000_000)
+    # Analyst-facing collection query page limits (PR 23A). The default is
+    # applied when a caller omits a limit; the maximum is the hard ceiling
+    # validated by every query service.
+    query_default_page_size: int = Field(default=50, ge=1)
+    query_max_page_size: int = Field(default=200, ge=1)
     # Credential-free local artifact URI of the DB-IP IP to City Lite MMDB.
     # Blank (default) disables the DB-IP City Lite provider. This is a plain
     # artifact location, not a secret; it is validated as an authority-free
@@ -253,6 +258,18 @@ class Settings(BaseSettings):
         if not value.strip():
             raise ValueError("llm_model must not be blank")
         return value.strip()
+
+    @field_validator(
+        "query_default_page_size",
+        "query_max_page_size",
+        mode="before",
+    )
+    @classmethod
+    def validate_query_page_size_types(cls, value: object) -> object:
+        """Reject coercive non-integers while retaining environment text parsing."""
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ValueError("query page size setting must be an integer")
+        return value
 
     @field_validator(
         "llm_max_structured_output_attempts",

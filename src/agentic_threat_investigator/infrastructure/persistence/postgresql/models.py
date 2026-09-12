@@ -68,6 +68,28 @@ class AuditEventRow(Base):
     )
 
 
+class DomainObjectHistoryRow(Base):
+    """Database row for one immutable generic resource-state history entry.
+
+    Mapped read-only for the PR 23A history query layer; writes always route
+    through the versioned SQL write functions.
+    """
+
+    __tablename__ = "domain_object_history"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    object_type: Mapped[str] = mapped_column(String)
+    object_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    version: Mapped[int] = mapped_column(BigInteger)
+    operation: Mapped[str] = mapped_column(String)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    diff: Mapped[dict[str, Any]] = mapped_column(JSON)
+    actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    request_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    investigation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class EntityRow(Base):
     """Database row for an entity."""
 
@@ -160,6 +182,24 @@ class DocumentChunkRow(Base):
     content_hash: Mapped[bytes] = mapped_column(BYTEA)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ResearchResultRow(Base):
+    """Database row for one immutable contextual research result.
+
+    Mapped read-only for the PR 23A research query layer; writes always
+    route through the versioned append function.
+    """
+
+    __tablename__ = "research_result"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    investigation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    subject_entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    query: Mapped[str] = mapped_column(String)
+    claims: Mapped[dict[str, Any]] = mapped_column(JSON)
+    citations: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

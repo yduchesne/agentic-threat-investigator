@@ -663,3 +663,110 @@ Indexes should be introduced based on known query paths, including:
 - vector index appropriate to pgvector retrieval.
 
 Exact index implementation is an implementation-level decision validated by query plans/tests.
+
+## Query/index inventory (PR 23A)
+
+PR 23A introduces the analyst-facing read/query layer (`app/query/` and
+`infrastructure/persistence/query/`). Every collection has exactly one
+canonical deterministic ordering, every paginated query uses keyset
+continuation (never OFFSET), every cursor is opaque, versioned, and bound to
+its query collection and filter fingerprint, and date ranges use UTC
+half-open ``[from, to)`` semantics.
+
+Every index below exists because a concrete PR 23A query contract requires
+it. Indexes whose access path was fully superseded by a richer composite
+(``investigation_status_idx``, ``relationship_observation_time_idx``) were
+dropped in migration 0022 rather than duplicated.
+
+### Investigation
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `investigation_active_created_idx` | `(created_at DESC, id ASC) WHERE deleted_at IS NULL` | global investigation listing (`created_at DESC, id ASC`) |
+| `investigation_active_status_created_idx` | `(status, created_at DESC, id ASC) WHERE deleted_at IS NULL` | status-filtered investigation listing |
+
+### Evidence
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `evidence_investigation_listing_idx` (pre-existing) | `(investigation_id, retrieved_at DESC, id ASC)` | investigation Evidence listing / retrieved-time range |
+| `evidence_investigation_source_listing_idx` | `(investigation_id, source, retrieved_at DESC, id ASC)` | investigation + source Evidence listing |
+| `evidence_investigation_subject_listing_idx` | `(investigation_id, subject_entity_id, retrieved_at DESC, id ASC)` | investigation + subject-entity Evidence listing |
+| `evidence_investigation_type_listing_idx` | `(investigation_id, evidence_type, retrieved_at DESC, id ASC)` | investigation + type Evidence listing |
+
+### Relationship
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `relationship` canonical UNIQUE (pre-existing) | `(source_entity_id, relationship_type_urn, target_entity_id)` | source-direction adjacency and stable edge identity |
+| `relationship_target_adjacency_idx` | `(target_entity_id, relationship_type_urn, source_entity_id) WHERE deleted_at IS NULL` | target-direction adjacency pivots |
+
+Investigation relationship listing derives visibility through
+`relationship_observation.investigation_id` (no `investigation_id` column is
+added to the stable Relationship resource) and deduplicates by the edge's
+primary key; the canonical order is the stable `relationship.id ASC`.
+
+### RelationshipObservation
+
+RelationshipObservation rows are themselves the immutable historical record
+and are **not** duplicated into `domain_object_history`. Historical browsing
+queries `relationship_observation` directly.
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `relationship_observation_investigation_retrieved_idx` | `(investigation_id, retrieved_at DESC, id ASC)` | investigation-scoped observation listing and investigation relationship join |
+| `relationship_observation_relationship_retrieved_idx` | `(relationship_id, retrieved_at DESC, id ASC)` | relationship-scoped observation listing / retrieved-time range |
+| `relationship_observation_relationship_observed_idx` | `(relationship_id, observed_at DESC, id ASC) WHERE observed_at IS NOT NULL` | relationship + observed-at date-range browsing |
+
+Observation cursors always encode `retrieved_at` (mandatory) and the row id;
+the nullable `observed_at` is an independent filter and never a cursor key.
+
+### ResearchResult
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `research_result_investigation_idx` (pre-existing) | `(investigation_id, created_at, id)` | internal execution reconciliation read (`created_at ASC, id ASC`) |
+| `research_result_subject_idx` (pre-existing) | `(subject_entity_id, created_at, id)` | execution-time subject reconciliation |
+| `research_result_investigation_created_idx` | `(investigation_id, created_at DESC, id ASC)` | analyst listing (`created_at DESC, id ASC`) |
+| `research_result_investigation_subject_created_idx` | `(investigation_id, subject_entity_id, created_at DESC, id ASC)` | investigation + subject analyst listing |
+
+### Assessment
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `assessment_investigation_listing_idx` (pre-existing) | `(investigation_id, created_at DESC, id ASC) WHERE deleted_at IS NULL` | internal newest-created listing |
+| `assessment_investigation_version_idx` | `(investigation_id, version DESC, id ASC) WHERE deleted_at IS NULL` | Assessment version list (`version DESC, id ASC`) |
+
+The current/final Assessment is resolved exclusively through the
+Investigation's durable `assessment_id` pointer; `MAX(version)` inference is
+never used. Assessment version lists are `assessment` rows; generic
+state-change history is `domain_object_history`. The two are never conflated.
+
+### Investigation timeline
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `investigation_timeline_event_chronological_idx` (pre-existing) | `(investigation_id, occurred_at, sequence)` | chronological timeline listing (`occurred_at ASC, sequence ASC`) |
+
+The `sequence` column is a table-wide monotonic sequence and is the stable
+cursor tie-breaker; no UUID is required. The event-type filter is a bounded
+residual filter in v0.1 (low cardinality).
+
+### Generic domain-object history
+
+Generic resource-state history lives in `domain_object_history` with stable
+object identity `object_type + object_id` (the original domain object ID).
+No `natural_key` column exists or is introduced. The history row's own
+primary key `id` (pre-existing) is the stable pagination tie-breaker under
+`occurred_at DESC, id ASC`; nothing is invented for cursor pagination.
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `domain_object_history_object_idx` (pre-existing) | `(object_type, object_id, version)` | exact `object_type + object_id + version` lookup |
+| `domain_history_occurred_idx` | `(occurred_at DESC, id ASC)` | global chronological history browsing |
+| `domain_history_type_occurred_idx` | `(object_type, occurred_at DESC, id ASC)` | type-scoped history browsing (including type + occurred range) |
+| `domain_history_object_occurred_idx` | `(object_type, object_id, occurred_at DESC, id ASC)` | one object's complete history |
+| `domain_history_investigation_occurred_idx` | `(investigation_id, occurred_at DESC, id ASC) WHERE investigation_id IS NOT NULL` | investigation-scoped history browsing |
+
+RelationshipObservation is deliberately excluded from
+`domain_object_history`; its historical record is its own immutable rows.
