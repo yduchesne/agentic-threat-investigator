@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agentic_threat_investigator.domain.assessment import Assessment
 from agentic_threat_investigator.domain.entities import EntityType
@@ -25,9 +25,11 @@ from agentic_threat_investigator.domain.investigation import (
     PivotRequest,
     PivotStatus,
     ProviderWorkItem,
+    ResearchExecutionStatus,
     StopReason,
     pivot_class,
 )
+from agentic_threat_investigator.domain.research_agent import ResearchAgentRequest
 
 
 class PivotRejectionReason(str, Enum):
@@ -66,6 +68,48 @@ class CoordinatorEntityView(BaseModel):
     deleted: bool = False
 
 
+class PlannedResearchRequest(BaseModel):
+    """One deterministic, already-planned research request chosen by policy.
+
+    ``context_fingerprint`` is the schema-versioned deterministic identity of
+    the exact research context; the Coordinator deduplicates completion and
+    exhaustion against it. The request is fully explicit so graph execution
+    never rebuilds or re-plans the question. This is pure policy output: it
+    carries no retrieval, persistence, provider, or LLM dependency.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    request: ResearchAgentRequest
+    context_fingerprint: str
+
+    @field_validator("context_fingerprint")
+    @classmethod
+    def validate_fingerprint(cls, value: str) -> str:
+        """Reject blank fingerprints."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("research context fingerprint must not be blank")
+        return stripped
+
+
+class ResearchRequestPlanner(ABC):
+    """Plan one deterministic bounded research request for a due entity."""
+
+    @abstractmethod
+    def plan(
+        self,
+        *,
+        investigation: InvestigationState,
+        entity: CoordinatorEntityView,
+    ) -> PlannedResearchRequest:
+        """Return the planned request plus its stable context fingerprint.
+
+        The planner must be pure and deterministic: no LLM, clock, random
+        values, persistence, or network access.
+        """
+
+
 class CoordinatorPolicyContext(BaseModel):
     """Authoritative, short-lived snapshot supplied to the pure policy.
 
@@ -90,6 +134,7 @@ class CoordinatorAction(str, Enum):
     EXECUTE_PROVIDER_WORK = "execute_provider_work"
     REQUEST_ANALYSIS = "request_analysis"
     AUTHORIZE_PIVOT = "authorize_pivot"
+    REQUEST_RESEARCH = "request_research"
     STOP = "stop"
 
 
@@ -102,6 +147,7 @@ class CoordinatorDecision(BaseModel):
     work_items: tuple[ProviderWorkItem, ...] = ()
     pivots: tuple[PivotRequest, ...] = ()
     research_entity_ids: tuple[UUID, ...] = ()
+    research_request: PlannedResearchRequest | None = None
     stop_reason: StopReason | None = None
     rejection_reasons: tuple[PivotRejectionReason, ...] = ()
     rejections: tuple[PivotRejection, ...] = ()
@@ -113,6 +159,37 @@ class CoordinatorDecision(BaseModel):
     research-only marking, skipped duplicates, provider errors, or LLM repair
     attempts.
     """
+
+    @model_validator(mode="after")
+    def research_decision_shape(self) -> "CoordinatorDecision":
+        """Enforce the exact REQUEST_RESEARCH decision shape.
+
+        A research decision carries exactly one planned request and no
+        provider work, pivots, research markers, stop reason, or replan
+        consumption; every other action carries no planned request.
+        """
+        if self.action is CoordinatorAction.REQUEST_RESEARCH:
+            if self.research_request is None:
+                raise ValueError(
+                    "research decisions require exactly one planned request"
+                )
+            if (
+                self.work_items
+                or self.pivots
+                or self.research_entity_ids
+                or self.stop_reason is not None
+            ):
+                raise ValueError(
+                    "research decisions carry no provider work, pivots, "
+                    "research markers, or stop reason"
+                )
+            if self.consumes_replan:
+                raise ValueError("research decisions never consume a replan")
+        elif self.research_request is not None:
+            raise ValueError(
+                "only research decisions may carry a planned research request"
+            )
+        return self
 
 
 class ProviderWorkPlanner(ABC):
@@ -147,9 +224,26 @@ class MappingProviderWorkPlanner(ProviderWorkPlanner):
 class CoordinatorPolicy:
     """Pure policy enforcing provenance, duplicate, depth, and budget rules."""
 
-    def __init__(self, planner: ProviderWorkPlanner) -> None:
-        """Bind the deterministic provider-work planner."""
+    def __init__(
+        self,
+        planner: ProviderWorkPlanner,
+        research_planner: ResearchRequestPlanner | None = None,
+    ) -> None:
+        """Bind the deterministic provider-work and optional research planners.
+
+        When no research planner is bound, the policy never selects
+        REQUEST_RESEARCH: the PR 21 marker behavior (``MARK_RESEARCH_REQUIRED``
+        through the AUTHORIZE_PIVOT transition) remains fully intact, and
+        already-marked requirements simply stay unexecuted. Production
+        composition always binds a deterministic research planner.
+        """
         self._planner = planner
+        self._research_planner = research_planner
+
+    @property
+    def research_planner(self) -> ResearchRequestPlanner | None:
+        """Return the bound research planner, or ``None`` when unbound."""
+        return self._research_planner
 
     def decide(
         self, *, state: InvestigationState, context: CoordinatorPolicyContext
@@ -207,6 +301,21 @@ class CoordinatorPolicy:
         if disposition is None and current_evidence:
             # Evidence exists but no analysis has been performed yet.
             return CoordinatorDecision(action=CoordinatorAction.REQUEST_ANALYSIS)
+
+        # 4b. After evidence synchronization, one already-marked due research
+        #     context executes before any terminal or pivot decision: new
+        #     Evidence is always analyzed first, and explicitly scheduled
+        #     contextual research is completed before the investigation can
+        #     terminate merely because no provider pivot remains. Research
+        #     completion never creates Evidence, so it does not automatically
+        #     trigger another analysis round.
+        due_research = self._due_research_request(state, context)
+        if due_research is not None:
+            return CoordinatorDecision(
+                action=CoordinatorAction.REQUEST_RESEARCH,
+                research_request=due_research,
+                consumes_replan=False,
+            )
 
         # 5. SUFFICIENT stops only when the disposition is current for the
         #    exact analyzed evidence set (guaranteed above).
@@ -375,6 +484,58 @@ class CoordinatorPolicy:
             if cls is PivotClass.RESEARCHABLE and entity_id not in already:
                 markers.append(entity_id)
         return markers
+
+    def _due_research_request(
+        self,
+        state: InvestigationState,
+        context: CoordinatorPolicyContext,
+    ) -> PlannedResearchRequest | None:
+        """Return at most one due research context in deterministic order.
+
+        Candidates follow the existing Coordinator ordering (roots in
+        ``root_entity_ids`` order, then traversal first-discovery order) and
+        are restricted to entities already marked research-required and still
+        visible/non-deleted RESEARCHABLE. The current request is planned, its
+        fingerprint computed, and matching execution state inspected: a
+        COMPLETED or EXHAUSTED unchanged context is skipped (it is no longer
+        due), while a REQUESTED context remains due for the graph's
+        persisted-attempts/reconciliation semantics. No state is mutated.
+        """
+        planner = self._research_planner
+        if planner is None:
+            return None
+        views = {entity.entity_id: entity for entity in context.entities}
+        required = set(state.research_required_for_entity_ids)
+        for entity_id in self._candidate_order(state, context):
+            if entity_id not in required:
+                continue
+            entity = views.get(entity_id)
+            if entity is None or entity.deleted:
+                continue
+            try:
+                cls = pivot_class(entity.entity_type)
+            except KeyError:
+                continue
+            if cls is not PivotClass.RESEARCHABLE:
+                continue
+            planned = planner.plan(investigation=state, entity=entity)
+            for execution in state.research_executions:
+                if (
+                    execution.subject_entity_id != entity_id
+                    or execution.context_fingerprint != planned.context_fingerprint
+                ):
+                    continue
+                if execution.status is ResearchExecutionStatus.COMPLETED:
+                    break
+                if execution.status is ResearchExecutionStatus.EXHAUSTED:
+                    break
+                # REQUESTED: the durable attempt state owns retry/reconciliation
+                # semantics; the context remains due so the graph node can
+                # re-authorize or resolve it deterministically.
+                return planned
+            else:
+                return planned
+        return None
 
     def _authorize_candidates(
         self,

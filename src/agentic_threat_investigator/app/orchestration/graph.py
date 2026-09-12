@@ -32,6 +32,7 @@ from agentic_threat_investigator.app.orchestration.coordinator import (
     CoordinatorAction,
     CoordinatorDecision,
     CoordinatorPolicy,
+    PlannedResearchRequest,
 )
 from agentic_threat_investigator.app.orchestration.dispatcher import TaskDispatcher
 from agentic_threat_investigator.app.orchestration.models import (
@@ -40,6 +41,13 @@ from agentic_threat_investigator.app.orchestration.models import (
     finalize_stop_state,
     record_provider_outcome,
     select_provider_work,
+)
+from agentic_threat_investigator.app.orchestration.research import (
+    AmbiguousResearchReconciliationError,
+    ResearchExecutionOutcome,
+    ResearchExecutionReconciler,
+    ResearchExecutor,
+    research_execution_recoverable,
 )
 from agentic_threat_investigator.app.orchestration.services import (
     CoordinatorContextLoader,
@@ -51,11 +59,14 @@ from agentic_threat_investigator.app.orchestration.timeline_actions import (
     TimelineActionService,
 )
 from agentic_threat_investigator.domain.investigation import (
+    MAX_RESEARCH_EXECUTION_ATTEMPTS,
     CoordinatorTransitionKind,
     InvestigationError,
     InvestigationState,
     PivotRequest,
     ProviderWorkItem,
+    ResearchExecutionState,
+    ResearchExecutionStatus,
     StopReason,
     is_terminal_status,
 )
@@ -139,6 +150,39 @@ class StopWithoutReasonError(ValueError):
     def __init__(self) -> None:
         """Build the fixed safe stop-without-reason message."""
         super().__init__("coordinator stop decision requires a stop reason")
+
+
+class MissingResearchRequestError(ValueError):
+    """Raised when a REQUEST_RESEARCH decision lacks a planned request."""
+
+    def __init__(self) -> None:
+        """Build the fixed safe missing-request message."""
+        super().__init__("research decision requires a planned research request")
+
+
+class ResearchOutcomeMismatchError(ValueError):
+    """Raised when a research outcome does not match the durable context.
+
+    The graph adopts only results bound to the planned Investigation, subject
+    entity, and query; a mismatch fails closed with this typed error and no
+    completion persistence.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Record a safe fixed detail message."""
+        super().__init__(message)
+
+
+class ResolvedResearchContextError(ValueError):
+    """Raised when policy selected a research context already resolved.
+
+    A COMPLETED or EXHAUSTED execution is never due; reaching this node with
+    such a context is an invariant violation that fails closed.
+    """
+
+    def __init__(self) -> None:
+        """Build the fixed safe resolved-context message."""
+        super().__init__("research decision selected a resolved execution context")
 
 
 class AuthorizeWithoutPivotError(ValueError):
@@ -571,6 +615,398 @@ async def analyze(
     return {"investigation": authoritative, "_coordinator_decision": None}
 
 
+def _research_execution_matching(
+    state: InvestigationState, planned: PlannedResearchRequest
+) -> ResearchExecutionState | None:
+    """Return the durable execution entry for the exact planned context."""
+    for execution in state.research_executions:
+        if (
+            execution.subject_entity_id == planned.request.subject_entity_id
+            and execution.context_fingerprint == planned.context_fingerprint
+        ):
+            return execution
+    return None
+
+
+def _replace_research_execution(
+    executions: list[ResearchExecutionState],
+    planned: PlannedResearchRequest,
+    replacement: ResearchExecutionState,
+) -> list[ResearchExecutionState]:
+    """Replace the exact-context entry in place, preserving deterministic order."""
+    result: list[ResearchExecutionState] = []
+    for entry in executions:
+        if (
+            entry.subject_entity_id == planned.request.subject_entity_id
+            and entry.context_fingerprint == planned.context_fingerprint
+        ):
+            result.append(replacement)
+        else:
+            result.append(entry)
+    return result
+
+
+def _authorize_research_request(
+    investigation: InvestigationState, planned: PlannedResearchRequest
+) -> tuple[InvestigationState, bool, int]:
+    """Return the REQUEST_RESEARCH state plus whether a new attempt is authorized.
+
+    A context with no execution entry starts at attempt 1; an existing
+    REQUESTED context increments its attempt counter by one (never above
+    ``MAX_RESEARCH_EXECUTION_ATTEMPTS``). A REQUESTED context already at the
+    final attempt is a crash resume: no new attempt is authorized and the
+    caller proceeds to reconciliation only. A COMPLETED/EXHAUSTED context is
+    never due and fails closed.
+    """
+    existing = _research_execution_matching(investigation, planned)
+    if existing is None:
+        entry = ResearchExecutionState(
+            subject_entity_id=planned.request.subject_entity_id,
+            context_fingerprint=planned.context_fingerprint,
+            query=planned.request.query,
+            entity_ids=planned.request.entity_ids,
+            source_ids=planned.request.source_ids,
+            document_types=planned.request.document_types,
+            max_results=planned.request.max_results,
+            status=ResearchExecutionStatus.REQUESTED,
+            attempts=1,
+        )
+        updated = investigation.model_copy(
+            update={"research_executions": [*investigation.research_executions, entry]}
+        )
+        return updated, True, 1
+    if existing.status is ResearchExecutionStatus.REQUESTED:
+        if existing.attempts >= MAX_RESEARCH_EXECUTION_ATTEMPTS:
+            return investigation, False, existing.attempts
+        next_attempts = existing.attempts + 1
+        replacement = existing.model_copy(
+            update={
+                "status": ResearchExecutionStatus.REQUESTED,
+                "attempts": next_attempts,
+            }
+        )
+        updated = investigation.model_copy(
+            update={
+                "research_executions": _replace_research_execution(
+                    investigation.research_executions, planned, replacement
+                )
+            }
+        )
+        return updated, True, next_attempts
+    raise ResolvedResearchContextError()
+
+
+def _research_completion_state(
+    investigation: InvestigationState,
+    planned: PlannedResearchRequest,
+    outcome: ResearchExecutionOutcome,
+) -> InvestigationState:
+    """Resolve the exact REQUESTED context to COMPLETED and link its result once."""
+    existing = _research_execution_matching(investigation, planned)
+    if existing is None or existing.status is not ResearchExecutionStatus.REQUESTED:
+        raise ResolvedResearchContextError()
+    replacement = existing.model_copy(
+        update={
+            "status": ResearchExecutionStatus.COMPLETED,
+            "result_id": outcome.result_id,
+        }
+    )
+    result_ids = list(investigation.research_result_ids)
+    if outcome.result_id not in result_ids:
+        result_ids.append(outcome.result_id)
+    return investigation.model_copy(
+        update={
+            "research_executions": _replace_research_execution(
+                investigation.research_executions, planned, replacement
+            ),
+            "research_result_ids": result_ids,
+        }
+    )
+
+
+def _research_exhaustion_state(
+    investigation: InvestigationState, planned: PlannedResearchRequest
+) -> InvestigationState:
+    """Resolve the exact REQUESTED context to EXHAUSTED with no result link."""
+    existing = _research_execution_matching(investigation, planned)
+    if existing is None or existing.status is not ResearchExecutionStatus.REQUESTED:
+        raise ResolvedResearchContextError()
+    replacement = existing.model_copy(
+        update={
+            "status": ResearchExecutionStatus.EXHAUSTED,
+            "result_id": None,
+        }
+    )
+    return investigation.model_copy(
+        update={
+            "research_executions": _replace_research_execution(
+                investigation.research_executions, planned, replacement
+            )
+        }
+    )
+
+
+async def research_node(
+    research_executor: ResearchExecutor,
+    research_reconciler: ResearchExecutionReconciler,
+    transition_service: CoordinatorTransitionService,
+    timeline_action_service: TimelineActionService,
+    fatal_stop_service: FatalStopService,
+    state: OrchestrationGraphState,
+) -> OrchestrationGraphState:
+    """Execute one due research context as a bounded durable synchronization point.
+
+    The node requires a REQUEST_RESEARCH decision carrying one planned
+    request, verifies the executor binding, persists the REQUEST_RESEARCH
+    transition (appending the attempt entry or incrementing the attempt
+    counter) together with the RESEARCH_REQUESTED timeline event in one short
+    transaction, closes it, reconciles an already-persisted matching
+    ResearchResult (adopting it without another model call), otherwise
+    executes the ResearchExecutor outside any transaction, reloads the
+    authoritative Investigation (LLM accounting may have advanced its
+    version), validates the outcome binding, and persists COMPLETED or
+    bounded EXHAUSTED through RECORD_RESEARCH_OUTCOME against the fresh
+    version. The node always returns to the Coordinator; it never routes
+    directly to pivot authorization.
+    """
+    decision = _require_decision(state, CoordinatorAction.REQUEST_RESEARCH)
+    planned = decision.research_request
+    if planned is None:
+        raise MissingResearchRequestError()
+    investigation = state["investigation"]
+
+    if (
+        research_executor.bound_investigation_id is not None
+        and research_executor.bound_investigation_id != investigation.investigation_id
+    ):
+        raise InvestigationGraphBindingConflictError()
+
+    # Persist the durable REQUEST_RESEARCH transition + timeline event before
+    # any external Research Agent I/O; the transaction is closed inside the
+    # transition service.
+    updated, authorized, next_attempts = _authorize_research_request(
+        investigation, planned
+    )
+    if authorized:
+        validated = InvestigationState.model_validate(updated.model_dump())
+        event = timeline_action_service.research_requested(
+            entity_id=planned.request.subject_entity_id, state=validated
+        )
+        try:
+            persisted = await transition_service.persist(
+                investigation.investigation_id,
+                CoordinatorTransitionKind.REQUEST_RESEARCH,
+                validated,
+                expected_version=_require_version(investigation),
+                events=(event,),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if _persistence_error(exc):
+                raise
+            fatal = await fatal_stop_service.fatalize(
+                investigation.investigation_id,
+                InvestigationError(
+                    source="orchestration",
+                    code="research_request_error",
+                    message="research request could not be persisted safely",
+                    recoverable=False,
+                ),
+                expected_version=_require_version(investigation),
+            )
+            return {
+                "investigation": fatal,
+                "_coordinator_decision": CoordinatorDecision(
+                    action=CoordinatorAction.STOP,
+                    stop_reason=StopReason.FATAL_ERROR,
+                ),
+            }
+    else:
+        persisted = investigation
+
+    # Reconcile an already-persisted matching result: adopt it without
+    # another model call; a final-attempt resume with no durable result fails
+    # the unchanged context to EXHAUSTED (the bound never permits a third
+    # execution).
+    outcome: ResearchExecutionOutcome | None = None
+    try:
+        match = await research_reconciler.find_matching_result(
+            investigation_id=investigation.investigation_id,
+            subject_entity_id=planned.request.subject_entity_id,
+            query=planned.request.query,
+            state=persisted,
+        )
+        if match is not None:
+            outcome = ResearchExecutionOutcome(
+                result_id=match.id,
+                investigation_id=match.investigation_id,
+                subject_entity_id=match.subject_entity_id,
+                query=match.query,
+            )
+        elif not authorized:
+            return await _resolve_research_outcome(
+                transition_service,
+                fatal_stop_service,
+                investigation.investigation_id,
+                planned,
+                outcome=None,
+                state=persisted,
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        if _persistence_error(exc) or isinstance(
+            exc, AmbiguousResearchReconciliationError
+        ):
+            raise
+        fatal = await fatal_stop_service.fatalize(
+            investigation.investigation_id,
+            InvestigationError(
+                source="orchestration",
+                code="research_reconciliation_error",
+                message="research reconciliation could not complete safely",
+                recoverable=False,
+            ),
+            expected_version=_require_version(persisted),
+        )
+        return {
+            "investigation": fatal,
+            "_coordinator_decision": CoordinatorDecision(
+                action=CoordinatorAction.STOP,
+                stop_reason=StopReason.FATAL_ERROR,
+            ),
+        }
+
+    if outcome is None:
+        # Authorized attempt: execute the Research Agent outside any UoW.
+        try:
+            outcome = await research_executor.execute(planned.request)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if _persistence_error(exc):
+                raise
+            latest = await transition_service.reload(investigation.investigation_id)
+            if research_execution_recoverable(exc) and next_attempts < (
+                MAX_RESEARCH_EXECUTION_ATTEMPTS
+            ):
+                # One bounded later retry remains possible: leave the context
+                # REQUESTED and return to Coordinator policy; never loop inside
+                # this node.
+                return {"investigation": latest, "_coordinator_decision": None}
+            if research_execution_recoverable(exc):
+                # Final recoverable failure: EXHAUSTED, no result link.
+                return await _resolve_research_outcome(
+                    transition_service,
+                    fatal_stop_service,
+                    investigation.investigation_id,
+                    planned,
+                    outcome=None,
+                    state=latest,
+                )
+            fatal = await fatal_stop_service.fatalize(
+                investigation.investigation_id,
+                InvestigationError(
+                    source="research",
+                    code="research_execution_error",
+                    message="contextual research could not complete safely",
+                    recoverable=False,
+                ),
+                expected_version=_require_version(latest),
+            )
+            return {
+                "investigation": fatal,
+                "_coordinator_decision": CoordinatorDecision(
+                    action=CoordinatorAction.STOP,
+                    stop_reason=StopReason.FATAL_ERROR,
+                ),
+            }
+
+    return await _resolve_research_outcome(
+        transition_service,
+        fatal_stop_service,
+        investigation.investigation_id,
+        planned,
+        outcome=outcome,
+        state=None,
+    )
+
+
+async def _resolve_research_outcome(
+    transition_service: CoordinatorTransitionService,
+    fatal_stop_service: FatalStopService,
+    investigation_id: UUID,
+    planned: PlannedResearchRequest,
+    *,
+    outcome: ResearchExecutionOutcome | None,
+    state: InvestigationState | None,
+) -> OrchestrationGraphState:
+    """Reload authoritative state and persist COMPLETED or EXHAUSTED.
+
+    The reload is mandatory: the Research Agent's LLM accounting may have
+    advanced the Investigation version between the request transition and the
+    completion transition, and persisting completion against the pre-LLM
+    expected version would overwrite accounting. An outcome is validated
+    against the exact planned context before any completion persistence;
+    invariant/binding failures fail closed through a bounded fatal stop.
+    """
+    authoritative = (
+        state
+        if state is not None
+        else await transition_service.reload(investigation_id)
+    )
+    if authoritative.investigation_id != investigation_id:
+        raise InvestigationGraphContextMismatchError()
+    try:
+        if outcome is not None:
+            if outcome.investigation_id != investigation_id:
+                raise ResearchOutcomeMismatchError(
+                    "research outcome investigation does not match the durable state"
+                )
+            if outcome.subject_entity_id != planned.request.subject_entity_id:
+                raise ResearchOutcomeMismatchError(
+                    "research outcome subject does not match the planned context"
+                )
+            if outcome.query != planned.request.query:
+                raise ResearchOutcomeMismatchError(
+                    "research outcome query does not match the planned context"
+                )
+            final = _research_completion_state(authoritative, planned, outcome)
+        else:
+            final = _research_exhaustion_state(authoritative, planned)
+        validated = InvestigationState.model_validate(final.model_dump())
+        persisted = await transition_service.persist(
+            investigation_id,
+            CoordinatorTransitionKind.RECORD_RESEARCH_OUTCOME,
+            validated,
+            expected_version=_require_version(authoritative),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        if _persistence_error(exc):
+            raise
+        fatal = await fatal_stop_service.fatalize(
+            investigation_id,
+            InvestigationError(
+                source="orchestration",
+                code="research_outcome_error",
+                message="research outcome could not be recorded safely",
+                recoverable=False,
+            ),
+            expected_version=_require_version(authoritative),
+        )
+        return {
+            "investigation": fatal,
+            "_coordinator_decision": CoordinatorDecision(
+                action=CoordinatorAction.STOP,
+                stop_reason=StopReason.FATAL_ERROR,
+            ),
+        }
+    return {"investigation": persisted, "_coordinator_decision": None}
+
+
 async def finalize_stop_node(
     status_writer: InvestigationStatusWriter,
     timeline_action_service: TimelineActionService,
@@ -708,6 +1144,8 @@ def _route_after_coordinator(state: OrchestrationGraphState) -> str:
         return "analyze"
     if action is CoordinatorAction.AUTHORIZE_PIVOT:
         return "authorize_pivot"
+    if action is CoordinatorAction.REQUEST_RESEARCH:
+        return "research"
     if action is CoordinatorAction.STOP:
         return "finalize_stop"
     raise UnknownCoordinatorActionError(action.value)
@@ -741,6 +1179,20 @@ def _route_after_analyze(_state: OrchestrationGraphState) -> str:
     return "coordinator"
 
 
+def _route_after_research(state: OrchestrationGraphState) -> str:
+    """After research, return to the coordinator.
+
+    Research completion is never pivot authority: the only way out of the
+    research node is back to Coordinator policy, except a fatalized
+    investigation which finalizes directly.
+    """
+    return (
+        "finalize_stop"
+        if is_terminal_status(state["investigation"].status)
+        else "coordinator"
+    )
+
+
 def build_investigation_graph(
     dispatcher: TaskDispatcher,
     *,
@@ -751,6 +1203,8 @@ def build_investigation_graph(
     status_writer: InvestigationStatusWriter,
     timeline_action_service: TimelineActionService,
     fatal_stop_service: FatalStopService,
+    research_executor: ResearchExecutor | None = None,
+    research_reconciler: ResearchExecutionReconciler | None = None,
     expected_investigation_id: UUID | None = None,
 ) -> CompiledStateGraph[
     OrchestrationGraphState, None, OrchestrationGraphState, OrchestrationGraphState
@@ -758,9 +1212,11 @@ def build_investigation_graph(
     """Build the deterministic PR 21 coordinator-driven orchestration graph.
 
     All coordinator dependencies are required; partial composition raises
-    :class:`CoordinatorDependencyError`. The legacy PR 19A topology is
-    available only through :func:`build_legacy_investigation_graph` for
-    isolated mechanics tests.
+    :class:`CoordinatorDependencyError`. A policy bound to a research planner
+    additionally requires a ``research_executor`` and ``research_reconciler``;
+    a graph that routes REQUEST_RESEARCH without them fails closed at
+    construction. The legacy PR 19A topology is available only through
+    :func:`build_legacy_investigation_graph` for isolated mechanics tests.
 
     Binding derivation: when the dispatcher exposes a bound investigation
     identity, that identity is adopted automatically as the graph's binding
@@ -791,12 +1247,22 @@ def build_investigation_graph(
             transition_service.bound_investigation_id,
             status_writer.bound_investigation_id,
             fatal_stop_service.bound_investigation_id,
+            (
+                research_executor.bound_investigation_id
+                if research_executor is not None
+                else None
+            ),
         )
         if any(
             binding is not None and binding != effective_investigation_id
             for binding in dependency_bindings
         ):
             raise InvestigationGraphBindingConflictError()
+
+    if coordinator_policy.research_planner is not None and (
+        research_executor is None or research_reconciler is None
+    ):
+        raise CoordinatorDependencyError()
 
     builder: StateGraph[OrchestrationGraphState] = StateGraph(OrchestrationGraphState)
 
@@ -921,6 +1387,21 @@ def build_investigation_graph(
 
     builder.add_node("analyze", analyze_node)
 
+    async def research_node_entry(
+        state: OrchestrationGraphState,
+    ) -> OrchestrationGraphState:
+        assert research_executor is not None and research_reconciler is not None
+        return await research_node(
+            research_executor,
+            research_reconciler,
+            transition_service,
+            timeline_action_service,
+            fatal_stop_service,
+            state,
+        )
+
+    builder.add_node("research", research_node_entry)
+
     async def stop_node(
         state: OrchestrationGraphState,
     ) -> OrchestrationGraphState:
@@ -937,6 +1418,7 @@ def build_investigation_graph(
             "select_work": "select_work",
             "analyze": "analyze",
             "authorize_pivot": "authorize_pivot",
+            "research": "research",
             "finalize_stop": "finalize_stop",
         },
     )
@@ -968,6 +1450,11 @@ def build_investigation_graph(
         "analyze",
         _route_after_analyze,
         {"coordinator": "coordinator"},
+    )
+    builder.add_conditional_edges(
+        "research",
+        _route_after_research,
+        {"coordinator": "coordinator", "finalize_stop": "finalize_stop"},
     )
     builder.add_edge("finalize_stop", END)
 

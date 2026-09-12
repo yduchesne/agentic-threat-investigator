@@ -22,6 +22,9 @@ from agentic_threat_investigator.app.orchestration.coordinator import (
     PivotRejectionReason,
     ProviderWorkPlanner,
 )
+from agentic_threat_investigator.app.orchestration.research import (
+    DeterministicResearchRequestPlanner,
+)
 from agentic_threat_investigator.domain.assessment import (
     Assessment,
     AssessmentConfidence,
@@ -1037,3 +1040,255 @@ class TestCoordinatorWithDisposition:
         decision = policy.decide(state=state, context=context)
         assert decision.action is CoordinatorAction.STOP
         assert decision.stop_reason is StopReason.NO_ELIGIBLE_PIVOTS
+
+
+class TestCoordinatorResearchRequest:
+    """PR 22C REQUEST_RESEARCH precedence and deduplication (U12-U22)."""
+
+    def _research_policy(self) -> CoordinatorPolicy:
+        """Return a policy bound to the deterministic research planner."""
+        return CoordinatorPolicy(
+            _planner(), research_planner=DeterministicResearchRequestPlanner()
+        )
+
+    def _malware_view(
+        self, value: str = "asyncrat", entity_id: UUID = _MALWARE_ID
+    ) -> CoordinatorEntityView:
+        """Return one visible RESEARCHABLE malware view."""
+        return CoordinatorEntityView(
+            entity_id=entity_id,
+            entity_type=EntityType.MALWARE,
+            value=value,
+        )
+
+    def _marked_state(self, **overrides: Any) -> InvestigationState:
+        """Return a state whose root is investigated and malware is marked."""
+        return _state(
+            discovered_entity_ids=[_MALWARE_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID],
+            research_required_for_entity_ids=[_MALWARE_ID],
+            **overrides,
+        )
+
+    def _planned_fingerprint(self, value: str) -> str:
+        """Return the deterministic fingerprint for one entity value."""
+        planner = DeterministicResearchRequestPlanner()
+        state = _state(discovered_entity_ids=[_MALWARE_ID])
+        return planner.plan(
+            investigation=state, entity=self._malware_view(value=value)
+        ).context_fingerprint
+
+    def test_unmarked_researchable_still_marks_not_executes(self) -> None:
+        """U12: an unmarked RESEARCHABLE entity takes the marker path."""
+        policy = self._research_policy()
+        state = _state(
+            discovered_entity_ids=[_MALWARE_ID],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID, entity_type=EntityType.DOMAIN
+                ),
+                self._malware_view(),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        # Marker persistence keeps precedence over research execution.
+        assert decision.action is CoordinatorAction.AUTHORIZE_PIVOT
+        assert decision.research_entity_ids == (_MALWARE_ID,)
+        assert decision.research_request is None
+
+    def test_marked_due_entity_requests_research(self) -> None:
+        """U13: a marked due context with no new evidence requests research."""
+        policy = self._research_policy()
+        state = self._marked_state()
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID, entity_type=EntityType.DOMAIN
+                ),
+                self._malware_view(),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.REQUEST_RESEARCH
+        assert decision.research_request is not None
+        assert decision.research_request.request.subject_entity_id == _MALWARE_ID
+        assert decision.work_items == ()
+        assert decision.pivots == ()
+        assert decision.stop_reason is None
+        assert decision.consumes_replan is False
+
+    def test_multiple_due_entities_selects_first_only(self) -> None:
+        """U14: only the first deterministic due candidate is selected."""
+        malware_b = UUID("00000000-0000-0000-0000-00000000000b")
+        policy = self._research_policy()
+        state = _state(
+            discovered_entity_ids=[_MALWARE_ID, malware_b],
+            investigated_entity_ids=[_ROOT_DOMAIN_ID],
+            research_required_for_entity_ids=[_MALWARE_ID, malware_b],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID, entity_type=EntityType.DOMAIN
+                ),
+                self._malware_view(),
+                CoordinatorEntityView(
+                    entity_id=malware_b,
+                    entity_type=EntityType.MALWARE,
+                    value="njrat",
+                ),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.REQUEST_RESEARCH
+        assert decision.research_request is not None
+        assert decision.research_request.request.subject_entity_id == _MALWARE_ID
+
+    def test_pending_provider_work_precedes_research(self) -> None:
+        """U15: pending provider work executes before due research."""
+        policy = self._research_policy()
+        state = self._marked_state(
+            pending_provider_work=[
+                ProviderWorkItem(
+                    provider=SourceId.GOOGLE_PUBLIC_DNS,
+                    entity_id=_ROOT_DOMAIN_ID,
+                    depth=0,
+                )
+            ]
+        )
+        decision = policy.decide(state=state, context=_context())
+        assert decision.action is CoordinatorAction.EXECUTE_PROVIDER_WORK
+        assert decision.research_request is None
+
+    def test_new_evidence_analysis_precedes_research(self) -> None:
+        """U16: new evidence analysis requests analysis before research."""
+        policy = self._research_policy()
+        evidence_id = UUID("00000000-0000-0000-0000-0000000000e9")
+        state = self._marked_state(evidence_ids=[evidence_id])
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID, entity_type=EntityType.DOMAIN
+                ),
+                self._malware_view(),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.REQUEST_ANALYSIS
+        assert decision.research_request is None
+
+    def test_due_research_precedes_sufficient_stop(self) -> None:
+        """U17: explicitly scheduled research completes before SUFFICIENT stop."""
+        policy = self._research_policy()
+        evidence_id = UUID("00000000-0000-0000-0000-0000000000ea")
+        state = self._marked_state(
+            evidence_ids=[evidence_id],
+            analyzed_evidence_ids=[evidence_id],
+            analysis_disposition=AnalysisDisposition.SUFFICIENT.value,
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID, entity_type=EntityType.DOMAIN
+                ),
+                self._malware_view(),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.REQUEST_RESEARCH
+        assert decision.stop_reason is None
+
+    def test_completed_unchanged_context_does_not_repeat(self) -> None:
+        """U18: a COMPLETED unchanged fingerprint is never re-requested."""
+        policy = self._research_policy()
+        result_id = UUID("00000000-0000-0000-0000-0000000000f8")
+        fingerprint = self._planned_fingerprint("asyncrat")
+        state = self._marked_state(
+            research_executions=[
+                {
+                    "subject_entity_id": _MALWARE_ID,
+                    "context_fingerprint": fingerprint,
+                    "query": "q",
+                    "status": "completed",
+                    "attempts": 1,
+                    "result_id": result_id,
+                }
+            ],
+            research_result_ids=[result_id],
+        )
+        decision = policy.decide(state=state, context=_context())
+        # Root is investigated and nothing else is eligible: plain stop.
+        assert decision.action is CoordinatorAction.STOP
+        assert decision.research_request is None
+
+    def test_exhausted_unchanged_context_does_not_repeat(self) -> None:
+        """U19: an EXHAUSTED unchanged fingerprint is never re-requested."""
+        policy = self._research_policy()
+        fingerprint = self._planned_fingerprint("asyncrat")
+        state = self._marked_state(
+            research_executions=[
+                {
+                    "subject_entity_id": _MALWARE_ID,
+                    "context_fingerprint": fingerprint,
+                    "query": "q",
+                    "status": "exhausted",
+                    "attempts": 2,
+                }
+            ]
+        )
+        decision = policy.decide(state=state, context=_context())
+        assert decision.action is CoordinatorAction.STOP
+        assert decision.research_request is None
+
+    def test_changed_context_becomes_due_again(self) -> None:
+        """U20: a COMPLETED old fingerprint does not suppress a changed context."""
+        policy = self._research_policy()
+        result_id = UUID("00000000-0000-0000-0000-0000000000f9")
+        old_fingerprint = self._planned_fingerprint("asyncrat")
+        state = self._marked_state(
+            research_executions=[
+                {
+                    "subject_entity_id": _MALWARE_ID,
+                    "context_fingerprint": old_fingerprint,
+                    "query": "old query",
+                    "status": "completed",
+                    "attempts": 1,
+                    "result_id": result_id,
+                }
+            ],
+            research_result_ids=[result_id],
+        )
+        context = _context(
+            entities=[
+                CoordinatorEntityView(
+                    entity_id=_ROOT_DOMAIN_ID, entity_type=EntityType.DOMAIN
+                ),
+                self._malware_view(value="njrat"),
+            ]
+        )
+        decision = policy.decide(state=state, context=context)
+        assert decision.action is CoordinatorAction.REQUEST_RESEARCH
+        assert decision.research_request is not None
+        assert decision.research_request.context_fingerprint != old_fingerprint
+
+    def test_research_only_decision_never_consumes_replan(self) -> None:
+        """U22: a research-only decision carries consumes_replan=False."""
+        policy = self._research_policy()
+        state = self._marked_state()
+        decision = policy.decide(
+            state=state,
+            context=_context(
+                entities=[
+                    CoordinatorEntityView(
+                        entity_id=_ROOT_DOMAIN_ID,
+                        entity_type=EntityType.DOMAIN,
+                    ),
+                    self._malware_view(),
+                ]
+            ),
+        )
+        assert decision.action is CoordinatorAction.REQUEST_RESEARCH
+        assert decision.consumes_replan is False

@@ -121,6 +121,10 @@ class TestInvestigationTimelineEvent:
                 InvestigationTimelineEventType.ENTITIES_DISCOVERED,
                 {"entity_ids": (uuid4(),)},
             ),
+            (
+                InvestigationTimelineEventType.RESEARCH_REQUESTED,
+                {"entity_ids": (uuid4(),), "provider": None, "target_entity_id": None},
+            ),
         ],
     )
     def test_valid_event_shapes_accepted(
@@ -240,6 +244,34 @@ class TestInvestigationTimelineEvent:
                 InvestigationTimelineEventType.ENTITIES_DISCOVERED,
                 {"error_code": "provider_error"},
             ),
+            (
+                InvestigationTimelineEventType.RESEARCH_REQUESTED,
+                {"entity_ids": ()},
+            ),
+            (
+                InvestigationTimelineEventType.RESEARCH_REQUESTED,
+                {"entity_ids": (uuid4(), uuid4())},
+            ),
+            (
+                InvestigationTimelineEventType.RESEARCH_REQUESTED,
+                {"provider": SourceId.GOOGLE_PUBLIC_DNS},
+            ),
+            (
+                InvestigationTimelineEventType.RESEARCH_REQUESTED,
+                {"target_entity_id": uuid4()},
+            ),
+            (
+                InvestigationTimelineEventType.RESEARCH_REQUESTED,
+                {"error_code": "provider_error"},
+            ),
+            (
+                InvestigationTimelineEventType.RESEARCH_REQUESTED,
+                {"reason_code": "sufficient_evidence"},
+            ),
+            (
+                InvestigationTimelineEventType.RESEARCH_REQUESTED,
+                {"pivot_depth": 1},
+            ),
         ],
     )
     def test_invalid_event_shapes_rejected(
@@ -331,6 +363,75 @@ class TestInvestigationTimelineEvent:
                 provider=None,
                 target_entity_id=None,
             )
+
+
+class TestResearchRequestedTimelineEvent:
+    """PR 22C RESEARCH_REQUESTED event contract (U23-U27)."""
+
+    @staticmethod
+    def _research_event(**overrides: Any) -> InvestigationTimelineEvent:
+        """Build a RESEARCH_REQUESTED event without provider/target defaults."""
+        fields: dict[str, Any] = {
+            "type": InvestigationTimelineEventType.RESEARCH_REQUESTED,
+            "entity_ids": (uuid4(),),
+            "provider": None,
+            "target_entity_id": None,
+        }
+        fields.update(overrides)
+        return _event(**fields)
+
+    def test_research_requested_carries_exactly_one_entity(self) -> None:
+        """U23: exactly one subject entity ID is carried."""
+        entity_id = uuid4()
+        event = self._research_event(entity_ids=(entity_id,))
+        assert event.entity_ids == (entity_id,)
+        assert event.provider is None
+        assert event.target_entity_id is None
+        assert event.error_code is None
+        assert event.reason_code is None
+        assert event.pivot_depth is None
+
+    def test_zero_entity_ids_rejected(self) -> None:
+        """U24: zero entity IDs are rejected."""
+        with pytest.raises(ValidationError, match="exactly one entity ID"):
+            self._research_event(entity_ids=())
+
+    def test_multiple_entity_ids_rejected(self) -> None:
+        """U24: multiple entity IDs are rejected."""
+        with pytest.raises(ValidationError, match="exactly one entity ID"):
+            self._research_event(entity_ids=(uuid4(), uuid4()))
+
+    def test_provider_target_error_rejected(self) -> None:
+        """U25: provider/target/error fields are rejected."""
+        with pytest.raises(ValidationError, match="no provider, target"):
+            self._research_event(provider=SourceId.GOOGLE_PUBLIC_DNS)
+        with pytest.raises(ValidationError, match="no provider, target"):
+            self._research_event(target_entity_id=uuid4())
+        with pytest.raises(ValidationError, match="no provider, target"):
+            self._research_event(error_code="provider_error")
+
+    def test_no_reason_code_or_pivot_depth(self) -> None:
+        """U25: reason_code and pivot_depth are rejected."""
+        with pytest.raises(ValidationError, match="reason_code or pivot_depth"):
+            self._research_event(reason_code="sufficient_evidence")
+        with pytest.raises(ValidationError, match="reason_code or pivot_depth"):
+            self._research_event(pivot_depth=1)
+
+    def test_identifier_tuples_other_than_entity_rejected(self) -> None:
+        """U25: evidence/relationship tuples are rejected by extra shape."""
+        with pytest.raises(ValidationError):
+            self._research_event(evidence_ids=(uuid4(),))
+
+    def test_no_research_content_fields_exist(self) -> None:
+        """U27: the schema cannot carry query/value/claim content."""
+        event = self._research_event()
+        payload = event.model_dump()
+        assert "query" not in payload
+        assert "value" not in payload
+        assert "prompt" not in payload
+        assert "claims" not in payload
+        assert "source_url" not in payload
+        assert "failure" not in payload
 
 
 class TestUnitOfWorkTimelineSink:

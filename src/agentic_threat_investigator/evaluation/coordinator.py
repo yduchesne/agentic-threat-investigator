@@ -33,6 +33,7 @@ ACTION_ENTITY_DISCOVERED = "urn:ati:action:entity_discovered"
 ACTION_PIVOT_ENQUEUED = "urn:ati:action:pivot_enqueued"
 ACTION_PIVOT_EXECUTED = "urn:ati:action:pivot_executed"
 ACTION_PIVOT_SKIPPED = "urn:ati:action:pivot_skipped"
+ACTION_RESEARCH_REQUESTED = "urn:ati:action:research_requested"
 ACTION_ASSESSMENT_REQUESTED = "urn:ati:action:assessment_requested"
 ACTION_INVESTIGATION_STOPPED = "urn:ati:action:investigation_stopped"
 

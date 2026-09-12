@@ -68,6 +68,7 @@ EXPECTED_FUNCTIONS = {
     "set_investigation_analysis_result",
     "append_research_result",
     "jsonb_array_starts_with",
+    "research_execution_valid",
 }
 
 

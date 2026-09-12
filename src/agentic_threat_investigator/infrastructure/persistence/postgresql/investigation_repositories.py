@@ -70,6 +70,7 @@ _OPERATIONAL_FIELDS = (
     "last_provider_outcome",
     "investigated_entity_ids",
     "research_required_for_entity_ids",
+    "research_executions",
     "research_result_ids",
     "assessment_id",
     "report_id",

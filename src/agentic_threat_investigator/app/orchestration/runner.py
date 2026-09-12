@@ -33,6 +33,7 @@ from agentic_threat_investigator.app.orchestration.coordinator import (
 from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
 )
+from agentic_threat_investigator.app.orchestration.research import ResearchExecutor
 from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationNotFoundError,
     UnitOfWork,
@@ -111,6 +112,7 @@ class LocalInvestigationRunner(InvestigationRunner):
         uow_factory: Callable[[], UnitOfWork],
         provider_registry: Mapping[SourceId, EvidenceProvider],
         analysis_executor_factory: Callable[[UUID], AnalysisExecutor],
+        research_executor_factory: Callable[[UUID], ResearchExecutor] | None = None,
         clock: Callable[[], datetime] | None = None,
         recursion_limit: int = 40,
     ) -> None:
@@ -119,13 +121,17 @@ class LocalInvestigationRunner(InvestigationRunner):
         ``recursion_limit`` bounds the LangGraph recursion depth for one
         invocation; the canonical trajectory measured value (40) is the
         default. The provider registry is copied defensively so a later caller
-        mutation cannot change a compiled graph's enabled provider set.
+        mutation cannot change a compiled graph's enabled provider set. A
+        ``research_executor_factory`` is optional: when absent the graph
+        never executes research (already-marked requirements stay marked),
+        preserving the pre-22C lifecycle for callers that opt out.
         """
         if recursion_limit <= 0:
             raise ValueError("recursion_limit must be positive")
         self._uow_factory = uow_factory
         self._provider_registry = dict(provider_registry)
         self._analysis_executor_factory = analysis_executor_factory
+        self._research_executor_factory = research_executor_factory
         self._clock: Callable[[], datetime] = (
             clock if clock is not None else (lambda: datetime.now(UTC))
         )
@@ -154,6 +160,11 @@ class LocalInvestigationRunner(InvestigationRunner):
             raise InvestigationRunnerLifecycleError()
 
         analysis_executor = self._analysis_executor_factory(investigation_id)
+        research_executor = (
+            self._research_executor_factory(investigation_id)
+            if self._research_executor_factory is not None
+            else None
+        )
         context = ProviderExecutionContext(
             investigation_id=investigation_id, clock=self._clock
         )
@@ -162,6 +173,7 @@ class LocalInvestigationRunner(InvestigationRunner):
             provider_registry=self._provider_registry,
             context=context,
             analysis_executor=analysis_executor,
+            research_executor=research_executor,
         )
         result = await graph.ainvoke(
             {"investigation": loaded},

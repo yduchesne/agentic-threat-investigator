@@ -39,6 +39,4 @@ def downgrade() -> None:
         "DROP FUNCTION IF EXISTS ati.set_investigation_analysis_result("
         "uuid, uuid, jsonb, text, uuid, uuid, bigint)"
     )
-    op.execute(
-        "DROP FUNCTION IF EXISTS ati.jsonb_array_starts_with(jsonb, jsonb)"
-    )
+    op.execute("DROP FUNCTION IF EXISTS ati.jsonb_array_starts_with(jsonb, jsonb)")

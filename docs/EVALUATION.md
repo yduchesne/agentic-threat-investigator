@@ -190,6 +190,7 @@ urn:ati:action:entity_discovered
 urn:ati:action:pivot_enqueued
 urn:ati:action:pivot_executed
 urn:ati:action:pivot_skipped
+urn:ati:action:research_requested     # PR 22C coordinator research execution
 urn:ati:action:assessment_requested
 urn:ati:action:investigation_stopped
 ```
@@ -197,7 +198,6 @@ urn:ati:action:investigation_stopped
 Planned future actions that are **not** emitted yet:
 
 ```text
-urn:ati:action:research_requested    # PR 22 research execution
 urn:ati:action:report_generated      # later report flow
 ```
 
@@ -250,9 +250,11 @@ both authorization and execution:
 Evaluation consumes durable structured actions and the authoritative final
 `InvestigationState` — never logs, never prose. The currently emitted action
 URNs are `urn:ati:action:provider_query`, `entity_discovered`,
-`pivot_enqueued`, `pivot_executed`, `pivot_skipped`, `assessment_requested`,
-and `investigation_stopped`. `research_requested` and `report_generated` are
-future PR 22/report-flow actions and are not emitted yet.
+`pivot_enqueued`, `pivot_executed`, `pivot_skipped`,
+`research_requested` (PR 22C), `assessment_requested`, and
+`investigation_stopped`. `report_generated` is a future report-flow action
+and is not emitted yet. PR 22C adds no research-quality, retrieval-relevance,
+or citation-quality scoring rules; those belong to PR 22D.
 
 Designed metrics (all denominator-safe, bounded to `[0.0, 1.0]`):
 
