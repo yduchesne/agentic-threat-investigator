@@ -88,6 +88,14 @@ class EvidenceQueryService(ABC):
         exact filter set.
         """
 
+    @abstractmethod
+    async def get(self, investigation_id: UUID, evidence_id: UUID) -> Evidence | None:
+        """Return one Evidence observation bound to the Investigation, if any.
+
+        A cross-Investigation lookup fails closed by returning ``None`` so
+        the HTTP layer can map it to a 404 without enumerating resources.
+        """
+
 
 def evidence_sort_values(retrieved_at: datetime, evidence_id: UUID) -> tuple[str, str]:
     """Return canonical cursor sort values for one evidence row."""

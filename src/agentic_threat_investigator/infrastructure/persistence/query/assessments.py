@@ -261,3 +261,26 @@ class PostgresAssessmentQueryService(AssessmentQueryService):
             .all()
         )
         return _with_findings(rows, finding_rows, support_rows)
+
+    async def get(
+        self, investigation_id: UUID, assessment_id: UUID
+    ) -> Assessment | None:
+        """Return one Assessment version bound to the Investigation, if any.
+
+        The exact version is returned regardless of the durable pointer;
+        soft-deleted Assessments are hidden and cross-Investigation lookups
+        fail closed with ``None``.
+        """
+        row = (
+            await self._session.execute(
+                select(AssessmentRow).where(
+                    AssessmentRow.id == assessment_id,
+                    AssessmentRow.investigation_id == investigation_id,
+                    AssessmentRow.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        items = await self._with_findings_for_page([row])
+        return items[0] if items else None

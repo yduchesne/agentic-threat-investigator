@@ -30,6 +30,10 @@ from .identity_repositories import (
     PostgresSessionRepository,
     PostgresUserRepository,
 )
+from .investigation_job_repositories import (
+    PostgresIdempotencyRepository,
+    PostgresInvestigationJobRepository,
+)
 from .investigation_repositories import PostgresInvestigationRepository
 from .rag_repositories import (
     PostgresDocumentChunkRepository,
@@ -79,6 +83,8 @@ class PostgresUnitOfWork(UnitOfWork):
         self.document_chunks = cast(PostgresDocumentChunkRepository, None)
         self.research_results = cast(PostgresResearchResultRepository, None)
         self.timeline_events = cast(InvestigationTimelineRepository, None)
+        self.investigation_jobs = cast(PostgresInvestigationJobRepository, None)
+        self.idempotency = cast(PostgresIdempotencyRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -115,6 +121,8 @@ class PostgresUnitOfWork(UnitOfWork):
         )
         self.research_results = PostgresResearchResultRepository(self.session)
         self.timeline_events = PostgresInvestigationTimelineRepository(self.session)
+        self.investigation_jobs = PostgresInvestigationJobRepository(self.session)
+        self.idempotency = PostgresIdempotencyRepository(self.session)
         return self
 
     async def __aexit__(
@@ -157,6 +165,8 @@ class PostgresUnitOfWork(UnitOfWork):
             self.document_chunks = cast(PostgresDocumentChunkRepository, None)
             self.research_results = cast(PostgresResearchResultRepository, None)
             self.timeline_events = cast(InvestigationTimelineRepository, None)
+            self.investigation_jobs = cast(PostgresInvestigationJobRepository, None)
+            self.idempotency = cast(PostgresIdempotencyRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

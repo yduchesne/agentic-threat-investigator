@@ -171,20 +171,55 @@ This avoids environment drift between Python services.
 
 ## API and worker
 
-The API persists asynchronous work.
+The API (`uvicorn agentic_threat_investigator.main:app`) serves the
+delivered `/api/v1` boundary. The worker process is separate and must run
+for pending Investigations to execute.
 
-The worker claims jobs from PostgreSQL and executes LangGraph investigations:
+API process (`compose.yaml` service `api`):
+
+```text
+FastAPI (/api/v1)
+ -> authentication/authorization + DTO mapping
+ -> PR 23A/23B query services
+ -> POST /investigations -> atomic PENDING Investigation + durable job
+    + audit + idempotency record -> 202 Accepted
+```
+
+The API process never executes LangGraph, provider polling, or job
+execution; its lifespan composes API services only.
+
+Worker process (service `worker`): the delivered
+`InvestigationJobWorker` seam claims the durable PostgreSQL investigation
+job and invokes `InvestigationRunner` outside any transaction:
 
 ```text
 worker process
- -> LangGraph
- -> LocalTaskDispatcher
- -> local WorkExecutor
+ -> claim durable job (FOR UPDATE SKIP LOCKED)
+ -> investigate via InvestigationRunner
+ -> LangGraph -> LocalTaskDispatcher -> local WorkExecutor
+ -> durable job succeeded/failed
 ```
 
-No external broker is required for dispatch within a running investigation. This in-investigation dispatch boundary is separate from the PostgreSQL-backed durable investigation job mechanism. PR 19C adds no broker service or port to the v0.1 Compose topology.
+No external broker is required for dispatch within a running investigation.
+This in-investigation dispatch boundary is separate from the
+PostgreSQL-backed durable investigation job mechanism. PR 19C adds no
+broker service or port to the v0.1 Compose topology; PR 23C keeps the API
+and worker processes distinct and adds no job-administration surface.
 
 Investigation execution must survive API container restart because it is not tied to the HTTP-serving process.
+
+Operational requirements for the delivered API:
+
+- allowed frontend origins: set `api_cors_origins` to the exact frontend
+  origin(s); the wildcard is rejected while cookies are used;
+- the session cookie is `Secure` in the production profile and
+  `SameSite=Lax`; the public origin must match `public_base_url` (CSRF
+  Origin/Referer validation uses it);
+- HTTP requests carry `Idempotency-Key` on `POST /api/v1/investigations`;
+  only SHA-256 key digests are stored;
+- idempotency records and exhausted job rows have no v0.1 cleanup
+  scheduler; deployments define retention for `ati.api_idempotency` and
+  `ati.investigation_job` (see `docs/DATABASE.md`).
 
 ## Scheduler
 

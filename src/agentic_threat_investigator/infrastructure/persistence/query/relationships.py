@@ -7,6 +7,8 @@ correlation; the stable Relationship resource is never denormalized with an
 the immutable historical record and never through ``domain_object_history``.
 """
 
+from uuid import UUID
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,6 +127,35 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
                 )
             )
         return QueryPage(items=items, next_cursor=next_cursor)
+
+    async def get(
+        self, investigation_id: UUID, relationship_id: UUID
+    ) -> Relationship | None:
+        """Return one Relationship visible to the Investigation, if any.
+
+        Visibility derives from RelationshipObservation correlation with the
+        Investigation; a cross-Investigation lookup fails closed with
+        ``None``.
+        """
+        row = (
+            await self._session.execute(
+                select(RelationshipRow)
+                .where(
+                    RelationshipRow.id == relationship_id,
+                    RelationshipRow.deleted_at.is_(None),
+                )
+                .where(
+                    select(RelationshipObservationRow.id)
+                    .where(
+                        RelationshipObservationRow.relationship_id
+                        == RelationshipRow.id,
+                        RelationshipObservationRow.investigation_id == investigation_id,
+                    )
+                    .exists()
+                )
+            )
+        ).scalar_one_or_none()
+        return None if row is None else _relationship_from_row(row)
 
 
 class PostgresRelationshipObservationQueryService(RelationshipObservationQueryService):

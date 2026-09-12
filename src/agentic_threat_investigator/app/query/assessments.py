@@ -59,6 +59,16 @@ class AssessmentQueryService(ABC):
         pointer; ``MAX(version)`` inference is never used.
         """
 
+    @abstractmethod
+    async def get(
+        self, investigation_id: UUID, assessment_id: UUID
+    ) -> Assessment | None:
+        """Return one Assessment version bound to the Investigation, if any.
+
+        The exact version is returned regardless of the durable pointer;
+        cross-Investigation lookups fail closed with ``None``.
+        """
+
 
 def assessment_sort_values(version: int, assessment_id: UUID) -> tuple[str, str]:
     """Return canonical cursor sort values for one assessment row.
