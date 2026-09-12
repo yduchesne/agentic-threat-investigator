@@ -749,6 +749,35 @@ domain_object_history
     state history for designated historized resources
 ```
 
+### Analyst read/query path (PR 23A)
+
+Analyst-facing data browsing is a dedicated read path, separate from the
+execution-oriented persistence used by orchestration:
+
+```text
+API [future]
+    -> application query services (app/query/)
+    -> PostgreSQL query implementations (infrastructure/persistence/query/)
+    -> indexed deterministic keyset queries
+```
+
+Division of responsibility:
+
+- **write repositories / orchestration persistence** own mutation, version
+  allocation, history writes, and bounded internal execution reads
+  (``list_for_investigation`` and similar); they are unchanged by PR 23A;
+- **analyst read/query services** own bounded explicit filters, one
+  canonical deterministic ordering per collection, opaque versioned keyset
+  cursors, and page contracts (`QueryPage`) — never HTTP semantics, request
+  DTOs, or report generation;
+- query services return validated domain/read models only; raw SQLAlchemy
+  rows and unvalidated dictionaries never cross the application boundary;
+- historical RelationshipObservation browsing queries
+  `relationship_observation` directly and never `domain_object_history`;
+  generic resource-state history uses `object_type + object_id` identity;
+- the future HTTP layer consumes these read contracts directly; it does not
+  invent SQL or query behavior.
+
 ## Transactions
 
 External provider and LLM calls occur outside database transactions.

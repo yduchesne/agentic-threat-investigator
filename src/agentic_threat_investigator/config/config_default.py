@@ -37,4 +37,7 @@ CONFIG: dict[str, Any] = {
     "llm_max_relationship_observations": 200,
     "llm_max_normalized_facts_bytes": 131072,
     "llm_max_input_bytes": 262144,
+    # Analyst-facing collection query page limits (PR 23A).
+    "query_default_page_size": 50,
+    "query_max_page_size": 200,
 }

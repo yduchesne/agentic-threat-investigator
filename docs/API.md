@@ -296,6 +296,28 @@ Response:
 
 Server configuration controls default and maximum limits.
 
+### Collection query semantics (PR 23A)
+
+The query/read foundation underlying these future collections is implemented
+and documented in `docs/DATABASE.md`; the HTTP endpoints themselves are not
+implemented yet. The semantics:
+
+- each listed collection has exactly **one canonical v0.1 ordering** (no
+  arbitrary client sort selection);
+- cursors are **opaque** values that encode only the ordering identity
+  needed to continue a query;
+- cursors are **bound to their query and filter context**: reusing a cursor
+  produced for another collection or another filter set fails closed;
+- pagination is **keyset/seek** based; there is no OFFSET-based public
+  pagination and no total-count query per page;
+- every page is bounded by `limit + 1` continuation reads;
+- date ranges are **UTC half-open intervals** (`from` inclusive, `to`
+  exclusive);
+- RelationshipObservation is a first-class historical resource and is
+  queryable independently by relationship/investigation and date;
+- generic resource history uses **`object_type + object_id`** as its stable
+  object identity; there is no `natural_key`.
+
 ## Filtering
 
 v0.1 supports bounded explicit filters rather than a general query language.
@@ -306,6 +328,14 @@ Examples:
 - evidence by source/entity;
 - findings by workflow status;
 - monitors by enabled state.
+
+PR 23A already implements the typed filter contracts for investigations
+(status, created range), evidence (source, subject entity, type, retrieved
+range), relationships (source/target entity, type), relationship
+observations (source, retrieved/observed ranges), research results (subject
+entity, created range), assessments, timeline events (event type, occurred
+range), and generic history (object type/object ID, investigation,
+operation, occurred range).
 
 ## Errors
 

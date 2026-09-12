@@ -110,6 +110,10 @@ def _to_domain(row: InvestigationRow) -> InvestigationState:
     return InvestigationState.model_validate(payload)
 
 
+investigation_state_from_row = _to_domain
+"""Public read mapping shared with the PR 23A query layer."""
+
+
 def _serialized(state: InvestigationState) -> tuple[str, str]:
     """Return the JSON budget and operational-state documents for persistence.
 

@@ -468,9 +468,56 @@ The production/test distinction is deliberate: production adapters target real s
 
 ## PR 23 — Report Writer and investigation API
 
-Deliver structured reports, Report Writer, report persistence/versioning, `/api/v1` investigation/subresource endpoints, asynchronous semantics, cursor pagination, stable errors, idempotency, and history/version exposure.
+PR 23 is split into bounded follow-up PRs (see the PR 23A execution plan at
+`.plans/PR_23A_DETAILED_EXECUTION_PLAN.md` for the full decomposition):
 
-Report Writer cannot alter Evidence Analyst verdict/confidence or introduce unsupported facts.
+### PR 23A — API query and PostgreSQL read-path foundation [DONE]
+
+Delivered the production analyst-facing read/query foundation the REST API
+and Report Writer will consume:
+
+- a dedicated application query/read layer (`app/query/`) with typed,
+  immutable query contracts, one canonical deterministic ordering per
+  collection, bounded explicit filters, and UTC half-open date ranges;
+- versioned opaque keyset cursors bound to their query collection and filter
+  fingerprint, with typed fail-closed codec errors; no OFFSET anywhere in
+  the API-oriented read path;
+- PostgreSQL query implementations for Investigations, Evidence,
+  Relationships, RelationshipObservations, ResearchResults, Assessments,
+  timeline events, and generic `domain_object_history` browsing, including
+  exact `object_type + object_id + version` history lookup;
+- RelationshipObservation treated as a first-class historical resource
+  (investigation/relationship scopes, retrieved/observed date ranges) and
+  never routed through `domain_object_history`, preserving PR 22E semantics;
+- Assessment current-version resolution through the durable Investigation
+  `assessment_id` pointer, never `MAX(version)`;
+- migration 0022 indexes mapping one-to-one to concrete query paths, with
+  redundant pre-existing indexes superseded and removed;
+- functional pagination integration tests proving no skips/duplicates over
+  tied timestamps, plus `EXPLAIN` plan-eligibility tests that never assert
+  unstable planner costs;
+- `docs/DATABASE.md` index/query inventory and `docs/API.md` cursor/filter/
+  date semantics without claiming the HTTP implementation exists.
+
+PR 23A does **not** implement FastAPI routes, HTTP DTOs, authentication,
+Report Writer execution, report persistence, investigation submission,
+idempotency, or frontend work.
+
+### PR 23B — Structured Report Writer and report persistence
+
+Deliver the structured Report Writer LLM execution, typed report domain
+model, report persistence/versioning, and report history exposure on the PR
+23A persistence foundation. Report Writer cannot alter Evidence Analyst
+verdict/confidence or introduce unsupported facts.
+
+### PR 23C — Investigation REST API
+
+Deliver `/api/v1` investigation and subresource endpoints consuming the PR
+23A query contracts (cursor pagination, bounded filters, history/version
+exposure), asynchronous investigation creation semantics, stable errors, and
+idempotency. If async submission/idempotency makes this PR too large after
+detailed planning, split it further (read API first, then
+submission/auth/idempotency).
 
 ## PR 24 — Analyst frontend
 
