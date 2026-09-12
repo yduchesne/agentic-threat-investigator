@@ -1,0 +1,23 @@
+{
+  "id": "rpt-s08-stale-assessment-race",
+  "version": 1,
+  "description": "Stale Assessment race: report input is materialized against Assessment A, then the Investigation advances to Assessment B before persistence. The report append must revalidate under lock and fail with the typed stale-input conflict; no report row, history, or pointer update may commit.",
+  "fixture": "report-stale-race",
+  "expected": {
+    "verdict": "malicious",
+    "confidence": "high",
+    "required_assessment_finding_ordinals": [],
+    "forbidden_assessment_finding_ordinals": [],
+    "required_research_claim_labels": [],
+    "forbidden_research_claim_labels": [],
+    "required_limitations": [],
+    "required_unresolved_questions": [],
+    "required_next_steps": [],
+    "min_narrative_statements": 0,
+    "max_narrative_statements": 0,
+    "required_phrases": [],
+    "forbidden_phrases": [],
+    "expected_no_report": true,
+    "expected_execution_error_code": "stale_report_input"
+  }
+}

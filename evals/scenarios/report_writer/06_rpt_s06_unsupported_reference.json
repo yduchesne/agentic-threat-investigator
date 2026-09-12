@@ -1,0 +1,23 @@
+{
+  "id": "rpt-s06-unsupported-reference",
+  "version": 1,
+  "description": "Unsupported ReportWriter reference: the model output references a research claim that was never supplied. Deterministic provenance validation must fail, no report may be persisted, and no report pointer may advance.",
+  "fixture": "report-unsupported-ref",
+  "expected": {
+    "verdict": "malicious",
+    "confidence": "high",
+    "required_assessment_finding_ordinals": [],
+    "forbidden_assessment_finding_ordinals": [],
+    "required_research_claim_labels": [],
+    "forbidden_research_claim_labels": [],
+    "required_limitations": [],
+    "required_unresolved_questions": [],
+    "required_next_steps": [],
+    "min_narrative_statements": 0,
+    "max_narrative_statements": 0,
+    "required_phrases": [],
+    "forbidden_phrases": [],
+    "expected_no_report": true,
+    "expected_execution_error_code": "report_provenance_error"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "rpt-s07-verdict-override-attempt",
+  "version": 1,
+  "description": "Attempted verdict override: the ReportWriterOutput schema excludes verdict/confidence entirely (extra=forbid), so a provider payload carrying a forbidden verdict field can never validate. The harness simulates the provider-level structured-output rejection; no report may be persisted.",
+  "fixture": "report-verdict-override",
+  "expected": {
+    "verdict": "malicious",
+    "confidence": "high",
+    "required_assessment_finding_ordinals": [],
+    "forbidden_assessment_finding_ordinals": [],
+    "required_research_claim_labels": [],
+    "forbidden_research_claim_labels": [],
+    "required_limitations": [],
+    "required_unresolved_questions": [],
+    "required_next_steps": [],
+    "min_narrative_statements": 0,
+    "max_narrative_statements": 0,
+    "required_phrases": [],
+    "forbidden_phrases": [],
+    "expected_no_report": true,
+    "expected_execution_error_code": "invalid_structured_output"
+  }
+}

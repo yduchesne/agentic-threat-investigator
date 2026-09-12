@@ -279,6 +279,17 @@ class FakeInvestigationRepository(InvestigationRepository):
         self.pointer_calls.append((investigation_id, assessment_id, expected_version))
         return InvestigationWriteResult(investigation_id, 6, BatchOutcome.UPDATED)
 
+    async def update_report_reference(
+        self,
+        investigation_id: UUID,
+        report_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int | None = None,
+    ) -> InvestigationWriteResult:
+        raise NotImplementedError
+
     async def update_budget(
         self,
         investigation_id: UUID,
@@ -623,6 +634,14 @@ class FakeAccountingInvestigationRepository(InvestigationRepository):
         self,
         investigation_id: UUID,
         assessment_id: UUID,
+        **_: object,
+    ) -> InvestigationWriteResult:
+        raise NotImplementedError
+
+    async def update_report_reference(
+        self,
+        investigation_id: UUID,
+        report_id: UUID,
         **_: object,
     ) -> InvestigationWriteResult:
         raise NotImplementedError

@@ -503,12 +503,48 @@ PR 23A does **not** implement FastAPI routes, HTTP DTOs, authentication,
 Report Writer execution, report persistence, investigation submission,
 idempotency, or frontend work.
 
-### PR 23B — Structured Report Writer and report persistence
+### PR 23B — Structured Report Writer and report persistence [DONE]
 
-Deliver the structured Report Writer LLM execution, typed report domain
+Delivered the structured Report Writer LLM execution, typed report domain
 model, report persistence/versioning, and report history exposure on the PR
 23A persistence foundation. Report Writer cannot alter Evidence Analyst
 verdict/confidence or introduce unsupported facts.
+
+Delivered:
+
+- typed report domain contracts (``AssessmentFindingRef`` /
+  ``ResearchClaimRef`` / ``ReportNarrativeStatement`` /
+  ``ReportWriterOutput`` / ``InvestigationReport``) with strict frozen
+  models and ``extra="forbid"``;
+- ``ReportWriterInputLoader`` materializing the current Assessment (via the
+  Investigation's durable ``assessment_id`` pointer), its analyzed Evidence,
+  finding-referenced RelationshipObservations, and bounded persisted
+  ResearchResults, with independent input bounds and no raw Evidence
+  payloads;
+- deterministic prompt builder (``urn:ati:llm:report_writing``), reusing
+  ``LlmClient.generate_structured`` and investigation-wide LLM accounting
+  with at most one schema-repair attempt and no free-form fallback;
+- application stamping and ``ReportProvenanceValidator``: verdict/
+  confidence copied from the current Assessment (never model-authored),
+  finding/research snapshots application-copied, caveats preserved exactly,
+  reference/source-set closure enforced before persistence;
+- versioned PostgreSQL persistence (migration 0023, SQL API v0019):
+  ``ati.investigation_report`` root table with JSONB presentation snapshots,
+  DB-assigned versions, one CREATE history row, the durable Investigation
+  ``report_id`` pointer advanced atomically under lock, stale-Assessment
+  rejection (``U23A1``), and superseded-only soft deletion;
+- report query extension of the PR 23A layer (``QueryKind.REPORTS``,
+  keyset pagination ``version DESC, id ASC``, current report via the durable
+  pointer, listing index with EXPLAIN eligibility test);
+- deterministic Markdown formatter (pure presentation code, no LLM/DB
+  access, safe escaping);
+- repository-owned Report Writer behavioral baseline (RPT-S01..S08, stable
+  failure codes, no LLM-as-judge) and the canonical real-PostgreSQL /
+  ``FakeLlmClient`` vertical slice;
+- documentation reconciliation (architecture, agent design, database, API,
+  testing, evaluation).
+
+PR 23C remains the Investigation REST API.
 
 ### PR 23C — Investigation REST API
 

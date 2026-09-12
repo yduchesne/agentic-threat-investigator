@@ -1,0 +1,22 @@
+{
+  "id": "rpt-s03-conflicting-evidence",
+  "version": 1,
+  "description": "Conflicting evidence: a MALICIOUS/medium Assessment with one supporting and one contradicting finding. The report must represent both sides, must not erase the contradiction, and must preserve the Assessment confidence.",
+  "fixture": "report-conflicting",
+  "expected": {
+    "verdict": "malicious",
+    "confidence": "medium",
+    "required_assessment_finding_ordinals": [1, 2],
+    "forbidden_assessment_finding_ordinals": [],
+    "required_research_claim_labels": [],
+    "forbidden_research_claim_labels": [],
+    "required_limitations": ["one reputation source conflicts with the others"],
+    "required_unresolved_questions": [],
+    "required_next_steps": [],
+    "min_narrative_statements": 1,
+    "max_narrative_statements": 5,
+    "required_phrases": ["conflicting evidence is represented"],
+    "forbidden_phrases": ["contradiction is resolved"],
+    "expected_no_report": false
+  }
+}

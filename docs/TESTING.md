@@ -1051,6 +1051,27 @@ an indiscriminate snapshot update cannot hide a semantic regression.
 
 Keep these responsibilities separate:
 
+**Report Writer structural tests (PR 23B)**
+
+- strict domain contracts: blank titles/statements rejected, unsupported
+  narrative statements rejected, duplicate source references rejected,
+  forbidden model-authored verdict/confidence/persistence metadata rejected
+  via `extra="forbid"`;
+- input materialization: no current Assessment fails typed before any LLM
+  call, missing provenance fails closed, input collections and serialized
+  bytes are independently bounded, raw Evidence payloads never enter the
+  context, ordering and prompt bytes are deterministic;
+- deterministic provenance validation: unknown finding/research references,
+  cross-Investigation references, snapshot drift, caveat changes, and
+  source-set drift all fail before persistence;
+- LLM execution: one reservation per actual invocation, at most one
+  schema-repair invocation, cancellation propagates, no free-form fallback;
+- report persistence: DB-assigned versions, one CREATE history row, atomic
+  append + pointer update, stale-Assessment rejection, superseded-only soft
+  deletion, current-report delete rejection;
+- report query: `version DESC, id ASC` keyset pagination, current report via
+  the durable `report_id` pointer, index eligibility via EXPLAIN.
+
 **Report Writer behavioral evaluation**
 
 - grounded synthesis;
@@ -1058,6 +1079,11 @@ Keep these responsibilities separate:
 - no unsupported material claims;
 - Assessment verdict/confidence preserved;
 - useful structured report content.
+
+Behavioral evaluation is repository-owned and deterministic (scenario JSON
+under `evals/scenarios/report_writer/`, stable failure codes, no
+LLM-as-judge); it never claims that deterministic reference validation
+proves semantic entailment.
 
 **Formatter deterministic tests**
 
@@ -1071,6 +1097,16 @@ Keep these responsibilities separate:
 
 A formatter failure is a deterministic software defect, not an LLM
 evaluation failure.
+
+**Canonical offline vertical slice**
+
+The primary “PR 23B actually works” proof is a real-PostgreSQL slice that
+runs the production input loader, prompt builder, Report Writer service,
+provenance validation, report persistence, and Markdown formatter with
+`FakeLlmClient` ONLY at the model boundary, asserting the exact persisted
+report is returned, verdict/confidence equal the Assessment, provenance
+references resolve, and Markdown is deterministic. No live Internet or live
+LLM participates.
 
 ### No free-form fallback
 

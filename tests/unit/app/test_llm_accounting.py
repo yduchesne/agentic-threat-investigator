@@ -109,6 +109,14 @@ class _FakeRepository(InvestigationRepository):  # pragma: no cover
     ) -> InvestigationWriteResult:
         raise NotImplementedError
 
+    async def update_report_reference(
+        self,
+        investigation_id: UUID,
+        report_id: UUID,
+        **_: object,
+    ) -> InvestigationWriteResult:
+        raise NotImplementedError
+
     async def soft_delete(self, *args: object, **_: object) -> InvestigationWriteResult:
         raise NotImplementedError
 

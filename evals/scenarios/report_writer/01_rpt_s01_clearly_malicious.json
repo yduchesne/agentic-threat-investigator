@@ -1,0 +1,22 @@
+{
+  "id": "rpt-s01-clearly-malicious",
+  "version": 1,
+  "description": "Clearly malicious: a MALICIOUS/high Assessment with a supported reputation finding and useful research context. The report must preserve verdict/confidence, include the malicious finding, may include the contextual research claim, and must not invent unsupported actor attribution.",
+  "fixture": "report-malicious",
+  "expected": {
+    "verdict": "malicious",
+    "confidence": "high",
+    "required_assessment_finding_ordinals": [1],
+    "forbidden_assessment_finding_ordinals": [],
+    "required_research_claim_labels": ["malicious_context"],
+    "forbidden_research_claim_labels": [],
+    "required_limitations": ["reputation evidence is third-party and may lag"],
+    "required_unresolved_questions": [],
+    "required_next_steps": ["monitor the indicator for 30 days"],
+    "min_narrative_statements": 1,
+    "max_narrative_statements": 5,
+    "required_phrases": ["malicious indicator with high confidence"],
+    "forbidden_phrases": ["attributed to threat actor"],
+    "expected_no_report": false
+  }
+}

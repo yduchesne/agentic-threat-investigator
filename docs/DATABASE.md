@@ -377,6 +377,83 @@ and fails with a clear error BEFORE the drop if any row exists, so legacy
 Assessment data can never be silently destroyed. A nonempty table requires a
 maintainer-approved data-migration mapping before this migration may run.
 
+## InvestigationReport persistence
+
+Report persistence (migration 0023, SQL API v0019) follows the versioned
+analytical-output convention: each explicit report generation appends a new
+immutable ``ati.investigation_report`` row with a fresh database-allocated
+version and one CREATE domain-history entry; a prior report row is never
+updated in place.
+
+The write path accepts the composite input arrays (executive summary
+statements and their flat narrative-support rows, finding snapshots and their
+flat finding-support rows, research snapshots) and stores the nested
+presentation structures as authoritative typed JSONB snapshots:
+
+```text
+investigation_report (investigation_id, assessment_id,
+    verdict, confidence, title,
+    executive_summary jsonb, findings jsonb, research_context jsonb,
+    limitations/unresolved_questions/recommended_next_steps text[],
+    source_evidence_ids/source_relationship_observation_ids/
+    source_research_result_ids uuid[],
+    version, created_at, deleted_at, deleted_by_actor_id)
+  -> investigation(id) FK
+  -> assessment(id) FK
+  UNIQUE(investigation_id, version)
+index (investigation_id, version DESC, id ASC) WHERE deleted_at IS NULL
+```
+
+Nested report structures are deliberately NOT normalized into mutable child
+tables: the report is an immutable versioned presentation snapshot whose
+child structures are never independently mutated or queried, mirroring the
+ResearchResult claims/citations JSONB precedent. The Pydantic domain model
+remains the contract; the database enforces root integrity, structural
+vocabulary, hard ceilings, and the critical current-Assessment invariant.
+
+Authoritative write path (versioned SQL API v0019):
+
+- ``ati.append_investigation_report(...)`` locks the visible parent
+  Investigation row ``FOR UPDATE`` first, then the target Assessment row
+  ``FOR UPDATE``, and verifies the Assessment is visible, belongs to the
+  Investigation, and — critically — is STILL the Investigation's current
+  ``assessment_id`` under the lock. A report whose input was materialized
+  against an Assessment that ceased to be current is rejected with the
+  typed stale-input conflict (``U23A1``) and no report row, history, or
+  pointer change commits. The staged composites are validated set-wise
+  (finding ordinals positive/unique, allowed vocabulary, nonblank
+  statements, at least one unique valid support per finding/statement,
+  research selections unique and resolvable to persisted claims of this
+  Investigation), the version is allocated from
+  ``ati.investigation_report_version_seq``, the authoritative row is
+  inserted (duplicate identity is ``U23A4``), the JSONB snapshots are
+  assembled set-wise, and one immutable CREATE history entry is written;
+- ``ati.set_investigation_report(...)`` advances ``operational_state``'s
+  ``report_id`` with database-owned optimistic concurrency, a no-op for an
+  identical pointer, and UPDATE history otherwise. Lock order matches the
+  Assessment pointer: owning Investigation row ``FOR UPDATE``, then the
+  target report row ``FOR UPDATE``;
+- ``ati.soft_delete_investigation_report(...)`` mirrors Assessment soft
+  deletion: only a superseded report may be deleted (rejected with
+  ``U23A7`` while a visible Investigation still points at it), deletion
+  allocates the next report version and writes one DELETE history entry,
+  and the application emits one transactional ``REPORT_DELETE`` audit event.
+
+The report append + Investigation ``report_id`` pointer update are one
+atomic UnitOfWork: the pointer advances only after the report row has been
+durably inserted, and any failure rolls both back. The current report is
+resolved through the durable ``report_id`` pointer, never ``MAX(version)``.
+Input ceilings follow the Assessment convention: the application service and
+repository enforce the configured ``db_batch_size`` independently against
+every bounded report collection, and the stored function rejects any
+collection above the defensive hard ceiling of 10,000 (``U23A8``).
+
+Lock order is documented here once for all report/Assessment pointer
+operations: owning Investigation row first, then target Assessment/Report
+row. Both directions use this exact order so concurrent pointer assignment
+and soft deletion serialize on the Investigation row and can never
+interleave into a visible Investigation pointing at a deleted output.
+
 ## Transactions and Unit of Work
 
 Repositories do not self-commit.
