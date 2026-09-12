@@ -34,6 +34,7 @@ from .investigation_repositories import PostgresInvestigationRepository
 from .rag_repositories import (
     PostgresDocumentChunkRepository,
     PostgresDocumentRepository,
+    PostgresResearchResultRepository,
 )
 from .relationship_repositories import (
     PostgresEvidenceRepository,
@@ -74,6 +75,7 @@ class PostgresUnitOfWork(UnitOfWork):
         self.ingestion_checkpoints = cast(PostgresIngestionCheckpointRepository, None)
         self.documents = cast(PostgresDocumentRepository, None)
         self.document_chunks = cast(PostgresDocumentChunkRepository, None)
+        self.research_results = cast(PostgresResearchResultRepository, None)
         self.timeline_events = cast(InvestigationTimelineRepository, None)
 
     async def __aenter__(self) -> Self:
@@ -106,6 +108,7 @@ class PostgresUnitOfWork(UnitOfWork):
         self.document_chunks = PostgresDocumentChunkRepository(
             self.session, self._batch_size
         )
+        self.research_results = PostgresResearchResultRepository(self.session)
         self.timeline_events = PostgresInvestigationTimelineRepository(self.session)
         return self
 
@@ -144,6 +147,7 @@ class PostgresUnitOfWork(UnitOfWork):
             )
             self.documents = cast(PostgresDocumentRepository, None)
             self.document_chunks = cast(PostgresDocumentChunkRepository, None)
+            self.research_results = cast(PostgresResearchResultRepository, None)
             self.timeline_events = cast(InvestigationTimelineRepository, None)
 
     async def commit(self) -> None:

@@ -1670,6 +1670,16 @@ original STIX object are retained as provenance; ATT&CK tactics and platforms
 are normalized into technique/software payload attributes. Revoked and
 deprecated records are retained rather than deleted.
 
+The production contract is the real upstream MITRE STIX 2.1 bundle format:
+`MitreAttackBatchSource` is the only ATT&CK source/parser abstraction, and
+`MitreAttackDocumentBuilder` is the only ATT&CK document builder. Automated
+tests never bypass them with a fake source. Instead, deterministic local
+real-format STIX 2.1 fixtures under `tests/fixtures/mitre_attack/` (synthetic,
+clearly non-authoritative content that conforms exactly to the production
+input contract) exercise the same production parser, document builder,
+indexing service, and pgvector retrieval path offline. The test fixtures are
+a real-format fixture subset, not a separate fake data source.
+
 STIX relationships are normalized to `urn:ati:relationship:attack:uses_technique`
 when a `uses` relationship targets an `attack-pattern`. Other relationship
 forms use `urn:ati:relationship:threat:associated_with`, while preserving the

@@ -16,19 +16,31 @@ DOCUMENT_CHUNK_EMBEDDING_DIMENSION = 1536
 
 
 class EmbeddingSettings(BaseModel):
-    """Configured embedding representation."""
+    """Configured embedding representation.
+
+    ``api_key_secret`` carries only the NAME of the environment variable
+    holding the provider API key (a secret reference, never a key value);
+    the key is resolved during bootstrap/composition and passed to the
+    constructed provider. Local/dev defaults remain the deterministic
+    hashing utility, so startup never requires OpenAI credentials merely
+    because the semantic adapter exists.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     dimension: int = Field(ge=1)
     provider: str
     model_version: int = Field(ge=1)
     model: str
+    api_key_secret: str = "ATI_OPENAI_EMBEDDING_API_KEY"
+    timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_embedding_contract(self) -> "EmbeddingSettings":
         """Reject blank identifiers and dimensions incompatible with the DDL."""
         if not self.provider.strip() or not self.model.strip():
             raise ValueError("embedding provider and model must not be blank")
+        if not self.api_key_secret.strip():
+            raise ValueError("embedding api_key_secret must not be blank")
         if self.dimension != DOCUMENT_CHUNK_EMBEDDING_DIMENSION:
             raise ValueError(
                 f"embedding dimension must be {DOCUMENT_CHUNK_EMBEDDING_DIMENSION}"

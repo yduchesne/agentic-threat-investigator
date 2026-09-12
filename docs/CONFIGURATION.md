@@ -439,6 +439,28 @@ Real or resolved OpenAI API keys must never be committed, logged, persisted, pla
 - the resolved key value is passed to the composed chat model, which uses it only for provider authentication; application/domain code never reads configuration or the environment directly;
 - a missing, empty, or whitespace-only required key fails clearly at composition time with `SecretNotFoundError` **before** any model object is created.
 
+## Embedding settings (PR 22A)
+
+PR 22A adds a production semantic embedding adapter behind the existing `EmbeddingClient` contract while keeping deterministic offline embedding for local/dev/test use. The configuration seam distinguishes them explicitly:
+
+| Setting | Environment variable | Type | Default | Bounds | Description |
+|---|---|---|---|---|---|
+| `embedding.provider` | `ATI_EMBEDDING_PROVIDER` | `str` | `hashing` | non-blank | Embedding representation provider identity |
+| `embedding.model` | `ATI_EMBEDDING_MODEL` | `str` | `ati-hashing-v1` | non-blank | Embedding model identity |
+| `embedding.model_version` | `ATI_EMBEDDING_MODEL_VERSION` | `int` | `1` | `>= 1` | ATI-owned representation version (part of the embedding identity filter) |
+| `embedding.dimension` | `ATI_EMBEDDING_DIMENSION` | `int` | `1536` | exactly `1536` | Vector dimension; fixed by the document_chunk DDL |
+| `embedding.api_key_secret` | `ATI_EMBEDDING_API_KEY_SECRET` | `str` | `ATI_OPENAI_EMBEDDING_API_KEY` | non-blank | Environment variable NAME carrying the semantic provider API key (secret reference, never a key value) |
+| `embedding.timeout_seconds` | `ATI_EMBEDDING_TIMEOUT_SECONDS` | `float?` | `None` | `> 0`, finite | Optional per-request provider timeout; omission uses the provider default |
+| `embedding_batch_size` | `ATI_EMBEDDING_BATCH_SIZE` | `int` | `64` | `>= 1` | Indexing embed-batch width |
+
+Semantic adapter contract:
+
+- `HashingEmbeddingClient` is a deterministic local/testing utility. Its vectors are NOT semantically meaningful and must never be treated as production-quality semantic retrieval.
+- The production semantic adapter (`LangChainEmbeddingClient` composed through `build_openai_embedding_client`) wraps the installed LangChain/OpenAI async embedding interface behind the same `EmbeddingClient(ABC)` and validates result count, 1-based ordinal correlation, dimension, and finite values with content-free typed errors.
+- Prerequisite startup neither constructs the semantic adapter nor requires OpenAI credentials: local/dev defaults remain hashing/offline, and the adapter is composed only where the deployment selects a semantic provider.
+- `embedding.api_key_secret` stores only the NAME of the environment variable carrying the key. Resolved keys are injected into the composed provider during bootstrap/composition (never read by application/domain code, never logged or persisted), following the same `SecretsResolver` contract as the LLM key.
+- CI never calls the live embedding API: automated adapter tests inject a stub at the LangChain `Embeddings` boundary and the canonical corpus tests use deterministic offline embeddings.
+
 ## Authentication settings
 
 The local authentication profile may define the following settings (environment

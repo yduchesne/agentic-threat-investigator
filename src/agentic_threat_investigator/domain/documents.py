@@ -8,7 +8,7 @@ import math
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -18,6 +18,39 @@ from agentic_threat_investigator.domain.source import (
     canonical_timestamp_text,
     validate_utc_timestamp,
 )
+
+# Repository-owned namespace for chunk citation identities. The constant is
+# itself derived deterministically from a fixed URI below the ATI namespace,
+# so every deployment and process derives identical citation UUIDs from the
+# same semantic chunk.
+CITATION_NAMESPACE = uuid5(NAMESPACE_URL, "urn:ati:domain:document-chunk-citation")
+
+
+def document_chunk_citation_id(chunk: DocumentChunk | Mapping[str, Any]) -> UUID:
+    """Compute the deterministic semantic citation identity of one chunk.
+
+    The citation identity represents one concrete chunk in one deterministic
+    document segmentation. It is derived exclusively from the chunk's
+    semantic coordinates (document, sequence, text, token count, and semantic
+    chunk metadata) and deliberately excludes the replaceable persistence row
+    identity, the concrete vector, and the embedding provider/model/version/
+    dimension: a pure re-embedding of the same chunk text therefore preserves
+    the citation identity while a semantic chunk change alters it.
+    """
+    values: Mapping[str, Any]
+    if isinstance(chunk, DocumentChunk):
+        values = chunk.model_dump(mode="python")
+    else:
+        values = chunk
+    semantic = {
+        "document_id": str(values["document_id"]),
+        "sequence": values["sequence"],
+        "text": values["text"],
+        "token_count": values["token_count"],
+        "metadata": values.get("metadata", {}),
+    }
+    digest = hashlib.sha256(canonical_json_bytes(semantic)).hexdigest()
+    return uuid5(CITATION_NAMESPACE, digest)
 
 
 def document_content_hash(document: Document | Mapping[str, Any]) -> str:
@@ -147,11 +180,24 @@ class EmbeddingModelInfo(BaseModel):
 
 
 class DocumentChunk(BaseModel):
-    """A replaceable embedded segment of a narrative document."""
+    """A replaceable embedded segment of a narrative document.
+
+    Identity semantics:
+
+    - ``id`` is the replaceable persistence row identity; it changes whenever
+      the chunk set is physically rebuilt (document change or re-embedding).
+    - ``citation_id`` is the deterministic semantic citation identity. It
+      stays stable across pure re-embedding of the same chunk text/semantics
+      and changes only when the chunk's semantic content or position
+      changes. Research citations (``ResearchCitation``) snapshot this value.
+    - ``content_hash`` is the concrete indexed chunk representation digest
+      and intentionally includes the embedding identity.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: UUID | None = None
+    citation_id: UUID | None = None
     document_id: UUID
     sequence: int = Field(ge=1)
     text: str
@@ -179,6 +225,38 @@ class DocumentChunk(BaseModel):
         if any(not math.isfinite(item) for item in value):
             raise ValueError("embedding values must be finite")
         return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_citation_id(cls, data: Any) -> Any:
+        """Derive or verify the deterministic semantic citation identity.
+
+        A successfully constructed chunk always exposes a non-null
+        ``citation_id``: an omitted value is derived from the chunk semantics
+        and an explicitly supplied value must equal the deterministic
+        derivation or construction is rejected.
+        """
+        if not isinstance(data, Mapping):
+            return data
+        values = dict(data)
+        required = {"document_id", "sequence", "text", "token_count"}
+        if not required.issubset(values):
+            return values
+        expected = document_chunk_citation_id(values)
+        supplied = values.get("citation_id")
+        if supplied is None:
+            values["citation_id"] = expected
+            return values
+        try:
+            supplied_uuid = (
+                supplied if isinstance(supplied, UUID) else UUID(str(supplied))
+            )
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("citation_id must be a UUID") from exc
+        if supplied_uuid != expected:
+            raise ValueError("citation_id does not match chunk semantics")
+        values["citation_id"] = expected
+        return values
 
     @model_validator(mode="before")
     @classmethod

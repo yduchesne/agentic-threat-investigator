@@ -593,6 +593,30 @@ RAG is conditional and concept-driven. It is invoked for entities such as malwar
 
 Live IOC facts remain evidence-provider responsibility.
 
+### Document and chunk identity semantics
+
+```text
+DocumentChunk.id
+    = replaceable persistence row identity
+
+DocumentChunk.citation_id
+    = deterministic semantic citation identity
+
+ResearchCitation
+    = immutable provenance snapshot
+
+ResearchResult
+    = immutable contextual research artifact
+    != Evidence
+    != Assessment
+```
+
+- `DocumentChunk.id` is the operational row identity and changes whenever the chunk set is physically rebuilt (document change or re-embedding).
+- `DocumentChunk.citation_id` is a deterministic UUIDv5 derived from the chunk's semantic coordinates (document identity, sequence, text, token count, and semantic chunk metadata) in the pure domain layer. It deliberately excludes the row identity, the vector, and the embedding provider/model/version/dimension: pure re-embedding preserves the citation identity, while a semantic chunk change alters it.
+- `DocumentChunk.content_hash` remains the concrete indexed representation digest (including embedding metadata) used for change detection.
+- `ResearchCitation` is an immutable self-contained snapshot of one retrieved chunk's full provenance surface, so a persisted research result remains interpretable even when the active chunk row it cited is later replaced or removed.
+- `ResearchResult` is an immutable, append-only contextual research synthesis/provenance container. It is deliberately NOT Evidence and NOT Assessment: it never enters Evidence persistence and never carries Assessment verdict/confidence semantics. Repeat research executions create a new result rather than mutating a prior one.
+
 ## Persistence
 
 PostgreSQL is the authoritative datastore.
@@ -600,6 +624,7 @@ PostgreSQL is the authoritative datastore.
 Categories:
 
 - append-oriented immutable observations: Evidence, RelationshipObservation, AuditEvent;
+- append-only immutable contextual analytical artifacts: ResearchResult (research claims with self-contained citation snapshots);
 - stable identities: Entity, Relationship;
 - versioned outputs: Assessment, InvestigationReport;
 - mutable operational state: Investigation, Monitor, jobs, users/sessions;

@@ -95,14 +95,16 @@ def _session_factory(
 async def test_retrieve_embeds_before_session_and_maps_provenance() -> None:
     """Retrieval embeds first and maps rows without leaking vector internals."""
     events: list[str] = []
-    chunk_id, document_id = uuid4(), uuid4()
+    chunk_id, citation_id, document_id = uuid4(), uuid4(), uuid4()
     published_at = datetime(2026, 1, 1, tzinfo=UTC)
     factory, execute = _session_factory(
         [
             {
                 "chunk_id": chunk_id,
+                "citation_id": citation_id,
                 "document_id": document_id,
                 "source_id": "urn:test:source",
+                "source_record_id": "record-1",
                 "text": "untrusted text",
                 "title": "Title",
                 "source_url": "https://example.test/doc",
@@ -141,6 +143,11 @@ async def test_retrieve_embeds_before_session_and_maps_provenance() -> None:
     assert params["embedding_model"] == "test-model"
     assert params["embedding_model_version"] == 7
     assert chunks[0].chunk_id == chunk_id
+    assert chunks[0].citation_id == citation_id
+    assert chunks[0].document_id == document_id
+    assert chunks[0].source_record_id == "record-1"
+    assert chunks[0].document_type == "advisory"
+    assert chunks[0].chunk_sequence == 2
     assert chunks[0].similarity_score == 1.0
     assert chunks[0].metadata == {
         "document_type": "advisory",
@@ -225,8 +232,10 @@ async def test_invalid_database_score_raises(score: object) -> None:
         [
             {
                 "chunk_id": uuid4(),
+                "citation_id": uuid4(),
                 "document_id": uuid4(),
                 "source_id": "source",
+                "source_record_id": "record",
                 "text": "text",
                 "title": None,
                 "source_url": None,

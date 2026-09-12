@@ -36,6 +36,7 @@ from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
 )
+from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.domain.source import SourceRecord
 
 
@@ -168,6 +169,24 @@ class AssessmentCurrentReferenceConflictError(LookupError):
             f"{assessment_id}"
         )
         self.assessment_id = assessment_id
+
+
+class ResearchResultDuplicateIdentityError(ValueError):
+    """Raised when an immutable ResearchResult identity already exists."""
+
+    def __init__(self, result_id: UUID) -> None:
+        """Record the conflicting research-result identity."""
+        super().__init__(f"research result already exists: {result_id}")
+        self.result_id = result_id
+
+
+class ResearchResultReferenceError(LookupError):
+    """Raised when a ResearchResult references an unknown Investigation/Entity.
+
+    ResearchResults are append-only contextual artifacts; a reference that
+    cannot be resolved to a visible Investigation or Entity is rejected
+    rather than persisted with a dangling root.
+    """
 
 
 class SoftDeletedIdentityError(ValueError):
@@ -323,6 +342,33 @@ class DocumentChunkRepository(ABC):
     @abstractmethod
     async def list_by_document(self, document_id: UUID) -> list[DocumentChunk]:
         """Return current chunks in sequence order."""
+
+
+class ResearchResultRepository(ABC):  # pragma: no cover
+    """Append-only repository for immutable contextual research results.
+
+    A persisted ResearchResult is never updated or deleted: repeat research
+    executions create a new result rather than mutating a prior one. There
+    is deliberately no update/delete/soft_delete operation.
+    """
+
+    @abstractmethod
+    async def add(self, result: ResearchResult) -> None:
+        """Insert one immutable research result in the caller's transaction.
+
+        A duplicate identity is rejected with a typed error and never
+        becomes an update of a prior result.
+        """
+
+    @abstractmethod
+    async def get_by_id(self, result_id: UUID) -> ResearchResult | None:
+        """Return one research result with its exact claims and citations."""
+
+    @abstractmethod
+    async def list_by_investigation(
+        self, investigation_id: UUID
+    ) -> list[ResearchResult]:
+        """Return an investigation's results in deterministic order."""
 
 
 class SourceRecordRepository(ABC):
@@ -821,6 +867,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     ingestion_checkpoints: IngestionCheckpointRepository
     documents: DocumentRepository
     document_chunks: DocumentChunkRepository
+    research_results: ResearchResultRepository
     timeline_events: InvestigationTimelineRepository
 
     @abstractmethod

@@ -244,9 +244,36 @@ deterministic local fixtures captured/derived from the real upstream format
 
 Tests must remain offline and reproducible. They may use small checked-in fixture subsets of MITRE ATT&CK/CISA or synthetic records that conform exactly to the production source contract, but must not introduce a separate "fake source" architecture that bypasses the production parser, repository, indexing, retrieval, or orchestration path being tested. Live Internet access and live LLM calls are not required by CI/integration tests.
 
-### PR 22A — Research storage, corpus ingestion, and retrieval foundation
+### PR 22A — Research storage, corpus ingestion, and retrieval foundation [DONE]
 
-Establish the deterministic, non-LLM foundation for threat research.
+Delivered the deterministic, non-LLM Threat Research/RAG foundation:
+
+- deterministic stable chunk citation identity (`DocumentChunk.citation_id`),
+  distinct from the replaceable row identity and embedding identity, computed
+  in the pure domain layer and uniquely persisted in PostgreSQL;
+- pgvector retrieval provenance extended with citation ID, source-record ID,
+  document type, and chunk sequence;
+- immutable append-only `ResearchResult`/`ResearchClaim`/`ResearchCitation`
+  domain contracts with deterministic citation closure, the `ResearchResultRepository`
+  ABC, a PostgreSQL implementation (one immutable root row with typed JSONB
+  snapshots), `UnitOfWork` exposure, and a narrow persistence service;
+- controlled re-embedding: unchanged Documents re-index only when their
+  current chunk set is missing or incompatible with the active embedding
+  identity, while pure re-embedding preserves citation identities;
+- production semantic embedding adapter (`LangChainEmbeddingClient` wrapping
+  the installed LangChain/OpenAI async interface, plus `build_openai_embedding_client`)
+  with count/ordinal/dimension/finite validation and a secret-reference config
+  seam, while `HashingEmbeddingClient` remains available for deterministic
+  offline tests;
+- canonical real-format vertical slice: a deterministic local STIX 2.1 fixture
+  drives the production `MitreAttackBatchSource` parser, `MitreAttackDocumentBuilder`,
+  `DocumentIndexingService`, PostgreSQL persistence, and `PgVectorResearchRetriever`
+  offline, proving ingestion, provenance, idempotency, and embedding migration.
+
+PR 22A reuses the existing PR 11 document/RAG abstractions and the existing
+MITRE ATT&CK source/document architecture; it adds no Research Agent LLM,
+Coordinator/graph behavior, `research_requested` action, Evidence/Assessment
+change, report generation, or generic evaluation framework.
 
 **Deliver:**
 - finalize the research persistence/domain contracts, including the exact lifecycle and provenance semantics for persisted research results/claims;
