@@ -79,6 +79,8 @@ It uses RAG to explain concepts already discovered by the investigation, includi
 
 It cannot establish live IOC facts or produce the final Assessment, and it never creates Evidence, Relationships, Relationships observations, or Assessment/verdict/confidence content.
 
+PR 22D evaluates this completed behavior deterministically without touching it: retrieval scenarios (Recall@k, Precision@k, MRR, expected-source rank, filter/rank/gap invariants), synthesis scenarios over the persisted `ResearchResult` (exact citation closure, supplied-context membership, required/forbidden citation identities, no-context/contradictory/envelope semantics), and hard epistemic promotion gates (Evidence / RelationshipObservation / Assessment identity sets unchanged across isolated research). See `EVALUATION.md` for the full baseline; no LLM-as-judge or generic evaluation platform participates.
+
 ### Evidence Analyst
 
 Consumes the persisted evidence snapshot and produces a typed analytical result.

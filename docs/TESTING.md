@@ -846,6 +846,86 @@ context, and preserve LLM-accounting version increments. `FakeLlmClient` is
 the only fake external model boundary; tests never require live Internet or
 a live LLM.
 
+### Threat Research evaluation baseline (PR 22D)
+
+PR 22D adds a separate **behavioral evaluation layer** over the unchanged
+PR 22A-C runtime: the runtime tests above prove *what the production path
+does*; the PR 22D evaluators prove *whether the persisted artifacts satisfy
+repository-owned scenario expectations*. The two layers are deliberately
+distinct and both remain fully offline.
+
+Evaluator unit matrix (`tests/unit/evaluation/research/`,
+`tests/unit/evaluation/test_coordinator_research_evaluator.py`):
+
+```text
+retrieval metrics: Recall@k, Precision@k, MRR, expected-source rank,
+  duplicate identities, empty denominators, explicit gap, filter leaks,
+  forbidden records, deterministic failure ordering (22D-U01..U12)
+strict retrieval/synthesis loaders: malformed JSON, duplicate JSON keys,
+  duplicate (id, version) identities, duplicate expectation labels,
+  invalid scenario ids, extra-field rejection (22D-U13..U15)
+synthesis envelope: citation closure, supplied-set membership,
+  required/forbidden citations, empty-result semantics, claim matching,
+  contradiction pairs, deterministic failure ordering, denominator-safe
+  metrics (22D-U16..U29)
+epistemic snapshots: unchanged Evidence/RelationshipObservation/Assessment
+  passes; any promotion is a stable failure; a ResearchResult alone is not
+  promotion (22D-U30..U34)
+coordinator research lifecycle: required/forbidden requests, bounded
+  budgets, legitimate retry vs. post-completion duplicate, exhaustion,
+  termination, backward compatibility of pre-research scenarios
+  (22D-U35..U42)
+```
+
+Real-format retrieval evaluation slice
+(`tests/integration/test_research_retrieval_evaluation.py`, 22D-I01):
+
+```text
+local MITRE ATT&CK STIX 2.1 fixture
+ -> production MitreAttackBatchSource / MitreAttackDocumentBuilder
+ -> DocumentIndexingService + deterministic embeddings
+ -> real PostgreSQL / pgvector
+ -> PgVectorResearchRetriever
+ -> ordered RetrievedChunk values
+ -> ResearchRetrievalEvaluator
+```
+
+Repository-owned scenarios under `evals/scenarios/research/retrieval/`
+declare stable ATT&CK identities expected/forbidden at bounded ranks, filter
+contexts, and an explicit retrieval-gap case. A deliberately failing
+scenario (`real-mitre-forbidden-technique`) proves a structurally successful
+retrieval can fail the baseline.
+
+Synthesis evaluation slice
+(`tests/integration/test_research_evaluation.py`, 22D-I02..I06):
+
+```text
+real-format fixture
+ -> production parser/builder/indexing/retrieval
+ -> ResearchAgent + FakeLlmClient (model boundary only)
+ -> real ResearchResult persistence
+ -> repository-read-back result -> ResearchSynthesisEvaluator
+ -> epistemic snapshots before/after the isolated research interval
+```
+
+The slice covers RAG-S01 relevant context, S02 no-retrieval empty result,
+S03 retrieved-but-irrelevant empty result, S04 contradictory separately
+cited claims, S05 unsupported-citation safe failure (execution envelope, no
+fabricated result), and S06 hostile corpus text. A runtime-valid but
+scenario-wrong persisted result (supplied-but-wrong citation) is proven to
+fail the behavioral evaluation (22D-I03). The canonical synthesis/trajectory
+career observes the exact supplied citation set with a recording wrapper
+around the production retriever; nothing is re-ranked or substituted.
+
+Coordinator trajectory evaluation slices
+(`tests/integration/test_research_trajectory_evaluation.py`, 22D-I07/I08)
+run the full production research lifecycle (real CoordinatorPolicy, real
+LangGraph, real runner, real corpus/research agent) and evaluate the durable
+timeline/state with the extended `CoordinatorTrajectoryEvaluator` against
+the repository scenarios C-R01 (research requested), C-R02 (completed
+unchanged context not re-requested on rerun), C-R03 (bounded exhaustion, no
+further request), and C-R04 (no direct research->pivot authority).
+
 ### Evidence Analyst evaluation vertical slices (PR 20C)
 
 `tests/integration/test_evidence_analyst_evaluation.py` runs the repository-

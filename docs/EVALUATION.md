@@ -253,8 +253,19 @@ URNs are `urn:ati:action:provider_query`, `entity_discovered`,
 `pivot_enqueued`, `pivot_executed`, `pivot_skipped`,
 `research_requested` (PR 22C), `assessment_requested`, and
 `investigation_stopped`. `report_generated` is a future report-flow action
-and is not emitted yet. PR 22C adds no research-quality, retrieval-relevance,
-or citation-quality scoring rules; those belong to PR 22D.
+and is not emitted yet.
+
+PR 22D extends the trajectory envelope with the delivered research
+lifecycle. Scenarios may declare `required_research_requests` and
+`forbidden_research_requests` (semantic entity labels), a bounded
+`max_research_requests` budget, and `require_research_termination`. The
+evaluator recognizes `urn:ati:action:research_requested` and applies
+identity-level duplicate semantics: a duplicate is a request beyond the
+durable authorized attempt total for its subject (a post-completion/exhaustion
+re-request), never merely `count > 1`, so a legitimate bounded retry is never
+misclassified. Research termination requires no dangling `REQUESTED` durable
+execution at the stop boundary. The evaluator never re-implements
+`CoordinatorPolicy`.
 
 Designed metrics (all denominator-safe, bounded to `[0.0, 1.0]`):
 
@@ -267,6 +278,9 @@ duplicate_action_rate
 stop_decision_accuracy
 budget_violation_rate
 termination
+research_request_count       (nonnegative count)
+duplicate_research_request_count   (nonnegative count)
+research_terminated
 ```
 
 Policy-invalid accounting uses unique observed pivot identities:
@@ -302,9 +316,11 @@ Hard gates for every deterministic scenario: `invented_entity_pivot_rate = 0`,
 `policy_invalid_pivot_rate = 0`, `budget_violation_rate = 0`, and
 `termination = true` under an explicit transition bound.
 
-Scope boundary: PR 21/21D evaluation remains fully deterministic. There is no
-LLM-as-judge, no generic PR 27 evaluator platform, no evaluation persistence,
-no release thresholds, and no PR 22 RAG evaluation execution.
+Scope boundary: PR 21/21D/22D evaluation remains fully deterministic. There
+is no LLM-as-judge, no generic PR 27 evaluator platform, no evaluation
+persistence, no release thresholds, and no PR 22 RAG evaluation execution
+inside the coordinator gate (research quality is PR 22D's own narrow
+baseline; see the Threat Research Agent evaluations section).
 
 Also evaluate:
 
@@ -379,52 +395,148 @@ These evaluations are primarily deterministic.
 
 ## Threat Research Agent evaluations
 
-Threat Research evaluation is divided into retrieval and synthesis.
+Threat Research evaluation is divided into retrieval and synthesis, and PR 22D
+delivers the narrow repository-owned deterministic baseline for both. The
+evaluators consume persisted typed outputs and repository-owned scenarios;
+they never invoke a second model (no LLM-as-judge), never reach the live
+Internet, and never change PR 22 runtime behavior.
+
+### PR 22D delivered baseline
+
+PR 22D adds `evaluation/research/` with strict scenario models, loaders,
+deterministic retrieval/synthesis evaluators, an evaluation-only epistemic
+snapshot, and stable failure-code envelopes. The existing synthetic retrieval
+fixture (`evals/fixtures/research/retrieval_cases.json`) is retained for
+production-independent metric-contract semantics, and a second layer runs the
+same evaluators against the production real-format path:
+
+```text
+local MITRE ATT&CK STIX 2.1 fixture
+ -> MitreAttackBatchSource / MitreAttackDocumentBuilder
+ -> DocumentIndexingService + deterministic embeddings
+ -> real PostgreSQL / pgvector
+ -> PgVectorResearchRetriever
+ -> ordered RetrievedChunk values
+ -> ResearchRetrievalEvaluator
+```
 
 ### Retrieval evaluation
 
-Evaluate the retriever independently.
+Repository-owned scenarios (`evals/scenarios/research/retrieval/`) declare a
+deterministic query, filter context (`source_ids`, `document_types`), and
+**stable upstream identities** — MITRE ATT&CK `source_record_id` values,
+durable `source_id` values, `document_type` values — expected and forbidden
+in the ordered response, plus an explicit `expected_retrieval_gap` flag.
+Relevance is author-declared; the evaluator never inspects free-form text.
 
-Suggested metrics:
+Metrics (`evaluation/retrieval.py` helpers, reused by every evaluator):
 
 ```text
 Recall@k
 Precision@k
-MRR
+MRR (reciprocal rank)
 expected-source rank
-metadata-filter correctness
-source diversity where appropriate
 ```
 
-Scenario expectations may explicitly identify relevant ATT&CK/CISA source material.
+Denominator semantics are explicit: no relevant truth means the metrics are
+`None` (or perfect `1.0` for an explicitly declared retrieval gap); an
+expected-relevance case with an empty response scores zero; duplicate chunk
+identities count once and are reported as a stable failure. Stable failure
+codes cover required/forbidden records, missing expected sources, filter
+violations, rank violations, duplicate identities, and gap contracts
+(`REQUIRED_RECORD_NOT_RETRIEVED`, `FORBIDDEN_RECORD_RETRIEVED`,
+`EXPECTED_SOURCE_MISSING`, `FILTER_VIOLATION`, `EXPECTED_RANK_VIOLATION`,
+`DUPLICATE_RETRIEVAL_IDENTITY`, `EXPECTED_RETRIEVAL_GAP_NOT_OBSERVED`,
+`UNEXPECTED_NONEMPTY_RETRIEVAL`).
 
-The repository-owned synthetic retrieval cases are versioned in
-`evals/fixtures/research/retrieval_cases.json`. Production-independent metric
-helpers implement Recall@k, Precision@k, reciprocal rank, and expected-source
-rank with deterministic duplicate and empty-result behavior. These fixtures do
-not establish release thresholds; thresholds remain empirical.
+The synthetic fixture (`evals/fixtures/research/retrieval_cases.json`) remains
+the production-independent metric-contract corpus: Recall@k arithmetic,
+duplicate/empty denominators, filter expectations, embedding-version
+isolation, and deleted-parent exclusion are proven against its deterministic
+vector labels without any database. Neither layer establishes release
+thresholds; thresholds remain empirical (PR 27).
 
 ### Synthesis evaluation
 
-Evaluate:
+Synthesis scenarios (`evals/scenarios/research/synthesis/`) are strict,
+versioned, offline JSON files pairing one deterministic fixture with one
+`ExpectedResearchResult` envelope. Human-authored semantic labels
+(`attack_technique_data_obfuscation`, `contradiction_alpha`) resolve exactly
+to persisted `citation_id` values after the production corpus is materialized
+and retrieved (`ResearchScenarioResolution`); no runtime UUID is authored
+into a scenario file.
 
-- every material claim cites a retrieved chunk;
-- the cited chunk supports the claim;
-- no claim is based on unretrieved material;
-- research context is not converted into live IOC evidence;
-- corpus gaps become explicit limitations.
+The `ResearchSynthesisEvaluator` consumes the persisted `ResearchResult`
+(reloaded through the repository), the resolution, the exact citation IDs
+supplied to the model invocation (observed at the retrieval boundary by a
+recording wrapper around the production retriever), and evaluation-only
+epistemic snapshots of Evidence / RelationshipObservation / Assessment
+identity-version sets taken immediately before and after the research
+interval.
 
-Hard invariant:
+Deterministic checks:
 
 ```text
-citation references retrieved chunk = 100%
+claim citation IDs close over the result's citation snapshots
+every result citation was supplied to the model invocation
+required/forbidden citation labels resolve to exact persisted IDs
+claim count is within the scenario bounds (0..N inclusive when declared)
+expected claims match by citation-set compatibility first, then exact
+  statement phrases after canonical whitespace normalization
+an explicitly expected empty result must be claims=() and citations=()
+research does not change Evidence / RelationshipObservation / Assessment sets
 ```
 
-Target:
+Hard invariants:
 
 ```text
-unsupported material research claims = 0%
+citation references retrieved chunk = 100%     (per result, structural)
+invalid RAG citations = 0                        (per scenario, deterministic)
 ```
+
+Represented scenario classes (S01..S06):
+
+- S01 — relevant ATT&CK context passes with a supplied technique citation;
+- S02 — no-retrieval completion persists an empty result with zero LLM calls;
+- S03 — retrieved-but-irrelevant context yields an empty result (retrieval is
+  never automatically promoted to claims);
+- S04 — contradictory context requires both sides as separately cited claims
+  with no verdict/winner or similarity-based authority semantics;
+- S05 — a schema-valid unsupported citation fails closed with no persisted
+  result (execution-envelope evaluation; no fabricated empty result);
+- S06 — hostile prompt-injection corpus text stays inside the untrusted-data
+  section; structured output remains bounded and non-promoting.
+
+A structurally valid `ResearchResult` can still fail a behavioral scenario:
+PR 22D proves a runtime-accepted decision that cites a supplied-but-wrong
+citation fails the declared envelope with stable failure codes.
+
+### Epistemic boundary
+
+The hard non-promotion gate is evaluated, not assumed: an isolated research
+interval must leave the Evidence identity set, the RelationshipObservation
+identity set, and the Assessment identity/version set unchanged. Creating a
+`ResearchResult` is not promotion. `EVIDENCE_PROMOTION_DETECTED`,
+`RELATIONSHIP_OBSERVATION_PROMOTION_DETECTED`, and
+`ASSESSMENT_PROMOTION_DETECTED` are stable failure codes; the snapshots never
+record payloads, claim text, or prompt content.
+
+### Scope boundary
+
+PR 22D is a deterministic repository-owned baseline and nothing more:
+
+```text
+NOT: generic evaluator platform
+NOT: LLM-as-judge
+NOT: LangSmith execution dependency
+NOT: release threshold framework
+NOT: cost/latency benchmark
+NOT: evaluation persistence tables
+NOT: research runtime feature changes
+```
+
+PR 27 owns the generic evaluation/release-hardening platform, LLM-judge
+evaluation, and release thresholds.
 
 ## Evidence Analyst evaluations
 
@@ -528,9 +640,10 @@ framework, LLM-judge system, LangSmith dataset/experiment execution, or
 end-to-end trajectory evaluation was built. Those remain future scope.
 
 The research-specific regression (malware research does not prove the
-specific IOC is malicious) requires the PR 22 `ResearchResult`/chunk runtime
-types, which do not exist yet; the executable RAG case is explicitly deferred
-to PR 22/27 with no temporary runtime research infrastructure added here.
+specific IOC is malicious) is now covered by the delivered PR 22D synthesis
+baseline: the persisted `ResearchResult`/chunk runtime types exist, the
+evaluator proves research never creates Evidence or Assessment, and the
+canonical trajectory scenarios assert research never authorizes a pivot.
 
 Evaluate:
 

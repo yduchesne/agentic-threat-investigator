@@ -1,0 +1,25 @@
+{
+  "id": "rag-s02-no-retrieval-result",
+  "version": 1,
+  "description": "No retrieval result: a source filter matching nothing produces a persisted zero-claim/zero-citation result with zero LLM invocations.",
+  "fixture": {
+    "name": "mitre-attack-small"
+  },
+  "query": "obfuscate command-and-control traffic conceal exfiltrated data",
+  "source_ids": [
+    "urn:ati:source:missing"
+  ],
+  "document_types": [],
+  "max_results": 3,
+  "expected": {
+    "min_claims": 0,
+    "max_claims": 0,
+    "required_citation_labels": [],
+    "forbidden_citation_labels": [],
+    "required_claims": [],
+    "expected_empty_result": true,
+    "expect_no_evidence_promotion": true,
+    "expect_no_assessment_promotion": true
+  },
+  "source_records": {}
+}

@@ -388,32 +388,49 @@ PR 21 already records `research_required_for_entity_ids`; PR 22C consumes that s
 
 The PR must prove that research can execute as a bounded, idempotent part of the production investigation state machine.
 
-### PR 22D — Threat Research / RAG evaluation and documentation hardening
+### PR 22D — Threat Research / RAG evaluation and documentation hardening [DONE]
 
-Add the narrow repository-owned evaluation baseline for PR 22 and reconcile documentation with the delivered research architecture.
+Delivered the narrow repository-owned deterministic evaluation baseline for
+PR 22 and reconciled the documentation with the delivered research
+architecture.
 
-**Deliver:**
-- deterministic retrieval evaluation for relevance/coverage using repository-owned fixtures that represent the real production corpus/source contract;
-- structured synthesis evaluation for citation validity, provenance correctness, no-context handling, contradictory context, bounded execution, and safe failure;
-- scenarios proving that contextual research is not silently promoted to source Evidence or Assessment;
-- coordinator-trajectory evaluation updates needed to recognize the delivered research lifecycle without duplicating Coordinator policy;
-- regression coverage for duplicate research requests and research termination;
-- evaluation scenarios that remain fully offline by using deterministic local corpus fixtures and `FakeLlmClient`, while exercising the same production parsing/retrieval/persistence contracts wherever those contracts are under evaluation;
-- documentation reconciliation across `EVALUATION.md`, `TESTING.md`, `ARCHITECTURE.md`, and `PR_PLAN.md`;
-- explicit documentation of the final Evidence -> retrieval -> research -> Assessment epistemic boundaries.
+**Delivered:**
+- deterministic retrieval evaluation (`evaluation/research/retrieval.py`,
+  `ResearchRetrievalEvaluator`) with Recall@k, Precision@k, MRR,
+  expected-source rank, filter/rank/gap invariants, stable failure codes,
+  and retention of the existing synthetic metric fixture;
+- real-format retrieval evaluation through the production
+  parser/builder/indexing/pgvector path against repository-owned scenarios
+  (`evals/scenarios/research/retrieval/`), including a deliberately failing
+  expectation proving a structurally successful retrieval can fail the
+  baseline;
+- structured synthesis evaluation (`ResearchSynthesisEvaluator`) over the
+  persisted `ResearchResult`: exact citation closure, supplied-context
+  membership, required/forbidden citation labels, bounded claim counts,
+  canonical-phrase claim envelopes, explicit empty/no-context and
+  contradictory-context semantics, and safe-failure execution envelopes;
+- hard epistemic promotion gates: isolated research leaves Evidence /
+  RelationshipObservation / Assessment identity-version sets unchanged;
+- strict versioned scenario loaders for retrieval/synthesis corpora
+  (`evals/scenarios/research/synthesis/` S01..S06) with duplicate-JSON-key,
+  duplicate-identity, and duplicate-label fail-closed loading;
+- coordinator-trajectory evaluator extensions recognizing `RESEARCH_REQUESTED`
+  with required/forbidden request expectations, bounded request budgets,
+  identity-level duplicate detection (post-completion re-request, never mere
+  count > 1), and research-termination checks without duplicating
+  Coordinator policy, plus repository scenarios C-R01..C-R04;
+- fully offline canonical slices exercising the production
+  parser/index/pgvector/Coordinator/LangGraph/Research Agent path with
+  `FakeLlmClient` only at the model boundary;
+- documentation reconciliation across `EVALUATION.md`, `TESTING.md`,
+  `ARCHITECTURE.md`, and `AGENT_DESIGN.md`, including the final
+  Evidence -> retrieval -> research -> Assessment epistemic boundaries.
 
-**Boundaries:**
-- deterministic repository-owned baseline only;
-- no LLM-as-judge requirement;
-- no LangSmith evaluation dependency;
-- no generic evaluation-run persistence;
-- no release-threshold framework;
-- no cost/latency/performance evaluation framework;
-- no PR 27 evaluator-platform scope;
-- no new runtime feature behavior merely to satisfy evaluation;
-- no requirement for live source downloads or live LLM calls during evaluation.
-
-The PR must validate the completed PR 22 behavior rather than introduce another research architecture.
+**Boundaries honored:** deterministic repository-owned baseline only; no
+LLM-as-judge; no LangSmith evaluation dependency; no generic evaluation-run
+persistence; no release-threshold framework; no cost/latency/performance
+framework; no PR 27 evaluator-platform scope; no research runtime behavior
+change; no live source downloads or live LLM calls during evaluation.
 
 ### PR 22 overall non-goals
 

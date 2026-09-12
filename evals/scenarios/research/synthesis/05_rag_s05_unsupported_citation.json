@@ -1,0 +1,23 @@
+{
+  "id": "rag-s05-unsupported-citation",
+  "version": 1,
+  "description": "Unsupported-citation safe failure: a schema-valid model decision citing a real corpus citation that was not supplied must fail closed before persistence. No fabricated empty result is persisted; the execution envelope records the typed error.",
+  "fixture": {
+    "name": "mitre-attack-small"
+  },
+  "query": "obfuscate command-and-control traffic conceal exfiltrated data",
+  "source_ids": [],
+  "document_types": [],
+  "max_results": 1,
+  "expected": {
+    "min_claims": 0,
+    "max_claims": 8,
+    "required_citation_labels": [],
+    "forbidden_citation_labels": [],
+    "required_claims": [],
+    "expected_empty_result": false,
+    "expect_no_evidence_promotion": true,
+    "expect_no_assessment_promotion": true
+  },
+  "source_records": {}
+}
