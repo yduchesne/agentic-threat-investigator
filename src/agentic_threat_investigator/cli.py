@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import logging
 from collections.abc import Callable
+from uuid import UUID
 
 from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.ext.asyncio import (
@@ -52,9 +53,14 @@ from agentic_threat_investigator.app.orchestration.runner import (
 from agentic_threat_investigator.app.orchestration.services import (
     EvidenceAnalystAnalysisExecutor,
 )
+from agentic_threat_investigator.app.report_writer.writer import ReportWriter
 from agentic_threat_investigator.app.secrets import EnvVarSecretsResolver
 from agentic_threat_investigator.config import get_settings
-from agentic_threat_investigator.config.settings import OperatingMode, Settings
+from agentic_threat_investigator.config.settings import (
+    LlmDriver,
+    OperatingMode,
+    Settings,
+)
 from agentic_threat_investigator.infrastructure.embeddings import (
     HashingEmbeddingClient,
     build_openai_embedding_client,
@@ -66,6 +72,9 @@ from agentic_threat_investigator.infrastructure.intelligence_composition import 
 from agentic_threat_investigator.infrastructure.llm.composition import (
     build_openai_chat_model,
 )
+from agentic_threat_investigator.infrastructure.llm.deterministic import (
+    DeterministicLlmClient,
+)
 from agentic_threat_investigator.infrastructure.llm.langchain_client import (
     LangChainLlmClient,
 )
@@ -74,6 +83,9 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.composite
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
+)
+from agentic_threat_investigator.infrastructure.report_writer_composition import (
+    build_report_writer,
 )
 from agentic_threat_investigator.infrastructure.research_agent_composition import (
     build_research_agent,
@@ -117,8 +129,17 @@ def _uow_factory(
     )
 
 
-def _compose_llm(settings: Settings) -> LangChainLlmClient:
-    """Compose the configured real LLM client (independent of operating mode)."""
+def _compose_llm(settings: Settings) -> LangChainLlmClient | DeterministicLlmClient:
+    """Compose the configured LLM client for the worker process.
+
+    ``ATI_LLM_DRIVER=deterministic`` selects the repository-owned offline
+    scripted boundary (PR 24B offline real-stack browser tests); the default
+    ``openai`` driver resolves the API key through the secret-reference
+    bootstrap contract and builds the real chat model. Operating mode never
+    selects the LLM implementation.
+    """
+    if settings.llm_driver is LlmDriver.DETERMINISTIC:
+        return DeterministicLlmClient()
     resolver = EnvVarSecretsResolver()
     chat_model = build_openai_chat_model(settings, resolver)
     return LangChainLlmClient(chat_model)
@@ -147,14 +168,20 @@ def _compose_runner(
     session_factory: async_sessionmaker[AsyncSession],
     uow_factory: Callable[[], PostgresUnitOfWork],
     sources: IntelligenceSourceComposition,
+    llm: LangChainLlmClient | DeterministicLlmClient,
 ) -> LocalInvestigationRunner:
     """Compose the production InvestigationRunner for the worker process.
 
     The provider registry comes from the operating-mode intelligence-source
-    composition; the LLM is the configured runtime implementation in every
-    mode (automated tests inject ``FakeLlmClient`` independently).
+    composition; the LLM is the injected configured runtime implementation in
+    every driver mode (automated tests inject ``FakeLlmClient``
+    independently of ``worker_main``). The recursion bound mirrors the
+    measured production trajectory (40) at normal runtime; the deterministic
+    offline driver uses the generous bound measured by the canonical
+    multi-hop fake-world slices (120), since the optional deterministic
+    boundary is only ever composed for test/demo stacks.
     """
-    llm = _compose_llm(settings)
+    recursion_limit = 120 if settings.llm_driver is LlmDriver.DETERMINISTIC else 40
     analyst = EvidenceAnalyst(
         input_loader=EvidenceAnalystInputLoader(uow_factory),
         llm_client=llm,
@@ -180,6 +207,7 @@ def _compose_runner(
         research_executor_factory=lambda bound: ResearchAgentResearchExecutor(
             research_agent, bound_investigation_id=bound
         ),
+        recursion_limit=recursion_limit,
     )
 
 
@@ -251,17 +279,37 @@ def worker_main(argv: list[str] | None = None) -> int:
     async def run() -> int:
         try:
             sources = await build_intelligence_sources(settings)
+            llm = _compose_llm(settings)
             runner = _compose_runner(
                 settings=settings,
                 session_factory=factory,
                 uow_factory=uow_factory,
                 sources=sources,
+                llm=llm,
+            )
+            report_writer = build_report_writer(
+                uow_factory=uow_factory,
+                llm_client=llm,
+                batch_size=settings.db_batch_size,
+                max_findings=settings.report_writer_max_findings,
+                max_evidence=settings.report_writer_max_evidence,
+                max_relationship_observations=(
+                    settings.report_writer_max_relationship_observations
+                ),
+                max_research_results=settings.report_writer_max_research_results,
+                max_research_claims=settings.report_writer_max_research_claims,
+                max_input_bytes=settings.report_writer_max_input_bytes,
+                max_structured_output_attempts=settings.llm_max_structured_output_attempts,
             )
             worker = InvestigationJobWorker(uow_factory=uow_factory, runner=runner)
             while True:
-                executed = await worker.run_until_empty(max_rounds=100)
-                if executed == 0:
+                executed = await worker.claim_and_run_once()
+                if executed is None:
                     await asyncio.sleep(max(0.0, args.poll_seconds))
+                    continue
+                await _write_missing_current_report(
+                    executed, uow_factory, report_writer
+                )
         except KeyboardInterrupt:
             LOGGER.info("worker interrupted")
             return 0
@@ -270,6 +318,44 @@ def worker_main(argv: list[str] | None = None) -> int:
         return 0
 
     return asyncio.run(run())
+
+
+async def _write_missing_current_report(
+    investigation_id: UUID,
+    uow_factory: Callable[[], PostgresUnitOfWork],
+    report_writer: ReportWriter,
+) -> None:
+    """Write the current Report for one executed terminal Investigation.
+
+    PR 23B deliberately keeps Report generation out of the coordinator graph;
+    the worker uploads the persisted Report after a terminal Investigation
+    that owns a current Assessment but no current Report. Report failure
+    (for example an exhausted LLM budget) never flips the already-terminal
+    Investigation; the bounded error is logged and the legitimate
+    Assessment-only state remains visible to analysts.
+    """
+    from agentic_threat_investigator.app.investigation_worker import (
+        _bounded_error_code,
+    )
+    from agentic_threat_investigator.domain.investigation import (
+        is_terminal_status,
+    )
+
+    async with uow_factory() as uow:
+        state = await uow.investigations.get_by_id(investigation_id)
+    if state is None or not is_terminal_status(state.status):
+        return
+    if state.assessment_id is None or state.report_id is not None:
+        return
+    LOGGER.info("worker writing current report investigation_id=%s", investigation_id)
+    try:
+        await report_writer.write(investigation_id)
+    except BaseException as error:  # noqa: BLE001 - bounded worker-side marker; the terminal Investigation is never flipped
+        LOGGER.warning(
+            "worker report generation failed investigation_id=%s error_code=%s",
+            investigation_id,
+            _bounded_error_code(type(error).__name__),
+        )
 
 
 def _log_operating_mode(settings: Settings) -> None:

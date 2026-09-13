@@ -26,6 +26,7 @@ from uuid import UUID
 
 from agentic_threat_investigator.app.orchestration.runner import InvestigationRunner
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.investigation_job import (
     InvestigationJob,
     InvestigationJobStatus,
@@ -68,8 +69,32 @@ class InvestigationJobWorker:
             job = await uow.investigation_jobs.claim_next(now)
         if job is None:
             return None
+        await self._advance_to_running(job.investigation_id)
         await self._run_job(job)
         return job.investigation_id
+
+    async def _advance_to_running(self, investigation_id: UUID) -> None:
+        """Durably advance a PENDING Investigation to RUNNING before execution.
+
+        The confirmed lifecycle is ``pending -> running -> terminal``; the
+        API persists PENDING and the runner executes only RUNNING
+        investigations (any other non-terminal status fails closed). The
+        claim owns this job exclusively (``FOR UPDATE SKIP LOCKED``), so
+        exactly one worker performs this short versioned transition; a
+        missing, terminal, or already-RUNNING Investigation is an idempotent
+        no-op.
+        """
+        async with self._uow_factory() as uow:
+            state = await uow.investigations.get_by_id(investigation_id)
+            if state is None or state.status is not InvestigationStatus.PENDING:
+                return
+            if state.version is None:
+                return
+            await uow.investigations.update_status(
+                investigation_id,
+                InvestigationStatus.RUNNING,
+                expected_version=state.version,
+            )
 
     async def _run_job(self, job: InvestigationJob) -> None:
         """Execute the claimed job through the production runner seam."""

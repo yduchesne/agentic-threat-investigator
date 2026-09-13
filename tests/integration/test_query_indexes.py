@@ -406,6 +406,14 @@ async def test_p11_history_type_occurred_index(
     """Type-scoped history browses through the type/time index."""
     async with uow_factory() as uow:
         await seed_investigation(uow)
+        # The shared suite truncates tables per test without refreshing
+        # planner statistics (TRUNCATE leaves migration-era stats), so the
+        # index decision between the adjacency/type indexes can otherwise
+        # flip with the preceding workload. A fresh ANALYZE makes the
+        # plan-eligibility assertion deterministic; `enable_seqscan=off`
+        # and the asserted index itself are unchanged.
+        assert uow.session is not None
+        await uow.session.execute(text("ANALYZE ati.domain_object_history"))
         # The type+time-range shape is the documented type/time browse path;
         # the range makes the type/time index clearly preferable to the
         # object/time index (whose occurred_at column follows object_id).
