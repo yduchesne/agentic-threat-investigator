@@ -86,6 +86,25 @@ describe("apiRequest", () => {
     expect(header(captured.headers, "X-CSRF-Token")).toBe("token value");
   });
 
+  it("merges caller headers without allowing client-controlled overrides", async () => {
+    const fetchMock = stubFetch();
+    document.cookie = `${CSRF_COOKIE_NAME}=csrf-token`;
+    await apiRequest<unknown>("/investigations", {
+      method: "POST",
+      body: { objective: "assess" },
+      headers: {
+        "Idempotency-Key": "attempt-1",
+        Accept: "text/html",
+        "X-CSRF-Token": "forged",
+      },
+    }).catch(() => undefined);
+    const captured = initFrom(fetchMock);
+    expect(header(captured.headers, "Idempotency-Key")).toBe("attempt-1");
+    // Client-controlled headers keep their authoritative values.
+    expect(header(captured.headers, "Accept")).toBe("application/json");
+    expect(header(captured.headers, "X-CSRF-Token")).toBe("csrf-token");
+  });
+
   it("allows login before the CSRF cookie exists (U11)", async () => {
     const fetchMock = stubFetch();
     document.cookie = "";

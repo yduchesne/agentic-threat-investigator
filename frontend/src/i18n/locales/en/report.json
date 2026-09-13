@@ -1,0 +1,14 @@
+{
+  "title": "Report",
+  "none": "This investigation has no persisted Report.",
+  "backToOverview": "Back to Overview",
+  "loading": "Loading report…",
+  "loadError": "Unable to load the Report",
+  "meta.createdAt": "Created:",
+  "meta.version": "Version:",
+  "viewMarkdown": "View Markdown",
+  "hideMarkdown": "Hide Markdown",
+  "markdown.loading": "Loading Markdown…",
+  "markdown.error": "The Markdown could not be loaded.",
+  "markdown.label": "Markdown rendering of the persisted report"
+}

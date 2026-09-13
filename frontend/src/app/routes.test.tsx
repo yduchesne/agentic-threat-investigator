@@ -11,6 +11,7 @@ import {
   ANALYST_USER,
   authMe401,
   authMeSuccess,
+  investigationsListHandler,
   runtimeFake,
 } from "../test/handlers";
 
@@ -26,7 +27,7 @@ describe("route topology", () => {
   });
 
   it("renders the authenticated shell for a real /auth/me user (U21)", async () => {
-    setHttpHandlers(authMeSuccess, runtimeFake);
+    setHttpHandlers(authMeSuccess, runtimeFake, investigationsListHandler([]));
     renderAtPath("/investigations");
     expect(
       await screen.findByRole("heading", { name: "Agentic Threat Investigator" }),
@@ -36,7 +37,7 @@ describe("route topology", () => {
   });
 
   it("redirects the authenticated / route to /investigations", async () => {
-    setHttpHandlers(authMeSuccess, runtimeFake);
+    setHttpHandlers(authMeSuccess, runtimeFake, investigationsListHandler([]));
     renderAtPath("/");
     expect(
       await screen.findByRole("heading", { name: "Investigations" }),
@@ -44,7 +45,7 @@ describe("route topology", () => {
   });
 
   it("redirects authenticated /login to /investigations (U22)", async () => {
-    setHttpHandlers(authMeSuccess, runtimeFake);
+    setHttpHandlers(authMeSuccess, runtimeFake, investigationsListHandler([]));
     renderAtPath("/login");
     expect(
       await screen.findByRole("heading", { name: "Investigations" }),

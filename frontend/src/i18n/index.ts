@@ -13,16 +13,26 @@ import { initReactI18next } from "react-i18next";
 
 import auth from "./locales/en/auth.json";
 import common from "./locales/en/common.json";
+import investigations from "./locales/en/investigations.json";
+import overview from "./locales/en/overview.json";
+import report from "./locales/en/report.json";
 import shell from "./locales/en/shell.json";
 
 /** The v0.1 shipped locale. */
 export const DEFAULT_LOCALE = "en";
 
-/** The three 24A translation namespaces. */
-export const NAMESPACES = ["common", "auth", "shell"] as const;
+/** The PR 24A + PR 24B translation namespaces. */
+export const NAMESPACES = [
+  "common",
+  "auth",
+  "shell",
+  "investigations",
+  "overview",
+  "report",
+] as const;
 
 const RESOURCES = {
-  en: { common, auth, shell },
+  en: { common, auth, shell, investigations, overview, report },
 };
 
 let initPromise: Promise<void> | null = null;

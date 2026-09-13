@@ -17,13 +17,14 @@ import {
   authMeSuccess,
   loginFlowHandlers,
   runtimeFake,
+  investigationsListHandler,
 } from "../test/handlers";
 
 useHttp();
 
 describe("RequireAuth", () => {
   it("shows the authenticated shell on /auth/me 200 (U13)", async () => {
-    setHttpHandlers(authMeSuccess, runtimeFake);
+    setHttpHandlers(authMeSuccess, runtimeFake, investigationsListHandler([]));
     renderAtPath("/investigations");
     expect(await screen.findByText(ANALYST_USER.alias)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
