@@ -108,6 +108,31 @@ FastAPI request/response DTOs and REST routes. API DTOs are separate from domain
 
 React/TypeScript analyst workbench consuming the stable `/api/v1` contract.
 
+The v0.1 frontend is a typed, internationalization-ready browser application
+(foundation PR 24A) with strict ownership boundaries:
+
+```text
+React Router 7            owns navigation/URL state
+TanStack Query v5         owns server state (cache, async lifecycle)
+local React state         owns transient presentation state
+FastAPI /api/v1           authoritative for identity, runtime mode and
+                          every analytical resource
+```
+
+Server resources live in TanStack Query only — never in React Context or a
+custom global store. All browser API traffic flows through one centralized,
+ATI-owned fetch boundary (`frontend/src/api/client.ts`) using the
+browser-relative `/api/v1` base, `credentials: include`, Abort signals and
+exact `ati_csrf` → `X-CSRF-Token` handling. The HttpOnly `ati_session` cookie
+is never read by frontend code; `/auth/me` is the authentication authority.
+OpenAPI-derived TypeScript types are generated from the committed snapshot
+(`tests/fixtures/openapi_v1.json`) with a deterministic drift check.
+
+Component/design system is Material UI + Emotion; user-visible strings are
+backed by i18next/react-i18next (English first). Investment in Investigation
+workflow (PR 24B), analyst tables (PR 24C), pivots (PR 24D) and relationship
+visualization (PR 24E) builds on this foundation.
+
 ## Core architectural rule
 
 > Providers retrieve. Collectors coordinate retrieval. Repositories persist. Application workflows decide persistence. Agents decide investigative actions within policy.

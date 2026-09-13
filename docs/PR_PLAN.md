@@ -673,7 +673,208 @@ generic simulation framework was introduced.
 
 ## PR 24 — Analyst frontend
 
-Deliver React/TypeScript investigation list/create/detail flows, Overview, Evidence, Relationships, Research, Timeline and Report views, React Flow graph visualization, and polling. Keep the UI evidence-centric.
+PR 24 is decomposed into five bounded frontend PRs. The original single-PR scope mixed application infrastructure, Investigation workflow, tabular analyst exploration, pivot/navigation semantics, and visualization. These are separate architectural concerns and should not be delegated to one coding-agent change.
+
+The frontend reuses the Vite/React 19 scaffold already present on `main`. The v0.1 frontend stack is:
+
+```text
+Vite + React 19 + strict TypeScript
+React Router 7                 route/navigation state
+TanStack Query v5              server state
+Material UI + Emotion          component/design system
+i18next + react-i18next        internationalization foundation
+OpenAPI-derived TS types       backend DTO contract
+Vitest + Testing Library + MSW unit/component tests
+Playwright                     browser E2E
+```
+
+Future table browsing uses TanStack Table; relationship graph visualization uses React Flow. Do not add either before the PR that owns it.
+
+The product UX remains evidence-centric:
+
+```text
+summary
+  -> finding
+  -> supporting evidence / relationship observations / research
+  -> analyst pivot
+  -> further exploration
+```
+
+The UI must make it easy to move from an AI conclusion to its provenance and from any interesting value to the next investigative pivot. Chat is not the primary application interaction model.
+
+### PR 24A — Frontend foundation and authenticated analyst shell
+
+Establish the browser application platform and prove real authenticated operation against the PR 23C/23D backend.
+
+Deliver:
+
+- evolve the existing `frontend/` Vite/React 19 scaffold rather than replacing it;
+- React Router browser/data-router foundation;
+- TanStack Query server-state foundation;
+- Material UI/Emotion theme and responsive analyst shell;
+- i18next/react-i18next foundation with English shell/auth strings;
+- TypeScript types generated from committed `tests/fixtures/openapi_v1.json`, with deterministic drift check;
+- one ATI-owned fetch/API boundary using relative `/api/v1`, `credentials: include`, stable public `ErrorResponse` mapping, AbortSignal support, and exact `ati_csrf` -> `X-CSRF-Token` handling for unsafe authenticated requests;
+- authentication state sourced from `GET /api/v1/auth/me`, plus login/logout flows and protected routing;
+- routes `/login`, `/investigations` (bounded placeholder only), and safe not-found behavior;
+- safe internal return-to navigation after authentication; no external redirect target;
+- authenticated shell showing product/navigation/user identity/logout;
+- authenticated `GET /api/v1/runtime` integration and persistent, non-dismissible textual `FAKE DATA` indicator when `operating_mode=fake`; runtime lookup failure must never silently imply production;
+- Vite `/api` development proxy and production Nginx `/api` reverse proxy so feature code never hard-codes an API host;
+- Nginx SPA history fallback so direct nested browser routes resolve through React Router;
+- local public-origin/Compose wiring preserving PR 23C CORS and Origin/Referer CSRF protections;
+- frontend unit/component infrastructure with Vitest, jsdom, Testing Library, user-event and centralized MSW;
+- Playwright real-browser coverage against real FastAPI/PostgreSQL proving login -> authenticated shell -> runtime indicator, reload/session restore, CSRF-protected logout, and direct SPA navigation;
+- frontend architecture/deployment/testing documentation.
+
+**PR 24A boundaries:** no Investigation list data, create form, polling, detail workspace, Overview, Report UI, analyst resource tables, export, pivots, Relationship Evolution, React Flow, or map. No Redux/Zustand/global state store. No refresh-token mechanism or weakening of cookie/CSRF security. [DONE]
+
+### PR 24B — Investigation workflow, Overview and report experience
+
+Deliver the first complete analyst workflow:
+
+```text
+Investigations
+    -> Create Investigation
+    -> Investigation workspace
+    -> Overview
+```
+
+Deliver:
+
+- real Investigation list using PR 23C cursor semantics;
+- Create Investigation form using backend-supported indicator types/objective bounds;
+- browser-generated cryptographically strong `Idempotency-Key` per logical submission attempt, retained for safe retry of that attempt and replaced for a new semantic request;
+- asynchronous `202 Accepted` handling;
+- navigate immediately into Investigation workspace;
+- bounded polling of Investigation until terminal state, with cancellation on route/unmount/terminal transition;
+- persistent Investigation header: subject/indicators, objective, status, timestamps and current assessment/report availability;
+- workspace navigation establishing `Overview | Evidence | Relationships | Research | Timeline`, with only Overview substantive in 24B and later routes owned by 24C;
+- Overview centered on "What did ATI conclude, why, and what remains uncertain?";
+- current Assessment and current Report resolved through durable current-resource endpoints, never `MAX(version)` client-side;
+- verdict/confidence, executive summary, findings, caveats/limitations, unresolved questions/recommendations and relevant research references according to delivered DTOs;
+- full report presentation as a secondary view/action rather than making Report the only workspace;
+- finding support rendered as explicit provenance references ready for PR 24C/24D drill-down;
+- robust empty states for running, failed, stopped-without-report, and other legitimate missing-artifact states;
+- Playwright real-stack slice using PR 23D fake mode: `login -> create known fake Investigation -> durable job/worker -> poll -> terminal Overview`.
+
+No Evidence/Relationship/Research table implementation, pivot workspace, graph, or map in 24B.
+
+### PR 24C — Analyst resource tables and drill-down
+
+Deliver one reusable server-driven analyst browsing architecture and apply it to:
+
+```text
+Evidence
+Relationships
+RelationshipObservations
+Research
+Timeline
+History
+```
+
+Use TanStack Table over Material UI presentation primitives; do not introduce MUI Data Grid as a second table framework.
+
+Common interaction contract:
+
+```text
+server-side filters
+    -> URL search parameters
+    -> API query
+    -> opaque cursor page
+    -> rows
+    -> row selection
+    -> detail drawer/panel
+```
+
+Deliver:
+
+- resource-specific bounded filters matching PR 23C API capabilities;
+- no client-side invention of unsupported filter semantics;
+- opaque next-cursor pagination; frontend never decodes cursors and never uses OFFSET/page-number assumptions;
+- deterministic loading/empty/error/retry states;
+- table density appropriate for analyst work;
+- explicit provenance fields where present;
+- detail surfaces for Evidence, Relationship, RelationshipObservation, ResearchResult/claims/citations, Timeline events and generic History records;
+- RelationshipObservation treated as the first-class historical observation resource, not generic history;
+- `observed_at` and `retrieved_at` displayed distinctly;
+- Research visually/semantically distinguished from Evidence;
+- generic History kept secondary to core analyst views and respecting backend redaction;
+- bounded export designed against actually loaded/query-selected server data; never silently claim exhaustive export when only one cursor page is available;
+- URLs preserve route/filter state sufficiently for refresh/share within same deployment;
+- component tests for reusable table/query machinery and real-stack browser coverage against representative PR 23D noisy fake-world data.
+
+No cross-table popup pivot workspace or breadcrumb chain yet; that is PR 24D. No relationship graph/timeline visualization; that is PR 24E.
+
+### PR 24D — Cross-resource pivots, provenance navigation and breadcrumb workspaces
+
+Deliver ATI's defining analyst exploration interaction:
+
+> From an interesting value or report finding, move to the relevant supporting data or a filtered target resource without losing exploration context.
+
+Deliver:
+
+- contextual actions on eligible entity/column/reference values;
+- user-selected pivot targets where more than one target resource is meaningful;
+- target table/workspace opens as a popup/modal analyst workspace with selected value pre-applied as a server-side filter;
+- nested pivots preserve breadcrumb path, for example: `Investigation -> 203.0.113.7 -> Relationships -> beta.example -> Evidence`;
+- popup/workspace title renders breadcrumb context;
+- URL representation of pivot/filter state sufficient for refresh/back-forward without sensitive raw payloads in URL;
+- deterministic close/back semantics;
+- Report/Assessment finding -> supporting Evidence / RelationshipObservation / Research navigation;
+- Relationship -> observation -> Evidence provenance drill-down;
+- value pivots never invent entity equivalence or relationship semantics not provided by backend;
+- bounded nested-workspace depth or another explicit guard against unbounded modal recursion;
+- browser tests covering multi-step pivots against the shared PR 23D synthetic world, including one meaningful path and one benign/dead-end path.
+
+No generic graph visualization or geospatial map.
+
+### PR 24E — Relationship Evolution and relationship graph
+
+Deliver the relationship visualization layer after the table/pivot model is established.
+
+Prioritize **Relationship Evolution** over generic graph polish.
+
+Relationship Evolution answers:
+
+> How has ATI observed this entity's relationships over time?
+
+Deliver:
+
+- entity-centric temporal relationship view sourced from `RelationshipObservation`;
+- filters for direction, relationship type, counterparty/source where supported, and observed date range;
+- discrete observation points / swimlane-style presentation based on `observed_at`;
+- `retrieved_at` remains distinct metadata;
+- derived labels such as First observed, Re-observed, observation frequency, new counterparty/type only where deterministically supported;
+- never infer started/ended/continuous validity merely from missing observations;
+- observation interaction drills into PR 24C detail/provenance and PR 24D pivots;
+- React Flow graph for current/stable relationship exploration after temporal view;
+- graph nodes/edges are navigation/exploration aids, not a new inference engine;
+- graph/table/pivot transitions preserve entity identity and Investigation scope;
+- backend prerequisite rule: if current PR 23C RelationshipObservation API cannot support bounded temporal queries, STOP and introduce a narrow backend prerequisite rather than downloading unbounded observations client-side;
+- Playwright coverage: `entity -> Relationship Evolution -> observation -> Evidence/provenance`, plus bounded graph-to-table navigation.
+
+No PR 25 map/GEOINT expansion.
+
+### PR 24 overall UI principles
+
+Across PR 24A–E:
+
+- primary landing after authentication becomes Investigations workspace once PR 24B lands;
+- Overview answers conclusion/why/uncertainty, not executive SOC KPI dashboards;
+- Evidence, Relationships and Research are table-first analyst surfaces;
+- Research remains visibly epistemically distinct from Evidence;
+- Investigation Timeline (what ATI did) remains distinct from Relationship Evolution (what relationships ATI observed over time) and generic resource History (how persisted state changed);
+- Assessment/Report current versions come from durable backend current pointers/endpoints, never browser inference;
+- backend opaque cursors remain opaque;
+- no client-side reconstruction of unbounded datasets;
+- filter/pivot state belongs in routes/search params where appropriate; server resources belong in TanStack Query; transient component state remains local;
+- substantive user-visible UI text uses i18n foundation;
+- PR 23D fake mode remains visibly labeled during demos;
+- component tests may fake HTTP at browser-unit boundary, but every functional PR also proves its principal workflow through a real browser against real FastAPI/PostgreSQL;
+- frontend must not weaken PR 23C authentication, CSRF, authorization, idempotency or error contracts.
+
+After PR 24E, PR 25 adds the geolocation map using the established routing/query/pivot architecture.
 
 ## PR 25 — Geolocation map
 
