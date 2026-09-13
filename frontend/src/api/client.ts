@@ -57,6 +57,18 @@ export interface ApiRequestOptions {
   signal?: AbortSignal;
   /** Unsafe-request CSRF policy (login is the only "absent-ok" caller). */
   csrf?: CsrfPolicy;
+  /**
+   * Additional request headers (for example `Idempotency-Key`).
+   *
+   * Client-controlled headers (`Accept`, `Content-Type`, and the CSRF
+   * header) are always applied last and can never be overridden here.
+   */
+  headers?: Record<string, string>;
+  /**
+   * Return the raw response body text instead of JSON (deterministic
+   * Markdown endpoints). Error mapping stays identical.
+   */
+  rawText?: boolean;
 }
 
 const UNSAFE_METHODS: ReadonlySet<HttpMethod> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -85,6 +97,22 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     }
     if (token !== null) {
       headers[CSRF_HEADER_NAME] = token;
+    }
+  }
+
+  // Caller headers (for example Idempotency-Key) are merged after CSRF
+  // handling; the client-controlled surface (Accept, Content-Type, CSRF)
+  // can never be overridden from the outside.
+  if (options.headers !== undefined) {
+    const controlled = new Set([
+      "accept",
+      "content-type",
+      CSRF_HEADER_NAME.toLowerCase(),
+    ]);
+    for (const [name, value] of Object.entries(options.headers)) {
+      if (!controlled.has(name.toLowerCase())) {
+        headers[name] = value;
+      }
     }
   }
 
@@ -118,6 +146,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
 
   const text = await response.text();
+  if (response.ok && options.rawText === true) {
+    return text as T;
+  }
   let payload: unknown = undefined;
   if (text.length > 0) {
     try {

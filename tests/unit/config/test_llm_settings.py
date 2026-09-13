@@ -65,6 +65,43 @@ class TestLlmSettings:
         with pytest.raises(ValidationError, match="blank"):
             settings_from_config({"llm_api_key_secret": "   "})
 
+    def test_llm_driver_defaults_to_openai(self) -> None:
+        """Absent driver selects the safe real-model default (PR 24B)."""
+        settings = settings_from_config({})
+        assert settings.llm_driver.value == "openai"
+
+    def test_llm_driver_deterministic_is_accepted(self) -> None:
+        """The explicit deterministic driver parses to the typed enum value."""
+        settings = settings_from_config({"llm_driver": "deterministic"})
+        assert settings.llm_driver.value == "deterministic"
+
+    def test_llm_driver_openai_is_accepted(self) -> None:
+        """The explicit openai driver parses to the typed enum value."""
+        settings = settings_from_config({"llm_driver": "openai"})
+        assert settings.llm_driver.value == "openai"
+
+    @pytest.mark.parametrize("value", ["unknown", "", "   ", "DETERMINISTIC"])
+    def test_llm_driver_unknown_fails_closed(self, value: str) -> None:
+        """Unknown or blank driver values fail validation; no silent fallback."""
+        with pytest.raises(ValidationError):
+            settings_from_config({"llm_driver": value})
+
+    def test_profile_never_pins_the_llm_driver(self) -> None:
+        """The driver is an env-resolved operational selection, never a profile key.
+
+        Like ``operating_mode``, pinning ``llm_driver`` in a profile would
+        silently override ``ATI_LLM_DRIVER``; the offline deterministic E2E
+        worker relies on the environment variable.
+        """
+        config = load_config()
+        assert "llm_driver" not in config
+
+    def test_llm_driver_env_override(self, monkeypatch: MonkeyPatch) -> None:
+        """``ATI_LLM_DRIVER=deterministic`` selects the offline boundary."""
+        monkeypatch.setenv("ATI_LLM_DRIVER", "deterministic")
+        settings = settings_from_config({})
+        assert settings.llm_driver.value == "deterministic"
+
     @pytest.mark.parametrize(
         ("field", "value"),
         [

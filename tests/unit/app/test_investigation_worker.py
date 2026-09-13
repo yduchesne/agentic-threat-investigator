@@ -67,12 +67,43 @@ class FakeJobsRepository:
         )
 
 
-class FakeUnitOfWork:
-    """In-memory transaction boundary exposing the jobs repository."""
+class FakeInvestigationsRepository:
+    """In-memory investigation state for the worker lifecycle transition."""
 
-    def __init__(self, jobs: FakeJobsRepository | None = None) -> None:
-        """Bind the jobs repository fake."""
+    def __init__(self, state: InvestigationState | None = None) -> None:
+        """Bind the authoritative investigation state (mutable)."""
+        self.state = state
+
+    async def get_by_id(self, investigation_id: UUID) -> InvestigationState | None:
+        """Return the bound state (identity is fixed per test)."""
+        del investigation_id
+        return self.state
+
+    async def update_status(
+        self,
+        investigation_id: UUID,
+        status: InvestigationStatus,
+        expected_version: int,
+    ) -> None:
+        """Apply the durable status transition on the bound state."""
+        del investigation_id
+        assert self.state is not None
+        self.state = self.state.model_copy(
+            update={"status": status, "version": expected_version + 1}
+        )
+
+
+class FakeUnitOfWork:
+    """In-memory transaction boundary exposing jobs + investigations."""
+
+    def __init__(
+        self,
+        jobs: FakeJobsRepository | None = None,
+        investigations: FakeInvestigationsRepository | None = None,
+    ) -> None:
+        """Bind the repository fakes."""
         self.investigation_jobs = jobs or FakeJobsRepository()
+        self.investigations = investigations or FakeInvestigationsRepository()
 
     async def __aenter__(self) -> "FakeUnitOfWork":
         """Enter the transaction."""
@@ -119,12 +150,31 @@ def _job(investigation_id: UUID | None = None) -> InvestigationJob:
     )
 
 
-def _worker(jobs: FakeJobsRepository, runner: FakeRunner) -> InvestigationJobWorker:
+def _worker(
+    jobs: FakeJobsRepository,
+    runner: FakeRunner,
+    investigations: FakeInvestigationsRepository | None = None,
+) -> InvestigationJobWorker:
     """Build the worker over the fakes with a fixed clock."""
     return InvestigationJobWorker(
-        cast(Any, lambda: FakeUnitOfWork(jobs)),
+        cast(Any, lambda: FakeUnitOfWork(jobs, investigations)),
         cast(Any, runner),
         clock=lambda: FIXED_NOW,
+    )
+
+
+def _pending_state(investigation_id: UUID) -> InvestigationState:
+    """Build one PENDING investigation bound to the job identity."""
+    return InvestigationState(
+        investigation_id=investigation_id,
+        status=InvestigationStatus.PENDING,
+        trigger_type=InvestigationTriggerType.API,
+        root_entity_ids=[],
+        objective="assess",
+        budget=default_investigation_budget(),
+        started_at=FIXED_NOW,
+        created_at=FIXED_NOW,
+        version=1,
     )
 
 
@@ -133,8 +183,9 @@ async def test_worker_claims_runs_and_completes_one_job() -> None:
     """One claim -> Runner -> succeeded completion is the happy path."""
     job = _job()
     jobs = FakeJobsRepository([job])
+    investigations = FakeInvestigationsRepository(_pending_state(job.investigation_id))
     runner = FakeRunner()
-    worker = _worker(jobs, runner)
+    worker = _worker(jobs, runner, investigations)
 
     executed = await worker.claim_and_run_once()
 
@@ -142,6 +193,48 @@ async def test_worker_claims_runs_and_completes_one_job() -> None:
     assert runner.ran == [job.investigation_id]
     assert jobs.claims == 1
     assert jobs.completed == [(job.id, InvestigationJobStatus.SUCCEEDED)]
+
+
+@pytest.mark.asyncio
+async def test_worker_advances_pending_to_running_before_execution() -> None:
+    """The confirmed PENDING -> RUNNING lifecycle is owned by the worker.
+
+    The API persists PENDING and the runner executes only RUNNING
+    investigations; the durable worker performs the versioned transition
+    through the investigation repository before invoking the runner.
+    """
+    job = _job()
+    jobs = FakeJobsRepository([job])
+    investigations = FakeInvestigationsRepository(_pending_state(job.investigation_id))
+    runner = FakeRunner()
+    worker = _worker(jobs, runner, investigations)
+
+    await worker.claim_and_run_once()
+
+    assert investigations.state is not None
+    assert investigations.state.status is InvestigationStatus.RUNNING
+    assert investigations.state.version == 2
+    # The runner still observed the Investigation (transition happened first).
+    assert runner.ran == [job.investigation_id]
+
+
+@pytest.mark.asyncio
+async def test_worker_leaves_terminal_investigations_untouched() -> None:
+    """A terminal Investigation is an idempotent no-op for the transition."""
+    job = _job()
+    jobs = FakeJobsRepository([job])
+    terminal = _pending_state(job.investigation_id).model_copy(
+        update={"status": InvestigationStatus.COMPLETED, "version": 7}
+    )
+    investigations = FakeInvestigationsRepository(terminal)
+    runner = FakeRunner()
+    worker = _worker(jobs, runner, investigations)
+
+    await worker.claim_and_run_once()
+
+    assert investigations.state is not None
+    assert investigations.state.status is InvestigationStatus.COMPLETED
+    assert investigations.state.version == 7
 
 
 @pytest.mark.asyncio

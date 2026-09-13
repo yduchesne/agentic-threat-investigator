@@ -438,7 +438,7 @@ Fail-closed behavior:
 
 Operating mode selects **intelligence-source composition only**. It does **not** select:
 
-- the `LlmClient` implementation (fake mode at normal runtime uses the configured real LLM);
+- the `LlmClient` implementation (fake mode at normal runtime uses the configured real LLM; `ATI_LLM_DRIVER=deterministic` is the PR 24B offline worker boundary and remains orthogonal);
 - the `EmbeddingClient` implementation;
 - PostgreSQL versus an in-memory database;
 - `TaskDispatcher`;
@@ -459,6 +459,7 @@ PR 20B introduces the first LLM-bearing configuration. The concrete v0.1 provide
 
 | Setting | Environment variable | Type | Default | Bounds | Description |
 |---|---|---|---|---|---|
+| `llm_driver` | `ATI_LLM_DRIVER` | `openai` \| `deterministic` | `openai` | non-blank; exact values only | Worker LLM implementation (PR 24B). `openai` composes the configured real chat model through the secret reference; `deterministic` composes the repository-owned offline scripted boundary used by deterministic real-stack browser tests and offline deployments. Never silently falls back; blank/unknown values fail validation. |
 | `llm_model` | `ATI_LLM_MODEL` | `str` | `gpt-4o-mini` | non-blank | Model identifier handed to the OpenAI provider |
 | `llm_timeout_seconds` | `ATI_LLM_TIMEOUT_SECONDS` | `float` | `60.0` | `> 0`, finite | Per-operation model timeout |
 | `llm_max_structured_output_attempts` | `ATI_LLM_MAX_STRUCTURED_OUTPUT_ATTEMPTS` | `int` | `2` | `1..2` | Initial attempt plus at most one schema repair; values above 2 are rejected |
@@ -471,6 +472,8 @@ PR 20B introduces the first LLM-bearing configuration. The concrete v0.1 provide
 | `llm_max_input_bytes` | `ATI_LLM_MAX_INPUT_BYTES` | `int` | `262144` | `1000..1000000` | Serialized analyst-input size bound |
 
 All LLM floating-point settings must be **finite**; NaN and both infinities are rejected at startup so timeouts and temperatures can never be silently disabled. Boolean values are not accepted as numbers. Integer settings require genuine integer profile values. Oversized analyst inputs (item counts, aggregate normalized-facts bytes, or total serialized size) fail with a typed application error **before any model call**; evidence is never silently truncated. The observation overflow sentinel detects a 1001st observation at the 1000 bound without silent clamping. Structured-output attempts are bounded to `1..2` and each actual invocation (including repair attempts) is counted against the Investigation LLM budget (`max_llm_calls`/`llm_calls_used`, defaults `10`/`0`).
+
+`ATI_LLM_DRIVER=deterministic` is orthogonal to `ATI_OPERATING_MODE`: fake operating mode keeps using the configured real LLM at normal runtime (PR 23D); the deterministic driver exists specifically for offline deterministic stacks (for example the PR 24B real-stack Playwright harness) and never touches the network or secret values.
 
 ### OpenAI API key
 

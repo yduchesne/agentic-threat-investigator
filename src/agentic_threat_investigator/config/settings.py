@@ -31,6 +31,24 @@ class OperatingMode(str, Enum):
     PRODUCTION = "production"
 
 
+class LlmDriver(str, Enum):
+    """Selected worker LLM implementation (PR 24B deterministic boundary).
+
+    ``OPENAI`` composes the configured real OpenAI chat model through the
+    existing secret-reference bootstrap contract. ``DETERMINISTIC`` composes
+    :class:`DeterministicLlmClient`, a repository-owned scripts-free model
+    boundary used by offline real-stack browser tests and deterministic
+    deployments; it never touches the network and never reads secret values.
+    The default is ``openai``: an existing deployment that never sets the
+    variable must not silently switch to a scripted boundary. Exactly
+    ``openai`` and ``deterministic`` are accepted; anything else fails
+    validation.
+    """
+
+    OPENAI = "openai"
+    DETERMINISTIC = "deterministic"
+
+
 class EmbeddingSettings(BaseModel):
     """Configured embedding representation.
 
@@ -167,6 +185,7 @@ class Settings(BaseSettings):
     # logged here. Deterministic analysis configuration defaults to
     # temperature 0. Structured-output attempts are explicitly bounded: the
     # initial attempt plus at most one schema-repair retry.
+    llm_driver: LlmDriver = LlmDriver.OPENAI
     llm_model: str = "gpt-4o-mini"
     llm_timeout_seconds: float = Field(default=60.0, gt=0, allow_inf_nan=False)
     llm_max_structured_output_attempts: int = Field(default=2, ge=1, le=2)
@@ -287,6 +306,19 @@ class Settings(BaseSettings):
         if not value.strip():
             raise ValueError("urlhaus_auth_key_secret must not be blank")
         return value.strip()
+
+    @field_validator("llm_driver", mode="before")
+    @classmethod
+    def validate_llm_driver(cls, value: object) -> object:
+        """Reject blank or invalid LLM-driver strings before enum parsing.
+
+        A blank value fails closed: there is no silent fallback between
+        ``openai`` and ``deterministic``, matching the fail-closed
+        configuration contract (PR 23D operating mode).
+        """
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("llm_driver must not be blank")
+        return value
 
     @field_validator("llm_api_key_secret")
     @classmethod

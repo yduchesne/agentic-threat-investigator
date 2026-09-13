@@ -133,6 +133,45 @@ backed by i18next/react-i18next (English first). Investment in Investigation
 workflow (PR 24B), analyst tables (PR 24C), pivots (PR 24D) and relationship
 visualization (PR 24E) builds on this foundation.
 
+### Async workflow and state ownership (PR 24B)
+
+The PR 24B Investigation workflow treats the Investigation API as a durable
+asynchronous resource, never as an RPC that runs an Investigation:
+
+```text
+POST /api/v1/investigations  (Idempotency-Key, CSRF-aware client)
+  -> 202 Accepted + durable Investigation identity
+  -> navigate immediately to /investigations/{id}/overview
+  -> GET /investigations/{id}  (bounded 2s polling while pending/running)
+  -> terminal status (completed | partial | failed) stops polling
+  -> pointer-gated GET .../assessments/current and .../reports/current
+  -> Overview presentation (Report when present, Assessment fallback)
+```
+
+State ownership is explicit:
+
+```text
+URL                 route/tab state and list filters/cursor (never objective,
+                    indicators, idempotency keys, or raw errors)
+TanStack Query      server resources (list pages, detail, current Assessment,
+                    current Report, Report Markdown) with opaque cursors
+component state     form controls and the in-memory idempotency attempt
+                    (cryptographic key retained for transport-uncertain retry,
+                    never persisted or logged)
+backend             lifecycle, idempotency, durable current-resource pointers
+```
+
+Polling is bounded to the Investigation detail resource while non-terminal;
+it stops on terminal status (never on timestamps or pointer presence), never
+runs in the background, propagates AbortSignals, and never invents progress
+percentages, ETAs, queue positions, or worker internals. Current Assessment
+and Report are queried only through their durable pointers and the `/current`
+endpoints — the browser never computes current versions from version lists.
+The Overview renders the persisted Report when present, falls back to the
+current Assessment otherwise, keeps Research visibly distinct from Evidence,
+and renders every support reference in compact form (rich resolution belongs
+to PR 24C/24D).
+
 ## Core architectural rule
 
 > Providers retrieve. Collectors coordinate retrieval. Repositories persist. Application workflows decide persistence. Agents decide investigative actions within policy.
@@ -172,6 +211,26 @@ TaskDispatcher
 ```
 
 In v0.1, a worker claims an investigation job, runs LangGraph, and LangGraph hands authorized work to `LocalTaskDispatcher`, which delegates to a local `WorkExecutor`. Long-running investigation work must not execute as an in-process FastAPI background task. PR 19C does not replace the PostgreSQL job queue.
+
+The durable worker also owns the confirmed PENDING -> RUNNING lifecycle
+transition (PR 24B): the API persists PENDING, the runner executes only
+RUNNING investigations, so the worker performs the short versioned
+transition through the investigation repository after claiming the job and
+before invoking the runner; a missing, terminal, or already-RUNNING
+Investigation is a no-op.
+
+The PR 24B `ati-worker` entrypoint adds one bounded post-run step: after a
+terminal Investigation owns a current Assessment but no current Report, the
+worker invokes the existing production Report Writer (PR 23B composition) and
+advances the durable `report_id` pointer. Report generation stays out of the
+coordinator graph (PR 23B boundary); a report failure never flips the
+already-terminal Investigation — the legitimate Assessment-only state remains
+visible. The worker composes the configured `LlmClient` implementation; the
+deterministic driver (`ATI_LLM_DRIVER=deterministic`) selects the
+repository-owned offline scripted boundary used by the real-stack fake-world
+browser tests, so the full worker path (provider execution, coordinator,
+runner, Evidence Analyst, Research Agent, Report Writer, persistence) runs
+over real PostgreSQL with no live LLM.
 
 v0.1 uses a PostgreSQL-backed job queue rather than introducing Redis/Kafka solely for background work.
 

@@ -28,6 +28,9 @@ CONFIG: dict[str, Any] = {
     "rag_chunk_max_tokens": 800,
     # LLM settings (PR 20B). Non-secret defaults only: the API key reference
     # name is declared by Settings and must never be committed with a value.
+    # `llm_driver` deliberately stays out of profiles: like
+    # `ATI_OPERATING_MODE`, it is an operational selection resolved from the
+    # environment, never pinned by configuration.
     "llm_model": "gpt-4o-mini",
     "llm_timeout_seconds": 60.0,
     "llm_max_structured_output_attempts": 2,

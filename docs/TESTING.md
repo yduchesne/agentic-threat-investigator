@@ -1332,9 +1332,13 @@ The v0.1 frontend toolchain (PR 24A):
 - **Testing Library + user-event** for interaction, and jest-dom matchers;
 - **MSW** centralizes deterministic HTTP behavior: `src/test/server.ts`
   owns the server lifecycle and `src/test/handlers.ts` owns the
-  `/auth/me`, `/auth/login`, `/auth/logout` and `/runtime` handlers.
-  Every test builds an isolated QueryClient (no shared Query cache);
-  unhandled requests fail loudly;
+  `/auth/me`, `/auth/login`, `/auth/logout`, `/runtime` and PR 24B
+  Investigation handlers (list, create, detail, current Assessment,
+  current Report, Report Markdown) with deterministic lifecycle
+  transitions (`pending -> running -> completed`, `pending -> failed`,
+  `running -> partial`) modeled on the public HTTP contract only — never
+  on worker internals. Every test builds an isolated QueryClient (no
+  shared Query cache); unhandled requests fail loudly;
 - **OpenAPI-derived types**: `npm run api:generate` regenerates
   `frontend/src/api/schema.generated.ts` from the committed snapshot
   `tests/fixtures/openapi_v1.json`; `npm run api:check` fails when the
@@ -1350,7 +1354,7 @@ What is mocked versus real:
 | HTTP | MSW handlers | real FastAPI via Nginx `/api` proxy |
 | Auth/session | jsdom cookie jar + real CSRF contract code | real HttpOnly session + CSRF cookies |
 | Database | none | real throwaway PostgreSQL 18 |
-| LLM | none (fake operating mode) | fake operating mode; never a live LLM |
+| LLM | none (unit tests inject `FakeLlmClient`/the deterministic client directly) | `ATI_LLM_DRIVER=deterministic` offline scripted boundary; never a live LLM |
 
 TanStack Query itself is never mocked and the API client is never replaced
 with per-component fakes.
@@ -1366,12 +1370,60 @@ ports, a throwaway named volume, and generated test-only credentials.
 Cleanup only touches resources the harness created; no live LLM is used
 and no normal developer data is touched.
 
+### Investigation workflow tests (PR 24B)
+
+Component tests (`frontend/src/investigations/`) cover the full matrix:
+
+- list: default bounded page, exact status filter enum, opaque cursor
+  Previous/Next via a browser-local cursor stack, no count/page-number
+  fiction, empty/error/retry states, and no fabricated subject labels;
+- create: localized requiredness and the exact backend bounds exposed in
+  OpenAPI (objective ≤ 4000, indicator value ≤ 2048, at least one typed
+  indicator), exact `EntityType` submission, cryptographic in-memory
+  `Idempotency-Key` generation, transport-uncertain retry reusing the
+  same key, new key for changed semantic content, explicit
+  `409 idempotency_conflict`, `202` immediate workspace navigation, list
+  invalidation, and CSRF preservation;
+- polling: pending/running refetch on the bounded 2s interval,
+  completed/partial/failed stop refetching, no interval-in-background,
+  AbortSignal propagation and cancellation on unmount, transient poll
+  failure retaining the last successful state;
+- current-resource queries are pointer-gated (`/assessments/current`,
+  `/reports/current` only) — never version-list `MAX(version)` — with one
+  bounded detail reconciliation for pointer/read-race 404s;
+- Overview: Report-based presentation when present, Assessment fallback
+  otherwise, partial/failed terminal states, no invented progress, escaped
+  analytical text (no raw HTML), Research visibly distinct from Evidence,
+  and visible support references;
+- full Report route with persisted metadata and the optional deterministic
+  Markdown view as plain text;
+- workspace placeholders (Evidence/Relationships/Research/Timeline) issue
+  no collection queries; detail 404 renders a scoped not-found surface.
+
+### Browser E2E (PR 24B)
+
+`scripts/e2e.sh` now includes the real durable Investigation worker in the
+isolated topology (isolated PostgreSQL → migrations → fake-data bootstrap →
+FastAPI → worker → static frontend + Nginx → Playwright Chromium). The
+worker runs the production Coordinator/runner/persistence with the
+deterministic offline LLM boundary (`ATI_LLM_DRIVER=deterministic`),
+including the worker-owned PENDING -> RUNNING lifecycle transition and the
+post-run Report writing, so the browser slice exercises the complete
+workflow with no live LLM or live network: login → create the documented F02 fake-world Investigation → 202 →
+immediate workspace → bounded detail polling → terminal lifecycle → current
+Assessment → current Report → Overview, verifying `Idempotency-Key`,
+`FAKE DATA`, verdict/confidence, executive summary, findings and support
+references, and that the list shows exactly one logical Investigation.
+
 Covered paths (frontend/e2e):
 
 - E01 login → authenticated shell → runtime `FAKE DATA` indicator;
 - E02 reload restores the server-side session;
 - E03 real CSRF-protected logout revokes the session;
-- E04 direct SPA navigation through Nginx resolves via React Router.
+- E04 direct SPA navigation through Nginx resolves via React Router;
+- E10 create → 202 → workspace → poll → terminal Assessment/Report
+  Overview (real stack, fake world, deterministic LLM boundary);
+- E11 the created Investigation appears exactly once in the real list.
 
 ## Definition of done
 
