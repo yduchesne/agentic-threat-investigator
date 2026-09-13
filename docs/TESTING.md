@@ -1325,7 +1325,53 @@ The React/TypeScript frontend must have equivalent automated engineering discipl
 - unit/component tests;
 - relevant integration tests.
 
-The exact frontend toolchain is selected during frontend bootstrap and integrated into the repository-level quality command.
+The v0.1 frontend toolchain (PR 24A):
+
+- **Vitest + jsdom** for unit/component tests, with global setup in
+  `frontend/src/test/setup.ts`;
+- **Testing Library + user-event** for interaction, and jest-dom matchers;
+- **MSW** centralizes deterministic HTTP behavior: `src/test/server.ts`
+  owns the server lifecycle and `src/test/handlers.ts` owns the
+  `/auth/me`, `/auth/login`, `/auth/logout` and `/runtime` handlers.
+  Every test builds an isolated QueryClient (no shared Query cache);
+  unhandled requests fail loudly;
+- **OpenAPI-derived types**: `npm run api:generate` regenerates
+  `frontend/src/api/schema.generated.ts` from the committed snapshot
+  `tests/fixtures/openapi_v1.json`; `npm run api:check` fails when the
+  committed types are stale. CI never fetches a live development server's
+  OpenAPI document;
+- **Playwright** runs the real-browser production-path slice against real
+  FastAPI/PostgreSQL — see *Browser E2E* below.
+
+What is mocked versus real:
+
+| Layer | Unit/component tests | Playwright E2E |
+|---|---|---|
+| HTTP | MSW handlers | real FastAPI via Nginx `/api` proxy |
+| Auth/session | jsdom cookie jar + real CSRF contract code | real HttpOnly session + CSRF cookies |
+| Database | none | real throwaway PostgreSQL 18 |
+| LLM | none (fake operating mode) | fake operating mode; never a live LLM |
+
+TanStack Query itself is never mocked and the API client is never replaced
+with per-component fakes.
+
+### Browser E2E (PR 24A)
+
+`scripts/e2e.sh` builds the full production-path topology in isolation:
+throwaway PostgreSQL → migrations → fake-data bootstrap → FastAPI (fake
+mode, generated bootstrap admin) → static frontend + Nginx `/api` proxy →
+Playwright Chromium. Isolation follows `integration-test.sh` principles:
+unique Compose project, unmistakable test database/user, random host
+ports, a throwaway named volume, and generated test-only credentials.
+Cleanup only touches resources the harness created; no live LLM is used
+and no normal developer data is touched.
+
+Covered paths (frontend/e2e):
+
+- E01 login → authenticated shell → runtime `FAKE DATA` indicator;
+- E02 reload restores the server-side session;
+- E03 real CSRF-protected logout revokes the session;
+- E04 direct SPA navigation through Nginx resolves via React Router.
 
 ## Definition of done
 
