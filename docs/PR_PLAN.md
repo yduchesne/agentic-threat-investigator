@@ -466,210 +466,209 @@ Execution must continue to respect the PR 19C dispatch boundary, PR 20B structur
 
 The production/test distinction is deliberate: production adapters target real source contracts; automated tests use deterministic local representations of those contracts and fake only true external/non-deterministic boundaries such as the LLM or network transport. Tests must not gain determinism by bypassing the production code path they are intended to verify.
 
-## PR 23 — Report Writer and investigation API
+## PR 23 --- Report Writer, investigation API, and local operating modes
 
-PR 23 is split into bounded follow-up PRs (see the PR 23A execution plan at
-`.plans/PR_23A_DETAILED_EXECUTION_PLAN.md` for the full decomposition):
+PR 23 delivers the analyst-facing backend required by the v0.1 frontend:
+deterministic read/query contracts, structured evidence-backed reports,
+the authenticated asynchronous Investigation REST API, and a
+reproducible local fake-intelligence runtime. The phase is split into
+bounded PRs so each coding-agent change has one dominant architectural
+concern.
 
-### PR 23A — API query and PostgreSQL read-path foundation [DONE]
+``` text
+PR 23A  API query/read foundation
+    ↓
+PR 23B  Structured Report Writer + persistence
+    ↓
+PR 23C  Investigation REST API
+    ↓
+PR 23D  Runtime operating modes + deterministic fake intelligence environment
+    ↓
+PR 24   Analyst frontend
+```
 
-Delivered the production analyst-facing read/query foundation the REST API
-and Report Writer will consume:
+### PR 23A --- API query and PostgreSQL read-path foundation \[DONE\]
 
-- a dedicated application query/read layer (`app/query/`) with typed,
-  immutable query contracts, one canonical deterministic ordering per
-  collection, bounded explicit filters, and UTC half-open date ranges;
-- versioned opaque keyset cursors bound to their query collection and filter
-  fingerprint, with typed fail-closed codec errors; no OFFSET anywhere in
-  the API-oriented read path;
-- PostgreSQL query implementations for Investigations, Evidence,
-  Relationships, RelationshipObservations, ResearchResults, Assessments,
-  timeline events, and generic `domain_object_history` browsing, including
-  exact `object_type + object_id + version` history lookup;
-- RelationshipObservation treated as a first-class historical resource
-  (investigation/relationship scopes, retrieved/observed date ranges) and
-  never routed through `domain_object_history`, preserving PR 22E semantics;
-- Assessment current-version resolution through the durable Investigation
-  `assessment_id` pointer, never `MAX(version)`;
-- migration 0022 indexes mapping one-to-one to concrete query paths, with
-  redundant pre-existing indexes superseded and removed;
-- functional pagination integration tests proving no skips/duplicates over
-  tied timestamps, plus `EXPLAIN` plan-eligibility tests that never assert
-  unstable planner costs;
-- `docs/DATABASE.md` index/query inventory and `docs/API.md` cursor/filter/
-  date semantics without claiming the HTTP implementation exists.
+Delivered the production analyst-facing read/query foundation consumed
+by the REST API and Report Writer:
 
-PR 23A does **not** implement FastAPI routes, HTTP DTOs, authentication,
-Report Writer execution, report persistence, investigation submission,
-idempotency, or frontend work.
+-   dedicated application query/read layer (`app/query/`) with typed
+    immutable query contracts;
+-   one canonical deterministic ordering per collection;
+-   bounded explicit filters and UTC half-open date ranges;
+-   versioned opaque keyset cursors bound to collection and filter
+    fingerprint; no OFFSET;
+-   PostgreSQL queries for Investigations, Evidence, Relationships,
+    RelationshipObservations, ResearchResults, Assessments, timeline
+    events, and generic `domain_object_history`;
+-   exact `object_type + object_id + version` history lookup;
+-   RelationshipObservation as a first-class historical resource rather
+    than generic history;
+-   current Assessment resolution through durable
+    `Investigation.assessment_id`, never `MAX(version)`;
+-   query-path indexes and deterministic pagination/EXPLAIN integration
+    coverage;
+-   database/API documentation of cursor/filter/date semantics.
 
-### PR 23B — Structured Report Writer and report persistence [DONE]
+PR 23A does not implement HTTP routes, authentication, report
+generation, investigation submission, idempotency, or frontend behavior.
 
-Delivered the structured Report Writer LLM execution, typed report domain
-model, report persistence/versioning, and report history exposure on the PR
-23A persistence foundation. Report Writer cannot alter Evidence Analyst
-verdict/confidence or introduce unsupported facts.
+### PR 23B --- Structured Report Writer and report persistence \[DONE\]
 
-Delivered:
+Delivered the structured Report Writer and durable versioned
+InvestigationReport:
 
-- typed report domain contracts (``AssessmentFindingRef`` /
-  ``ResearchClaimRef`` / ``ReportNarrativeStatement`` /
-  ``ReportWriterOutput`` / ``InvestigationReport``) with strict frozen
-  models and ``extra="forbid"``;
-- ``ReportWriterInputLoader`` materializing the current Assessment (via the
-  Investigation's durable ``assessment_id`` pointer), its analyzed Evidence,
-  finding-referenced RelationshipObservations, and bounded persisted
-  ResearchResults, with independent input bounds and no raw Evidence
-  payloads;
-- deterministic prompt builder (``urn:ati:llm:report_writing``), reusing
-  ``LlmClient.generate_structured`` and investigation-wide LLM accounting
-  with at most one schema-repair attempt and no free-form fallback;
-- application stamping and ``ReportProvenanceValidator``: verdict/
-  confidence copied from the current Assessment (never model-authored),
-  finding/research snapshots application-copied, caveats preserved exactly,
-  reference/source-set closure enforced before persistence;
-- versioned PostgreSQL persistence (migration 0023, SQL API v0019):
-  ``ati.investigation_report`` root table with JSONB presentation snapshots,
-  DB-assigned versions, one CREATE history row, the durable Investigation
-  ``report_id`` pointer advanced atomically under lock, stale-Assessment
-  rejection (``U23A1``), and superseded-only soft deletion;
-- report query extension of the PR 23A layer (``QueryKind.REPORTS``,
-  keyset pagination ``version DESC, id ASC``, current report via the durable
-  pointer, listing index with EXPLAIN eligibility test);
-- deterministic Markdown formatter (pure presentation code, no LLM/DB
-  access, safe escaping);
-- repository-owned Report Writer behavioral baseline (RPT-S01..S08, stable
-  failure codes, no LLM-as-judge) and the canonical real-PostgreSQL /
-  ``FakeLlmClient`` vertical slice;
-- documentation reconciliation (architecture, agent design, database, API,
-  testing, evaluation).
+-   strict typed report contracts with model-authored narrative
+    separated from application-owned verdict/confidence/provenance;
+-   bounded input loading from current Assessment, analyzed Evidence,
+    finding-referenced RelationshipObservations, and persisted
+    ResearchResults;
+-   deterministic structured LLM prompt/execution through the existing
+    `LlmClient`, bounded repair, and investigation-wide accounting;
+-   application stamping and provenance closure so Report Writer cannot
+    alter Assessment verdict/confidence or introduce unsupported
+    references;
+-   PostgreSQL report persistence with DB-assigned versions, history,
+    stale-Assessment rejection, and durable `Investigation.report_id`;
+-   current Report resolution through the durable pointer, never
+    `MAX(version)`;
+-   deterministic pure Markdown formatting;
+-   deterministic Report Writer behavioral scenarios and real-PostgreSQL
+    vertical slice using `FakeLlmClient` only at the model boundary;
+-   architecture/database/API/testing/evaluation documentation
+    reconciliation.
 
-PR 23C remains the Investigation REST API.
+PR 23B does not implement HTTP routes or frontend behavior.
 
-### PR 23C — Investigation REST API [DONE]
+### PR 23C --- Investigation REST API \[DONE\]
 
-Delivered `/api/v1` investigation and subresource endpoints consuming the PR
-23A query contracts (cursor pagination, bounded filters, history/version
-exposure), asynchronous investigation creation semantics, stable errors, and
-idempotency.
+Delivered the authenticated `/api/v1` Investigation API on the PR
+23A/23B application contracts:
 
-Delivered:
+-   FastAPI application factory, explicit DTOs and allowlist mappers;
+-   request-ID/security middleware, stable public error envelope,
+    explicit credentialed CORS, and OpenAPI contract;
+-   server-side session authentication with Argon2id credentials, opaque
+    high-entropy session tokens stored only as hashes, HttpOnly/SameSite
+    cookies, CSRF protection, and ANALYST/ADMIN authorization;
+-   asynchronous `POST /api/v1/investigations`: atomically persist
+    PENDING Investigation + durable PostgreSQL job + audit event +
+    actor-scoped idempotency record, then return `202`; the API request
+    never invokes `InvestigationRunner`;
+-   race-safe semantic idempotency;
+-   Investigation, Evidence, Relationships, RelationshipObservations,
+    Research, Assessment, Report, Timeline, and scoped History read
+    endpoints reusing PR 23A keyset query contracts;
+-   current Assessment/Report through durable pointers;
+-   deterministic Report Markdown GET with no LLM regeneration;
+-   generic-history public allowlisting/redaction;
+-   minimal `InvestigationJobWorker` that claims durable jobs and
+    invokes `InvestigationRunner` outside the transaction;
+-   route/unit tests, real-PostgreSQL HTTP integration tests, OpenAPI
+    snapshot, and canonical
+    `POST -> job -> worker -> InvestigationRunner -> GET` vertical
+    slice.
 
-- FastAPI application factory (`api/app.py`) composing CORS, request-ID /
-  security-header middleware, the stable error envelope, every /api/v1
-  router, health probes, and the cookie-session OpenAPI security scheme;
-- explicit request/response DTOs (`api/dto/`) with `extra="forbid"` and
-  pure deterministic allowlist mappers (`api/mappers.py`);
-- minimal server-side session authentication (`POST /auth/login`, `POST
-  /auth/logout`, `GET /auth/me`) reusing the Argon2id credential and
-  SHA-256-hashed opaque session tokens (256-bit CSPRNG) behind an HttpOnly
-  SameSite=Lax cookie plus double-submit CSRF cookies and same-origin
-  checks;
-- ANALYST/ADMIN authorization dependencies (``authentication_required`` 401
-  / ``forbidden`` 403) and credentialed CORS with explicit configured
-  origins (wildcard rejected);
-- bounded request IDs echoed in `X-Request-ID` and inside every error
-  envelope;
-- stable public error envelope (`ErrorResponse{code,message,request_id}`)
-  with central typed-exception mapping (cursor, not-found, conflict,
-  stale-version, idempotency codes) and FastAPI validation overridden to
-  the ATI envelope;
-- asynchronous investigation creation: `POST /api/v1/investigations`
-  atomically persists the PENDING Investigation, the durable PostgreSQL
-  investigation job (`ati.investigation_job`, SQL API v0020), the mutation
-  audit event, and the actor-scoped idempotency record
-  (`ati.api_idempotency`) in one transaction, then returns `202 Accepted`
-  with a `Location` header; the request never invokes `InvestigationRunner`;
-- durable idempotency: required bounded `Idempotency-Key` (1..128 visible
-  ASCII), SHA-256 key digests only, canonical semantic request fingerprints,
-  equivalent replays returning the same Investigation, mismatches returning
-  `409 idempotency_conflict`, and database-owned race safety (one
-  Investigation + one logical job under concurrency);
-- Investigation list/detail, Evidence, Relationships,
-  RelationshipObservations (observed/retrieved filters kept distinct),
-  Research, Assessment (version list / current via durable
-  `assessment_id` / detail), Report (version list / current via durable
-  `report_id` / detail / deterministic Markdown), Timeline, and scoped
-  generic history — all read paths reuse the PR 23A keyset contracts and
-  the PR 23B report query layer, with no OFFSET, no total counts, and no
-  raw payloads;
-- generic history redaction: public object-type allowlist
-  (investigation/entity/relationship/assessment/investigation_report) with
-  per-type state/diff projections that never expose operational or auth
-  material;
-- the minimal durable job worker seam (`InvestigationJobWorker`) claiming
-  jobs atomically and invoking `InvestigationRunner` outside any
-transaction; no job administration API (PR 26 scope);
-- OpenAPI snapshot fixture (`tests/fixtures/openapi_v1.json`) pinning
-  explicit operation IDs, public DTOs, error responses, and the cookie
-  scheme;
-- unit + route contract tests (`tests/unit/api/**`), real-PostgreSQL API
-  integration tests (auth, creation transaction, idempotent replay/race/
-mismatch, collections, raw-payload exclusion, durable pointers, history
-  redaction, deterministic Markdown), the canonical async vertical slice
-  (`POST -> job -> worker -> InvestigationRunner -> GET`), and document
-  reconciliation.
+PR 23C retains the PR 24/25/26 boundaries: no frontend, geolocation/map
+endpoint work, monitor/findings/admin/job-administration UI/API,
+WebSockets/SSE, report regeneration endpoint, or distributed broker.
 
-PR 24/25/26 scope boundaries are retained: no frontend, no geolocation/map
-endpoints, no monitors/findings/admin/job-administration APIs, no report
-generation/regeneration endpoints, no WebSockets/SSE, and no distributed
-broker.
+### PR 23D --- Runtime operating modes and deterministic fake intelligence environment
 
-### PR 23D — Runtime operating modes and deterministic fake intelligence environment [DONE]
+Add a reproducible local runtime for frontend development, manual QA,
+and portfolio demonstrations without depending on changing external
+threat-intelligence services.
 
-Added the v0.1 `ATI_OPERATING_MODE` runtime contract with exactly `fake` and
-`production` modes. `production` preserves the existing real
-intelligence-source composition; `fake` replaces only external batch/live
-intelligence sources with deterministic repository-owned fixtures/adapters
-while retaining the production `InvestigationRunner`, Coordinator/LangGraph,
-provider execution, persistence, Research, Assessment, Report, worker, and
-HTTP architecture.
+Introduce:
 
-Delivered:
+``` text
+ATI_OPERATING_MODE=fake|production
+```
 
-- typed `OperatingMode` (`config/settings.py`) bound to `ATI_OPERATING_MODE`
-  with a safe `production` default, fail-closed validation, and documented
-  orthogonality with `ATI_CONFIG_PROFILE`;
-- the versioned synthetic world and scenario catalog
-  (`infrastructure/fake_runtime/data/v1/` + `catalog.py`): one shared
-  deterministic world with scenario-defining signal, relevant-but-
-  inconclusive data, ambient noise, shared infrastructure, dead-end pivots,
-  and F01–F05 named scenario entry points, all strictly validated;
-- deterministic fake live providers implementing the existing
-  `EvidenceProvider` contract with preserved `SourceId` identities and
-  real-provider `supports(Entity)` applicability, no HTTP transport, no
-  provider secrets, and explicit no-result/error semantics
-  (`infrastructure/fake_runtime/providers.py`);
-- the operating-mode composition boundary
-  (`infrastructure/intelligence_composition.py`): fake vs production
-  branches yielding the same provider-registry contract, wired into the
-  worker/runner through existing seams;
-- the explicit idempotent fake-data bootstrap (`ati-fake-data-bootstrap`)
-  materializing the packaged MITRE STIX fixture into the datasets object
-  store and ingesting through the production `MitreAttackBatchSource` /
-  `IngestionService` / document-indexing path; API/worker startup never
-  ingests fake data;
-- the real `ati-worker` entrypoint composing the selected registry, the
-  configured real LLM, the real Evidence Analyst, and the real Research
-  Agent;
-- safe startup observability (`operating_mode=...
-  intelligence_source_mode=...`) and the authenticated
-  `GET /api/v1/runtime` metadata endpoint for the future frontend
-  (OpenAPI snapshot updated);
-- local Compose wiring (bootstrap-before-API/worker, `ATI_OPERATING_MODE`
-  on API and worker) and documentation reconciliation
-  (`CONFIGURATION.md`, `ARCHITECTURE.md`, `TESTING.md`, `API.md`,
-  `DEPLOYMENT.md`);
-- deterministic offline coverage: configuration unit tests, fixture/catalog
-  unit tests, no-network provider tests, composition fail-closed tests,
-  batch-bootstrap PostgreSQL integration tests, F03 relationship-evolution
-  integration, F04 research-required integration, and the canonical
-  fake-mode HTTP -> durable job -> worker -> runner -> HTTP vertical slice
-  over real PostgreSQL with `FakeLlmClient` only at the model boundary.
+`ATI_OPERATING_MODE` is **orthogonal** to `ATI_CONFIG_PROFILE`.
 
-No frontend, new production intelligence sources, distributed
-infrastructure, mode switching through HTTP, a third operating mode, or a
-generic simulation framework was introduced.
+Runtime semantics:
+
+  ---------------------------------------------------------------------------
+  Mode              Batch intelligence    Live Evidence     LLM
+                    sources               providers         
+  ----------------- --------------------- ----------------- -----------------
+  `fake`            deterministic local   deterministic     real configured
+                    fake/fixture-backed   local fake        `LlmClient`
+                    sources               providers         
+
+  `production`      real production       real production   real configured
+                    sources               providers         `LlmClient`
+  ---------------------------------------------------------------------------
+
+Automated tests remain deterministic and offline: fake-mode integration
+tests inject `FakeLlmClient` independently of operating mode.
+`ATI_OPERATING_MODE` must never select or replace the LLM
+implementation.
+
+**Deliver:**
+
+-   typed `OperatingMode` with exactly `fake` and `production`, selected
+    through `ATI_OPERATING_MODE` using the existing
+    Settings/configuration lifecycle;
+-   safe production default and fail-closed validation; no silent
+    fallback between fake and production;
+-   composition-root selection of intelligence-source implementations
+    only; Coordinator, LangGraph, ProviderWorkExecutor,
+    InvestigationRunner, persistence, Research, Assessment, Report, and
+    API remain mode-unaware;
+-   deterministic fake live Evidence providers implementing the existing
+    provider contracts, preserving real `SourceId` identities and
+    bounded `supports(Entity)` applicability, with no network access or
+    production provider secrets;
+-   deterministic local batch fixtures, reusing existing production
+    BatchSource parsers and ObjectStore paths where the source boundary
+    is an upstream artifact format;
+-   a strict versioned fake-scenario corpus sufficient for frontend
+    development and demonstrations, including:
+    -   benign indicator;
+    -   malicious multi-source correlation;
+    -   relationship evolution with repeated RelationshipObservations
+        and distinct `observed_at`/`retrieved_at`;
+    -   research-required investigation;
+    -   insufficient-evidence/uncertainty path;
+-   safe runtime metadata exposing `fake` versus `production` so PR 24
+    can display a persistent fake-data indicator without exposing
+    configuration/secrets;
+-   startup logging that makes fake mode unmistakable;
+-   local API/worker deployment wiring using the same operating mode;
+-   canonical real-PostgreSQL fake-mode integration through the
+    production architecture, preferably:
+    `HTTP POST -> durable job -> worker -> InvestigationRunner -> production Coordinator/provider execution -> fake intelligence boundaries -> FakeLlmClient -> real persistence -> HTTP GET`;
+-   configuration, architecture, testing, API (if runtime metadata is
+    added), and local-run documentation.
+
+**Binding boundaries:**
+
+-   fake the external intelligence world, not ATI's application
+    architecture;
+-   normal interactive `fake` mode still uses the configured real LLM;
+-   automated tests use `FakeLlmClient` at the LLM boundary and require
+    no live Internet/LLM;
+-   no `config_fake` profile; configuration profile and operating mode
+    remain separate concepts;
+-   no per-provider fake/production mixing in v0.1;
+-   no per-request/runtime API mode switching;
+-   no third mode such as `demo`, `test`, `offline`, or `hybrid`;
+-   no random fake-data generator or generic simulation framework;
+-   no direct final-state database seeding as the canonical fake
+    investigation path;
+-   no new production threat-intelligence provider;
+-   no Coordinator/report/Assessment semantic changes;
+-   no distributed task infrastructure;
+-   no frontend, graph, Relationship Evolution visualization, or
+    geolocation UI;
+-   no database migration is expected; if correctness appears to require
+    persisted per-Investigation operating-mode identity, stop and make
+    that a separate architectural decision.
+
+PR 23D is the final backend/development-environment prerequisite before
+the bounded PR 24 frontend series.
 
 ## PR 24 — Analyst frontend
 
