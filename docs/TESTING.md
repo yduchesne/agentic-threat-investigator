@@ -618,6 +618,27 @@ The test suite should provide deterministic implementations such as:
 
 Fakes should implement the same ABC contracts as production components.
 
+## Fake operating mode versus test mode (PR 23D)
+
+Fake **operating mode** is a runtime concept, not a test mode:
+
+- `ATI_OPERATING_MODE=fake` changes only which intelligence-source implementations are composed at bootstrap;
+- automated tests are deterministic regardless of operating mode and inject `FakeLlmClient` at the model boundary;
+- CI never requires live network access or a live LLM;
+- runtime `fake` mode at a real deployment still uses the configured real `LlmClient` when an LLM-bearing path executes.
+
+PR 23D adds the following deterministic, offline coverage:
+
+- **configuration tests** (`tests/unit/config/test_operating_mode.py`): safe production default, exact `fake`/`production` values, fail-closed validation, profile orthogonality;
+- **catalog/fixture tests** (`tests/unit/infrastructure/test_fake_runtime.py`): strict schema validation (duplicate scenario IDs, duplicate root indicators, unknown providers, malformed timestamps, path escapes), deterministic shared-world lookups, fake provider contract behavior, no-network invariants, and composition branches (fake only fakes, production only real);
+- **runtime metadata tests** (`tests/unit/api/test_runtime.py`): `GET /api/v1/runtime` reports the mode only, requires authentication, and never exposes configuration or secrets;
+- **fake batch bootstrap tests** (`tests/integration/test_fake_batch_bootstrap.py`): first ingestion through the production `MitreAttackBatchSource`, idempotent re-run, malformed-fixture fail-closed, production-mode refusal;
+- **canonical fake-mode vertical slice** (`tests/integration/test_fake_canonical_vertical_slice.py`): HTTP `POST /investigations` → durable job → `InvestigationJobWorker` → `LocalInvestigationRunner` → fake intelligence providers → `FakeLlmClient` → real PostgreSQL → HTTP reads (Investigation, Evidence, Relationships, RelationshipObservations, Research, Assessment, Timeline, runtime mode);
+- **relationship evolution** (`tests/integration/test_fake_relationship_evolution.py`): repeated observations of a stable relationship at distinct source-semantic times and a later new counterparty, with `observed_at` preserved separately from `retrieved_at`;
+- **research-required** (`tests/integration/test_fake_research_required.py`): the coordinator research lifecycle persists a contextual `ResearchResult` that remains distinct from Evidence.
+
+The fake world and scenario fixtures are repository-owned under `src/agentic_threat_investigator/infrastructure/fake_runtime/data/v1/` and are versioned and strictly validated; runtime randomness is forbidden and fixture-internal relevance classifications are never exposed to the analytical pipeline as privileged truth.
+
 ## Structured agent output and deterministic formatter tests
 
 All programmatic agent outputs are validated Pydantic models. Conventional

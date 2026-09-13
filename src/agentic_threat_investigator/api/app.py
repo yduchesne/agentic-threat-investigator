@@ -12,6 +12,7 @@ the investigation worker, LangGraph, provider polling, or job execution.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -29,10 +30,33 @@ from agentic_threat_investigator.api.routes import (
     relationships,
     reports,
     research,
+    runtime,
     timeline,
 )
 from agentic_threat_investigator.config import Settings
 from agentic_threat_investigator.infrastructure.api_composition import ApiComposition
+
+LOGGER = logging.getLogger(__name__)
+
+
+def log_operating_mode(settings: Settings) -> None:
+    """Emit the safe startup observability event for the API process.
+
+    Only the selected operating mode and its intelligence-source label are
+    logged; resolved secrets and configuration internals are never included.
+    """
+    LOGGER.info(
+        "operating_mode=%s intelligence_source_mode=%s",
+        settings.operating_mode.value,
+        settings.operating_mode.value,
+    )
+    if settings.operating_mode.value == "fake":
+        LOGGER.info(
+            "ATI operating mode: FAKE; external threat-intelligence sources: "
+            "deterministic local fakes; LLM: configured runtime implementation "
+            "(not selected by operating mode)"
+        )
+
 
 API_ROUTERS = (
     auth.router,
@@ -45,6 +69,7 @@ API_ROUTERS = (
     reports.router,
     timeline.router,
     history.router,
+    runtime.router,
 )
 """Every /api/v1 router in a stable registration order."""
 
@@ -141,6 +166,7 @@ def create_app(settings: Settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         """Compose the real API services and seed the bootstrap admin."""
+        log_operating_mode(settings)
         composition = ApiComposition(settings)
         composition.install_services(application)
         await composition.bootstrap_admin().ensure(

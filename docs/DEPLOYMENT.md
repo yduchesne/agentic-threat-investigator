@@ -413,6 +413,52 @@ The exact implementation may be Make/scripts, but developers and coding agents s
 
 All ATI processes use the profile mechanism defined in `CONFIGURATION.md`. `ATI_CONFIG_PROFILE` selects the profile and defaults to `default`. Compose manifests should make the selected profile explicit where appropriate. Source-controlled profile modules contain no production secrets; secrets are supplied through deliberate runtime mechanisms.
 
+## Operating modes and the deterministic fake runtime (PR 23D)
+
+`ATI_OPERATING_MODE` (see `CONFIGURATION.md`) selects intelligence-source composition and is independent of `ATI_CONFIG_PROFILE`. The API and worker processes must agree on the operating mode for a coherent deployment.
+
+### Local fake-mode invocation
+
+```bash
+ATI_CONFIG_PROFILE=local
+ATI_OPERATING_MODE=fake
+ATI_OPENAI_API_KEY=...    # real configured LLM, required for LLM-bearing paths
+```
+
+`compose.yaml` defaults the local runtime to fake mode and wires the one-shot bootstrap before normal API/worker use:
+
+```text
+PostgreSQL healthy
+        ↓
+ati-migrate (one-shot Alembic)
+        ↓
+ati-fake-data-bootstrap (one-shot, idempotent)
+        ↓
+API + worker
+```
+
+The `ati-fake-data-bootstrap` service runs `ati-fake-data-bootstrap`, which loads and validates the packaged synthetic world, materializes the MITRE STIX fixture into `${ATI_DATA_DIR}/datasets`, ingests it through the production `MitreAttackBatchSource`/`IngestionService` path, and indexes changed records into the research corpus. It is safe to re-run: a completed artifact is a no-op, so repeated runs never create semantic duplicates. API startup, worker startup, and module import never ingest fake batch data.
+
+Local fake mode uses the configured real `LlmClient`: the worker requires the normal LLM secret (`ATI_OPENAI_API_KEY`) when an LLM-bearing path executes. No fake intelligence provider requires a provider API secret and no fake source performs network I/O.
+
+Manual workflow (also valid for local QA and fresh-database initialization):
+
+```bash
+ATI_CONFIG_PROFILE=local ATI_OPERATING_MODE=fake ati-fake-data-bootstrap
+ATI_CONFIG_PROFILE=local ATI_OPERATING_MODE=fake ati-worker --poll-seconds 1.0
+```
+
+then create an Investigation through the PR 23C API using a documented fake scenario indicator (synthetic/reserved values such as `update-package.test`; see `docs/ARCHITECTURE.md`), and inspect it through the read endpoints.
+
+### Production invocation
+
+```bash
+ATI_CONFIG_PROFILE=prod
+ATI_OPERATING_MODE=production
+```
+
+Production deployments must set `ATI_OPERATING_MODE=production` explicitly (or rely on the safe production default), must never run the fake-data bootstrap, and must not mix fake and production data volumes casually: fake scenarios use reserved `.test` domains and documentation IP ranges precisely so they cannot collide with real indicators.
+
 ## Database baseline update
 
 ATI v0.1 targets a pinned PostgreSQL 18 image plus a verified compatible pgvector release. Batch size is an operational configuration value (for example `db_batch_size`) enforced by the application before composite-array submission to PostgreSQL; the exact default is benchmark-driven.

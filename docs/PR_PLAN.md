@@ -615,6 +615,62 @@ endpoints, no monitors/findings/admin/job-administration APIs, no report
 generation/regeneration endpoints, no WebSockets/SSE, and no distributed
 broker.
 
+### PR 23D — Runtime operating modes and deterministic fake intelligence environment [DONE]
+
+Added the v0.1 `ATI_OPERATING_MODE` runtime contract with exactly `fake` and
+`production` modes. `production` preserves the existing real
+intelligence-source composition; `fake` replaces only external batch/live
+intelligence sources with deterministic repository-owned fixtures/adapters
+while retaining the production `InvestigationRunner`, Coordinator/LangGraph,
+provider execution, persistence, Research, Assessment, Report, worker, and
+HTTP architecture.
+
+Delivered:
+
+- typed `OperatingMode` (`config/settings.py`) bound to `ATI_OPERATING_MODE`
+  with a safe `production` default, fail-closed validation, and documented
+  orthogonality with `ATI_CONFIG_PROFILE`;
+- the versioned synthetic world and scenario catalog
+  (`infrastructure/fake_runtime/data/v1/` + `catalog.py`): one shared
+  deterministic world with scenario-defining signal, relevant-but-
+  inconclusive data, ambient noise, shared infrastructure, dead-end pivots,
+  and F01–F05 named scenario entry points, all strictly validated;
+- deterministic fake live providers implementing the existing
+  `EvidenceProvider` contract with preserved `SourceId` identities and
+  real-provider `supports(Entity)` applicability, no HTTP transport, no
+  provider secrets, and explicit no-result/error semantics
+  (`infrastructure/fake_runtime/providers.py`);
+- the operating-mode composition boundary
+  (`infrastructure/intelligence_composition.py`): fake vs production
+  branches yielding the same provider-registry contract, wired into the
+  worker/runner through existing seams;
+- the explicit idempotent fake-data bootstrap (`ati-fake-data-bootstrap`)
+  materializing the packaged MITRE STIX fixture into the datasets object
+  store and ingesting through the production `MitreAttackBatchSource` /
+  `IngestionService` / document-indexing path; API/worker startup never
+  ingests fake data;
+- the real `ati-worker` entrypoint composing the selected registry, the
+  configured real LLM, the real Evidence Analyst, and the real Research
+  Agent;
+- safe startup observability (`operating_mode=...
+  intelligence_source_mode=...`) and the authenticated
+  `GET /api/v1/runtime` metadata endpoint for the future frontend
+  (OpenAPI snapshot updated);
+- local Compose wiring (bootstrap-before-API/worker, `ATI_OPERATING_MODE`
+  on API and worker) and documentation reconciliation
+  (`CONFIGURATION.md`, `ARCHITECTURE.md`, `TESTING.md`, `API.md`,
+  `DEPLOYMENT.md`);
+- deterministic offline coverage: configuration unit tests, fixture/catalog
+  unit tests, no-network provider tests, composition fail-closed tests,
+  batch-bootstrap PostgreSQL integration tests, F03 relationship-evolution
+  integration, F04 research-required integration, and the canonical
+  fake-mode HTTP -> durable job -> worker -> runner -> HTTP vertical slice
+  over real PostgreSQL with `FakeLlmClient` only at the model boundary.
+
+No frontend, new production intelligence sources, distributed
+infrastructure, mode switching through HTTP, a third operating mode, or a
+generic simulation framework was introduced.
+
 ## PR 24 — Analyst frontend
 
 Deliver React/TypeScript investigation list/create/detail flows, Overview, Evidence, Relationships, Research, Timeline and Report views, React Flow graph visualization, and polling. Keep the UI evidence-centric.

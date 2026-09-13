@@ -342,6 +342,23 @@ the validated persisted report resource:
   PR 23B formatter; GET never regenerates a report and never invokes an
   LLM.
 
+## Runtime mode (PR 23D)
+
+`GET /api/v1/runtime` is an authenticated, read-only endpoint returning the
+selected intelligence-source composition mode:
+
+```json
+{"operating_mode": "fake"}
+```
+
+`operating_mode` is exactly `fake` or `production`. It describes which
+intelligence-source implementations are composed — it never claims anything
+about the LLM implementation (runtime fake mode still uses the configured
+real LLM). The response exposes mode only: never provider credentials,
+secret reference names, LLM providers, database URLs, filesystem paths, or
+the effective configuration. No endpoint can switch the operating mode and
+no request can select fake versus production.
+
 ## Generic history redaction (delivered)
 
 Generic history identity is `object_type + object_id` (no `natural_key`).

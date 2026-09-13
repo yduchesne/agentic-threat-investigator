@@ -1558,6 +1558,22 @@
         "title": "ResearchResultResponse",
         "type": "object"
       },
+      "RuntimeInfoResponse": {
+        "additionalProperties": false,
+        "description": "Safe public runtime composition metadata for the analyst frontend.\n\n``operating_mode`` is the lowercase ``fake``/``production`` value; PR 24\nuses it to display a persistent ``FAKE DATA`` indicator without\nhard-coding frontend deployment knowledge.",
+        "properties": {
+          "operating_mode": {
+            "minLength": 1,
+            "title": "Operating Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operating_mode"
+        ],
+        "title": "RuntimeInfoResponse",
+        "type": "object"
+      },
       "TimelineEventResponse": {
         "additionalProperties": false,
         "description": "One safe observable workflow event.",
@@ -5008,6 +5024,93 @@
         "summary": "List Timeline Events",
         "tags": [
           "timeline"
+        ]
+      }
+    },
+    "/api/v1/runtime": {
+      "get": {
+        "description": "Return the selected intelligence-source composition mode.\n\nOnly the lowercase ``fake``/``production`` operating mode is exposed;\nno credential, secret reference, LLM provider, or configuration value is\nincluded.",
+        "operationId": "get_runtime_info",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed."
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "Get Runtime Info",
+        "tags": [
+          "runtime"
         ]
       }
     },
