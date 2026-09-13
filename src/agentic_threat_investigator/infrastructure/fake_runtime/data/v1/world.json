@@ -1,0 +1,1325 @@
+{
+  "schema_version": 1,
+  "world_id": "fake_world_v1",
+  "provider_results": [
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "domain",
+      "entity_value": "alice-corp.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "query_name": "alice-corp.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "alice-corp.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "203.0.113.10"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "query_name": "alice-corp.test",
+            "query_type": "MX",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "alice-corp.test",
+                "record_type": "MX",
+                "ttl": 300,
+                "preference": 10,
+                "exchange": "mail-relay.test"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "query_name": "alice-corp.test",
+            "query_type": "NS",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "alice-corp.test",
+                "record_type": "NS",
+                "ttl": 300,
+                "value": "ns-host.test"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "query_name": "alice-corp.test",
+            "query_type": "TXT",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "alice-corp.test",
+                "record_type": "TXT",
+                "ttl": 300,
+                "value": "v=spf1 include:_spf.alice-corp.test -all"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "domain",
+      "entity_value": "alice-corp.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "object_class_name": "domain",
+            "handle": "D-ALICE-CORP",
+            "registrar": "Synthetic Registrar"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "domain",
+      "entity_value": "alice-corp.test",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "domain",
+      "entity_value": "alice-corp.test",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.10",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:ipinfo_lite",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.10",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.10",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:network",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "object_class_name": "ip network",
+            "handle": "NET-203-0-113-0-1",
+            "cidr0_cidrs": [
+              {
+                "prefix": "203.0.113.0",
+                "length": 24
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:abuseipdb",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.10",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:reputation",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "abuse_confidence_score": 0,
+            "country_code": "US",
+            "total_reports": 0
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.10",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.10",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "domain",
+      "entity_value": "mail-relay.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "query_name": "mail-relay.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "mail-relay.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "203.0.113.11"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "domain",
+      "entity_value": "mail-relay.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "object_class_name": "domain",
+            "handle": "D-MAIL-RELAY"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "domain",
+      "entity_value": "mail-relay.test",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "domain",
+      "entity_value": "mail-relay.test",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.11",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:ipinfo_lite",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.11",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.11",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:network",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "object_class_name": "ip network",
+            "handle": "NET-203-0-113-0-1",
+            "cidr0_cidrs": [
+              {
+                "prefix": "203.0.113.0",
+                "length": 24
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:abuseipdb",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.11",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:reputation",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "abuse_confidence_score": 0,
+            "country_code": "US",
+            "total_reports": 0
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.11",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.11",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "domain",
+      "entity_value": "update-package.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "query_name": "update-package.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "update-package.test",
+                "record_type": "CNAME",
+                "ttl": 300,
+                "value": "assets-edge.test"
+              },
+              {
+                "name": "assets-edge.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "203.0.113.81"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "query_name": "update-package.test",
+            "query_type": "MX",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "update-package.test",
+                "record_type": "MX",
+                "ttl": 300,
+                "preference": 10,
+                "exchange": "mail-01.test"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "query_name": "update-package.test",
+            "query_type": "NS",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "update-package.test",
+                "record_type": "NS",
+                "ttl": 300,
+                "value": "ns-host.test"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "query_name": "update-package.test",
+            "query_type": "TXT",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "update-package.test",
+                "record_type": "TXT",
+                "ttl": 300,
+                "value": "trusted marketing partner newsletter"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "domain",
+      "entity_value": "update-package.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "object_class_name": "domain",
+            "handle": "D-UPDATE-PACKAGE",
+            "registrar": "Synthetic Registrar"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "domain",
+      "entity_value": "update-package.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:threat_intelligence",
+          "observed_at": "2026-05-10T00:00:00Z",
+          "facts": {
+            "matches": [
+              {
+                "threatfox_id": "9000001",
+                "ioc": "update-package.test",
+                "ioc_type": "domain",
+                "threat_type": "botnet_cc",
+                "threat_type_description": "C&C server",
+                "malware": "malware.badloader_v2",
+                "malware_printable": "BadLoader v2",
+                "confidence_level": 90,
+                "first_seen": "2026-04-15T00:00:00Z",
+                "last_seen": "2026-05-10T00:00:00Z",
+                "reference": null,
+                "tags": [
+                  "c2",
+                  "dropper"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "domain",
+      "entity_value": "update-package.test",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.81",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:ipinfo_lite",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.81",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.81",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:network",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "object_class_name": "ip network",
+            "handle": "NET-203-0-113-0-1",
+            "cidr0_cidrs": [
+              {
+                "prefix": "203.0.113.0",
+                "length": 24
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:abuseipdb",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.81",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:reputation",
+          "observed_at": "2026-05-10T00:00:00Z",
+          "facts": {
+            "abuse_confidence_score": 30,
+            "country_code": "US",
+            "total_reports": 2
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.81",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.81",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "domain",
+      "entity_value": "assets-edge.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "query_name": "assets-edge.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "assets-edge.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "203.0.113.81"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "query_name": "assets-edge.test",
+            "query_type": "TXT",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "assets-edge.test",
+                "record_type": "TXT",
+                "ttl": 300,
+                "value": "authorized corporate asset delivery"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "domain",
+      "entity_value": "assets-edge.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "object_class_name": "domain",
+            "handle": "D-ASSETS-EDGE"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "domain",
+      "entity_value": "assets-edge.test",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "domain",
+      "entity_value": "assets-edge.test",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "domain",
+      "entity_value": "mail-01.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "query_name": "mail-01.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "mail-01.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "203.0.113.12"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "domain",
+      "entity_value": "mail-01.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "object_class_name": "domain",
+            "handle": "D-MAIL-01"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "domain",
+      "entity_value": "mail-01.test",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "domain",
+      "entity_value": "mail-01.test",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:ipinfo_lite",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.12",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.12",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:network",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "object_class_name": "ip network",
+            "handle": "NET-203-0-113-0-1",
+            "cidr0_cidrs": [
+              {
+                "prefix": "203.0.113.0",
+                "length": 24
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:abuseipdb",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.12",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:reputation",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "abuse_confidence_score": 0,
+            "country_code": "US",
+            "total_reports": 0
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.12",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.12",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.12",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "domain",
+      "entity_value": "ns-host.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "query_name": "ns-host.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "ns-host.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "192.0.2.53"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "domain",
+      "entity_value": "ns-host.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "object_class_name": "domain",
+            "handle": "D-NS-HOST",
+            "registrar": "Synthetic Registrar"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "domain",
+      "entity_value": "ns-host.test",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "domain",
+      "entity_value": "ns-host.test",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:ipinfo_lite",
+      "entity_type": "ip_address",
+      "entity_value": "192.0.2.53",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "ip_address",
+      "entity_value": "192.0.2.53",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:network",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "object_class_name": "ip network",
+            "handle": "NET-192-0-2-0-1",
+            "cidr0_cidrs": [
+              {
+                "prefix": "192.0.2.0",
+                "length": 24
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:abuseipdb",
+      "entity_type": "ip_address",
+      "entity_value": "192.0.2.53",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:reputation",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "abuse_confidence_score": 0,
+            "country_code": "US",
+            "total_reports": 0
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "ip_address",
+      "entity_value": "192.0.2.53",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "192.0.2.53",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "ip_address",
+      "entity_value": "192.0.2.53",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "domain",
+      "entity_value": "logistics-corp.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-01-10T09:00:00Z",
+          "facts": {
+            "query_name": "logistics-corp.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "logistics-corp.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "203.0.113.60"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-03-20T09:00:00Z",
+          "facts": {
+            "query_name": "logistics-corp.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "logistics-corp.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "203.0.113.60"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-06-15T09:00:00Z",
+          "facts": {
+            "query_name": "logistics-corp.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "logistics-corp.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "203.0.113.60"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-09-01T09:00:00Z",
+          "facts": {
+            "query_name": "logistics-corp.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "logistics-corp.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "198.51.100.77"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-03-20T09:00:00Z",
+          "facts": {
+            "query_name": "logistics-corp.test",
+            "query_type": "MX",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "logistics-corp.test",
+                "record_type": "MX",
+                "ttl": 300,
+                "preference": 10,
+                "exchange": "mail-relay.test"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-03-20T09:00:00Z",
+          "facts": {
+            "query_name": "logistics-corp.test",
+            "query_type": "NS",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "logistics-corp.test",
+                "record_type": "NS",
+                "ttl": 300,
+                "value": "ns-host.test"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-03-20T09:00:00Z",
+          "facts": {
+            "query_name": "logistics-corp.test",
+            "query_type": "TXT",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "logistics-corp.test",
+                "record_type": "TXT",
+                "ttl": 300,
+                "value": "v=spf1 include:_spf.logistics-corp.test -all"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "domain",
+      "entity_value": "logistics-corp.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-03-20T09:00:00Z",
+          "facts": {
+            "object_class_name": "domain",
+            "handle": "D-LOGISTICS-CORP",
+            "registrar": "Synthetic Registrar"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "domain",
+      "entity_value": "logistics-corp.test",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "domain",
+      "entity_value": "logistics-corp.test",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.60",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:ipinfo_lite",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.60",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.60",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:network",
+          "observed_at": "2026-06-15T09:00:00Z",
+          "facts": {
+            "object_class_name": "ip network",
+            "handle": "NET-203-0-113-0-1",
+            "cidr0_cidrs": [
+              {
+                "prefix": "203.0.113.0",
+                "length": 24
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:abuseipdb",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.60",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:reputation",
+          "observed_at": "2026-06-15T09:00:00Z",
+          "facts": {
+            "abuse_confidence_score": 5,
+            "country_code": "US",
+            "total_reports": 1
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.60",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.60",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:ipinfo_lite",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.77",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.77",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:network",
+          "observed_at": "2026-09-01T09:00:00Z",
+          "facts": {
+            "object_class_name": "ip network",
+            "handle": "NET-198-51-100-0-1",
+            "cidr0_cidrs": [
+              {
+                "prefix": "198.51.100.0",
+                "length": 24
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:abuseipdb",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.77",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:reputation",
+          "observed_at": "2026-09-01T09:00:00Z",
+          "facts": {
+            "abuse_confidence_score": 0,
+            "country_code": "US",
+            "total_reports": 0
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.77",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.77",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.77",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "domain",
+      "entity_value": "order-portal.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-07-15T10:00:00Z",
+          "facts": {
+            "query_name": "order-portal.test",
+            "query_type": "A",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "order-portal.test",
+                "record_type": "A",
+                "ttl": 300,
+                "value": "198.51.100.25"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_type": "urn:ati:evidence:dns",
+          "observed_at": "2026-07-15T10:00:00Z",
+          "facts": {
+            "query_name": "order-portal.test",
+            "query_type": "TXT",
+            "status": 0,
+            "flags": {
+              "rd": true,
+              "ra": true
+            },
+            "answers": [
+              {
+                "name": "order-portal.test",
+                "record_type": "TXT",
+                "ttl": 300,
+                "value": "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC8hG"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "domain",
+      "entity_value": "order-portal.test",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-07-15T10:00:00Z",
+          "facts": {
+            "object_class_name": "domain",
+            "handle": "D-ORDER-PORTAL",
+            "registrar": "Synthetic Registrar"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "domain",
+      "entity_value": "order-portal.test",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "domain",
+      "entity_value": "order-portal.test",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:ipinfo_lite",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.25",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.25",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:network",
+          "observed_at": "2026-07-15T10:00:00Z",
+          "facts": {
+            "object_class_name": "ip network",
+            "handle": "NET-198-51-100-0-1",
+            "cidr0_cidrs": [
+              {
+                "prefix": "198.51.100.0",
+                "length": 24
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:abuseipdb",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.25",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:reputation",
+          "observed_at": "2026-07-15T10:00:00Z",
+          "facts": {
+            "abuse_confidence_score": 15,
+            "country_code": "US",
+            "total_reports": 1
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:google_public_dns",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.25",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.25",
+      "no_result": true,
+      "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.25",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:rdap",
+      "entity_type": "asn",
+      "entity_value": "AS64500",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:registration",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "object_class_name": "autnum",
+            "handle": "AS64500",
+            "as_name": "SharedHosting-ASN"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:urlhaus",
+      "entity_type": "url",
+      "entity_value": "https://update-package.test/dl/setup.exe",
+      "no_result": true
+    },
+    {
+      "provider_id": "urn:ati:source:threatfox",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.99",
+      "error": {
+        "code": "provider_unavailable",
+        "message": "synthetic provider outage"
+      },
+      "observations": []
+    }
+  ],
+  "batch_artifacts": [
+    {
+      "source_id": "urn:ati:source:mitre_attack",
+      "package_path": "v1/batch/mitre_attack_stix_v1.json",
+      "dataset_path": "mitre-attack/fake_world_v1.json"
+    }
+  ]
+}

@@ -58,6 +58,10 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_threat_investigator"]
 
+[project.scripts]
+ati-fake-data-bootstrap = "agentic_threat_investigator.cli:fake_data_bootstrap_main"
+ati-worker = "agentic_threat_investigator.cli:worker_main"
+
 [tool.ruff]
 line-length = 88
 target-version = "py314"

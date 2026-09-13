@@ -29,21 +29,42 @@ services:
     build: .
     environment:
       ATI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
+      # API and worker must agree on the intelligence-source operating mode
+      # (PR 23D). Local fake operation is the documented developer default;
+      # production deployments set ATI_OPERATING_MODE=production explicitly.
+      ATI_OPERATING_MODE: ${ATI_OPERATING_MODE:-fake}
     command: ["uvicorn", "agentic_threat_investigator.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
-      migrate: { condition: service_completed_successfully }
+      fake-data-bootstrap: { condition: service_completed_successfully }
     ports: ["8000:8000"]
+    networks: [ati]
+
+  fake-data-bootstrap:
+    build: .
+    environment:
+      ATI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
+      ATI_DATA_DIR: /var/lib/ati
+      ATI_OPERATING_MODE: ${ATI_OPERATING_MODE:-fake}
+    volumes:
+      - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/datasets:/var/lib/ati/datasets"
+    command: ["ati-fake-data-bootstrap"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
     networks: [ati]
 
   worker:
     build: .
     environment:
+      ATI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
       ATI_DATA_DIR: /var/lib/ati
+      ATI_OPERATING_MODE: ${ATI_OPERATING_MODE:-fake}
+      # The worker composes the configured real LLM at normal runtime.
+      ATI_OPENAI_API_KEY: ${ATI_OPENAI_API_KEY:-}
     volumes:
       - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/datasets:/var/lib/ati/datasets:ro"
-    command: ["python", "-c", "print('ATI worker bootstrap')"]
+    command: ["ati-worker", "--poll-seconds", "1.0"]
     depends_on:
-      migrate: { condition: service_completed_successfully }
+      fake-data-bootstrap: { condition: service_completed_successfully }
     networks: [ati]
 
   scheduler:

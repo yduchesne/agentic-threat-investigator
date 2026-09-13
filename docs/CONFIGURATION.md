@@ -411,6 +411,48 @@ PR 19C requires no new production configuration. `LocalTaskDispatcher` is select
 
 v0.1 does not define a dispatcher type, broker URL, subjects, acknowledgement timeout, redelivery policy, or distributed-worker settings.
 
+## Operating mode (PR 23D)
+
+`ATI_OPERATING_MODE` selects **which intelligence-source implementations are wired** at process bootstrap. It is orthogonal to `ATI_CONFIG_PROFILE`:
+
+- `ATI_CONFIG_PROFILE` answers **which deployment/runtime settings apply**;
+- `ATI_OPERATING_MODE` answers **which intelligence-source implementations are composed**.
+
+Exactly two v0.1 values are supported:
+
+| Value | Batch intelligence sources | Live evidence providers |
+|---|---|---|
+| `fake` | deterministic local fake/fixture-backed sources | deterministic local fake providers |
+| `production` | real production sources | real production providers |
+
+**Safe default:** `production`. An existing deployment that never sets the variable must not silently switch to fake intelligence.
+
+`fake` is never encoded as a configuration profile and no `config_fake.py` profile exists. Operating mode is never inferred from `local`, `dev`, `prod`, or `test` profile names.
+
+Fail-closed behavior:
+
+- invalid, blank, or unknown operating-mode values fail settings validation (no silent fallback between `fake` and `production`);
+- fake mode never instantiates a real intelligence provider because a fake fixture is missing;
+- production mode never instantiates a fake provider because a production credential, artifact, or dependency is missing;
+- the selected mode is logged safely at startup (`operating_mode=... intelligence_source_mode=...`); resolved secrets are never logged.
+
+Operating mode selects **intelligence-source composition only**. It does **not** select:
+
+- the `LlmClient` implementation (fake mode at normal runtime uses the configured real LLM);
+- the `EmbeddingClient` implementation;
+- PostgreSQL versus an in-memory database;
+- `TaskDispatcher`;
+- `InvestigationRunner`;
+- Coordinator policy;
+- report generation;
+- API behavior.
+
+The `fake` mode fakes the external intelligence world, not ATI's application architecture: the same `InvestigationRunner`, Coordinator, parser/normalizer, persistence, query, report, API, and worker architecture execute against deterministic local sources. Fake data is repository-owned, versioned, and deterministic; runtime random generation is forbidden.
+
+Fake batch data is initialized only through the explicit idempotent `ati-fake-data-bootstrap` command. API startup, worker startup, and module import never ingest fake batch data. Production deployments must never run the fake-data bootstrap.
+
+Automated PR 23D tests are different from runtime mode semantics: they inject `FakeLlmClient` independently of operating mode and never require live LLM or network access.
+
 ## LLM settings (PR 20B)
 
 PR 20B introduces the first LLM-bearing configuration. The concrete v0.1 provider is the OpenAI chat model composed through `langchain-openai`; the provider package choice is an infrastructure composition decision, not a runtime setting. Configuration carries only the API key **reference name**, never a key value.

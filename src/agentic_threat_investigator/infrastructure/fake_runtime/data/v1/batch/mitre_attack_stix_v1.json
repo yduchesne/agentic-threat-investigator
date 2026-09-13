@@ -1,0 +1,134 @@
+{
+  "type": "bundle",
+  "id": "bundle--5c9d3f10-4a5e-4f8b-9a4f-1c1b1e0a0001",
+  "objects": [
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--a934d7f9-1f15-4d3f-b7a1-2a7f0a1b1c01",
+      "created": "2020-01-01T00:00:00.000Z",
+      "modified": "2024-06-01T00:00:00.000Z",
+      "name": "Phishing",
+      "description": "Adversaries may send phishing messages to gain access to victim systems.",
+      "revoked": false,
+      "x_mitre_deprecated": false,
+      "x_mitre_is_subtechnique": false,
+      "x_mitre_attack_id": "T1566",
+      "x_mitre_platforms": ["Linux", "Windows"],
+      "kill_chain_phases": [
+        {"kill_chain_name": "mitre-attack", "phase_name": "initial-access"}
+      ]
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--0b7df85b-76f2-4f1a-8b6c-04e5d0f1a0d2",
+      "created": "2020-01-01T00:00:00.000Z",
+      "modified": "2024-06-01T00:00:00.000Z",
+      "name": "Spearphishing Attachment",
+      "description": "Adversaries may send emails with malicious attachments.",
+      "revoked": false,
+      "x_mitre_deprecated": false,
+      "x_mitre_is_subtechnique": true,
+      "x_mitre_attack_id": "T1566.001",
+      "x_mitre_platforms": ["Windows"],
+      "kill_chain_phases": [
+        {"kill_chain_name": "mitre-attack", "phase_name": "initial-access"}
+      ]
+    },
+    {
+      "type": "malware",
+      "id": "malware--4b6a9f2c-3d1e-4a8b-9c0d-5e6f7a8b9c0e",
+      "created": "2017-05-31T00:00:00.000Z",
+      "modified": "2023-10-01T00:00:00.000Z",
+      "name": "Mimikatz",
+      "description": "Mimikatz is a utility that extracts plaintext passwords, hash values, and Kerberos tickets.",
+      "revoked": false,
+      "x_mitre_deprecated": false,
+      "x_mitre_attack_id": "S0002",
+      "x_mitre_platforms": ["Windows"]
+    },
+    {
+      "type": "tool",
+      "id": "tool--4f1c3a8b-9d2e-4c6f-8a0b-1d2e3f4a5b6c",
+      "created": "2017-05-31T00:00:00.000Z",
+      "modified": "2023-10-01T00:00:00.000Z",
+      "name": "PsExec",
+      "description": "PsExec is a command-line tool for executing processes on remote systems.",
+      "revoked": false,
+      "x_mitre_deprecated": false,
+      "x_mitre_attack_id": "S0029",
+      "x_mitre_platforms": ["Windows"]
+    },
+    {
+      "type": "intrusion-set",
+      "id": "intrusion-set--bef3c5c5-6b7d-4a1c-8b9c-2d3e4f5a6b7c",
+      "created": "2016-01-01T00:00:00.000Z",
+      "modified": "2024-03-01T00:00:00.000Z",
+      "name": "APT28",
+      "description": "APT28 is a threat group attributed to Russia's intelligence services.",
+      "aliases": ["Sofacy", "Fancy Bear", "APT28"],
+      "revoked": false,
+      "x_mitre_deprecated": false,
+      "x_mitre_attack_id": "G0007"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "created": "2020-01-01T00:00:00.000Z",
+      "modified": "2024-06-01T00:00:00.000Z",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--bef3c5c5-6b7d-4a1c-8b9c-2d3e4f5a6b7c",
+      "target_ref": "attack-pattern--a934d7f9-1f15-4d3f-b7a1-2a7f0a1b1c01",
+      "description": "APT28 uses spearphishing to gain initial access."
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+      "created": "2020-01-01T00:00:00.000Z",
+      "modified": "2024-06-01T00:00:00.000Z",
+      "relationship_type": "uses",
+      "source_ref": "malware--4b6a9f2c-3d1e-4a8b-9c0d-5e6f7a8b9c0e",
+      "target_ref": "attack-pattern--0b7df85b-76f2-4f1a-8b6c-04e5d0f1a0d2",
+      "description": "Mimikatz uses spearphishing attachments for delivery."
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
+      "created": "2020-01-01T00:00:00.000Z",
+      "modified": "2024-06-01T00:00:00.000Z",
+      "relationship_type": "subtechnique-of",
+      "source_ref": "attack-pattern--0b7df85b-76f2-4f1a-8b6c-04e5d0f1a0d2",
+      "target_ref": "attack-pattern--a934d7f9-1f15-4d3f-b7a1-2a7f0a1b1c01",
+      "description": "Spearphishing Attachment is a sub-technique of Phishing."
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--4d5e6f7a-8b9c-4d0e-1f2a-3b4c5d6e7f8a",
+      "created": "2020-01-01T00:00:00.000Z",
+      "modified": "2024-06-01T00:00:00.000Z",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--bef3c5c5-6b7d-4a1c-8b9c-2d3e4f5a6b7c",
+      "target_ref": "malware--4b6a9f2c-3d1e-4a8b-9c0d-5e6f7a8b9c0e",
+      "description": "APT28 uses Mimikatz."
+    },
+    {
+      "type": "identity",
+      "id": "identity--c2ab6c9e-4f6a-4b3e-9a1d-8e2f3a4b5c6d",
+      "name": "The MITRE Corporation"
+    },
+    {
+      "type": "marking-definition",
+      "id": "marking-definition--f2ab5c8e-3d4a-4e6f-8b0c-9d1e2f3a4b5c",
+      "definition_type": "tlp"
+    },
+    {
+      "type": "x-mitre-tactic",
+      "id": "x-mitre-tactic--1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5e",
+      "name": "Initial Access"
+    },
+    {
+      "type": "course-of-action",
+      "id": "course-of-action--5e6f7a8b-9c0d-4e1f-2a3b-4c5d6e7f8a9b",
+      "name": "Phishing Filter"
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 """Typed application settings and the configuration bootstrap bridge."""
 
 import logging
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -13,6 +14,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from agentic_threat_investigator.config.config_utils import Config, load_config
 
 DOCUMENT_CHUNK_EMBEDDING_DIMENSION = 1536
+
+
+class OperatingMode(str, Enum):
+    """Selected v0.1 runtime intelligence-source composition mode.
+
+    Operating mode answers **which intelligence-source implementations are
+    wired** at bootstrap: ``FAKE`` selects deterministic repository-owned
+    fake batch/live sources, ``PRODUCTION`` selects the real configured
+    sources. It is orthogonal to ``ATI_CONFIG_PROFILE`` and never selects
+    the LLM, embeddings, database, dispatcher, runner, coordinator policy,
+    report implementation, or API behavior.
+    """
+
+    FAKE = "fake"
+    PRODUCTION = "production"
 
 
 class EmbeddingSettings(BaseModel):
@@ -57,6 +73,11 @@ class Settings(BaseSettings):
 
     app_name: str = "Agentic Threat Investigator"
     environment: str = "development"
+    # Operating mode (PR 23D): selects intelligence-source composition only.
+    # The safe default is production: an existing deployment that never sets
+    # the variable must not silently switch to fake intelligence. Exactly
+    # `fake` and `production` are accepted; anything else fails validation.
+    operating_mode: OperatingMode = OperatingMode.PRODUCTION
     database_url: str = "postgresql+psycopg://ati:ati@postgres:5432/ati"
     log_level: str = "INFO"
     database_pool_size: int = 5
@@ -333,6 +354,19 @@ class Settings(BaseSettings):
         """Reject booleans masquerading as LLM numeric settings."""
         if isinstance(value, bool):
             raise ValueError("LLM numeric setting must be a real number")
+        return value
+
+    @field_validator("operating_mode", mode="before")
+    @classmethod
+    def validate_operating_mode(cls, value: object) -> object:
+        """Reject blank or invalid operating-mode strings before enum parsing.
+
+        A blank value fails closed: there is no silent fallback between
+        ``fake`` and ``production``, matching the fail-closed configuration
+        contract (PR 23D).
+        """
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("operating_mode must not be blank")
         return value
 
     @field_validator("dbip_city_lite_artifact_uri")

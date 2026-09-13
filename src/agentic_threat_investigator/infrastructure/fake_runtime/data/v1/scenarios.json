@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "world_id": "fake_world_v1",
+  "scenarios": [
+    {
+      "scenario_id": "F01-benign",
+      "description": "A legitimate organization domain with benign infrastructure, ambient DNS noise, explicit no-result provider outcomes, and no malicious association.",
+      "root_indicators": [
+        {"type": "domain", "value": "alice-corp.test"}
+      ]
+    },
+    {
+      "scenario_id": "F02-malicious-multi-source",
+      "description": "A malicious update-delivery domain correlated across DNS, ThreatFox, and URLhaus, with shared hosting infrastructure, benign-looking MX/NS neighbors, one provider no-result, and a researchable malware association.",
+      "root_indicators": [
+        {"type": "domain", "value": "update-package.test"}
+      ]
+    },
+    {
+      "scenario_id": "F03-relationship-evolution",
+      "description": "A domain with repeated DNS observations of a stable host over time and a later new counterparty, surrounded by benign temporal churn.",
+      "root_indicators": [
+        {"type": "domain", "value": "logistics-corp.test"}
+      ]
+    },
+    {
+      "scenario_id": "F04-research-required",
+      "description": "A researchable attack-technique root that drives the coordinator research lifecycle and persists contextual research separate from Evidence.",
+      "root_indicators": [
+        {"type": "attack_technique", "value": "T1566.001"}
+      ]
+    },
+    {
+      "scenario_id": "F05-insufficient-evidence",
+      "description": "A suspicious-looking but weakly corroborated domain whose analysis expresses bounded uncertainty instead of forcing a verdict.",
+      "root_indicators": [
+        {"type": "domain", "value": "order-portal.test"}
+      ]
+    }
+  ]
+}

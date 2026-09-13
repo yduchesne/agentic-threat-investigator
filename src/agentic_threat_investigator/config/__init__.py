@@ -12,6 +12,7 @@ from agentic_threat_investigator.config.config_utils import (
 from agentic_threat_investigator.config.settings import (
     DOCUMENT_CHUNK_EMBEDDING_DIMENSION,
     EmbeddingSettings,
+    OperatingMode,
     Settings,
     ensure_test_database_safe,
     get_settings,
@@ -24,6 +25,7 @@ __all__ = [
     "ConfigProfileNotFoundError",
     "Settings",
     "EmbeddingSettings",
+    "OperatingMode",
     "DOCUMENT_CHUNK_EMBEDDING_DIMENSION",
     "ensure_test_database_safe",
     "get_settings",

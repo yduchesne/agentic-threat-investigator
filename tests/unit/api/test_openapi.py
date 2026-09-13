@@ -113,6 +113,7 @@ def test_openapi_operation_ids_are_explicit() -> None:
         "list_investigation_history",
         "list_object_history",
         "get_object_history_version",
+        "get_runtime_info",
     }
 
 

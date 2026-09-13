@@ -929,6 +929,43 @@ No observability backend is required for correct execution.
 
 Runtime configuration follows `CONFIGURATION.md`. `ATI_CONFIG_PROFILE` selects a source-controlled profile under `ati.config`; `default` is always the base and a selected non-default profile shallowly overrides it. Configuration is loaded once during process bootstrap and injected into application components. Components do not independently read process environment variables. Effective configuration is logged with conservative sensitive-value redaction.
 
+## Intelligence-source operating mode (PR 23D)
+
+`ATI_OPERATING_MODE` selects the intelligence-source implementations composed at bootstrap; it never selects the LLM, embeddings, persistence, dispatcher, runner, coordinator policy, report implementation, or API behavior. The mode branch exists only at the bootstrap/composition boundary
+(`infrastructure/intelligence_composition.py`):
+
+```text
+                         ATI_OPERATING_MODE
+                                |
+                  +-------------+-------------+
+                  |                           |
+                fake                     production
+                  |                           |
+       fake/local intelligence       real intelligence
+       source composition            source composition
+                  |                           |
+                  +-------------+-------------+
+                                |
+                     existing provider registry
+                                |
+                     production ATI execution
+```
+
+Both branches yield the same existing contracts, above all the `SourceId`-keyed provider registry consumed by the production investigation graph/runner. The Coordinator, graph nodes, `ProviderWorkExecutor`, persistence services, API routers, domain models, and report code are mode-unaware; the composition seam is the single place that knows the mode.
+
+Fake mode fakes the **external intelligence world**, not ATI's architecture:
+
+- deterministic fake live providers implement the existing `EvidenceProvider` contract, preserve the exact `SourceId` identity and `supports(Entity)` applicability, use no HTTP transport, and require no provider secret;
+- the versioned synthetic world (`infrastructure/fake_runtime/data/v1/`) models one shared deterministic threat-intelligence world; named scenarios are stable entry points into that world;
+- packaged batch fixtures are parsed by the existing production `BatchSource` parsers and persisted through the normal batch persistence path by the explicit idempotent `ati-fake-data-bootstrap` command;
+- fake mode never falls back to real intelligence sources and production mode never falls back to fake sources.
+
+Fake evidence is produced through the same normalized fact vocabulary and the same deterministic extractors as real provider evidence. Because the production outcome-provenance stored function requires every newly discovered entity to be backed by a `RelationshipObservation` from this provider outcome, the fake world exercises relationship-backed discovery shapes (DNS A/CNAME/MX/NS, ThreatFox `ASSOCIATED_WITH`, RDAP `BELONGS_TO`) in canonical investigation paths; sources whose discoveries carry no relationship assertion (DNS PTR targets, IPinfo ASN facts, URLhaus URL/host matches) are composed but return deterministic no-results. This is fixture design within the existing production contracts — the production parser/extractor/executor/coordination/stored-function behavior is unchanged.
+
+Runtime `fake` mode uses the configured real `LlmClient`; automated tests inject `FakeLlmClient` at the model boundary independently of operating mode so CI stays deterministic and offline.
+
+`GET /api/v1/runtime` exposes the selected mode (``fake``/``production``) so the future frontend can display a persistent `FAKE DATA` indicator without hard-coding deployment knowledge. The endpoint exposes mode only: never credentials, secret reference names, LLM providers, database URLs, filesystem paths, or the effective configuration.
+
 ## Batch persistence responsibility boundary
 
 Batch persistence always uses resource-specific PostgreSQL composite arrays as the bounded application-to-database transport and temporary tables inside set-oriented stored functions. ATI assumes batches may be large; there is no small-batch alternate path. The application enforces a configurable maximum batch size. PostgreSQL owns reconciliation, concurrency checks, version allocation, JSONB diff generation, target mutation, immutable history creation, and outcome classification. Python repositories must not duplicate this logic. Row-level history/version triggers are prohibited.
