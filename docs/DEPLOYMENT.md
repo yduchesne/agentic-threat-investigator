@@ -240,6 +240,48 @@ A development override such as `compose.dev.yaml` may provide:
 
 Frontend developers may optionally run the frontend dev server on the host while Podman provides backend/database services.
 
+### Frontend networking and API origin (PR 24A)
+
+The production `frontend` container (`frontend/Dockerfile`) is a two-stage
+built image: a Node build stage produces `dist/`, and an Nginx static stage
+serves it. `frontend/nginx.conf` provides:
+
+- SPA history fallback so direct browser navigation to `/investigations`
+  resolves through React Router instead of an Nginx 404;
+- a `/api/` reverse proxy to the `api:8000` service (static configuration
+  only — never a request-controlled destination);
+- `no-store` on `/api/` responses, immutable caching for content-hashed
+  `/assets/`, dotfile denial, and a small baseline of security headers
+  (`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`).
+
+The frontend only ever calls the browser-relative `/api/v1` path. The Vite
+dev server (`frontend/vite.config.ts`) listens on port `8080` and proxies
+`/api` to `http://localhost:8000`, so feature code behaves identically
+under Vite and Nginx. No hard-coded API host appears in frontend feature
+code.
+
+Because the browser origin is `http://localhost:8080`, the local `api`
+Compose service sets `ATI_PUBLIC_BASE_URL` to `http://localhost:8080`
+(default in `compose.yaml`). PR 23C CSRF Origin/Referer validation and the
+credentialed CORS allowlist use this value; it must equal the real public
+browser origin in every deployment.
+
+Developer commands:
+
+```bash
+cd frontend
+npm ci                  # install from the committed lockfile
+npm run dev             # Vite on http://localhost:8080
+npm run lint            # ESLint (flat config)
+npm run typecheck       # strict TypeScript
+npm test                # Vitest + Testing Library + MSW
+npm run build           # typecheck + production bundle
+npm run api:generate    # regenerate OpenAPI types from tests/fixtures/openapi_v1.json
+npm run api:check       # fail when the committed generated types are stale
+npm run test:e2e        # Playwright (requires the E2E stack; see scripts/e2e.sh)
+./scripts/e2e.sh        # repository real-stack browser E2E harness
+```
+
 ## Configuration
 
 Environment-based configuration is loaded into a typed settings object.

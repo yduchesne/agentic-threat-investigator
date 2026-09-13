@@ -1,0 +1,17 @@
+{
+  "loading": "Loading…",
+  "retry": "Retry",
+  "errorBoundary.title": "Something went wrong",
+  "errorBoundary.message": "The application hit an unexpected problem. Your session is unaffected.",
+  "errorBoundary.reload": "Reload page",
+  "notFound.title": "Page not found",
+  "notFound.message": "The requested page does not exist.",
+  "notFound.home": "Go to investigations",
+  "session.title": "Unable to verify session",
+  "session.message": "The authentication service could not be reached. Check that the API is available and then retry.",
+  "runtimeUnavailable.title": "Runtime mode unavailable",
+  "runtimeUnavailable.message": "The operating mode could not be determined. The investigation workbench remains usable.",
+  "unexpectedError": "An unexpected error occurred.",
+  "supportReference": "Support reference: {{requestId}}",
+  "requestId.unknown": "Support reference unavailable"
+}

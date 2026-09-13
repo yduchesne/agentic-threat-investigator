@@ -1,0 +1,14 @@
+{
+  "title": "Agentic Threat Investigator",
+  "appbar.workbench": "Analyst workbench",
+  "nav.label": "Primary",
+  "nav.investigations": "Investigations",
+  "user.role": "Role",
+  "role.analyst": "Analyst",
+  "role.admin": "Administrator",
+  "fakeData.title": "FAKE DATA",
+  "fakeData.message": "Running against deterministic local fake intelligence sources. No live external data is used.",
+  "loading.session": "Verifying session…",
+  "investigations.placeholder.title": "Investigations",
+  "investigations.placeholder.message": "The investigations table and creation workflow arrive in a later release. Authentication, session restore and the runtime indicator are verified and working."
+}

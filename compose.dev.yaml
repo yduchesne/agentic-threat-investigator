@@ -7,4 +7,7 @@ services:
     working_dir: /app
     volumes: ["./frontend:/app"]
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
-    ports: ["5173:5173"]
+    # The Vite dev server and the production Nginx frontend share the same
+    # public origin (http://localhost:8080) so the local origin documented
+    # for CSRF/CORS stays consistent (PR 24A).
+    ports: ["8080:8080"]
