@@ -50,7 +50,7 @@ test.describe("PR 24A real-stack browser flows", () => {
     await expect(page).toHaveURL(/\/investigations/);
     await expect(page.getByText("FAKE DATA")).toBeVisible();
     await expect(page.getByText(ADMIN_USERNAME)).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Investigations" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Investigations", exact: true })).toBeVisible();
     await expect(page.locator("main")).toBeVisible();
     expect(consoleErrors).toEqual([]);
   });

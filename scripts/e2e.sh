@@ -100,6 +100,9 @@ export ATI_POSTGRES_HOST_PORT="$POSTGRES_PORT"
 # the postgres port pattern.
 export ATI_FRONTEND_HOST_PORT="$FRONTEND_PORT"
 export ATI_OPERATING_MODE=fake
+# The offline deterministic worker LLM boundary (PR 24B): the E2E stack
+# never needs a live LLM. The API process does not compose an LLM.
+export ATI_LLM_DRIVER=deterministic
 export ATI_PUBLIC_BASE_URL="http://127.0.0.1:${FRONTEND_PORT}"
 export ATI_BOOTSTRAP_ADMIN_USERNAME="e2e-admin"
 export E2E_BOOTSTRAP_PASSWORD="$BOOTSTRAP_PASSWORD"
@@ -107,6 +110,7 @@ export E2E_BOOTSTRAP_PASSWORD="$BOOTSTRAP_PASSWORD"
 # postgres volume with a throwaway named volume. The fake-data bootstrap
 # materializes its packaged datasets itself.
 export ATI_DATA_DIR="${ATI_DATA_DIR:-/tmp/ati-e2e-unused}"
+mkdir -p "$ATI_DATA_DIR/datasets"
 export E2E_BASE_URL="http://127.0.0.1:${FRONTEND_PORT}"
 export E2E_ADMIN_USERNAME="$ATI_BOOTSTRAP_ADMIN_USERNAME"
 export E2E_ADMIN_PASSWORD="$BOOTSTRAP_PASSWORD"
@@ -132,7 +136,7 @@ trap cleanup EXIT
 
 echo "== Building and creating isolated E2E stack ($E2E_ID) =="
 "${COMPOSE[@]}" -f compose.yaml -f "$E2E_OVERRIDE" -p "$E2E_ID" up --no-start --build \
-  postgres migrate fake-data-bootstrap api frontend
+  postgres migrate fake-data-bootstrap api worker frontend
 
 echo "== Starting E2E containers =="
 E2E_CONTAINERS=$(podman ps -a --filter "label=io.podman.compose.project=${E2E_ID}" --format '{{.Names}}' | tr '\n' ' ')
@@ -166,6 +170,20 @@ while True:
     time.sleep(2)
 print("Frontend/API boundary is ready.")
 PY
+
+BOOTSTRAP_CONTAINER=$(podman ps -a --filter "label=io.podman.compose.project=${E2E_ID}" --format '{{.Names}}' | grep -F fake-data-bootstrap | head -n 1)
+echo "== Waiting for the fake-data bootstrap to complete =="
+for _ in $(seq 1 240); do
+  state=$(podman inspect -f '{{.State.Status}}' "$BOOTSTRAP_CONTAINER" 2>/dev/null || true)
+  [ "$state" = "exited" ] && break
+  sleep 2
+done
+bootstrap_code=$(podman inspect -f '{{.State.ExitCode}}' "$BOOTSTRAP_CONTAINER" 2>/dev/null || echo 1)
+if [ "$bootstrap_code" != "0" ]; then
+  echo "fake-data bootstrap failed (exit $bootstrap_code)" >&2
+  exit 1
+fi
+echo "Fake-data bootstrap completed."
 
 echo "== Ensuring Playwright Chromium =="
 if [[ ! -d "${HOME}/.cache/ms-playwright/chromium-"* ]]; then

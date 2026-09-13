@@ -12,7 +12,10 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
-  expect: { timeout: 15_000 },
+  // The real-stack stack legitimately cold-starts slower (bootstrap
+  // ingestion, API + durable worker containers); 30s keeps single-step
+  // waits deterministic without masking failures.
+  expect: { timeout: 30_000 },
   retries: 0,
   workers: 1,
   reporter: [["list"]],

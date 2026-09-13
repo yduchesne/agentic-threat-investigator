@@ -64,6 +64,10 @@ services:
       ATI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
       ATI_DATA_DIR: /var/lib/ati
       ATI_OPERATING_MODE: ${ATI_OPERATING_MODE:-fake}
+      # The worker composes the configured real LLM at normal runtime; the
+      # deterministic driver (PR 24B) selects the offline scripted boundary
+      # used by offline real-stack browser tests.
+      ATI_LLM_DRIVER: ${ATI_LLM_DRIVER:-openai}
       # The worker composes the configured real LLM at normal runtime.
       ATI_OPENAI_API_KEY: ${ATI_OPENAI_API_KEY:-}
     volumes:

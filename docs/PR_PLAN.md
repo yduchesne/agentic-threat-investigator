@@ -729,9 +729,9 @@ Deliver:
 
 **PR 24A boundaries:** no Investigation list data, create form, polling, detail workspace, Overview, Report UI, analyst resource tables, export, pivots, Relationship Evolution, React Flow, or map. No Redux/Zustand/global state store. No refresh-token mechanism or weakening of cookie/CSRF security. [DONE]
 
-### PR 24B — Investigation workflow, Overview and report experience
+### PR 24B — Investigation workflow, Overview and report experience [DONE]
 
-Deliver the first complete analyst workflow:
+Delivered the first complete analyst workflow:
 
 ```text
 Investigations
@@ -759,6 +759,48 @@ Deliver:
 - Playwright real-stack slice using PR 23D fake mode: `login -> create known fake Investigation -> durable job/worker -> poll -> terminal Overview`.
 
 No Evidence/Relationship/Research table implementation, pivot workspace, graph, or map in 24B.
+
+Delivered (PR 24B implementation summary):
+
+- real Investigations landing replacing the PR 24A placeholder, consuming
+  the PR 23C cursor API with exact lifecycle-status filtering, opaque
+  Previous/Next cursor navigation through a browser-local cursor stack,
+  bounded page size, and no total-count/page-number fiction;
+- Create Investigation form (objective + typed indicators, friendly labels
+  over exact `EntityType` values, exact backend bounds from the committed
+  OpenAPI snapshot, no client-side canonicalizer);
+- browser idempotency-key lifecycle: cryptographic keys (never
+  `Math.random`), transport-uncertain retries reusing the same key,
+  changed semantic payloads forcing a new key, explicit
+  `409 idempotency_conflict` handling, keys never persisted or logged;
+- asynchronous `202 Accepted` handling with immediate workspace
+  navigation and list invalidation;
+- persistent workspace header + `Overview | Evidence | Relationships |
+  Research | Timeline` route links, with placeholder routes issuing no
+  collection queries;
+- bounded detail polling (2s) while `pending`/`running` only, stopping on
+  every terminal status, no interval-in-background, AbortSignal
+  propagation and unmount cancellation;
+- Overview answering conclusion/why/confidence/uncertainty/next steps
+  from the durable pointer-backed `/assessments/current` and
+  `/reports/current` endpoints (never `MAX(version)`), Report
+  presentation when present, Assessment fallback otherwise, visible
+  support references, distinctly labeled Research context, and a
+  consistency warning when Report and Assessment disagree;
+- secondary full Report route with persisted metadata and an optional
+  deterministic Markdown view as plain text;
+- MSW lifecycle handlers, polling-behavior component tests, corrupted-key
+  and cursor-opacity unit tests, and a real-stack Playwright slice
+  (login -> create F02 fake-world Investigation -> 202 -> workspace ->
+  poll -> terminal -> current Assessment/Report -> Overview) over
+  PostgreSQL, FastAPI, the real durable worker with the deterministic
+  offline LLM boundary, and the built Nginx frontend — no live LLM or
+  live network;
+- narrow backend prerequisite: `ATI_LLM_DRIVER=deterministic` selects the
+  repository-owned offline scripted boundary, and the `ati-worker`
+  writes the current Report through the existing PR 23B Report Writer
+  after terminal Investigation completion (Assessment-only failure state
+  remains legitimate).
 
 ### PR 24C — Analyst resource tables and drill-down
 
