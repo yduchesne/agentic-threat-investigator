@@ -142,6 +142,15 @@ class ResearchSynthesisEvaluator:
             if _claim_satisfies(scenario, result, resolution, expected_claim):
                 claims_satisfied += 1
             else:
+                # Preserve the more actionable structural diagnostic when a
+                # citation-compatible claim has the required positive content
+                # but also contains an explicitly forbidden phrase.  The
+                # claim is still unsatisfied, so retain REQUIRED_CLAIM_MISSING
+                # as the envelope failure as well.
+                if _claim_has_forbidden_content(
+                    scenario, result, resolution, expected_claim
+                ):
+                    failures.add(ResearchSynthesisFailureCode.FORBIDDEN_CLAIM_CONTENT)
                 failures.add(ResearchSynthesisFailureCode.REQUIRED_CLAIM_MISSING)
 
         # Epistemic promotion hard gates (author-declared defaults).
@@ -236,6 +245,40 @@ def _claim_satisfies(
         ):
             continue
         return True
+    return False
+
+
+def _claim_has_forbidden_content(
+    scenario: ResearchSynthesisScenario,
+    result: ResearchResult,
+    resolution: ResearchScenarioResolution,
+    expected: ExpectedResearchClaim,
+) -> bool:
+    """Return whether a near-matching claim contains forbidden content.
+
+    A claim is a near match when it has the expected citation identity and all
+    required phrases.  Separating this diagnostic from ``_claim_satisfies``
+    keeps the acceptance rule unchanged while exposing the scenario-authored
+    reason for rejection.
+    """
+    required_ids = {
+        _resolve_citation(scenario, resolution, label)
+        for label in expected.citation_labels
+    }
+    for claim in result.claims:
+        if not required_ids <= set(claim.citation_ids):
+            continue
+        normalized = _normalize_whitespace(claim.text)
+        if any(
+            _normalize_whitespace(phrase) not in normalized
+            for phrase in expected.required_phrases
+        ):
+            continue
+        if any(
+            _normalize_whitespace(phrase) in normalized
+            for phrase in expected.forbidden_phrases
+        ):
+            return True
     return False
 
 

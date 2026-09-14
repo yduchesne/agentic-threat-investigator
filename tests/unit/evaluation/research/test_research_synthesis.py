@@ -594,3 +594,4 @@ def test_forbidden_phrase_disqualifies_candidate_claim() -> None:
     evaluation = _evaluate(scenario, result)
     assert not evaluation.passed
     assert ResearchSynthesisFailureCode.REQUIRED_CLAIM_MISSING in evaluation.failures
+    assert ResearchSynthesisFailureCode.FORBIDDEN_CLAIM_CONTENT in evaluation.failures
