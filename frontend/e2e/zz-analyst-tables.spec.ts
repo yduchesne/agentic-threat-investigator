@@ -202,7 +202,7 @@ test.describe("PR 24C real-stack analyst browsing", () => {
 
   test.describe("PR 24C shared-session reuse", () => {
     test.use({ storageState: SHARED_SESSION_STATE });
-    test("E21 the completed investigation browses with no pivot UI", async ({
+    test("E21 the completed investigation browses with no pivot modal", async ({
       page,
     }) => {
       await page.goto("/investigations");
@@ -222,10 +222,12 @@ test.describe("PR 24C real-stack analyst browsing", () => {
     await page.getByRole("tab", { name: "Evidence" }).click();
     await expect(page.getByText(F02_ROOT_DOMAIN).first()).toBeVisible({ timeout: 30_000 });
 
-      // No PR 24D pivot modal workspace / breadcrumb chain exists.
+      // Plain browsing opens no PR 24D pivot modal workspace: pivot
+      // triggers exist on typed values but the modal appears only after an
+      // explicit pivot action.
       expect(
         (await page.getByRole("banner").allTextContents()).join(" "),
-      ).not.toContain("Breadcrumb");
+      ).not.toContain("Pivot breadcrumb");
       await expect(page.getByRole("dialog")).not.toBeVisible();
     });
   });

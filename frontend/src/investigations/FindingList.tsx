@@ -1,11 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Investigation finding presentation (PR 24B §24).
+// Investigation finding presentation (PR 24B §24; PR 24D §7).
 //
 // One bounded finding card with statement, category, disposition,
-// confidence, and visible typed support references. Support references are
-// compact identifiers with the full value in the title tooltip; rich
-// resource resolution and pivots belong to PR 24C/24D.
+// confidence, and visible typed support references. Evidence support
+// pivots to the exact scoped Evidence workspace (PR 24D); Relationship-
+// Observation support stays visible but non-pivotable because the v0.1
+// API exposes observations only through a ``relationship_id``-filtered
+// list and the support DTO carries only the observation id (PR 24D §7,
+// §34 STOP condition 3). Rich resource resolution belongs to pivots.
 
 import { Stack, Typography } from "@mui/material";
 import Box from "@mui/material/Box";
@@ -18,6 +21,8 @@ import type {
   ReportFinding,
 } from "../api/schema-types";
 import { ShortId } from "../components/ShortId";
+import { PivotMenu } from "../pivots/PivotMenu";
+import { evidenceSupportAction } from "../pivots/pivot-capabilities";
 
 type FindingLike = Finding | ReportFinding;
 
@@ -44,7 +49,14 @@ export function SupportReference({
   if (support.kind === "evidence" && support.evidence_id !== null && support.evidence_id !== undefined) {
     return (
       <li>
-        {t("support.evidence")} <ShortId id={support.evidence_id} />
+        <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", gap: 0.5 }}>
+          <Typography variant="caption" component="span">
+            {t("support.evidence")} <ShortId id={support.evidence_id} />
+          </Typography>
+          <PivotMenu
+            actions={[evidenceSupportAction(support.evidence_id, "report_support")]}
+          />
+        </Stack>
       </li>
     );
   }
@@ -53,6 +65,8 @@ export function SupportReference({
     support.relationship_observation_id !== null &&
     support.relationship_observation_id !== undefined
   ) {
+    // Visible but not pivotable: no bounded route exists from the support
+    // observation id (PR 24D STOP condition 3).
     return (
       <li>
         {t("support.relationshipObservation")}{" "}

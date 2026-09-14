@@ -1477,23 +1477,77 @@ over central MSW handlers for every list/detail route:
 PostgreSQL + the durable worker over the PR 23D fake world with the
 deterministic offline LLM boundary. PR 24C coverage (frontend/e2e):
 
-- E20 Evidence: bounded table, a real exact filter (evidence type DNS)
-  with URL round-trip on reload, and the authoritative scoped detail
-  drawer with distinct Observed at / Retrieved at;
-- E21 Relationships: analyst label rows, detail with a bounded
-  relationship-scoped observation preview, and the first-class
-  `/relationships/observations` route;
-- E22 Research context (visible separation), Timeline with an exact event
-  filter, and secondary History with exact-version state/diff detail;
-- E23 a browser-proven current-page CSV download with the safe filename
-  shape;
-- E24 no PR 24D pivot/breadcrumb UI surfaces exist.
+- E20 completed-Investigation browsing: bounded Evidence table with a real
+  exact filter (evidence type DNS) surviving URL round-trip reload, the
+  authoritative scoped detail drawer with distinct Observed at / Retrieved
+  at, Relationship analyst-label rows with detail and a bounded
+  relationship-scoped observation preview, first-class
+  `/relationships/observations`, Research context (visible separation),
+  Timeline with an exact event filter, secondary History with
+  exact-version state/diff detail, a browser-proven current-page CSV
+  download with the safe filename shape;
+- E21 plain browsing after completion opens no pivot modal: pivot triggers
+  exist on typed values but the modal appears only after an explicit
+  pivot action;
 - the PR 24C browser suite runs after the PR 24A/24B specs
-  (`frontend/e2e/zz-analyst-tables.spec.ts`) and performs a single login;
-  the E2E harness sets the test-only `ATI_CONFIG_PROFILE=local` on the API
-  so the throwaway stack's in-process login rate limit (100/60s instead of
-  the production 5/60s) never makes the authenticated multi-spec suite
-  timing-dependent. Production deployments keep the default limit.
+  (`frontend/e2e/zz-analyst-tables.spec.ts`) and performs a single login
+  (the E2E harness sets the test-only `ATI_CONFIG_PROFILE=local` on the
+  API so the throwaway stack's in-process login rate limit (100/60s
+  instead of the production 5/60s) never makes the authenticated
+  multi-spec suite timing-dependent; production deployments keep the
+  default limit), then captures a Playwright storageState
+  (`test-results/analyst-session.json`) that the PR 24D suite reuses
+  without an additional login.
+
+### Cross-resource pivots and provenance navigation (PR 24D)
+
+Separate generated-schema-projected pivot steps from router-backed page
+components so the pivot modal and the normal routes reuse the exact PR 24C
+resource query/filter/table/detail machinery (`frontend/src/pivots/`,
+`frontend/src/analyst-table/resource-page.ts`):
+
+- serializer/parser (`pivot-url.test.ts`): versioned base64url JSON
+  envelope in the reserved `pivot` search parameter; query-identity
+  stability, unicode labels, headers-only URL length stays within the
+  4096-byte bound, malformed/truncated/foreign-version/base64url-off-json
+  payloads fail closed, unknown resources filter to presence, max depth 5;
+- capability registry (`pivot-capabilities.test.ts`): at least one legal
+  action per typed value (Evidence subject/type/source, Relationship
+  source/target, observation relationship + exact Evidence) and the
+  guarded no-op on the RelationshipObservation support reference that
+  carries only an observation id with no bounded route;
+- navigation/URL projection (`pivot-port.test.ts` regressions inside
+  `PivotWorkspace.test.tsx`): step filters arrive pre-applied at the
+  table, pillars (evidence type/source) stay anchored to the Investigation;
+- modal behavior (`PivotWorkspace.test.tsx`): one Material UI Dialog
+  hosting the extracted route-independent workspaces, breadcrumbs with
+  clickable truncation, depth cap at five with a visible notice, browser
+  history push (Back/Forward restore prior pivot states and the base URL
+  search parameters), malformed-cycle deep links degrade to the first
+  legal step, 404/network failure shows the in-modal error/retry state,
+  network retry, drawing exact Evidence inside the modal, and Close
+  preserving base filters;
+- provenance (`provenance.test.tsx`): the Report/Overview support list
+  pivots exact Evidence by persisted id, Research context/claim
+  references pivot exact Research, RelationshipObservation support stays
+  visible but non-pivotable (STOP condition 3), and Report/Research free
+  text never enters the URL;
+- real-stack E22 (`frontend/e2e/zz-pivots.spec.ts`): overall completing
+  F02 Investigation, Evidence support → exact Evidence workspace →
+  subject pivot Relationships where source → open Relationship →
+  RelationshipObservations → observation Evidence → Evidence; breadcrumb
+  path mirrors the sequence; browser Back/Forward traverse pivot states;
+  breadcrumb truncation restores the Relationships step; reload restores
+  the active modal; Close restores the underlying Overview route; `FAKE
+  DATA` and a clean browser console throughout. Interactions inside the
+  pivot overlay use the raw pointer path (`page.mouse`) because the
+  Playwright/Chromium composite locator hit-test can hang the browser
+  main thread while a full-viewport fixed layer is open (DIAG-verified:
+  raw events dispatch and the page stays responsive; identical events
+  dispatched through the composite path do not). The same raw events can
+  intermittently wedge the Chromium pointer dispatch on this stack
+  (environment-specific; the identical interaction passes on retry and
+  passed whole-suite runs), so CI retries E22 once before failing.
 
 ## Definition of done
 

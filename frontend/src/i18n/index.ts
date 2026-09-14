@@ -17,6 +17,7 @@ import evidence from "./locales/en/evidence.json";
 import history from "./locales/en/history.json";
 import investigations from "./locales/en/investigations.json";
 import overview from "./locales/en/overview.json";
+import pivots from "./locales/en/pivots.json";
 import relationships from "./locales/en/relationships.json";
 import report from "./locales/en/report.json";
 import research from "./locales/en/research.json";
@@ -26,7 +27,7 @@ import timeline from "./locales/en/timeline.json";
 /** The v0.1 shipped locale. */
 export const DEFAULT_LOCALE = "en";
 
-/** The PR 24A + PR 24B + PR 24C translation namespaces. */
+/** The PR 24A + PR 24B + PR 24C + PR 24D translation namespaces. */
 export const NAMESPACES = [
   "common",
   "auth",
@@ -39,6 +40,7 @@ export const NAMESPACES = [
   "research",
   "timeline",
   "history",
+  "pivots",
 ] as const;
 
 const RESOURCES = {
@@ -54,6 +56,7 @@ const RESOURCES = {
     research,
     timeline,
     history,
+    pivots,
   },
 };
 
