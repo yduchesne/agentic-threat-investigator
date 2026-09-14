@@ -1425,6 +1425,76 @@ Covered paths (frontend/e2e):
   Overview (real stack, fake world, deterministic LLM boundary);
 - E11 the created Investigation appears exactly once in the real list.
 
+### Analyst resource tables and drill-down (PR 24C)
+
+Component tests (`frontend/src/analyst-table/`, `frontend/src/{evidence,
+relationships,research,timeline,history}/`) cover the full PR 24C matrix
+over central MSW handlers for every list/detail route:
+
+- shared table mechanics: semantic header rows, loading/empty/error/retry
+  states, keyboard-operable row `View` actions, no sort affordances,
+  Next enabled only with a `next_cursor`, opaque cursor bytes passed
+  unchanged, Previous over the browser-local back stack, filter-change
+  cursor/back-stack reset, URL-cursor deep links, invalid-cursor first-page
+  recovery, stale-data retention on transient failure, and the running-
+  Investigation freshness notice with Refresh;
+- filter codecs: unknown/invalid enum/UUID values normalize to absence
+  (never sent), empty values are omitted, local datetime inputs convert to
+  UTC ISO with half-open semantics preserved, and `selected` never alters
+  list query identity;
+- CSV: RFC 4180 quoting of commas/quotes/CR/LF, spreadsheet
+  formula-injection neutralization, objective-free filenames, and export
+  scoped to the loaded page only (no recursive cursor fetching);
+- Evidence: subject/type/source and distinct observed/retrieved rendering,
+  exact type/source/entity/time filters, authoritative scoped detail,
+  safe HTTP(S)-only source links, escaped markup, and empty-does-not-mean-
+  benign;
+- Relationships/Observations: source/type/target with analyst labels,
+  exact filters, Investigation-scoped detail, bounded relationship-scoped
+  observation previews (never generic History), first-class observations
+  route, observed/retrieved range independence, and no ended/removed
+  inference;
+- Research: metadata/counts, exact filters, inspectable claim-to-citation
+  closure, visible separation from Evidence, escaped external text, no
+  browser source fetching, and retrieval scores never labeled as
+  credibility/confidence;
+- Timeline: canonical order preserved, exact event/date filters, label
+  mapping with safe unknown fallback, and no Relationship Evolution
+  wording;
+- History: allowlisted object types only (the exact backend public
+  allowlist), exact operation/date filters, escaped state/diff rendering,
+  exact-version detail (including scoped 404), bounded object-version
+  browsing, and RelationshipObservation never fetched through generic
+  History; the generic History list skips non-allowlisted audit rows (such
+  as the immutable ``evidence`` rows appended by the stored functions)
+  instead of failing with a 500, while explicit requests for
+  non-allowlisted types fail closed with ``400 invalid_request``
+  (api/routes/history.py + tests/unit/api/test_history_routes.py).
+
+### Browser E2E (PR 24C)
+
+`scripts/e2e.sh` exercises the built frontend + real FastAPI + real
+PostgreSQL + the durable worker over the PR 23D fake world with the
+deterministic offline LLM boundary. PR 24C coverage (frontend/e2e):
+
+- E20 Evidence: bounded table, a real exact filter (evidence type DNS)
+  with URL round-trip on reload, and the authoritative scoped detail
+  drawer with distinct Observed at / Retrieved at;
+- E21 Relationships: analyst label rows, detail with a bounded
+  relationship-scoped observation preview, and the first-class
+  `/relationships/observations` route;
+- E22 Research context (visible separation), Timeline with an exact event
+  filter, and secondary History with exact-version state/diff detail;
+- E23 a browser-proven current-page CSV download with the safe filename
+  shape;
+- E24 no PR 24D pivot/breadcrumb UI surfaces exist.
+- the PR 24C browser suite runs after the PR 24A/24B specs
+  (`frontend/e2e/zz-analyst-tables.spec.ts`) and performs a single login;
+  the E2E harness sets the test-only `ATI_CONFIG_PROFILE=local` on the API
+  so the throwaway stack's in-process login rate limit (100/60s instead of
+  the production 5/60s) never makes the authenticated multi-spec suite
+  timing-dependent. Production deployments keep the default limit.
+
 ## Definition of done
 
 A change is not complete until:

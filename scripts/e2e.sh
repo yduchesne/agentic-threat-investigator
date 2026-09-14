@@ -100,6 +100,15 @@ export ATI_POSTGRES_HOST_PORT="$POSTGRES_PORT"
 # the postgres port pattern.
 export ATI_FRONTEND_HOST_PORT="$FRONTEND_PORT"
 export ATI_OPERATING_MODE=fake
+# The throwaway E2E topology raises the in-process login rate limit
+# (config_local sets 100/60s instead of the production default 5/60s): the
+# full authenticated suite (PR 24A auth spec + PR 24B investigation pair +
+# PR 24C analyst browsing) performs several logins within one 60s window,
+# and a timing-dependent 429 flake would make the deterministic browser
+# suite unreliable on faster/slower runners. The E2E stack is a
+# single-admin throwaway test world; production deployments keep the
+# default limit.
+export ATI_CONFIG_PROFILE=local
 # The offline deterministic worker LLM boundary (PR 24B): the E2E stack
 # never needs a live LLM. The API process does not compose an LLM.
 export ATI_LLM_DRIVER=deterministic
@@ -124,6 +133,9 @@ services:
     environment:
       ATI_BOOTSTRAP_ADMIN_USERNAME: ${ATI_BOOTSTRAP_ADMIN_USERNAME}
       ATI_BOOTSTRAP_ADMIN_PASSWORD: ${E2E_BOOTSTRAP_PASSWORD}
+      # Test-only profile: raises the in-process login rate limit for the
+      # multi-session browser suite (see export above).
+      ATI_CONFIG_PROFILE: ${ATI_CONFIG_PROFILE}
 volumes:
   ati_e2e_postgres_data: {}
 OVERRIDE

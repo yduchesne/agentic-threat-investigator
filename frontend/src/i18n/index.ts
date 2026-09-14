@@ -13,15 +13,20 @@ import { initReactI18next } from "react-i18next";
 
 import auth from "./locales/en/auth.json";
 import common from "./locales/en/common.json";
+import evidence from "./locales/en/evidence.json";
+import history from "./locales/en/history.json";
 import investigations from "./locales/en/investigations.json";
 import overview from "./locales/en/overview.json";
+import relationships from "./locales/en/relationships.json";
 import report from "./locales/en/report.json";
+import research from "./locales/en/research.json";
 import shell from "./locales/en/shell.json";
+import timeline from "./locales/en/timeline.json";
 
 /** The v0.1 shipped locale. */
 export const DEFAULT_LOCALE = "en";
 
-/** The PR 24A + PR 24B translation namespaces. */
+/** The PR 24A + PR 24B + PR 24C translation namespaces. */
 export const NAMESPACES = [
   "common",
   "auth",
@@ -29,10 +34,27 @@ export const NAMESPACES = [
   "investigations",
   "overview",
   "report",
+  "evidence",
+  "relationships",
+  "research",
+  "timeline",
+  "history",
 ] as const;
 
 const RESOURCES = {
-  en: { common, auth, shell, investigations, overview, report },
+  en: {
+    common,
+    auth,
+    shell,
+    investigations,
+    overview,
+    report,
+    evidence,
+    relationships,
+    research,
+    timeline,
+    history,
+  },
 };
 
 let initPromise: Promise<void> | null = null;

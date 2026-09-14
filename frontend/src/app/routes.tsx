@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Route topology (PR 24A / PR 24B).
+// Route topology (PR 24A / PR 24B / PR 24C).
 //
 //   /login             authenticated -> /investigations; else sign-in form
 //   /                  authenticated -> /investigations
@@ -9,7 +9,12 @@
 //   /investigations/:id                        workspace (24B)
 //     -> /investigations/:id/overview          substantive Overview
 //     -> /investigations/:id/overview/report   full persisted Report
-//     -> evidence/relationships/research/timeline bounded placeholders
+//     -> /investigations/:id/evidence          analyst tables (24C)
+//     -> /investigations/:id/relationships
+//     -> /investigations/:id/relationships/observations
+//     -> /investigations/:id/research
+//     -> /investigations/:id/timeline
+//     -> /investigations/:id/history           secondary (24C)
 //   *                  safe 404
 //
 // The same route array backs the production Browser Router and the memory
@@ -28,19 +33,16 @@ import { InvestigationsPage } from "../investigations/InvestigationsPage";
 import { InvestigationWorkspace } from "../investigations/InvestigationWorkspace";
 import { OverviewPage } from "../investigations/OverviewPage";
 import { ReportPage } from "../investigations/ReportPage";
-import {
-  WorkspacePlaceholderPage,
-  type WorkspacePlaceholderKind,
-} from "../investigations/WorkspacePlaceholderPage";
+import { EvidencePage } from "../evidence/EvidencePage";
+import { HistoryPage } from "../history/HistoryPage";
+import { RelationshipsPage } from "../relationships/RelationshipsPage";
+import { RelationshipObservationsPage } from "../relationships/RelationshipObservationsPage";
+import { ResearchPage } from "../research/ResearchPage";
+import { TimelinePage } from "../timeline/TimelinePage";
 
 /** Redirects the authenticated `/` route to the Investigations module. */
 function RootHome(): ReactElement {
   return <Navigate to="/investigations" replace />;
-}
-
-/** One bounded PR 24C placeholder route. */
-function PlaceholderRoute({ kind }: { kind: WorkspacePlaceholderKind }): ReactElement {
-  return <WorkspacePlaceholderPage kind={kind} />;
 }
 
 /** Build the shared route table used by Browser and Memory routers. */
@@ -71,22 +73,15 @@ export function createAppRoutes(): RouteObject[] {
                 },
                 { path: "overview", Component: OverviewPage },
                 { path: "overview/report", Component: ReportPage },
+                { path: "evidence", Component: EvidencePage },
+                { path: "relationships", Component: RelationshipsPage },
                 {
-                  path: "evidence",
-                  element: <PlaceholderRoute kind="evidence" />,
+                  path: "relationships/observations",
+                  Component: RelationshipObservationsPage,
                 },
-                {
-                  path: "relationships",
-                  element: <PlaceholderRoute kind="relationships" />,
-                },
-                {
-                  path: "research",
-                  element: <PlaceholderRoute kind="research" />,
-                },
-                {
-                  path: "timeline",
-                  element: <PlaceholderRoute kind="timeline" />,
-                },
+                { path: "research", Component: ResearchPage },
+                { path: "timeline", Component: TimelinePage },
+                { path: "history", Component: HistoryPage },
               ],
             },
           ],

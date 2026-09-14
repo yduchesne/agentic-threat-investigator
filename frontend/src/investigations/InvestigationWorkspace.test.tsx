@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 // Investigation workspace tests: polling policy, terminality, cancellation,
-// placeholders and scoped 404 (PR 24B U20-U27, U43-U49).
+// analyst-table routes, the secondary History access and scoped 404
+// (PR 24B U20-U27, U43-U49; PR 24C workspace integration).
 
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
 
@@ -44,72 +46,99 @@ describe("Investigation workspace routes", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders Evidence as a bounded placeholder without collection queries (U44)", async () => {
+  it("renders the real Evidence route with one bounded collection query (U44)", async () => {
     const recorder = listRequestRecorder();
     setHttpHandlers(
       ...AUTH,
       investigationLifecycleHandler([
         buildInvestigation({ id: INVESTIGATION_ID, status: "pending" }),
       ]),
-      // If the browser asked the Evidence collection, this unhandled state
-      // would fail; the placeholder must not fetch anything.
-      http.get("*/api/v1/investigations/:id/evidence", () => {
-        recorder.requests.push({ status: null, cursor: null, limit: null });
+      http.get("*/api/v1/investigations/:id/evidence", ({ request }) => {
+        const url = new URL(request.url);
+        recorder.requests.push({
+          status: null,
+          cursor: url.searchParams.get("cursor"),
+          limit: url.searchParams.get("limit"),
+        });
         return jsonResponse({ items: [], next_cursor: null });
       }),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/evidence`);
     expect(
-      await screen.findByText(
-        /The evidence workspace arrives in a later release/,
-      ),
+      await screen.findByRole("heading", { name: "Evidence" }),
     ).toBeInTheDocument();
-    expect(recorder.requests).toHaveLength(0);
+    // The placeholder is gone and the real page rendered its empty state.
+    await screen.findByText("No evidence");
+    // Exactly one bounded page request, never polling.
+    expect(recorder.requests).toHaveLength(1);
+    expect(recorder.requests[0].limit).toBe("25");
   });
 
-  it("renders Relationships as a bounded placeholder (U45)", async () => {
+  it("renders the real Relationships route (U45)", async () => {
     setHttpHandlers(
       ...AUTH,
       investigationLifecycleHandler([
         buildInvestigation({ id: INVESTIGATION_ID, status: "pending" }),
       ]),
+      http.get("*/api/v1/investigations/:id/relationships", () =>
+        jsonResponse({ items: [], next_cursor: null })),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/relationships`);
     expect(
-      await screen.findByText(
-        /The relationships workspace arrives in a later release/,
-      ),
+      await screen.findByRole("heading", { name: "Relationships" }),
     ).toBeInTheDocument();
+    await screen.findByText("No relationships");
   });
 
-  it("renders Research as a bounded placeholder (U46)", async () => {
+  it("renders the real Research route (U46)", async () => {
     setHttpHandlers(
       ...AUTH,
       investigationLifecycleHandler([
         buildInvestigation({ id: INVESTIGATION_ID, status: "pending" }),
       ]),
+      http.get("*/api/v1/investigations/:id/research", () =>
+        jsonResponse({ items: [], next_cursor: null })),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/research`);
     expect(
-      await screen.findByText(
-        /The research workspace arrives in a later release/,
-      ),
+      await screen.findByRole("heading", { name: "Research context" }),
     ).toBeInTheDocument();
+    await screen.findByText("No research results");
   });
 
-  it("renders Timeline as a bounded placeholder (U47)", async () => {
+  it("renders the real Timeline route (U47)", async () => {
     setHttpHandlers(
       ...AUTH,
       investigationLifecycleHandler([
         buildInvestigation({ id: INVESTIGATION_ID, status: "pending" }),
       ]),
+      http.get("*/api/v1/investigations/:id/timeline", () =>
+        jsonResponse({ items: [], next_cursor: null })),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/timeline`);
     expect(
-      await screen.findByText(
-        /The timeline workspace arrives in a later release/,
-      ),
+      await screen.findByRole("heading", { name: "Timeline" }),
     ).toBeInTheDocument();
+    await screen.findByText("No timeline events");
+  });
+
+  it("exposes secondary History through More -> History (U49)", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      investigationDetailHandler(
+        buildInvestigation({ id: INVESTIGATION_ID, status: "completed" }),
+      ),
+      http.get("*/api/v1/investigations/:id/history", () =>
+        jsonResponse({ items: [], next_cursor: null })),
+    );
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
+    await screen.findByRole("heading", { name: "assess the update-package delivery domain" });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "History" }));
+    expect(
+      await screen.findByRole("heading", { name: "History" }),
+    ).toBeInTheDocument();
+    await screen.findByText("No history rows");
   });
 
   it("renders a scoped not-found UI on detail 404 (U48)", async () => {
@@ -130,16 +159,19 @@ describe("Investigation workspace routes", () => {
     expect(screen.queryByText("Investigation in progress")).not.toBeInTheDocument();
   });
 
-  it("keeps the persistent header visible across placeholder routes (U44b)", async () => {
+  it("keeps the persistent header visible across analyst-table routes (U44b)", async () => {
     setHttpHandlers(
       ...AUTH,
-      investigationDetailHandler(
+      investigationLifecycleHandler([
         buildInvestigation({
           id: INVESTIGATION_ID,
           status: "running",
           objective: "assess the update-package delivery domain",
         }),
-      ),
+      ]),
+      // Pending/running explains why a fresh route navigation issues once.
+      http.get("*/api/v1/investigations/:id/timeline", () =>
+        jsonResponse({ items: [], next_cursor: null })),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/timeline`);
     expect(
@@ -147,6 +179,11 @@ describe("Investigation workspace routes", () => {
         name: "assess the update-package delivery domain",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getAllByText("Running").length).toBeGreaterThan(0);
+    // Running notice with a bounded Refresh is visible (no polling).
+    expect(
+      await screen.findByText(/Investigation still running; the timeline may change/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
   });
 });

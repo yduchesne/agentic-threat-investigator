@@ -21,6 +21,7 @@ from agentic_threat_investigator.api.dto.common import PageResponse
 from agentic_threat_investigator.api.dto.history import HistoryRecordResponse
 from agentic_threat_investigator.api.errors import ApiError, ApiErrorCode
 from agentic_threat_investigator.api.history_redaction import (
+    PUBLIC_HISTORY_OBJECT_TYPES,
     HistoryObjectTypeForbiddenError,
     redact_history_snapshot,
     require_public_history_object_type,
@@ -44,7 +45,15 @@ router = APIRouter(
 
 
 def _redacted(record: DomainObjectHistoryRecord) -> HistoryRecordResponse:
-    """Project one history record through the public allowlist."""
+    """Project one history record through the public allowlist.
+
+    Rows of non-allowlisted object types (for example the immutable
+    ``evidence`` audit rows appended by the stored functions) carry no
+    public projection and are skipped by list browsing; they stay
+    persisted for audit and ordering purposes but never cross the HTTP
+    boundary. Explicitly requested non-allowlisted types still fail closed
+    with ``400 invalid_request``.
+    """
     require_public_history_object_type(record.object_type)
     redacted = record.model_copy(
         update={
@@ -53,6 +62,22 @@ def _redacted(record: DomainObjectHistoryRecord) -> HistoryRecordResponse:
         }
     )
     return to_history_response(redacted)
+
+
+def _public_items(
+    records: tuple[DomainObjectHistoryRecord, ...],
+) -> tuple[DomainObjectHistoryRecord, ...]:
+    """Keep only rows whose object type has a public projection.
+
+    The bounded page semantics are preserved: non-allowlisted audit rows
+    are omitted from the analyst-visible results rather than failing the
+    whole list with a 500.
+    """
+    return tuple(
+        record
+        for record in records
+        if record.object_type in PUBLIC_HISTORY_OBJECT_TYPES
+    )
 
 
 @router.get(
@@ -95,8 +120,9 @@ async def list_investigation_history(
             )
         )
     )
+    public_page = _public_items(page.items)
     return PageResponse(
-        items=tuple(_redacted(item) for item in page.items),
+        items=tuple(_redacted(record) for record in public_page),
         next_cursor=page.next_cursor,
     )
 
