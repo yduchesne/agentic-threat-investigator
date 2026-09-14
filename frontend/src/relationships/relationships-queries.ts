@@ -39,6 +39,7 @@ export function useRelationshipsPage(
   investigationId: string,
   filters: RelationshipFilters,
   cursor: string | undefined,
+  enabled: boolean = true,
 ): {
   page: RelationshipPage | null;
   isLoading: boolean;
@@ -50,6 +51,7 @@ export function useRelationshipsPage(
     queryKey: relationshipsListKey(investigationId, filters, cursor),
     queryFn: ({ signal }) =>
       fetchRelationshipsPage(investigationId, filters, cursor, signal),
+    enabled,
     staleTime: 30_000,
   });
   return {
@@ -135,6 +137,7 @@ export function useObservationsPage(
   investigationId: string,
   filters: ObservationFilters,
   cursor: string | undefined,
+  enabled: boolean = true,
 ): {
   page: RelationshipObservationPage | null;
   isLoading: boolean;
@@ -146,6 +149,7 @@ export function useObservationsPage(
     queryKey: observationsListKey(investigationId, filters, cursor),
     queryFn: ({ signal }) =>
       fetchObservationsPage(investigationId, filters, cursor, signal),
+    enabled,
     staleTime: 30_000,
   });
   return {

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Route topology (PR 24A / PR 24B / PR 24C).
+// Route topology (PR 24A / PR 24B / PR 24C / PR 24D / PR 24E).
 //
 //   /login             authenticated -> /investigations; else sign-in form
 //   /                  authenticated -> /investigations
@@ -12,6 +12,8 @@
 //     -> /investigations/:id/evidence          analyst tables (24C)
 //     -> /investigations/:id/relationships
 //     -> /investigations/:id/relationships/observations
+//     -> /investigations/:id/relationships/evolution   (24E; entity_id
+//        query param required, view=evolution|graph)
 //     -> /investigations/:id/research
 //     -> /investigations/:id/timeline
 //     -> /investigations/:id/history           secondary (24C)
@@ -37,6 +39,7 @@ import { EvidencePage } from "../evidence/EvidencePage";
 import { HistoryPage } from "../history/HistoryPage";
 import { RelationshipsPage } from "../relationships/RelationshipsPage";
 import { RelationshipObservationsPage } from "../relationships/RelationshipObservationsPage";
+import { RelationshipEvolutionPage } from "../relationship-evolution/RelationshipEvolutionPage";
 import { ResearchPage } from "../research/ResearchPage";
 import { TimelinePage } from "../timeline/TimelinePage";
 
@@ -78,6 +81,10 @@ export function createAppRoutes(): RouteObject[] {
                 {
                   path: "relationships/observations",
                   Component: RelationshipObservationsPage,
+                },
+                {
+                  path: "relationships/evolution",
+                  Component: RelationshipEvolutionPage,
                 },
                 { path: "research", Component: ResearchPage },
                 { path: "timeline", Component: TimelinePage },

@@ -30,6 +30,12 @@ class RelationshipObservationResponse(BaseModel):
 
     ``observed_at`` is the source observation time when known; ``retrieved_at``
     is ATI's retrieval time and the canonical cursor key.
+
+    ``relationship_source_entity_id``, ``relationship_target_entity_id`` and
+    ``relationship_type`` are stable denormalized fields sourced from the
+    joined Relationship row (PR 24E) — they are response projections only,
+    never persisted duplicates. They are ``null`` only when the join cannot
+    resolve the edge, which cannot happen for normally written data.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -42,3 +48,6 @@ class RelationshipObservationResponse(BaseModel):
     retrieved_at: datetime
     source: str
     confidence: float | None
+    relationship_source_entity_id: UUID | None = None
+    relationship_target_entity_id: UUID | None = None
+    relationship_type: RelationshipType | None = None

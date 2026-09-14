@@ -27,6 +27,7 @@ import {
   relationshipTargetActions,
 } from "../pivots/pivot-capabilities";
 import { relationshipTypeKey } from "./labels";
+import { EvolutionLink } from "./EvolutionLink";
 import { useRelationshipObservationPreview } from "./relationships-queries";
 
 export interface RelationshipDetailProps {
@@ -67,6 +68,34 @@ export function RelationshipDetail({
           },
         ]}
       />
+      <DetailSection title={t("evolution.detailHeading")}>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 0.5 }}>
+          <DetailRows
+            rows={[
+              {
+                label: t("detail.sourceEntity"),
+                value: (
+                  <EvolutionLink
+                    investigationId={investigationId}
+                    entityId={relationship.source_entity_id}
+                    ariaLabel={t("evolution.sourceAria")}
+                  />
+                ),
+              },
+              {
+                label: t("detail.targetEntity"),
+                value: (
+                  <EvolutionLink
+                    investigationId={investigationId}
+                    entityId={relationship.target_entity_id}
+                    ariaLabel={t("evolution.targetAria")}
+                  />
+                ),
+              },
+            ]}
+          />
+        </Box>
+      </DetailSection>
       <DetailSection title={t("detail.pivot.title")}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 0.5 }}>
           <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>

@@ -1549,6 +1549,82 @@ resource query/filter/table/detail machinery (`frontend/src/pivots/`,
   (environment-specific; the identical interaction passes on retry and
   passed whole-suite runs), so CI retries E22 once before failing.
 
+### Relationship Evolution and graph (PR 24E)
+
+Backend test coverage for the entity-centric observation query:
+
+- **query contracts** (`tests/unit/app/query/test_query_contracts.py`):
+  `direction`/`counterparty_entity_id` without `entity_id` fail closed;
+  a bare `entity_id` has the documented `either` behavior; fingerprints
+  include entity/direction/type/counterparty (entity-only and
+  explicit-`either` share one cursor context; different entities,
+  directions, types and counterparts never share one);
+- **route contracts** (`tests/unit/api/test_relationship_evolution_routes.py`):
+  valid entity UUIDs, direction/counterparty/type filters map exactly to
+  the query DTO; malformed UUIDs, unknown direction values and unknown
+  relationship types fail with the stable 422 envelope; `direction` and
+  `counterparty_entity_id` without `entity_id` fail with 400
+  `invalid_request`; the public observation DTO exposes the joined
+  relationship fields without leaking operational columns; the one-hop
+  Relationships `entity_id` filter maps to the DTO;
+- **real PostgreSQL integration**
+  (`tests/integration/test_query_relationship_evolution.py`): the PR 24E
+  E-B01..E-B16 matrix over a synthetic world (focal A, counterparties
+  B/C, reverse edge, unrelated D->E, multiple providers, distinct
+  observed/retrieved times, a null-observed row, another Investigation
+  re-observing the same edge): entity/direction/counterparty/type/provider/
+  observed-range intersection, wrong-Investigation isolation, no
+  self-relationship duplication, canonical `retrieved_at DESC, id ASC`
+  ordering, bounded one-row cursor pagination, and cursor/filter mismatch
+  (across focal entity, direction, type, and collection kind) failing
+  closed;
+- **plan eligibility** (`tests/integration/test_query_indexes.py` P12):
+  the entity-joined observation query shape uses the existing
+  `relationship_observation_investigation_retrieved_idx` — no structural
+  migration was required, so none was added;
+- the OpenAPI snapshot fixture is regenerated after the contract change
+  (governed by `tests/unit/api/test_openapi.py`).
+
+Frontend coverage (`frontend/src/relationship-evolution/`,
+`frontend/src/relationship-graph/`):
+
+- pure derived model (`relationship-evolution-model.test.ts`, E-D01..E-D09):
+  outbound/inbound/self lanes, null-observed rows in the explicit
+  unavailable group, stable ID tie-breaks, retrieved-time independence,
+  repeated observations as distinct points, type-separated lanes, and
+  page-scoped annotations that never claim global first-observed;
+- Evolution workspace (`relationship-evolution.test.tsx`, E-U01..E-U18 via
+  central MSW handlers): no request without an entity, bounded
+  entity/direction page, direction/type/counterparty/provider/observed-range
+  filters reaching exact server params with cursor reset, points rendered
+  from `observed_at` with `retrieved_at` as distinct tooltip metadata,
+  explicit null-observed state, bounded-page notice + Next/Previous,
+  activation opening the observation detail with Evidence provenance,
+  honest no-results wording, running-Investigation notice, error Retry
+  preserving context, keyboard-accessible points, and the tabular
+  alternative;
+- graph (`relationship-graph-model.test.ts` + `relationship-graph.test.tsx`,
+  E-G01..E-G11): focal node identity, deduplicated counterparties,
+  self-edge purity, distinct multi-type edges, compact labels without
+  entity N+1, deterministic radial layout, honest bounded-neighborhood
+  notice, empty state, and the always-available edge-list navigation
+  (relationship + evolution routes carrying exact IDs); the jsdom test
+  environment stubs `ResizeObserver` for `@xyflow/react` (documented in
+  `src/test/setup.ts`); no pixel/layout snapshots are asserted;
+- real-stack E23 (`frontend/e2e/zz-relationship-evolution.spec.ts`):
+  completed F03 fake-world Investigation (`logistics-corp.test`),
+  Relationships -> source entity -> Relationship Evolution, temporal
+  points driven by `observed_at` with distinct `retrieved_at` tooltips,
+  `Earliest shown on this page`, observation activation -> exact
+  observation detail, observation -> Evidence exact navigation through
+  the PR 24D pivot workspace, switch to Graph -> accessible relationship
+  list -> exact Relationship table context, route refresh preserving
+  Evolution filters/entity, browser Back/Forward preserving focal entity
+  identity, `FAKE DATA` visible, clean console;
+- PR 24E adds no speculative second graph/visualization dependency and
+  no new fake-world fixture: the F03 world's repeated observed-at stamps
+  drive the browser slice.
+
 ## Definition of done
 
 A change is not complete until:

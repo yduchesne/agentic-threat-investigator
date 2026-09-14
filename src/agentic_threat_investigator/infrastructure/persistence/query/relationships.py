@@ -21,6 +21,7 @@ from agentic_threat_investigator.app.query.pagination import (
 )
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipListQuery,
+    RelationshipObservationItem,
     RelationshipObservationListQuery,
     RelationshipObservationQueryService,
     RelationshipQueryService,
@@ -31,6 +32,7 @@ from agentic_threat_investigator.app.query.relationships import (
 )
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
+    RelationshipDirection,
     RelationshipObservation,
     RelationshipType,
 )
@@ -106,6 +108,16 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
             stmt = stmt.where(
                 RelationshipRow.target_entity_id == query.target_entity_id
             )
+        if query.entity_id is not None:
+            # One bounded one-hop neighborhood query (PR 24E §23 Option A):
+            # source-or-target OR semantics on the server, never a
+            # client-side merge of two bounded pages.
+            stmt = stmt.where(
+                or_(
+                    RelationshipRow.source_entity_id == query.entity_id,
+                    RelationshipRow.target_entity_id == query.entity_id,
+                )
+            )
         if query.relationship_type is not None:
             stmt = stmt.where(
                 RelationshipRow.relationship_type_urn == query.relationship_type.value
@@ -168,12 +180,17 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
 
     async def list(
         self, query: RelationshipObservationListQuery
-    ) -> QueryPage[RelationshipObservation]:
+    ) -> QueryPage[RelationshipObservationItem]:
         """Return one bounded page of immutable observations, newest first.
 
-        At least one scope (investigation or relationship) is required by the
-        contract; ``observed_at`` ranges filter independently and never enter
-        the cursor.
+        Every observation is joined to its stable Relationship so entity,
+        direction, counterparty and relationship-type filters run in SQL and
+        the joined source/target/type semantics ship with the page (no one
+        Relationship GET per observation). Self-relationships satisfy both
+        OR branches but the row is unique by id, so nothing is duplicated.
+        At least one scope (investigation or relationship) is required by
+        the contract; ``observed_at`` ranges filter independently and never
+        enter the cursor.
         """
         limit = self._limits.validate_limit(query.limit)
         envelope = require_cursor_for_query(
@@ -187,7 +204,14 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
             else parse_relationship_observation_cursor(envelope)
         )
 
-        stmt = select(RelationshipObservationRow)
+        stmt = select(RelationshipObservationRow, RelationshipRow).join(
+            RelationshipRow,
+            # The stable Relationship resource has no investigation_id
+            # column (visibility derives from observations), so the join is
+            # by edge identity only and Investigation isolation is enforced
+            # by the observation's own investigation_id predicate below.
+            RelationshipRow.id == RelationshipObservationRow.relationship_id,
+        )
         if query.investigation_id is not None:
             stmt = stmt.where(
                 RelationshipObservationRow.investigation_id == query.investigation_id
@@ -198,6 +222,49 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
             )
         if query.source is not None:
             stmt = stmt.where(RelationshipObservationRow.source == query.source)
+        # Entity-centric filtering joins the stable edge (PR 24E). Self-
+        # relationships match either branch of the OR but the observation
+        # row is unique by id, so they are never duplicated.
+        if query.entity_id is not None:
+            direction = query.effective_direction()
+            if direction is RelationshipDirection.SOURCE:
+                stmt = stmt.where(RelationshipRow.source_entity_id == query.entity_id)
+                if query.counterparty_entity_id is not None:
+                    stmt = stmt.where(
+                        RelationshipRow.target_entity_id == query.counterparty_entity_id
+                    )
+            elif direction is RelationshipDirection.TARGET:
+                stmt = stmt.where(RelationshipRow.target_entity_id == query.entity_id)
+                if query.counterparty_entity_id is not None:
+                    stmt = stmt.where(
+                        RelationshipRow.source_entity_id == query.counterparty_entity_id
+                    )
+            else:
+                stmt = stmt.where(
+                    or_(
+                        RelationshipRow.source_entity_id == query.entity_id,
+                        RelationshipRow.target_entity_id == query.entity_id,
+                    )
+                )
+                if query.counterparty_entity_id is not None:
+                    stmt = stmt.where(
+                        or_(
+                            and_(
+                                RelationshipRow.source_entity_id == query.entity_id,
+                                RelationshipRow.target_entity_id
+                                == query.counterparty_entity_id,
+                            ),
+                            and_(
+                                RelationshipRow.target_entity_id == query.entity_id,
+                                RelationshipRow.source_entity_id
+                                == query.counterparty_entity_id,
+                            ),
+                        )
+                    )
+        if query.relationship_type is not None:
+            stmt = stmt.where(
+                RelationshipRow.relationship_type_urn == query.relationship_type.value
+            )
         if query.retrieved_from is not None:
             stmt = stmt.where(
                 RelationshipObservationRow.retrieved_at >= query.retrieved_from
@@ -229,18 +296,28 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
             RelationshipObservationRow.retrieved_at.desc(),
             RelationshipObservationRow.id.asc(),
         ).limit(limit + 1)
-        rows = (await self._session.execute(stmt)).scalars().all()
+        rows = (await self._session.execute(stmt)).all()
         page = rows[:limit]
-        items = tuple(_observation_from_row(row) for row in page)
+        items = tuple(
+            RelationshipObservationItem.from_observation(
+                _observation_from_row(observation_row),
+                relationship_source_entity_id=relationship_row.source_entity_id,
+                relationship_target_entity_id=relationship_row.target_entity_id,
+                relationship_type=RelationshipType(
+                    relationship_row.relationship_type_urn
+                ),
+            )
+            for observation_row, relationship_row in page
+        )
         next_cursor: str | None = None
         if len(rows) > limit:
-            last = page[-1]
+            last_observation_row = page[-1][0]
             next_cursor = encode_cursor(
                 CursorEnvelope(
                     query_kind=QueryKind.RELATIONSHIP_OBSERVATIONS,
                     filter_fingerprint=query.fingerprint(),
                     sort_values=relationship_observation_sort_values(
-                        last.retrieved_at, last.id
+                        last_observation_row.retrieved_at, last_observation_row.id
                     ),
                 )
             )

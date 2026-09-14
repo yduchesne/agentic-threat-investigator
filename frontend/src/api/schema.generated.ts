@@ -299,6 +299,21 @@ export interface paths {
          *     ``observed_at`` and ``retrieved_at`` remain independent half-open UTC
          *     filters; pagination follows the canonical ``retrieved_at DESC, id ASC``
          *     order with opaque cursors.
+         *
+         *     PR 24E entity-centric filters:
+         *
+         *     - ``entity_id`` narrows to observations whose joined Relationship has
+         *       that entity as source or target (server-side, never client joins);
+         *     - ``direction`` is ``source``/``target``/``either`` relative to
+         *       ``entity_id`` and requires it (a bare entity behaves as ``either``);
+         *     - ``counterparty_entity_id`` pins the other endpoint and requires
+         *       ``entity_id``;
+         *     - ``relationship_type`` filters the joined edge's type URN.
+         *
+         *     Response rows additionally carry the joined stable relationship
+         *     semantics (``relationship_source_entity_id``,
+         *     ``relationship_target_entity_id``, ``relationship_type``) so the
+         *     browser never issues one Relationship GET per observation.
          */
         get: operations["list_relationship_observations"];
         put?: never;
@@ -319,6 +334,11 @@ export interface paths {
         /**
          * List Relationships
          * @description List distinct Relationships visible to one Investigation.
+         *
+         *     ``entity_id`` (PR 24E) selects the bounded one-hop neighborhood of one
+         *     focal entity: source-or-target OR semantics applied on the server, and
+         *     it intersects normally with the other filters. Soft-deleted edges stay
+         *     excluded exactly as before.
          */
         get: operations["list_relationships"];
         put?: never;
@@ -978,11 +998,28 @@ export interface components {
             next_cursor?: string | null;
         };
         /**
+         * RelationshipDirection
+         * @description Focal-entity direction of an entity-centric relationship query.
+         *
+         *     ``SOURCE`` selects edges whose source is the focal entity, ``TARGET``
+         *     selects edges whose target is the focal entity, and ``EITHER`` selects
+         *     edges on either side. The enum exists only to drive server-side entity
+         *     filtering; it never describes a persisted edge attribute.
+         * @enum {string}
+         */
+        RelationshipDirection: "source" | "target" | "either";
+        /**
          * RelationshipObservationResponse
          * @description One immutable historical relationship observation.
          *
          *     ``observed_at`` is the source observation time when known; ``retrieved_at``
          *     is ATI's retrieval time and the canonical cursor key.
+         *
+         *     ``relationship_source_entity_id``, ``relationship_target_entity_id`` and
+         *     ``relationship_type`` are stable denormalized fields sourced from the
+         *     joined Relationship row (PR 24E) — they are response projections only,
+         *     never persisted duplicates. They are ``null`` only when the join cannot
+         *     resolve the edge, which cannot happen for normally written data.
          */
         RelationshipObservationResponse: {
             /** Confidence */
@@ -1006,6 +1043,11 @@ export interface components {
              * Format: uuid
              */
             relationship_id: string;
+            /** Relationship Source Entity Id */
+            relationship_source_entity_id?: string | null;
+            /** Relationship Target Entity Id */
+            relationship_target_entity_id?: string | null;
+            relationship_type?: components["schemas"]["RelationshipType"] | null;
             /**
              * Retrieved At
              * Format: date-time
@@ -1378,6 +1420,7 @@ export type PageResponseRelationshipResponse = components['schemas']['PageRespon
 export type PageResponseReportResponse = components['schemas']['PageResponse_ReportResponse_'];
 export type PageResponseResearchResultResponse = components['schemas']['PageResponse_ResearchResultResponse_'];
 export type PageResponseTimelineEventResponse = components['schemas']['PageResponse_TimelineEventResponse_'];
+export type RelationshipDirection = components['schemas']['RelationshipDirection'];
 export type RelationshipObservationResponse = components['schemas']['RelationshipObservationResponse'];
 export type RelationshipResponse = components['schemas']['RelationshipResponse'];
 export type RelationshipType = components['schemas']['RelationshipType'];
@@ -2460,6 +2503,10 @@ export interface operations {
                 retrieved_to?: string | null;
                 observed_from?: string | null;
                 observed_to?: string | null;
+                entity_id?: string | null;
+                direction?: components["schemas"]["RelationshipDirection"] | null;
+                relationship_type?: components["schemas"]["RelationshipType"] | null;
+                counterparty_entity_id?: string | null;
                 limit?: number | null;
                 cursor?: string | null;
             };
@@ -2541,6 +2588,7 @@ export interface operations {
             query?: {
                 source_entity_id?: string | null;
                 target_entity_id?: string | null;
+                entity_id?: string | null;
                 relationship_type?: components["schemas"]["RelationshipType"] | null;
                 limit?: number | null;
                 cursor?: string | null;

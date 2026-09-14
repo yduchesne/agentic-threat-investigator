@@ -15,7 +15,12 @@ import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import type { Investigation, RelationshipObservation } from "../api/schema-types";
+import type {
+  Investigation,
+  RelationshipDirectionName,
+  RelationshipObservation,
+  RelationshipTypeName,
+} from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
 import { DetailDrawer } from "../analyst-table/DetailDrawer";
@@ -45,6 +50,10 @@ interface ObservationDraft {
   observedTo: string;
   retrievedFrom: string;
   retrievedTo: string;
+  entityId: string;
+  direction: RelationshipDirectionName | "";
+  relationshipType: RelationshipTypeName | "";
+  counterpartyEntityId: string;
 }
 
 /** Build a draft from the committed URL-backed filters. */
@@ -56,6 +65,10 @@ function draftFromFilters(filters: ObservationFilters): ObservationDraft {
     observedTo: filters.observedTo ?? "",
     retrievedFrom: filters.retrievedFrom ?? "",
     retrievedTo: filters.retrievedTo ?? "",
+    entityId: filters.entityId ?? "",
+    direction: filters.direction ?? "",
+    relationshipType: filters.relationshipType ?? "",
+    counterpartyEntityId: filters.counterpartyEntityId ?? "",
   };
 }
 
@@ -68,6 +81,11 @@ function draftToFilters(draft: ObservationDraft): ObservationFilters {
     observedTo: localDateTimeToIso(draft.observedTo),
     retrievedFrom: localDateTimeToIso(draft.retrievedFrom),
     retrievedTo: localDateTimeToIso(draft.retrievedTo),
+    entityId: parseUuidParam(draft.entityId),
+    direction: draft.direction === "" ? undefined : draft.direction,
+    relationshipType:
+      draft.relationshipType === "" ? undefined : draft.relationshipType,
+    counterpartyEntityId: parseUuidParam(draft.counterpartyEntityId),
   };
 }
 
@@ -80,6 +98,10 @@ function filtersKey(filters: ObservationFilters): string {
     filters.observedTo,
     filters.retrievedFrom,
     filters.retrievedTo,
+    filters.entityId,
+    filters.direction,
+    filters.relationshipType,
+    filters.counterpartyEntityId,
   ]);
 }
 

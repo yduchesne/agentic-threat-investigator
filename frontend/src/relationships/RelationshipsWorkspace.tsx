@@ -28,6 +28,7 @@ import { CompactId } from "../components/CompactId";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { relationshipSourceActions, relationshipTargetActions } from "../pivots/pivot-capabilities";
 import { relationshipTypeKey, RELATIONSHIP_TYPES } from "./labels";
+import { EvolutionLink } from "./EvolutionLink";
 import { RelationshipDetail } from "./RelationshipDetail";
 import { useRelationshipDetail, useRelationshipsPage } from "./relationships-queries";
 import {
@@ -40,6 +41,7 @@ import {
 interface RelationshipDraft {
   sourceEntityId: string;
   targetEntityId: string;
+  entityId: string;
   relationshipType: RelationshipTypeName | "";
 }
 
@@ -48,6 +50,7 @@ function draftFromFilters(filters: RelationshipFilters): RelationshipDraft {
   return {
     sourceEntityId: filters.sourceEntityId ?? "",
     targetEntityId: filters.targetEntityId ?? "",
+    entityId: filters.entityId ?? "",
     relationshipType: filters.relationshipType ?? "",
   };
 }
@@ -57,6 +60,7 @@ function draftToFilters(draft: RelationshipDraft): RelationshipFilters {
   return {
     sourceEntityId: parseUuidParam(draft.sourceEntityId),
     targetEntityId: parseUuidParam(draft.targetEntityId),
+    entityId: parseUuidParam(draft.entityId),
     relationshipType: draft.relationshipType === "" ? undefined : draft.relationshipType,
   };
 }
@@ -66,6 +70,7 @@ function filtersKey(filters: RelationshipFilters): string {
   return JSON.stringify([
     filters.sourceEntityId,
     filters.targetEntityId,
+    filters.entityId,
     filters.relationshipType,
   ]);
 }
@@ -82,7 +87,10 @@ function draftError(t: (key: string) => string, draft: RelationshipDraft): strin
 }
 
 /** Analyst-facing Relationship columns (server-driven; no sort affordances). */
-export function relationshipColumns(t: (key: string) => string): Column<Relationship>[] {
+export function relationshipColumns(
+  t: (key: string) => string,
+  investigationId: string,
+): Column<Relationship>[] {
   return [
     {
       id: "sourceEntity",
@@ -93,6 +101,11 @@ export function relationshipColumns(t: (key: string) => string): Column<Relation
           <PivotMenu
             actions={relationshipSourceActions(relationship, "table_cell")}
             ariaLabel={t("columns.sourceEntity")}
+          />
+          <EvolutionLink
+            investigationId={investigationId}
+            entityId={relationship.source_entity_id}
+            ariaLabel={t("evolution.sourceAria")}
           />
         </Box>
       ),
@@ -117,6 +130,11 @@ export function relationshipColumns(t: (key: string) => string): Column<Relation
           <PivotMenu
             actions={relationshipTargetActions(relationship, "table_cell")}
             ariaLabel={t("columns.targetEntity")}
+          />
+          <EvolutionLink
+            investigationId={investigationId}
+            entityId={relationship.target_entity_id}
+            ariaLabel={t("evolution.targetAria")}
           />
         </Box>
       ),
@@ -229,7 +247,7 @@ export function RelationshipsWorkspace({
         </Typography>
       ) : null}
       <AnalystTable<Relationship>
-        columns={relationshipColumns(t)}
+        columns={relationshipColumns(t, investigationId)}
         rows={page?.items ?? []}
         getRowId={(relationship) => relationship.id}
         ariaLabel={t("title")}

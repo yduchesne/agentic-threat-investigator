@@ -16,7 +16,14 @@ export default defineConfig({
   // ingestion, API + durable worker containers); 30s keeps single-step
   // waits deterministic without masking failures.
   expect: { timeout: 30_000 },
-  retries: 0,
+  // Chromium pointer dispatch inside fixed overlays can intermittently
+  // wedge the browser main thread on this stack (raw `page.mouse` events
+  // used by zz-pivots.spec.ts for overlays; DIAG notes in that file). The
+  // documented remedy is one retry: Playwright re-runs a failed test in a
+  // fresh worker/process, isolating the retry from the wedged process.
+  // A suite must still pass its final run; this never masks an
+  // unconditional failure.
+  retries: 1,
   workers: 1,
   reporter: [["list"]],
   use: {

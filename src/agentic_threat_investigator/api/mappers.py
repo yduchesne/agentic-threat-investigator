@@ -39,6 +39,9 @@ from agentic_threat_investigator.api.dto.research import (
 )
 from agentic_threat_investigator.api.dto.timeline import TimelineEventResponse
 from agentic_threat_investigator.app.query.history import DomainObjectHistoryRecord
+from agentic_threat_investigator.app.query.relationships import (
+    RelationshipObservationItem,
+)
 from agentic_threat_investigator.domain.assessment import (
     AnalyticalFinding,
     Assessment,
@@ -50,10 +53,7 @@ from agentic_threat_investigator.domain.investigation import InvestigationState
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
-from agentic_threat_investigator.domain.relationships import (
-    Relationship,
-    RelationshipObservation,
-)
+from agentic_threat_investigator.domain.relationships import Relationship
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
@@ -140,18 +140,27 @@ def to_relationship_response(
 
 
 def to_relationship_observation_response(
-    observation: RelationshipObservation,
+    item: RelationshipObservationItem,
 ) -> RelationshipObservationResponse:
-    """Map one immutable observation, preserving observed/retrieved times."""
+    """Map one immutable observation item, preserving observed/retrieved times.
+
+    The joined Relationship semantics (source entity, target entity, type)
+    are projected from the read item alongside the observation; they are
+    response projections sourced from the joined edge, never separate
+    Relationship GETs and never persisted duplicates.
+    """
     return RelationshipObservationResponse(
-        id=observation.id,
-        relationship_id=observation.relationship_id,
-        evidence_id=observation.evidence_id,
-        investigation_id=observation.investigation_id,
-        observed_at=observation.observed_at,
-        retrieved_at=observation.retrieved_at,
-        source=observation.source,
-        confidence=observation.confidence,
+        id=item.id,
+        relationship_id=item.relationship_id,
+        evidence_id=item.evidence_id,
+        investigation_id=item.investigation_id,
+        observed_at=item.observed_at,
+        retrieved_at=item.retrieved_at,
+        source=item.source,
+        confidence=item.confidence,
+        relationship_source_entity_id=item.relationship_source_entity_id,
+        relationship_target_entity_id=item.relationship_target_entity_id,
+        relationship_type=item.relationship_type,
     )
 
 

@@ -481,3 +481,44 @@ def _timeline_event(investigation_id: UUID) -> InvestigationTimelineEvent:
         type=InvestigationTimelineEventType.INVESTIGATION_STARTED,
         occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_p12_observation_entity_join_uses_investigation_retrieved_index(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Entity-centric evolution (PR 24E) keeps the canonical observation index.
+
+    The entity/direction/type filters run through the joined stable
+    Relationship, and the driving scan remains the Investigation+retrieved
+    observation index that backs the canonical ``retrieved_at DESC, id ASC``
+    keyset order. No structural migration is required for the bounded
+    evolution query at v0.1 scale.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        source = await seed_entity(uow, value="example.com")
+        target = await seed_entity(uow, value="192.0.2.1")
+        edge = await seed_relationship(
+            uow, source_entity_id=source, target_entity_id=target
+        )
+        evidence = await uow.evidence.insert(evidence_factory(investigation_id, source))
+        await seed_observation(
+            uow,
+            investigation_id=investigation_id,
+            relationship=edge,
+            evidence=evidence,
+            observed_at=FIXED_TIME,
+        )
+        assert uow.session is not None
+        await _assert_uses_index(
+            uow,
+            "SELECT ro.id FROM ati.relationship_observation ro "
+            "JOIN ati.relationship r ON r.id = ro.relationship_id "
+            "WHERE ro.investigation_id = :investigation_id "
+            "AND (r.source_entity_id = :entity_id OR r.target_entity_id = :entity_id) "
+            "ORDER BY ro.retrieved_at DESC, ro.id ASC LIMIT 50",
+            {"investigation_id": investigation_id, "entity_id": source},
+            "relationship_observation_investigation_retrieved_idx",
+        )
