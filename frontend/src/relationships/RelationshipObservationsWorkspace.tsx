@@ -6,9 +6,10 @@
 // immutable historical observation browsed directly, never through generic
 // History. ``observed_at`` and ``retrieved_at`` remain visibly independent
 // with half-open ranges; no started/ended/removed/continuous-validity
-// semantics are inferred. Detail uses the exact list DTO (no single-GET
-// endpoint exists and none is invented). The PR 24D modal embeds the same
-// workspace through the pivot-step port.
+// semantics are inferred. Detail uses the exact list DTO, recovered by the
+// Investigation-scoped exact GET (PR 24F) when the open selection is not
+// on the loaded page. The PR 24D modal embeds the same workspace through
+// the pivot-step port.
 
 import { Box, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
@@ -23,11 +24,12 @@ import type {
 } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DetailDrawer } from "../analyst-table/DetailDrawer";
+import { DetailDrawer, DrawerError, DrawerLoading, DrawerNotFound } from "../analyst-table/DetailDrawer";
 import { DetailRows } from "../analyst-table/DetailRows";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, localDateTimeToIso, parseUuidParam } from "../analyst-table/filters";
+import { isNotFound404 } from "../analyst-table/detail-error";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import { runningNotice } from "../analyst-table/running";
 import { TableToolbar } from "../analyst-table/TableToolbar";
@@ -35,7 +37,7 @@ import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { observationActions } from "../pivots/pivot-capabilities";
-import { useObservationsPage } from "./relationships-queries";
+import { useObservationDetail, useObservationsPage } from "./relationships-queries";
 import {
   emptyObservationFilters,
   observationFiltersActive,
@@ -213,6 +215,15 @@ export function RelationshipObservationsWorkspace({
 
   const drawerOpen = table.selection !== null;
   const filtersActive = observationFiltersActive(table.filters);
+  // One exact Investigation-scoped read for the open selection (PR 24F):
+  // the persisted observation id resolves through the scoped GET, so
+  // exact provenance never scans cursor pages or substitutes a related
+  // observation. Rows already present on the loaded page render from the
+  // page row (the cached exact read stays ready for any other selection).
+  const detail = useObservationDetail(
+    investigationId,
+    drawerOpen ? (table.selection ?? "") : null,
+  );
 
   const goNext = (): void => {
     if (page === null || page.next_cursor === null || page.next_cursor === undefined) {
@@ -314,26 +325,42 @@ export function RelationshipObservationsWorkspace({
         title={t("observations.detail.title")}
         onClose={table.closeSelection}
       >
-        {drawerOpen ? observationDetailBody(t, page, table.selection ?? "") : null}
+        {drawerOpen ? observationDetailBody(t, page, detail, table.selection ?? "") : null}
       </DetailDrawer>
     </Box>
   );
 }
 
 /**
- * The observation detail body: the exact list DTO, because no single-GET
- * observation endpoint exists and none is invented.
+ * The observation detail body.
+ *
+ * The exact list DTO stays the single public shape. Rows already present
+ * on the loaded page render from the page; any other selection resolves
+ * through the exact Investigation-scoped GET (PR 24F) — the persisted id
+ * is never reconstructed from list scans or substitute observations.
  */
 function observationDetailBody(
   t: (key: string) => string,
   page: { items: readonly RelationshipObservation[] } | null,
+  detail: ReturnType<typeof useObservationDetail>,
   selectedId: string,
 ): ReactElement {
-  const observation = page?.items.find((row) => row.id === selectedId);
-  if (observation === undefined) {
-    // The selected row is not on the currently loaded page; unlike
-    // resource detail there is no single-GET endpoint to recover it, so the
-    // drawer states exactly that instead of spinning forever.
+  const row = page?.items.find((candidate) => candidate.id === selectedId);
+  if (row !== undefined) {
+    return observationDetailRows(t, row);
+  }
+  if (detail.isLoading && detail.observation === null) {
+    return <DrawerLoading label={t("detail.loading")} />;
+  }
+  if (detail.isError && detail.observation === null) {
+    if (detail.error !== null && isNotFound404(detail.error)) {
+      // The exact Investigation-scoped read reports the observation is
+      // not visible here: keep the workspace open and state exactly that.
+      return <DrawerNotFound title={t("detail.notFound.title")} />;
+    }
+    return <DrawerError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
+  }
+  if (detail.observation === null) {
     return (
       <Box role="status" sx={{ py: 2, textAlign: "center" }}>
         <Typography variant="body1">{t("detail.notOnPage.title")}</Typography>
@@ -343,36 +370,52 @@ function observationDetailBody(
       </Box>
     );
   }
+  return observationDetailRows(t, detail.observation);
+}
+
+/** One exact list-DTO observation detail (shared by page row and GET). */
+function observationDetailRows(
+  t: (key: string) => string,
+  observation: RelationshipObservation,
+): ReactElement {
   return (
-    <DetailRows
-      rows={[
-        {
-          label: t("detail.relationshipId"),
-          value: <CompactId id={observation.relationship_id} label={t("detail.relationshipId")} />,
-        },
-        { label: t("detail.source"), value: observation.source },
-        {
-          label: t("detail.observedAt"),
-          value:
-            observation.observed_at !== null
-              ? <Timestamp iso={observation.observed_at} />
-              : t("detail.notObserved"),
-        },
-        { label: t("detail.retrievedAt"), value: <Timestamp iso={observation.retrieved_at} /> },
-        {
-          label: t("detail.evidenceId"),
-          value: <CompactId id={observation.evidence_id} label={t("detail.evidenceId")} />,
-        },
-        {
-          label: t("detail.confidence"),
-          value: observation.confidence !== null ? String(observation.confidence) : t("detail.nullable"),
-        },
-        {
-          label: t("detail.observationId"),
-          value: <CompactId id={observation.id} label={t("detail.observationId")} />,
-        },
-      ]}
-    />
+    <Box>
+      <DetailRows
+        rows={[
+          {
+            label: t("detail.relationshipId"),
+            value: <CompactId id={observation.relationship_id} label={t("detail.relationshipId")} />,
+          },
+          { label: t("detail.source"), value: observation.source },
+          {
+            label: t("detail.observedAt"),
+            value:
+              observation.observed_at !== null
+                ? <Timestamp iso={observation.observed_at} />
+                : t("detail.notObserved"),
+          },
+          { label: t("detail.retrievedAt"), value: <Timestamp iso={observation.retrieved_at} /> },
+          {
+            label: t("detail.evidenceId"),
+            value: <CompactId id={observation.evidence_id} label={t("detail.evidenceId")} />,
+          },
+          {
+            label: t("detail.confidence"),
+            value: observation.confidence !== null ? String(observation.confidence) : t("detail.nullable"),
+          },
+          {
+            label: t("detail.observationId"),
+            value: <CompactId id={observation.id} label={t("detail.observationId")} />,
+          },
+        ]}
+      />
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 1 }}>
+        <PivotMenu
+          actions={observationActions(observation, "detail_field")}
+          ariaLabel={t("detail.provenanceAria")}
+        />
+      </Box>
+    </Box>
   );
 }
 

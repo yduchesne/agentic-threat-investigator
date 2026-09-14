@@ -9,6 +9,7 @@
 // content, and replaced when the semantic content changes or the previous
 // attempt is definitively settled.
 
+import type { ApiError } from "../api/errors";
 import type { CreateInvestigationInput } from "../api/schema-types";
 
 /** Backend grammar: bounded visible ASCII, 1..128 characters (PR 23C). */
@@ -26,6 +27,32 @@ export interface IdempotencyAttempt {
 /** Normalized stable fingerprint of one semantic create payload. */
 export function payloadFingerprint(input: CreateInvestigationInput): string {
   return JSON.stringify(input);
+}
+
+/**
+ * Whether one create attempt's commit outcome is uncertain enough that an
+ * unchanged retry must reuse the same Idempotency-Key (PR 24B §12; PR 24F §6).
+ *
+ * A transport failure (status 0, no HTTP response) and every HTTP response
+ * with status >= 500 are commit-uncertain: the browser cannot determine
+ * whether the request committed atomically and the response path then
+ * failed, or failed before commit, so the safe retry reuses the same key
+ * for the same semantic payload and lets the backend resolve the ambiguity.
+ *
+ * Everything else is definitive and settles the attempt: a pre-transport
+ * CSRF failure (``kind === "csrf"``, still ``status === 0``) happens before
+ * any request could commit, and definitive 4xx responses (validation,
+ * idempotency conflict, auth/permission) are authoritative rejections.
+ * The classifier deliberately never keys purely off ``error.status === 0``.
+ */
+export function isCreateAttemptOutcomeUncertain(error: ApiError): boolean {
+  if (error.kind === "transport") {
+    return true;
+  }
+  if (error.kind === "api" || error.kind === "unexpected-response") {
+    return error.status >= 500;
+  }
+  return false;
 }
 
 /**

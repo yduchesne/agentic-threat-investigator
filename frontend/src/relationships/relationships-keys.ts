@@ -32,6 +32,14 @@ export function relationshipObservationsPreviewKey(
   return ["relationship-observations", investigationId, "preview", relationshipId];
 }
 
+/** Query key for the exact Investigation-scoped observation read. */
+export function observationDetailKey(
+  investigationId: string,
+  observationId: string,
+): unknown[] {
+  return ["relationship-observations", investigationId, "detail", observationId];
+}
+
 /** Query key for one bounded RelationshipObservations page. */
 export function observationsListKey(
   investigationId: string,

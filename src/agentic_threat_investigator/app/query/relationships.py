@@ -295,6 +295,24 @@ class RelationshipObservationQueryService(ABC):
         one Relationship GET per observation.
         """
 
+    @abstractmethod
+    async def get(
+        self,
+        investigation_id: UUID,
+        observation_id: UUID,
+    ) -> RelationshipObservationItem | None:
+        """Return one Investigation-scoped immutable observation, if any.
+
+        Exact identity + Investigation scope only: the observation must
+        exist and belong to the path Investigation, otherwise ``None``
+        (missing and cross-Investigation lookups are indistinguishable
+        so the HTTP layer can map both to one scoped 404 without
+        enumerating cross-Investigation existence). The item carries the
+        same joined stable Relationship semantics as :meth:`list`; it is
+        never queried through ``domain_object_history`` and no list scan
+        or relationship inference is involved.
+        """
+
 
 def relationship_observation_sort_values(
     retrieved_at: datetime, observation_id: UUID

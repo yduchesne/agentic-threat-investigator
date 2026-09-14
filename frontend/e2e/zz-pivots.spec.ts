@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 // Real-stack browser E2E: PR 24D cross-resource pivots, provenance
-// navigation, and breadcrumb workspaces (E22).
+// navigation, and breadcrumb workspaces (E22), plus the PR 24D benign/
+// dead-end pivot path (E22-B, PR 24F).
 //
 // Runs against the production-path stack created by the repository E2E
 // harness (scripts/e2e.sh): built/static React + Nginx -> real FastAPI ->
@@ -39,6 +40,13 @@
 //     -> pivot observation Evidence -> Evidence
 //     -> breadcrumb path, Back/Forward, truncation, refresh, Close
 //
+// Dead-end slice (PR 24F §16):
+//   completed F01 benign Investigation
+//     -> Evidence table -> subject detail
+//     -> legal pivot "Research for this entity"
+//     -> exact filter applied -> honest empty/dead-end research table
+//     -> breadcrumb context preserved -> Close restores the base route.
+//
 // Assertions: the breadcrumb path mirrors the exploration sequence,
 // Back/Forward traverse pivot states, truncation restores a prior step,
 // refresh restores the active modal, Close restores the underlying
@@ -49,6 +57,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const OBJECTIVE = "PR 24D cross-resource pivots via provenance";
 const F02_ROOT_DOMAIN = "update-package.test";
+const F01_BENIGN_OBJECTIVE = "PR 24F benign dead-end pivot path";
+const F01_ROOT_DOMAIN = "alice-corp.test";
 const SHARED_SESSION_STATE = "test-results/analyst-session.json";
 
 /** Progress markers printed when E22 ends pin the exact stall point. */
@@ -91,19 +101,33 @@ async function clickForce(page: Page, target: Locator): Promise<void> {
 
 /** Create and complete one F02 fake-world Investigation; returns its id. */
 async function completeF02Investigation(page: Page): Promise<string> {
+  return completeInvestigation(page, OBJECTIVE, F02_ROOT_DOMAIN);
+}
+
+/** Create and complete one F01 benign fake-world Investigation. */
+async function completeF01Investigation(page: Page): Promise<string> {
+  return completeInvestigation(page, F01_BENIGN_OBJECTIVE, F01_ROOT_DOMAIN);
+}
+
+/** Create and complete one deterministic fake-world Investigation. */
+async function completeInvestigation(
+  page: Page,
+  objective: string,
+  rootDomain: string,
+): Promise<string> {
   await page.getByRole("link", { name: "New Investigation" }).click();
   await expect(
     page.getByRole("heading", { name: "Create Investigation" }),
   ).toBeVisible();
-  await page.getByLabel(/^Objective/).fill(OBJECTIVE);
-  await page.getByLabel("Indicator value 1").fill(F02_ROOT_DOMAIN);
+  await page.getByLabel(/^Objective/).fill(objective);
+  await page.getByLabel("Indicator value 1").fill(rootDomain);
   await page.getByRole("button", { name: "Submit" }).click();
   await expect(page).toHaveURL(/\/investigations\/([0-9a-f-]+)\/overview/);
   const url = page.url();
   const investigationId = url.match(/\/investigations\/([0-9a-f-]+)\//)?.[1];
   expect(investigationId).not.toBeUndefined();
   await expect(
-    page.getByRole("heading", { name: OBJECTIVE }),
+    page.getByRole("heading", { name: objective }),
   ).toBeVisible({ timeout: 20_000 });
   await expect(page.getByLabel("Status: Completed").first()).toBeVisible({ timeout: 240_000 });
   return investigationId ?? "";
@@ -248,6 +272,96 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     expect(consoleErrors).toEqual([]);
     for (const { tag, at } of stepTags) {
       console.log(`E22-MARK ${tag} +${(at - stepTags[0].at) / 1000}s`);
+    }
+  });
+
+  test("E22-B benign/dead-end pivot path resolves honestly (F01)", async ({
+    page,
+  }) => {
+    const consoleErrors: string[] = [];
+    page.on("pageerror", (error) => consoleErrors.push(`pageerror: ${String(error)}`));
+    page.on("console", (message) => {
+      if (message.type === "error") {
+        consoleErrors.push(`console: ${message.text}`);
+      }
+    });
+
+    step("dead: start");
+    await page.goto("/investigations");
+    await expect(page.getByText("FAKE DATA")).toBeVisible();
+    await completeF01Investigation(page);
+    step("dead: F01 completed");
+
+    // A legal typed pivot from the benign investigation's Evidence: the
+    // subject value is real observed data, and "Research for this entity"
+    // is a registered pivot capability. F01 (domain + IP evidence only)
+    // persists no research results, so the target is an honest dead end.
+    await page.getByRole("tab", { name: "Evidence" }).click();
+    await expect(
+      page.getByText(F01_ROOT_DOMAIN, { exact: true }).first(),
+    ).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: /^View / }).first().click();
+    const drawer = page.getByRole("dialog", { name: "Evidence" });
+    await expect(drawer).toBeVisible({ timeout: 30_000 });
+    step("dead: evidence drawer open");
+
+    // Legal pivot: Evidence subject -> Research for this entity. The exact
+    // subject id is carried by the typed action (never derived or scanned).
+    await clickForce(page, drawer.getByRole("button", { name: "Pivot actions" }));
+    await clickForce(
+      page,
+      page.getByRole("menuitem", { name: "Research for this entity" }),
+    );
+    const researchDialog = page.getByRole("dialog", {
+      name: /Research pivot workspace/i,
+    });
+    await expect(researchDialog).toBeVisible({ timeout: 30_000 });
+    step("dead: research workspace open");
+
+    // The exact bounded server filter is visible/represented: the Subject
+    // entity ID field carries the entity UUID from the typed pivot step.
+    await expect(
+      researchDialog.getByRole("textbox", { name: "Subject entity ID" }),
+    ).toHaveValue(/^[0-9a-f-]{36}$/);
+    // Honest empty/dead-end semantics: the filtered research table states
+    // exactly what it is and never invents a fallback target or an inferred
+    // relationship/entity equivalence.
+    await expect(
+      researchDialog.getByText("No research results match these filters"),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      researchDialog.getByText("The active filters exclude every loaded research result."),
+    ).toBeVisible();
+    expect(
+      researchDialog.getByText(/inferred|equivalent|related observation/i),
+    ).toHaveCount(0);
+
+    // Breadcrumb context is preserved: Investigation -> the evidence
+    // subject label, with the modal still hosted by the pivot workspace.
+    const breadcrumb = researchDialog.getByRole("navigation", {
+      name: "Pivot breadcrumb",
+    });
+    await expect(breadcrumb.getByText("Investigation")).toBeVisible();
+    await expect(breadcrumb.getByText(F01_ROOT_DOMAIN)).toBeVisible();
+    step("dead: honest empty state + breadcrumb");
+
+    // Close returns safely to the base Evidence route; no modal remains.
+    await clickForce(page, page.getByRole("button", { name: "Close pivot workspace" }));
+    await expect(
+      page.getByRole("dialog", { name: /pivot workspace/i }),
+    ).not.toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Evidence" }),
+    ).toBeVisible();
+    expect(page.getByText("FAKE DATA")).toBeVisible();
+    expect(
+      (await page.getByRole("banner").allTextContents()).join(" "),
+    ).not.toContain("Pivot breadcrumb");
+
+    // The real production path stayed offline/LLM-free with a clean console.
+    expect(consoleErrors).toEqual([]);
+    for (const { tag, at } of stepTags) {
+      console.log(`E22B-MARK ${tag} +${(at - stepTags[0].at) / 1000}s`);
     }
   });
 });

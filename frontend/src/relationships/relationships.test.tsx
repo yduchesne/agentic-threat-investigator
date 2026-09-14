@@ -204,6 +204,48 @@ describe("Relationship observations page", () => {
     expect(screen.queryByText(/ended|removed/i)).not.toBeInTheDocument();
   });
 
+  it("resolves a selection not on the loaded page through the exact scoped GET (F-P04)", async () => {
+    const selected = "40000000-0000-4000-8000-000000000099";
+    const detailRequests: string[] = [];
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/relationship-observations",
+        // The loaded page contains a different observation: the open
+        // selection must be fetched by exact persisted id, never scanned.
+        pages: [[obsA()]],
+        recorder: resourceListRecorder(),
+      }),
+      http.get(
+        "*/api/v1/investigations/:id/relationship-observations/:observationId",
+        ({ request }) => {
+          const url = new URL(request.url);
+          detailRequests.push(url.pathname);
+          return jsonResponse(
+            buildObservation({
+              id: selected,
+              relationship_id: "40000000-0000-4000-8000-000000000021",
+              source: "exact-dns",
+              observed_at: "2026-06-01T08:00:00Z",
+              retrieved_at: "2026-06-01T08:30:00Z",
+            }),
+          );
+        },
+      ),
+    );
+    renderAtPath(`${OBS_BASE}?selected=${selected}`);
+    // The drawer renders the exact observation resolved by the scoped GET
+    // (its source differs from the loaded page row).
+    expect(await screen.findByText("exact-dns")).toBeInTheDocument();
+    expect(screen.getByTitle("2026-06-01T08:00:00Z")).toBeInTheDocument();
+    expect(screen.getByTitle("2026-06-01T08:30:00Z")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(detailRequests).toHaveLength(1);
+      expect(detailRequests[0]).toContain(`/relationship-observations/${selected}`);
+    });
+  });
+
   it("never routes observations through generic History (R09)", async () => {
     let historyCalls = 0;
     setHttpHandlers(

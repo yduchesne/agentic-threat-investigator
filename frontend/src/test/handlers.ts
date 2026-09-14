@@ -399,20 +399,42 @@ export interface CreateRequestRecord {
 
 /**
  * Stateful create handler: 202 with a durable identity, or a scripted
- * conflict/validation/transport failure. Records every request. `failWith`
- * lets a test switch modes mid-flow (e.g. transport -> ok for retry tests).
+ * conflict/validation/transport/5xx failure. Records every request.
+ * `failWith` lets a test switch modes mid-flow (e.g. transport -> ok for
+ * retry tests). PR 24F adds the transient 5xx modes and the definitive
+ * auth/permission rejections used by the create-uncertainty matrix.
  */
 export function createInvestigationHandler({
   result,
   failWith: initialFailWith = "ok",
 }: {
   result?: CreateInvestigationResult;
-  failWith?: "ok" | "conflict" | "validation" | "transport";
+  failWith?:
+    | "ok"
+    | "conflict"
+    | "validation"
+    | "transport"
+    | "server500"
+    | "server502"
+    | "server503"
+    | "malformed500"
+    | "unauthorized"
+    | "forbidden";
 } = {}) {
   const requests: CreateRequestRecord[] = [];
-  const state: { failWith: "ok" | "conflict" | "validation" | "transport" } = {
-    failWith: initialFailWith,
-  };
+  const state: {
+    failWith:
+      | "ok"
+      | "conflict"
+      | "validation"
+      | "transport"
+      | "server500"
+      | "server502"
+      | "server503"
+      | "malformed500"
+      | "unauthorized"
+      | "forbidden";
+  } = { failWith: initialFailWith };
   const handler = http.post("*/api/v1/investigations", async ({ request }) => {
     const body = await request.json();
     requests.push({
@@ -425,6 +447,26 @@ export function createInvestigationHandler({
     }
     if (state.failWith === "validation") {
       return errorResponse(422, "validation_error");
+    }
+    if (state.failWith === "server500") {
+      return errorResponse(500, "internal_error");
+    }
+    if (state.failWith === "server502") {
+      return errorResponse(502, "bad_gateway");
+    }
+    if (state.failWith === "server503") {
+      return errorResponse(503, "dependency_unavailable");
+    }
+    if (state.failWith === "malformed500") {
+      // A 500 whose body is not the stable error envelope: the client must
+      // classify it by HTTP status only (unexpected-response, >= 500).
+      return new HttpResponse("<html>upstream failure</html>", { status: 500 });
+    }
+    if (state.failWith === "unauthorized") {
+      return errorResponse(401, "authentication_required");
+    }
+    if (state.failWith === "forbidden") {
+      return errorResponse(403, "forbidden");
     }
     if (state.failWith === "transport") {
       return HttpResponse.error();

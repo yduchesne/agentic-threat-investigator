@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pivot capability registry tests (PR 24D §25).
+// Pivot capability registry tests (PR 24D §25; PR 24F).
 //
 // Every registered action maps one explicit source identity to an exact
 // existing server filter/selection. No actions are inferred from strings,
-// no source-or-target merge exists, no-op targets are suppressed, and the
-// RelationshipObservation support gap yields no action.
+// no source-or-target merge exists, and no-op targets are suppressed.
+// RelationshipObservation support now opens the exact scoped observation.
 
 import { describe, expect, it } from "vitest";
 
@@ -15,7 +15,7 @@ import {
   evidenceSubjectActions,
   evidenceSupportAction,
   observationActions,
-  relationshipObservationSupportActions,
+  observationSupportAction,
   relationshipObservationsAction,
   relationshipSourceActions,
   relationshipTargetActions,
@@ -179,8 +179,15 @@ describe("pivot capability registry", () => {
     expect(action.target.selectedId).toBe(RESEARCH_ID);
   });
 
-  it("RelationshipObservation support has no legal action (bounded route gap)", () => {
-    expect(relationshipObservationSupportActions()).toEqual([]);
+  it("RelationshipObservation support opens the exact scoped observation", () => {
+    const observationId = "40000000-0000-4000-8000-000000000041";
+    const action = observationSupportAction(observationId, "report_support");
+    expect(action.key).toBe("observationExact");
+    expect(action.target.resource).toBe("relationship-observations");
+    expect(action.target.filters).toEqual({});
+    expect(action.target.selectedId).toBe(observationId);
+    expect(action.target.label).toContain("RelationshipObservation");
+    expect(action.target.label).not.toContain(observationId);
   });
 
   it("no-op entity targets are suppressed against the active step", () => {

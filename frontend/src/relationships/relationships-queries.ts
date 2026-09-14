@@ -11,10 +11,12 @@ import { useQuery } from "@tanstack/react-query";
 import type { ApiError } from "../api/errors";
 import type {
   Relationship,
+  RelationshipObservation,
   RelationshipObservationPage,
   RelationshipPage,
 } from "../api/schema-types";
 import {
+  fetchObservation,
   fetchObservationsPage,
   fetchRelationship,
   fetchRelationshipsPage,
@@ -25,6 +27,7 @@ import type {
 } from "./relationships-filters";
 import { emptyObservationFilters } from "./relationships-filters";
 import {
+  observationDetailKey,
   observationsListKey,
   relationshipDetailKey,
   relationshipObservationsPreviewKey,
@@ -154,6 +157,39 @@ export function useObservationsPage(
   });
   return {
     page: result.data ?? null,
+    isLoading: result.isLoading,
+    isError: result.isError,
+    error: result.error ?? null,
+    refetch: () => void result.refetch(),
+  };
+}
+
+/**
+ * Read one exact Investigation-scoped immutable RelationshipObservation.
+ *
+ * Drives the exact provenance selection: the persisted observation id
+ * resolves through the scoped GET (never a list scan, never a substitute
+ * observation). Used only while a selection is open.
+ */
+export function useObservationDetail(
+  investigationId: string,
+  observationId: string | null,
+): {
+  observation: RelationshipObservation | null;
+  isLoading: boolean;
+  isError: boolean;
+  error: ApiError | null;
+  refetch: () => void;
+} {
+  const result = useQuery<RelationshipObservation, ApiError>({
+    queryKey: observationDetailKey(investigationId, observationId ?? ""),
+    queryFn: ({ signal }) =>
+      fetchObservation(investigationId, observationId ?? "", signal),
+    enabled: observationId !== null,
+    staleTime: 30_000,
+  });
+  return {
+    observation: result.data ?? null,
     isLoading: result.isLoading,
     isError: result.isError,
     error: result.error ?? null,
