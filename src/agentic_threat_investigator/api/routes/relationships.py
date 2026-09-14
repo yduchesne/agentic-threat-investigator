@@ -186,3 +186,36 @@ async def list_relationship_observations(
         items=tuple(to_relationship_observation_response(item) for item in page.items),
         next_cursor=page.next_cursor,
     )
+
+
+@observations_router.get(
+    "/{observation_id}",
+    response_model=RelationshipObservationResponse,
+    operation_id="get_relationship_observation",
+)
+async def get_relationship_observation(
+    investigation_id: UUID,
+    observation_id: UUID,
+    services: QueryServices,
+    _user: AnalystUser,
+) -> RelationshipObservationResponse:
+    """Return one immutable RelationshipObservation of the path Investigation.
+
+    Exact identity + Investigation scope (PR 24F): the observation must
+    exist and belong to the path Investigation; missing and
+    cross-Investigation observation IDs map to the same stable scoped 404
+    so cross-Investigation existence is never revealed. The response uses
+    the exact public list projection (joined stable Relationship
+    semantics included); observations remain immutable first-class
+    history and are never routed through ``domain_object_history``.
+    """
+    observation = await services.relationship_observations.get(
+        investigation_id, observation_id
+    )
+    if observation is None:
+        raise ApiError(
+            ApiErrorCode.RELATIONSHIP_NOT_FOUND,
+            "Relationship observation was not found for this investigation.",
+            404,
+        )
+    return to_relationship_observation_response(observation)

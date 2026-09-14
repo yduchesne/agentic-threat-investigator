@@ -1380,8 +1380,13 @@ Component tests (`frontend/src/investigations/`) cover the full matrix:
 - create: localized requiredness and the exact backend bounds exposed in
   OpenAPI (objective ≤ 4000, indicator value ≤ 2048, at least one typed
   indicator), exact `EntityType` submission, cryptographic in-memory
-  `Idempotency-Key` generation, transport-uncertain retry reusing the
-  same key, new key for changed semantic content, explicit
+  `Idempotency-Key` generation, commit-uncertain retry reusing the same
+  key for transport failures and transient HTTP 5xx outcomes (API 500/
+  502/503 envelopes and malformed 5xx bodies, PR 24F F-B02..F-B05),
+  new key for changed semantic content after an uncertain attempt
+  (including after a 503, F-B11), definitive 4xx validation/conflict/
+  auth-permission settling the attempt (F-B06/F-B07/F-B08), pre-transport
+  CSRF never treated as uncertain (F-B09), explicit
   `409 idempotency_conflict`, `202` immediate workspace navigation, list
   invalidation, and CSRF preservation;
 - polling: pending/running refetch on the bounded 2s interval,
@@ -1514,8 +1519,8 @@ resource query/filter/table/detail machinery (`frontend/src/pivots/`,
 - capability registry (`pivot-capabilities.test.ts`): at least one legal
   action per typed value (Evidence subject/type/source, Relationship
   source/target, observation relationship + exact Evidence) and the
-  guarded no-op on the RelationshipObservation support reference that
-  carries only an observation id with no bounded route;
+  RelationshipObservation support reference opening the exact scoped
+  observation selection;
 - navigation/URL projection (`pivot-port.test.ts` regressions inside
   `PivotWorkspace.test.tsx`): step filters arrive pre-applied at the
   table, pillars (evidence type/source) stay anchored to the Investigation;
@@ -1529,9 +1534,15 @@ resource query/filter/table/detail machinery (`frontend/src/pivots/`,
   preserving base filters;
 - provenance (`provenance.test.tsx`): the Report/Overview support list
   pivots exact Evidence by persisted id, Research context/claim
-  references pivot exact Research, RelationshipObservation support stays
-  visible but non-pivotable (STOP condition 3), and Report/Research free
-  text never enters the URL;
+  references pivot exact Research, and RelationshipObservation support
+  pivots the exact Investigation-scoped observation (F-P03/F-P04 via the
+  scoped GET — the list page deliberately serves a different row, so the
+  exact id must drive the request; F-P08 free Report text never enters
+  the URL; F-P09 bounded breadcrumb label). A scoped observation 404
+  keeps the pivot workspace open with an honest not-found and no
+  fallback/substitute (F-P05/F-P06); observation detail pivots to exact
+  Evidence by `evidence_id` (F-P07); Close restores the base Overview
+  (F-P10). Report/Research free text never enters the URL;
 - real-stack E22 (`frontend/e2e/zz-pivots.spec.ts`): overall completing
   F02 Investigation, Evidence support → exact Evidence workspace →
   subject pivot Relationships where source → open Relationship →
@@ -1547,7 +1558,29 @@ resource query/filter/table/detail machinery (`frontend/src/pivots/`,
   dispatched through the composite path do not). The same raw events can
   intermittently wedge the Chromium pointer dispatch on this stack
   (environment-specific; the identical interaction passes on retry and
-  passed whole-suite runs), so CI retries E22 once before failing.
+  passed whole-suite runs), so CI retries E22 once before failing;
+- real-stack E22-B (`frontend/e2e/zz-pivots.spec.ts`, PR 24F): benign/
+  dead-end pivot path against the deterministic F01 fake-world
+  Investigation — a legal typed pivot (Evidence subject -> Research for
+  this entity) opens the target modal with the exact server filter
+  visible, shows the honest filtered-empty research state (no invented
+  relationship, no automatic fallback, no entity equivalence),
+  preserves the breadcrumb context, closes safely to the base Evidence
+  route with `FAKE DATA` visible and a clean browser console;
+- exact observation query/API coverage (PR 24F): backend contract tests
+  F-O01..F-O06 (same-Investigation item, missing/cross-Investigation
+  `None`, joined relationship semantics, distinct observed/retrieved),
+  real-PostgreSQL identity + Investigation-scope matrix
+  (`tests/integration/test_query_relationship_observations.py`),
+  API tests F-A01..F-A06 (200 projection, unknown/cross-Investigation
+  scoped 404 without existence leaks, malformed UUID stable 422
+  envelope, unauthenticated 401, same public fields as the list DTO),
+  the regenerated OpenAPI snapshot, and frontend exact-detail coverage
+  (F-P04 plus the observations-workspace selection test);
+- the PR 24 series is closed: PR 24F performs the final source-and-test
+  compliance sweep of PR 24A–24E and reconciles the authoritative
+  documentation; no PR 24A–24E requirement remains unrecorded as
+  compliant and no material architectural debt blocks PR 25.
 
 ### Relationship Evolution and graph (PR 24E)
 

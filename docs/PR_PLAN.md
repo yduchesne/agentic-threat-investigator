@@ -889,7 +889,7 @@ Delivered (PR 24C implementation summary):
 
 No cross-table popup pivot workspace or breadcrumb chain yet; that is PR 24D. No relationship graph/timeline visualization; that is PR 24E.
 
-### PR 24D — Cross-resource pivots, provenance navigation and breadcrumb workspaces
+### PR 24D — Cross-resource pivots, provenance navigation and breadcrumb workspaces [DONE]
 
 Deliver ATI's defining analyst exploration interaction:
 
@@ -911,6 +911,43 @@ Deliver:
 - browser tests covering multi-step pivots against the shared PR 23D synthetic world, including one meaningful path and one benign/dead-end path.
 
 No generic graph visualization or geospatial map.
+
+Delivered (PR 24D implementation summary, completed by PR 24F):
+
+- typed pivot model and one explicit capability registry
+  (`frontend/src/pivots/pivot-types.ts`, `pivot-capabilities.ts`): every
+  legal action is an explicit source identity -> exact PR 24C
+  filter/selection target; nothing is inferred from strings, no
+  source-or-target merge, no client-side OR simulation;
+- versioned base64url JSON pivot stack in the reserved `pivot` search
+  parameter (`pivot-url.ts`), capped at five steps and a 4096-byte
+  header budget, with deterministic push/truncate/clear semantics;
+- one modal pivot workspace (`PivotWorkspace.tsx`) hosting the active
+  PR 24C resource view through a thin search-params projection
+  (`pivot-port.ts`), with breadcrumbs, Back/Forward/refresh restore,
+  depth cap, and Close to the base route; implemented with MUI
+  primitives (fixed paper/backdrop + roving-keyboard menus) because the
+  MUI 7 Modal focus trap races the in-drawer pivot unmount and crashes
+  the Chromium main thread on the real stack;
+- provenance navigation by exact persisted support identity: Report/
+  Assessment Evidence support opens the exact scoped Evidence selection,
+  Research context/claim references open the exact Research result, and
+  RelationshipObservation support resolves through the exact
+  Investigation-scoped observation read added by PR 24F (never a list
+  scan, never a substitute observation, never generic History);
+- Relationship -> observation -> Evidence drill-down through the same
+  typed pivot model, and bounded compact breadcrumb labels;
+- no entity equivalence or relationship semantics are ever invented by
+  the browser; free Report/Research text never enters the pivot URL;
+- real-stack E22 covering the meaningful pivot path
+  (Evidence support -> subject -> Relationships -> observations ->
+  Evidence, breadcrumbs, Back/Forward, truncation, refresh, Close) and
+  the real-stack E22-B benign/dead-end path over the F01 fake-world
+  Investigation (legal pivot to an honestly empty filtered target, no
+  invented fallback, breadcrumb preserved, safe Close) added by PR 24F;
+- source-and-test compliance re-audited in PR 24F against the exact PR
+  24D deliverable list (bounded/versioned URL state, single workspace,
+  depth 5, no graph/map leakage).
 
 ### PR 24E — Relationship Evolution and relationship graph `[DONE]`
 
@@ -1004,6 +1041,67 @@ Across PR 24A–E:
 - frontend must not weaken PR 23C authentication, CSRF, authorization, idempotency or error contracts.
 
 After PR 24E, PR 25 adds the geolocation map using the established routing/query/pivot architecture.
+
+### PR 24F — PR 24 series hardening and compliance closure [DONE]
+
+PR 24F is a hardening and compliance-closure PR, not a feature PR. It
+closes the bounded residual compliance gaps remaining from PR 24A–24E and
+reconciles the authoritative documentation with the verified
+implementation. No new product capability, agent behavior, persistence
+model, graph feature, or GEOINT work was added.
+
+Delivered (PR 24F implementation summary):
+
+- **Create Investigation commit-uncertain retry safety (PR 24B fix):** one
+  pure policy helper (`isCreateAttemptOutcomeUncertain` in
+  `frontend/src/investigations/idempotency.ts`) classifies create
+  outcomes as commit-uncertain only for transport failures and HTTP
+  responses with status >= 500 (including malformed 5xx bodies);
+  pre-transport CSRF failures and definitive 4xx responses (validation,
+  idempotency conflict, auth/permission) settle the attempt. An unchanged
+  semantic payload after a transient 5xx retries with the same
+  in-memory Idempotency-Key; a changed payload (objective/indicator edit)
+  always starts a new logical attempt/key. Keys remain cryptographic,
+  memory-only, and never enter URLs, storage, logs, or UI text. Component/
+  MSW coverage: F-B01..F-B12.
+- **Exact RelationshipObservation read (PR 24D provenance fix):**
+  `RelationshipObservationQueryService.get(investigation_id,
+  observation_id)` and its PostgreSQL joined exact read (identity +
+  Investigation scope; same joined source/target/type projection as the
+  list, no cursor, no N+1, no generic History) behind
+  `GET /api/v1/investigations/{id}/relationship-observations/{observation_id}`
+  (operation id `get_relationship_observation`, public
+  `RelationshipObservationResponse`, stable scoped 404 for missing and
+  cross-Investigation ids). OpenAPI fixture and generated frontend types
+  regenerated. Coverage: F-O01..F-O06 backend contract, real-PostgreSQL
+  scope matrix, F-A01..F-A06 API.
+- **Report/Assessment -> exact RelationshipObservation provenance:**
+  Report finding `relationship_observation` support references are now
+  actionable; the persisted observation id drives one Investigation-
+  scoped exact GET inside the PR 24D pivot workspace (never a list scan,
+  never a substitute observation), reusing the existing observation row
+  presentation, and the observation detail keeps exact Evidence
+  navigation by `evidence_id`. Coverage: F-P01..F-P10 component.
+- **Benign/dead-end real-browser pivot scenario:** E22-B in
+  `frontend/e2e/zz-pivots.spec.ts` completes the deterministic F01
+  fake-world Investigation and takes a legal typed pivot
+  (Evidence subject -> Research for this entity) to an honestly empty
+  filtered target: exact filter visible, no invented relationship or
+  fallback, breadcrumb context preserved, Close safe, `FAKE DATA`
+  visible, clean browser console, real FastAPI/PostgreSQL/built frontend,
+  no live Internet/LLM.
+- **Final source-and-test compliance sweep:** every PR 24A–24E minimum
+  requirement was re-verified against implementation files and
+  deterministic tests (COMPLIANT/PARTIAL/MISSING/NOT APPLICABLE mapping);
+  only PR-24F-admissible residual fixes were absorbed (the three gaps
+  above plus the missing `observations.detail.title` i18n key). No
+  material precedent-PR gap was found; no STOP was required.
+- **Documentation reconciliation:** `docs/PR_PLAN.md` (24D marked DONE,
+  this summary), `docs/ARCHITECTURE.md` (24B commit-uncertain retry
+  wording, 24D exact observation provenance wording), `docs/API.md`
+  (exact observation GET), `docs/TESTING.md` (5xx uncertainty, exact
+  observation provenance, benign/dead-end browser path, final closure
+  note, stale non-pivotable wording removed).
 
 ## PR 25 — Geolocation map
 

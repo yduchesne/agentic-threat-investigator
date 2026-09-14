@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Explicit pivot capability registry (PR 24D §1.3, §4, §6, §8).
+// Explicit pivot capability registry (PR 24D §1.3, §4, §6, §8; PR 24F §14).
 //
 // Every legal pivot is declared here as an explicit typed capability:
 // source identity -> exact target resource + exact existing server filter
@@ -8,7 +8,7 @@
 // inferred from matching property names, string similarity, or
 // client-side OR semantics. Targets not expressible through the existing
 // PR 24C filter codecs or exact scoped detail endpoints have no
-// capability (see the RelationshipObservation support gap below).
+// capability.
 
 import type {
   Evidence,
@@ -45,6 +45,7 @@ export const PIVOT_ACTION_KINDS = [
   "observationsForRelationship",
   "evidenceExact",
   "researchExact",
+  "observationExact",
 ] as const;
 
 /** One stable pivot action identity. */
@@ -70,6 +71,10 @@ export function evidenceCompactLabel(evidenceId: string): string {
 
 export function relationshipCompactLabel(relationshipId: string): string {
   return `Relationship ${shortUuid(relationshipId)}`;
+}
+
+export function observationCompactLabel(observationId: string): string {
+  return `RelationshipObservation ${shortUuid(observationId)}`;
 }
 
 export function researchCompactLabel(researchResultId: string): string {
@@ -264,18 +269,29 @@ export function researchSupportAction(
 }
 
 /**
- * RelationshipObservation support has NO legal PR 24D action.
+ * RelationshipObservation support identity -> the exact scoped observation.
  *
- * The current ``FindingSupportResponse`` carries only
- * ``relationship_observation_id``; the v0.1 API exposes observations only
- * through the ``relationship_id``-filtered bounded list (no single-GET
- * endpoint, no observation-id filter exists). Reaching the cited
- * observation boundedly is impossible without a backend contract change,
- * so ATI leaves the reference visible but non-pivotable instead of
- * scanning cursor pages or inferring a relationship id (PR 24D §7, §34).
+ * PR 24F: the persisted observation id resolves through the exact
+ * Investigation-scoped observation GET (never a list scan, never a
+ * substitute observation, never a guessed relationship id). The bounded
+ * breadcrumb label is the compact observation id; no raw Report text or
+ * free form ever enters the pivot state.
  */
-export function relationshipObservationSupportActions(): PivotAction[] {
-  return [];
+export function observationSupportAction(
+  observationId: string,
+  sourceKind: PivotSourceKind,
+): PivotAction {
+  return {
+    key: "observationExact",
+    labelKey: "actions.observationExact",
+    sourceKind,
+    target: {
+      resource: "relationship-observations",
+      filters: {},
+      selectedId: observationId,
+      label: observationCompactLabel(observationId),
+    },
+  };
 }
 
 /**

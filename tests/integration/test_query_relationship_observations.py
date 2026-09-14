@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -14,6 +14,7 @@ from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationListQuery,
 )
+from agentic_threat_investigator.domain.relationships import RelationshipType
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
@@ -207,6 +208,94 @@ async def test_observation_observed_range_handles_null(
             ),
         )
         assert collected == [inside_obs.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_exact_observation_get_is_identity_and_investigation_scoped(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """PR 24F: exact observation retrieval uses identity + Investigation scope.
+
+    ``get(A, OA)`` returns the joined observation; ``get(A, OB)``,
+    ``get(B, OA)`` and a random UUID all fail closed with ``None`` so the
+    HTTP layer can map missing and cross-Investigation lookups to one safe
+    scoped 404 without enumerating cross-Investigation existence.
+    """
+    async with uow_factory() as uow:
+        investigation_a = await seed_investigation(uow)
+        source_a = await seed_entity(uow, value="exact-source.test")
+        target_a = await seed_entity(uow, value="192.0.2.200")
+        edge_a = await seed_relationship(
+            uow, source_entity_id=source_a, target_entity_id=target_a
+        )
+        evidence_a = await uow.evidence.insert(
+            evidence_factory(investigation_a, source_a)
+        )
+        observation_a = await seed_observation(
+            uow,
+            investigation_id=investigation_a,
+            relationship=edge_a,
+            evidence=evidence_a,
+            retrieved_at=FIXED_TIME + timedelta(minutes=31),
+            observed_at=FIXED_TIME + timedelta(minutes=1),
+        )
+        investigation_b = await seed_investigation(uow)
+        source_b = await seed_entity(uow, value="other.example")
+        target_b = await seed_entity(uow, value="192.0.2.99")
+        edge_b = await seed_relationship(
+            uow, source_entity_id=source_b, target_entity_id=target_b
+        )
+        evidence_b = await uow.evidence.insert(
+            evidence_factory(investigation_b, source_b)
+        )
+        observation_b = await seed_observation(
+            uow,
+            investigation_id=investigation_b,
+            relationship=edge_b,
+            evidence=evidence_b,
+            retrieved_at=FIXED_TIME + timedelta(minutes=7),
+            observed_at=FIXED_TIME + timedelta(minutes=2),
+        )
+        assert uow.session is not None
+        services = PostgresQueryServices(
+            uow.session, QueryLimits(default_page_size=50, max_page_size=200)
+        )
+
+        exact = await services.relationship_observations.get(
+            investigation_a, observation_a.id
+        )
+        assert exact is not None
+        assert exact.id == observation_a.id
+        assert exact.investigation_id == investigation_a
+        # Joined stable Relationship semantics project exactly like the list:
+        # source/target entity and the edge type are the seeded values.
+        assert exact.relationship_source_entity_id == source_a
+        assert exact.relationship_target_entity_id == target_a
+        assert exact.relationship_type == RelationshipType.RESOLVES_TO
+        assert exact.evidence_id == evidence_a.id
+        assert exact.source == "urn:ati:source:google_public_dns"
+        # ``observed_at`` and ``retrieved_at`` stay distinct.
+        assert exact.observed_at == FIXED_TIME + timedelta(minutes=1)
+        assert exact.retrieved_at == FIXED_TIME + timedelta(minutes=31)
+
+        # Cross-Investigation and missing IDs are indistinguishable.
+        assert (
+            await services.relationship_observations.get(
+                investigation_a, observation_b.id
+            )
+            is None
+        )
+        assert (
+            await services.relationship_observations.get(
+                investigation_b, observation_a.id
+            )
+            is None
+        )
+        assert (
+            await services.relationship_observations.get(investigation_a, uuid4())
+            is None
+        )
 
 
 @pytest.mark.asyncio

@@ -33,8 +33,10 @@ import type {
   CreateInvestigationInput,
   EntityTypeName,
 } from "../api/schema-types";
+import { ApiError } from "../api/errors";
 import { ErrorNotice } from "../components/ErrorNotice";
 import {
+  isCreateAttemptOutcomeUncertain,
   payloadFingerprint,
   IdempotencyAttemptStore,
 } from "./idempotency";
@@ -86,11 +88,17 @@ export function CreateInvestigationPage(): ReactElement {
   ]);
   const [errors, setErrors] = useState<FormErrors>({});
 
+  /**
+   * Classify the mutation failure through the explicit create-attempt
+   * uncertainty policy (PR 24F): transport faults and HTTP >= 500 are
+   * commit-uncertain (mark the attempt so an unchanged retry reuses the
+   * same key); CSRF-before-transport and definitive 4xx responses settle
+   * the attempt so the next submit is a new logical request.
+   */
   const handleMutationError = useCallback((mutError: unknown) => {
     if (
-      typeof mutError === "object" &&
-      mutError !== null &&
-      (mutError as { kind?: unknown }).kind === "transport"
+      mutError instanceof ApiError &&
+      isCreateAttemptOutcomeUncertain(mutError)
     ) {
       attemptStore.current.markUncertain();
     } else {
@@ -151,7 +159,8 @@ export function CreateInvestigationPage(): ReactElement {
     run({ input: payload, idempotencyKey: attempt.key });
   };
 
-  const uncertain = submissionError?.kind === "transport";
+  const uncertain =
+    submissionError !== null && isCreateAttemptOutcomeUncertain(submissionError);
   const conflict = submissionError !== null && isIdempotencyConflict(submissionError);
   const validationFailure =
     submissionError !== null && isValidationError(submissionError);

@@ -1,15 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Relationships + RelationshipObservations API boundary (PR 24C §7, §9).
+// Relationships + RelationshipObservations API boundary (PR 24C §7, §9;
+// PR 24F §12).
 //
 // All traffic funnels through the PR 24A centralized client and stays
 // Investigation-scoped. Cursors are opaque and passed through unchanged.
-// Observations list directly; there is no single-GET observation endpoint,
-// so the browser never invents one — detail uses the exact list DTO.
+// Observations list directly and resolve exactly through the PR 24F
+// scoped GET — the browser never invents requests and never scans cursor
+// pages to recover a selected observation.
 
 import { apiGet } from "../api/client";
 import type {
   Relationship,
+  RelationshipObservation,
   RelationshipObservationPage,
   RelationshipPage,
 } from "../api/schema-types";
@@ -50,6 +53,18 @@ export async function fetchRelationship(
 ): Promise<Relationship> {
   return apiGet<Relationship>(
     `/investigations/${investigationId}/relationships/${relationshipId}`,
+    signal,
+  );
+}
+
+/** Load one Investigation-scoped immutable RelationshipObservation. */
+export async function fetchObservation(
+  investigationId: string,
+  observationId: string,
+  signal?: AbortSignal,
+): Promise<RelationshipObservation> {
+  return apiGet<RelationshipObservation>(
+    `/investigations/${investigationId}/relationship-observations/${observationId}`,
     signal,
   );
 }

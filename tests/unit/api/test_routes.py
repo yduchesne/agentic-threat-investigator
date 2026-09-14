@@ -13,11 +13,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from agentic_threat_investigator.api.mappers import to_relationship_observation_response
 from agentic_threat_investigator.app.investigation_submission import (
     IdempotencyConflictError,
     IdempotencyKeyRequiredError,
 )
 from agentic_threat_investigator.app.query.models import QueryPage
+from agentic_threat_investigator.app.query.relationships import (
+    RelationshipObservationItem,
+)
 from agentic_threat_investigator.domain.assessment import (
     Assessment,
     AssessmentConfidence,
@@ -256,6 +260,118 @@ def test_r11_observation_filters_keep_observed_retrieved_distinct() -> None:
     assert query.observed_to == datetime(2026, 1, 15, tzinfo=UTC)
     assert query.retrieved_from == datetime(2026, 2, 1, tzinfo=UTC)
     assert query.retrieved_to == datetime(2026, 3, 1, tzinfo=UTC)
+
+
+def _observation_item(
+    *, observation_id: UUID | None = None, investigation_id: UUID | None = None
+) -> RelationshipObservationItem:
+    """Build one joined RelationshipObservationItem fixture (PR 24F)."""
+    return RelationshipObservationItem(
+        id=observation_id or uuid4(),
+        relationship_id=uuid4(),
+        evidence_id=uuid4(),
+        investigation_id=investigation_id or INVESTIGATION,
+        observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+        retrieved_at=datetime(2026, 1, 2, tzinfo=UTC),
+        source="urn:ati:source:google_public_dns",
+        confidence=0.9,
+        relationship_source_entity_id=uuid4(),
+        relationship_target_entity_id=uuid4(),
+        relationship_type=RelationshipType.RESOLVES_TO,
+    )
+
+
+def test_r18_exact_observation_returns_public_projection() -> None:
+    """F-A01/F-A06: exact scoped GET uses the exact public list DTO."""
+    bundle = FakeQueryBundle()
+    item = _observation_item()
+    bundle.relationship_observations.gets[(INVESTIGATION, item.id)] = item
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/relationship-observations/{item.id}"
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == str(item.id)
+    assert body["relationship_id"] == str(item.relationship_id)
+    assert body["evidence_id"] == str(item.evidence_id)
+    assert body["source"] == "urn:ati:source:google_public_dns"
+    assert body["observed_at"] == "2026-01-01T00:00:00Z"
+    assert body["retrieved_at"] == "2026-01-02T00:00:00Z"
+    assert body["relationship_source_entity_id"] == str(
+        item.relationship_source_entity_id
+    )
+    assert body["relationship_target_entity_id"] == str(
+        item.relationship_target_entity_id
+    )
+    assert item.relationship_type is not None
+    assert body["relationship_type"] == item.relationship_type.value
+    # The exact response carries exactly the public list projection fields.
+    list_item = to_relationship_observation_response(item)
+    assert set(body) == set(list_item.model_dump())
+
+
+def test_r19_exact_observation_unknown_id_is_scoped_404() -> None:
+    """F-A02: a missing observation maps to the stable scoped 404."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/relationship-observations/{uuid4()}"
+        )
+
+    assert response.status_code == 404
+    body = response.json()["error"]
+    assert body["code"] == "relationship_not_found"
+    assert body["request_id"]
+
+
+def test_r20_exact_observation_cross_investigation_is_scoped_404() -> None:
+    """F-A03: another Investigation's observation is indistinguishable from missing."""
+    bundle = FakeQueryBundle()
+    other = UUID("99999999-9999-4999-8999-999999999999")
+    item = _observation_item(investigation_id=other)
+    bundle.relationship_observations.gets[(other, item.id)] = item
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        other_path = client.get(
+            f"/api/v1/investigations/{other}/relationship-observations/{item.id}"
+        )
+        wrong_path = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/relationship-observations/{item.id}"
+        )
+
+    assert other_path.status_code == 200
+    assert wrong_path.status_code == 404
+    assert wrong_path.json()["error"]["code"] == "relationship_not_found"
+
+
+def test_r21_exact_observation_malformed_uuid_is_stable_validation() -> None:
+    """F-A04: a malformed observation UUID fails with the stable 422 envelope."""
+    with build_test_app() as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/relationship-observations/not-a-uuid"
+        )
+
+    assert response.status_code == 422
+    body = response.json()["error"]
+    assert body["code"] == "validation_error"
+    assert body["message"]
+    assert body["request_id"]
+
+
+def test_r22_exact_observation_requires_authentication() -> None:
+    """F-A05: the exact observation GET stays behind the cookie session."""
+    with build_test_app() as client:
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/relationship-observations/{uuid4()}"
+        )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
 
 
 def test_r12_current_assessment_uses_durable_pointer_service() -> None:

@@ -322,3 +322,39 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
                 )
             )
         return QueryPage(items=items, next_cursor=next_cursor)
+
+    async def get(
+        self, investigation_id: UUID, observation_id: UUID
+    ) -> RelationshipObservationItem | None:
+        """Return one Investigation-scoped immutable observation, if any.
+
+        One exact joined read: identity predicate plus the observation's
+        own ``investigation_id`` (the same Investigation isolation the
+        list enforces) joined to the stable Relationship by edge identity
+        only, mapping through the exact list projection — no cursor, no
+        generic History, no N+1. Missing and cross-Investigation IDs both
+        fail closed with ``None`` so the HTTP layer maps them to one safe
+        scoped 404.
+        """
+        row = (
+            await self._session.execute(
+                select(RelationshipObservationRow, RelationshipRow)
+                .join(
+                    RelationshipRow,
+                    RelationshipRow.id == RelationshipObservationRow.relationship_id,
+                )
+                .where(
+                    RelationshipObservationRow.id == observation_id,
+                    RelationshipObservationRow.investigation_id == investigation_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        observation_row, relationship_row = row
+        return RelationshipObservationItem.from_observation(
+            _observation_from_row(observation_row),
+            relationship_source_entity_id=relationship_row.source_entity_id,
+            relationship_target_entity_id=relationship_row.target_entity_id,
+            relationship_type=RelationshipType(relationship_row.relationship_type_urn),
+        )

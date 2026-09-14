@@ -171,6 +171,196 @@ describe("Create Investigation", () => {
     20_000,
   );
 
+  /** Run one uncertain-first retry flow and return the two observed keys. */
+  async function runUncertainRetry(
+    initialFail:
+      | "server500"
+      | "server502"
+      | "server503"
+      | "malformed500",
+  ): Promise<{ firstKey: string; secondKey: string }> {
+    const create = createInvestigationHandler({ failWith: initialFail });
+    setHttpHandlers(
+      ...AUTH,
+      investigationsListHandler([]),
+      investigationDetailHandler(
+        buildInvestigation({
+          id: NEW_INVESTIGATION_ID,
+          status: "pending",
+          objective: "assess the delivery domain",
+        }),
+      ),
+      create.handler,
+    );
+    renderAtPath("/investigations/new");
+    await fillRequiredForm();
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(
+      await screen.findByText(
+        "Submission status is uncertain. Retry will safely reuse the same submission identifier.",
+      ),
+    ).toBeInTheDocument();
+    expect(create.requests).toHaveLength(1);
+    const firstKey = lastKey(create.requests);
+
+    create.failWith("ok");
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await waitForRequests(create.requests, 2);
+    const secondKey = lastKey(create.requests);
+    return { firstKey, secondKey };
+  }
+
+  it("reuses the same key after an API 500 envelope (F-B02)", async () => {
+    const { firstKey, secondKey } = await runUncertainRetry("server500");
+    expect(secondKey).toBe(firstKey);
+  }, 20_000);
+
+  it("reuses the same key after an API 502 envelope (F-B03)", async () => {
+    const { firstKey, secondKey } = await runUncertainRetry("server502");
+    expect(secondKey).toBe(firstKey);
+  }, 20_000);
+
+  it("reuses the same key after an API 503 envelope (F-B04)", async () => {
+    const { firstKey, secondKey } = await runUncertainRetry("server503");
+    expect(secondKey).toBe(firstKey);
+  }, 20_000);
+
+  it("reuses the same key after a malformed 500 response (F-B05)", async () => {
+    const { firstKey, secondKey } = await runUncertainRetry("malformed500");
+    expect(secondKey).toBe(firstKey);
+  }, 20_000);
+
+  it("edits after an uncertain 503 still generate a new key (F-B11)", async () => {
+    const create = createInvestigationHandler({ failWith: "server503" });
+    setHttpHandlers(
+      ...AUTH,
+      investigationsListHandler([]),
+      investigationDetailHandler(
+        buildInvestigation({
+          id: NEW_INVESTIGATION_ID,
+          status: "pending",
+          objective: "assess the delivery domain",
+        }),
+      ),
+      create.handler,
+    );
+    renderAtPath("/investigations/new");
+    await fillRequiredForm();
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await screen.findByText(/Submission status is uncertain/);
+    const firstKey = lastKey(create.requests);
+
+    create.failWith("ok");
+    const objective = screen.getByLabelText(/^Objective/);
+    await userEvent.clear(objective);
+    await userEvent.type(objective, "assess a different delivery domain");
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await waitForRequests(create.requests, 2);
+    expect(lastKey(create.requests)).not.toBe(firstKey);
+  }, 20_000);
+
+  it("settles on validation 400/422: the next submit uses a new key (F-B06)", async () => {
+    const create = createInvestigationHandler({ failWith: "validation" });
+    setHttpHandlers(
+      ...AUTH,
+      investigationsListHandler([]),
+      investigationDetailHandler(
+        buildInvestigation({
+          id: NEW_INVESTIGATION_ID,
+          status: "pending",
+          objective: "assess the delivery domain",
+        }),
+      ),
+      create.handler,
+    );
+    renderAtPath("/investigations/new");
+    await fillRequiredForm();
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(
+      await screen.findByText("The investigation could not be submitted."),
+    ).toBeInTheDocument();
+    // No uncertain banner for a definitive 4xx rejection.
+    expect(screen.queryByText(/Submission status is uncertain/)).toBeNull();
+    const firstKey = lastKey(create.requests);
+
+    create.failWith("ok");
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await waitForRequests(create.requests, 2);
+    expect(lastKey(create.requests)).not.toBe(firstKey);
+  }, 20_000);
+
+  it.each<"unauthorized" | "forbidden">(["unauthorized", "forbidden"])(
+    "settles auth/permission %s responses: the next submit uses a new key (F-B08)",
+    async (failWith) => {
+      const create = createInvestigationHandler({ failWith });
+      setHttpHandlers(
+        ...AUTH,
+        investigationsListHandler([]),
+        investigationDetailHandler(
+          buildInvestigation({
+            id: NEW_INVESTIGATION_ID,
+            status: "pending",
+            objective: "assess the delivery domain",
+          }),
+        ),
+        create.handler,
+      );
+      renderAtPath("/investigations/new");
+      await fillRequiredForm();
+      await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+      expect(
+        await screen.findByText("The investigation could not be submitted."),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Submission status is uncertain/)).toBeNull();
+      const firstKey = lastKey(create.requests);
+
+      create.failWith("ok");
+      await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+      await waitForRequests(create.requests, 2);
+      expect(lastKey(create.requests)).not.toBe(firstKey);
+    },
+    20_000,
+  );
+
+  it("never treats a pre-transport CSRF failure as uncertain (F-B09)", async () => {
+    const create = createInvestigationHandler();
+    setHttpHandlers(
+      ...AUTH,
+      investigationsListHandler([]),
+      investigationDetailHandler(
+        buildInvestigation({
+          id: NEW_INVESTIGATION_ID,
+          status: "pending",
+          objective: "assess the delivery domain",
+        }),
+      ),
+      create.handler,
+    );
+    renderAtPath("/investigations/new");
+    await screen.findByRole("button", { name: "Submit" });
+    // By design, omit the CSRF cookie: the request fails before transport.
+    await userEvent.type(screen.getByLabelText(/^Objective/), "assess the delivery domain");
+    await userEvent.type(
+      screen.getByLabelText("Indicator value 1"),
+      "update-package.test",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(
+      await screen.findByText("A required security cookie is missing. Reload the page and try again."),
+    ).toBeInTheDocument();
+    // Definite local failure: no uncertain banner and nothing hit the wire.
+    expect(screen.queryByText(/Submission status is uncertain/)).toBeNull();
+    expect(create.requests).toHaveLength(0);
+
+    // The attempt settled: the next explicit submit is a fresh logical
+    // request once the cookie exists, and it reaches the server.
+    installCsrfCookie();
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await waitForRequests(create.requests, 1);
+    expect(lastKey(create.requests)).toMatch(IDEMPOTENCY_KEY_GRAMMAR);
+    expect(screen.queryByText(/Submission status is uncertain/)).toBeNull();
+  }, 20_000);
+
   it("uses a new key when the semantic payload changed after an uncertain attempt (U14)", async () => {
     const create = createInvestigationHandler({ failWith: "transport" });
     setHttpHandlers(

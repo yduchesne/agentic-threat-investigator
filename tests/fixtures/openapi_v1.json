@@ -3925,6 +3925,115 @@
         ]
       }
     },
+    "/api/v1/investigations/{investigation_id}/relationship-observations/{observation_id}": {
+      "get": {
+        "description": "Return one immutable RelationshipObservation of the path Investigation.\n\nExact identity + Investigation scope (PR 24F): the observation must\nexist and belong to the path Investigation; missing and\ncross-Investigation observation IDs map to the same stable scoped 404\nso cross-Investigation existence is never revealed. The response uses\nthe exact public list projection (joined stable Relationship\nsemantics included); observations remain immutable first-class\nhistory and are never routed through ``domain_object_history``.",
+        "operationId": "get_relationship_observation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "observation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Observation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationshipObservationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "Get Relationship Observation",
+        "tags": [
+          "relationships"
+        ]
+      }
+    },
     "/api/v1/investigations/{investigation_id}/relationships": {
       "get": {
         "description": "List distinct Relationships visible to one Investigation.\n\n``entity_id`` (PR 24E) selects the bounded one-hop neighborhood of one\nfocal entity: source-or-target OR semantics applied on the server, and\nit intersects normally with the other filters. Soft-deleted edges stay\nexcluded exactly as before.",

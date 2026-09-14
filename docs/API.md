@@ -251,6 +251,7 @@ Delivered routes (PR 23C):
 - `GET /api/v1/investigations/{id}/relationships`
 - `GET /api/v1/investigations/{id}/relationships/{relationship_id}`
 - `GET /api/v1/investigations/{id}/relationship-observations`
+- `GET /api/v1/investigations/{id}/relationship-observations/{observation_id}` (PR 24F)
 - `GET /api/v1/investigations/{id}/research`
 - `GET /api/v1/investigations/{id}/research/{research_result_id}`
 - `GET /api/v1/investigations/{id}/assessments`
@@ -371,6 +372,28 @@ semantics as public projection fields (never persisted duplicates):
 The frontend never issues one Relationship GET per observation, never
 downloads unrelated observations to join/filter client-side, and never
 reconstructs unbounded relationship history.
+
+### Exact RelationshipObservation read (PR 24F)
+
+`GET /api/v1/investigations/{id}/relationship-observations/{observation_id}`
+returns one immutable RelationshipObservation by exact persisted identity,
+Investigation-scoped by the path Investigation. The response uses the exact
+public list projection shown above (joined stable Relationship semantics
+included); observations remain immutable first-class history and are never
+routable through generic History.
+
+Semantics:
+
+- the observation exists and belongs to the path Investigation -> `200`
+  with `RelationshipObservationResponse`;
+- the observation is missing, or belongs to another Investigation -> the
+  same stable scoped `404 relationship_not_found` (cross-Investigation
+  existence is never revealed);
+- a malformed `observation_id` UUID -> the stable `422 validation_error`
+  envelope.
+
+The endpoint is authenticated and requires the analyst role. There is no
+generic object-by-id resolver and no global observation search.
 
 ## Assessment
 

@@ -251,10 +251,15 @@ Architectural decisions:
   alters Investigation orchestration, never creates Evidence, and never
   performs downloads;
 - provenance navigation uses exact persisted support identifiers where
-  bounded API access exists (Evidence support, Research claims/context);
-  when support metadata is insufficient (e.g. a RelationshipObservation
-  reference carrying only an observation id with no bounded route) ATI
-  stops rather than inventing a related target;
+  bounded API access exists (Evidence support, Research claims/context,
+  and RelationshipObservation support); a Report/Assessment
+  `relationship_observation` support id resolves through the exact
+  Investigation-scoped observation read
+  (`GET /api/v1/investigations/{id}/relationship-observations/{observation_id}`,
+  PR 24F) inside the pivot workspace — the browser never scans cursor
+  pages, never substitutes a related observation, and never falls back to
+  generic History. Missing and cross-Investigation ids map to the same
+  safe scoped 404;
 - Performance bounds enforced by the plan: only the active step is
   mounted (no hidden component trees for prior steps), menus are computed
   from already-loaded row objects and never prefetch resources or issue
@@ -328,9 +333,11 @@ Architectural decisions:
   validity reasoning, and an always-available non-spatial edge list with
   exact navigation links;
 - Evolution/Graph interactions drill into the existing PR 24C detail
-  surfaces and PR 24D pivot/provenance paths; the known Report -> exact
-  RelationshipObservation provenance gap remains a documented PR 24F
-  residual and is never repaired inside PR 24E.
+  surfaces and PR 24D pivot/provenance paths. PR 24F closed the
+  documented Report -> exact RelationshipObservation residual with a
+  narrow Investigation-scoped exact observation GET (Section
+  "RelationshipObservation query contracts") and reuses it from the
+  Report/Assessment provenance references.
 
 ### Async workflow and state ownership (PR 24B)
 
@@ -355,8 +362,12 @@ URL                 route/tab state and list filters/cursor (never objective,
 TanStack Query      server resources (list pages, detail, current Assessment,
                     current Report, Report Markdown) with opaque cursors
 component state     form controls and the in-memory idempotency attempt
-                    (cryptographic key retained for transport-uncertain retry,
-                    never persisted or logged)
+                    (cryptographic key retained for commit-uncertain retry —
+                    transport failures and transient HTTP 5xx outcomes — and
+                    replaced when the semantic payload changes or the attempt
+                    is definitively settled; pre-transport CSRF failures and
+                    definitive 4xx responses settle, never persisted or
+                    logged; see ``frontend/src/investigations/idempotency.ts``)
 backend             lifecycle, idempotency, durable current-resource pointers
 ```
 
