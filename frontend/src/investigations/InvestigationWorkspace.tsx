@@ -22,6 +22,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { useInvestigationDetail } from "./investigation-queries";
 import { InvestigationHeader } from "./InvestigationHeader";
 import { InvestigationTabs } from "./InvestigationTabs";
+import { PivotWorkspace } from "../pivots/PivotWorkspace";
 
 /** Detail state shared with workspace child routes via the outlet. */
 export interface WorkspaceOutletContext {
@@ -125,6 +126,10 @@ export function InvestigationWorkspace(): ReactElement {
       <Box component="section" sx={{ mt: 2 }}>
         <Outlet context={outletContext} />
       </Box>
+      <PivotWorkspace
+        investigationId={investigationId}
+        investigation={investigation}
+      />
     </Box>
   );
 }

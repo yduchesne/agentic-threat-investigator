@@ -19,6 +19,8 @@ import type {
   ReportResearchClaim,
   VerdictName,
 } from "../api/schema-types";
+import { PivotMenu } from "../pivots/PivotMenu";
+import { researchSupportAction } from "../pivots/pivot-capabilities";
 import { FindingList } from "./FindingList";
 
 const VERDICT_LABEL_KEYS: Record<VerdictName, string> = {
@@ -95,7 +97,16 @@ function NarrativeSupport({ support }: { support: NarrativeStatement["support"][
       </li>
     );
   }
-  return <li>{t("execSummary.support.researchClaim")}</li>;
+  return (
+    <li>
+      <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", gap: 0.5 }}>
+        <Box component="span">{t("execSummary.support.researchClaim")}</Box>
+        <PivotMenu
+          actions={[researchSupportAction(support.research_result_id, "research_reference")]}
+        />
+      </Stack>
+    </li>
+  );
 }
 
 /** Executive summary statements, each with compact support references. */
@@ -165,6 +176,11 @@ export function ResearchContextBlock({
                 : ""}
             </Typography>
           ) : null}
+          <Box sx={{ mt: 0.5 }}>
+            <PivotMenu
+              actions={[researchSupportAction(claim.research_result_id, "research_reference")]}
+            />
+          </Box>
         </Box>
       ))}
     </Stack>

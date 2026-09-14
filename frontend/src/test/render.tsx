@@ -40,7 +40,7 @@ export function renderProviders(
 export function renderAtPath(
   path: string | object,
   options: RenderProvidersOptions = {},
-): { result: RenderResult; queryClient: QueryClient } {
+): { result: RenderResult; queryClient: QueryClient; router: ReturnType<typeof createMemoryRouter> } {
   const queryClient = options.queryClient ?? freshQueryClient();
   const routeTable = createMemoryRouter(createAppRoutes(), { initialEntries: [path] });
   return {
@@ -50,5 +50,6 @@ export function renderAtPath(
       </AppProviders>,
     ),
     queryClient,
+    router: routeTable,
   };
 }

@@ -195,9 +195,72 @@ Rules enforced by the architecture:
   formula-injection neutralization and filenames free of objective/IOC
   text.
 
-Cross-resource pivots, breadcrumb modal workspaces, Relationship Evolution,
-graph visualization, and maps remain later PRs (24D/24E/PR 25) and reuse
-this table/detail architecture rather than creating a second one.
+Cross-resource pivots and breadcrumb modal workspaces (PR 24D) reuse this
+table/detail architecture rather than creating a second one; Relationship
+Evolution, graph visualization, and maps remain later PRs (24E/PR 25).
+
+### Cross-resource pivots and provenance navigation (PR 24D)
+
+PR 24D is a navigation layer over the PR 24C surfaces: an analyst can
+pivot from a typed entity/resource value or an Overview/Report provenance
+reference into an existing filtered resource view, inspect table/details,
+and pivot again — deterministically, bounded, and restorable through
+browser navigation.
+
+```text
+typed value / provenance reference
+ -> explicit capability registry entry
+ -> URL-backed pivot step (validated, versioned, bounded stack)
+ -> one modal workspace -> active PR 24C resource view
+ -> breadcrumbs preserve the exploration sequence
+ -> next pivot replaces the modal content (never stacks dialogs)
+```
+
+Architectural decisions:
+
+- a typed pivot model and one explicit capability registry
+  (`frontend/src/pivots/pivot-types.ts`, `pivot-capabilities.ts`) list
+  every legal action; ATI never infers navigation from arbitrary matching
+  strings and never merges unsupported query combinations client-side —
+  every pivot corresponds to an existing bounded PR 24C filter or exact
+  scoped detail endpoint;
+- pivot state is a versioned base64url JSON stack in the reserved `pivot`
+  search parameter (`pivot-url.ts`), capped at five steps and a 4096-byte
+  header budget; pushing replaces the query (removing a prior
+  `selected=<uuid>`), truncation and Close restore prior/base state, and
+  browser Back/Forward plus refresh restore the active modal from the URL
+  — no client-side global pivot store;
+- the route-independent workspaces extracted for PR 24D reuse the exact
+  PR 24C query/filter/table/detail machinery through a thin search-params
+  projection (`analyst-table/resource-page.ts`, `pivots/pivot-port.ts`):
+  one modal workspace hosts the active resource view, nested pivots key
+  the same modal by resource, and the URL continues to own all state.
+  The modal and the multi-target action menus are implemented with MUI
+  primitives (fixed paper/backdrop, Portal, WAI-ARIA menu semantics)
+  rather than the MUI Dialog/Menu/Modal chain: in material-ui 7 the Modal
+  focus trap, with the custom detail drawer mounted inside it, races the
+  drawer's unmount on an in-drawer pivot click and permanently
+  spins/crashes the Chromium main thread (real-stack E2E, PR 24D). The
+  component contracts (accessible dialog semantics, backdrop/Escape
+  close, body scroll lock, aria-hiding of the underlying page, roving
+  keyboard menus) are identical; jsdom and browser behavior agree;
+- the Investigation ID is immutable across the pivot stack, the modally
+  hosted tables reuse the identical bounded server queries and detail
+  endpoints, and pivoting changes navigation context only — it never
+  alters Investigation orchestration, never creates Evidence, and never
+  performs downloads;
+- provenance navigation uses exact persisted support identifiers where
+  bounded API access exists (Evidence support, Research claims/context);
+  when support metadata is insufficient (e.g. a RelationshipObservation
+  reference carrying only an observation id with no bounded route) ATI
+  stops rather than inventing a related target;
+- Performance bounds enforced by the plan: only the active step is
+  mounted (no hidden component trees for prior steps), menus are computed
+  from already-loaded row objects and never prefetch resources or issue
+  API calls, labels come from the same object graph (no N+1 resolution),
+  the depth cap is `MAX_PIVOT_STEPS=5` at which further pivot actions are
+  suppressed, and nested pivots replace the single modal's content rather
+  than stacking dialogs.
 
 ### Async workflow and state ownership (PR 24B)
 

@@ -19,10 +19,13 @@ import { CompactId } from "../components/CompactId";
 import { SafeExternalLink } from "../components/SafeExternalLink";
 import { Timestamp } from "../components/Timestamp";
 import { DetailRows, DetailSection } from "../analyst-table/DetailRows";
+import { PivotMenu } from "../pivots/PivotMenu";
+import { researchSubjectActions } from "../pivots/pivot-capabilities";
 
 /** One metadata + claims + citations detail surface. */
 export function ResearchDetail({ research }: { research: ResearchResult }): ReactElement {
   const { t } = useTranslation("research");
+  const { t: tPivots } = useTranslation("pivots");
   const citationsById = new Map(research.citations.map((citation) => [citation.citation_id, citation]));
 
   return (
@@ -41,6 +44,12 @@ export function ResearchDetail({ research }: { research: ResearchResult }): Reac
           },
         ]}
       />
+      <DetailSection title={tPivots("detail.pivot.title")}>
+        <PivotMenu
+          actions={researchSubjectActions(research, "detail_field")}
+          ariaLabel={tPivots("detail.pivot.aria")}
+        />
+      </DetailSection>
       <DetailSection title={t("detail.claims.title")}>
         {research.claims.length === 0 ? (
           <Typography variant="body2">{t("detail.claims.none")}</Typography>

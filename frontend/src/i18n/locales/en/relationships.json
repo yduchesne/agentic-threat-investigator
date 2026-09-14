@@ -55,6 +55,8 @@
   "detail.observations.more": "More observations exist beyond this preview.",
   "detail.observations.viewAll": "View all observations",
   "detail.observations.nullable": "—",
+  "detail.pivot.title": "Pivot",
+  "detail.pivot.aria": "Pivot actions",
   "detail.source": "Source",
   "detail.observedAt": "Observed at",
   "detail.retrievedAt": "Retrieved at",

@@ -57,11 +57,33 @@ export interface ResourceTableState<F> {
   closeSelection: () => void;
 }
 
+/**
+ * The URL-backed search-parameter surface consumed by the resource table.
+ *
+ * Normal routes use the live router search params; the pivot modal
+ * (PR 24D) supplies a port projected from the active pivot step so the
+ * same table controller works without duplicating resources.
+ */
+export interface SearchParamsPort {
+  readonly searchParams: URLSearchParams;
+  setSearchParams: (
+    params: URLSearchParams,
+    options?: { replace?: boolean },
+  ) => void;
+}
+
+/** The router search-parameter port used by the normal resource routes. */
+export function useRouterSearchParamsPort(): SearchParamsPort {
+  const [searchParams, setSearchParams] = useSearchParams();
+  return { searchParams, setSearchParams };
+}
+
 /** One URL-backed resource table controller. */
 export function useResourceTable<F>(
   codec: ResourceFilterCodec<F>,
+  port?: SearchParamsPort,
 ): ResourceTableState<F> {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setSearchParams } = port ?? useRouterSearchParamsPort();
   const filters = codec.parse(searchParams);
   const cursor = parseCursorParam(searchParams.get(CURSOR_PARAM));
   const selection = parseSelectedParam(searchParams, isUuidValue);
