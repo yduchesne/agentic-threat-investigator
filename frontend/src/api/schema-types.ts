@@ -14,18 +14,36 @@ import type {
   CreateInvestigationResponse,
   EntityType,
   ErrorResponse,
+  EvidenceResponse,
+  EvidenceType,
   FindingResponse,
   FindingSupportResponse,
+  HistoryOperation,
+  HistoryRecordResponse,
   IndicatorRequest,
   InvestigationResponse,
   InvestigationStatus,
+  InvestigationTimelineEventType,
   LoginRequest,
   NarrativeStatementResponse,
+  PageResponseEvidenceResponse,
+  PageResponseHistoryRecordResponse,
   PageResponseInvestigationResponse,
+  PageResponseRelationshipObservationResponse,
+  PageResponseRelationshipResponse,
+  PageResponseResearchResultResponse,
+  PageResponseTimelineEventResponse,
+  RelationshipObservationResponse,
+  RelationshipResponse,
+  RelationshipType,
   ReportFindingResponse,
   ReportResearchClaimResponse,
   ReportResponse,
+  ResearchCitationResponse,
+  ResearchClaimResponse,
+  ResearchResultResponse,
   RuntimeInfoResponse,
+  TimelineEventResponse,
   UserRole,
   Verdict,
 } from "./schema.generated";
@@ -83,6 +101,60 @@ export type FindingSupportRef = FindingSupportResponse;
 
 /** One versioned structured InvestigationReport (PR 24B). */
 export type Report = ReportResponse;
+
+/** One immutable Evidence observation (PR 24C). */
+export type Evidence = EvidenceResponse;
+
+/** One bounded cursor page of Evidence observations (PR 24C). */
+export type EvidencePage = PageResponseEvidenceResponse;
+
+/** The exact v0.1 Evidence type URNs (PR 24C). */
+export type EvidenceTypeName = EvidenceType;
+
+/** One stable relationship edge (PR 24C). */
+export type Relationship = RelationshipResponse;
+
+/** One bounded cursor page of Relationships (PR 24C). */
+export type RelationshipPage = PageResponseRelationshipResponse;
+
+/** The exact v0.1 Relationship type URNs (PR 24C). */
+export type RelationshipTypeName = RelationshipType;
+
+/** One immutable historical relationship observation (PR 24C). */
+export type RelationshipObservation = RelationshipObservationResponse;
+
+/** One bounded cursor page of RelationshipObservations (PR 24C). */
+export type RelationshipObservationPage = PageResponseRelationshipObservationResponse;
+
+/** One contextual ResearchResult artifact (PR 24C). */
+export type ResearchResult = ResearchResultResponse;
+
+/** One bounded cursor page of ResearchResults (PR 24C). */
+export type ResearchResultPage = PageResponseResearchResultResponse;
+
+/** One persisted Research claim (PR 24C). */
+export type ResearchClaim = ResearchClaimResponse;
+
+/** One immutable retrieved-chunk citation snapshot (PR 24C). */
+export type ResearchCitation = ResearchCitationResponse;
+
+/** One safe observable workflow timeline event (PR 24C). */
+export type TimelineEvent = TimelineEventResponse;
+
+/** One bounded cursor page of Timeline events (PR 24C). */
+export type TimelineEventPage = PageResponseTimelineEventResponse;
+
+/** The exact v0.1 timeline event types (PR 24C). */
+export type TimelineEventTypeName = InvestigationTimelineEventType;
+
+/** One allowlisted public history row (PR 24C). */
+export type HistoryRecord = HistoryRecordResponse;
+
+/** One bounded cursor page of history rows (PR 24C). */
+export type HistoryPage = PageResponseHistoryRecordResponse;
+
+/** The exact immutable history operations (PR 24C). */
+export type HistoryOperationName = HistoryOperation;
 
 /** One application-copied Report finding snapshot (PR 24B). */
 export type ReportFinding = ReportFindingResponse;

@@ -70,5 +70,6 @@
   "tabs.relationships": "Relationships",
   "tabs.research": "Research",
   "tabs.timeline": "Timeline",
-  "placeholder.message": "The {{surface}} workspace arrives in a later release. The Overview remains available."
+  "more.label": "More",
+  "more.history": "History"
 }

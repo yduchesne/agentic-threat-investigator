@@ -802,7 +802,7 @@ Delivered (PR 24B implementation summary):
   after terminal Investigation completion (Assessment-only failure state
   remains legitimate).
 
-### PR 24C — Analyst resource tables and drill-down
+### PR 24C — Analyst resource tables and drill-down [DONE]
 
 Deliver one reusable server-driven analyst browsing architecture and apply it to:
 
@@ -845,6 +845,47 @@ Deliver:
 - bounded export designed against actually loaded/query-selected server data; never silently claim exhaustive export when only one cursor page is available;
 - URLs preserve route/filter state sufficiently for refresh/share within same deployment;
 - component tests for reusable table/query machinery and real-stack browser coverage against representative PR 23D noisy fake-world data.
+
+No cross-table popup pivot workspace or breadcrumb chain yet; that is PR 24D. No relationship graph/timeline visualization; that is PR 24E.
+
+Delivered (PR 24C implementation summary):
+
+- TanStack Table v8 as the sole table engine, rendered headless through
+  Material UI primitives in manual/server mode (no client sorting, no
+  client-side exhaustive filtering, no page-number fiction);
+- a reusable analyst-table layer (`frontend/src/analyst-table/`) with
+  URL-backed resource filter controllers, opaque-cursor Previous/Next over
+  a browser-local back stack, filter-change cursor reset, invalid-cursor
+  first-page recovery, row-selection/detail drawers, bounded current-page
+  CSV export (RFC 4180 quoting, spreadsheet formula-injection
+  neutralization, objective-free filenames), safe structured-data viewer,
+  and loading/empty/error/refresh states;
+- real Evidence, Relationships, RelationshipObservations, Research and
+  Timeline workspaces replacing the PR 24B placeholders, plus secondary
+  Investigation History reached through the workspace `More` menu;
+- Evidence detail uses the authoritative Investigation-scoped GET;
+  Relationship detail shows the stable edge plus a bounded
+  relationship-scoped observation preview; RelationshipObservations are
+  first-class through `/relationships/observations` with `observed_at` and
+  `retrieved_at` visibly independent (never generic History, never
+  ended/removed inference); Research keeps contextual claims/citations
+  visibly distinct from Evidence with escaped external text; Timeline
+  preserves the API canonical order and maps known event enums with safe
+  fallback; History honors the backend public object-type allowlist with
+  exact-version detail, object-scoped version browsing, and allowlisted
+  state/diff rendered as escaped data;
+- a backend contract fix discovered by the E2E slice: the generic History
+  list now skips non-allowlisted audit rows (such as the immutable
+  ``evidence`` rows appended by the stored functions) instead of failing
+  with a 500, and explicit requests for non-allowlisted object types still
+  fail closed with ``400 invalid_request`` (api/routes/history.py with
+  four route-level unit tests);
+- component tests covering the full resource matrix (cursor/filter/drawer/
+  export mechanics, Evidence epistemics, RelationshipObservation temporal
+  semantics, Research contextual separation, Timeline semantics, History
+  safety) and real-stack Playwright coverage over the PR 23D fake world
+  without live Internet/LLM, including a browser-proven current-page CSV
+  download.
 
 No cross-table popup pivot workspace or breadcrumb chain yet; that is PR 24D. No relationship graph/timeline visualization; that is PR 24E.
 

@@ -14,8 +14,18 @@ import type { PublicUser } from "../api/schema-types";
 import type {
   Assessment,
   CreateInvestigationResult,
+  Evidence,
+  EvidenceTypeName,
+  HistoryOperationName,
+  HistoryRecord,
   Investigation,
+  Relationship,
+  RelationshipObservation,
+  RelationshipTypeName,
   Report,
+  ResearchResult,
+  TimelineEvent,
+  TimelineEventTypeName,
 } from "../api/schema-types";
 
 export const ANALYST_USER: PublicUser = {
@@ -203,13 +213,16 @@ export function buildReport(overrides: Partial<Report> = {}): Report {
 }
 
 /** A completed Investigation with current Assessment + Report pointers. */
-export function completedInvestigationFixture(): Investigation {
+export function completedInvestigationFixture(
+  overrides: Partial<Investigation> = {},
+): Investigation {
   return buildInvestigation({
     status: "completed",
     completed_at: "2026-06-01T10:06:00Z",
     assessment_id: "30000000-0000-4000-8000-000000000001",
     report_id: "50000000-0000-4000-8000-000000000001",
     version: 5,
+    ...overrides,
   });
 }
 
@@ -375,3 +388,172 @@ export function reportMarkdownHandler(text: string) {
 
 export const reportMarkdown404Handler = http.get("*/api/v1/investigations/:id/reports/:reportId/markdown", () =>
   errorResponse(404, "report_not_found"));
+
+// PR 24C analyst resource fixtures + handlers ---------------------------------
+
+/** Record exact list query parameters for one resource request. */
+export interface ResourceListRequestRecord {
+  cursor: string | null;
+  limit: string | null;
+  params: Record<string, string>;
+}
+
+export function resourceListRecorder() {
+  const requests: ResourceListRequestRecord[] = [];
+  return { requests };
+}
+
+/**
+ * Deterministic paged resource handler over opaque cursors.
+ *
+ * `pages[i]` is served when the request cursor equals `cursors[i]`; an
+ * unknown cursor fails closed with 422. Every exact query parameter is
+ * recorded for filter assertions (never decoded).
+ */
+export function pagedResourceHandler<T>({
+  path,
+  pages,
+  recorder,
+  failCursor = false,
+}: {
+  path: string;
+  pages: T[][];
+  recorder: { requests: ResourceListRequestRecord[] };
+  failCursor?: boolean;
+}) {
+  const cursors = ["", "cursor-1", "cursor-2", "cursor-3"];
+  return http.get(path, ({ request }) => {
+    const url = new URL(request.url);
+    recorder.requests.push({
+      cursor: url.searchParams.get("cursor"),
+      limit: url.searchParams.get("limit"),
+      params: Object.fromEntries(url.searchParams.entries()),
+    });
+    const cursor = url.searchParams.get("cursor") ?? "";
+    const index = cursors.indexOf(cursor);
+    if (index < 0 || index >= pages.length) {
+      return failCursor
+        ? errorResponse(422, "invalid_cursor")
+        : errorResponse(422, "validation_error");
+    }
+    return jsonResponse({
+      items: pages[index],
+      next_cursor: index + 1 < pages.length ? cursors[index + 1] : null,
+    });
+  });
+}
+
+export const RESOURCE_UUID_BASE = "40000000-0000-4000-8000-";
+
+export function uuidAt(ordinal: number): string {
+  return `${RESOURCE_UUID_BASE}${String(ordinal).padStart(12, "0")}`;
+}
+
+export function buildEvidence(overrides: Partial<Evidence> = {}): Evidence {
+  return {
+    id: uuidAt(1),
+    subject_entity_id: uuidAt(101),
+    subject_value: "update-package.test",
+    subject_type: "domain",
+    type: "urn:ati:evidence:dns" as EvidenceTypeName,
+    source: "fake-dns",
+    source_record_id: "record-1",
+    source_url: "https://example.invalid/dns/update-package.test",
+    observed_at: "2026-06-01T09:00:00Z",
+    retrieved_at: "2026-06-01T09:05:00Z",
+    facts: { resolver: "8.8.8.8" },
+    ...overrides,
+  };
+}
+
+export function buildRelationship(overrides: Partial<Relationship> = {}): Relationship {
+  return {
+    id: uuidAt(21),
+    source_entity_id: uuidAt(101),
+    target_entity_id: uuidAt(102),
+    type: "urn:ati:relationship:dns:resolves_to" as RelationshipTypeName,
+    ...overrides,
+  };
+}
+
+export function buildObservation(overrides: Partial<RelationshipObservation> = {}): RelationshipObservation {
+  return {
+    id: uuidAt(41),
+    relationship_id: uuidAt(21),
+    evidence_id: uuidAt(1),
+    investigation_id: "20000000-0000-4000-8000-000000000001",
+    observed_at: "2026-06-01T09:00:00Z",
+    retrieved_at: "2026-06-01T09:05:00Z",
+    source: "fake-dns",
+    confidence: 0.9,
+    ...overrides,
+  };
+}
+
+export function buildResearchResult(overrides: Partial<ResearchResult> = {}): ResearchResult {
+  return {
+    id: uuidAt(61),
+    investigation_id: "20000000-0000-4000-8000-000000000001",
+    subject_entity_id: uuidAt(101),
+    query: "context for update-package.test",
+    created_at: "2026-06-01T09:10:00Z",
+    claims: [
+      {
+        id: uuidAt(71),
+        text: "Asserted sentence about the subject from persisted research.",
+        citation_ids: [uuidAt(81)],
+      },
+    ],
+    citations: [
+      {
+        citation_id: uuidAt(81),
+        document_id: uuidAt(91),
+        document_type: "report",
+        source_id: "source-1",
+        source_record_id: "record-9",
+        source_url: "https://example.invalid/research/1",
+        title: "Example research document",
+        published_at: "2026-05-01T00:00:00Z",
+        chunk_sequence: 3,
+        similarity_score: 0.81,
+        text: "Persisted chunk text with <markup> that must stay escaped.",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+export function buildTimelineEvent(overrides: Partial<TimelineEvent> = {}): TimelineEvent {
+  return {
+    id: uuidAt(111),
+    occurred_at: "2026-06-01T09:00:01Z",
+    type: "provider_work_completed" as TimelineEventTypeName,
+    provider: "fake-dns",
+    target_entity_id: uuidAt(101),
+    entity_ids: [uuidAt(101)],
+    evidence_ids: [uuidAt(1)],
+    relationship_ids: [],
+    entity_count: 1,
+    pivot_depth: null,
+    provider_calls_used: 3,
+    replans_used: 0,
+    error_code: null,
+    reason_code: null,
+    ...overrides,
+  };
+}
+
+export function buildHistoryRecord(overrides: Partial<HistoryRecord> = {}): HistoryRecord {
+  return {
+    id: uuidAt(131),
+    object_type: "investigation",
+    object_id: "20000000-0000-4000-8000-000000000001",
+    operation: "UPDATE" as HistoryOperationName,
+    version: 2,
+    occurred_at: "2026-06-01T09:00:02Z",
+    actor_id: "10000000-0000-4000-8000-000000000001",
+    state: { status: "running", version: 2 },
+    diff: { status: { before: "pending", after: "running" } },
+    ...overrides,
+  };
+}

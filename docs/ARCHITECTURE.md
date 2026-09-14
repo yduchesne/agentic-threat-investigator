@@ -133,6 +133,72 @@ backed by i18next/react-i18next (English first). Investment in Investigation
 workflow (PR 24B), analyst tables (PR 24C), pivots (PR 24D) and relationship
 visualization (PR 24E) builds on this foundation.
 
+### Server-driven analyst browsing (PR 24C)
+
+PR 24C adds one reusable server-driven tabular browsing and detail
+architecture over the PR 23C read APIs:
+
+```text
+workspace route
+ -> URL-backed filters
+ -> bounded server query
+ -> opaque cursor page
+ -> analyst table
+ -> row selection
+ -> authoritative resource detail drawer
+```
+
+The backend owns filter semantics, canonical ordering, cursor encoding,
+pagination bounds, Investigation scoping, authorization, history
+allowlisting/redaction, and resource identity. The frontend owns filter
+controls, URL serialization, table presentation, opaque-cursor
+Previous/Next navigation, row selection, detail presentation, and
+accurately labeled bounded export.
+
+```text
+URL                 resource filter values, the opaque cursor, and
+                    `selected=<uuid>` for the drawer (never JSON filter
+                    blobs or API responses)
+TanStack Query      one bounded page per committed filter/cursor, plus
+                    detail queries enabled only on selection
+TanStack Table v8   the sole table engine, running headless through
+                    Material UI primitives in manual/server mode
+browser-local state draft filter-form values and the Previous back stack
+                    (never persisted to browser storage)
+backend             filters/order/pagination/cursor encoding, binding,
+                    authorization, history public allowlists and redaction
+```
+
+Rules enforced by the architecture:
+
+- cursors are opaque: the browser never decodes, compares, or performs
+  arithmetic on them, never shows page numbers/totals, and never fetches
+  all pages to simulate a client dataset;
+- any semantic filter change resets the cursor and the browser-local back
+  stack; a direct URL cursor may load but reload need not reconstruct the
+  prior back stack; an invalid/stale cursor offers first-page recovery;
+- tables never poll: Evidence/Relationships/Research/Timeline/History load
+  one bounded page per committed state. While an Investigation is
+  pending/running they display currently persisted rows plus a small
+  freshness notice with an explicit Refresh;
+- RelationshipObservation is first-class immutable observation history
+  (`/relationships/observations`) and is never routed through generic
+  History; `observed_at` and `retrieved_at` are visibly independent with
+  half-open ranges and no started/ended/removed/continuous-validity
+  inference;
+- Research is contextual knowledge, never Evidence: claims/citations are
+  inspectable and external text is React-escaped, never auto-fetched;
+- generic History is secondary (workspace `More -> History`), honors the
+  backend public object-type allowlist, and renders backend-redacted
+  `state`/`diff` only as escaped data with exact-version detail;
+- export means the current page: a bounded RFC 4180 CSV with spreadsheet
+  formula-injection neutralization and filenames free of objective/IOC
+  text.
+
+Cross-resource pivots, breadcrumb modal workspaces, Relationship Evolution,
+graph visualization, and maps remain later PRs (24D/24E/PR 25) and reuse
+this table/detail architecture rather than creating a second one.
+
 ### Async workflow and state ownership (PR 24B)
 
 The PR 24B Investigation workflow treats the Investigation API as a durable
