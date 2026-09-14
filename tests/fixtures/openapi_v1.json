@@ -1005,9 +1005,19 @@
         "title": "PageResponse[TimelineEventResponse]",
         "type": "object"
       },
+      "RelationshipDirection": {
+        "description": "Focal-entity direction of an entity-centric relationship query.\n\n``SOURCE`` selects edges whose source is the focal entity, ``TARGET``\nselects edges whose target is the focal entity, and ``EITHER`` selects\nedges on either side. The enum exists only to drive server-side entity\nfiltering; it never describes a persisted edge attribute.",
+        "enum": [
+          "source",
+          "target",
+          "either"
+        ],
+        "title": "RelationshipDirection",
+        "type": "string"
+      },
       "RelationshipObservationResponse": {
         "additionalProperties": false,
-        "description": "One immutable historical relationship observation.\n\n``observed_at`` is the source observation time when known; ``retrieved_at``\nis ATI's retrieval time and the canonical cursor key.",
+        "description": "One immutable historical relationship observation.\n\n``observed_at`` is the source observation time when known; ``retrieved_at``\nis ATI's retrieval time and the canonical cursor key.\n\n``relationship_source_entity_id``, ``relationship_target_entity_id`` and\n``relationship_type`` are stable denormalized fields sourced from the\njoined Relationship row (PR 24E) \u2014 they are response projections only,\nnever persisted duplicates. They are ``null`` only when the join cannot\nresolve the edge, which cannot happen for normally written data.",
         "properties": {
           "confidence": {
             "anyOf": [
@@ -1058,6 +1068,40 @@
             "format": "uuid",
             "title": "Relationship Id",
             "type": "string"
+          },
+          "relationship_source_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Source Entity Id"
+          },
+          "relationship_target_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Target Entity Id"
+          },
+          "relationship_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RelationshipType"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "retrieved_at": {
             "format": "date-time",
@@ -3584,7 +3628,7 @@
     },
     "/api/v1/investigations/{investigation_id}/relationship-observations": {
       "get": {
-        "description": "List immutable RelationshipObservations of one Investigation.\n\n``observed_at`` and ``retrieved_at`` remain independent half-open UTC\nfilters; pagination follows the canonical ``retrieved_at DESC, id ASC``\norder with opaque cursors.",
+        "description": "List immutable RelationshipObservations of one Investigation.\n\n``observed_at`` and ``retrieved_at`` remain independent half-open UTC\nfilters; pagination follows the canonical ``retrieved_at DESC, id ASC``\norder with opaque cursors.\n\nPR 24E entity-centric filters:\n\n- ``entity_id`` narrows to observations whose joined Relationship has\n  that entity as source or target (server-side, never client joins);\n- ``direction`` is ``source``/``target``/``either`` relative to\n  ``entity_id`` and requires it (a bare entity behaves as ``either``);\n- ``counterparty_entity_id`` pins the other endpoint and requires\n  ``entity_id``;\n- ``relationship_type`` filters the joined edge's type URN.\n\nResponse rows additionally carry the joined stable relationship\nsemantics (``relationship_source_entity_id``,\n``relationship_target_entity_id``, ``relationship_type``) so the\nbrowser never issues one Relationship GET per observation.",
         "operationId": "list_relationship_observations",
         "parameters": [
           {
@@ -3696,6 +3740,72 @@
                 }
               ],
               "title": "Observed To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RelationshipDirection"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Direction"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relationship_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RelationshipType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Relationship Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "counterparty_entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Counterparty Entity Id"
             }
           },
           {
@@ -3817,7 +3927,7 @@
     },
     "/api/v1/investigations/{investigation_id}/relationships": {
       "get": {
-        "description": "List distinct Relationships visible to one Investigation.",
+        "description": "List distinct Relationships visible to one Investigation.\n\n``entity_id`` (PR 24E) selects the bounded one-hop neighborhood of one\nfocal entity: source-or-target OR semantics applied on the server, and\nit intersects normally with the other filters. Soft-deleted edges stay\nexcluded exactly as before.",
         "operationId": "list_relationships",
         "parameters": [
           {
@@ -3862,6 +3972,23 @@
                 }
               ],
               "title": "Target Entity Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity Id"
             }
           },
           {

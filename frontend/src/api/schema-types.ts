@@ -35,6 +35,7 @@ import type {
   PageResponseTimelineEventResponse,
   RelationshipObservationResponse,
   RelationshipResponse,
+  RelationshipDirection,
   RelationshipType,
   ReportFindingResponse,
   ReportResearchClaimResponse,
@@ -119,6 +120,10 @@ export type RelationshipPage = PageResponseRelationshipResponse;
 
 /** The exact v0.1 Relationship type URNs (PR 24C). */
 export type RelationshipTypeName = RelationshipType;
+
+/** The focal-entity direction accepted by entity-centric observation queries
+ * (PR 24E): ``source``/``target``/``either`` relative to ``entity_id``. */
+export type RelationshipDirectionName = RelationshipDirection;
 
 /** One immutable historical relationship observation (PR 24C). */
 export type RelationshipObservation = RelationshipObservationResponse;

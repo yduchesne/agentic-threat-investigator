@@ -11,6 +11,7 @@
 
 import type {
   EvidenceTypeName,
+  RelationshipDirectionName,
   RelationshipTypeName,
 } from "../api/schema-types";
 
@@ -67,6 +68,12 @@ export interface PivotObservationFilters {
   observed_to?: string;
   retrieved_from?: string;
   retrieved_to?: string;
+  /** PR 24E entity-centric filters (server-side; direction/counterparty
+   * require entity_id; bare entity behaves as either). */
+  entity_id?: string;
+  direction?: RelationshipDirectionName;
+  relationship_type?: RelationshipTypeName;
+  counterparty_entity_id?: string;
 }
 
 /** ResearchResult list filters expressible through one legal pivot step. */
@@ -155,6 +162,10 @@ export const PIVOT_FILTER_KEYS: Readonly<Record<PivotResource, readonly string[]
     "observed_to",
     "retrieved_from",
     "retrieved_to",
+    "entity_id",
+    "direction",
+    "relationship_type",
+    "counterparty_entity_id",
   ],
   research: ["subject_entity_id", "created_from", "created_to"],
 };
@@ -162,8 +173,12 @@ export const PIVOT_FILTER_KEYS: Readonly<Record<PivotResource, readonly string[]
 /** The filter keys that must hold a canonical UUID value. */
 export const PIVOT_UUID_FILTER_KEYS: Readonly<Record<PivotResource, readonly string[]>> = {
   evidence: ["subject_entity_id"],
-  relationships: ["source_entity_id", "target_entity_id"],
-  "relationship-observations": ["relationship_id"],
+  relationships: ["source_entity_id", "target_entity_id", "entity_id"],
+  "relationship-observations": [
+    "relationship_id",
+    "entity_id",
+    "counterparty_entity_id",
+  ],
   research: ["subject_entity_id"],
 };
 

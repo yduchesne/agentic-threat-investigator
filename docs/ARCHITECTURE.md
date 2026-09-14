@@ -197,7 +197,8 @@ Rules enforced by the architecture:
 
 Cross-resource pivots and breadcrumb modal workspaces (PR 24D) reuse this
 table/detail architecture rather than creating a second one; Relationship
-Evolution, graph visualization, and maps remain later PRs (24E/PR 25).
+Evolution and the bounded stable-relationship graph are delivered in PR
+24E below, and maps remain PR 25.
 
 ### Cross-resource pivots and provenance navigation (PR 24D)
 
@@ -261,6 +262,75 @@ Architectural decisions:
   the depth cap is `MAX_PIVOT_STEPS=5` at which further pivot actions are
   suppressed, and nested pivots replace the single modal's content rather
   than stacking dialogs.
+
+### Relationship Evolution and the bounded relationship graph (PR 24E)
+
+PR 24E delivers the entity-centric temporal view of observed relationships
+and a bounded one-hop visualization of the stable Relationship set.
+
+```text
+Relationship          = stable semantic edge ATI knows about
+RelationshipObservation = immutable observation that the edge was observed
+Relationship Evolution  = deterministic read projection of those observations
+                          (RelationshipObservation JOIN Relationship)
+Investigation Timeline   = what ATI did (distinct, unmodified)
+Generic History          = how eligible persisted objects changed (distinct)
+Relationship Graph       = bounded one-hop view of the stable Relationship set
+```
+
+Architectural decisions:
+
+- **Evolution is a read projection, never a second persistence model**: no
+  `relationship_evolution` tables, no materialized timelines, no mutable
+  validity records, no frontend-generated historical truth. The existing
+  Investigation-scoped RelationshipObservation endpoint remains the source
+  of truth;
+- the PR 23A observation query is extended narrowly with server-side
+  `entity_id`, `direction` (`source`/`target`/`either`),
+  `relationship_type`, and `counterparty_entity_id` filters, evaluated in
+  SQL through the joined stable Relationship (an inner join on edge
+  identity; Investigation isolation stays on the observation's own
+  `investigation_id`). The browser never downloads unrelated observations
+  and never joins/filters client-side;
+- each observation page carries the joined Relationship semantics
+  (`relationship_source_entity_id`, `relationship_target_entity_id`,
+  `relationship_type`) as public projection fields — there is no N+1
+  Relationship detail loading;
+- cursor identity includes the new semantic filters; changing any
+  Evolution filter resets the cursor, and a cursor from another focal
+  entity/direction/type fails with the existing
+  `cursor_filter_mismatch` contract;
+- `observed_at` is the only temporal axis of Evolution and `retrieved_at`
+  remains secondary metadata; null `observed_at` rows render in an
+  explicit `Observed time unavailable` group and are never positioned on
+  the retrieved timestamp;
+- discrete observations never imply continuous validity: ATI does not
+  infer started/ended/removed/active intervals from observation gaps and
+  never claims global first-observed/frequency facts from one bounded
+  cursor page (only page-scoped, deterministic labels such as
+  `Earliest shown on this page` are produced);
+- the first-class route
+  `/investigations/:id/relationships/evolution` owns the URL state
+  (`entity_id` required, semantic filters, opaque cursor, `view`);
+  `view=evolution|graph` switches views without losing focal entity or
+  filter context, and observed-range filters stay in the URL while Graph
+  (correctly) does not apply them to stable edges;
+- the entry points are explicit typed internal links from the
+  Relationships table/detail (source and target entities) and the
+  enriched observation detail; PR 24D pivot capabilities are reused for
+  Evidence/research/relationships pivots and are not distorted with
+  route-only targets;
+- the graph is a bounded one-hop neighborhood: one server query using the
+  Relationships `entity_id` filter (source-or-target OR on the server),
+  deterministic radial layout, React Flow (`@xyflow/react`) as the single
+  graph library, exact Entity/Relationship IDs backing nodes/edges, no
+  recursive traversal, no inference, no maliciousness scoring, no
+  validity reasoning, and an always-available non-spatial edge list with
+  exact navigation links;
+- Evolution/Graph interactions drill into the existing PR 24C detail
+  surfaces and PR 24D pivot/provenance paths; the known Report -> exact
+  RelationshipObservation provenance gap remains a documented PR 24F
+  residual and is never repaired inside PR 24E.
 
 ### Async workflow and state ownership (PR 24B)
 

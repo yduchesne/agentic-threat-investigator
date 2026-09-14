@@ -56,7 +56,10 @@ from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEventType,
 )
-from agentic_threat_investigator.domain.relationships import RelationshipType
+from agentic_threat_investigator.domain.relationships import (
+    RelationshipDirection,
+    RelationshipType,
+)
 
 
 def _cursor_envelope(sort_values: tuple[str, ...], kind: QueryKind) -> CursorEnvelope:
@@ -240,6 +243,127 @@ def test_u23_nullable_observed_timestamp_never_cursor_key() -> None:
     )
     assert parsed == (stamp, observation_id)
     assert len(values) == 2
+
+
+def test_u28_entity_without_direction_behaves_as_either() -> None:
+    """A bare entity filter has the documented either-direction semantics."""
+    entity = uuid4()
+    query = RelationshipObservationListQuery(
+        investigation_id=uuid4(), entity_id=entity, limit=10
+    )
+    assert query.direction is None
+    assert query.effective_direction() == RelationshipDirection.EITHER
+    # The entity-only query and the explicit either query share one cursor
+    # fingerprint: the effective direction is canonicalized, never duplicated.
+    explicit = RelationshipObservationListQuery(
+        investigation_id=query.investigation_id,
+        entity_id=entity,
+        direction=RelationshipDirection.EITHER,
+        limit=10,
+    )
+    assert query.fingerprint() == explicit.fingerprint()
+
+
+def test_u28_direction_without_entity_rejected() -> None:
+    """A direction filter without a focal entity is a contract failure."""
+    with pytest.raises(ValidationError):
+        RelationshipObservationListQuery(
+            investigation_id=uuid4(), direction=RelationshipDirection.SOURCE, limit=10
+        )
+
+
+def test_u28_counterparty_without_entity_rejected() -> None:
+    """A counterparty filter without a focal entity is a contract failure."""
+    with pytest.raises(ValidationError):
+        RelationshipObservationListQuery(
+            investigation_id=uuid4(), counterparty_entity_id=uuid4(), limit=10
+        )
+
+
+def test_u28_entity_fingerprints_bound_to_semantic_filters() -> None:
+    """Cursor fingerprints include entity, direction, type and counterparty."""
+    entity_a = uuid4()
+    entity_b = uuid4()
+    counterparty = uuid4()
+    base = RelationshipObservationListQuery(
+        investigation_id=uuid4(), entity_id=entity_a, limit=10
+    )
+    assert (
+        base.fingerprint()
+        != RelationshipObservationListQuery(
+            investigation_id=uuid4(),
+            entity_id=entity_b,
+            direction=RelationshipDirection.EITHER,
+            limit=10,
+        ).fingerprint()
+    )
+    assert (
+        RelationshipObservationListQuery(
+            investigation_id=uuid4(),
+            entity_id=entity_a,
+            direction=RelationshipDirection.SOURCE,
+            limit=10,
+        ).fingerprint()
+        != RelationshipObservationListQuery(
+            investigation_id=uuid4(),
+            entity_id=entity_a,
+            direction=RelationshipDirection.TARGET,
+            limit=10,
+        ).fingerprint()
+    )
+    assert (
+        base.fingerprint()
+        != RelationshipObservationListQuery(
+            investigation_id=uuid4(),
+            entity_id=entity_a,
+            relationship_type=RelationshipType.RESOLVES_TO,
+            limit=10,
+        ).fingerprint()
+    )
+    assert (
+        base.fingerprint()
+        != RelationshipObservationListQuery(
+            investigation_id=uuid4(),
+            entity_id=entity_a,
+            counterparty_entity_id=counterparty,
+            limit=10,
+        ).fingerprint()
+    )
+
+
+def test_u29_entity_filter_accepts_type_and_old_filters_together() -> None:
+    """Old and new observation filters compose by intersection."""
+    query = RelationshipObservationListQuery(
+        investigation_id=uuid4(),
+        entity_id=uuid4(),
+        direction=RelationshipDirection.SOURCE,
+        relationship_type=RelationshipType.RESOLVES_TO,
+        counterparty_entity_id=uuid4(),
+        source="urn:ati:source:google_public_dns",
+        observed_from=datetime(2026, 1, 1, tzinfo=UTC),
+        observed_to=datetime(2026, 2, 1, tzinfo=UTC),
+        retrieved_from=datetime(2026, 1, 1, tzinfo=UTC),
+        retrieved_to=datetime(2026, 2, 1, tzinfo=UTC),
+        limit=10,
+    )
+    assert query.fingerprint()
+    assert query.effective_direction() is RelationshipDirection.SOURCE
+
+
+def test_u29_relationship_entity_neighborhood_fingerprint() -> None:
+    """The one-hop Relationship neighborhood filter is fingerprinted."""
+    entity = uuid4()
+    query = RelationshipListQuery(investigation_id=uuid4(), entity_id=entity, limit=10)
+    assert (
+        query.fingerprint()
+        != RelationshipListQuery(investigation_id=uuid4(), limit=10).fingerprint()
+    )
+    assert (
+        query.fingerprint()
+        != RelationshipListQuery(
+            investigation_id=uuid4(), entity_id=uuid4(), limit=10
+        ).fingerprint()
+    )
 
 
 def test_u24_history_object_id_without_type_rejected() -> None:

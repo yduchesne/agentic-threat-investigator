@@ -233,6 +233,84 @@ export interface ListRequestRecord {
   limit: string | null;
 }
 
+/**
+ * Bounded Evolution observation handler (PR 24E).
+ *
+ * Serves deterministic pages keyed by the opaque cursor and records every
+ * exact URL search parameter (entity/direction/type/counterparty/source/
+ * observed/retrieved/limit/cursor) for filter assertions. An unknown
+ * cursor fails closed with 422 ``invalid_cursor`` when ``failCursor``.
+ */
+export function evolutionObservationsHandler<T>({
+  pages,
+  recorder,
+  failCursor = false,
+}: {
+  pages: T[][];
+  recorder: { requests: ResourceListRequestRecord[] };
+  failCursor?: boolean;
+}) {
+  const cursors = ["", "cursor-1", "cursor-2", "cursor-3"];
+  return http.get(
+    "*/api/v1/investigations/:id/relationship-observations",
+    ({ request }) => {
+      const url = new URL(request.url);
+      recorder.requests.push({
+        cursor: url.searchParams.get("cursor"),
+        limit: url.searchParams.get("limit"),
+        params: Object.fromEntries(url.searchParams.entries()),
+      });
+      const cursor = url.searchParams.get("cursor") ?? "";
+      const index = cursors.indexOf(cursor);
+      if (index < 0 || index >= pages.length) {
+        return errorResponse(422, failCursor ? "invalid_cursor" : "validation_error");
+      }
+      return jsonResponse({
+        items: pages[index],
+        next_cursor: index + 1 < pages.length ? cursors[index + 1] : null,
+      });
+    },
+  );
+}
+
+/**
+ * Bounded graph/neighborhood Relationships handler (PR 24E).
+ *
+ * Serves one-hop pages for ``entity_id``-filtered Relationship queries and
+ * records every exact parameter (entity/source/target/type/cursor/limit).
+ */
+export function graphRelationshipsHandler({
+  pages,
+  recorder,
+}: {
+  pages: Relationship[][];
+  recorder: { requests: ResourceListRequestRecord[] };
+}) {
+  const cursors = ["", "cursor-1", "cursor-2"];
+  return http.get("*/api/v1/investigations/:id/relationships", ({ request }) => {
+    const url = new URL(request.url);
+    recorder.requests.push({
+      cursor: url.searchParams.get("cursor"),
+      limit: url.searchParams.get("limit"),
+      params: Object.fromEntries(url.searchParams.entries()),
+    });
+    const cursor = url.searchParams.get("cursor") ?? "";
+    const index = cursors.indexOf(cursor);
+    if (index < 0 || index >= pages.length) {
+      return errorResponse(422, "validation_error");
+    }
+    return jsonResponse({
+      items: pages[index],
+      next_cursor: index + 1 < pages.length ? cursors[index + 1] : null,
+    });
+  });
+}
+
+export const relationshipObservationsNetworkErrorHandler = http.get(
+  "*/api/v1/investigations/:id/relationship-observations",
+  () => HttpResponse.error(),
+);
+
 export function listRequestRecorder() {
   const requests: ListRequestRecord[] = [];
   return { requests };
@@ -486,6 +564,11 @@ export function buildObservation(overrides: Partial<RelationshipObservation> = {
     retrieved_at: "2026-06-01T09:05:00Z",
     source: "fake-dns",
     confidence: 0.9,
+    // Joined stable Relationship semantics (PR 24E) ship with the page;
+    // they are response projections, never persisted duplicates.
+    relationship_source_entity_id: uuidAt(101),
+    relationship_target_entity_id: uuidAt(102),
+    relationship_type: "urn:ati:relationship:dns:resolves_to" as RelationshipTypeName,
     ...overrides,
   };
 }

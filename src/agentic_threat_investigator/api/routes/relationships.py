@@ -34,7 +34,10 @@ from agentic_threat_investigator.app.query.relationships import (
     RelationshipListQuery,
     RelationshipObservationListQuery,
 )
-from agentic_threat_investigator.domain.relationships import RelationshipType
+from agentic_threat_investigator.domain.relationships import (
+    RelationshipDirection,
+    RelationshipType,
+)
 
 relationships_router = APIRouter(
     prefix="/api/v1/investigations/{investigation_id}/relationships",
@@ -58,19 +61,27 @@ async def list_relationships(
     _user: AnalystUser,
     source_entity_id: UUID | None = None,
     target_entity_id: UUID | None = None,
+    entity_id: UUID | None = None,
     relationship_type: Annotated[
         RelationshipType | None, Query(alias="relationship_type")
     ] = None,
     limit: int | None = None,
     cursor: Annotated[str | None, Query(max_length=2048)] = None,
 ) -> PageResponse[RelationshipResponse]:
-    """List distinct Relationships visible to one Investigation."""
+    """List distinct Relationships visible to one Investigation.
+
+    ``entity_id`` (PR 24E) selects the bounded one-hop neighborhood of one
+    focal entity: source-or-target OR semantics applied on the server, and
+    it intersects normally with the other filters. Soft-deleted edges stay
+    excluded exactly as before.
+    """
     page = await run_page_query(
         lambda: services.relationships.list(
             RelationshipListQuery(
                 investigation_id=investigation_id,
                 source_entity_id=source_entity_id,
                 target_entity_id=target_entity_id,
+                entity_id=entity_id,
                 relationship_type=relationship_type,
                 limit=effective_page_limit(request, limit),
                 cursor=cursor,
@@ -121,6 +132,12 @@ async def list_relationship_observations(
     retrieved_to: datetime | None = None,
     observed_from: datetime | None = None,
     observed_to: datetime | None = None,
+    entity_id: UUID | None = None,
+    direction: RelationshipDirection | None = None,
+    relationship_type: Annotated[
+        RelationshipType | None, Query(alias="relationship_type")
+    ] = None,
+    counterparty_entity_id: UUID | None = None,
     limit: int | None = None,
     cursor: Annotated[str | None, Query(max_length=2048)] = None,
 ) -> PageResponse[RelationshipObservationResponse]:
@@ -129,7 +146,23 @@ async def list_relationship_observations(
     ``observed_at`` and ``retrieved_at`` remain independent half-open UTC
     filters; pagination follows the canonical ``retrieved_at DESC, id ASC``
     order with opaque cursors.
+
+    PR 24E entity-centric filters:
+
+    - ``entity_id`` narrows to observations whose joined Relationship has
+      that entity as source or target (server-side, never client joins);
+    - ``direction`` is ``source``/``target``/``either`` relative to
+      ``entity_id`` and requires it (a bare entity behaves as ``either``);
+    - ``counterparty_entity_id`` pins the other endpoint and requires
+      ``entity_id``;
+    - ``relationship_type`` filters the joined edge's type URN.
+
+    Response rows additionally carry the joined stable relationship
+    semantics (``relationship_source_entity_id``,
+    ``relationship_target_entity_id``, ``relationship_type``) so the
+    browser never issues one Relationship GET per observation.
     """
+
     page = await run_page_query(
         lambda: services.relationship_observations.list(
             RelationshipObservationListQuery(
@@ -140,6 +173,10 @@ async def list_relationship_observations(
                 retrieved_to=retrieved_to,
                 observed_from=observed_from,
                 observed_to=observed_to,
+                entity_id=entity_id,
+                direction=direction,
+                relationship_type=relationship_type,
+                counterparty_entity_id=counterparty_entity_id,
                 limit=effective_page_limit(request, limit),
                 cursor=cursor,
             )

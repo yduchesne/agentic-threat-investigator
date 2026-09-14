@@ -912,7 +912,53 @@ Deliver:
 
 No generic graph visualization or geospatial map.
 
-### PR 24E — Relationship Evolution and relationship graph
+### PR 24E — Relationship Evolution and relationship graph `[DONE]`
+
+Delivered:
+
+- server-side entity-centric RelationshipObservation filtering
+  (`entity_id`, `direction=source|target|either`, `relationship_type`,
+  `counterparty_entity_id`) on the existing Investigation-scoped endpoint,
+  evaluated in SQL through the joined stable Relationship; validation
+  rules are exact (`direction`/`counterparty_entity_id` require
+  `entity_id`; a bare entity behaves as `either`) and cursor fingerprints
+  include the new filters;
+- joined Relationship semantics shipped on each observation page
+  (`relationship_source_entity_id`, `relationship_target_entity_id`,
+  `relationship_type`) — no N+1 Relationship loading, no persistence
+  duplication;
+- the Relationships list gains the one-hop `entity_id` neighborhood
+  filter (source-or-target OR on the server) used by the graph;
+- first-class `/investigations/:id/relationships/evolution` route with
+  URL-backed focal entity + filters + opaque cursor and a
+  `view=evolution|graph` switch that preserves entity/filter context;
+- Relationship Evolution swimlanes over `observed_at` with `retrieved_at`
+  kept distinct, an explicit `Observed time unavailable` group, bounded
+  page honesty, page-scoped deterministic labels (`Earliest shown on this
+  page`), keyboard-accessible points, observation detail with Evidence
+  provenance and exact Relationship navigation, and a tabular
+  alternative;
+- explicit Evolution entry links from the Relationships table/detail
+  (source/target entities) and the enriched observation detail; PR 24D
+  pivots reused for Evidence/research/relationships — the pivot model was
+  not distorted with route-only targets;
+- bounded one-hop stable Relationship graph with React Flow
+  (`@xyflow/react`): exact Entity/Relationship IDs, deterministic radial
+  layout, honest incomplete-neighborhood notice, and an always-available
+  non-spatial edge list; no recursive traversal, no inference, no
+  validity semantics, no layout persistence;
+- backend unit/route/OpenAPI/PostgreSQL integration tests (E-B01..E-B16 +
+  cursor binding + index plan eligibility), frontend derived-model and
+  component tests (E-D01..E-D09, E-U01..E-U18, E-G01..E-G11), and the
+  real-stack F03 browser slice E23
+  (`entity -> Evolution -> observation -> Evidence -> Graph ->
+  Relationship/table`, refresh and Back/Forward preservation);
+- documentation updated in `docs/API.md`, `docs/ARCHITECTURE.md`, and
+  `docs/TESTING.md`.
+
+No PR 24B/24D residual fixups were absorbed; PR 24F owns final series
+reconciliation (including the Report -> exact RelationshipObservation
+provenance gap, which PR 24E explicitly does not depend on).
 
 Deliver the relationship visualization layer after the table/pivot model is established.
 

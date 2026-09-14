@@ -292,6 +292,86 @@ Example:
 }
 ```
 
+### Relationship listing filters
+
+`GET /api/v1/investigations/{id}/relationships` supports bounded explicit
+filters (all intersect):
+
+- `source_entity_id` — the exact source entity UUID;
+- `target_entity_id` — the exact target entity UUID;
+- `entity_id` (PR 24E) — the bounded one-hop neighborhood of one focal
+  entity, with **source-or-target OR semantics applied on the server**
+  (never merged client-side across two bounded pages);
+- `relationship_type` — the exact relationship type URN.
+
+Soft-deleted edges stay excluded. Pagination remains the opaque keyset
+cursor bound to the exact filter set (`cursor` reuse across different
+entities/filters fails closed).
+
+### RelationshipObservation listing filters
+
+`GET /api/v1/investigations/{id}/relationship-observations` lists the
+immutable historical record directly, ordered `retrieved_at DESC, id ASC`
+with opaque cursors. Existing filters (all intersect):
+
+- `relationship_id`;
+- `source` (exact provider/source);
+- `retrieved_from` / `retrieved_to` and `observed_from` / `observed_to`
+  (UTC half-open ranges; `observed_at` and `retrieved_at` stay
+  independent);
+- `limit`, `cursor`.
+
+PR 24E adds entity-centric filters, all evaluated **in SQL through the
+joined stable Relationship** (an inner join on `relationship.id =
+relationship_observation.relationship_id`; Investigation isolation is
+enforced by the observation's own `investigation_id` predicate):
+
+- `entity_id` — focal entity UUID; the query returns observations whose
+  edge has this entity as source or target;
+- `direction` — `source`, `target`, or `either` relative to `entity_id`
+  (required only if a direction is supplied; a bare `entity_id` behaves as
+  `either`);
+- `counterparty_entity_id` — pins the other endpoint (`source` means
+  source=focal AND target=counterparty; `target` means target=focal AND
+  source=counterparty; `either` means either orientation);
+- `relationship_type` — filters the joined edge's type URN (never copied
+  into observation persistence).
+
+Validation rules:
+
+- `direction` without `entity_id` fails with the stable public 400
+  `invalid_request` envelope;
+- `counterparty_entity_id` without `entity_id` fails the same way;
+- a bare `entity_id` is legal and deterministic: `either`.
+
+Self-relationships (source = target = focal) match either OR branch but
+are returned once (rows are unique by id). Cursor identity includes the
+new filters: a cursor produced for one focal entity/direction/type cannot
+be reused for another and fails with the existing
+`cursor_filter_mismatch` contract.
+
+Each response row additionally carries the joined stable Relationship
+semantics as public projection fields (never persisted duplicates):
+
+```json
+{
+  "id": "uuid",
+  "relationship_id": "uuid",
+  "evidence_id": "uuid",
+  "investigation_id": "uuid",
+  "source": "urn:ati:source:google_public_dns",
+  "observed_at": "2026-01-10T09:00:00Z",
+  "retrieved_at": "2026-07-01T10:00:00Z",
+  "relationship_source_entity_id": "uuid",
+  "relationship_target_entity_id": "uuid",
+  "relationship_type": "urn:ati:relationship:dns:resolves_to"
+}
+```
+
+The frontend never issues one Relationship GET per observation, never
+downloads unrelated observations to join/filter client-side, and never
+reconstructs unbounded relationship history.
+
 ## Assessment
 
 Assessment endpoints preserve version history and evidence references.

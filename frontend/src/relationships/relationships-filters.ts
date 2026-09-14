@@ -1,13 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Relationship and RelationshipObservation filter codecs (PR 24C §6, §9).
+// Relationship and RelationshipObservation filter codecs (PR 24C §6, §9;
+// PR 24E §13, §23).
 //
 // Exact backend filter semantics only: source/target entity UUIDs and the
 // relationship type URN for the stable edge; relationship id, exact
 // source, and independent half-open observed/retrieved ranges for the
-// immutable observations. Nothing here infers temporal validity.
+// immutable observations. PR 24E adds the server-side entity-centric
+// observation filters (entity_id, direction, relationship_type,
+// counterparty_entity_id) and the one-hop Relationship ``entity_id``
+// neighborhood. Nothing here infers temporal validity.
 
 import type {
+  RelationshipDirectionName,
   RelationshipObservation,
   RelationshipTypeName,
 } from "../api/schema-types";
@@ -24,6 +29,7 @@ import { RELATIONSHIP_TYPES } from "./labels";
 export interface RelationshipFilters {
   sourceEntityId: string | undefined;
   targetEntityId: string | undefined;
+  entityId: string | undefined;
   relationshipType: RelationshipTypeName | undefined;
 }
 
@@ -31,6 +37,7 @@ export interface RelationshipFilters {
 export const RELATIONSHIP_FILTER_KEYS = [
   "source_entity_id",
   "target_entity_id",
+  "entity_id",
   "relationship_type",
 ] as const;
 
@@ -39,6 +46,7 @@ export function emptyRelationshipFilters(): RelationshipFilters {
   return {
     sourceEntityId: undefined,
     targetEntityId: undefined,
+    entityId: undefined,
     relationshipType: undefined,
   };
 }
@@ -48,6 +56,7 @@ export function parseRelationshipFilters(params: URLSearchParams): RelationshipF
   return {
     sourceEntityId: parseUuidParam(params.get("source_entity_id")),
     targetEntityId: parseUuidParam(params.get("target_entity_id")),
+    entityId: parseUuidParam(params.get("entity_id")),
     relationshipType: parseEnumParam(params.get("relationship_type"), RELATIONSHIP_TYPES),
   };
 }
@@ -60,6 +69,7 @@ export function relationshipFiltersToParams(
   return applyFilterParams(params, RELATIONSHIP_FILTER_KEYS, {
     source_entity_id: filters.sourceEntityId,
     target_entity_id: filters.targetEntityId,
+    entity_id: filters.entityId,
     relationship_type: filters.relationshipType,
   });
 }
@@ -69,6 +79,7 @@ export function relationshipFiltersToApi(filters: RelationshipFilters): URLSearc
   return buildApiQuery({
     source_entity_id: filters.sourceEntityId,
     target_entity_id: filters.targetEntityId,
+    entity_id: filters.entityId,
     relationship_type: filters.relationshipType,
   });
 }
@@ -78,9 +89,17 @@ export function relationshipFiltersActive(filters: RelationshipFilters): boolean
   return (
     filters.sourceEntityId !== undefined ||
     filters.targetEntityId !== undefined ||
+    filters.entityId !== undefined ||
     filters.relationshipType !== undefined
   );
 }
+
+/** The allowlisted direction values (exact backend enum). */
+export const RELATIONSHIP_DIRECTIONS: readonly RelationshipDirectionName[] = [
+  "source",
+  "target",
+  "either",
+];
 
 /** One validated RelationshipObservation list filter model. */
 export interface ObservationFilters {
@@ -90,6 +109,14 @@ export interface ObservationFilters {
   observedTo: string | undefined;
   retrievedFrom: string | undefined;
   retrievedTo: string | undefined;
+  /** Focal entity for server-side entity-centric filtering (PR 24E). */
+  entityId: string | undefined;
+  /** Relative to ``entityId``; ``either`` is the documented default. */
+  direction: RelationshipDirectionName | undefined;
+  /** Filter through the joined stable Relationship type URN. */
+  relationshipType: RelationshipTypeName | undefined;
+  /** The other endpoint of the focal edge (requires ``entityId``). */
+  counterpartyEntityId: string | undefined;
 }
 
 /** The URL parameter keys owned by the Observation codec. */
@@ -100,6 +127,10 @@ export const OBSERVATION_FILTER_KEYS = [
   "observed_to",
   "retrieved_from",
   "retrieved_to",
+  "entity_id",
+  "direction",
+  "relationship_type",
+  "counterparty_entity_id",
 ] as const;
 
 /** The neutral Observation filter state. */
@@ -111,6 +142,10 @@ export function emptyObservationFilters(): ObservationFilters {
     observedTo: undefined,
     retrievedFrom: undefined,
     retrievedTo: undefined,
+    entityId: undefined,
+    direction: undefined,
+    relationshipType: undefined,
+    counterpartyEntityId: undefined,
   };
 }
 
@@ -123,6 +158,10 @@ export function parseObservationFilters(params: URLSearchParams): ObservationFil
     observedTo: parseTimestampParam(params.get("observed_to")),
     retrievedFrom: parseTimestampParam(params.get("retrieved_from")),
     retrievedTo: parseTimestampParam(params.get("retrieved_to")),
+    entityId: parseUuidParam(params.get("entity_id")),
+    direction: parseEnumParam(params.get("direction"), RELATIONSHIP_DIRECTIONS),
+    relationshipType: parseEnumParam(params.get("relationship_type"), RELATIONSHIP_TYPES),
+    counterpartyEntityId: parseUuidParam(params.get("counterparty_entity_id")),
   };
 }
 
@@ -138,6 +177,10 @@ export function observationFiltersToParams(
     observed_to: filters.observedTo,
     retrieved_from: filters.retrievedFrom,
     retrieved_to: filters.retrievedTo,
+    entity_id: filters.entityId,
+    direction: filters.direction,
+    relationship_type: filters.relationshipType,
+    counterparty_entity_id: filters.counterpartyEntityId,
   });
 }
 
@@ -150,6 +193,10 @@ export function observationFiltersToApi(filters: ObservationFilters): URLSearchP
     observed_to: filters.observedTo,
     retrieved_from: filters.retrievedFrom,
     retrieved_to: filters.retrievedTo,
+    entity_id: filters.entityId,
+    direction: filters.direction,
+    relationship_type: filters.relationshipType,
+    counterparty_entity_id: filters.counterpartyEntityId,
   });
 }
 
@@ -161,7 +208,11 @@ export function observationFiltersActive(filters: ObservationFilters): boolean {
     filters.observedFrom !== undefined ||
     filters.observedTo !== undefined ||
     filters.retrievedFrom !== undefined ||
-    filters.retrievedTo !== undefined
+    filters.retrievedTo !== undefined ||
+    filters.entityId !== undefined ||
+    filters.direction !== undefined ||
+    filters.relationshipType !== undefined ||
+    filters.counterpartyEntityId !== undefined
   );
 }
 

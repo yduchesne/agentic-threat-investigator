@@ -17,6 +17,20 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+class RelationshipDirection(str, Enum):
+    """Focal-entity direction of an entity-centric relationship query.
+
+    ``SOURCE`` selects edges whose source is the focal entity, ``TARGET``
+    selects edges whose target is the focal entity, and ``EITHER`` selects
+    edges on either side. The enum exists only to drive server-side entity
+    filtering; it never describes a persisted edge attribute.
+    """
+
+    SOURCE = "source"
+    TARGET = "target"
+    EITHER = "either"
+
+
 class RelationshipType(str, Enum):
     """Stable ATI relationship type URNs."""
 

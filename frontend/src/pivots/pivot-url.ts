@@ -23,12 +23,14 @@
 
 import type {
   EvidenceTypeName,
+  RelationshipDirectionName,
   RelationshipTypeName,
 } from "../api/schema-types";
 import { isIsoTimestamp, isUuidValue } from "../analyst-table/filters";
 import { parseCursorParam } from "../analyst-table/cursor-stack";
 import { parseSelectedParam } from "../analyst-table/url-params";
 import { EVIDENCE_TYPES } from "../evidence/labels";
+import { RELATIONSHIP_DIRECTIONS } from "../relationships/relationships-filters";
 import { RELATIONSHIP_TYPES } from "../relationships/labels";
 import {
   isPivotResource,
@@ -147,6 +149,13 @@ export function parsePivotFilters(
         return null;
       }
       output[key] = value as RelationshipTypeName;
+      continue;
+    }
+    if (key === "direction") {
+      if (!(RELATIONSHIP_DIRECTIONS as readonly string[]).includes(value)) {
+        return null;
+      }
+      output[key] = value as RelationshipDirectionName;
       continue;
     }
     output[key] = value as string;

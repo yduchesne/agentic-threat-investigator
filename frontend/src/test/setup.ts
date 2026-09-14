@@ -14,6 +14,40 @@ beforeAll(async () => {
   await initI18n();
 });
 
+/**
+ * Minimal ResizeObserver stub for jsdom.
+ *
+ * @xyflow/react (the PR 24E graph visualization dependency) mounts a
+ * ZoomPane that constructs a ResizeObserver in an effect; jsdom does not
+ * ship one. The stub never reports sizes (jsdom has no layout), which is
+ * exactly right for component tests that assert semantics, not pixels —
+ * the canvas limits are exercised on the real stack by the Playwright
+ * suite, which runs in Chromium.
+ */
+class ResizeObserverStub implements ResizeObserver {
+  private callback: ResizeObserverCallback;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+
+  observe(): void {}
+
+  unobserve(): void {}
+
+  disconnect(): void {}
+
+  // ResizeObserver uses a callback trigger; keep the reference for the
+  // structural contract without ever reporting layout in jsdom.
+  protected trigger(): void {
+    // Never invoked: jsdom provides no layout to observe.
+  }
+}
+
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = ResizeObserverStub;
+}
+
 /** Clear the jsdom cookie jar (the empty-string setter is a no-op). */
 function clearCookies(): void {
   const jar = document.cookie;
