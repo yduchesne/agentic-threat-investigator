@@ -26,6 +26,14 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     Verdict,
 )
+from agentic_threat_investigator.domain.entities import EntityType
+from agentic_threat_investigator.domain.evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
@@ -481,6 +489,63 @@ def _timeline_event(investigation_id: UUID) -> InvestigationTimelineEvent:
         type=InvestigationTimelineEventType.INVESTIGATION_STARTED,
         occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_p13_geolocation_projection_drives_existing_type_index(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """PR 25A geolocation projection uses the existing evidence indexes.
+
+    The latest-per-entity projection drives through the established
+    investigation-prefixed evidence listing composites (the planner may
+    choose the type composite or the subject composite); the window
+    function only reorders the filtered rows, so no new index is required
+    at v0.1 and no migration is introduced (plan 28).
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        await uow.evidence.insert(
+            Evidence(
+                investigation_id=investigation_id,
+                type=EvidenceType.GEOLOCATION,
+                subject=EvidenceEntityRef(
+                    id=entity_id,
+                    type=EntityType.IP_ADDRESS,
+                    value="203.0.113.10",
+                ),
+                source="urn:ati:source:dbip_city_lite",
+                retrieved_at=FIXED_TIME,
+                facts={
+                    "country_code": "US",
+                    "provider": "urn:ati:source:dbip_city_lite",
+                    "precision": "city",
+                },
+            )
+        )
+        found = await _plan_indexes(
+            uow,
+            "SELECT e.id FROM ati.evidence e "
+            "JOIN ati.entity ent ON ent.id = e.subject_entity_id "
+            "WHERE e.investigation_id = :investigation_id "
+            "AND e.evidence_type = :evidence_type "
+            "AND ent.entity_type = :entity_type",
+            {
+                "investigation_id": investigation_id,
+                "evidence_type": EvidenceType.GEOLOCATION.value,
+                "entity_type": EntityType.IP_ADDRESS.value,
+            },
+        )
+        assert found & {
+            "evidence_investigation_listing_idx",
+            "evidence_investigation_source_listing_idx",
+            "evidence_investigation_subject_listing_idx",
+            "evidence_investigation_type_listing_idx",
+        }, f"plan used none of the existing evidence listing indexes: {sorted(found)}"
 
 
 @pytest.mark.asyncio

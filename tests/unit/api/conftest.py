@@ -22,6 +22,9 @@ from agentic_threat_investigator.api.app import (
 )
 from agentic_threat_investigator.api.errors import install_error_handlers
 from agentic_threat_investigator.app.identity import AuthenticationError
+from agentic_threat_investigator.app.query.geolocation import (
+    InvestigationGeolocationResult,
+)
 from agentic_threat_investigator.app.query.models import QueryPage
 from agentic_threat_investigator.app.query.services import QueryServiceBundle
 from agentic_threat_investigator.config import Settings
@@ -117,6 +120,27 @@ class FakeCollectionService:
         )
 
 
+class FakeGeolocationService:
+    """Record one list_for_investigation call and return a configured result."""
+
+    def __init__(self, result: InvestigationGeolocationResult | None = None) -> None:
+        """Bind the default empty projection and an empty call log."""
+        self.result = result or InvestigationGeolocationResult(
+            items=(), truncated=False
+        )
+        self.investigation_ids: list[UUID] = []
+        self.errors: list[BaseException] = []
+
+    async def list_for_investigation(
+        self, investigation_id: UUID
+    ) -> InvestigationGeolocationResult:
+        """Record the Investigation and return the configured projection."""
+        self.investigation_ids.append(investigation_id)
+        for error in self.errors:
+            raise error
+        return self.result
+
+
 class FakeQueryBundle:
     """One in-memory query bundle with per-collection fakes.
 
@@ -130,6 +154,7 @@ class FakeQueryBundle:
         """Bind fresh collection fakes for every read contract."""
         self.investigations = FakeCollectionService()
         self.evidence = FakeCollectionService()
+        self.geolocations = FakeGeolocationService()
         self.relationships = FakeCollectionService()
         self.relationship_observations = FakeCollectionService()
         self.research_results = FakeCollectionService()

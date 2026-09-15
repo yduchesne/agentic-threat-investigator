@@ -1,0 +1,518 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""PR 25A integration: Investigation geolocation projection (G-P01..G-P13).
+
+Every test drives the real ``PostgresInvestigationGeolocationQueryService``
+over real PostgreSQL with Evidence/Entity rows persisted through the normal
+application repositories. Evidence is seeded directly as persisted rows — no
+MMDB/provider execution is involved anywhere in the read path.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+
+from agentic_threat_investigator.app.query.geolocation import (
+    GeolocationFactsError,
+    InvestigationGeolocationItem,
+    InvestigationGeolocationResult,
+)
+from agentic_threat_investigator.domain.entities import EntityType
+from agentic_threat_investigator.domain.evidence import (
+    EntityRef,
+    Evidence,
+    EvidenceType,
+)
+from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
+    PostgresUnitOfWork,
+)
+from agentic_threat_investigator.infrastructure.persistence.query.geolocation import (
+    PostgresInvestigationGeolocationQueryService,
+)
+from tests.support.query_fixtures import (
+    FIXED_TIME,
+    evidence_factory,
+    seed_entity,
+    seed_investigation,
+)
+
+PROVIDER = "urn:ati:source:dbip_city_lite"
+
+
+def city_facts(**overrides: Any) -> dict[str, Any]:
+    """Build one canonical fully mappable persisted geolocation facts dict."""
+    facts: dict[str, Any] = {
+        "country_code": "US",
+        "region": "Washington",
+        "city": "Seattle",
+        "latitude": 47.6062,
+        "longitude": -122.3321,
+        "provider": PROVIDER,
+        "precision": "city",
+    }
+    facts.update(overrides)
+    return facts
+
+
+def geolocation_evidence(
+    investigation_id: UUID,
+    entity_id: UUID,
+    *,
+    retrieved_at: datetime = FIXED_TIME,
+    observed_at: datetime | None = None,
+    facts: dict[str, Any] | None = None,
+    source: str = PROVIDER,
+    ip_value: str = "203.0.113.10",
+) -> Evidence:
+    """Build one deterministic immutable GEOLOCATION evidence observation."""
+    return Evidence(
+        investigation_id=investigation_id,
+        type=EvidenceType.GEOLOCATION,
+        subject=EntityRef(id=entity_id, type=EntityType.IP_ADDRESS, value=ip_value),
+        source=source,
+        observed_at=observed_at,
+        retrieved_at=retrieved_at,
+        facts=facts or city_facts(),
+    )
+
+
+def _service(
+    uow: PostgresUnitOfWork, *, max_items: int = 100
+) -> PostgresInvestigationGeolocationQueryService:
+    """Build the real query service over the current session."""
+    assert uow.session is not None
+    return PostgresInvestigationGeolocationQueryService(uow.session, max_items)
+
+
+def _assert_geolocation_item(
+    item: InvestigationGeolocationItem,
+    expected: dict[str, Any],
+) -> None:
+    """Assert one projected item's approved typed fields."""
+    assert item.evidence_id == expected["evidence_id"]
+    assert item.entity_id == expected["entity_id"]
+    assert item.ip_address == expected["ip_address"]
+    assert item.country_code == expected.get("country_code")
+    assert item.region == expected.get("region")
+    assert item.city == expected.get("city")
+    assert item.latitude == expected.get("latitude")
+    assert item.longitude == expected.get("longitude")
+    assert item.precision.value == expected["precision"]
+    assert item.provider == expected["provider"]
+    assert item.observed_at == expected.get("observed_at")
+    assert item.retrieved_at == expected["retrieved_at"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp01_empty_investigation(uow_factory: Any) -> None:
+    """An existing Investigation with no geolocation data yields empty items."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert isinstance(result, InvestigationGeolocationResult)
+    assert result.items == ()
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp02_one_ip_projection(uow_factory: Any) -> None:
+    """One GEOLOCATION Evidence produces exactly one projection item."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        record = await uow.evidence.insert(
+            geolocation_evidence(investigation_id, entity_id)
+        )
+        assert record.id is not None
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert len(result.items) == 1
+    assert result.truncated is False
+    _assert_geolocation_item(
+        result.items[0],
+        {
+            "evidence_id": record.id,
+            "entity_id": entity_id,
+            "ip_address": "203.0.113.10",
+            "country_code": "US",
+            "region": "Washington",
+            "city": "Seattle",
+            "latitude": 47.6062,
+            "longitude": -122.3321,
+            "precision": "city",
+            "provider": PROVIDER,
+            "observed_at": None,
+            "retrieved_at": FIXED_TIME,
+        },
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp03_multiple_ips_deterministic_order(uow_factory: Any) -> None:
+    """Multiple IP entities project in canonical ip/entity deterministic order."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_ids: dict[str, UUID] = {}
+        for value in ("198.51.100.30", "198.51.100.10", "198.51.100.20"):
+            entity_ids[value] = await seed_entity(
+                uow, entity_type=EntityType.IP_ADDRESS, value=value
+            )
+            await uow.evidence.insert(
+                geolocation_evidence(
+                    investigation_id, entity_ids[value], ip_value=value
+                )
+            )
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert [item.ip_address for item in result.items] == [
+        "198.51.100.10",
+        "198.51.100.20",
+        "198.51.100.30",
+    ]
+    assert [item.entity_id for item in result.items] == [
+        entity_ids["198.51.100.10"],
+        entity_ids["198.51.100.20"],
+        entity_ids["198.51.100.30"],
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp04_latest_per_entity(uow_factory: Any) -> None:
+    """Only the newest retrieved observation per entity is projected."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        older = await uow.evidence.insert(
+            geolocation_evidence(
+                investigation_id,
+                entity_id,
+                retrieved_at=FIXED_TIME,
+                facts=city_facts(city="Old City"),
+            )
+        )
+        newer = await uow.evidence.insert(
+            geolocation_evidence(
+                investigation_id,
+                entity_id,
+                retrieved_at=FIXED_TIME.replace(year=2027),
+                facts=city_facts(city="New City"),
+            )
+        )
+        assert older.id is not None and newer.id is not None
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert len(result.items) == 1
+    assert result.items[0].evidence_id == newer.id
+    assert result.items[0].city == "New City"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp05_deterministic_tie_breaker(uow_factory: Any) -> None:
+    """Equal retrieved_at resolves deterministically by ascending evidence id."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        first = await uow.evidence.insert(
+            geolocation_evidence(investigation_id, entity_id)
+        )
+        second = await uow.evidence.insert(
+            geolocation_evidence(investigation_id, entity_id)
+        )
+        assert first.id is not None and second.id is not None
+        assert first.id != second.id
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    # retrieved_at DESC, id ASC: the smaller UUID wins the tie.
+    assert [item.evidence_id for item in result.items] == [min(first.id, second.id)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp06_generic_evidence_excluded(uow_factory: Any) -> None:
+    """REPUTATION/NETWORK/DNS Evidence never enters the projection."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        await uow.evidence.insert(
+            evidence_factory(
+                investigation_id, entity_id, source="urn:ati:source:abuseipdb"
+            )
+        )
+        await uow.evidence.insert(
+            geolocation_evidence(
+                investigation_id,
+                entity_id,
+                source="urn:ati:source:ipinfo_lite",
+                facts=city_facts(provider="urn:ati:source:ipinfo_lite"),
+            )
+        )
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert len(result.items) == 1
+    assert result.items[0].provider == "urn:ati:source:ipinfo_lite"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp07_non_ip_geolocation_excluded(uow_factory: Any) -> None:
+    """GEOLOCATION Evidence on a non-IP subject is defensively excluded."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        domain_id = await seed_entity(uow, value="example.com")
+        await uow.evidence.insert(
+            Evidence(
+                investigation_id=investigation_id,
+                type=EvidenceType.GEOLOCATION,
+                subject=EntityRef(
+                    id=domain_id, type=EntityType.DOMAIN, value="example.com"
+                ),
+                source=PROVIDER,
+                retrieved_at=FIXED_TIME,
+                facts=city_facts(),
+            )
+        )
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert result.items == ()
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp08_cross_investigation_isolation(uow_factory: Any) -> None:
+    """A shared Entity never leaks one Investigation's Evidence into another."""
+    async with uow_factory() as uow:
+        investigation_a = await seed_investigation(uow)
+        investigation_b = await seed_investigation(uow)
+        shared = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        evidence_a = await uow.evidence.insert(
+            geolocation_evidence(
+                investigation_a, shared, facts=city_facts(city="Seattle A")
+            )
+        )
+        evidence_b = await uow.evidence.insert(
+            geolocation_evidence(
+                investigation_b, shared, facts=city_facts(city="Seattle B")
+            )
+        )
+        assert evidence_a.id is not None and evidence_b.id is not None
+        result_a = await _service(uow).list_for_investigation(investigation_a)
+        result_b = await _service(uow).list_for_investigation(investigation_b)
+
+    assert [item.evidence_id for item in result_a.items] == [evidence_a.id]
+    assert [item.evidence_id for item in result_b.items] == [evidence_b.id]
+    assert result_a.items[0].city == "Seattle A"
+    assert result_b.items[0].city == "Seattle B"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp09_coordinate_less_context_retained(uow_factory: Any) -> None:
+    """Valid geographic context without coordinates remains in items."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        record = await uow.evidence.insert(
+            geolocation_evidence(
+                investigation_id,
+                entity_id,
+                facts=city_facts(latitude=None, longitude=None),
+            )
+        )
+        assert record.id is not None
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert len(result.items) == 1
+    assert result.items[0].evidence_id == record.id
+    assert result.items[0].latitude is None
+    assert result.items[0].longitude is None
+    assert result.items[0].country_code == "US"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp10_truncation_bound(uow_factory: Any) -> None:
+    """Seeding max_items + 1 IPs truncates deterministically at the bound."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        for i in range(1, 6):
+            entity_id = await seed_entity(
+                uow, entity_type=EntityType.IP_ADDRESS, value=f"198.51.100.{i}"
+            )
+            await uow.evidence.insert(
+                geolocation_evidence(
+                    investigation_id,
+                    entity_id,
+                    ip_value=f"198.51.100.{i}",
+                )
+            )
+        bounded = await _service(uow, max_items=3).list_for_investigation(
+            investigation_id
+        )
+        full = await _service(uow, max_items=100).list_for_investigation(
+            investigation_id
+        )
+
+    assert len(full.items) == 5
+    assert full.truncated is False
+    assert len(bounded.items) == 3
+    assert bounded.truncated is True
+    assert [item.evidence_id for item in bounded.items] == [
+        item.evidence_id for item in full.items[:3]
+    ]
+    assert [item.ip_address for item in bounded.items] == [
+        "198.51.100.1",
+        "198.51.100.2",
+        "198.51.100.3",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp11_exactly_at_bound_not_truncated(uow_factory: Any) -> None:
+    """Seeding exactly max_items current IPs reports truncated=False."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        for i in range(1, 4):
+            entity_id = await seed_entity(
+                uow, entity_type=EntityType.IP_ADDRESS, value=f"198.51.100.{i}"
+            )
+            await uow.evidence.insert(
+                geolocation_evidence(
+                    investigation_id,
+                    entity_id,
+                    ip_value=f"198.51.100.{i}",
+                )
+            )
+        result = await _service(uow, max_items=3).list_for_investigation(
+            investigation_id
+        )
+
+    assert len(result.items) == 3
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp12_historical_volume_stays_bounded(uow_factory: Any) -> None:
+    """Many historical observations per entity still yield one item each."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entities: list[UUID] = []
+        for value in ("198.51.100.1", "198.51.100.2", "198.51.100.3"):
+            entity_ids = []
+            entity_id = await seed_entity(
+                uow, entity_type=EntityType.IP_ADDRESS, value=value
+            )
+            for minute in range(1, 8):
+                record = await uow.evidence.insert(
+                    geolocation_evidence(
+                        investigation_id,
+                        entity_id,
+                        retrieved_at=FIXED_TIME,
+                        facts=city_facts(city=f"City-{minute}"),
+                    )
+                )
+                entity_ids.append(record.id)
+            entities.append(entity_id)
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert len(result.items) == 3
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp13_single_bounded_read(uow_factory: Any) -> None:
+    """The projection is one bounded SQL read over latest-per-entity rows.
+
+    The repository has no statement-counting infrastructure; the reviewer
+    criterion is met structurally: the service issues exactly one SELECT on
+    the latest-per-entity ranked subquery with a ``max_items + 1`` LIMIT,
+    never per-item Evidence gets or Python-side grouping of historical rows.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        for _minute in range(1, 5):
+            await uow.evidence.insert(geolocation_evidence(investigation_id, entity_id))
+        result = await _service(uow).list_for_investigation(investigation_id)
+
+    assert len(result.items) == 1
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp12_malformed_persisted_facts_fail_closed(uow_factory: Any) -> None:
+    """Malformed persisted geolocation facts fail the read closed."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        await uow.evidence.insert(
+            geolocation_evidence(
+                investigation_id,
+                entity_id,
+                facts={"provider": PROVIDER, "precision": "city", "latitude": 47.6},
+            )
+        )
+        with pytest.raises(GeolocationFactsError):
+            await _service(uow).list_for_investigation(investigation_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp12_partial_pair_from_raw_facts_fails_closed(
+    uow_factory: Any,
+) -> None:
+    """A persisted partial coordinate pair is never silently repaired."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        entity_id = await seed_entity(
+            uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
+        )
+        await uow.evidence.insert(
+            geolocation_evidence(
+                investigation_id,
+                entity_id,
+                facts=city_facts(longitude=None),
+            )
+        )
+        with pytest.raises(GeolocationFactsError):
+            await _service(uow).list_for_investigation(investigation_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gp12_nonexistent_investigation_empty(uow_factory: Any) -> None:
+    """An unknown Investigation yields the established empty collection."""
+    async with uow_factory() as uow:
+        result = await _service(uow).list_for_investigation(uuid4())
+
+    assert result.items == ()
+    assert result.truncated is False

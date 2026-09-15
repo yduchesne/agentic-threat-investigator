@@ -420,6 +420,17 @@
         "title": "FindingSupportResponse",
         "type": "object"
       },
+      "GeoPrecision": {
+        "description": "How precisely a geolocation result locates its subject.",
+        "enum": [
+          "country",
+          "region",
+          "city",
+          "unknown"
+        ],
+        "title": "GeoPrecision",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -528,6 +539,144 @@
           "value"
         ],
         "title": "IndicatorRequest",
+        "type": "object"
+      },
+      "InvestigationGeolocationCollectionResponse": {
+        "additionalProperties": false,
+        "description": "One bounded Investigation geolocation projection.\n\nNo cursor is exposed: this is one coherent server-owned visualization\ndataset, never a pageable collection. ``truncated`` is true exactly\nwhen the projection exceeded the server-owned maximum.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InvestigationGeolocationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "title": "InvestigationGeolocationCollectionResponse",
+        "type": "object"
+      },
+      "InvestigationGeolocationResponse": {
+        "additionalProperties": false,
+        "description": "One current approximate geolocation context item for one IP entity.\n\n``evidence_id`` is the exact persisted immutable Evidence observation\nthat produced the item, so the frontend can navigate map point -> exact\nEvidence without any fuzzy lookup. Latitude and longitude are paired:\neither both are present or both are absent. Valid geographic context\nwithout map coordinates is retained with ``null`` coordinates.",
+        "properties": {
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code"
+          },
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "evidence_id": {
+            "format": "uuid",
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "ip_address": {
+            "title": "Ip Address",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/GeoPrecision"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "retrieved_at": {
+            "format": "date-time",
+            "title": "Retrieved At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "entity_id",
+          "ip_address",
+          "country_code",
+          "region",
+          "city",
+          "latitude",
+          "longitude",
+          "precision",
+          "provider",
+          "observed_at",
+          "retrieved_at"
+        ],
+        "title": "InvestigationGeolocationResponse",
         "type": "object"
       },
       "InvestigationResponse": {
@@ -3097,6 +3246,105 @@
         "summary": "Get Evidence",
         "tags": [
           "evidence"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/geolocations": {
+      "get": {
+        "description": "Return the bounded current geolocation projection of one Investigation.\n\nThe projection contains at most one item per IP entity (the latest\npersisted ``GEOLOCATION`` Evidence by ``retrieved_at DESC, id ASC``),\npreserves the exact Evidence ID as provenance, and never exposes\narbitrary facts or raw payloads.",
+        "operationId": "list_investigation_geolocations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestigationGeolocationCollectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "List Investigation Geolocations",
+        "tags": [
+          "geolocation"
         ]
       }
     },

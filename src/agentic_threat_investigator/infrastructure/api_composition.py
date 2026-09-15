@@ -140,7 +140,11 @@ class ApiComposition:
         )
 
         def factory() -> PostgresQueryServices:
-            return PostgresQueryServices(self._session_factory(), limits)
+            return PostgresQueryServices(
+                self._session_factory(),
+                limits,
+                geolocation_max_items=self._settings.api_max_map_geolocation_items,
+            )
 
         return factory
 

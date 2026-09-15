@@ -1582,6 +1582,62 @@ resource query/filter/table/detail machinery (`frontend/src/pivots/`,
   documentation; no PR 24A–24E requirement remains unrecorded as
   compliant and no material architectural debt blocks PR 25.
 
+### Investigation geolocation read projection and API (PR 25A)
+
+PR 25A delivers the backend/query/API foundation for the v0.1 Investigation
+Map: a bounded, Investigation-scoped, read-only projection over already-
+persisted immutable `GEOLOCATION` Evidence joined to its canonical IP
+entity. Coverage (G-Q01..G-Q10, G-M01..G-M10, G-P01..G-P13, G-A01..G-A10,
+plus the vertical slices):
+
+- **read-model invariants** (`tests/unit/app/query/test_geolocation_query.py`):
+  fully mappable item; coordinate-less context accepted; partial
+  coordinate pair rejected; latitude [-90,90]/longitude [-180,180] bounds;
+  precision restricted to the existing persisted vocabulary; provider
+  required and non-blank; canonical IP value carried; timezone-aware
+  timestamps; frozen/extra-forbid behavior;
+- **pure persisted-facts mapping** (`tests/unit/app/query/test_geolocation_query.py`):
+  all approved facts map; unknown extra facts ignored (never leaked);
+  missing optional city/region/country accepted; missing required
+  provider/precision rejected; non-numeric, boolean, NaN/infinity, and
+  partial-pair coordinates rejected; out-of-vocabulary precision and
+  country-code representations rejected; only the approved fields can ever
+  appear on the item;
+- **real-PostgreSQL query matrix** (`tests/integration/test_query_geolocation.py`):
+  empty Investigation; one IP; multiple IPs with deterministic ordering;
+  latest-per-entity; deterministic id tie-breaker; generic Evidence types
+  (REPUTATION/NETWORK/DNS) excluded; non-IP GEOLOCATION defensively
+  excluded; cross-Investigation isolation with a shared Entity; coordinate-
+  less context retained; truncation at `max_items + 1` with deterministic
+  prefix; exactly-at-bound not truncated; historical volume stays one
+  item per entity; malformed persisted facts (partial pair, missing
+  coordinate) fail closed with `GeolocationFactsError`; unknown
+  Investigation yields the established empty collection; the projection is
+  one bounded SQL read (no per-item reads, no application-side grouping);
+- **index eligibility** (`tests/integration/test_query_indexes.py`,
+  test_p13): the latest-per-entity projection drives through the existing
+  investigation-prefixed evidence listing indexes; no new index/migration
+  is required at v0.1 (plan 28)
+- **API contract** (`tests/unit/api/test_geolocation.py`): unauthenticated
+  401; ANALYST and ADMIN 200; exact allowlisted response DTO; no
+  facts/raw payload/source record id/artifact path leakage; empty
+  collection 200; truncation transport; malformed persisted projection
+  maps to a safe 500 internal error without leaking values; OpenAPI
+  declares path, GET, operation id `list_investigation_geolocations`,
+  cookie-session security, and the dedicated response schemas (a lower-
+  privilege authenticated role does not exist in the v0.1 UserRole
+  vocabulary, so the 403 branch remains covered at the shared
+  `require_analyst` dependency);
+- **real PostgreSQL + FastAPI vertical slices**
+  (`tests/integration/test_api_geolocation.py`): persisted Entity +
+  `GEOLOCATION` Evidence -> PostgreSQL query service -> QueryServiceBundle
+  -> FastAPI route -> public JSON DTO (raw-payload-bearing non-geolocation
+  Evidence never enters the projection), and the same path proving strict
+  cross-Investigation HTTP isolation;
+- regenerated OpenAPI fixture (`tests/fixtures/openapi_v1.json`) and
+  frontend generated API types (`frontend/src/api/schema.generated.ts`,
+  verified with `npm run api:check`).
+
 ### Relationship Evolution and graph (PR 24E)
 
 Backend test coverage for the entity-centric observation query:

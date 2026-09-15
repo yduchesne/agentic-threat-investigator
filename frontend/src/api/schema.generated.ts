@@ -219,6 +219,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/investigations/{investigation_id}/geolocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Investigation Geolocations
+         * @description Return the bounded current geolocation projection of one Investigation.
+         *
+         *     The projection contains at most one item per IP entity (the latest
+         *     persisted ``GEOLOCATION`` Evidence by ``retrieved_at DESC, id ASC``),
+         *     preserves the exact Evidence ID as provenance, and never exposes
+         *     arbitrary facts or raw payloads.
+         */
+        get: operations["list_investigation_geolocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/investigations/{investigation_id}/history": {
         parameters: {
             query?: never;
@@ -820,6 +845,12 @@ export interface components {
             /** Relationship Observation Id */
             relationship_observation_id?: string | null;
         };
+        /**
+         * GeoPrecision
+         * @description How precisely a geolocation result locates its subject.
+         * @enum {string}
+         */
+        GeoPrecision: "country" | "region" | "city" | "unknown";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -880,6 +911,64 @@ export interface components {
             type: components["schemas"]["EntityType"];
             /** Value */
             value: string;
+        };
+        /**
+         * InvestigationGeolocationCollectionResponse
+         * @description One bounded Investigation geolocation projection.
+         *
+         *     No cursor is exposed: this is one coherent server-owned visualization
+         *     dataset, never a pageable collection. ``truncated`` is true exactly
+         *     when the projection exceeded the server-owned maximum.
+         */
+        InvestigationGeolocationCollectionResponse: {
+            /** Items */
+            items: components["schemas"]["InvestigationGeolocationResponse"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * InvestigationGeolocationResponse
+         * @description One current approximate geolocation context item for one IP entity.
+         *
+         *     ``evidence_id`` is the exact persisted immutable Evidence observation
+         *     that produced the item, so the frontend can navigate map point -> exact
+         *     Evidence without any fuzzy lookup. Latitude and longitude are paired:
+         *     either both are present or both are absent. Valid geographic context
+         *     without map coordinates is retained with ``null`` coordinates.
+         */
+        InvestigationGeolocationResponse: {
+            /** City */
+            city: string | null;
+            /** Country Code */
+            country_code: string | null;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
+            evidence_id: string;
+            /** Ip Address */
+            ip_address: string;
+            /** Latitude */
+            latitude: number | null;
+            /** Longitude */
+            longitude: number | null;
+            /** Observed At */
+            observed_at: string | null;
+            precision: components["schemas"]["GeoPrecision"];
+            /** Provider */
+            provider: string;
+            /** Region */
+            region: string | null;
+            /**
+             * Retrieved At
+             * Format: date-time
+             */
+            retrieved_at: string;
         };
         /**
          * InvestigationResponse
@@ -1430,10 +1519,13 @@ export type FindingCategory = components['schemas']['FindingCategory'];
 export type FindingDisposition = components['schemas']['FindingDisposition'];
 export type FindingResponse = components['schemas']['FindingResponse'];
 export type FindingSupportResponse = components['schemas']['FindingSupportResponse'];
+export type GeoPrecision = components['schemas']['GeoPrecision'];
 export type HttpValidationError = components['schemas']['HTTPValidationError'];
 export type HistoryOperation = components['schemas']['HistoryOperation'];
 export type HistoryRecordResponse = components['schemas']['HistoryRecordResponse'];
 export type IndicatorRequest = components['schemas']['IndicatorRequest'];
+export type InvestigationGeolocationCollectionResponse = components['schemas']['InvestigationGeolocationCollectionResponse'];
+export type InvestigationGeolocationResponse = components['schemas']['InvestigationGeolocationResponse'];
 export type InvestigationResponse = components['schemas']['InvestigationResponse'];
 export type InvestigationStatus = components['schemas']['InvestigationStatus'];
 export type InvestigationTimelineEventType = components['schemas']['InvestigationTimelineEventType'];
@@ -2218,6 +2310,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvidenceResponse"];
+                };
+            };
+            /** @description Invalid request. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Access forbidden. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_investigation_geolocations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investigation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestigationGeolocationCollectionResponse"];
                 };
             };
             /** @description Invalid request. */

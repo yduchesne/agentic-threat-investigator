@@ -52,13 +52,14 @@ served by FastAPI (`src/agentic_threat_investigator/api/`). The delivered
 surface covers authentication, investigation creation (asynchronous,
 idempotent), investigation list/detail, and the Evidence, Relationships,
 RelationshipObservations, Research, Assessment, Report (including the
-deterministic Markdown representation), Timeline, and scoped generic history
+deterministic Markdown representation), Timeline, geolocation projection,
+and scoped generic history
 subresources. Every endpoint is documented in the generated OpenAPI document
 (pinned by `tests/fixtures/openapi_v1.json`), declares the cookie-session
 security scheme, and returns the stable error envelope.
 
 Endpoints still in future sections of this document (Monitors, Findings,
-Administration, Map/geolocation) are **not** part of the v0.1 delivered
+Administration) are **not** part of the v0.1 delivered
 surface and must not be consumed.
 
 FastAPI-generated OpenAPI is a supported API artifact.
@@ -262,13 +263,14 @@ Delivered routes (PR 23C):
 - `GET /api/v1/investigations/{id}/reports/{report_id}`
 - `GET /api/v1/investigations/{id}/reports/{report_id}/markdown`
 - `GET /api/v1/investigations/{id}/timeline`
+- `GET /api/v1/investigations/{id}/geolocations` (PR 25A)
 - `GET /api/v1/investigations/{id}/history`
 - `GET /api/v1/investigations/{id}/history/{object_type}/{object_id}`
 - `GET /api/v1/investigations/{id}/history/{object_type}/{object_id}/{version}`
 
 Future (not delivered):
 
-- `GET /api/v1/investigations/{id}/geolocations` (PR 25)
+- `GET /api/v1/maps` (PR 25B presentation, not a backend resource)
 
 ## Evidence
 
@@ -482,7 +484,67 @@ resource).
 
 ## Map/geolocation
 
-The geolocation endpoint returns investigation-relevant approximate geographic data and provenance suitable for the map.
+### Geolocation projection (PR 25A, delivered)
+
+`GET /api/v1/investigations/{id}/geolocations` (operation id
+`list_investigation_geolocations`) returns one bounded server-owned
+current geolocation context projection for the Investigation, derived
+exclusively from already-persisted immutable `GEOLOCATION` Evidence joined
+to its canonical IP entity. The API performs no DB-IP/MMDB lookup, opens
+no artifact, invokes no provider, and consults no other source.
+
+The projection contains at most one item per IP entity: the latest
+persisted `GEOLOCATION` Evidence by `(retrieved_at DESC, id ASC)`. Each
+item retains the exact persisted Evidence ID (`evidence_id`) and Entity ID
+(`entity_id`) as provenance; the canonical IP value is `ip_address`.
+
+Response shape:
+
+```json
+{
+  "items": [
+    {
+      "evidence_id": "...",
+      "entity_id": "...",
+      "ip_address": "203.0.113.10",
+      "country_code": "US",
+      "region": "Washington",
+      "city": "Seattle",
+      "latitude": 47.6062,
+      "longitude": -122.3321,
+      "precision": "city",
+      "provider": "urn:ati:source:dbip_city_lite",
+      "observed_at": null,
+      "retrieved_at": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "truncated": false
+}
+```
+
+- `items` is ordered `ip_address ASC, entity_id ASC`; `truncated` is true
+exactly when the projection exceeded the configured server-owned maximum
+(`ATI_API_MAX_MAP_GEOLOCATION_ITEMS`). There is no cursor and no
+caller-controlled limit: the Map backend never paginates through generic
+Evidence.
+- `country_code`, `region`, `city` are typed optional location fields;
+`latitude`/`longitude` are paired (both present or both absent). Valid
+geolocation context without plot coordinates is retained with `null`
+coordinates.
+- `precision` uses the existing persisted vocabulary (`country`, `region`,
+`city`, `unknown`); `provider` is the persisting source identity.
+- The response exposes only typed allowlisted fields: arbitrary normalized
+`facts`, raw provider payloads, source record ids, and DB-IP
+artifact/filesystem locations are never returned.
+- Geolocation is approximate network-address context; it never identifies
+an attacker's or device's physical location and implies no maliciousness,
+attribution, or Assessment confidence.
+- Missing or not-visible Investigations return the established collection
+semantics: an empty `200` with `items: []` (same as other collection
+subresources).
+
+Presentation (Leaflet map, markers, fit-bounds) is PR 25B and remains
+outside this document's delivered surface.
 
 ## Monitors
 

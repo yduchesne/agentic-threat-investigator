@@ -95,3 +95,21 @@ def test_test_database_guard() -> None:
     ensure_test_database_safe("postgresql://host/ati-test")
     with pytest.raises(ValueError):
         ensure_test_database_safe("postgresql://host/ati")
+
+
+def test_map_geolocation_bound_default_and_validation() -> None:
+    """The PR 25A projection bound defaults safely and rejects bad values."""
+    settings = settings_from_config({})
+    assert settings.api_max_map_geolocation_items == 500
+    assert (
+        settings_from_config(
+            {"api_max_map_geolocation_items": 25}
+        ).api_max_map_geolocation_items
+        == 25
+    )
+    with pytest.raises(ValidationError):
+        settings_from_config({"api_max_map_geolocation_items": 0})
+    with pytest.raises(ValidationError):
+        settings_from_config({"api_max_map_geolocation_items": "many"})
+    with pytest.raises(ValidationError):
+        settings_from_config({"api_max_map_geolocation_items": True})
