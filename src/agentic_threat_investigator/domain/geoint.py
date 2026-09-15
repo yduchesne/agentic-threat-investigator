@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 26A GEOINT domain contracts.
+"""PR 26 GEOINT domain contracts.
 
 Location is canonical geographic/reference data, not an ATI Entity.
 EntityLocationObservation is immutable append-only historical provenance that
@@ -9,16 +9,33 @@ EntityLocation is the current materialized Entity-to-Location association and
 is maintained exclusively by the database. GeoResolution is durable
 operational geographic-enrichment work state, not geographic truth.
 
-PR 26A is deliberately non-spatial: no PostGIS, no geometry/centroid fields,
-and no geographic resolution logic.
+PR 26A delivered the non-spatial GEOINT foundation. PR 26B adds the
+canonical reference/spatial surface: ``Location`` carries optional
+PostGIS-compatible EWKT geometry (``SRID=4326;...``) and a representative
+centroid/on-surface point, deterministic UUIDv5 canonical reference
+identity, the bounded :class:`GeographicClaim` contract, and the explicit
+:class:`CanonicalLocationResolution` result algebra. Spatial validation is
+owned by the versioned SQL write function; the domain only bounds the text
+representation so no PostGIS/SQLAlchemy object ever leaks into domain code.
+
+PR 26A-2 manages EntityLocation version allocation; PR 26B does not touch
+observation, current-state, or GeoResolution semantics.
 """
 
+import math
 import re
+import unicodedata
 from datetime import UTC, datetime
 from enum import Enum
-from uuid import UUID
+from uuid import UUID, uuid5
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 _COUNTRY_CODE_RE = "^[A-Z]{2}$"
 _ERROR_CODE_RE = "^[a-z][a-z0-9_]{0,63}$"
@@ -26,8 +43,14 @@ _NAME_MAX_LENGTH = 200
 _CODE_MAX_LENGTH = 64
 _METHOD_MAX_LENGTH = 200
 _CLAIMED_BY_MAX_LENGTH = 200
+_EWKT_MAX_LENGTH = 1_000_000
 
 _PRECISION_VOCABULARY = ("country", "administrative_area", "city")
+
+# Fixed namespace for canonical Location UUIDv5 identity (PR 26B). Generated
+# once at authoring time; changing it would change every canonical reference
+# identity, so it is an immutable contract.
+ATI_LOCATION_NAMESPACE = UUID("d94572fc-fb6d-4626-ba99-b760fee02afd")
 
 
 class LocationType(str, Enum):
@@ -82,6 +105,13 @@ def _normalize_text(value: str, label: str, max_length: int) -> str:
     return trimmed
 
 
+def _normalize_text_or_none(value: str | None, label: str) -> str | None:
+    """Trim a bounded optional textual field and reject failures closed."""
+    if value is None:
+        return None
+    return _normalize_text(value, label, _EWKT_MAX_LENGTH)
+
+
 def _normalize_code(value: str, label: str) -> str:
     """Trim a bounded identifier code and reject blank/oversized values."""
     trimmed = value.strip()
@@ -107,7 +137,8 @@ class Location(BaseModel):
     deterministic tuple ``(type, country_code, admin1_code, admin2_code,
     canonical_name)`` with null components normalized by the database;
     ``parent_location_id`` is reference hierarchy and is not part of the
-    identity.
+    identity. Spatial representation (``geometry``/``centroid``) is state
+    attached to the canonical reference object, never part of its identity.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -120,6 +151,12 @@ class Location(BaseModel):
     admin1_code: str | None = None
     admin2_code: str | None = None
     parent_location_id: UUID | None = None
+    # Reference/spatial state (PR 26B): PostGIS-compatible EWKT strings
+    # (``SRID=4326;...``) or ``None`` when the canonical object has no
+    # reference geometry. The database owns full geometric validity; the
+    # domain only bounds the serialized text so no PostGIS object leaks.
+    geometry: str | None = None
+    centroid: str | None = None
     # Persistence-owned fields are exposed so repository writes can return
     # the authoritative revision without leaking ORM types.
     version: int | None = None
@@ -131,6 +168,19 @@ class Location(BaseModel):
     def _validate_name(cls, value: str) -> str:
         """Require a nonblank name bounded to the documented maximum."""
         return _normalize_text(value, "location name", _NAME_MAX_LENGTH)
+
+    @field_validator("geometry", "centroid")
+    @classmethod
+    def _validate_spatial_text(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        """Bound the serialized EWKT text without parsing geometry.
+
+        Spatial validity, SRID, type, emptiness, and coordinate bounds are
+        enforced by the versioned reference write function; the domain only
+        rejects blank and oversized serializations deterministically.
+        """
+        return _normalize_text_or_none(value, info.field_name or "spatial value")
 
     @field_validator("country_code")
     @classmethod
@@ -325,3 +375,286 @@ def location_identity_tuple(
         location.admin2_code,
         location.canonical_name,
     )
+
+
+def normalize_reference_name(value: str) -> str:
+    """Apply the deterministic reference-name normalization contract (PR 26B).
+
+    - NFC Unicode normalization;
+    - surrounding whitespace trimmed;
+    - every Unicode whitespace run collapses to a single ASCII space;
+    - case is preserved (matching aliases are case-folded only at
+      claim-matching time, never inside the canonical name).
+
+    The contract deliberately does not strip punctuation or diacritics and
+    never fuzzes the canonical identity.
+    """
+    return " ".join(unicodedata.normalize("NFC", value).split())
+
+
+def location_identity_key(
+    *,
+    location_type: LocationType,
+    country_code: str,
+    admin1_code: str | None,
+    admin2_code: str | None,
+    canonical_name: str,
+) -> str:
+    """Return the byte-deterministic serialization of the canonical identity.
+
+    The exact serialization is the canonical identity tuple joined by the
+    ASCII unit separator ``\\x1f`` with null admin codes serialized as the
+    empty string:
+
+    ``<type>\\x1f<country_code>\\x1f<admin1-or-empty>\\x1f<admin2-or-empty>\\x1f<canonical_name>``
+
+    The unit separator cannot collide with the bounded validated fields and
+    keeps the mapping injective over the identity tuple.
+    """
+    return "\x1f".join(
+        (
+            location_type.value,
+            country_code,
+            admin1_code or "",
+            admin2_code or "",
+            canonical_name,
+        )
+    )
+
+
+def canonical_location_uuid(
+    *,
+    location_type: LocationType,
+    country_code: str,
+    admin1_code: str | None,
+    admin2_code: str | None,
+    canonical_name: str,
+) -> UUID:
+    """Derive the deterministic canonical Location UUIDv5 identity (PR 26B).
+
+    The UUID is UUIDv5 of the canonical identity key under the fixed
+    :data:`ATI_LOCATION_NAMESPACE`. It is independent of any external source
+    identifier, so a clean database and an existing database resolve the same
+    canonical Location identity to the same UUID, and geometry refreshes never
+    change identity.
+    """
+    return uuid5(
+        ATI_LOCATION_NAMESPACE,
+        location_identity_key(
+            location_type=location_type,
+            country_code=country_code,
+            admin1_code=admin1_code,
+            admin2_code=admin2_code,
+            canonical_name=canonical_name,
+        ),
+    )
+
+
+class GeographicClaim(BaseModel):
+    """A bounded frozen claim of only the geographic facts already observed.
+
+    The field vocabulary mirrors the persisted ``GEOLOCATION`` Evidence facts
+    (``country_code``, ``region`` -> ``administrative_area``, ``city``,
+    ``latitude``, ``longitude``) plus the explicit administrative code, so PR
+    26C consumes the same vocabulary without a parallel spelling.
+
+    Validation rules:
+
+    - latitude/longitude appear together, are finite, and stay within WGS84
+      bounds (lon in [-180, 180], lat in [-90, 90]);
+    - a supplied country code is two ASCII uppercase letters;
+    - the claimed precision is exactly the precision of the most specific
+      semantic field supplied: city fields demand ``city`` precision,
+      administrative fields demand ``administrative_area`` precision, and a
+      claim with no administrative/city field is a ``country`` claim.
+
+    Coordinates are provider observation, never a precision claim: a
+    coordinate pair does not upgrade the claim's semantic precision.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    country_code: str | None = None
+    administrative_area: str | None = None
+    administrative_area_code: str | None = None
+    city: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    precision: LocationPrecision
+
+    @field_validator("country_code")
+    @classmethod
+    def _validate_country_code(cls, value: str | None) -> str | None:
+        """Normalize and bound an optional two-letter country code."""
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if len(normalized) != 2 or not normalized.isalpha():
+            raise ValueError(
+                "claim country_code must be two uppercase letters when supplied"
+            )
+        return normalized
+
+    @field_validator("administrative_area", "city")
+    @classmethod
+    def _validate_geographic_name(cls, value: str | None) -> str | None:
+        """Apply the deterministic name normalization contract when present."""
+        if value is None:
+            return None
+        normalized = normalize_reference_name(value)
+        if not normalized:
+            raise ValueError("claim geographic name must not be blank")
+        if len(normalized) > _NAME_MAX_LENGTH:
+            raise ValueError(
+                f"claim geographic name exceeds the maximum length of {_NAME_MAX_LENGTH}"
+            )
+        return normalized
+
+    @field_validator("administrative_area_code")
+    @classmethod
+    def _validate_admin_code(cls, value: str | None) -> str | None:
+        """Require a trimmed nonblank bounded administrative code when present."""
+        if value is None:
+            return None
+        return _normalize_code(value, "claim administrative code")
+
+    @field_validator("latitude", "longitude")
+    @classmethod
+    def _validate_finite(cls, value: float | None) -> float | None:
+        """Reject non-finite coordinates while preserving ``None``."""
+        if value is None:
+            return None
+        if not math.isfinite(value):
+            raise ValueError("claim coordinates must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_claim_shape(self) -> "GeographicClaim":
+        """Enforce coordinate pairing, WGS84 bounds, and precision support."""
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("claim latitude and longitude must be supplied together")
+        if self.latitude is not None and not (-90.0 <= self.latitude <= 90.0):
+            raise ValueError("claim latitude must be within [-90, 90]")
+        if self.longitude is not None and not (-180.0 <= self.longitude <= 180.0):
+            raise ValueError("claim longitude must be within [-180, 180]")
+        if self.city is not None:
+            if self.precision is not LocationPrecision.CITY:
+                raise ValueError(
+                    "claim city field requires city precision; coordinates and "
+                    "labels never upgrade claim precision"
+                )
+        elif (
+            self.administrative_area is not None
+            or self.administrative_area_code is not None
+        ):
+            if self.precision is not LocationPrecision.ADMINISTRATIVE_AREA:
+                raise ValueError(
+                    "claim administrative field requires administrative_area "
+                    "precision; coordinates and labels never upgrade claim precision"
+                )
+        elif self.precision is not LocationPrecision.COUNTRY:
+            raise ValueError(
+                "claim precision cannot exceed the semantic fields supplied"
+            )
+        return self
+
+
+RESOLVED_REASON_CODES = frozenset(
+    {"exact_semantic_match", "containment_disambiguation"}
+)
+"""Reason codes for :class:`CanonicalLocationResolution` RESOLVED outcomes."""
+
+AMBIGUOUS_REASON_CODES = frozenset(
+    {"multiple_candidates", "competing_boundary_coverage"}
+)
+"""Reason codes for :class:`CanonicalLocationResolution` AMBIGUOUS outcomes."""
+
+UNRESOLVABLE_REASON_CODES = frozenset(
+    {
+        "missing_semantic_context",
+        "missing_country_context",
+        "unknown_country",
+        "unknown_administrative_area",
+        "unknown_city",
+    }
+)
+"""Reason codes for :class:`CanonicalLocationResolution` UNRESOLVABLE outcomes."""
+
+
+class CanonicalLocationResolutionStatus(str, Enum):
+    """Deterministic canonical geography resolution outcome (PR 26B).
+
+    Resolution outcomes are first-class results, never exceptions; malformed
+    *input* remains an error raised by claim validation.
+    """
+
+    RESOLVED = "resolved"
+    AMBIGUOUS = "ambiguous"
+    UNRESOLVABLE = "unresolvable"
+
+
+class LocationCandidate(BaseModel):
+    """One equally-valued canonical Location candidate and how it matched."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    location: Location
+    matched_fields: tuple[str, ...] = ()
+
+
+class CanonicalLocationResolution(BaseModel):
+    """Bounded result algebra for claim -> canonical Location resolution.
+
+    Invariants:
+
+    - ``resolved``: exactly one canonical Location, exposed in both
+      ``location`` and the single candidate;
+    - ``ambiguous``: no selected Location and at least two deterministic
+      candidates;
+    - ``unresolvable``: no Location and no candidates, with a reason code.
+
+    ``reason_code`` is drawn from the closed PR 26B vocabularies above.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: CanonicalLocationResolutionStatus
+    location: Location | None = None
+    candidates: tuple[LocationCandidate, ...] = ()
+    reason_code: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_result_shape(self) -> "CanonicalLocationResolution":
+        """Enforce the documented invariant per outcome status."""
+        if self.status is CanonicalLocationResolutionStatus.RESOLVED:
+            if self.location is None:
+                raise ValueError("resolved resolution requires a location")
+            if len(self.candidates) != 1:
+                raise ValueError("resolved resolution requires exactly one candidate")
+            if self.candidates[0].location != self.location:
+                raise ValueError("resolved resolution candidate must equal the result")
+            if self.reason_code not in RESOLVED_REASON_CODES:
+                raise ValueError(
+                    f"reason_code must be one of {sorted(RESOLVED_REASON_CODES)}"
+                )
+        elif self.status is CanonicalLocationResolutionStatus.AMBIGUOUS:
+            if self.location is not None:
+                raise ValueError("ambiguous resolution must not select a location")
+            if len(self.candidates) < 2:
+                raise ValueError(
+                    "ambiguous resolution requires at least two candidates"
+                )
+            if self.reason_code not in AMBIGUOUS_REASON_CODES:
+                raise ValueError(
+                    f"reason_code must be one of {sorted(AMBIGUOUS_REASON_CODES)}"
+                )
+        else:
+            if self.location is not None:
+                raise ValueError("unresolvable resolution must not select a location")
+            if self.candidates:
+                raise ValueError("unresolvable resolution must not carry candidates")
+            if self.reason_code not in UNRESOLVABLE_REASON_CODES:
+                raise ValueError(
+                    f"reason_code must be one of {sorted(UNRESOLVABLE_REASON_CODES)}"
+                )
+        return self

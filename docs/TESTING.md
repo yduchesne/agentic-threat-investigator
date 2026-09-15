@@ -1929,14 +1929,14 @@ PR 26A's non-spatial foundation is covered by:
   rejection; naive/offset observation timestamp normalization; mandatory
   exact Entity/Location/Evidence observation IDs; initial pending
   GeoResolution validity; malformed status/error/claim metadata fail
-  closed; no geometry/PostGIS fields; `EntityType` unchanged (Location is
+  closed; bounded PostGIS-compatible EWKT text on Location (added by PR 26B);
+  `EntityType` unchanged (Location is
   not an Entity); deterministic identity tuple excluding parent.
 - **G26A-P01..P34** (`tests/integration/test_geoint_persistence.py`): the
   canonical real-PostgreSQL matrix — Location round-trip, parent/admin
   shape enforcement, canonical-identity reuse without version churn,
   concurrent same-identity upsert yielding one row, incompatible duplicate
-  state failing atomically, database-side shape rejection, no
-  PostGIS/geometry dependency; first observation creating EntityLocation
+  state failing atomically, database-side shape rejection; first observation creating EntityLocation
   atomically, exact provenance storage, GEOLOCATION Evidence requirement,
   Evidence subject mismatch rejection, missing Entity/Location/Evidence
   rejection, duplicate observation rejection without current-state
@@ -1989,8 +1989,67 @@ from `ati.entity_location_version_seq` — never arithmetic `target.version + 1`
   upgrade installs the four tables, four version sequences, and three
   stored functions; the downgrade removes only the PR 26A objects in
   dependency-safe order while existing Entity/Evidence (including PR 25
-  GEOLOCATION Evidence) rows survive untouched; no PostGIS extension is
-  required at any point.
+  GEOLOCATION Evidence) rows survive untouched. PR 26B supersedes the
+  26A-era ``no PostGIS`` assertion: PostGIS is now installed by migration
+  0027 and is asserted present at head (and removed on downgrade).
+
+#### PR 26B delivered testing (G26B-D/P/I/R matrices)
+
+PR 26B's deterministic geographic substrate is covered by real PostgreSQL
+**+ PostGIS** tests (PostGIS is never mocked):
+
+- **G26B-D01..D14** (`tests/unit/domain/test_geo_reference.py`,
+  `tests/unit/app/geoint/test_geo_canonicalization.py`,
+  `tests/unit/app/geoint/test_resolution.py`): reference record
+  country/admin/city contracts; deterministic UUIDv5 canonical identity
+  independent of external source record IDs; identity unchanged by
+  geometry changes; claim lat/lon pairing, finite/range validation,
+  precision cannot exceed semantic claim support, coordinates never
+  upgrade precision; resolution result discriminators/invariants
+  (resolved exactly one, ambiguous requires candidates, unresolvable
+  carries a reason); deterministic name normalization (NFC/whitespace/
+  case-preserving); EWKT canonicalization (SRID 4326 prefix, type rules,
+  WGS84 bounds, malformed coordinate rejection); fail-closed hierarchy
+  rules.
+- **G26B-I01..I12** (`tests/integration/test_geoint_reference_spatial.py`
+  plus unit-level ingestion tests in `tests/unit/app/geoint/`):
+  parent-before-child country -> admin -> city import; repeated identical
+  import is a true no-op; deterministic UUIDv5 ids identical across clean
+  databases; a pre-existing PR 26A Location is enriched (same row id, new
+  sequence version) rather than duplicated; geometry refresh allocates a
+  new version; a repeated refresh is a no-op; incompatible hierarchy and
+  malformed source geometry fail closed with no partial state;
+  transaction rollback never leaves a partial child hierarchy; aliases
+  collapse onto one canonical row; input order never changes canonical
+  state; concurrent identical reference upserts converge on one row.
+- **G26B-P01..P18** (`tests/integration/test_geoint_reference_spatial.py`
+  + migration tests): PostGIS extension availability; pgvector + PostGIS
+  coexistence; `ati.location.geometry`/`centroid` are SRID-4326
+  `geometry` (never `geography`); country polygon/admin polygon/city
+  point persistence round-trips; derived on-surface representative point
+  (`ST_PointOnSurface`, documented — never `ST_Centroid`); invalid SRID,
+  empty geometry, invalid polygon, city polygon, country/admin point,
+  and out-of-WGS84-bounds inputs rejected fail-closed; NULL spatial state
+  remains valid; the justified GiST index exists and the concrete
+  containment query is proven spatial-index eligible with EXPLAIN;
+  pre-26B Location rows migrate with NULL spatial fields; migration
+  downgrade restores the pre-26B schema without data loss and without
+  CASCADE collateral; pgvector/RAG schema survives upgrade + downgrade.
+- **G26B-R01..R18** (`tests/integration/test_geoint_reference_spatial.py`):
+  country code resolves the country; country + admin code/name resolves
+  the administrative area; country + admin + city resolves the city;
+  coordinates never upgrade precision (country-only stays country,
+  admin-only stays admin even inside a city); coordinates only
+  validate/disambiguate duplicate city names (containment
+  disambiguation); unknown country/admin/city are unresolvable outcomes;
+  duplicate city names without a discriminator are ambiguous; a semantic
+  admin discriminator resolves deterministically; containment is
+  boundary-inclusive (`ST_Covers`) and competing boundary coverage is
+  ambiguous; coordinate-less semantic claims resolve normally; no
+  nearest-city inference; candidate ordering is deterministic; hierarchy
+  and spatial containment can disagree without rewriting either;
+  resolution performs no mutation and never touches `GeoResolution`
+  (PR 26C scope).
 
 ### Domain and persistence
 
@@ -2006,15 +2065,22 @@ Cover:
 
 ### PostgreSQL/PostGIS
 
-Real-PostgreSQL integration tests cover:
+Real-PostgreSQL + PostGIS integration tests cover (PR 26B delivered):
 
-- PostGIS availability/migration;
-- canonical Location matching;
+- PostGIS availability through the normal migration path (project-owned
+  PostgreSQL 18 image ships both pgvector and PostGIS);
+- pgvector + PostGIS coexistence (HNSW/RAG suites stay green);
+- spatial Location schema (SRID 4326, type/validity/emptiness/bounds
+  rejection, round-trips, NULL spatial state);
+- canonical reference ingestion (idempotency, enrichment/version
+  semantics, concurrency, rollback atomicity);
+- canonical Location claim resolution (exact/code/name matching,
+  boundary-inclusive containment disambiguation, explicit
+  resolved/ambiguous/unresolvable outcomes);
 - hierarchy versus spatial containment;
-- geometry validity;
-- deterministic spatial predicates;
-- justified spatial-index eligibility;
-- Investigation isolation in analyst query projections.
+- justified spatial-index eligibility via EXPLAIN;
+- migration upgrade/downgrade with data preservation;
+- Investigation isolation remains covered by PR 26D analyst query tests.
 
 ### Asynchronous resolution
 

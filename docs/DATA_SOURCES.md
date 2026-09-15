@@ -19,6 +19,7 @@
 - [Structured batch sources](#structured-batch-sources)
   - [MITRE ATT&CK](#mitre-attck)
   - [CISA Known Exploited Vulnerabilities](#cisa-known-exploited-vulnerabilities)
+- [Canonical reference geography (PR 26B)](#canonical-reference-geography-pr-26b)
 - [Narrative RAG corpus](#narrative-rag-corpus)
 - [Deferred sources](#deferred-sources)
 - [Batch ingestion model](#batch-ingestion-model)
@@ -1702,6 +1703,42 @@ Use full periodic download/upsert.
 Source identifier:
 
 `urn:ati:source:cisa_kev`
+
+## Canonical reference geography (PR 26B)
+
+ATI's canonical country/administrative-area/city reference corpus is a
+documented deterministic intermediate format, the *ATI Geography Corpus*
+(NDJSON; one JSON object per line). The production parser live in
+`agentic_threat_investigator.infrastructure.sources.geography` and the
+fixtures under `tests/fixtures/geoint/` exercise exactly that parser.
+
+Upstream derivation (verified licensing):
+
+- **GeoNames** (`https://www.geonames.org/`, CC BY 4.0) provides country/
+  administrative-area/city naming, the administrative hierarchy, and city
+  coordinates. GeoNames data is redistributable with attribution under CC
+  BY 4.0; operators who download it must comply with that license and
+  https://www.geonames.org/export/ terms. ATI does not embed GeoNames
+  records in source control.
+- **Natural Earth** (`https://www.naturalearthdata.com/`, public domain) is
+  the proposed source of country/administrative boundary polygons.
+  Natural Earth is in the public domain; no attribution is required for
+  redistribution.
+
+License/attribution guidance: ATI itself only ships *synthetic* fixture
+geometry (simplified boxes with no third-party data). Operators who build a
+full corpus derive it locally from the upstream sources and import it with
+`ati-geography-import`; schema migrations never download reference data.
+The 26B fixtures and derived corpus carry no Natural Earth or GeoNames
+records, so no redistribution license is engaged by the repository.
+
+Corpus record fields: `location_type` (`country`/`administrative_area`/
+`city`), `name`, `canonical_name`, `country_code`, optional
+`admin1_code`/`admin2_code`, an optional `parent` object carrying the
+parent's own canonical identity (`location_type`, `country_code`,
+`admin1_code`, `admin2_code`, `canonical_name`), and optional
+`geometry`/`centroid` EWKT strings (`SRID=4326;...`). Malformed records
+fail closed.
 
 ## Narrative RAG corpus
 

@@ -211,6 +211,83 @@ def _compose_runner(
     )
 
 
+def geography_import_main(argv: list[str] | None = None) -> int:
+    """Import canonical reference geography from local corpus artifacts.
+
+    Reads the documented ATI Geography Corpus NDJSON format from the supplied
+    files/directories, validates the complete batch, and persists it through
+    the canonical reference ingestion service in one transaction. Reference
+    data is loaded separately from schema migration: ``alembic upgrade``
+    never downloads or imports reference geography.
+    """
+    from pathlib import Path
+
+    from agentic_threat_investigator.app.geoint.reference_ingestion import (
+        ReferenceIngestionService,
+    )
+    from agentic_threat_investigator.infrastructure.sources.geography import (
+        JsonlGeographyCorpus,
+        ReferenceCorpusError,
+    )
+
+    parser = argparse.ArgumentParser(prog="ati-geography-import")
+    parser.add_argument(
+        "sources",
+        nargs="+",
+        help="reference corpus artifacts or directories (ATI Geography Corpus NDJSON)",
+    )
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO)
+    settings = get_settings()
+
+    paths: list[Path] = []
+    for source in args.sources:
+        path = Path(source)
+        if path.is_dir():
+            paths.extend(sorted(path.glob("*.jsonl")))
+        else:
+            paths.append(path)
+    if not paths:
+        LOGGER.error("geography import refused: no corpus artifacts found")
+        return 2
+    try:
+        records = JsonlGeographyCorpus().read_paths(paths)
+    except ReferenceCorpusError:
+        LOGGER.exception("reference corpus parse failed")
+        return 1
+    if not records:
+        LOGGER.error("geography import refused: corpus is empty")
+        return 2
+
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+
+    async def run() -> int:
+        try:
+            stats = await ReferenceIngestionService(uow_factory).ingest(records)
+        except Exception:
+            LOGGER.exception(
+                "reference import failed; the batch transaction rolled back "
+                "and no partial hierarchy was committed"
+            )
+            return 1
+        finally:
+            await engine.dispose()
+        LOGGER.info(
+            "reference import complete created=%d enriched=%d unchanged=%d "
+            "conflicts=%d rejected=%d",
+            stats.created,
+            stats.enriched,
+            stats.unchanged,
+            stats.conflicts,
+            stats.rejected,
+        )
+        return 0
+
+    return asyncio.run(run())
+
+
 def fake_data_bootstrap_main(argv: list[str] | None = None) -> int:
     """Run the one-shot fake-data bootstrap and exit with its status code."""
     parser = argparse.ArgumentParser(prog="ati-fake-data-bootstrap")

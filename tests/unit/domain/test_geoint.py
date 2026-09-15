@@ -294,19 +294,31 @@ def test_gd12_malformed_status_and_metadata_fail_closed() -> None:
 # --- G26A-D13/D14: scope guards ---------------------------------------------
 
 
-def test_gd13_models_contain_no_geometry_or_postgis_fields() -> None:
-    """G26A-D13 GEOINT models carry no geometry/PostGIS fields."""
-    assert not hasattr(Location, "geometry")
-    assert not hasattr(Location, "centroid")
-    assert not hasattr(EntityLocation, "geometry")
-    assert not hasattr(EntityLocationObservation, "geometry")
-    assert not hasattr(GeoResolution, "geometry")
-    for model in (Location, EntityLocation, EntityLocationObservation, GeoResolution):
+def test_gd13_spatial_state_is_bounded_text_not_postgis_objects() -> None:
+    """Location geometry/centroid are bounded text; no ORM/PostGIS objects leak.
+
+    PR 26A pinned the non-spatial Location contract; PR 26B intentionally
+    adds the spatial reference surface as bounded PostGIS-compatible EWKT
+    strings, while EntityLocation/EntityLocationObservation/GeoResolution
+    remain spatial-free and the domain never exposes SQLAlchemy/PostGIS
+    objects.
+    """
+    assert "geometry" in set(Location.model_fields)
+    assert "centroid" in set(Location.model_fields)
+    assert Location.model_fields["geometry"].annotation == (str | None)
+    assert Location.model_fields["centroid"].annotation == (str | None)
+    for model in (EntityLocation, EntityLocationObservation, GeoResolution):
         fields = set(model.model_fields)
         assert "geometry" not in fields
         assert "centroid" not in fields
         assert "latitude" not in fields
         assert "longitude" not in fields
+    geometry_model = Location.model_json_schema()
+    assert "geometry" in geometry_model["properties"]
+    assert geometry_model["properties"]["geometry"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "null"},
+    ]
 
 
 def test_gd14_no_location_entity_type_added() -> None:

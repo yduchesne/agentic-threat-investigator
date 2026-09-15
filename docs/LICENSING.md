@@ -162,6 +162,12 @@ Compliance handling for ATI:
 
 ## Data bundling
 
+Canonical reference geography (PR 26B): ATI ships only synthetic fixture
+geometry; the full reference corpus is derived locally by the operator from
+GeoNames (CC BY 4.0, attribution required) and Natural Earth (public domain)
+and imported with `ati-geography-import`. See `DATA_SOURCES.md`
+“Canonical reference geography (PR 26B)” for licensing details.
+
 Third-party datasets are generally not committed or bundled with ATI.
 
 ATI distributes:

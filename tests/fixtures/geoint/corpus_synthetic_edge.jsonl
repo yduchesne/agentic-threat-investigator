@@ -1,0 +1,14 @@
+# ATI Geography Corpus v1 -- synthetic spatial edge-case fixture (PR 26B).
+#
+# Fully synthetic country "EdgeLand" (ZZ) with two administrative areas whose
+# polygons overlap in a sliver and two same-canonical-name cities under them.
+# Exercises deterministic boundary/containment semantics deterministically:
+# Alpha square lon[-10,10] x lat[-10,10], Beta square lon[0,20] x lat[-10,10],
+# so the strip [0,10] is covered by both, lon<0 is Alpha-only, and lon>10 is
+# Beta-only. Boundary points use longitude exactly 0 or -10 (ST_Covers is
+# boundary-inclusive; ST_Contains would return false).
+{"location_type": "country", "name": "EdgeLand", "canonical_name": "EdgeLand", "country_code": "ZZ"}
+{"location_type": "administrative_area", "name": "Alpha District", "canonical_name": "Alpha District", "country_code": "ZZ", "admin1_code": "ALPHA", "parent": {"location_type": "country", "country_code": "ZZ", "canonical_name": "EdgeLand"}, "geometry": "SRID=4326;POLYGON((-10 -10,10 -10,10 10,-10 10,-10 -10))"}
+{"location_type": "administrative_area", "name": "Beta District", "canonical_name": "Beta District", "country_code": "ZZ", "admin1_code": "BETA", "parent": {"location_type": "country", "country_code": "ZZ", "canonical_name": "EdgeLand"}, "geometry": "SRID=4326;POLYGON((0 -10,20 -10,20 10,0 10,0 -10))"}
+{"location_type": "city", "name": "Springfield", "canonical_name": "Springfield", "country_code": "ZZ", "admin1_code": "ALPHA", "parent": {"location_type": "administrative_area", "country_code": "ZZ", "admin1_code": "ALPHA", "canonical_name": "Alpha District"}, "geometry": "SRID=4326;POINT(-5 5)"}
+{"location_type": "city", "name": "Springfield", "canonical_name": "Springfield", "country_code": "ZZ", "admin1_code": "BETA", "parent": {"location_type": "administrative_area", "country_code": "ZZ", "admin1_code": "BETA", "canonical_name": "Beta District"}, "geometry": "SRID=4326;POINT(15 5)"}

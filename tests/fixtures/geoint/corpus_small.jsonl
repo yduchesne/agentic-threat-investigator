@@ -1,0 +1,24 @@
+# ATI Geography Corpus v1 -- representative small fixture (PR 26B).
+#
+# Deterministic offline subset exercising the production corpus parser in the
+# documented NDJSON format: countries, administrative areas, cities, the
+# parent-before-child hierarchy, polygon/point spatial state, a
+# coordinate-less record, and a duplicate-name city pair used for
+# ambiguity/disambiguation tests. Geometry is synthetic (simplified boxes),
+# never Natural Earth data; see docs/DATA_SOURCES.md for the upstream
+# derivation and licensing.
+{"location_type": "country", "name": "United States", "canonical_name": "United States", "country_code": "US"}
+{"location_type": "country", "name": "Canada", "canonical_name": "Canada", "country_code": "CA"}
+{"location_type": "administrative_area", "name": "Washington", "canonical_name": "Washington", "country_code": "US", "admin1_code": "WA", "parent": {"location_type": "country", "country_code": "US", "canonical_name": "United States"}, "geometry": "SRID=4326;POLYGON((-125 45,-116 45,-116 49.5,-125 49.5,-125 45))"}
+{"location_type": "administrative_area", "name": "Texas", "canonical_name": "Texas", "country_code": "US", "admin1_code": "TX", "parent": {"location_type": "country", "country_code": "US", "canonical_name": "United States"}, "geometry": "SRID=4326;POLYGON((-106.6 25,-93.6 25,-93.6 36.5,-106.6 36.5,-106.6 25))"}
+{"location_type": "administrative_area", "name": "British Columbia", "canonical_name": "British Columbia", "country_code": "CA", "admin1_code": "BC", "parent": {"location_type": "country", "country_code": "CA", "canonical_name": "Canada"}, "geometry": "SRID=4326;POLYGON((-127 48.5,-119 48.5,-119 60.5,-127 60.5,-127 48.5))"}
+{"location_type": "city", "name": "Seattle", "canonical_name": "Seattle", "country_code": "US", "admin1_code": "WA", "parent": {"location_type": "administrative_area", "country_code": "US", "admin1_code": "WA", "canonical_name": "Washington"}, "geometry": "SRID=4326;POINT(-122.3321 47.6062)"}
+{"location_type": "city", "name": "Dallas", "canonical_name": "Dallas", "country_code": "US", "admin1_code": "TX", "parent": {"location_type": "administrative_area", "country_code": "US", "admin1_code": "TX", "canonical_name": "Texas"}, "geometry": "SRID=4326;POINT(-96.79 32.78)"}
+{"location_type": "city", "name": "Vancouver", "canonical_name": "Vancouver", "country_code": "CA", "admin1_code": "BC", "parent": {"location_type": "administrative_area", "country_code": "CA", "admin1_code": "BC", "canonical_name": "British Columbia"}, "geometry": "SRID=4326;POINT(-123.1 49.25)"}
+# Duplicate-name city case: one canonical city display name under two
+# different administrative parents (used by the ambiguity/disambiguation
+# matrix; the canonical identities differ by admin1_code).
+{"location_type": "city", "name": "Springfield", "canonical_name": "Springfield", "country_code": "US", "admin1_code": "WA", "parent": {"location_type": "administrative_area", "country_code": "US", "admin1_code": "WA", "canonical_name": "Washington"}, "geometry": "SRID=4326;POINT(-123.2 47.4)"}
+{"location_type": "city", "name": "Springfield", "canonical_name": "Springfield", "country_code": "US", "admin1_code": "TX", "parent": {"location_type": "administrative_area", "country_code": "US", "admin1_code": "TX", "canonical_name": "Texas"}, "geometry": "SRID=4326;POINT(-97.5 33.4)"}
+# Coordinate-less record: a valid canonical city with no spatial state.
+{"location_type": "city", "name": "Auburn", "canonical_name": "Auburn", "country_code": "US", "admin1_code": "WA", "parent": {"location_type": "administrative_area", "country_code": "US", "admin1_code": "WA", "canonical_name": "Washington"}}

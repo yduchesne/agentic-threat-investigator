@@ -1,15 +1,19 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Thin PostgreSQL adapters for the PR 26A GEOINT persistence contracts.
+"""Thin PostgreSQL adapters for the PR 26 GEOINT persistence contracts.
 
-Every GEOINT mutation routes through the versioned SQL API v0021 stored
-functions (``ati.upsert_location``, ``ati.append_entity_location_observation``,
-``ati.create_geo_resolution``); PostgreSQL owns canonical identity,
-provenance validation, version allocation, and current-state reconciliation.
+Every GEOINT mutation routes through versioned SQL API stored functions:
+PR 26A (``ati.upsert_location``, ``ati.append_entity_location_observation``,
+``ati.create_geo_resolution``, SQL API v0021/v0022) and the PR 26B canonical
+reference/spatial path (``ati.upsert_reference_location``, SQL API v0023).
+PostgreSQL owns canonical identity, spatial validity, provenance validation,
+version allocation, reference enrichment, and current-state reconciliation.
 These adapters never commit, never allocate versions, and never reconcile
 EntityLocation in Python. Reads use direct SELECT only for the approved
-exact/bounded lookups.
+exact/bounded lookups; PR 26B spatial reads select ``ST_AsEWKT`` so the
+domain sees the documented EWKT text representation, never PostGIS objects.
 """
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -17,6 +21,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.persistence.repositories import (
+    CanonicalLocationConflictError,
     EntityLocationObservationDuplicateError,
     EntityLocationObservationRepository,
     EntityLocationRepository,
@@ -28,8 +33,13 @@ from agentic_threat_investigator.app.persistence.repositories import (
     GeoLocationNotFoundError,
     GeoResolutionDuplicateStateError,
     GeoResolutionRepository,
+    InvalidReferenceGeometryError,
+    InvalidReferenceHierarchyError,
     LocationIdentityConflictError,
+    LocationReferenceOutcome,
     LocationRepository,
+    LocationWriteResult,
+    UnsupportedReferenceRecordError,
 )
 from agentic_threat_investigator.domain.geoint import (
     EntityLocation,
@@ -51,30 +61,50 @@ from .errors import (
     SQLSTATE_GEOLOCATION_LOCATION_NOT_FOUND,
     SQLSTATE_GEOLOCATION_OBSERVATION_DUPLICATE,
     SQLSTATE_GEOLOCATION_RESOLUTION_DUPLICATE_STATE,
+    SQLSTATE_REFERENCE_CANONICAL_CONFLICT,
+    SQLSTATE_REFERENCE_GEOMETRY_INVALID,
+    SQLSTATE_REFERENCE_HIERARCHY_INVALID,
+    SQLSTATE_REFERENCE_RECORD_UNSUPPORTED,
     sqlstate,
 )
 from .models import (
     EntityLocationObservationRow,
     EntityLocationRow,
     GeoResolutionRow,
-    LocationRow,
+)
+
+# Explicit read projection for canonical Locations. PR 26B spatial columns are
+# never mapped into SQLAlchemy rows; reads select ST_AsEWKT so the domain
+# receives the documented EWKT text representation (SRID=4326;...) without
+# leaking PostGIS/psycopg objects, and NULL spatial state round-trips as NULL.
+_LOCATION_SELECT = text(
+    """
+    SELECT id, location_type, name, canonical_name, country_code,
+           admin1_code, admin2_code, parent_location_id, version,
+           created_at, updated_at,
+           ST_AsEWKT(geometry) AS geometry_ewkt,
+           ST_AsEWKT(centroid) AS centroid_ewkt
+    FROM ati.location
+    """
 )
 
 
-def _location(row: LocationRow) -> Location:
-    """Map a Location row to its domain model."""
+def _location(row: Any) -> Location:
+    """Map an EWKT-aware Location row to its domain model."""
     return Location(
-        id=row.id,
-        type=LocationType(row.location_type),
-        name=row.name,
-        canonical_name=row.canonical_name,
-        country_code=row.country_code,
-        admin1_code=row.admin1_code,
-        admin2_code=row.admin2_code,
-        parent_location_id=row.parent_location_id,
-        version=row.version,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
+        id=row["id"],
+        type=LocationType(row["location_type"]),
+        name=row["name"],
+        canonical_name=row["canonical_name"],
+        country_code=row["country_code"],
+        admin1_code=row["admin1_code"],
+        admin2_code=row["admin2_code"],
+        parent_location_id=row["parent_location_id"],
+        geometry=row["geometry_ewkt"],
+        centroid=row["centroid_ewkt"],
+        version=row["version"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 
@@ -143,16 +173,41 @@ def _map_location_error(error: DBAPIError) -> None:
     raise
 
 
+def _map_reference_error(error: DBAPIError) -> None:
+    """Map a SQL API v0023 SQLSTATE to the typed reference error, if known."""
+    state = sqlstate(error)
+    detail = getattr(getattr(error, "orig", None), "diag", None)
+    message = getattr(detail, "message_primary", None)
+    if state == SQLSTATE_REFERENCE_GEOMETRY_INVALID:
+        raise InvalidReferenceGeometryError(message) from error
+    if state == SQLSTATE_REFERENCE_HIERARCHY_INVALID:
+        raise InvalidReferenceHierarchyError(message) from error
+    if state == SQLSTATE_REFERENCE_CANONICAL_CONFLICT:
+        raise CanonicalLocationConflictError() from error
+    if state == SQLSTATE_REFERENCE_RECORD_UNSUPPORTED:
+        raise UnsupportedReferenceRecordError(message) from error
+    raise
+
+
 class PostgresLocationRepository(LocationRepository):
     """Persist canonical Locations through the active transaction."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def _fetch(
+        self, where_sql: str, where_params: dict[str, object]
+    ) -> Location | None:
+        """Select one EWKT-aware canonical Location row with the given predicate."""
+        result = await self.session.execute(
+            text(f"{_LOCATION_SELECT.text} WHERE {where_sql} LIMIT 1"), where_params
+        )
+        row = result.mappings().first()
+        return None if row is None else _location(row)
+
     async def get_by_id(self, location_id: UUID) -> Location | None:
         """Return the canonical Location with the given identifier, if any."""
-        row = await self.session.get(LocationRow, location_id)
-        return None if row is None else _location(row)
+        return await self._fetch("id = :location_id", {"location_id": location_id})
 
     async def get_by_identity(
         self,
@@ -163,29 +218,36 @@ class PostgresLocationRepository(LocationRepository):
         admin2_code: str | None,
         canonical_name: str,
     ) -> Location | None:
-        """Find a canonical Location by its approved identity tuple."""
-        result = await self.session.execute(
-            select(LocationRow).where(
-                LocationRow.location_type == location_type,
-                LocationRow.country_code == country_code,
-                LocationRow.admin1_code.is_(None)
-                if admin1_code is None
-                else LocationRow.admin1_code == admin1_code,
-                LocationRow.admin2_code.is_(None)
-                if admin2_code is None
-                else LocationRow.admin2_code == admin2_code,
-                LocationRow.canonical_name == canonical_name,
-            )
+        """Find a canonical Location by its approved identity tuple.
+
+        Null admin components are normalized through the same COALESCE
+        expression the canonical identity unique index uses, so callers never
+        distinguish empty-string from NULL themselves.
+        """
+        return await self._fetch(
+            """
+            location_type = :location_type
+              AND country_code = :country_code
+              AND COALESCE(admin1_code, '') = COALESCE(:admin1_code, '')
+              AND COALESCE(admin2_code, '') = COALESCE(:admin2_code, '')
+              AND canonical_name = :canonical_name
+            """,
+            {
+                "location_type": location_type,
+                "country_code": country_code,
+                "admin1_code": admin1_code,
+                "admin2_code": admin2_code,
+                "canonical_name": canonical_name,
+            },
         )
-        row = result.scalar_one_or_none()
-        return None if row is None else _location(row)
 
     async def upsert(self, location: Location) -> Location:
         """Create or reuse the canonical Location through the SQL function.
 
         The database owns canonical-identity resolution, race-safe creation,
         and version allocation; this adapter performs no Python-side version
-        allocation and never self-commits.
+        allocation and never self-commits. The PR 26A path carries no spatial
+        state.
         """
         try:
             result = await self.session.execute(
@@ -209,10 +271,54 @@ class PostgresLocationRepository(LocationRepository):
         except DBAPIError as error:
             _map_location_error(error)
         written_id, _version, _created = result.one()
-        row = await self.session.get(LocationRow, written_id)
-        if row is None:  # pragma: no cover - the function and transaction are atomic
+        fetched = await self.get_by_id(written_id)
+        if (
+            fetched is None
+        ):  # pragma: no cover - the function and transaction are atomic
             raise RuntimeError("location write returned no row")
-        return _location(row)
+        return fetched
+
+    async def upsert_reference(self, location: Location) -> LocationWriteResult:
+        """Create/enrich/reuse one canonical reference/spatial Location (PR 26B).
+
+        Routes exclusively through ``ati.upsert_reference_location`` (SQL API
+        v0023), serializing the EWKT spatial state carried by the domain
+        ``Location``. The database owns spatial validity, reference
+        enrichment, version allocation, and race safety; the adapter maps the
+        deterministic outcome and typed SQLSTATEs and never commits.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, outcome FROM ati.upsert_reference_location(
+                        :id, :location_type, :name, :canonical_name,
+                        :country_code, :admin1_code, :admin2_code,
+                        :parent_location_id, :geometry, :centroid)
+                """),
+                {
+                    "id": location.id,
+                    "location_type": location.type.value,
+                    "name": location.name,
+                    "canonical_name": location.canonical_name,
+                    "country_code": location.country_code,
+                    "admin1_code": location.admin1_code,
+                    "admin2_code": location.admin2_code,
+                    "parent_location_id": location.parent_location_id,
+                    "geometry": location.geometry,
+                    "centroid": location.centroid,
+                },
+            )
+        except DBAPIError as error:
+            _map_reference_error(error)
+        written_id, _version, outcome_value = result.one()
+        fetched = await self.get_by_id(written_id)
+        if (
+            fetched is None
+        ):  # pragma: no cover - the function and transaction are atomic
+            raise RuntimeError("reference location write returned no row")
+        return LocationWriteResult(
+            location=fetched, outcome=LocationReferenceOutcome(outcome_value)
+        )
 
 
 class PostgresEntityLocationRepository(EntityLocationRepository):

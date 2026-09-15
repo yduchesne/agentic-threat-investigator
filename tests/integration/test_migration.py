@@ -85,6 +85,9 @@ EXPECTED_FUNCTIONS = {
     "upsert_location",
     "append_entity_location_observation",
     "create_geo_resolution",
+    "upsert_reference_location",
+    "reference_geometry_parse",
+    "reference_centroid_parse",
 }
 
 
@@ -149,8 +152,8 @@ async def test_upgrade_head_installs_expected_schema() -> None:
     assert sequences >= EXPECTED_SEQUENCES
     assert functions >= EXPECTED_FUNCTIONS
     # The migration search path installs extensions into the ati schema so all
-    # database objects, including pgvector support, live there.
-    assert {"vector", "pgcrypto"} <= extensions
+    # database objects — including pgvector and PostGIS (PR 26B) — live there.
+    assert {"vector", "pgcrypto", "postgis"} <= extensions
 
 
 @pytest.mark.asyncio
@@ -1076,7 +1079,8 @@ async def test_geoint_migration_downgrade_and_re_upgrade() -> None:
                 }
         finally:
             await engine.dispose()
-        assert "postgis" not in extensions
+        # PR 26B: head installs PostGIS alongside pgvector/pgcrypto.
+        assert "postgis" in extensions
 
         command.downgrade(alembic_cfg, "0024_api_async_foundation")
         tables, sequences, functions = await geoint_state()
@@ -1124,5 +1128,187 @@ async def test_geoint_migration_downgrade_and_re_upgrade() -> None:
             await engine.dispose()
         assert entity_count == existing_entity_count
         assert evidence_count == existing_evidence_count
+    finally:
+        command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_geoint_spatial_migration_upgrade_and_downgrade() -> None:
+    """PR 26B spatial migration round-trip preserves pre-26B GEOINT state.
+
+    G26B-P16: upgrading a 0026 database that already holds Location rows
+    leaves every existing row intact with NULL spatial fields (no invented
+    geometry). G26B-P17: downgrading to 0026 removes the spatial columns,
+    index, and write functions and drops the PostGIS extension (introduced by
+    PR 26B) without CASCADE collateral. G26B-P18: the pgvector/RAG schema
+    survives the upgrade+downgrade cycle.
+    """
+    alembic_cfg = Config("alembic.ini")
+
+    async def spatial_columns() -> set[str]:
+        """Return the PR 26B spatial column names on ati.location."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                return {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_schema = 'ati' AND table_name = 'location'
+                              AND column_name IN ('geometry', 'centroid')
+                        """)
+                    )
+                }
+        finally:
+            await engine.dispose()
+
+    async def extensions_present() -> set[str]:
+        """Return the extensions installed in the ati schema."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                return {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
+                            SELECT e.extname FROM pg_extension e
+                            JOIN pg_namespace n ON n.oid = e.extnamespace
+                            WHERE n.nspname = 'ati'
+                        """)
+                    )
+                }
+        finally:
+            await engine.dispose()
+
+    try:
+        command.downgrade(alembic_cfg, "0026_geoint_version_allocation")
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                # Pre-26B GEOINT state: one canonical Location (plus the
+                # v0021 API) and one geo_resolution/observation pair.
+                await connection.execute(
+                    text("""
+                        DO $$
+                        DECLARE v_inv uuid; v_entity uuid; v_ev uuid; v_loc uuid;
+                        BEGIN
+                          INSERT INTO ati.investigation
+                            (status, trigger_type, objective, budget,
+                             operational_state, version, created_at, updated_at,
+                             started_at)
+                          VALUES ('running', 'manual', 'seed', '{}'::jsonb,
+                                  '{}'::jsonb, 1, now(), now(), now())
+                          RETURNING id INTO v_inv;
+                          INSERT INTO ati.entity
+                            (entity_type, canonical_value, display_name,
+                             attributes, content_hash, version, created_at,
+                             updated_at)
+                          VALUES ('ip_address', '203.0.113.9', '203.0.113.9',
+                                  '{}'::jsonb, NULL, 1, now(), now())
+                          RETURNING id INTO v_entity;
+                          INSERT INTO ati.evidence
+                            (id, investigation_id, evidence_type,
+                             subject_entity_id, source, retrieved_at, facts,
+                             raw_payload, version)
+                          VALUES (gen_random_uuid(), v_inv,
+                                  'urn:ati:evidence:geolocation', v_entity,
+                                  'urn:ati:source:dbip', now(), '{}'::jsonb,
+                                  NULL, 1)
+                          RETURNING id INTO v_ev;
+                          SELECT id INTO v_loc FROM ati.upsert_location(
+                            NULL, 'country', 'United States', 'United States',
+                            'US', NULL, NULL, NULL);
+                          PERFORM ati.append_entity_location_observation(
+                            gen_random_uuid(), v_entity, v_loc, v_ev, 'country',
+                            NULL, now(), now(), 'seed_method');
+                          PERFORM ati.create_geo_resolution(
+                            gen_random_uuid(), v_entity, v_ev);
+                        END
+                        $$;
+                    """)
+                )
+                await connection.commit()
+        finally:
+            await engine.dispose()
+
+        command.upgrade(alembic_cfg, "head")
+        assert {"geometry", "centroid"} <= await spatial_columns()
+        assert "postgis" in await extensions_present()
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                geometry_values = {
+                    row[0]
+                    for row in await connection.execute(
+                        text("SELECT geometry IS NULL FROM ati.location")
+                    )
+                }
+                row_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.location")
+                )
+                observation_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.entity_location_observation")
+                )
+                resolution_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.geo_resolution")
+                )
+                chunk_columns = {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_schema = 'ati'
+                              AND table_name = 'document_chunk'
+                              AND column_name = 'embedding'
+                        """)
+                    )
+                }
+        finally:
+            await engine.dispose()
+        # G26B-P16: pre-26B rows survive with NULL spatial fields.
+        assert row_count == 1 and geometry_values == {True}
+        assert observation_count == 1 and resolution_count == 1
+        assert chunk_columns == {"embedding"}
+
+        command.downgrade(alembic_cfg, "0026_geoint_version_allocation")
+        assert await spatial_columns() == set()
+        assert "postgis" not in await extensions_present()
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                functions = {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
+                            SELECT routine_name FROM information_schema.routines
+                            WHERE routine_schema = 'ati'
+                        """)
+                    )
+                }
+                indexes = {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
+                            SELECT indexname FROM pg_indexes
+                            WHERE schemaname = 'ati' AND tablename = 'location'
+                        """)
+                    )
+                }
+                row_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.location")
+                )
+                extensions = await extensions_present()
+        finally:
+            await engine.dispose()
+        # G26B-P17: PR 26B objects gone; no unrelated rows lost.
+        assert not {"upsert_reference_location", "reference_geometry_parse"} & functions
+        assert "location_geometry_gist_idx" not in indexes
+        assert "location_resolution_name_idx" not in indexes
+        assert row_count == 1
+        # G26B-P18: pgvector/RAG remains available after the downgrade.
+        assert "vector" in extensions
+        assert "postgis" not in extensions
     finally:
         command.upgrade(alembic_cfg, "head")

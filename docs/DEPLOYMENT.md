@@ -46,7 +46,8 @@ Host
  |    +-- ati-geo-resolver        # planned PR 26C
  |    +-- ati-migrate (one-shot)
  |    +-- ati-fake-data-bootstrap # fake mode, one-shot
- |    +-- ati-postgres            # PostgreSQL + pgvector; PostGIS after PR 26B
+ |    +-- ati-postgres            # project PostgreSQL 18 + pgvector + PostGIS
+             # (docker/postgres/Dockerfile, PR 26B)
  |
  +-- ATI_DATA_DIR
       +-- postgres/data
@@ -131,11 +132,22 @@ may erase/reinitialize development data but must require explicit intent.
 
 ## PostgreSQL
 
-Use a pinned PostgreSQL image with a compatible pinned pgvector release.
+Use the project-owned pinned PostgreSQL 18 image built from
+`docker/postgres/Dockerfile` (`ati-postgres:0.1.0`, based on
+`docker.io/pgvector/pgvector:0.8.1-pg18` = `postgres:18-bookworm` + pgvector
+0.8.1 + the PostgreSQL 18 PostGIS package from the same PGDG repository).
+
+The image contains **both pgvector and PostGIS**; compose service `postgres`
+builds it, so no manual extension setup is required when using the supported
+compose deployment. The `postgis` extension is created by the Alembic
+migration (`CREATE EXTENSION IF NOT EXISTS postgis`) and is therefore also
+established on an already-existing ATI database whose server has PostGIS
+installed; `alembic upgrade` never downloads or imports reference data.
 
 Never use floating `latest` tags.
 
-The exact supported image/version is frozen during implementation after compatibility verification.
+The exact supported image/version is frozen during implementation after
+compatibility verification.
 
 PostgreSQL has a health check.
 
@@ -146,6 +158,23 @@ ATI_POSTGRES_HOST_PORT=54320
 ```
 
 to avoid collisions with host PostgreSQL.
+
+## Canonical reference geography import (PR 26B)
+
+Reference geography is data, not schema: it is loaded separately from
+migrations by an explicit operator action once the ATI Geography Corpus
+artifacts are available (see `DATA_SOURCES.md` for the upstream derivation
+and licensing):
+
+```bash
+uv run ati-geography-import path/to/corpus.jsonl path/to/dir
+```
+
+The import validates the complete batch, processes deterministically in
+parent-before-child order, derives canonical UUIDv5 identities, and commits
+one atomic transaction (any rejected record rolls back the whole batch).
+Re-running the same corpus is a true no-op; a refresh that changes approved
+reference geometry enriches the same canonical row with a new version.
 
 ## Database migrations
 

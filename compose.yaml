@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: docker.io/pgvector/pgvector:0.8.1-pg18
+    # Project-owned PostgreSQL 18 image: pgvector baseline + PostGIS (PR 26B).
+    build: ./docker/postgres
+    image: ati-postgres:0.1.0
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ati}
       POSTGRES_USER: ${POSTGRES_USER:-ati}
