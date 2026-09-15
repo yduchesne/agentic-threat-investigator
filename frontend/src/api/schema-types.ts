@@ -18,9 +18,12 @@ import type {
   EvidenceType,
   FindingResponse,
   FindingSupportResponse,
+  GeoPrecision,
   HistoryOperation,
   HistoryRecordResponse,
   IndicatorRequest,
+  InvestigationGeolocationCollectionResponse,
+  InvestigationGeolocationResponse,
   InvestigationResponse,
   InvestigationStatus,
   InvestigationTimelineEventType,
@@ -154,6 +157,15 @@ export type TimelineEventTypeName = InvestigationTimelineEventType;
 
 /** One allowlisted public history row (PR 24C). */
 export type HistoryRecord = HistoryRecordResponse;
+
+/** One current approximate geolocation context item for one IP entity (PR 25A). */
+export type InvestigationGeolocation = InvestigationGeolocationResponse;
+
+/** One bounded Investigation geolocation projection (PR 25A). */
+export type InvestigationGeolocationCollection = InvestigationGeolocationCollectionResponse;
+
+/** The exact v0.1 geolocation precision vocabulary (PR 25A). */
+export type GeoPrecisionName = GeoPrecision;
 
 /** One bounded cursor page of history rows (PR 24C). */
 export type HistoryPage = PageResponseHistoryRecordResponse;

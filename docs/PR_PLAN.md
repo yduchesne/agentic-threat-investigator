@@ -1201,6 +1201,83 @@ Consume the PR 25A endpoint and deliver the first-class Investigation Map fronte
 
 PR 25B does not add spatial queries, PostGIS, clustering-driven inference, geographic scoring, cross-Investigation maps, historical movement, or broader GEOINT capabilities.
 
+Delivered (PR 25B implementation summary):
+
+- **Dependencies:** `leaflet@1.9`, `react-leaflet@5.0` (peer-compatible with
+the repository's React 19 without forced peers), `@types/leaflet`; no Leaflet
+plugin; lockfile committed; Leaflet CSS bundled locally and marker assets
+inlined by Vite (no production marker 404s, no CDN); standard
+credential-free OSM raster tiles with required attribution centralized in
+`frontend/src/geolocation/map-config.ts` (no CSP change needed — Nginx ships
+no CSP);
+- **Transport/server state:** generated PR 25A aliases in `schema-types.ts`
+(`InvestigationGeolocation`, `InvestigationGeolocationCollection`,
+`GeoPrecisionName`); `geolocation-api.ts` calls the exact
+`/investigations/:id/geolocations` path through the centralized `apiGet`
+with no query string/cursor/limit and the AbortSignal propagated;
+Investigation-scoped query key (`["investigations", id,
+"geolocations"]`) with the 30s analytical stale time and no polling;
+- **Pure view model** (`geolocation-map-model.ts`, no React/Leaflet
+objects): defensive plottable-coordinate policy (finite in-range numbers
+only; no clamping/centroid/geocoding/jitter), mappable/unlocated
+partition preserving server order without mutating transport objects,
+truncation propagated exactly, comma-joined location labels, neutral
+precision/provider label keys, and the deterministic viewport policy
+(single-point center at fixed zoom 8; multi-point `fitBounds` over every
+mappable returned point with `[24,24]` padding and a zoom cap ≤ 8);
+- **Route/tab:** `/investigations/:id/map` inside `InvestigationWorkspace`
+as a primary route-owned tab (`tabs.map`) in the order Overview | Evidence |
+Relationships | Map | Research | Timeline;
+- **Page** (`InvestigationMapPage.tsx`): translated loading, error+Retry(
+no Evidence fallback, no invented markers), honest empty and
+coordinate-less states, explicit mixed-state counts, persistent visible
+approximation disclaimer, persistent truncated warning (server bound never
+bypassed), the Leaflet surface, the always-available non-map table of all
+returned items, and exact Evidence provenance through the shared PR 24C
+DetailDrawer/EvidenceDetail/`useEvidenceDetail` surface (exact
+`evidence_id`, Investigation-scoped, no IP lookup/list scan/History
+substitution); the Map URL state remains only the route itself;
+- **Leaflet** (`InvestigationMap.tsx`): React-Leaflet-owned lifecycle
+(StrictMode-clean, no manual map construction, no repeating timers),
+`MapContainer`/`TileLayer`/`Marker`/`Popup`/`useMap`, one neutral marker
+per mappable item (no risk/confidence/severity styling), popup with exact
+IP + available city/region/country + precision/provider + distinct
+observed/retrieved timestamps + exact `View Evidence` action, no
+clustering/heat map/circle/polygon;
+- **Coverage:** pure model B-M01..B-M10, labels B-L01..B-L05, viewport
+B-V01..B-V07, API/query B-Q01..B-Q08, route page B-U01..B-U17,
+Leaflet wrapper B-F01..B-F08 (rendering boundary mocked via
+`src/test/react-leaflet-mock.tsx`; no live tile requests), provenance
+B-P01..B-P06, accessibility B-A11Y01..B-A11Y08 — all passing under the
+repo frontend gate (`api:check`, strict typecheck, ESLint, Vitest,
+production build);
+- **E24 real-stack browser spec** (`frontend/e2e/zz-geolocation.spec.ts`)
+implements the principal Map workflow path (built frontend + Nginx + real
+FastAPI + real PostgreSQL + durable worker, real PR 25A endpoint, no
+geolocation interception, no dependence on live tile success).
+
+> **E24 data prerequisite STOP (open for PR 25B closure):** the PR 23D fake
+> world persists no mappable `GEOLOCATION` Evidence today: the fake catalog's
+> provider set (google_public_dns, rdap, ipinfo_lite, abuseipdb, threatfox,
+> urlhaus) contains no DB-IP source, and `DbIpCityLiteProvider` is composed
+> only when `dbip_city_lite_artifact_uri` is configured. Every fake-world
+> scenario (F01 benign, F02 malicious delivery, F03 relationship evolution,
+> F04 research-required, F05 insufficient-evidence) therefore yields an
+> honest empty geolocation projection, so E24's marker/plotted assertions
+> cannot pass yet and the spec records this STOP and skips precisely rather
+> than asserting a false pass. The smallest deterministic real-stack seeding
+> option — preferred: an existing deterministic E2E fixture/bootstrap seam
+> — does not exist; the viable options are (a) a harness-only seeding CLI
+> that persists a normal PR 25A-compatible `GEOLOCATION` Evidence row
+> through the normal repositories (test-fixture-only, does not change
+> product fake-mode data for manual local use), or (b) adding a
+> deterministic `urn:ati:source:dbip_city_lite` provider response to the
+> packaged fake world (changes product fake mode). Per PR 25B §53 that
+> decision is deliberately not taken inside 25B; PR 25B is therefore not
+> marked `[DONE]` until E24 passes with that seeding in place. No PR 25A
+> contract deficiency was discovered; nothing blocked the frontend feature
+> itself.
+
 ### PR 25C — Map analyst workflow integration and PR 25 closure
 
 Complete the map as an analyst exploration surface without turning geography into an inference engine:

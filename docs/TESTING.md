@@ -1638,6 +1638,82 @@ plus the vertical slices):
   frontend generated API types (`frontend/src/api/schema.generated.ts`,
   verified with `npm run api:check`).
 
+### Investigation Map / Leaflet visualization (PR 25B)
+
+PR 25B is the frontend Map feature over the PR 25A bounded projection
+(`frontend/src/geolocation/`). The rendering boundary mock
+(`frontend/src/test/react-leaflet-mock.tsx`) replaces the react-leaflet
+surface with inert labeled elements so component tests assert Leaflet
+semantics (one marker per mappable item, popup content, tile attribution,
+and the deterministic viewport commands) without a layout engine or live
+tile requests; TanStack Query and the centralized API client are never
+mocked. Coverage:
+
+- **pure map view model** (`geolocation-map-model.test.ts`, B-M01..B-M10):
+  empty collection; valid paired coordinates; null/null context retained;
+  mixed partition; server order preserved inside groups; truncation
+  propagated exactly; partial pairs, NaN/infinity and out-of-range
+  coordinates never plotted (inclusive boundary values are); input
+  transport objects never mutated;
+- **location labels** (`geolocation-labels.test.ts`, B-L01..B-L05):
+  city/region/country join; region+country without punctuation artifacts;
+  country only; no-label yields the explicit unavailable signal; external
+  strings remain escaped text;
+- **viewport policy** (`geolocation-viewport.test.ts`, B-V01..B-V07): zero
+  points -> no fit command; one point -> exact center at the conservative
+  fixed zoom 8; two/many points -> bounds over every mappable returned
+  coordinate; multi-point max zoom cap; coordinate-less and malformed
+  defensive items ignored for bounds;
+- **API/key/query seam** (`geolocation-queries.test.tsx`, B-Q01..B-Q08):
+  exact PR 25A path with no query string/cursor/limit; centralized
+  `apiGet`; caller AbortSignal cancellation reaches the fetch; query key
+  contains the Investigation ID (distinct per Investigation); one bounded
+  fetch with no polling; errors remain typed `ApiError`;
+- **route page states** (`InvestigationMapPage.test.tsx`, B-U01..B-U17):
+  Map is a primary route-owned tab (Overview | Evidence | Relationships |
+  Map | Research | Timeline) selected on the route; translated loading
+  state; API failure + Retry with no fallback; honest empty state with no
+  invented marker; one/multiple mappable items reach the map and the
+  non-map list; unlocated-only state; mixed state with explicit counts;
+  truncated warning (server bound never bypassed); persistent visible
+  approximation disclaimer; exact precision enum -> translated neutral
+  labels; known provider friendly label and unknown provider escaped
+  text; observed/retrieved timestamps stay distinct; the exact Evidence
+  drawer opens from the row action; the page is built from the
+  geolocation endpoint and never from Evidence pagination; hostile
+  external values cannot inject markup; the global `FAKE DATA` marker
+  remains visible;
+- **Leaflet wrapper** (`InvestigationMap.test.tsx`, B-F01..B-F08): one
+  Marker per mappable item and none for unlocated items; popup carries
+  the exact item and Evidence action; TileLayer carries the centralized
+  OSM attribution/URL (no secret-bearing URL); no fabricated precision
+  circle; no clustering plugin/component; unmount leaves no
+  application-owned timers/listeners; single-point `setView` and
+  multi-point `fitBounds` wiring matches the pure viewport policy;
+- **provenance** (`InvestigationMapPage.test.tsx`, B-P01..B-P06): marker
+  popup and non-map row both drive the exact PR 25A `evidence_id` (no
+  lookup by IP, no Evidence list scan, Investigation-scoped request, and
+  Close returning to the intact Map view) through the shared
+  DetailDrawer/EvidenceDetail PR 24C surface;
+- **accessibility** (`InvestigationMapPage.test.tsx`, B-A11Y01..B-A11Y08):
+  translated heading; visible disclaimer; labeled keyboard-reachable
+  non-map table; native Evidence buttons; no hover-only information;
+  unlocated items inspectable without the map; labeled map region; tile
+  attribution present.
+
+Real-stack browser coverage **E24** (`frontend/e2e/zz-geolocation.spec.ts`)
+implements the PR 25B §52 path (built frontend + Nginx + real FastAPI +
+real PostgreSQL + the durable worker over the fake world, real PR 25A
+endpoint, no geolocation interception, no correctness dependency on live
+tile delivery). **E24 is currently skipped by its own data-prerequisite
+guard**: the PR 23D fake world persists no mappable `GEOLOCATION` Evidence
+(the catalog has no DB-IP source; `DbIpCityLiteProvider` is composed only
+when `dbip_city_lite_artifact_uri` is configured), so a completed
+fake-world Investigation honestly returns an empty geolocation projection.
+The recorded PR 25B STOP (docs/PR_PLAN.md PR 25B) names a deterministic
+real-stack seeding option; until that lands, no marker assertion is claimed
+as browser-passing. Unit/component coverage above does pass.
+
 ### Relationship Evolution and graph (PR 24E)
 
 Backend test coverage for the entity-centric observation query:

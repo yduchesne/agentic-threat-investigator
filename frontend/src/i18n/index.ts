@@ -14,6 +14,7 @@ import { initReactI18next } from "react-i18next";
 import auth from "./locales/en/auth.json";
 import common from "./locales/en/common.json";
 import evidence from "./locales/en/evidence.json";
+import geolocation from "./locales/en/geolocation.json";
 import history from "./locales/en/history.json";
 import investigations from "./locales/en/investigations.json";
 import overview from "./locales/en/overview.json";
@@ -28,7 +29,7 @@ import timeline from "./locales/en/timeline.json";
 /** The v0.1 shipped locale. */
 export const DEFAULT_LOCALE = "en";
 
-/** The PR 24A + PR 24B + PR 24C + PR 24D + PR 24E translation namespaces. */
+/** The PR 24A + PR 24B + PR 24C + PR 24D + PR 24E + PR 25B translation namespaces. */
 export const NAMESPACES = [
   "common",
   "auth",
@@ -37,6 +38,7 @@ export const NAMESPACES = [
   "overview",
   "report",
   "evidence",
+  "geolocation",
   "relationships",
   "relationshipEvolution",
   "research",
@@ -54,6 +56,7 @@ const RESOURCES = {
     overview,
     report,
     evidence,
+    geolocation,
     relationships,
     relationshipEvolution,
     research,

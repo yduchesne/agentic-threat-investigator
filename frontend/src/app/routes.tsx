@@ -14,6 +14,7 @@
 //     -> /investigations/:id/relationships/observations
 //     -> /investigations/:id/relationships/evolution   (24E; entity_id
 //        query param required, view=evolution|graph)
+//     -> /investigations/:id/map                Investigation Map (25B)
 //     -> /investigations/:id/research
 //     -> /investigations/:id/timeline
 //     -> /investigations/:id/history           secondary (24C)
@@ -40,6 +41,7 @@ import { HistoryPage } from "../history/HistoryPage";
 import { RelationshipsPage } from "../relationships/RelationshipsPage";
 import { RelationshipObservationsPage } from "../relationships/RelationshipObservationsPage";
 import { RelationshipEvolutionPage } from "../relationship-evolution/RelationshipEvolutionPage";
+import { InvestigationMapPage } from "../geolocation/InvestigationMapPage";
 import { ResearchPage } from "../research/ResearchPage";
 import { TimelinePage } from "../timeline/TimelinePage";
 
@@ -87,6 +89,7 @@ export function createAppRoutes(): RouteObject[] {
                   Component: RelationshipEvolutionPage,
                 },
                 { path: "research", Component: ResearchPage },
+                { path: "map", Component: InvestigationMapPage },
                 { path: "timeline", Component: TimelinePage },
                 { path: "history", Component: HistoryPage },
               ],
