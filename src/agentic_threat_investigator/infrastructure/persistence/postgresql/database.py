@@ -25,6 +25,12 @@ from agentic_threat_investigator.config import Settings
 from .assessment_repositories import PostgresAssessmentRepository
 from .audit_repositories import PostgresAuditEventRepository
 from .composites import register_batch_composites
+from .geoint_repositories import (
+    PostgresEntityLocationObservationRepository,
+    PostgresEntityLocationRepository,
+    PostgresGeoResolutionRepository,
+    PostgresLocationRepository,
+)
 from .identity_repositories import (
     PostgresCredentialRepository,
     PostgresSessionRepository,
@@ -85,6 +91,12 @@ class PostgresUnitOfWork(UnitOfWork):
         self.timeline_events = cast(InvestigationTimelineRepository, None)
         self.investigation_jobs = cast(PostgresInvestigationJobRepository, None)
         self.idempotency = cast(PostgresIdempotencyRepository, None)
+        self.locations = cast(PostgresLocationRepository, None)
+        self.entity_locations = cast(PostgresEntityLocationRepository, None)
+        self.entity_location_observations = cast(
+            PostgresEntityLocationObservationRepository, None
+        )
+        self.geo_resolutions = cast(PostgresGeoResolutionRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -123,6 +135,12 @@ class PostgresUnitOfWork(UnitOfWork):
         self.timeline_events = PostgresInvestigationTimelineRepository(self.session)
         self.investigation_jobs = PostgresInvestigationJobRepository(self.session)
         self.idempotency = PostgresIdempotencyRepository(self.session)
+        self.locations = PostgresLocationRepository(self.session)
+        self.entity_locations = PostgresEntityLocationRepository(self.session)
+        self.entity_location_observations = PostgresEntityLocationObservationRepository(
+            self.session
+        )
+        self.geo_resolutions = PostgresGeoResolutionRepository(self.session)
         return self
 
     async def __aexit__(
@@ -167,6 +185,12 @@ class PostgresUnitOfWork(UnitOfWork):
             self.timeline_events = cast(InvestigationTimelineRepository, None)
             self.investigation_jobs = cast(PostgresInvestigationJobRepository, None)
             self.idempotency = cast(PostgresIdempotencyRepository, None)
+            self.locations = cast(PostgresLocationRepository, None)
+            self.entity_locations = cast(PostgresEntityLocationRepository, None)
+            self.entity_location_observations = cast(
+                PostgresEntityLocationObservationRepository, None
+            )
+            self.geo_resolutions = cast(PostgresGeoResolutionRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

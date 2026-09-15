@@ -34,7 +34,7 @@
 
 PostgreSQL is ATI's authoritative datastore. pgvector provides vector search for the RAG corpus.
 
-PostGIS is not required in v0.1. PR 25 did not require PostGIS; PR 26 introduces canonical geographic reference data and bounded spatial queries, which make PostGIS part of the v0.1 architecture (see [PostGIS and GEOINT (PR 26)](#postgis-and-geoint-pr-26)).
+PR 25 does not require PostGIS. PR 26B introduces PostGIS for canonical geography/spatial operations; PR 26A itself remains non-spatial (see [PostGIS and GEOINT (PR 26)](#postgis-and-geoint-pr-26)).
 
 ## Persistence categories
 
@@ -44,13 +44,15 @@ Insert-only:
 
 - Evidence
 - RelationshipObservation
+- EntityLocationObservation
 - AuditEvent
 - InvestigationTimelineEvent
 
 Normal application code exposes no deletion operation for these records.
 
 RelationshipObservation rows are themselves immutable historical observations
-and are not duplicated into `domain_object_history`.
+and are not duplicated into `domain_object_history`. EntityLocationObservation
+follows the same precedent (see [PostGIS and GEOINT (PR 26)](#postgis-and-geoint-pr-26)).
 
 ### Stable identities
 
@@ -58,6 +60,7 @@ Upserted by canonical identity:
 
 - Entity
 - Relationship
+- Location
 
 Entity uniqueness:
 
@@ -66,6 +69,13 @@ Entity uniqueness:
 Relationship uniqueness:
 
 `(source_entity_id, relationship_type_urn, target_entity_id)`
+
+Location uniqueness (PR 26A):
+
+`(location_type, country_code, admin1_code, admin2_code, canonical_name)`
+with null components normalized by the unique COALESCE expression index
+`location_canonical_identity_idx`; `parent_location_id` is reference
+hierarchy and is not part of identity.
 
 Relationship writes route through the versioned SQL API: `ati.upsert_relationship`
 resolves the stable three-part identity, returns observed state unchanged for reuse
@@ -148,6 +158,12 @@ Updates are permitted with auditing where material:
 - Finding workflow metadata.
 - User/session state.
 - Job state.
+- GeoResolution lifecycle (PR 26C); PR 26A persists initial PENDING rows and reads only.
+
+`EntityLocation` current materialized state is updated exclusively by the
+versioned stored-function reconciliation inside
+`ati.append_entity_location_observation`; application code has no direct
+mutation path.
 
 ## Soft deletion
 
@@ -595,7 +611,7 @@ Any adapter that persists a `SourceRecord` must recompute `source_record_content
 
 Alembic orchestrates schema migrations.
 
-Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. The shipped v0008 file is never edited in place.
+Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions. The shipped v0008 file is never edited in place.
 
 Rules:
 
@@ -607,73 +623,135 @@ Rules:
 
 ## PostGIS and GEOINT (PR 26)
 
-These are planned PR 26 contracts. The previous statement that PostGIS is not required in v0.1 is superseded by PR 26: PR 25 did not require PostGIS; PR 26 does, because ATI now introduces canonical geographic reference data and bounded spatial queries.
+PR 25 does not require PostGIS. PR 26B introduces PostGIS for canonical
+geography/spatial operations; PR 26A itself remains non-spatial. The GEOINT
+persistence foundation delivered by PR 26A (migration 0025, SQL API v0021)
+is deliberately free of PostGIS, geometry columns, centroids, and spatial
+predicates.
 
-Planned PR 26 persistence categories:
+### Delivered PR 26A persistence
+
+Four tables with database-owned versions and the versioned SQL API v0021
+(`migrations/sql/ati/v0021/geoint_persistence.sql`):
 
 - `Location`: canonical geographic/reference identity;
 - `EntityLocation`: current materialized Entity-to-Location association;
 - `EntityLocationObservation`: immutable append-only geographic observation/provenance;
-- `GeoResolution`: mutable durable asynchronous work/state.
+- `GeoResolution`: durable operational geographic-enrichment work.
 
-### Location
+`Location` is not an ATI Entity and never participates in
+Relationship/RelationshipObservation records. Canonical hierarchy and
+geometric containment are separate concerns.
 
-The initial Location model is bounded to country, administrative area, and city. Canonical hierarchy and geometric containment are separate concerns.
+### Location (delivered)
 
-Canonicalization must preserve supported precision. A country-only claim remains country-level; reference data must not manufacture a city-level assertion.
+`ati.location` is bounded to country, administrative area, and city
+(`location_type` vocabulary `country`/`administrative_area`/`city`). Canonical
+identity is the deterministic tuple `(location_type, country_code, admin1_code,
+admin2_code, canonical_name)` with null components normalized through a unique
+COALESCE expression index (`location_canonical_identity_idx`);
+`parent_location_id` is reference hierarchy and is **not** part of identity.
+Type-specific shape checks enforce country (no parent/admin codes),
+administrative-area (parent + admin1 required), and city (parent + admin1
+required, admin2 optional) constraints, plus the two-letter uppercase
+`country_code` shape and bounded nonblank textual fields.
 
-### EntityLocationObservation
+`ati.upsert_location(...)` creates once or reuses the existing canonical row
+(reuse is a semantic no-op with no version/history churn), rejects
+incompatible display name or parent for the same canonical identity (`U26A7`),
+and allocates the version from `ati.location_version_seq`. Location rows are
+not duplicated into `domain_object_history`.
 
-`EntityLocationObservation` follows the same fundamental historical principle as `RelationshipObservation`: the observation row is itself history and is not duplicated merely to create a second historical representation.
+Canonicalization must preserve supported precision. A country-only claim
+remains country-level; reference data must not manufacture a city-level
+assertion.
 
-Each observation explicitly preserves its `entity_id` and `location_id`; historical observations do not derive Location through current `EntityLocation`.
+### EntityLocationObservation (delivered)
 
-### EntityLocation
+`ati.entity_location_observation` follows the same fundamental historical
+principle as `RelationshipObservation`: the observation row is itself history
+and is **not** duplicated into `domain_object_history`. It is insert-only and
+immutable (no update/delete path). Each observation explicitly preserves its
+exact `entity_id`, `location_id`, and `evidence_id`; historical observations
+do not derive Location through current `EntityLocation`, and Investigation
+scope is derived through the exact Evidence provenance chain (there is no
+`investigation_id` column).
 
-`EntityLocation` is current materialized state. Reconciliation is database-owned and versioned. It does not replace immutable observations.
+`ati.append_entity_location_observation(...)` validates in one transaction
+that the Entity exists and is visible, the Location exists, the Evidence
+exists, the Evidence type is `GEOLOCATION`, and the Evidence subject is the
+exact Entity (typed SQLSTATEs `U26A1`-`U26A5`); rejects a duplicate
+observation identity (`U26A6`); appends exactly one immutable observation
+with a database-allocated version; and reconciles the current
+`EntityLocation` atomically. The bounded per-Entity historical read is
+backed by `entity_location_observation_entity_retrieved_idx`
+(`(entity_id, retrieved_at DESC, id ASC)`).
 
-### GeoResolution
+### EntityLocation (delivered)
 
-`GeoResolution` is the durable operational work record and conceptual queue for geographic enrichment. It is distinct from Evidence and from successful immutable geographic observations.
+`ati.entity_location` is current materialized state, database-maintained from
+observations. Reconciliation is database-owned and versioned; it does not
+replace immutable observations. The deterministic currentness ordering is
+`(COALESCE(observed_at, retrieved_at), observation_id)` with the greater pair
+winning: a later observation advances the current Location/precision/latest
+observation and `last_observed_at`, an older observation is still appended as
+history but never rewinds current state, and the earliest
+`first_observed_at` is preserved. Exactly one row exists per Entity in v0.1,
+and `latest_observation_id` points at the observation that currently
+determines the materialized association (enforced by a foreign key to
+`entity_location_observation(id)`). Application code has no direct mutation
+path.
 
-The detailed PR 26C plan must finalize the exact lifecycle, retry eligibility, lease semantics, stale-claim recovery, error vocabulary, and version rules.
+### GeoResolution (delivered: initial persistence only)
+
+`ati.geo_resolution` is the durable operational work record and conceptual
+queue for geographic enrichment. It is distinct from Evidence and from
+successful immutable geographic observations. `ati.create_geo_resolution(...)`
+persists the initial PENDING row (`status = 'pending'`, `attempt_count = 0`,
+no claim/lease/outcome metadata) after validating the Entity/Evidence binding
+and the GEOLOCATION Evidence type; the unique `(entity_id, evidence_id)`
+constraint makes creation race-safe, and an exact duplicate pair reuses the
+existing record unchanged only while it still has the initial pending shape
+(`U26A8` otherwise). `next_attempt_at` may be null in 26A.
+
+The detailed PR 26C plan must finalize the exact lifecycle, retry
+eligibility, lease semantics, stale-claim recovery, error vocabulary, and
+version rules. PR 26A deliberately adds no claim/lease/retry/completion
+function and no second queue table.
 
 ### PR 26 stored-function ownership
 
-All GEOINT mutation and reconciliation operations are versioned PostgreSQL stored-function APIs. This includes:
+All PR 26A GEOINT mutations and current-state reconciliation go through the
+versioned SQL API v0021 stored functions (`ati.upsert_location`,
+`ati.append_entity_location_observation`, `ati.create_geo_resolution`).
+Python repositories are thin callers and never issue ad-hoc GEOINT DML.
 
-- creating/reconciling resolution work;
-- claiming bounded work;
-- lease/attempt transitions;
-- stale-claim recovery;
-- successful completion;
-- canonical Location reconciliation where mutation is required;
-- appending EntityLocationObservation;
-- reconciling current EntityLocation;
-- failure/unresolvable transitions;
-- optimistic/version checks and idempotency.
+Bounded read/query services may use direct SQL in the same manner as ATI's
+existing dedicated query services; PostGIS-capable spatial projections are
+PR 26B+ scope.
 
-Python must not implement these transitions through ad-hoc DML.
+### Work claiming and deadlock/lock-duration rule (PR 26C)
 
-Bounded read/query services may use direct SQL/PostGIS in the same manner as ATI's existing dedicated query services.
-
-### Work claiming and deadlock/lock-duration rule
-
-Claiming may use `FOR UPDATE SKIP LOCKED` internally, but only in a short transaction:
+Claiming may use `FOR UPDATE SKIP LOCKED` internally, but only in a short
+transaction:
 
 ```text
 claim rows -> persist lease/ownership -> commit
 ```
 
 No row lock or transaction is retained while geographic resolution executes.
+Completion occurs in a separate short transaction. Contended records are
+processed in deterministic ordering. Leases---not long-lived database
+locks---coordinate workers. None of this exists in PR 26A.
 
-Completion occurs in a separate short transaction. Contended records are processed in deterministic ordering. Leases---not long-lived database locks---coordinate workers.
+### Spatial indexing (PR 26B+)
 
-### Spatial indexing
+Spatial indexes are introduced only for concrete PR 26 query/canonicalization
+paths. Tests should verify query-plan/index eligibility where useful without
+asserting unstable planner cost estimates.
 
-Spatial indexes are introduced only for concrete PR 26 query/canonicalization paths. Tests should verify query-plan/index eligibility where useful without asserting unstable planner cost estimates.
-
-PostGIS owns spatial computation. Spatial results do not mutate ATI cyber relationships merely because entities share or approach a geographic location.
+PostGIS owns spatial computation. Spatial results do not mutate ATI cyber
+relationships merely because entities share or approach a geographic location.
 
 ## RAG persistence
 

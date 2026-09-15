@@ -1195,7 +1195,7 @@ v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are 
 
 The Investigation Map read data (PR 25A) is a read projection derived exclusively from already-persisted immutable `GEOLOCATION` Evidence joined to its canonical IP entity: the API never opens the DB-IP MMDB, never invokes a provider, performs no network I/O, and introduces no new geolocation persistence, spatial materialization, or map-snapshot storage. One deterministic latest observation per IP entity is selected by PostgreSQL and returned as one bounded server-owned collection with explicit truncation, retaining the exact Evidence ID as provenance.
 
-PostGIS is not required until ATI needs actual spatial queries. PR 25 did not require PostGIS; PR 26 introduces canonical geographic reference data and bounded spatial queries, which make PostGIS part of the v0.1 architecture (see [GEOINT architecture (PR 26)](#geoint-architecture-pr-26)).
+PR 25 does not require PostGIS. PR 26B introduces PostGIS for canonical geography/spatial operations; PR 26A itself remains non-spatial (see [GEOINT architecture (PR 26)](#geoint-architecture-pr-26)).
 
 ## Investigation Map frontend (PR 25B)
 
@@ -1219,7 +1219,8 @@ PR 25C completes the Map as a bounded analyst exploration surface without turnin
 
 ## GEOINT architecture (PR 26)
 
-This section describes **planned PR 26 architecture**, not already-delivered capability.
+This section distinguishes **delivered PR 26A** from the planned PR 26B-G
+architecture.
 
 PR 25 remains the delivered v0.1 geolocation presentation path:
 
@@ -1230,6 +1231,31 @@ DB-IP provider
   -> Investigation Map
 ```
 
+PR 26A (delivered) establishes the non-spatial GEOINT persistence
+foundation:
+
+```text
+Location / EntityLocation / EntityLocationObservation / GeoResolution
+        delivered persistence foundation
+```
+
+PR 26A delivers:
+
+- `Location` as canonical geographic/reference identity (country,
+  administrative area, city) with a deterministic database-enforced
+  canonical identity tuple and no geometry;
+- immutable append-only `EntityLocationObservation` with exact Entity +
+  Location + Evidence provenance;
+- database-maintained current `EntityLocation` with deterministic
+  reconciliation (`COALESCE(observed_at, retrieved_at)`, observation UUID
+  tie-break);
+- `GeoResolution` durable operational work with initial PENDING persistence
+  only;
+- the versioned SQL API v0021 stored functions, thin repositories, and
+  UnitOfWork integration;
+- no PostGIS, no resolver, no claim/lease/retry, no GEOINT API, and no
+  agentic reasoning.
+
 PR 26 adds a richer, derived GEOINT subsystem without replacing that path:
 
 ```text
@@ -1239,7 +1265,7 @@ Persisted Evidence / geographic claim
    GeoResolution
  durable operational work/state
         |
-        | short stored-function claim transaction
+        | short stored-function claim transaction        (PR 26C)
         | lease persisted; transaction committed
         v
  Geo Resolver process
@@ -1247,7 +1273,7 @@ Persisted Evidence / geographic claim
         |
         v
  canonical Location resolution
- PostgreSQL + PostGIS
+ PostgreSQL + PostGIS                                       (PR 26B)
         |
         +--> EntityLocationObservation
         |    immutable historical/provenance observation
@@ -1270,15 +1296,15 @@ The initial canonical Location vocabulary is deliberately bounded to:
 
 `EntityLocationObservation` is immutable and append-only. It explicitly preserves the Entity, exact canonical Location resolved/claimed at that time, supporting Evidence/provenance, precision, and relevant observation/retrieval/resolution timestamps. Historical location observations do not inherit their Location through mutable current state.
 
-`EntityLocation` is the current materialized association. It references the most specific canonical Location actually supported by the underlying claim. Canonicalization must never manufacture additional precision.
+`EntityLocation` is the current materialized association, maintained by the database from observations under the deterministic ordering `(COALESCE(observed_at, retrieved_at), observation_id)`. It references the most specific canonical Location actually supported by the underlying claim. Canonicalization must never manufacture additional precision.
 
-`GeoResolution` is mutable operational state, not geographic evidence. It owns the asynchronous lifecycle such as pending, processing, resolved, unresolvable, and failed, together with attempts, lease/claim metadata, outcome metadata, and version/audit state.
+`GeoResolution` is mutable operational state, not geographic evidence. PR 26A persists the initial PENDING row; the asynchronous lifecycle (processing, resolved, unresolvable, failed, attempts, lease/claim metadata, outcome metadata, version/audit state) is PR 26C scope.
 
 ### PostgreSQL ownership and asynchronous resolution
 
-PR 26 preserves ATI's database architecture:
+PR 26A delivers the database-ownership model for GEOINT persistence:
 
-> All GEOINT mutations, reconciliation, current-state maintenance, versioning, asynchronous work claiming, lease/retry transitions, stale-claim recovery, and completion are performed through versioned PostgreSQL stored functions. Python repositories/processes remain thin callers.
+> All PR 26A GEOINT mutations, current-state reconciliation, and versioning are performed through versioned PostgreSQL stored functions (SQL API v0021). Python repositories/processes remain thin callers. Asynchronous work claiming, lease/retry transitions, stale-claim recovery, and completion are PR 26C scope but follow the same stored-function ownership model.
 
 Purpose-built bounded read/query services, including PostGIS spatial projections, may execute SQL directly under ATI's existing query-service pattern.
 
@@ -1307,7 +1333,7 @@ Leases coordinate asynchronous processing; long-held row locks do not. Expired c
 
 ### PostGIS responsibility
 
-PR 26 is the point at which PostGIS becomes part of the v0.1 architecture because ATI now requires actual spatial queries and canonical geographic operations.
+PR 26B is the point at which PostGIS becomes part of the v0.1 architecture because ATI then requires actual spatial queries and canonical geographic operations. PR 26A is deliberately non-spatial.
 
 PostGIS may answer deterministic spatial questions such as containment, intersection, distance, proximity, and bounding-box queries. It does not infer threat semantics.
 
@@ -1351,7 +1377,7 @@ Agent output must preserve exact geographic observation/Evidence support. Common
 
 ### v0.1 persistence taxonomy update
 
-For PR 26 planning, extend the persistence categories conceptually:
+With PR 26A delivered, the persistence categories are:
 
 - immutable observations: Evidence, RelationshipObservation, **EntityLocationObservation**, AuditEvent, InvestigationTimelineEvent;
 - stable/reference identities: Entity, Relationship, **Location**;
@@ -1359,6 +1385,10 @@ For PR 26 planning, extend the persistence categories conceptually:
 - mutable operational state: Investigation, jobs, users/sessions, **GeoResolution**;
 - versioned outputs: Assessment, InvestigationReport;
 - replaceable derived indexing: document chunks/embeddings.
+
+`GeoResolution` remains read-only from the application perspective in PR 26A
+(initial PENDING persistence only); its lifecycle transitions are PR 26C
+scope.
 
 Monitor is no longer a v0.1 persistence requirement. Monitor/scheduler/snapshots/diffs/Findings administration is deferred to v0.2 and tracked in `PR_PLAN_V02.md`.
 

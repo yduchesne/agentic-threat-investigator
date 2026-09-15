@@ -1,0 +1,1134 @@
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+"""PR 26A GEOINT persistence matrix on real PostgreSQL (G26A-P01..P34).
+
+Proves the delivered foundation: canonical Location identity, immutable
+EntityLocationObservation provenance, database-maintained EntityLocation
+current state with deterministic reconciliation, and initial pending
+GeoResolution work — all through the versioned SQL API v0021 with typed
+SQLSTATE mapping and thin repositories.
+"""
+
+import asyncio
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from agentic_threat_investigator.app.persistence.repositories import (
+    EntityLocationObservationDuplicateError,
+    GeoEntityNotFoundError,
+    GeoEvidenceNotFoundError,
+    GeoEvidenceSubjectMismatchError,
+    GeoEvidenceTypeError,
+    GeoInvalidInputError,
+    GeoLocationNotFoundError,
+    LocationIdentityConflictError,
+)
+from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import (
+    EntityRef,
+    Evidence,
+    EvidenceType,
+)
+from agentic_threat_investigator.domain.geoint import (
+    EntityLocationObservation,
+    GeoResolution,
+    GeoResolutionStatus,
+    Location,
+    LocationPrecision,
+    LocationType,
+)
+from agentic_threat_investigator.domain.investigation import (
+    InvestigationState,
+    InvestigationStatus,
+    InvestigationTriggerType,
+    default_investigation_budget,
+)
+from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
+    PostgresUnitOfWork,
+)
+
+pytestmark = pytest.mark.integration
+
+_RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+
+
+def location_factory(
+    *,
+    location_type: LocationType = LocationType.COUNTRY,
+    name: str = "United States",
+    canonical_name: str = "United States",
+    country_code: str = "US",
+    admin1_code: str | None = None,
+    admin2_code: str | None = None,
+    parent_location_id: UUID | None = None,
+    id: UUID | None = None,
+) -> Location:
+    """Build a deterministic valid Location fixture."""
+    return Location(
+        id=id,
+        type=location_type,
+        name=name,
+        canonical_name=canonical_name,
+        country_code=country_code,
+        admin1_code=admin1_code,
+        admin2_code=admin2_code,
+        parent_location_id=parent_location_id,
+    )
+
+
+async def seed_geolocation_evidence(
+    uow: PostgresUnitOfWork,
+) -> tuple[UUID, UUID, UUID, UUID]:
+    """Create one investigation, an IP Entity, and GEOLOCATION Evidence.
+
+    Returns (investigation_id, ip_entity_id, domain_entity_id, evidence_id).
+    The domain Entity exists for the Evidence-subject-mismatch tests.
+    """
+    investigation_id = uuid4()
+    await uow.investigations.create(
+        InvestigationState(
+            investigation_id=investigation_id,
+            status=InvestigationStatus.RUNNING,
+            trigger_type=InvestigationTriggerType.MANUAL,
+            root_entity_ids=[uuid4()],
+            objective="Assess the indicator.",
+            budget=default_investigation_budget(),
+            started_at=_RETRIEVED_AT,
+        )
+    )
+    ip_entity = await uow.entities.upsert(
+        Entity(type=EntityType.IP_ADDRESS, value="203.0.113.7")
+    )
+    domain_entity = await uow.entities.upsert(
+        Entity(type=EntityType.DOMAIN, value="example.com")
+    )
+    assert ip_entity.id is not None and domain_entity.id is not None
+    evidence = await uow.evidence.insert(
+        Evidence(
+            investigation_id=investigation_id,
+            type=EvidenceType.GEOLOCATION,
+            subject=EntityRef(
+                id=ip_entity.id, type=EntityType.IP_ADDRESS, value="203.0.113.7"
+            ),
+            source="urn:ati:source:dbip",
+            retrieved_at=_RETRIEVED_AT,
+            facts={"country_code": "US", "city": "Example City"},
+        )
+    )
+    assert evidence.id is not None
+    return investigation_id, ip_entity.id, domain_entity.id, evidence.id
+
+
+def observation_factory(
+    *,
+    id: UUID | None = None,
+    entity_id: UUID,
+    location_id: UUID,
+    evidence_id: UUID,
+    precision: LocationPrecision = LocationPrecision.COUNTRY,
+    retrieved_at: datetime = _RETRIEVED_AT,
+    observed_at: datetime | None = None,
+    resolution_method: str = "test_method",
+) -> EntityLocationObservation:
+    """Build a deterministic immutable observation fixture."""
+    return EntityLocationObservation(
+        id=id or uuid4(),
+        entity_id=entity_id,
+        location_id=location_id,
+        evidence_id=evidence_id,
+        precision=precision,
+        observed_at=observed_at,
+        retrieved_at=retrieved_at,
+        resolved_at=retrieved_at,
+        resolution_method=resolution_method,
+    )
+
+
+async def table_count(uow: PostgresUnitOfWork, table: str) -> int:
+    """Count every row of one application table in the active UoW."""
+    assert uow.session is not None
+    result = await uow.session.execute(text(f"SELECT count(*) FROM ati.{table}"))
+    return int(result.scalar_one())
+
+
+# --------------------------------------------------------------------------
+# Location matrix (G26A-P01..P08)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gp01_country_location_round_trips(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P01 a country Location persists and round-trips authoritatively."""
+    async with uow_factory() as uow:
+        country = location_factory()
+        persisted = await uow.locations.upsert(country)
+        assert persisted.id is not None
+        assert persisted.version is not None
+        assert persisted.created_at is not None and persisted.updated_at is not None
+        assert persisted.type is LocationType.COUNTRY
+        assert persisted.country_code == "US"
+        assert persisted.parent_location_id is None
+        fetched = await uow.locations.get_by_id(persisted.id)
+        assert fetched == persisted
+
+
+@pytest.mark.asyncio
+async def test_gp02_administrative_area_parent_and_admin1_enforced(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P02 an administrative-area Location requires parent + admin1."""
+    async with uow_factory() as uow:
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        area = await uow.locations.upsert(
+            location_factory(
+                location_type=LocationType.ADMINISTRATIVE_AREA,
+                name="California",
+                canonical_name="California",
+                admin1_code="CA",
+                parent_location_id=country.id,
+            )
+        )
+        assert area.id is not None and area.admin1_code == "CA"
+        assert area.parent_location_id == country.id
+        # The shape constraint is also enforced database-side for direct SQL.
+        assert uow.session is not None
+        with pytest.raises(IntegrityError):
+            await uow.session.execute(
+                text("""
+                    INSERT INTO ati.location (
+                        location_type, name, canonical_name, country_code,
+                        version)
+                    VALUES ('administrative_area', 'Broken', 'Broken', 'US', 1)
+                """)
+            )
+
+
+@pytest.mark.asyncio
+async def test_gp03_city_parent_and_admin1_enforced(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P03 a city Location requires parent + admin1; admin2 stays optional."""
+    async with uow_factory() as uow:
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        area = await uow.locations.upsert(
+            location_factory(
+                location_type=LocationType.ADMINISTRATIVE_AREA,
+                name="California",
+                canonical_name="California",
+                admin1_code="CA",
+                parent_location_id=country.id,
+            )
+        )
+        assert area.id is not None
+        city = await uow.locations.upsert(
+            location_factory(
+                location_type=LocationType.CITY,
+                name="San Francisco",
+                canonical_name="San Francisco",
+                admin1_code="CA",
+                admin2_code="075",
+                parent_location_id=area.id,
+            )
+        )
+        assert city.id is not None
+        assert city.admin2_code == "075"
+        city_without_admin2 = await uow.locations.upsert(
+            location_factory(
+                location_type=LocationType.CITY,
+                name="Oakland",
+                canonical_name="Oakland",
+                admin1_code="CA",
+                parent_location_id=area.id,
+            )
+        )
+        assert city_without_admin2.id is not None
+        assert city_without_admin2.admin2_code is None
+
+
+@pytest.mark.asyncio
+async def test_gp04_same_canonical_identity_reuses_without_version_churn(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P04 the same canonical identity reuses one Location, no version churn."""
+    async with uow_factory() as uow:
+        first = await uow.locations.upsert(location_factory())
+        second = await uow.locations.upsert(location_factory())
+        assert first.id == second.id
+        assert first.version == second.version
+        assert await table_count(uow, "location") == 1
+
+
+@pytest.mark.asyncio
+async def test_gp05_concurrent_same_identity_upsert_yields_one_row(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P05 concurrent same-identity upserts produce one canonical row."""
+
+    async def _upsert() -> Location:
+        """Upsert the canonical Location in an independent committed UoW."""
+        async with uow_factory() as uow:
+            return await uow.locations.upsert(location_factory())
+
+    created_a, created_b = await asyncio.gather(_upsert(), _upsert())
+    assert created_a.id == created_b.id
+    assert created_a.id is not None
+    async with uow_factory() as uow:
+        assert await table_count(uow, "location") == 1
+
+
+@pytest.mark.asyncio
+async def test_gp06_incompatible_duplicate_canonical_state_fails_atomically(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P06 incompatible state for one canonical identity fails atomically."""
+    async with uow_factory() as uow:
+        await uow.locations.upsert(location_factory())
+    async with uow_factory() as uow:
+        with pytest.raises(LocationIdentityConflictError):
+            await uow.locations.upsert(
+                location_factory(name="USA", canonical_name="United States")
+            )
+    async with uow_factory() as uow:
+        # No second row and no version churn on the existing row.
+        assert await table_count(uow, "location") == 1
+        current = await uow.locations.get_by_identity(
+            location_type="country",
+            country_code="US",
+            admin1_code=None,
+            admin2_code=None,
+            canonical_name="United States",
+        )
+        assert current is not None and current.name == "United States"
+
+
+@pytest.mark.asyncio
+async def test_gp07_invalid_shape_rejected_database_side(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P07 invalid type/country/code shape is rejected database-side."""
+    invalid_insert = """
+        INSERT INTO ati.location (
+            location_type, name, canonical_name, country_code, version)
+        VALUES (:location_type, 'Broken', 'Broken', :country_code, 1)
+    """
+    async with uow_factory() as uow:
+        assert uow.session is not None
+        with pytest.raises(IntegrityError):
+            await uow.session.execute(
+                text(invalid_insert),
+                {"location_type": "continent", "country_code": "US"},
+            )
+    async with uow_factory() as uow:
+        assert uow.session is not None
+        with pytest.raises(IntegrityError):
+            await uow.session.execute(
+                text(invalid_insert),
+                {"location_type": "country", "country_code": "US1"},
+            )
+    # The stored function surfaces the same rejection as a typed state even
+    # when model validation is bypassed with model_construct.
+    async with uow_factory() as uow:
+        with pytest.raises(GeoInvalidInputError):
+            await uow.locations.upsert(
+                Location.model_construct(
+                    type=LocationType.COUNTRY,
+                    name="Broken",
+                    canonical_name="Broken",
+                    country_code="US1",
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_gp08_no_geometry_or_postgis_dependency(
+    integration_engine: AsyncEngine,
+) -> None:
+    """G26A-P08 no geometry/PostGIS dependency exists for the GEOINT tables."""
+    async with integration_engine.connect() as connection:
+        extensions = {
+            row[0]
+            for row in await connection.execute(
+                text("""
+                    SELECT e.extname FROM pg_extension e
+                    JOIN pg_namespace n ON n.oid = e.extnamespace
+                    WHERE n.nspname = 'ati'
+                """)
+            )
+        }
+        columns = {
+            row[0]
+            for row in await connection.execute(
+                text("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'ati'
+                      AND table_name IN ('location', 'entity_location',
+                                         'entity_location_observation',
+                                         'geo_resolution')
+                """)
+            )
+        }
+    assert "postgis" not in extensions
+    assert not {"geometry", "geography", "centroid", "latitude", "longitude"} & columns
+
+
+# --------------------------------------------------------------------------
+# Observation / current-state matrix (G26A-P09..P22)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gp09_first_observation_creates_entity_location_atomically(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P09 the first observation appends one row and creates current state."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        observation = observation_factory(
+            entity_id=entity_id, location_id=country.id, evidence_id=evidence_id
+        )
+        persisted = await uow.entity_location_observations.append(observation)
+        assert persisted.version is not None
+        assert await table_count(uow, "entity_location_observation") == 1
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None
+        assert current.location_id == country.id
+        assert current.latest_observation_id == observation.id
+        assert current.first_observed_at == _RETRIEVED_AT
+        assert current.last_observed_at == _RETRIEVED_AT
+        assert current.version is not None
+
+
+@pytest.mark.asyncio
+async def test_gp10_observation_stores_exact_provenance(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P10 an observation stores exact Entity/Location/Evidence/timing."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        observed_at = _RETRIEVED_AT - timedelta(days=1)
+        observation = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+            precision=LocationPrecision.COUNTRY,
+            observed_at=observed_at,
+        )
+        persisted = await uow.entity_location_observations.append(observation)
+        fetched = await uow.entity_location_observations.get_by_id(observation.id)
+        assert fetched is not None
+        assert fetched.entity_id == entity_id
+        assert fetched.location_id == country.id
+        assert fetched.evidence_id == evidence_id
+        assert fetched.precision is LocationPrecision.COUNTRY
+        assert fetched.observed_at == observed_at
+        assert fetched.retrieved_at == _RETRIEVED_AT
+        assert fetched.resolved_at == _RETRIEVED_AT
+        assert fetched.resolution_method == "test_method"
+        assert fetched.version == persisted.version
+
+
+@pytest.mark.asyncio
+async def test_gp11_observation_requires_geolocation_evidence(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P11 non-GEOLOCATION Evidence cannot back an observation."""
+    async with uow_factory() as uow:
+        investigation_id = uuid4()
+        await uow.investigations.create(
+            InvestigationState(
+                investigation_id=investigation_id,
+                status=InvestigationStatus.RUNNING,
+                trigger_type=InvestigationTriggerType.MANUAL,
+                root_entity_ids=[uuid4()],
+                objective="Assess the indicator.",
+                budget=default_investigation_budget(),
+                started_at=_RETRIEVED_AT,
+            )
+        )
+        domain = await uow.entities.upsert(
+            Entity(type=EntityType.DOMAIN, value="example.org")
+        )
+        assert domain.id is not None
+        dns_evidence = await uow.evidence.insert(
+            Evidence(
+                investigation_id=investigation_id,
+                type=EvidenceType.DNS,
+                subject=EntityRef(
+                    id=domain.id, type=EntityType.DOMAIN, value="example.org"
+                ),
+                source="urn:ati:source:google_public_dns",
+                retrieved_at=_RETRIEVED_AT,
+            )
+        )
+        assert dns_evidence.id is not None
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        with pytest.raises(GeoEvidenceTypeError):
+            await uow.entity_location_observations.append(
+                observation_factory(
+                    entity_id=domain.id,
+                    location_id=country.id,
+                    evidence_id=dns_evidence.id,
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_gp12_evidence_subject_mismatch_rejected(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P12 Evidence subject must equal the observation Entity."""
+    async with uow_factory() as uow:
+        _, entity_id, domain_entity_id, evidence_id = await seed_geolocation_evidence(
+            uow
+        )
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        assert entity_id != domain_entity_id
+    async with uow_factory() as uow:
+        with pytest.raises(GeoEvidenceSubjectMismatchError):
+            await uow.entity_location_observations.append(
+                observation_factory(
+                    entity_id=domain_entity_id,
+                    location_id=country.id,
+                    evidence_id=evidence_id,
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_gp13_missing_entity_location_evidence_rejected(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P13 missing Entity/Location/Evidence references fail closed."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+    async with uow_factory() as uow:
+        with pytest.raises(GeoEntityNotFoundError):
+            await uow.entity_location_observations.append(
+                observation_factory(
+                    entity_id=uuid4(),
+                    location_id=country.id,
+                    evidence_id=evidence_id,
+                )
+            )
+    async with uow_factory() as uow:
+        with pytest.raises(GeoLocationNotFoundError):
+            await uow.entity_location_observations.append(
+                observation_factory(
+                    entity_id=entity_id,
+                    location_id=uuid4(),
+                    evidence_id=evidence_id,
+                )
+            )
+    async with uow_factory() as uow:
+        with pytest.raises(GeoEvidenceNotFoundError):
+            await uow.entity_location_observations.append(
+                observation_factory(
+                    entity_id=entity_id,
+                    location_id=country.id,
+                    evidence_id=uuid4(),
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_gp14_duplicate_observation_rejected_without_current_state_mutation(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P14 a duplicate observation UUID is rejected without state mutation."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        observation = observation_factory(
+            entity_id=entity_id, location_id=country.id, evidence_id=evidence_id
+        )
+        await uow.entity_location_observations.append(observation)
+        current_before = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current_before is not None
+    async with uow_factory() as uow:
+        with pytest.raises(EntityLocationObservationDuplicateError):
+            await uow.entity_location_observations.append(observation)
+    async with uow_factory() as uow:
+        current_after = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current_after == current_before
+        assert await table_count(uow, "entity_location_observation") == 1
+
+
+@pytest.mark.asyncio
+async def test_gp15_later_observation_updates_current_state(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P15 a later observation advances current Location/observation."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        other = await uow.locations.upsert(
+            location_factory(name="Canada", canonical_name="Canada", country_code="CA")
+        )
+        assert other.id is not None
+        first = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT,
+        )
+        await uow.entity_location_observations.append(first)
+        later = observation_factory(
+            entity_id=entity_id,
+            location_id=other.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT + timedelta(days=2),
+        )
+        await uow.entity_location_observations.append(later)
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None
+        assert current.location_id == other.id
+        assert current.latest_observation_id == later.id
+        assert current.last_observed_at == _RETRIEVED_AT + timedelta(days=2)
+        assert current.first_observed_at == _RETRIEVED_AT
+
+
+@pytest.mark.asyncio
+async def test_gp16_older_observation_does_not_rewind_current_state(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P16 an older historical observation appends without rewinding."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        other = await uow.locations.upsert(
+            location_factory(name="Canada", canonical_name="Canada", country_code="CA")
+        )
+        assert other.id is not None
+        later = observation_factory(
+            entity_id=entity_id,
+            location_id=other.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT + timedelta(days=2),
+        )
+        await uow.entity_location_observations.append(later)
+        older = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT,
+            observed_at=_RETRIEVED_AT - timedelta(days=5),
+        )
+        await uow.entity_location_observations.append(older)
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None
+        # Current state still reflects the later observation.
+        assert current.location_id == other.id
+        assert current.latest_observation_id == later.id
+        assert current.last_observed_at == _RETRIEVED_AT + timedelta(days=2)
+        # Both observations are preserved as history.
+        assert await table_count(uow, "entity_location_observation") == 2
+
+
+@pytest.mark.asyncio
+async def test_gp17_equal_effective_timestamps_use_uuid_tie_break(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P17 equal effective timestamps resolve by observation UUID ascending."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        other = await uow.locations.upsert(
+            location_factory(name="Canada", canonical_name="Canada", country_code="CA")
+        )
+        assert other.id is not None
+        lower_id, higher_id = uuid4(), uuid4()
+        if lower_id > higher_id:
+            lower_id, higher_id = higher_id, lower_id
+        await uow.entity_location_observations.append(
+            observation_factory(
+                id=lower_id,
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+                retrieved_at=_RETRIEVED_AT,
+            )
+        )
+        await uow.entity_location_observations.append(
+            observation_factory(
+                id=higher_id,
+                entity_id=entity_id,
+                location_id=other.id,
+                evidence_id=evidence_id,
+                retrieved_at=_RETRIEVED_AT,
+            )
+        )
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None
+        assert current.latest_observation_id == higher_id
+        assert current.location_id == other.id
+
+
+@pytest.mark.asyncio
+async def test_gp18_first_observed_time_remains_earliest_across_out_of_order(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P18 first_observed_at stays the earliest across out-of-order appends."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        earliest = _RETRIEVED_AT - timedelta(days=10)
+        middle = _RETRIEVED_AT - timedelta(days=3)
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+                retrieved_at=middle,
+            )
+        )
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+                retrieved_at=earliest,
+            )
+        )
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+                retrieved_at=_RETRIEVED_AT,
+            )
+        )
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None
+        assert current.first_observed_at == earliest
+        assert current.last_observed_at == _RETRIEVED_AT
+
+
+@pytest.mark.asyncio
+async def test_gp19_last_observed_reflects_deterministic_latest(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P19 last-observed/current association reflects the latest observation."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        other = await uow.locations.upsert(
+            location_factory(name="Canada", canonical_name="Canada", country_code="CA")
+        )
+        assert other.id is not None
+        newer = observation_factory(
+            entity_id=entity_id,
+            location_id=other.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT + timedelta(days=7),
+        )
+        await uow.entity_location_observations.append(newer)
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None
+        assert current.last_observed_at == _RETRIEVED_AT + timedelta(days=7)
+        assert current.location_id == other.id
+        assert current.latest_observation_id == newer.id
+        assert current.precision is LocationPrecision.COUNTRY
+
+
+@pytest.mark.asyncio
+async def test_gp20_observation_produces_no_domain_object_history(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P20 appending an observation creates no domain_object_history row."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+            )
+        )
+        assert uow.session is not None
+        history = await uow.session.scalar(
+            text(
+                "SELECT count(*) FROM ati.domain_object_history "
+                "WHERE object_type = 'entity_location_observation'"
+            )
+        )
+        assert int(history) == 0
+
+
+@pytest.mark.asyncio
+async def test_gp21_rollback_leaves_no_observation_or_partial_state(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P21 a rollback leaves neither observation nor partial state."""
+    uow = uow_factory()
+    async with uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+            )
+        )
+        await uow.rollback()
+    async with uow_factory() as uow:
+        assert await table_count(uow, "entity_location_observation") == 0
+        assert await uow.entity_locations.get_by_entity_id(entity_id) is None
+
+
+@pytest.mark.asyncio
+async def test_gp22_entity_location_has_no_public_mutation_path(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P22 current EntityLocation cannot be mutated through the repository."""
+    async with uow_factory() as uow:
+        repository = uow.entity_locations
+        assert not hasattr(repository, "update")
+        assert not hasattr(repository, "set_location")
+        assert not hasattr(repository, "delete")
+        # The only public operation is the bounded read.
+        assert not await uow.entity_locations.get_by_entity_id(uuid4())
+
+
+# --------------------------------------------------------------------------
+# GeoResolution matrix (G26A-P23..P30)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gp23_geolocation_evidence_creates_pending_work(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P23 valid GEOLOCATION Evidence creates PENDING work with exact state."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        resolution = await uow.geo_resolutions.create_pending(
+            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+        )
+        assert resolution.id is not None
+        assert resolution.status is GeoResolutionStatus.PENDING
+        assert resolution.attempt_count == 0
+        assert resolution.claimed_by is None
+        assert resolution.lease_expires_at is None
+        assert resolution.next_attempt_at is None
+        assert resolution.resolved_location_id is None
+        assert resolution.last_error_code is None
+        assert resolution.version is not None
+        fetched = await uow.geo_resolutions.get_by_id(resolution.id)
+        assert fetched == resolution
+
+
+@pytest.mark.asyncio
+async def test_gp24_duplicate_pair_is_idempotent_single_row(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P24 a duplicate Entity/Evidence pair reuses one pending row."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        first = await uow.geo_resolutions.create_pending(
+            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+        )
+        second = await uow.geo_resolutions.create_pending(
+            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+        )
+        assert first.id == second.id
+        assert first.version == second.version
+        assert await table_count(uow, "geo_resolution") == 1
+
+
+@pytest.mark.asyncio
+async def test_gp25_concurrent_duplicate_creation_creates_one_row(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P25 concurrent duplicate creation yields one work row."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+
+    async def _create() -> GeoResolution:
+        """Create pending work in an independent committed UoW."""
+        async with uow_factory() as uow:
+            return await uow.geo_resolutions.create_pending(
+                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            )
+
+    created_a, created_b = await asyncio.gather(_create(), _create())
+    assert created_a.id == created_b.id
+    assert created_a.status is GeoResolutionStatus.PENDING
+    async with uow_factory() as uow:
+        assert await table_count(uow, "geo_resolution") == 1
+
+
+@pytest.mark.asyncio
+async def test_gp26_non_geolocation_evidence_rejected(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P26 non-GEOLOCATION Evidence cannot create resolution work."""
+    async with uow_factory() as uow:
+        investigation_id = uuid4()
+        await uow.investigations.create(
+            InvestigationState(
+                investigation_id=investigation_id,
+                status=InvestigationStatus.RUNNING,
+                trigger_type=InvestigationTriggerType.MANUAL,
+                root_entity_ids=[uuid4()],
+                objective="Assess the indicator.",
+                budget=default_investigation_budget(),
+                started_at=_RETRIEVED_AT,
+            )
+        )
+        domain = await uow.entities.upsert(
+            Entity(type=EntityType.DOMAIN, value="example.net")
+        )
+        assert domain.id is not None
+        dns_evidence = await uow.evidence.insert(
+            Evidence(
+                investigation_id=investigation_id,
+                type=EvidenceType.DNS,
+                subject=EntityRef(
+                    id=domain.id, type=EntityType.DOMAIN, value="example.net"
+                ),
+                source="urn:ati:source:google_public_dns",
+                retrieved_at=_RETRIEVED_AT,
+            )
+        )
+        assert dns_evidence.id is not None
+        with pytest.raises(GeoEvidenceTypeError):
+            await uow.geo_resolutions.create_pending(
+                GeoResolution(
+                    id=uuid4(), entity_id=domain.id, evidence_id=dns_evidence.id
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_gp27_resolution_evidence_subject_mismatch_rejected(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P27 resolution Evidence subject mismatch is rejected."""
+    async with uow_factory() as uow:
+        _, entity_id, domain_entity_id, evidence_id = await seed_geolocation_evidence(
+            uow
+        )
+        with pytest.raises(GeoEvidenceSubjectMismatchError):
+            await uow.geo_resolutions.create_pending(
+                GeoResolution(
+                    id=uuid4(), entity_id=domain_entity_id, evidence_id=evidence_id
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_gp28_missing_or_invisible_entity_evidence_rejected(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P28 missing/invisible Entity or Evidence is rejected."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+    async with uow_factory() as uow:
+        with pytest.raises(GeoEntityNotFoundError):
+            await uow.geo_resolutions.create_pending(
+                GeoResolution(id=uuid4(), entity_id=uuid4(), evidence_id=evidence_id)
+            )
+    async with uow_factory() as uow:
+        with pytest.raises(GeoEvidenceNotFoundError):
+            await uow.geo_resolutions.create_pending(
+                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=uuid4())
+            )
+    # A soft-deleted Entity is invisible to the resolution path.
+    async with uow_factory() as uow:
+        deleted = await uow.entities.soft_delete(entity_id)
+        assert deleted.deleted_at is not None
+    async with uow_factory() as uow:
+        with pytest.raises(GeoEntityNotFoundError):
+            await uow.geo_resolutions.create_pending(
+                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            )
+
+
+@pytest.mark.asyncio
+async def test_gp29_no_claim_or_completion_api_exists(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P29 no claim/lease/completion function or repository API exists."""
+    async with uow_factory() as uow:
+        repository = uow.geo_resolutions
+        assert not hasattr(repository, "claim")
+        assert not hasattr(repository, "complete")
+        assert not hasattr(repository, "renew_lease")
+        assert not hasattr(repository, "retry")
+        assert uow.session is not None
+        routines = {
+            row[0]
+            for row in await uow.session.execute(
+                text(
+                    "SELECT routine_name FROM information_schema.routines "
+                    "WHERE routine_schema = 'ati'"
+                )
+            )
+        }
+        geo_routines = {name for name in routines if "geo_resolution" in name}
+        assert geo_routines == {"create_geo_resolution"}
+
+
+@pytest.mark.asyncio
+async def test_gp30_no_second_queue_table(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P30 GeoResolution is not duplicated into a second queue table."""
+    async with uow_factory() as uow:
+        assert uow.session is not None
+        tables = {
+            row[0]
+            for row in await uow.session.execute(
+                text(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'ati'"
+                )
+            )
+        }
+        assert "geo_resolution" in tables
+        assert not {"geo_resolution_queue", "geo_resolution_work"} & tables
+
+
+# --------------------------------------------------------------------------
+# UnitOfWork / transaction matrix (G26A-P31..P34)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gp31_geoint_repositories_participate_in_normal_uow(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P31 GEOINT repositories share the normal UnitOfWork transaction."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        observation = observation_factory(
+            entity_id=entity_id, location_id=country.id, evidence_id=evidence_id
+        )
+        await uow.entity_location_observations.append(observation)
+        await uow.geo_resolutions.create_pending(
+            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+        )
+        # Everything is visible inside the same open transaction.
+        assert await table_count(uow, "location") == 1
+        assert await table_count(uow, "entity_location_observation") == 1
+        assert await table_count(uow, "geo_resolution") == 1
+
+
+@pytest.mark.asyncio
+async def test_gp32_exception_rolls_back_all_geoint_mutations(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P32 an exception rolls back all GEOINT mutations in the UoW."""
+    uow = uow_factory()
+    with pytest.raises(RuntimeError):
+        async with uow:
+            _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+            country = await uow.locations.upsert(location_factory())
+            assert country.id is not None
+            await uow.entity_location_observations.append(
+                observation_factory(
+                    entity_id=entity_id,
+                    location_id=country.id,
+                    evidence_id=evidence_id,
+                )
+            )
+            await uow.geo_resolutions.create_pending(
+                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            )
+            raise RuntimeError("injected failure")
+    async with uow_factory() as uow:
+        assert await table_count(uow, "location") == 0
+        assert await table_count(uow, "entity_location_observation") == 0
+        assert await table_count(uow, "geo_resolution") == 0
+
+
+@pytest.mark.asyncio
+async def test_gp33_repositories_never_commit_independently(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P33 repository methods do not commit; only the UoW owns commit."""
+    uow = uow_factory()
+    async with uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+            )
+        )
+        # Discard the transaction without committing: nothing may persist.
+        await uow.rollback()
+    async with uow_factory() as uow:
+        assert await table_count(uow, "location") == 0
+        assert await table_count(uow, "entity_location_observation") == 0
+
+
+@pytest.mark.asyncio
+async def test_gp34_database_assigned_versions_returned_authoritatively(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A-P34 database-assigned versions are returned authoritatively."""
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None and country.version is not None
+        observation = observation_factory(
+            entity_id=entity_id, location_id=country.id, evidence_id=evidence_id
+        )
+        persisted_observation = await uow.entity_location_observations.append(
+            observation
+        )
+        assert persisted_observation.version is not None
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        before = current.version
+        resolution = await uow.geo_resolutions.create_pending(
+            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+        )
+        assert resolution.version is not None
+        # A second observation advances only the reconciled current state.
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+                retrieved_at=_RETRIEVED_AT + timedelta(days=1),
+            )
+        )
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None
+        assert before is not None
+        assert current.version == before + 1

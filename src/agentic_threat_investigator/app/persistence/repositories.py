@@ -22,6 +22,12 @@ from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
 from agentic_threat_investigator.domain.documents import Document, DocumentChunk
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
+from agentic_threat_investigator.domain.geoint import (
+    EntityLocation,
+    EntityLocationObservation,
+    GeoResolution,
+    Location,
+)
 from agentic_threat_investigator.domain.identity import Credential, Session, User
 from agentic_threat_investigator.domain.investigation import (
     CoordinatorTransitionKind,
@@ -327,6 +333,110 @@ def enforce_report_collection_bounds(report: InvestigationReport, limit: int) ->
     for collection, count in report_collection_sizes(report).items():
         if count > limit:
             raise ReportCollectionLimitExceededError(collection, count, limit)
+
+
+class GeoEntityNotFoundError(LookupError):
+    """Raised when a GEOINT write references a missing or invisible Entity."""
+
+    def __init__(self, entity_id: UUID) -> None:
+        """Record the missing Entity identity."""
+        super().__init__(f"geo entity not found or invisible: {entity_id}")
+        self.entity_id = entity_id
+
+
+class GeoLocationNotFoundError(LookupError):
+    """Raised when a GEOINT write references a missing canonical Location."""
+
+    def __init__(self, location_id: UUID | None = None) -> None:
+        """Record the missing Location identity when known."""
+        super().__init__(
+            f"geo location not found: {location_id}"
+            if location_id
+            else "geo location not found"
+        )
+        self.location_id = location_id
+
+
+class GeoEvidenceNotFoundError(LookupError):
+    """Raised when a GEOINT write references missing Evidence."""
+
+    def __init__(self, evidence_id: UUID) -> None:
+        """Record the missing Evidence identity."""
+        super().__init__(f"geo evidence not found: {evidence_id}")
+        self.evidence_id = evidence_id
+
+
+class GeoEvidenceTypeError(ValueError):
+    """Raised when Evidence backing geographic work is not GEOLOCATION."""
+
+    def __init__(self, evidence_id: UUID) -> None:
+        """Record the offending Evidence identity."""
+        super().__init__(f"geo evidence is not GEOLOCATION: {evidence_id}")
+        self.evidence_id = evidence_id
+
+
+class GeoEvidenceSubjectMismatchError(ValueError):
+    """Raised when Evidence's subject is not the observation/work Entity.
+
+    Cross-context provenance can never be fabricated: geographic observations
+    and resolution work bind the exact Evidence subject to the exact Entity.
+    """
+
+    def __init__(self, evidence_id: UUID, entity_id: UUID) -> None:
+        """Record the mismatched Evidence/Entity identities."""
+        super().__init__(
+            f"geo evidence subject mismatch: evidence {evidence_id} is not "
+            f"about entity {entity_id}"
+        )
+        self.evidence_id = evidence_id
+        self.entity_id = entity_id
+
+
+class EntityLocationObservationDuplicateError(ValueError):
+    """Raised when an immutable observation identity already exists."""
+
+    def __init__(self, observation_id: UUID) -> None:
+        """Record the conflicting observation identity."""
+        super().__init__(
+            f"entity location observation already exists: {observation_id}"
+        )
+        self.observation_id = observation_id
+
+
+class LocationIdentityConflictError(ValueError):
+    """Raised when a canonical Location identity is reused with incompatible state.
+
+    The same canonical identity tuple can never carry a different display
+    name or reference parent; the conflicting caller input is rejected with
+    no version or history churn.
+    """
+
+
+class GeoResolutionDuplicateStateError(ValueError):
+    """Raised when a duplicate GeoResolution pair is not in initial pending shape.
+
+    Duplicate creation is idempotent only for the exact pair in the initial
+    pending state; a progressed record can never be silently replayed as a
+    new request.
+    """
+
+    def __init__(self, entity_id: UUID, evidence_id: UUID) -> None:
+        """Record the conflicting work-pair identities."""
+        super().__init__(
+            f"geo resolution pair is not in initial pending state: "
+            f"entity {entity_id} evidence {evidence_id}"
+        )
+        self.entity_id = entity_id
+        self.evidence_id = evidence_id
+
+
+class GeoInvalidInputError(ValueError):
+    """Raised when a GEOINT write carries malformed input rejected database-side."""
+
+    def __init__(self, detail: str) -> None:
+        """Record the database-reported input failure detail."""
+        super().__init__(f"invalid geo input: {detail}")
+        self.detail = detail
 
 
 class ResearchResultDuplicateIdentityError(ValueError):
@@ -1179,6 +1289,112 @@ class SessionRepository(ABC):  # pragma: no cover
         """Update last-seen metadata."""
 
 
+class LocationRepository(ABC):  # pragma: no cover
+    """Repository for canonical geographic/reference Locations (PR 26A).
+
+    Locations are stable reference identities, not Entities. There is no
+    delete or soft-delete operation: canonical reference deletion/governance
+    is not part of the PR 26A foundation.
+    """
+
+    @abstractmethod
+    async def get_by_id(self, location_id: UUID) -> Location | None:
+        """Return the canonical Location with the given identifier, if any."""
+
+    @abstractmethod
+    async def get_by_identity(
+        self,
+        *,
+        location_type: str,
+        country_code: str,
+        admin1_code: str | None,
+        admin2_code: str | None,
+        canonical_name: str,
+    ) -> Location | None:
+        """Return the canonical Location matching the approved identity tuple."""
+
+    @abstractmethod
+    async def upsert(self, location: Location) -> Location:
+        """Create or reuse the canonical Location through the database function.
+
+        The database owns canonical-identity resolution, race-safe creation,
+        and version allocation; reuse is a semantic no-op. Incompatible state
+        for the same canonical identity is a typed error.
+        """
+
+
+class EntityLocationRepository(ABC):  # pragma: no cover
+    """Read-only repository for current materialized EntityLocation state.
+
+    Current state is database-maintained from observations; there is
+    deliberately no public method that permits callers to mutate it directly.
+    """
+
+    @abstractmethod
+    async def get_by_entity_id(self, entity_id: UUID) -> EntityLocation | None:
+        """Return the current EntityLocation of one Entity, if any."""
+
+
+class EntityLocationObservationRepository(ABC):  # pragma: no cover
+    """Append-only repository for immutable geographic observations.
+
+    One persisted row is one immutable historical observation with exact
+    Entity/Location/Evidence provenance. There is no update, delete, or
+    soft-delete path.
+    """
+
+    @abstractmethod
+    async def append(
+        self, observation: EntityLocationObservation
+    ) -> EntityLocationObservation:
+        """Append one immutable observation and reconcile current state.
+
+        The database validates provenance (Entity visibility, Location and
+        Evidence existence, GEOLOCATION type, exact Evidence subject) and
+        reconciles the current EntityLocation atomically in one transaction.
+        """
+
+    @abstractmethod
+    async def get_by_id(self, observation_id: UUID) -> EntityLocationObservation | None:
+        """Return an immutable observation by its identity."""
+
+    @abstractmethod
+    async def list_for_entity(
+        self,
+        entity_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EntityLocationObservation]:
+        """Return bounded observations for one Entity in deterministic order."""
+
+
+class GeoResolutionRepository(ABC):  # pragma: no cover
+    """Repository for durable operational GeoResolution work (PR 26A).
+
+    PR 26A supports creation of initial PENDING work and reads only.
+    Claim/lease/retry/completion methods are deliberately absent until PR 26C.
+    """
+
+    @abstractmethod
+    async def create_pending(self, resolution: GeoResolution) -> GeoResolution:
+        """Create (or idempotently reuse) the initial PENDING work record.
+
+        Exactly one row exists per Entity/Evidence pair; the database owns
+        the initial-state invariants and race safety.
+        """
+
+    @abstractmethod
+    async def get_by_id(self, resolution_id: UUID) -> GeoResolution | None:
+        """Return one GeoResolution work record by its identity."""
+
+    @abstractmethod
+    async def get_by_entity_evidence(
+        self, entity_id: UUID, evidence_id: UUID
+    ) -> GeoResolution | None:
+        """Return the GeoResolution for one Entity/Evidence pair, if any."""
+
+
 class UnitOfWork(ABC):  # pragma: no cover
     """Transaction boundary; repositories never commit themselves."""
 
@@ -1201,6 +1417,10 @@ class UnitOfWork(ABC):  # pragma: no cover
     timeline_events: InvestigationTimelineRepository
     investigation_jobs: InvestigationJobRepository
     idempotency: IdempotencyRepository
+    locations: LocationRepository
+    entity_locations: EntityLocationRepository
+    entity_location_observations: EntityLocationObservationRepository
+    geo_resolutions: GeoResolutionRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:

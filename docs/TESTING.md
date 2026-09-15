@@ -1917,6 +1917,47 @@ Frontend coverage (`frontend/src/relationship-evolution/`,
 
 PR 26 testing must preserve the production-path principle: deterministic tests fake true external/non-deterministic boundaries, not ATI's persistence, canonicalization, PostGIS, resolver state machine, or query contracts.
 
+### PR 26A delivered testing (G26A-D and G26A-P matrices)
+
+PR 26A's non-spatial foundation is covered by:
+
+- **G26A-D01..D14** (`tests/unit/domain/test_geoint.py`): exact
+  `LocationType`/`LocationPrecision`/`GeoResolutionStatus` vocabularies;
+  country/administrative-area/city type-shape constraints; deterministic
+  two-letter country-code normalization without reference data; blank/
+  oversized names and codes fail closed; EntityLocation inverted-time
+  rejection; naive/offset observation timestamp normalization; mandatory
+  exact Entity/Location/Evidence observation IDs; initial pending
+  GeoResolution validity; malformed status/error/claim metadata fail
+  closed; no geometry/PostGIS fields; `EntityType` unchanged (Location is
+  not an Entity); deterministic identity tuple excluding parent.
+- **G26A-P01..P34** (`tests/integration/test_geoint_persistence.py`): the
+  canonical real-PostgreSQL matrix — Location round-trip, parent/admin
+  shape enforcement, canonical-identity reuse without version churn,
+  concurrent same-identity upsert yielding one row, incompatible duplicate
+  state failing atomically, database-side shape rejection, no
+  PostGIS/geometry dependency; first observation creating EntityLocation
+  atomically, exact provenance storage, GEOLOCATION Evidence requirement,
+  Evidence subject mismatch rejection, missing Entity/Location/Evidence
+  rejection, duplicate observation rejection without current-state
+  mutation, later-observation advancement, older-observation non-rewind,
+  equal-timestamp UUID tie-break, earliest first-observed preservation,
+  deterministic latest association, zero `domain_object_history` rows for
+  observations, rollback atomicity, no public EntityLocation mutation
+  path; initial pending GeoResolution creation with exact state, duplicate
+  pair idempotency, concurrent duplicate creation yielding one row,
+  non-GEOLOCATION and subject-mismatch rejection, missing/invisible
+  Entity/Evidence rejection, no claim/lease/completion API, no second
+  queue table; normal UnitOfWork participation, exception rollback,
+  no independent repository commits, and authoritative database-assigned
+  versions.
+- **Migration tests** (`tests/integration/test_migration.py`): the 0025
+  upgrade installs the four tables, four version sequences, and three
+  stored functions; the downgrade removes only the PR 26A objects in
+  dependency-safe order while existing Entity/Evidence (including PR 25
+  GEOLOCATION Evidence) rows survive untouched; no PostGIS extension is
+  required at any point.
+
 ### Domain and persistence
 
 Cover:
