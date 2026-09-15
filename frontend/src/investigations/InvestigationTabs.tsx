@@ -19,6 +19,7 @@ const WORKSPACE_TABS = [
   { path: "overview", key: "overview" },
   { path: "evidence", key: "evidence" },
   { path: "relationships", key: "relationships" },
+  { path: "map", key: "map" },
   { path: "research", key: "research" },
   { path: "timeline", key: "timeline" },
 ] as const;
@@ -34,7 +35,7 @@ function selectedTab(pathname: string, base: string): number | false {
   return index >= 0 ? index : false;
 }
 
-/** Route links for Overview/Evidence/Relationships/Research/Timeline. */
+/** Route links for Overview/Evidence/Relationships/Map/Research/Timeline. */
 export function InvestigationTabs({
   investigationId,
 }: InvestigationTabsProps): ReactElement {

@@ -113,6 +113,28 @@ The E22-B result is particularly important because opening `Pivot actions` at th
 
 The experimental changes were reverted and were not merged.
 
+### PR 25B E2E run record (06/2026)
+
+A PR 25B real-stack run on this constrained host reproduced the same
+wedge without any interaction-mechanism change: E22 wedged after the
+``relationship drawer open`` step during the raw-pointer click on
+``Observations for this relationship``; the retry wedged earlier, inside
+the Evidence pivot workspace; E22-B wedged after ``dead: evidence drawer
+open`` on both attempts. All four stalls were pure test timeouts with no
+browser console/page errors, matching the documented characteristics
+above. No PR 25B code path (the Map module, tab, or route) was involved
+in any stale point, and the feature's own spec (E24) exercised the real
+stack to the honest empty-state data STOP without a stall.
+
+A second, unrelated suite-isolation observation from the same run: E10's
+flaky first attempt (cold-start ``Verdict: Malicious`` wait) is retried
+as a fresh test that creates a **second** Investigation with the exact
+same objective, so E11's ``appears once in the real list`` assertion then
+resolves two rows of the same objective and fails strictly. This is a
+pre-existing E2E suite-isolation gap (retry re-runs the whole create
+flow), not a product defect; it is recorded here rather than patched
+inside PR 25B (which touches neither flow).
+
 ### Current assessment
 
 The available evidence is more consistent with an environment/browser/rendering interaction involving some combination of:
