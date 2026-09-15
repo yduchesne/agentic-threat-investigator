@@ -1587,7 +1587,7 @@ resource query/filter/table/detail machinery (`frontend/src/pivots/`,
 PR 25A delivers the backend/query/API foundation for the v0.1 Investigation
 Map: a bounded, Investigation-scoped, read-only projection over already-
 persisted immutable `GEOLOCATION` Evidence joined to its canonical IP
-entity. Coverage (G-Q01..G-Q10, G-M01..G-M10, G-P01..G-P13, G-A01..G-A10,
+entity. Coverage (G-Q01..G-Q10, G-M01..G-M12, G-P01..G-P16, G-A01..G-A10,
 plus the vertical slices):
 
 - **read-model invariants** (`tests/unit/app/query/test_geolocation_query.py`):
@@ -1603,17 +1603,30 @@ plus the vertical slices):
   partial-pair coordinates rejected; out-of-vocabulary precision and
   country-code representations rejected; only the approved fields can ever
   appear on the item;
-- **real-PostgreSQL query matrix** (`tests/integration/test_query_geolocation.py`):
-  empty Investigation; one IP; multiple IPs with deterministic ordering;
+- **real-PostgreSQL query matrix** (`tests/integration/test_query_geolocation.py`,
+  G-P01..G-P16): core projection/bounded-read cases G-P01..G-P13 — empty
+  Investigation; one IP; multiple IPs with deterministic ordering;
   latest-per-entity; deterministic id tie-breaker; generic Evidence types
   (REPUTATION/NETWORK/DNS) excluded; non-IP GEOLOCATION defensively
   excluded; cross-Investigation isolation with a shared Entity; coordinate-
   less context retained; truncation at `max_items + 1` with deterministic
   prefix; exactly-at-bound not truncated; historical volume stays one
-  item per entity; malformed persisted facts (partial pair, missing
-  coordinate) fail closed with `GeolocationFactsError`; unknown
-  Investigation yields the established empty collection; the projection is
-  one bounded SQL read (no per-item reads, no application-side grouping);
+  item per entity; and the G-P13 bounded-single-read verification — and
+  defensive cases G-P14..G-P16: malformed persisted facts and partial
+  coordinate pairs fail closed with `GeolocationFactsError`
+  (G-P14/G-P15), and an unknown Investigation yields the established empty
+  collection (G-P16). G-P13 verifies the single-read criterion
+  structurally: the service issues exactly one SELECT over the
+  latest-per-entity ranked subquery with a `max_items + 1` LIMIT, never
+  per-item Evidence gets or Python-side grouping of historical rows. PR
+  25D explicitly inspected the repository for reusable SQL
+  statement-counting infrastructure (SQLAlchemy event listeners, query
+  counters, statement recorders); the only SQLAlchemy event listeners
+  present register batch composite types (the E2E geolocation seeder) or
+  track UnitOfWork lifecycle phases (the analyst pipeline transaction
+  tracker) — neither counts SQL statements. No generic instrumentation
+  framework was created; structural verification is retained and
+  documented at the test and in the PR 25D closure note below;
 - **index eligibility** (`tests/integration/test_query_indexes.py`,
   test_p13): the latest-per-entity projection drives through the existing
   investigation-prefixed evidence listing indexes; no new index/migration
@@ -1723,7 +1736,7 @@ Seed failure is test failure; there is no data-path skip.
 Deterministic E2E seeding and the Map-origin typed pivot workflow:
 
 - **seeder unit contracts** (`tests/unit/infrastructure/test_e2e_geolocation_seed.py`,
-  C-S01..C-S12): unknown scenarios rejected; malformed/nil Investigation
+  C-S01..C-S13): unknown scenarios rejected; malformed/nil Investigation
   IDs rejected; missing/soft-deleted Investigation refused; the explicit
   E2E guard (`ATI_OPERATING_MODE=fake` **and** `ATI_E2E_SEEDING_ENABLED`)
   required with the CLI exiting nonzero without it; valid single mappable
@@ -1779,6 +1792,49 @@ existing retry-1 configuration (reproduced on the pre-PR base commit;
 E22/E22-B consistently, E23 intermittently) and are outside PR 25C scope
 per the PR 24F stability notes and `docs/INVESTIGATION_STABILITY.md`.
 The PR 25C E24-E28 geolocation suite passes deterministically.
+
+### PR 25D — PR 25-series compliance closure [DONE]
+
+PR 25D is the final closure PR for the PR 25 geolocation-map series; it
+added no geolocation, Map, API, persistence, pivot, provider, spatial, or
+GEOINT functionality. Delivered:
+
+- **Fresh source-level audit of PR 25A-C** against actual source/tests
+  (not implementation summaries) with a COMPLIANT/PARTIAL/MISSING/
+  OUT-OF-SCOPE classification of every material requirement; no material
+  PR 25 production defect was found;
+- **G-P matrix normalization:** the three duplicate `gp12` identifiers
+  became the distinct G-P14 (malformed persisted facts fail closed), G-P15
+  (partial coordinate pair fails closed), and G-P16 (nonexistent
+  Investigation empty); G-P12 remains the historical-volume test and
+  G-P13 the bounded-single-read test; the test module and this document
+  reflect G-P01..G-P16 with G-P01..G-P13 as the core projection/
+  bounded-read cases and G-P14..G-P16 as the defensive cases;
+- **G-M matrix normalization:** the duplicate `gm10` identifiers became
+  the distinct G-M11 (invalid precision vocabulary) and G-M12 (invalid
+  country code); the test module and this document reflect G-M01..G-M12;
+- **Seeder unit matrix normalization:** the duplicate `cs04` identifier
+  became the distinct C-S13 (CLI exits nonzero when the guard is not
+  satisfied); the test module and this document reflect C-S01..C-S13;
+- **G-P13 disposition:** existing test support for SQL statement counting
+  was explicitly inspected (see above); no reusable lightweight mechanism
+  exists, so structural verification is retained and documented at the
+  test, and no generic instrumentation framework was added;
+- **B/C/SG/E traceability audit:** B-M/B-L/B-V/B-Q/B-U/B-F/B-P/B-A11Y,
+  C-P/C-V, SG01..SG07, and E24-E28 carry no duplicate or misleading
+  identifiers (the E22/E22-B Chromium/MUI wedge remains separately
+  classified per `docs/INVESTIGATION_STABILITY.md`);
+- **E24-E28 rerun** on the canonical full stack with all four real-stack
+  browser specs passing through the real PR 25A read path;
+- **No production/API/schema/persistence change:** the PR 25A endpoint,
+  operation ID, DTO, paired coordinates, provider/precision/timestamps,
+  `{items,truncated}` shape and authentication, PR 25B Map route/Leaflet
+  behavior, 30s stale time, viewport policy and disclaimer, PR 25C typed
+  pivot behavior, and the deterministic seeder implementation are
+  unchanged.
+
+PR 25A-D are closed; no known PR 25 functional residual remains, and PR 26
+remains the next v0.1 feature phase.
 
 ### Relationship Evolution and graph (PR 24E)
 
