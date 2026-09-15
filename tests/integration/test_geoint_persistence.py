@@ -357,10 +357,19 @@ async def test_gp07_invalid_shape_rejected_database_side(
 
 
 @pytest.mark.asyncio
-async def test_gp08_no_geometry_or_postgis_dependency(
+async def test_gp08_postgis_enabled_only_for_reference_location_state(
     integration_engine: AsyncEngine,
 ) -> None:
-    """G26A-P08 no geometry/PostGIS dependency exists for the GEOINT tables."""
+    """G26A-P08/G26B-P03 PostGIS spatial state is bounded to ati.location.
+
+    PR 26A pinned this test to a non-spatial GEOINT foundation; PR 26B
+    intentionally adds PostGIS and the ``geometry``/``centroid`` reference
+    state on ``ati.location`` only. EntityLocation,
+    EntityLocationObservation, and GeoResolution remain spatial-free, no
+    PostGIS ``geography`` column exists anywhere, and no latitude/longitude
+    columns exist on the GEOINT tables (those live in GEOLOCATION Evidence
+    facts, not GEOINT persistence).
+    """
     async with integration_engine.connect() as connection:
         extensions = {
             row[0]
@@ -384,8 +393,9 @@ async def test_gp08_no_geometry_or_postgis_dependency(
                 """)
             )
         }
-    assert "postgis" not in extensions
-    assert not {"geometry", "geography", "centroid", "latitude", "longitude"} & columns
+    assert "postgis" in extensions
+    assert {"geometry", "centroid"} <= columns
+    assert not {"geography", "latitude", "longitude"} & columns
 
 
 # --------------------------------------------------------------------------

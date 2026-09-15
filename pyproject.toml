@@ -61,6 +61,7 @@ packages = ["src/agentic_threat_investigator"]
 [project.scripts]
 ati-fake-data-bootstrap = "agentic_threat_investigator.cli:fake_data_bootstrap_main"
 ati-worker = "agentic_threat_investigator.cli:worker_main"
+ati-geography-import = "agentic_threat_investigator.cli:geography_import_main"
 
 [tool.ruff]
 line-length = 88

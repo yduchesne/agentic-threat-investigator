@@ -611,7 +611,7 @@ Any adapter that persists a `SourceRecord` must recompute `source_record_content
 
 Alembic orchestrates schema migrations.
 
-Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions; SQL API v0022 (`migrations/sql/ati/v0022/geoint_persistence.sql`, migration 0026, PR 26A-2) redefines only `ati.append_entity_location_observation` to allocate EntityLocation versions from `ati.entity_location_version_seq` on every actual current-state mutation. The shipped files are never edited in place.
+Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions; SQL API v0022 (`migrations/sql/ati/v0022/geoint_persistence.sql`, migration 0026, PR 26A-2) redefines only `ati.append_entity_location_observation` to allocate EntityLocation versions from `ati.entity_location_version_seq` on every actual current-state mutation. SQL API v0023 (`migrations/sql/ati/v0023/geoint_reference_spatial.sql`, migration 0027, PR 26B) adds the canonical reference/spatial write path `ati.upsert_reference_location` and the PostGIS extension; it only adds objects and never edits v0021/v0022. The shipped files are never edited in place.
 
 Rules:
 
@@ -628,6 +628,80 @@ geography/spatial operations; PR 26A itself remains non-spatial. The GEOINT
 persistence foundation delivered by PR 26A (migration 0025, SQL API v0021)
 is deliberately free of PostGIS, geometry columns, centroids, and spatial
 predicates.
+
+### PR 26B: PostGIS runtime and spatial Location state
+
+PR 26B (migration 0027, SQL API v0023) makes PostGIS part of the v0.1
+runtime and adds the canonical reference/spatial surface:
+
+- **PostGIS through migrations.** The supported PostgreSQL 18 image
+  (`docker/postgres/Dockerfile`) contains both pgvector and PostGIS; the
+  migration runs `CREATE EXTENSION IF NOT EXISTS postgis` so an
+  already-existing ATI database whose server has PostGIS installed also
+  upgrades. Downgrade (0027 -> 0026) drops the spatial function, columns,
+  and indexes first, then removes the PostGIS extension only when PR 26B
+  introduced it (the extension lives in the `ati` schema), never with
+  `CASCADE`.
+- **Spatial columns.** `ati.location.geometry geometry(Geometry, 4326)`
+  and `ati.location.centroid geometry(Point, 4326)` are optional SRID-4326
+  PostGIS `geometry` columns — never `geography`. Geometry is state
+  attached to the canonical reference object, never part of canonical
+  identity: corrections or corpus upgrades never create a second logical
+  Location.
+- **Geometry-type rules.** Country/administrative-area geometry must be
+  polygonal (`ST_Polygon`/`ST_MultiPolygon`) and valid; city geometry must
+  be a `Point`. Empty geometries, SRIDs other than 4326, and coordinates
+  outside WGS84 bounds are rejected. `centroid` is always a `Point`. The
+  `centroid` column stores an **on-surface representative point** derived
+  deterministically with `ST_PointOnSurface` during ingestion when the
+  source polygon is present and no explicit point is supplied (documented
+  as on-surface, never as a mathematical `ST_Centroid`); a city stores its
+  canonical point in both spatial columns.
+- **Spatial validation ownership.** CHECK constraints cannot call PostGIS
+  functions (they are not immutable), so malformed spatial state is
+  rejected fail-closed inside the versioned write function
+  (`ati.upsert_reference_location`), the sole mutation path for reference
+  spatial state. Typed SQLSTATEs: `U26B1` invalid reference geometry,
+  `U26B2` invalid reference hierarchy, `U26B3` canonical location conflict,
+  `U26B4` unsupported reference record.
+- **Reference enrichment/version semantics.**
+  `ati.upsert_reference_location` returns deterministic outcomes:
+  `CREATED` (new canonical identity, version from
+  `ati.location_version_seq`), `UNCHANGED` (identity and complete supplied
+  canonical state semantically identical — no version churn), `ENRICHED`
+  (approved previously-missing reference/spatial fields filled or a
+  deterministic reference-corpus refresh changed approved spatial state —
+  a new sequence version is allocated), and `CONFLICT` (raised as `U26B3`
+  when the canonical identity would be rebound with a different display
+  name or parent). PR 26A `ati.upsert_location` remains unchanged and
+  works on the same table: existing rows stay valid with
+  `geometry = NULL`, `centroid = NULL`, and no row is ever rewritten when
+  its referenced Location gains spatial state.
+- **Reference identity.** Canonical reference ingestion derives
+  deterministic UUIDv5 ids (`uuid5(ATI_LOCATION_NAMESPACE, ...)` over the
+  canonical identity tuple) so a clean and an existing database resolve the
+  same canonical identity to the same UUID; external source record ids
+  never participate. Reference data is loaded separately from schema
+  migration: `alembic upgrade` never downloads or imports geography; the
+  operator runs `ati-geography-import` with local corpus artifacts.
+- **Hierarchy and containment are distinct.** `parent_location_id` is
+  reference hierarchy supplied by the corpus; PostGIS predicates are
+  geometric. A failed/missing spatial predicate never rewrites the
+  hierarchy, and spatial containment alone never establishes parentage
+  during ordinary reads. `CanonicalGeographyResolver` (PR 26B) performs
+  deterministic narrowing (country code -> admin code/name -> city name)
+  and uses boundary-inclusive `ST_Covers` containment only to disambiguate
+  equally-valued candidates when the claim supplies coordinates; it never
+  invents precision, never infers a nearest city, and never mutates
+  Entity/EntityLocation/Observation/GeoResolution state (that remains PR
+  26C).
+- **Spatial indexes.** Two PR 26B indexes are justified by concrete paths:
+  `location_geometry_gist_idx` (GiST on non-null `geometry`, used for
+  containment/intersection candidate selection) and
+  `location_resolution_name_idx` (b-tree on `(location_type,
+  country_code, canonical_name)`, used by the deterministic claim
+  narrowing path). Containment queries are proven spatial-index eligible by
+  EXPLAIN in the G26B-P matrix.
 
 ### Delivered PR 26A persistence
 

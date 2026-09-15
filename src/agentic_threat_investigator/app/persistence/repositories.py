@@ -60,6 +60,32 @@ class BatchOutcome(str, Enum):
     CONFLICT = "CONFLICT"
 
 
+class LocationReferenceOutcome(str, Enum):
+    """Deterministic outcome of one canonical reference/spatial upsert (PR 26B).
+
+    - ``CREATED``: the canonical identity did not exist and was created;
+    - ``UNCHANGED``: identity and complete supplied canonical state are
+      semantically identical (no version churn);
+    - ``ENRICHED``: an approved previously-missing reference/spatial field
+      was filled or a deterministic reference-corpus refresh changed approved
+      spatial state (new database-issued version);
+    - ``CONFLICT``: same canonical identity would be rebound incompatibly.
+    """
+
+    CREATED = "CREATED"
+    UNCHANGED = "UNCHANGED"
+    ENRICHED = "ENRICHED"
+    CONFLICT = "CONFLICT"
+
+
+@dataclass(frozen=True)
+class LocationWriteResult:
+    """Authoritative result of one canonical reference/spatial upsert."""
+
+    location: Location
+    outcome: LocationReferenceOutcome
+
+
 class BatchSizeLimitExceededError(ValueError):
     """Raised when a batch exceeds the configured application limit."""
 
@@ -409,6 +435,82 @@ class LocationIdentityConflictError(ValueError):
     The same canonical identity tuple can never carry a different display
     name or reference parent; the conflicting caller input is rejected with
     no version or history churn.
+    """
+
+
+class CanonicalLocationConflictError(ValueError):
+    """Raised when the reference/spatial upsert would rebind a canonical identity.
+
+    The canonical reference upsert (PR 26B) enriches approved spatial state
+    but never rebinds the display name or reference parent of an existing
+    canonical Location; a conflicting input is rejected (SQLSTATE ``U26B3``)
+    with no mutation.
+    """
+
+    def __init__(self) -> None:
+        """Report the generic canonical rebind conflict; no identity leaks."""
+        super().__init__("canonical reference location rebind conflict")
+
+
+class UnsupportedReferenceRecordError(ValueError):
+    """Raised when a reference record cannot be mapped to the canonical model.
+
+    Unsupported location types, malformed shape, or invalid bounded text on
+    the reference write path fail closed (SQLSTATE ``U26B4``).
+    """
+
+    def __init__(self, detail: str | None = None) -> None:
+        """Record the database-reported input failure detail when present."""
+        super().__init__(
+            f"unsupported reference record: {detail}"
+            if detail
+            else "unsupported reference record"
+        )
+        self.detail = detail
+
+
+class InvalidReferenceHierarchyError(ValueError):
+    """Raised when reference parentage is structurally invalid or unresolved.
+
+    A non-country record requires an existing parent; countries must not have
+    parents or admin codes; self-parenting is rejected (SQLSTATE ``U26B2``).
+    """
+
+    def __init__(self, detail: str | None = None) -> None:
+        """Record the database-reported hierarchy failure detail when present."""
+        super().__init__(
+            f"invalid reference hierarchy: {detail}"
+            if detail
+            else "invalid reference hierarchy"
+        )
+        self.detail = detail
+
+
+class InvalidReferenceGeometryError(ValueError):
+    """Raised when supplied reference geometry is outside the spatial contract.
+
+    Covers malformed EWKT, SRID other than 4326, empty geometry, invalid
+    polygons, wrong geometry type per Location type, city canonical-point
+    violations, and out-of-WGS84-bounds coordinates (SQLSTATE ``U26B1``).
+    """
+
+    def __init__(self, detail: str | None = None) -> None:
+        """Record the database-reported geometry failure detail when present."""
+        super().__init__(
+            f"invalid reference geometry: {detail}"
+            if detail
+            else "invalid reference geometry"
+        )
+        self.detail = detail
+
+
+class InvalidGeographicClaimError(ValueError):
+    """Raised when a geographic claim violates the bounded claim contract.
+
+    Claim contract violations (coordinates without a pair, non-finite or
+    out-of-range coordinates, malformed country codes, precision exceeding
+    the supplied semantic fields) are errors; normal no-match/ambiguity
+    outcomes are results, never exceptions.
     """
 
 
@@ -1290,7 +1392,7 @@ class SessionRepository(ABC):  # pragma: no cover
 
 
 class LocationRepository(ABC):  # pragma: no cover
-    """Repository for canonical geographic/reference Locations (PR 26A).
+    """Repository for canonical geographic/reference Locations (PR 26A/26B).
 
     Locations are stable reference identities, not Entities. There is no
     delete or soft-delete operation: canonical reference deletion/governance
@@ -1311,7 +1413,13 @@ class LocationRepository(ABC):  # pragma: no cover
         admin2_code: str | None,
         canonical_name: str,
     ) -> Location | None:
-        """Return the canonical Location matching the approved identity tuple."""
+        """Return the canonical Location matching the approved identity tuple.
+
+        This is the canonical-identity reader used to locate an existing
+        reference row (for example during ingestion pre-validation); it is
+        the same tuple as ``location_identity_tuple`` for a persisted
+        :class:`Location`.
+        """
 
     @abstractmethod
     async def upsert(self, location: Location) -> Location:
@@ -1320,6 +1428,18 @@ class LocationRepository(ABC):  # pragma: no cover
         The database owns canonical-identity resolution, race-safe creation,
         and version allocation; reuse is a semantic no-op. Incompatible state
         for the same canonical identity is a typed error.
+        """
+
+    @abstractmethod
+    async def upsert_reference(self, location: Location) -> LocationWriteResult:
+        """Create/enrich/reuse one canonical reference/spatial Location (PR 26B).
+
+        Routes exclusively through ``ati.upsert_reference_location`` (SQL API
+        v0023), which owns spatial validity, reference enrichment, version
+        allocation, and race-safe creation. The result exposes the
+        deterministic :class:`LocationReferenceOutcome`; incompatible
+        canonical rebinds and invalid reference input raise typed errors and
+        mutate nothing.
         """
 
 

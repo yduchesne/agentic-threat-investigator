@@ -1219,8 +1219,8 @@ PR 25C completes the Map as a bounded analyst exploration surface without turnin
 
 ## GEOINT architecture (PR 26)
 
-This section distinguishes **delivered PR 26A** from the planned PR 26B-G
-architecture.
+This section distinguishes **delivered PR 26A/26B** from the planned PR
+26C-G architecture.
 
 PR 25 remains the delivered v0.1 geolocation presentation path:
 
@@ -1255,6 +1255,47 @@ PR 26A delivers:
   UnitOfWork integration;
 - no PostGIS, no resolver, no claim/lease/retry, no GEOINT API, and no
   agentic reasoning.
+
+PR 26B (delivered) establishes the deterministic geographic substrate on
+that foundation:
+
+```text
+Canonical reference sources (GeoNames-style naming/hierarchy + coordinates,
+Natural Earth-style boundary geometry, documented in DATA_SOURCES.md)
+                        |
+                        v  operator derives the ATI Geography Corpus NDJSON
+                 ati-geography-import (CLI)
+                        |
+                        v  ReferenceIngestionService (validated, ordered)
+                 ati.upsert_reference_location (SQL API v0023)
+                        |
+                        v
+        +-------------------------------------------+
+        |  ati.location                              |
+        |  canonical identity (unchanged from 26A)   |
+        |  reference hierarchy (parent_location_id)  |
+        |  geometry       (SRID 4326, never geography)|
+        |  centroid       (on-surface representative) |
+        +-------------------------------------------+
+                        |
+ geographic claim ------+
+        |
+        v  CanonicalGeographyResolver (PR 26B primitive)
+        +--> RESOLVED(location, supported precision)
+        +--> AMBIGUOUS(candidates)
+        +--> UNRESOLVABLE(reason code)
+```
+
+Key PR 26B properties: PostGIS is installed through the normal
+migration/deployment path (the project-owned PostgreSQL 18 image ships both
+pgvector and PostGIS); canonical identity stays the PR 26A tuple and is
+never rebuilt by geometry or source identifiers; reference identity is a
+deterministic UUIDv5; repeated unchanged ingestion is a true no-op;
+approved reference/spatial refreshes enrich the same canonical row with a
+database-issued version; and hierarchy (reference parentage) and spatial
+containment (PostGIS predicates) remain explicitly distinct. No threat
+relationship, maliciousness, attribution, or analytical conclusion is ever
+inferred from spatial facts.
 
 PR 26 adds a richer, derived GEOINT subsystem without replacing that path:
 
@@ -1304,7 +1345,7 @@ The initial canonical Location vocabulary is deliberately bounded to:
 
 PR 26A delivers the database-ownership model for GEOINT persistence:
 
-> All PR 26A GEOINT mutations, current-state reconciliation, and versioning are performed through versioned PostgreSQL stored functions (SQL API v0021). Python repositories/processes remain thin callers. Asynchronous work claiming, lease/retry transitions, stale-claim recovery, and completion are PR 26C scope but follow the same stored-function ownership model.
+> All PR 26A/26B GEOINT mutations, current-state reconciliation, and versioning are performed through versioned PostgreSQL stored functions (SQL API v0021/v0022; the PR 26B canonical reference/spatial path is SQL API v0023). Python repositories/processes remain thin callers. Asynchronous work claiming, lease/retry transitions, stale-claim recovery, and completion are PR 26C scope but follow the same stored-function ownership model.
 
 Purpose-built bounded read/query services, including PostGIS spatial projections, may execute SQL directly under ATI's existing query-service pattern.
 
@@ -1333,9 +1374,15 @@ Leases coordinate asynchronous processing; long-held row locks do not. Expired c
 
 ### PostGIS responsibility
 
-PR 26B is the point at which PostGIS becomes part of the v0.1 architecture because ATI then requires actual spatial queries and canonical geographic operations. PR 26A is deliberately non-spatial.
+PR 26B is the point at which PostGIS becomes part of the v0.1 architecture
+(delivered): the supported PostgreSQL 18 runtime contains both pgvector and
+PostGIS, the migration installs the extension, and canonical reference
+spatial state is persisted as SRID-4326 PostGIS `geometry` (never
+`geography`).
 
-PostGIS may answer deterministic spatial questions such as containment, intersection, distance, proximity, and bounding-box queries. It does not infer threat semantics.
+PostGIS may answer deterministic spatial questions such as containment,
+intersection, distance, proximity, and bounding-box queries. It does not
+infer threat semantics.
 
 Spatial facts never by themselves establish:
 
@@ -1346,6 +1393,14 @@ Spatial facts never by themselves establish:
 - coordination;
 - targeting;
 - attribution.
+
+The PR 26B deterministic resolver (`CanonicalGeographyResolver`, a boundary
+for PR 26C's asynchronous `LocationResolver`) narrows semantically first
+(country code -> administrative code/name -> city name) and uses PostGIS
+containment only as a deterministic disambiguation signal among equally
+valued candidates. Coordinates never upgrade claim precision, and there is
+no nearest-city or fuzzy geocoding. Resolved/ambiguous/unresolvable are
+first-class results, and malformed claims remain errors.
 
 ### GEOINT query and analyst layers
 
@@ -1377,10 +1432,10 @@ Agent output must preserve exact geographic observation/Evidence support. Common
 
 ### v0.1 persistence taxonomy update
 
-With PR 26A delivered, the persistence categories are:
+With PR 26A/26B delivered, the persistence categories are:
 
 - immutable observations: Evidence, RelationshipObservation, **EntityLocationObservation**, AuditEvent, InvestigationTimelineEvent;
-- stable/reference identities: Entity, Relationship, **Location**;
+- stable/reference identities: Entity, Relationship, **Location** (with optional canonical spatial state since PR 26B);
 - current materialized geographic state: **EntityLocation**;
 - mutable operational state: Investigation, jobs, users/sessions, **GeoResolution**;
 - versioned outputs: Assessment, InvestigationReport;

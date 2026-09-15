@@ -1542,19 +1542,17 @@ that inconsistency through the next immutable SQL API:
   repository, UoW, API, fake-data, PostGIS, and PR 25 behavior are
   unchanged.
 
-### PR 26B — Canonical geography and PostGIS foundation
+### PR 26B — Canonical geography and PostGIS foundation [DONE]
 
-Establish:
+Delivered the deterministic geographic substrate:
 
-- PostGIS through normal migrations/deployment;
-- canonical `Location` hierarchy and stable reference identities;
-- deterministic reference-data ingestion/canonicalization for country/administrative-area/city;
-- geometry/centroid representation where appropriate and indexes justified by concrete query paths;
-- geographic claim -> canonical `Location` resolution primitives;
-- distinct hierarchy vs spatial-containment semantics;
-- PostgreSQL/PostGIS tests for canonicalization, containment, geometry validity, precision preservation, idempotency, ambiguity, and failure.
-
-No threat relationship may be inferred from spatial facts.
+- **Runtime:** project-owned PostgreSQL 18 image (`docker/postgres/Dockerfile`, based on `docker.io/pgvector/pgvector:0.8.1-pg18` + `postgresql-18-postgis-3` from PGDG) ships both pgvector and PostGIS; `compose.yaml` builds it; migration 0027 runs `CREATE EXTENSION IF NOT EXISTS postgis` so existing ATI databases with PostGIS-installed servers also upgrade. The migration adds `ati.location.geometry geometry(Geometry, 4326)` and `centroid geometry(Point, 4326)` (SRID-4326 `geometry`, never `geography`), the GiST index on non-null geometry, and the b-tree `(location_type, country_code, canonical_name)` narrowing index; existing PR 26A rows keep NULL spatial fields. Downgrade drops the spatial objects in dependency-safe order and removes PostGIS only when PR 26B introduced it, never with `CASCADE`.
+- **Reference/spatial write path (SQL API v0023, migration 0027):** `ati.upsert_reference_location` implements the deterministic outcome algebra CREATED/UNCHANGED/ENRICHED/CONFLICT (U26B*) with database-owned `ST_PointOnSurface` representative-point derivation (documented as on-surface, never `ST_Centroid`), city canonical-point consistency, and fail-closed spatial validation (SRID 4326, emptiness, polygon validity, type rules, WGS84 bounds). PR 26A `upsert_location` (v0021) remains unchanged.
+- **Reference identity:** deterministic UUIDv5 (`ATI_LOCATION_NAMESPACE` over the canonical identity tuple), independent of external source record IDs; repeated unchanged ingestion is a true no-op; approved spatial refresh enriches the same canonical row with a new database-issued version.
+- **Ingestion:** `ReferenceIngestionService` (validated, parent-before-child, one atomic transaction), the production ATI Geography Corpus NDJSON parser (`infrastructure/sources/geography`), the `ati-geography-import` CLI, and small checked-in fixtures (US/WA/Seattle, US/TX/Dallas, CA/BC/Vancouver, duplicate-name/ambiguity cases, coordinate-less records, synthetic boundary/overlap polygons). Upstream derivation: GeoNames (CC BY 4.0) + Natural Earth (public domain), documented in `DATA_SOURCES.md`; migrations never download data.
+- **Resolution primitives:** `GeographicClaim` (lat/lon pairing, WGS84 bounds, precision cannot exceed semantic claim support, coordinates never upgrade precision), the `CanonicalLocationResolution` result algebra (resolved/ambiguous/unresolvable), and `CanonicalGeographyResolver` (distinct from PR 26C's `LocationResolver`) with deterministic narrowing and boundary-inclusive `ST_Covers` containment disambiguation; no nearest-city/fuzzy geocoding and no threat inference from spatial facts.
+- **Tests:** G26B-D/P/I/R matrices (unit + real PostgreSQL + PostGIS integration, EXPLAIN-based index eligibility, migration upgrade/downgrade with data preservation), plus `G26A-P08` updated for the intentional PostGIS/spatial-column introduction; all prior G26A/G26A-2, PR 25 map, RAG/pgvector, and migration suites remain green.
+- **Documentation:** `ARCHITECTURE.md`, `DATABASE.md`, `DEPLOYMENT.md`, `TESTING.md`, `DATA_SOURCES.md`, `LICENSING.md` reconciled with the delivered behavior.
 
 ### PR 26C — Asynchronous geographic resolution
 
