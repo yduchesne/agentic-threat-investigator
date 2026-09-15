@@ -28,6 +28,7 @@
 - [Geospatial](#geospatial)
 - [Investigation Map frontend (PR 25B)](#investigation-map-frontend-pr-25b)
 - [Map analyst workflow and E2E seeding (PR 25C)](#map-analyst-workflow-and-e2e-seeding-pr-25c)
+- [GEOINT architecture (PR 26)](#geoint-architecture-pr-26)
 - [Observability](#observability)
 - [Technology baseline](#technology-baseline)
 - [Configuration architecture](#configuration-architecture)
@@ -1194,7 +1195,7 @@ v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are 
 
 The Investigation Map read data (PR 25A) is a read projection derived exclusively from already-persisted immutable `GEOLOCATION` Evidence joined to its canonical IP entity: the API never opens the DB-IP MMDB, never invokes a provider, performs no network I/O, and introduces no new geolocation persistence, spatial materialization, or map-snapshot storage. One deterministic latest observation per IP entity is selected by PostgreSQL and returned as one bounded server-owned collection with explicit truncation, retaining the exact Evidence ID as provenance.
 
-PostGIS is not required until ATI needs actual spatial queries.
+PostGIS is not required until ATI needs actual spatial queries. PR 25 did not require PostGIS; PR 26 introduces canonical geographic reference data and bounded spatial queries, which make PostGIS part of the v0.1 architecture (see [GEOINT architecture (PR 26)](#geoint-architecture-pr-26)).
 
 ## Investigation Map frontend (PR 25B)
 
@@ -1215,6 +1216,170 @@ PR 25C completes the Map as a bounded analyst exploration surface without turnin
 
 - **typed entity pivots from the Map (PR 25C):** every returned Map item — marker popup and non-map row alike — exposes the exact persisted PR 25A `evidence_id` through the existing detail drawer **and** an Explore surface that reuses the PR 24 typed pivot capabilities via the exact `entityActions(item.entity_id, item.ip_address, "map_entity")` registry (`frontend/src/geolocation/GeolocationEntityActions.tsx`). The single new `map_entity` source kind is navigation provenance only: the target resources are the unchanged `evidence`/`relationships`/`research` workspaces with their existing server-backed filters (Evidence by exact subject, Relationships by source and by target as two independent actions, Research by exact subject). The first Map-origin breadcrumb label is the IP display value, never city/country/coordinates; the PivotWorkspace constraint set (typed resources, allowlisted filters, UUID/timestamp validation, bounded labels/cursors, URL serialization, no-op suppression, dead-end behavior, max depth 5, close/back) is untouched, and no Leaflet viewport/marker/popup state enters the pivot URL. Same-coordinate items remain individually inspectable through the accessible non-map rows with no jitter, clustering, or co-location/coordination inference; coordinate-less items stay fully actionable without a marker; empty projections stay honestly empty.
 - **deterministic E2E seeding seam (PR 25C):** `tests/e2e_support/seed_geolocation.py` is harness-only test infrastructure. It materializes ordinary canonical IP Entities and immutable `GEOLOCATION` Evidence into the throwaway isolated E2E PostgreSQL through the normal application repositories/UnitOfWork (`investigations.get_by_id`, `entities.upsert`, `evidence.insert`) for an exact browser-created Investigation UUID and an allowlisted scenario name (`single_mappable`, `multi_ioc`, `non_mappable`, `same_location`). It is deterministic (uuid5-derived identities, fixed UTC retrieval epoch), idempotent/bounded (repeated invocation reuses the persisted rows), offline and non-LLM, and fail-closed unless both `ATI_OPERATING_MODE=fake` and the dedicated `ATI_E2E_SEEDING_ENABLED` flag are present. There is no seed HTTP endpoint, no browser database credential, and no product fake-world/DB-IP catalog change; production reads remain exclusively the PR 25A projection through the real `/geolocations` endpoint.
+
+## GEOINT architecture (PR 26)
+
+This section describes **planned PR 26 architecture**, not already-delivered capability.
+
+PR 25 remains the delivered v0.1 geolocation presentation path:
+
+```text
+DB-IP provider
+  -> persisted GEOLOCATION Evidence
+  -> bounded Investigation geolocation projection
+  -> Investigation Map
+```
+
+PR 26 adds a richer, derived GEOINT subsystem without replacing that path:
+
+```text
+Persisted Evidence / geographic claim
+        |
+        v
+   GeoResolution
+ durable operational work/state
+        |
+        | short stored-function claim transaction
+        | lease persisted; transaction committed
+        v
+ Geo Resolver process
+ (no database locks held while resolving)
+        |
+        v
+ canonical Location resolution
+ PostgreSQL + PostGIS
+        |
+        +--> EntityLocationObservation
+        |    immutable historical/provenance observation
+        |
+        +--> EntityLocation
+             current materialized association
+```
+
+### Geographic domain separation
+
+`Location` is not an ATI `Entity`. Geographic containment and hierarchy are not modeled as ordinary `Relationship` / `RelationshipObservation` records.
+
+The initial canonical Location vocabulary is deliberately bounded to:
+
+- country;
+- administrative area;
+- city.
+
+`Location.parent_location_id` represents canonical/reference hierarchy. PostGIS spatial predicates represent geometric containment/intersection. These are distinct semantics.
+
+`EntityLocationObservation` is immutable and append-only. It explicitly preserves the Entity, exact canonical Location resolved/claimed at that time, supporting Evidence/provenance, precision, and relevant observation/retrieval/resolution timestamps. Historical location observations do not inherit their Location through mutable current state.
+
+`EntityLocation` is the current materialized association. It references the most specific canonical Location actually supported by the underlying claim. Canonicalization must never manufacture additional precision.
+
+`GeoResolution` is mutable operational state, not geographic evidence. It owns the asynchronous lifecycle such as pending, processing, resolved, unresolvable, and failed, together with attempts, lease/claim metadata, outcome metadata, and version/audit state.
+
+### PostgreSQL ownership and asynchronous resolution
+
+PR 26 preserves ATI's database architecture:
+
+> All GEOINT mutations, reconciliation, current-state maintenance, versioning, asynchronous work claiming, lease/retry transitions, stale-claim recovery, and completion are performed through versioned PostgreSQL stored functions. Python repositories/processes remain thin callers.
+
+Purpose-built bounded read/query services, including PostGIS spatial projections, may execute SQL directly under ATI's existing query-service pattern.
+
+The Geo Resolver uses two short database transactions around external/application work:
+
+```text
+claim_geo_resolution_work(...)
+  -> bounded eligible rows
+  -> FOR UPDATE SKIP LOCKED internally where appropriate
+  -> persist worker/lease/attempt state
+  -> COMMIT
+
+resolve geographic claim
+  -> no database transaction or row lock held
+
+complete_geo_resolution(...)
+  -> validate ownership/version/idempotency
+  -> canonicalize/reuse Location
+  -> append EntityLocationObservation
+  -> reconcile EntityLocation
+  -> transition GeoResolution
+  -> COMMIT
+```
+
+Leases coordinate asynchronous processing; long-held row locks do not. Expired claims are recoverable. Completion/reconciliation uses deterministic update ordering where records may contend.
+
+### PostGIS responsibility
+
+PR 26 is the point at which PostGIS becomes part of the v0.1 architecture because ATI now requires actual spatial queries and canonical geographic operations.
+
+PostGIS may answer deterministic spatial questions such as containment, intersection, distance, proximity, and bounding-box queries. It does not infer threat semantics.
+
+Spatial facts never by themselves establish:
+
+- maliciousness;
+- common ownership;
+- cyber relationships;
+- campaign association;
+- coordination;
+- targeting;
+- attribution.
+
+### GEOINT query and analyst layers
+
+Canonical `Location` is global reference data, but analyst operational queries remain bounded and Investigation-scoped.
+
+The application/query layer owns bounded geographic projections such as:
+
+- current and historical Locations for an Entity;
+- Investigation-scoped Entities/observations for a Location;
+- exact EntityLocationObservation provenance;
+- geographic summaries;
+- narrowly justified spatial queries.
+
+The PR 24 typed pivot/workspace architecture remains the navigation model. PR 26 extends it with semantically valid geographic pivots rather than creating a parallel navigation system.
+
+### Agentic GEOINT
+
+PR 26F introduces agentic reasoning only after deterministic geographic primitives exist. Agents receive bounded GEOINT tools; they do not issue arbitrary SQL/PostGIS, canonicalize Locations, or own persistence reconciliation.
+
+Potential deterministic tools include:
+
+- geographic summary;
+- locations for entity;
+- entities in location;
+- geographic history for entity;
+- narrowly bounded nearby/within queries.
+
+Agent output must preserve exact geographic observation/Evidence support. Common geography or proximity remains contextual unless independent Evidence supports a stronger analytical conclusion.
+
+### v0.1 persistence taxonomy update
+
+For PR 26 planning, extend the persistence categories conceptually:
+
+- immutable observations: Evidence, RelationshipObservation, **EntityLocationObservation**, AuditEvent, InvestigationTimelineEvent;
+- stable/reference identities: Entity, Relationship, **Location**;
+- current materialized geographic state: **EntityLocation**;
+- mutable operational state: Investigation, jobs, users/sessions, **GeoResolution**;
+- versioned outputs: Assessment, InvestigationReport;
+- replaceable derived indexing: document chunks/embeddings.
+
+Monitor is no longer a v0.1 persistence requirement. Monitor/scheduler/snapshots/diffs/Findings administration is deferred to v0.2 and tracked in `PR_PLAN_V02.md`.
+
+### Fake runtime and GEOINT
+
+The deterministic fake runtime continues to replace external/non-deterministic intelligence boundaries, not ATI's production application/persistence architecture.
+
+For PR 26, fake GEOINT data should enter as normal deterministic persisted geographic Evidence/claims and then flow through the real PR 26 resolution pipeline:
+
+```text
+fake deterministic source data
+  -> normal GEOLOCATION Evidence
+  -> GeoResolution
+  -> real asynchronous Geo Resolver
+  -> real canonicalization/PostGIS
+  -> Location
+  -> EntityLocationObservation
+  -> EntityLocation
+```
+
+The fake bootstrap must not directly manufacture `Location`, `EntityLocation`, or `EntityLocationObservation` merely to make GEOINT demos pass.
 
 ## Observability
 

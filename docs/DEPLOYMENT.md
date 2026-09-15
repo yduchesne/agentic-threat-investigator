@@ -11,6 +11,7 @@
 - [Database migrations](#database-migrations)
 - [Backend image](#backend-image)
 - [API and worker](#api-and-worker)
+- [Geographic resolver (planned PR 26C)](#geographic-resolver-planned-pr-26c)
 - [Scheduler](#scheduler)
 - [Frontend development](#frontend-development)
 - [Configuration](#configuration)
@@ -24,6 +25,7 @@
 - [Test environment isolation](#test-environment-isolation)
 - [Developer commands](#developer-commands)
 - [Configuration profiles](#configuration-profiles)
+- [Operating modes and the deterministic fake runtime (PR 23D)](#operating-modes-and-the-deterministic-fake-runtime-pr-23d)
 - [Database baseline update](#database-baseline-update)
 
 ## v0.1 deployment target
@@ -37,13 +39,14 @@ Containers are disposable. Durable data is not.
 ```text
 Host
  |
- +-- Podman Compose
+ +-- Compose
  |    +-- ati-frontend
  |    +-- ati-api
  |    +-- ati-worker
- |    +-- ati-scheduler
+ |    +-- ati-geo-resolver        # planned PR 26C
  |    +-- ati-migrate (one-shot)
- |    +-- ati-postgres (PostgreSQL + pgvector)
+ |    +-- ati-fake-data-bootstrap # fake mode, one-shot
+ |    +-- ati-postgres            # PostgreSQL + pgvector; PostGIS after PR 26B
  |
  +-- ATI_DATA_DIR
       +-- postgres/data
@@ -54,6 +57,8 @@ Host
 ```
 
 Redis, Kafka, Kubernetes, and a separate vector database are not required for v0.1.
+
+Monitor scheduling is deferred to v0.2; `ati-scheduler` is therefore not a required v0.1 Monitor runtime component (see [Scheduler](#scheduler)).
 
 ## Persistent host root
 
@@ -164,8 +169,11 @@ One backend image is reused with different commands for:
 
 - API;
 - worker;
-- scheduler;
-- migrations.
+- migrations;
+- geographic resolver (planned PR 26C).
+
+A future v0.2 scheduler reuses the same image when introduced (see
+`PR_PLAN_V02.md`).
 
 This avoids environment drift between Python services.
 
@@ -221,11 +229,51 @@ Operational requirements for the delivered API:
   scheduler; deployments define retention for `ati.api_idempotency` and
   `ati.investigation_job` (see `docs/DATABASE.md`).
 
+## Geographic resolver (planned PR 26C)
+
+PR 26 plans a distinct Geo Resolver process:
+
+```text
+Host
+ |
+ +-- Compose
+      +-- ati-geo-resolver        # planned PR 26C
+```
+
+The Geo Resolver is not the Investigation worker and does not execute
+LangGraph. It performs bounded asynchronous geographic enrichment.
+
+Lifecycle:
+
+```text
+claim bounded GeoResolution work
+  -> short stored-function transaction
+  -> persist lease/worker/attempt
+  -> commit
+  -> resolve outside any DB transaction
+  -> complete through a second short stored-function transaction
+  -> sleep/poll
+```
+
+The process may eventually run in a separate container, but PostgreSQL remains
+the initial durable queue/state mechanism. Kafka, NATS, Redis, or another
+broker is not required.
+
+Operational settings such as batch size, polling interval, lease duration, and
+retry policy are typed configuration. Exact defaults should be established by
+the detailed PR 26C plan and tests/benchmarks rather than guessed in
+architecture documentation.
+
 ## Scheduler
 
-The scheduler determines when monitors or batch-source jobs are due and creates jobs.
+Monitor scheduling is future/v0.2 architecture, not an active v0.1 Monitor
+requirement. A future scheduler determines when monitors or batch-source jobs
+are due and creates jobs; it does not perform the substantive
+investigation/ingestion work itself.
 
-It does not perform the substantive investigation/ingestion work itself.
+Monitor scheduling, Monitor-created Investigations, snapshots/diffs, Findings
+inbox, and associated administration are v0.2 scope tracked in
+`PR_PLAN_V02.md`.
 
 ## Frontend development
 
@@ -492,6 +540,67 @@ ATI_CONFIG_PROFILE=local ATI_OPERATING_MODE=fake ati-worker --poll-seconds 1.0
 
 then create an Investigation through the PR 23C API using a documented fake scenario indicator (synthetic/reserved values such as `update-package.test`; see `docs/ARCHITECTURE.md`), and inspect it through the read endpoints.
 
+### Fake bootstrap versus E2E-only seeding
+
+The normal fake bootstrap and PR 25C's geolocation E2E seeding seam have
+different responsibilities.
+
+`ati-fake-data-bootstrap` initializes the deterministic fake runtime through
+production ingestion paths. It runs explicitly (API/worker import or startup
+does not ingest fake batch data), is idempotent, loads/validates the
+repository-owned synthetic world, materializes the packaged MITRE STIX fixture
+under the configured datasets root, invokes the production
+`MitreAttackBatchSource` / `IngestionService` / document-indexing path, does
+not require live source network access, and fails visibly rather than allowing
+a partially initialized fake environment to masquerade as ready. Production
+deployments must not run the fake bootstrap.
+
+The PR 25C seeder is harness-only support for inserting deterministic ordinary
+GEOLOCATION Evidence into an exact browser-created Investigation in a
+throwaway E2E database. It is guarded by the dedicated
+`ATI_E2E_SEEDING_ENABLED` flag, has no HTTP endpoint, and is not a product
+bootstrap mechanism.
+
+Do not merge these responsibilities.
+
+### Fake GEOINT initialization (planned PR 26)
+
+PR 26 fake/demo GEOINT must exercise the production geographic pipeline rather
+than precomputing its outputs.
+
+Preferred flow:
+
+```text
+deterministic fake geographic source data
+        |
+        v
+normal persisted GEOLOCATION Evidence / geographic claim
+        |
+        v
+GeoResolution
+        |
+        v
+ati-geo-resolver
+        |
+        v
+canonical Location resolution + PostGIS
+        |
+        v
+EntityLocationObservation
+        |
+        v
+EntityLocation
+```
+
+The fake bootstrap may establish deterministic input data needed to trigger
+this flow. It must not directly populate `Location`, `EntityLocation`, or
+`EntityLocationObservation` merely to bypass the resolver/canonicalization
+pipeline.
+
+Real-stack PR 26 tests may use purpose-built harness support where exact
+Investigation identity is required, but such support must remain test-only and
+must not become a second production data path.
+
 ### Production invocation
 
 ```bash
@@ -503,4 +612,4 @@ Production deployments must set `ATI_OPERATING_MODE=production` explicitly (or r
 
 ## Database baseline update
 
-ATI v0.1 targets a pinned PostgreSQL 18 image plus a verified compatible pgvector release. Batch size is an operational configuration value (for example `db_batch_size`) enforced by the application before composite-array submission to PostgreSQL; the exact default is benchmark-driven.
+ATI v0.1 targets a pinned PostgreSQL 18 image plus a verified compatible pgvector release. PR 26 extends the pinned baseline image with a verified PostGIS release after PR 26B. Batch size is an operational configuration value (for example `db_batch_size`) enforced by the application before composite-array submission to PostgreSQL; the exact default is benchmark-driven.

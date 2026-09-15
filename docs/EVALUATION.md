@@ -24,6 +24,7 @@
   - [Trajectory correctness](#trajectory-correctness)
   - [Trajectory efficiency](#trajectory-efficiency)
 - [Scenario families](#scenario-families)
+- [GEOINT evaluation baseline (planned PR 26G)](#geoint-evaluation-baseline-planned-pr-26g)
 - [Adversarial evaluations](#adversarial-evaluations)
 - [Evaluator architecture](#evaluator-architecture)
 - [LLM-as-judge policy](#llm-as-judge-policy)
@@ -826,6 +827,84 @@ The evaluation corpus should cover at least:
 Canonical end-to-end fixture:
 
 `malicious_domain_with_ip_and_malware_pivot`
+
+## GEOINT evaluation baseline (planned PR 26G)
+
+PR 26G owns final implementation of the GEOINT evaluation baseline. GEOINT evaluation separates deterministic spatial correctness from agentic interpretation.
+
+### Deterministic geographic correctness
+
+Evaluate:
+
+- canonical Location identity;
+- preservation of input-supported precision;
+- correct historical EntityLocationObservation identity/provenance;
+- correct current EntityLocation reconciliation;
+- geographic history across changing observations;
+- bounded Investigation isolation;
+- spatial query correctness for approved deterministic tools.
+
+### Provenance closure
+
+Every material geographic claim exposed to an analyst or agent must resolve to the exact supporting EntityLocationObservation and ultimately to the exact Evidence/source that justified it.
+
+A geographic summary must not become support merely because a Location exists in canonical reference data.
+
+### Epistemic hard gates
+
+Evaluation scenarios explicitly forbid unsupported promotion of geographic context.
+
+The following facts alone are insufficient for cyber/threat conclusions:
+
+- same country;
+- same administrative area;
+- same city;
+- same or nearby coordinates;
+- geographic proximity;
+- containment in the same region;
+- temporal overlap of geographic observations.
+
+Without independent supporting Evidence these facts must not become claims of:
+
+- maliciousness;
+- cyber relationship;
+- common ownership/operator;
+- campaign association;
+- coordination;
+- targeting;
+- attribution.
+
+### Required scenario families
+
+PR 26G should include deterministic scenarios for:
+
+- country-only context retained without invented city precision;
+- city-level supported context;
+- one infrastructure Entity changing Location over time;
+- two unrelated entities sharing a Location;
+- two unrelated entities at the same coordinates;
+- ambiguous/unresolvable geographic input;
+- stale lease/retry recovery without duplicate geographic truth;
+- cross-Investigation isolation;
+- valid geographic pattern summary with exact support;
+- model attempt to overstate co-location/proximity, rejected by evaluation.
+
+### Agentic evaluation
+
+Agentic GEOINT evaluation should inspect structured outputs and tool use, not prose similarity.
+
+Measure/check:
+
+- allowed deterministic tool selection;
+- bounded tool invocation;
+- exact support references;
+- provenance closure;
+- no arbitrary SQL/PostGIS;
+- no invented Location precision;
+- no unsupported geographic-to-threat inference;
+- termination/budget behavior where GEOINT tools participate in an Investigation.
+
+PR 26G remains a repository-owned deterministic baseline and does not absorb PR 27's generic evaluator-platform/release-gate scope.
 
 ## Adversarial evaluations
 

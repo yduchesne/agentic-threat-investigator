@@ -28,6 +28,7 @@
 - [No quality-gate bypass](#no-quality-gate-bypass)
 - [CI quality gate](#ci-quality-gate)
 - [Frontend quality](#frontend-quality)
+- [PR 26 GEOINT testing strategy](#pr-26-geoint-testing-strategy)
 - [Definition of done](#definition-of-done)
 - [Configuration tests](#configuration-tests)
 - [Batch persistence and history tests](#batch-persistence-and-history-tests)
@@ -1911,6 +1912,111 @@ Frontend coverage (`frontend/src/relationship-evolution/`,
 - PR 24E adds no speculative second graph/visualization dependency and
   no new fake-world fixture: the F03 world's repeated observed-at stamps
   drive the browser slice.
+
+## PR 26 GEOINT testing strategy
+
+PR 26 testing must preserve the production-path principle: deterministic tests fake true external/non-deterministic boundaries, not ATI's persistence, canonicalization, PostGIS, resolver state machine, or query contracts.
+
+### Domain and persistence
+
+Cover:
+
+- Location type/hierarchy invariants;
+- precision preservation/no invented precision;
+- immutable EntityLocationObservation;
+- explicit historical `entity_id` + `location_id` + Evidence provenance;
+- current EntityLocation reconciliation;
+- GeoResolution lifecycle/version invariants;
+- rollback atomicity and idempotency.
+
+### PostgreSQL/PostGIS
+
+Real-PostgreSQL integration tests cover:
+
+- PostGIS availability/migration;
+- canonical Location matching;
+- hierarchy versus spatial containment;
+- geometry validity;
+- deterministic spatial predicates;
+- justified spatial-index eligibility;
+- Investigation isolation in analyst query projections.
+
+### Asynchronous resolution
+
+Multi-worker integration tests cover:
+
+- bounded atomic claims;
+- `SKIP LOCKED` workers claiming disjoint eligible work;
+- claim transaction committed before resolution;
+- no long-running DB transaction during resolution;
+- leases and expiry;
+- stale-claim recovery;
+- attempt/retry semantics;
+- crash between claim and completion;
+- duplicate/idempotent completion;
+- stale version/ownership rejection;
+- deterministic update ordering for contended completion;
+- bounded batch behavior.
+
+### Canonical GEOINT fixtures
+
+Fixtures should include at minimum:
+
+- country-only claim;
+- administrative-area claim;
+- city claim;
+- coordinates with supported precision;
+- coordinate-less valid context;
+- ambiguous/unresolvable claim;
+- one Entity observed at different Locations over time;
+- multiple unrelated Entities at the same Location;
+- same/similar coordinates without cyber relationship;
+- cross-Investigation identity/isolation cases.
+
+### Fake runtime
+
+The fake runtime must not seed derived geographic truth directly.
+
+The desired test/demo flow is:
+
+```text
+deterministic fake geographic input
+ -> normal persisted Evidence/claim
+ -> GeoResolution
+ -> real resolver state machine
+ -> real PostgreSQL/PostGIS canonicalization
+ -> EntityLocationObservation
+ -> EntityLocation
+```
+
+This is distinct from the PR 25C E2E seeder, which is a guarded harness-only mechanism for exact browser-created Investigation IDs. PR 26 may extend/create test harness support where necessary, but the canonical PR 26 vertical slice must exercise the production geographic pipeline.
+
+### API/frontend
+
+Real-stack coverage should prove:
+
+- bounded Investigation-scoped geographic queries;
+- current/history distinction;
+- exact observation -> Evidence provenance;
+- Location -> scoped Entities and Entity -> Locations navigation;
+- map/table accessibility;
+- same-location entities independently inspectable;
+- no unbounded browser reconstruction;
+- exact typed pivot identity and breadcrumbs;
+- approximation/precision semantics retained.
+
+### Agentic GEOINT
+
+`FakeLlmClient` remains the deterministic model boundary. GEOINT tools beneath it execute against real PostgreSQL/PostGIS in canonical integration/evaluation slices.
+
+Tests must prove that agent output cannot silently promote:
+
+- proximity;
+- same city/country;
+- same coordinates;
+- spatial containment
+
+into maliciousness, cyber relationship, common ownership, campaign, coordination, targeting, or attribution without independent support.
 
 ## Definition of done
 
