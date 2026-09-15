@@ -611,7 +611,7 @@ Any adapter that persists a `SourceRecord` must recompute `source_record_content
 
 Alembic orchestrates schema migrations.
 
-Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions. The shipped v0008 file is never edited in place.
+Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions; SQL API v0022 (`migrations/sql/ati/v0022/geoint_persistence.sql`, migration 0026, PR 26A-2) redefines only `ati.append_entity_location_observation` to allocate EntityLocation versions from `ati.entity_location_version_seq` on every actual current-state mutation. The shipped files are never edited in place.
 
 Rules:
 
@@ -702,6 +702,17 @@ determines the materialized association (enforced by a foreign key to
 `entity_location_observation(id)`). Application code has no direct mutation
 path.
 
+`EntityLocation.version` is a database-issued materialized-state change token
+allocated from `ati.entity_location_version_seq` on creation and every actual
+current-state mutation (SQL API v0022, migration 0026). It is monotonic for
+successive committed mutations of a row but not contiguous; sequence gaps are
+valid. An appended historical observation that does not change current state
+leaves the persisted version unchanged (a sequence value may still be
+consumed internally), and an older observation that extends
+`first_observed_at` is a real mutation that receives a new sequence token even
+when Location, precision, latest observation, and `last_observed_at` remain
+unchanged.
+
 ### GeoResolution (delivered: initial persistence only)
 
 `ati.geo_resolution` is the durable operational work record and conceptual
@@ -722,9 +733,15 @@ function and no second queue table.
 ### PR 26 stored-function ownership
 
 All PR 26A GEOINT mutations and current-state reconciliation go through the
-versioned SQL API v0021 stored functions (`ati.upsert_location`,
-`ati.append_entity_location_observation`, `ati.create_geo_resolution`).
-Python repositories are thin callers and never issue ad-hoc GEOINT DML.
+versioned SQL API stored functions (`ati.upsert_location`,
+`ati.append_entity_location_observation`, `ati.create_geo_resolution`). SQL
+API v0021 (migration 0025) shipped the PR 26A functions; SQL API v0022
+(migration 0026, PR 26A-2) redefines `ati.append_entity_location_observation`
+so `EntityLocation` versions are always allocated from
+`ati.entity_location_version_seq` — never derived arithmetically from the
+current row — while `ati.upsert_location` and `ati.create_geo_resolution`
+remain v0021. Python repositories are thin callers and never issue ad-hoc
+GEOINT DML.
 
 Bounded read/query services may use direct SQL in the same manner as ATI's
 existing dedicated query services; PostGIS-capable spatial projections are

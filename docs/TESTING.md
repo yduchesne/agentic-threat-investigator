@@ -1951,6 +1951,40 @@ PR 26A's non-spatial foundation is covered by:
   queue table; normal UnitOfWork participation, exception rollback,
   no independent repository commits, and authoritative database-assigned
   versions.
+
+#### PR 26A-2 corrective matrix (G26A2-P01..P05 + corrected G26A-P34)
+
+PR 26A-2 (`tests/integration/test_geoint_persistence.py`, plus the narrow
+source-contract guard in `tests/unit/test_geoint_version_contract.py`)
+proves `EntityLocation.version` is consistently database-sequence allocated
+from `ati.entity_location_version_seq` — never arithmetic `target.version + 1`
+— with gaps valid:
+
+- **G26A2-P01** initial version is the exact next value the sequence issues
+  (no assumption that the sequence starts at 1);
+- **G26A2-P02** the forced-gap provenance regression: deliberately advances
+  the sequence with a direct test-only `nextval`, appends a later
+  observation, and asserts the persisted version is strictly beyond the
+  forced gap — so it cannot be `before + 1`. This is the primary regression
+  test and failed on pre-fix main for exactly that reason;
+- **G26A2-P03** earliest-time-only mutation (older observation extending
+  `first_observed_at`) moves earliest time earlier while leaving
+  Location/precision/latest observation/`last_observed_at` untouched and
+  receives a new sequence-issued token;
+- **G26A2-P04** a true historical no-op (observation inside the current
+  window) persists as history while current fields and the persisted version
+  stay exactly unchanged — without asserting the sequence itself was not
+  consumed;
+- **G26A2-P05** a current-state-changing append that is rolled back leaves
+  the pre-transaction EntityLocation state/version intact in a new UoW;
+- **G26A-P34 (corrected)** no longer asserts `current.version == before + 1`;
+  it asserts `current.version > before` (monotonic, non-contiguous). The
+  unit guard pins the newest shipped GEOINT SQL API to sequence allocation
+  and forbids an arithmetic `target.version + 1` reassignment in the active
+  function.
+- **Migration tests** (`tests/integration/test_migration.py`) traverse SQL
+  API v0022/migration 0026 in both directions: existing EntityLocation
+  versions are database-owned historical tokens and are never rewritten.
 - **Migration tests** (`tests/integration/test_migration.py`): the 0025
   upgrade installs the four tables, four version sequences, and three
   stored functions; the downgrade removes only the PR 26A objects in
