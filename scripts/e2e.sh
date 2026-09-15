@@ -115,6 +115,15 @@ export ATI_LLM_DRIVER=deterministic
 export ATI_PUBLIC_BASE_URL="http://127.0.0.1:${FRONTEND_PORT}"
 export ATI_BOOTSTRAP_ADMIN_USERNAME="e2e-admin"
 export E2E_BOOTSTRAP_PASSWORD="$BOOTSTRAP_PASSWORD"
+# PR 25C deterministic geolocation seeding (E24-E28): the scripted seeder
+# runs on the host against the throwaway E2E Postgres host port through the
+# normal application persistence seam. The dedicated enable flag and fake
+# operating mode are both required by the seeder's fail-closed guard; the
+# browser never receives these database URL values — the Playwright specs
+# only invoke the helper script path below.
+export ATI_E2E_SEEDING_ENABLED=1
+export ATI_DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
+export E2E_SEED_SCRIPT="$PWD/scripts/e2e-seed-geolocation.sh"
 # Required by the base bind-mount definition; the override replaces the
 # postgres volume with a throwaway named volume. The fake-data bootstrap
 # materializes its packaged datasets itself.

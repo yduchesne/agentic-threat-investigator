@@ -10,26 +10,15 @@
 // LLM; `FAKE DATA` remains visible throughout. The PR 25A endpoint is
 // real — no geolocation interception, no MSW, no mocked fetch.
 //
-// E24 DATA PREREQUISITE (PR 25B STOP condition, docs/PR_PLAN.md PR 25B):
-//
-//   The current fake world (scenarios F01..F05) contains no DB-IP City
-//   Lite provider and persists no ``urn:ati:evidence:geolocation`` rows:
-//   GEOLOCATION evidence is produced only by the DbIpCityLiteProvider,
-//   which is composed solely when ``dbip_city_lite_artifact_uri`` is
-//   configured. Therefore a completed fake-world Investigation currently
-//   returns an honest empty geolocation projection, and the marker/plotted
-//   assertions below cannot pass until a deterministic real-stack seeding
-//   seam exists (see the PR 25B delivered summary / STOP report).
-//
-//   This spec therefore implements the exact PR 25B §52 path and, when the
-//   completed Investigation's Map shows the honest empty state (no
-//   persisted mappable GEOLOCATION context), records the STOP condition
-//   and skips precisely — it never asserts a false pass and never depends
-//   on external basemap tile delivery. When the deterministic seeding lands,
-//   the same spec proves the full path: geolocation data through the real
-//   stack -> visible disclaimer -> exact IP in the non-map representation
-//   -> at least one real marker -> exact Evidence provenance -> safe return
-//   -> `FAKE DATA` -> clean console.
+// PR 25C: E24's data prerequisite is closed by the deterministic real-stack
+// seeding seam. After the browser completes the exact Investigation, this
+// spec invokes the harness-only seeder (scripts/e2e-seed-geolocation.sh,
+// exported as E2E_SEED_SCRIPT) for the exact browser-created Investigation
+// UUID with the allowlisted ``single_mappable`` scenario. The seeder
+// persists ordinary canonical IP Entity + GEOLOCATION Evidence rows through
+// the normal application repositories into the isolated E2E PostgreSQL; the
+// browser then consumes those rows exclusively through the real PR 25A
+// endpoint. Seed failure is test failure; there is no data-path skip.
 //
 // The spec file is named ``zz-*`` so it runs after the PR 24A/24B specs
 // and reuses the authenticated session captured by the PR 24C suite
@@ -43,18 +32,36 @@
 // by zz-relationship-evolution.spec.ts; page-level controls use normal
 // clicks.
 
+import { execSync } from "node:child_process";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const OBJECTIVE = "PR 25B investigate geolocation map context";
 const ROOT_DOMAIN = "update-package.test";
 const SHARED_SESSION_STATE = "test-results/analyst-session.json";
 
-/** Recorded PR 25B E24 data STOP (docs/PR_PLAN.md PR 25B). */
-const E24_DATA_STOP =
-  "E24 data STOP: the current PR 23D fake world persists no mappable " +
-  "GEOLOCATION Evidence (no DB-IP provider); the Map honestly reports " +
-  "empty context. Deterministic real-stack geolocation seeding is a " +
-  "documented prerequisite for the marker assertions.";
+/** The harness-exported absolute path of the seeding helper script. */
+const SEED_SCRIPT = process.env.E2E_SEED_SCRIPT ?? "";
+
+/** Invoke the harness-only seeder; any failure fails the test. */
+function seedGeolocation(investigationId: string, scenario: string): void {
+  if (SEED_SCRIPT === "") {
+    throw new Error(
+      "E2E_SEED_SCRIPT is not exported: the E2E harness (scripts/e2e.sh) must " +
+        "define it before running Playwright",
+    );
+  }
+  try {
+    execSync(`"${SEED_SCRIPT}" "${investigationId}" "${scenario}"`, {
+      timeout: 120_000,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? String(error) : String(error);
+    throw new Error(
+      `geolocation seeding failed for investigation ${investigationId} ` +
+        `scenario ${scenario}: ${detail}`,
+    );
+  }
+}
 
 /** Activate an overlay control through a direct click-event dispatch. */
 async function activate(page: Page, target: Locator): Promise<void> {
@@ -92,7 +99,7 @@ test.describe("PR 25B real-stack Investigation Map", () => {
   test.describe.configure({ timeout: 300_000 });
   test.use({ storageState: SHARED_SESSION_STATE });
 
-  test("E24 principal Map workflow (data prerequisite required)", async ({
+  test("E24 principal Map workflow with seeded deterministic geolocation", async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -108,6 +115,10 @@ test.describe("PR 25B real-stack Investigation Map", () => {
     const investigationId = await completeInvestigation(page, OBJECTIVE, ROOT_DOMAIN);
     expect(investigationId).not.toBe("");
 
+    // Deterministic real-stack seeding (PR 25C seam): attach the allowlisted
+    // single mappable scenario to the exact browser-created Investigation.
+    seedGeolocation(investigationId, "single_mappable");
+
     // Open the Map primary tab.
     await page.getByRole("tab", { name: "Map" }).click();
     await expect(
@@ -119,23 +130,10 @@ test.describe("PR 25B real-stack Investigation Map", () => {
       page.getByText(/IP geolocation is approximate network-address context/i),
     ).toBeVisible({ timeout: 30_000 });
 
-    // E24 data prerequisite: a completed fake-world Investigation currently
-    // persists no GEOLOCATION Evidence, so the honest empty state appears.
-    const emptyState = page.getByText(
-      "No geolocation context is available for this Investigation.",
-    );
-    const emptyVisible = await emptyState.isVisible().catch(() => false);
-    if (emptyVisible) {
-      console.log(`E24-DATA-STOP ${E24_DATA_STOP}`);
-      test.skip(true, E24_DATA_STOP);
-      return;
-    }
-
-    // --- Data-present path (exercised once deterministic seeding exists) ---
-
-    // Exact IP of a persisted mappable item in the non-map representation.
+    // Exact IP of the persisted mappable item in the non-map representation.
     const rows = page.getByRole("table", { name: "All returned geolocation items" });
     await expect(rows).toBeVisible({ timeout: 30_000 });
+    await expect(rows.locator("tbody tr")).toHaveCount(1);
     const ipCell = rows.locator("tbody tr").first().locator("th").first();
     await expect(ipCell).toHaveText(/^\d{1,3}(\.\d{1,3}){3}$/);
 
@@ -145,7 +143,10 @@ test.describe("PR 25B real-stack Investigation Map", () => {
     });
     expect(await page.locator(".leaflet-marker-icon").count()).toBeGreaterThan(0);
 
-    // Exact Evidence provenance through the non-map row action.
+    // Exact Evidence provenance through the non-map row action: the drawer
+    // resolves the exact persisted GEOLOCATION Evidence (subject IP + type +
+    // source) — never an IP lookup or a substitute row. The provider appears
+    // both in the source row and inside the normalized facts section.
     const evidenceButton = rows
       .locator("tbody tr")
       .first()
@@ -153,8 +154,12 @@ test.describe("PR 25B real-stack Investigation Map", () => {
     await evidenceButton.click();
     const drawer = page.getByRole("dialog", { name: "Evidence" });
     await expect(drawer).toBeVisible({ timeout: 30_000 });
-    // The exact persisted Evidence subject is shown (never an IP lookup).
     await expect(drawer.getByText("Subject").first()).toBeVisible();
+    await expect(drawer.getByText("203.0.113.10")).toBeVisible();
+    await expect(drawer.getByText("Geolocation")).toBeVisible();
+    await expect(
+      drawer.getByText("urn:ati:source:dbip_city_lite").first(),
+    ).toBeVisible();
     // Return safely to the Map.
     await activate(page, page.getByRole("button", { name: "Close detail" }));
     await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();

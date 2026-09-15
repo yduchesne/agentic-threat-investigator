@@ -27,6 +27,7 @@
 - [Batch ingestion](#batch-ingestion)
 - [Geospatial](#geospatial)
 - [Investigation Map frontend (PR 25B)](#investigation-map-frontend-pr-25b)
+- [Map analyst workflow and E2E seeding (PR 25C)](#map-analyst-workflow-and-e2e-seeding-pr-25c)
 - [Observability](#observability)
 - [Technology baseline](#technology-baseline)
 - [Configuration architecture](#configuration-architecture)
@@ -1207,6 +1208,13 @@ The Investigation Map is a pure presentation surface over the bounded PR 25A pro
 - a persistent visible disclaimer states that IP geolocation is approximate network-address context and does not establish the physical location of an attacker, user, or device; observed/retrieved timestamps stay distinct.
 
 There is no map-time geolocation lookup, no spatial query, no PostGIS, no clustering/heat map/polygon, no cross-Investigation map, no historical movement, and no map state persisted in the URL, localStorage, or sessionStorage (the Map route's URL state is only the route itself).
+
+## Map analyst workflow and E2E seeding (PR 25C)
+
+PR 25C completes the Map as a bounded analyst exploration surface without turning geography into an inference engine:
+
+- **typed entity pivots from the Map (PR 25C):** every returned Map item — marker popup and non-map row alike — exposes the exact persisted PR 25A `evidence_id` through the existing detail drawer **and** an Explore surface that reuses the PR 24 typed pivot capabilities via the exact `entityActions(item.entity_id, item.ip_address, "map_entity")` registry (`frontend/src/geolocation/GeolocationEntityActions.tsx`). The single new `map_entity` source kind is navigation provenance only: the target resources are the unchanged `evidence`/`relationships`/`research` workspaces with their existing server-backed filters (Evidence by exact subject, Relationships by source and by target as two independent actions, Research by exact subject). The first Map-origin breadcrumb label is the IP display value, never city/country/coordinates; the PivotWorkspace constraint set (typed resources, allowlisted filters, UUID/timestamp validation, bounded labels/cursors, URL serialization, no-op suppression, dead-end behavior, max depth 5, close/back) is untouched, and no Leaflet viewport/marker/popup state enters the pivot URL. Same-coordinate items remain individually inspectable through the accessible non-map rows with no jitter, clustering, or co-location/coordination inference; coordinate-less items stay fully actionable without a marker; empty projections stay honestly empty.
+- **deterministic E2E seeding seam (PR 25C):** `tests/e2e_support/seed_geolocation.py` is harness-only test infrastructure. It materializes ordinary canonical IP Entities and immutable `GEOLOCATION` Evidence into the throwaway isolated E2E PostgreSQL through the normal application repositories/UnitOfWork (`investigations.get_by_id`, `entities.upsert`, `evidence.insert`) for an exact browser-created Investigation UUID and an allowlisted scenario name (`single_mappable`, `multi_ioc`, `non_mappable`, `same_location`). It is deterministic (uuid5-derived identities, fixed UTC retrieval epoch), idempotent/bounded (repeated invocation reuses the persisted rows), offline and non-LLM, and fail-closed unless both `ATI_OPERATING_MODE=fake` and the dedicated `ATI_E2E_SEEDING_ENABLED` flag are present. There is no seed HTTP endpoint, no browser database credential, and no product fake-world/DB-IP catalog change; production reads remain exclusively the PR 25A projection through the real `/geolocations` endpoint.
 
 ## Observability
 

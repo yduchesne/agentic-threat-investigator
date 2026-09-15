@@ -39,6 +39,7 @@ export const PIVOT_SOURCE_KINDS = [
   "assessment_support",
   "research_reference",
   "relationship_observation_reference",
+  "map_entity",
 ] as const;
 
 /** One bounded pivot source kind. */

@@ -29,6 +29,7 @@ import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { Box, Button, Typography } from "@mui/material";
 import type { InvestigationGeolocation } from "../api/schema-types";
 import { formatDateTime } from "../components/Timestamp";
+import { GeolocationEntityActions } from "./GeolocationEntityActions";
 import { TILE_ATTRIBUTION, TILE_URL, MAP_HEIGHT_PX } from "./map-config";
 import {
   BOUNDS_PADDING,
@@ -197,6 +198,9 @@ function MarkerPopup({ item, onViewEvidence }: MarkerPopupProps): ReactElement {
       >
         {t("popup.viewEvidence")}
       </Button>
+      <Box sx={{ mt: 0.5 }}>
+        <GeolocationEntityActions item={item} />
+      </Box>
     </Box>
   );
 }
