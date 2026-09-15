@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 25C seeder unit tests (C-S01..C-S12).
+"""PR 25C seeder unit tests (C-S01..C-S13).
 
 The seeder is harness-only deterministic geolocation seeding. Unit coverage
 fixes the pure contracts — allowlisted scenarios, deterministic identity
@@ -345,8 +345,8 @@ def test_cs04_e2e_guard_required() -> None:
     )
 
 
-def test_cs04_cli_guard_refuses_without_flag(monkeypatch: Any) -> None:
-    """C-S04: the CLI exits nonzero when the guard is not satisfied."""
+def test_cs13_cli_guard_refuses_without_flag(monkeypatch: Any) -> None:
+    """C-S13: the CLI exits nonzero when the guard is not satisfied."""
     monkeypatch.delenv("ATI_OPERATING_MODE", raising=False)
     monkeypatch.delenv(E2E_SEEDING_ENABLE_ENV, raising=False)
     assert (

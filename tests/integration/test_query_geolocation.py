@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 25A integration: Investigation geolocation projection (G-P01..G-P13).
+"""PR 25A integration: Investigation geolocation projection (G-P01..G-P16).
 
 Every test drives the real ``PostgresInvestigationGeolocationQueryService``
 over real PostgreSQL with Evidence/Entity rows persisted through the normal
 application repositories. Evidence is seeded directly as persisted rows — no
 MMDB/provider execution is involved anywhere in the read path.
+
+G-P01..G-P13 are the core projection/bounded-read matrix; G-P14..G-P16 are the
+defensive cases (malformed persisted facts, partial coordinate pair, and
+nonexistent Investigation).
 """
 
 from __future__ import annotations
@@ -447,10 +451,17 @@ async def test_gp12_historical_volume_stays_bounded(uow_factory: Any) -> None:
 async def test_gp13_single_bounded_read(uow_factory: Any) -> None:
     """The projection is one bounded SQL read over latest-per-entity rows.
 
-    The repository has no statement-counting infrastructure; the reviewer
-    criterion is met structurally: the service issues exactly one SELECT on
-    the latest-per-entity ranked subquery with a ``max_items + 1`` LIMIT,
-    never per-item Evidence gets or Python-side grouping of historical rows.
+    PR 25D inspected the existing test support for reusable SQL
+    statement-counting infrastructure (SQLAlchemy ``before/after_cursor_execute``
+    listeners, query counters, or statement recorders). The only SQLAlchemy
+    event listeners in the repository register batch composite types (the E2E
+    seeder) or track active UnitOfWork lifecycle phases (the analyst pipeline
+    transaction tracker); neither counts SQL statements, so no lightweight
+    established mechanism exists to instrument the read. Per the PR 25D
+    decision, no generic statement-count framework was created; the criterion
+    is met structurally: the service issues exactly one SELECT on the
+    latest-per-entity ranked subquery with a ``max_items + 1`` LIMIT, never
+    per-item Evidence gets or Python-side grouping of historical rows.
     """
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
@@ -467,8 +478,8 @@ async def test_gp13_single_bounded_read(uow_factory: Any) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_gp12_malformed_persisted_facts_fail_closed(uow_factory: Any) -> None:
-    """Malformed persisted geolocation facts fail the read closed."""
+async def test_gp14_malformed_persisted_facts_fail_closed(uow_factory: Any) -> None:
+    """G-P14: malformed persisted geolocation facts fail the read closed."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(
@@ -487,10 +498,10 @@ async def test_gp12_malformed_persisted_facts_fail_closed(uow_factory: Any) -> N
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_gp12_partial_pair_from_raw_facts_fails_closed(
+async def test_gp15_partial_pair_from_raw_facts_fails_closed(
     uow_factory: Any,
 ) -> None:
-    """A persisted partial coordinate pair is never silently repaired."""
+    """G-P15: a persisted partial coordinate pair is never silently repaired."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(
@@ -509,8 +520,8 @@ async def test_gp12_partial_pair_from_raw_facts_fails_closed(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_gp12_nonexistent_investigation_empty(uow_factory: Any) -> None:
-    """An unknown Investigation yields the established empty collection."""
+async def test_gp16_nonexistent_investigation_empty(uow_factory: Any) -> None:
+    """G-P16: an unknown Investigation yields the established empty collection."""
     async with uow_factory() as uow:
         result = await _service(uow).list_for_investigation(uuid4())
 

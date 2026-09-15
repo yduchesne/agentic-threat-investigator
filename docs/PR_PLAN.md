@@ -1167,11 +1167,12 @@ Delivered (PR 25A implementation summary):
   no artifact paths) with normal analyst cookie-session
   authentication/authorization. Unknown/not-visible Investigations follow
   the established collection convention and return an empty `200`;
-- **Coverage:** G-Q01..G-Q10 read-model invariants, G-M01..G-M10 pure
-  fact mapping, G-P01..G-P13 real-PostgreSQL matrix (empty, single,
+- **Coverage:** G-Q01..G-Q10 read-model invariants, G-M01..G-M12 pure
+  fact mapping, G-P01..G-P16 real-PostgreSQL matrix (empty, single,
   ordering, latest-per-entity, tie-breaker, type/IP exclusion,
   cross-Investigation isolation, coordinate-less context, truncation
-  bound/exact, historical volume, fail-closed malformed persistence),
+  bound/exact, historical volume, malformed/partial-pair fail-closed,
+  nonexistent-Investigation empty, bounded single read),
   G-A01..G-A10 HTTP contract checks, and two real PostgreSQL + FastAPI
   vertical slices (`tests/integration/test_api_geolocation.py`);
 - **Artifacts:** OpenAPI fixture regenerated
@@ -1303,7 +1304,7 @@ geolocation interception, no dependence on live tile success).
   typed pivots, E26 same-coordinate inspectability (no jitter/cluster),
   E27 coordinate-less actionable context, E28 empty/isolation — all
   passing on the full E2E stack;
-- **Coverage:** seeder unit C-S01..C-S12, real-PostgreSQL SG01..SG07
+- **Coverage:** seeder unit C-S01..C-S13, real-PostgreSQL SG01..SG07
   (including an authenticated real `/geolocations` read), map-action
   C-P01..C-P12, pivot URL/model C-V01..C-V08, and the E24-E28 browser
   specs;
@@ -1325,6 +1326,71 @@ Complete the map as an analyst exploration surface without turning geography int
 - reconcile `API.md`, `ARCHITECTURE.md`, `TESTING.md`, and `PR_PLAN.md` and perform a final PR 25A–C source/test compliance sweep.
 
 PR 25C must not infer co-location, coordination, common ownership, targeting, maliciousness, attribution, or victim geography merely because indicators appear geographically near one another.
+
+### PR 25D — PR 25-series compliance closure [DONE]
+
+PR 25D is the final closure PR for the PR 25 geolocation-map series. It
+added no geolocation, Map, API, persistence, pivot, provider, spatial, or
+GEOINT functionality; it closes the demonstrated PR 25A-C test-traceability
+residuals and verifies the complete geolocation surface.
+
+Delivered (PR 25D implementation summary):
+
+- **Fresh source-level audit of PR 25A-C:** every material requirement was
+  re-verified against actual source/tests (not `[DONE]` summaries or
+  implementation summaries) and classified COMPLIANT/PARTIAL/MISSING/
+  OUT-OF-SCOPE; no material production defect was found and no STOP
+  condition fired;
+- **G-P matrix normalization:** the three tests that incorrectly reused
+  `gp12` were renamed to the distinct `test_gp14_malformed_persisted_facts_fail_closed`,
+  `test_gp15_partial_pair_from_raw_facts_fails_closed`, and
+  `test_gp16_nonexistent_investigation_empty`; G-P01..G-P13 keep their
+  established meanings (G-P12 remains the historical-volume test, G-P13
+  the bounded-single-read test) and the module plus `TESTING.md` now
+  document G-P01..G-P16; `tests/integration/test_query_geolocation.py`
+  and `docs/TESTING.md` updated;
+- **G-M matrix normalization:** the duplicated `gm10` unit identifiers
+  became `test_gm11_invalid_precision_vocabulary_rejected` and
+  `test_gm12_invalid_country_code_rejected`; the module plus
+  `TESTING.md`/`PR_PLAN.md` now document G-M01..G-M12;
+- **Seeder unit matrix normalization:** the duplicated `cs04` identifier
+  became `test_cs13_cli_guard_refuses_without_flag`; the module plus
+  `TESTING.md`/`PR_PLAN.md` now document C-S01..C-S13;
+- **G-P13 disposition:** existing test support was explicitly inspected
+  for SQL statement-counting infrastructure (SQLAlchemy event listeners,
+  query counters, statement recorders). The only SQLAlchemy event
+  listeners in the repository register batch composite types (the E2E
+  seeder) or track UnitOfWork lifecycle phases (the analyst pipeline
+  transaction tracker); no reusable lightweight statement-count fixture
+  exists. Per the PR 25D decision (STOP condition D03), no generic
+  query-count framework was created; the structural verification (one
+  `session.execute`, DB-side ranked latest-per-entity selection,
+  server-side `max_items + 1`, no per-item repository gets, no Python
+  historical grouping) is retained and documented at the test and in
+  `TESTING.md`;
+- **B/C/SG/E traceability audit:** B-M/B-L/B-V/B-Q/B-U/B-F/B-P/B-A11Y,
+  C-P/C-V, SG01..SG07, and E24-E28 were audited for duplicate or
+  misleading identifiers and doc mismatches; no demonstrated defect was
+  found (the G-A04 gap is documented: no lower-privilege role exists in
+  the v0.1 UserRole vocabulary); the E22/E22-B Chromium/MUI wedge remains
+  separately classified per `docs/INVESTIGATION_STABILITY.md`;
+- **E24-E28 rerun:** all four real-stack browser specs pass on the
+  canonical full stack through the real PR 25A read path with assertions
+  unweakened;
+- **No production/API/schema/persistence change:** the endpoint, operation
+  ID, DTO, exact IDs, paired coordinates, provider/precision/timestamps,
+  `{items,truncated}`, authentication, Map route, 30s stale time/no
+  polling, viewport policy, neutral markers, coordinate-less
+  presentation, disclaimer, exact Evidence drill-down, `map_entity`
+  behavior, and the deterministic seeder implementation are unchanged;
+  no migration, index, provider, package, generated contract, or Leaflet
+  file was modified;
+- **Documentation reconciliation:** `TESTING.md` and this plan updated;
+  `ARCHITECTURE.md` and `API.md` required no change after the fresh
+  audit.
+
+PR 25A-C remain `[DONE]`; the PR 25 series is now closed with no known
+functional residual. PR 26 remains the next v0.1 feature phase.
 
 ### PR 25 overall boundaries
 

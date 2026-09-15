@@ -2,7 +2,7 @@
 """PR 25A unit tests: geolocation read models and persisted-facts mapping.
 
 Covers the typed read-contract model invariants (G-Q01..G-Q10) and the pure
-mapping of persisted normalized ``GEOLOCATION`` facts (G-M01..G-M10). The
+mapping of persisted normalized ``GEOLOCATION`` facts (G-M01..G-M12). The
 mapper never reinterprets malformed persisted data: it fails closed with
 :class:`GeolocationFactsError` so the API can surface a safe internal
 contract error instead of an incomplete map.
@@ -180,7 +180,7 @@ def test_gq10_immutable_and_extra_forbidden() -> None:
         )
 
 
-# --- Pure persisted-facts mapping (G-M01..G-M10) --------------------------
+# --- Pure persisted-facts mapping (G-M01..G-M12) --------------------------
 
 
 def test_gm01_approved_facts_map_correctly() -> None:
@@ -291,14 +291,14 @@ def test_gm10_no_provider_arbitrary_facts_escape() -> None:
     }
 
 
-def test_gm10_invalid_precision_vocabulary_rejected() -> None:
-    """A precision value outside the existing vocabulary fails closed."""
+def test_gm11_invalid_precision_vocabulary_rejected() -> None:
+    """G-M11: a precision value outside the existing vocabulary fails closed."""
     with pytest.raises(GeolocationFactsError):
         _mapped({"provider": PROVIDER, "precision": "town"})
 
 
-def test_gm10_invalid_country_code_rejected() -> None:
-    """A non-two-letter country code fails closed."""
+def test_gm12_invalid_country_code_rejected() -> None:
+    """G-M12: a non-two-letter country code fails closed."""
     with pytest.raises(GeolocationFactsError):
         _mapped({**_city_facts(), "country_code": "United States"})
     with pytest.raises(GeolocationFactsError):
