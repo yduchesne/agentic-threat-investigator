@@ -1501,6 +1501,47 @@ Delivered (PR 26A implementation summary):
   (G26A-D/G26A-P matrices and the canonical PostgreSQL path). Fake runtime
   and PR 25 Map behavior are unchanged.
 
+### PR 26A-2 — EntityLocation version-allocation consistency [DONE]
+
+Corrective child of PR 26A. PR 26A created the SQL API v0021 persistence
+foundation and `ati.entity_location_version_seq`, and used the sequence for
+initial `EntityLocation` creation, but the v0021 reconciliation path advanced
+changed current rows with `version = target.version + 1`. PR 26A-2 closes
+that inconsistency through the next immutable SQL API:
+
+- **Versioned SQL API v0022 (migration 0026):** redefines only
+  `ati.append_entity_location_observation`, preserving the public signature,
+  return shape, provenance validation (`U26A1`-`U26A6`), deterministic
+  currentness ordering, mutation predicate, and the atomic append +
+  reconciliation transaction. Both initial creation and every actual
+  current-state `DO UPDATE` now allocate the persisted version from
+  `nextval('ati.entity_location_version_seq')`. No schema, sequence,
+  constraint, or index changes; existing EntityLocation versions are
+  database-owned historical tokens and are not rewritten. SQL API v0021 is
+  immutable and unedited; its downgrade reinstalls the v0021 function
+  definitions.
+- **Version semantics:** `EntityLocation.version` is a database-issued
+  materialized-state change token, monotonic for successive committed
+  mutations of one row but **not contiguous**; sequence gaps caused by
+  rollback, contention, or PostgreSQL evaluation are valid. A historical
+  observation that does not mutate current state leaves the persisted
+  version unchanged; an earlier-time-only observation extending
+  `first_observed_at` is a real mutation and receives a new token.
+- **Tests:** real-PostgreSQL G26A2-P01..P05 (initial version is the exact
+  next sequence value; forced-gap later-current mutation proving the version
+  is not `before + 1` — the primary regression, which failed on pre-fix main
+  for that reason; earliest-time-only mutation receiving a new token;
+  true no-op leaving the persisted version unchanged; rollback preserving
+  the prior persisted version), corrected G26A-P34 (monotonic `> before`
+  rather than contiguous `+ 1`), and a narrow source-contract unit guard
+  (`tests/unit/test_geoint_version_contract.py`) pinning the active SQL API
+  to sequence allocation. The original G26A-D/G26A-P matrices, migration
+  upgrade/downgrade coverage, and the full repository gates remain green.
+- **Documentation:** `DATABASE.md` (version-token semantics, SQL API
+  v0022/migration 0026), `TESTING.md` (G26A2 corrective matrix). Domain,
+  repository, UoW, API, fake-data, PostGIS, and PR 25 behavior are
+  unchanged.
+
 ### PR 26B — Canonical geography and PostGIS foundation
 
 Establish:

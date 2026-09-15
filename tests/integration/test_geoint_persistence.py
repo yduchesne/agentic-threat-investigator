@@ -1,12 +1,19 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 26A GEOINT persistence matrix on real PostgreSQL (G26A-P01..P34).
+"""PR 26A/26A-2 GEOINT persistence matrices on real PostgreSQL.
 
-Proves the delivered foundation: canonical Location identity, immutable
-EntityLocationObservation provenance, database-maintained EntityLocation
-current state with deterministic reconciliation, and initial pending
-GeoResolution work — all through the versioned SQL API v0021 with typed
+PR 26A matrix (G26A-P01..P34): published foundation — canonical Location
+identity, immutable EntityLocationObservation provenance, database-maintained
+EntityLocation current state with deterministic reconciliation, initial
+pending GeoResolution work — through the versioned SQL API v0021 with typed
 SQLSTATE mapping and thin repositories.
+
+PR 26A-2 corrective matrix (G26A2-P01..P05): proves on real PostgreSQL that
+``ati.entity_location.version`` is consistently database-sequence allocated
+(``ati.entity_location_version_seq``) on creation and every actual
+current-state mutation — never arithmetic ``target.version + 1`` — with
+sequence gaps valid, no-op history leaving the persisted version unchanged,
+and rollback preserving the prior persisted version.
 """
 
 import asyncio
@@ -1129,6 +1136,299 @@ async def test_gp34_database_assigned_versions_returned_authoritatively(
             )
         )
         current = await uow.entity_locations.get_by_entity_id(entity_id)
-        assert current is not None
+        assert current is not None and current.version is not None
         assert before is not None
-        assert current.version == before + 1
+        assert current.version > before
+
+
+# --------------------------------------------------------------------------
+# PR 26A-2 corrective matrix (G26A2-P01..P05)
+# --------------------------------------------------------------------------
+#
+# PR 26A-2 makes ``ati.entity_location.version`` consistently
+# database-sequence allocated (``ati.entity_location_version_seq``) on every
+# actual current-state mutation. EntityLocation versions are monotonic
+# database-issued change tokens, not contiguous ``+1`` revision counters;
+# sequence gaps are valid. G26A2-P01..P05 prove sequence provenance on real
+# PostgreSQL; G26A-P34 was corrected to stop assuming row-local contiguity.
+
+
+@pytest.mark.asyncio
+async def test_g26a2_p01_initial_version_is_sequence_issued(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A2-P01 the initial EntityLocation version is sequence-issued.
+
+    Creates first observation/current state and proves the persisted version
+    equals exactly the value ``ati.entity_location_version_seq`` would issue
+    next — without assuming the sequence starts at 1. The sequence state is
+    read immediately before the append, so any earlier sequence consumption
+    in the shared test session is accounted for.
+    """
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        assert uow.session is not None
+        is_called, last_value = (
+            await uow.session.execute(
+                text(
+                    "SELECT is_called, last_value FROM ati.entity_location_version_seq"
+                )
+            )
+        ).one()
+        expected = int(last_value) + 1 if is_called else 1
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+            )
+        )
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        assert current.version == expected
+
+
+@pytest.mark.asyncio
+async def test_g26a2_p02_later_current_mutation_proves_sequence_provenance(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A2-P02 a later-current mutation follows the sequence, not +1.
+
+    Creates current state, deliberately advances ``ati.entity_location_version_seq``
+    with a direct test-only ``nextval`` (forcing a gap), then appends a
+    deterministically later observation. The persisted version must come from
+    the sequence — strictly beyond the forced gap — and therefore cannot be
+    ``before + 1``. This is the primary regression test and must fail on
+    pre-fix main for exactly that reason.
+    """
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        first = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+        )
+        await uow.entity_location_observations.append(first)
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        before = current.version
+        # Force exactly one gap with a direct test-only nextval. The sequence
+        # (not the row) is now one value ahead of the persisted version.
+        assert uow.session is not None
+        gap = int(
+            (
+                await uow.session.execute(
+                    text("SELECT nextval('ati.entity_location_version_seq')")
+                )
+            ).scalar_one()
+        )
+        assert gap == before + 1
+        # Append a deterministically later observation: an actual
+        # current-state mutation.
+        later = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT + timedelta(days=1),
+        )
+        await uow.entity_location_observations.append(later)
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        after = current.version
+        assert after > before
+        # The version is sequence-issued: it lies beyond the forced gap, so
+        # arithmetic `target.version + 1` allocation would have produced
+        # `after == gap` on a gap-free sequence and `after == before + 1` here.
+        assert after != before + 1
+        assert after > gap
+        assert current.latest_observation_id == later.id
+        assert current.last_observed_at == _RETRIEVED_AT + timedelta(days=1)
+
+
+@pytest.mark.asyncio
+async def test_g26a2_p03_earliest_time_only_mutation_gets_new_token(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A2-P03 an earliest-time-only mutation receives a new sequence token.
+
+    Appends an older observation that extends ``first_observed_at`` without
+    winning latest-current ordering: the current Location/precision/latest
+    observation and ``last_observed_at`` stay put, ``first_observed_at``
+    moves earlier, and the persisted version changes with a sequence-issued
+    value beyond a forced gap (no contiguous ``+1`` assumption).
+    """
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        other = await uow.locations.upsert(
+            location_factory(name="Canada", canonical_name="Canada", country_code="CA")
+        )
+        assert other.id is not None
+        later = observation_factory(
+            entity_id=entity_id,
+            location_id=other.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT + timedelta(days=2),
+        )
+        await uow.entity_location_observations.append(later)
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        before = current.version
+        assert uow.session is not None
+        gap = int(
+            (
+                await uow.session.execute(
+                    text("SELECT nextval('ati.entity_location_version_seq')")
+                )
+            ).scalar_one()
+        )
+        assert gap == before + 1
+        older = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+            observed_at=_RETRIEVED_AT - timedelta(days=5),
+        )
+        await uow.entity_location_observations.append(older)
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        # Earliest time moved earlier; latest-current state is untouched.
+        assert current.first_observed_at == _RETRIEVED_AT - timedelta(days=5)
+        assert current.location_id == other.id
+        assert current.precision is LocationPrecision.COUNTRY
+        assert current.latest_observation_id == later.id
+        assert current.last_observed_at == _RETRIEVED_AT + timedelta(days=2)
+        # The earliest-time-only mutation is a real current-state mutation and
+        # receives a new sequence-issued token beyond the forced gap.
+        assert current.version > before
+        assert current.version != gap
+        assert current.version > gap
+
+
+@pytest.mark.asyncio
+async def test_g26a2_p04_true_historical_noop_leaves_version_unchanged(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A2-P04 a true historical no-op leaves the persisted version unchanged.
+
+    Appends an observation that neither wins latest ordering nor extends
+    earliest time. The observation persists as history, current fields remain
+    unchanged, and the persisted EntityLocation version is exactly unchanged
+    — the sequence itself may still have consumed a value, which is valid.
+    """
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        other = await uow.locations.upsert(
+            location_factory(name="Canada", canonical_name="Canada", country_code="CA")
+        )
+        assert other.id is not None
+        # Establish the current-state window: latest at T+2d on 'other',
+        # earliest at T on 'country'.
+        later = observation_factory(
+            entity_id=entity_id,
+            location_id=other.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT + timedelta(days=2),
+        )
+        await uow.entity_location_observations.append(later)
+        earliest = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT,
+        )
+        await uow.entity_location_observations.append(earliest)
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        before = current.version
+        first, last, latest, location, precision = (
+            current.first_observed_at,
+            current.last_observed_at,
+            current.latest_observation_id,
+            current.location_id,
+            current.precision,
+        )
+        # An observation strictly inside the window neither wins latest
+        # ordering nor extends earliest time: a true current-state no-op.
+        middle = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT + timedelta(days=1),
+        )
+        await uow.entity_location_observations.append(middle)
+        # The observation itself persists as immutable history.
+        fetched = await uow.entity_location_observations.get_by_id(middle.id)
+        assert fetched is not None and fetched.version is not None
+        assert await table_count(uow, "entity_location_observation") == 3
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None
+        assert current.first_observed_at == first
+        assert current.last_observed_at == last
+        assert current.latest_observation_id == latest
+        assert current.location_id == location
+        assert current.precision is precision
+        # No current-state mutation: the persisted version is exactly unchanged.
+        assert current.version == before
+
+
+@pytest.mark.asyncio
+async def test_g26a2_p05_rollback_preserves_prior_persisted_version(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G26A2-P05 rollback preserves the prior persisted EntityLocation version.
+
+    Commits baseline current state, performs a current-state-changing append
+    in a second UoW and forces rollback, then asserts in a new UoW that the
+    pre-transaction EntityLocation state and version remain. A consumed
+    sequence value is acceptable.
+    """
+    async with uow_factory() as uow:
+        _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
+        country = await uow.locations.upsert(location_factory())
+        assert country.id is not None
+        first = observation_factory(
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_id=evidence_id,
+            retrieved_at=_RETRIEVED_AT,
+        )
+        await uow.entity_location_observations.append(first)
+    async with uow_factory() as uow:
+        baseline = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert baseline is not None and baseline.version is not None
+        before = baseline.version
+    # A current-state-changing append is rolled back (explicit rollback, so
+    # the UoW exit does not commit it).
+    uow = uow_factory()
+    async with uow:
+        await uow.entity_location_observations.append(
+            observation_factory(
+                entity_id=entity_id,
+                location_id=country.id,
+                evidence_id=evidence_id,
+                retrieved_at=_RETRIEVED_AT + timedelta(days=1),
+            )
+        )
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        # The mutation is visible inside the open transaction...
+        assert current.version > before
+        await uow.rollback()
+    # ...and the rollback leaves the pre-transaction state/version intact.
+    async with uow_factory() as uow:
+        current = await uow.entity_locations.get_by_entity_id(entity_id)
+        assert current is not None and current.version is not None
+        assert current.version == before
+        assert current.latest_observation_id == baseline.latest_observation_id
+        assert current.location_id == baseline.location_id
+        assert current.first_observed_at == baseline.first_observed_at
+        assert current.last_observed_at == baseline.last_observed_at
+        assert await table_count(uow, "entity_location_observation") == 1
