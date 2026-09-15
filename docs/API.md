@@ -546,6 +546,19 @@ subresources).
 Presentation (Leaflet map, markers, fit-bounds) is PR 25B and remains
 outside this document's delivered surface.
 
+Map-origin analyst exploration (PR 25C) introduces **no new production
+endpoint**: every Map item's Explore surface reuses the existing typed
+Evidence/Relationships/Research list and detail endpoints through the PR
+24 PivotWorkspace with a single frontend-only `map_entity` navigation
+provenance kind. Exact Evidence provenance continues through the existing
+`GET /api/v1/investigations/{id}/evidence/{evidence_id}` detail route. The
+deterministic E2E geolocation seeding seam is a harness-only CLI
+(`scripts/e2e-seed-geolocation.sh` over `tests/e2e_support/`) that writes
+ordinary rows through the normal application repositories into the
+throwaway E2E database; it is **not** an HTTP endpoint, carries no
+credentials to browsers, and is inert in normal fake mode without the
+explicit `ATI_E2E_SEEDING_ENABLED` flag.
+
 ## Monitors
 
 - `POST /api/v1/monitors`

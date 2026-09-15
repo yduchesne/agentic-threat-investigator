@@ -1184,7 +1184,15 @@ Delivered (PR 25A implementation summary):
 No frontend Map/Leaflet feature, PostGIS, spatial query, provider change,
 new geolocation persistence, or GEOINT expansion is included.
 
-### PR 25B — Investigation Map and Leaflet visualization
+### PR 25B — Investigation Map and Leaflet visualization [DONE]
+
+**PR 25B closure:** with the PR 25C deterministic real-stack seeding seam in
+place, the E24 data prerequisite is closed: `frontend/e2e/zz-geolocation.spec.ts`
+now seeds the allowlisted `single_mappable` scenario into the exact
+browser-created Investigation and runs the full Map workflow through the real
+PR 25A endpoint (disclaimer, seeded IP, real Leaflet marker, exact persisted
+GEOLOCATION Evidence provenance, safe return, `FAKE DATA`, clean console) with
+no data-path skip. E24 passes end-to-end on the full E2E stack.
 
 Consume the PR 25A endpoint and deliver the first-class Investigation Map frontend:
 
@@ -1256,29 +1264,55 @@ implements the principal Map workflow path (built frontend + Nginx + real
 FastAPI + real PostgreSQL + durable worker, real PR 25A endpoint, no
 geolocation interception, no dependence on live tile success).
 
-> **E24 data prerequisite STOP (open for PR 25B closure):** the PR 23D fake
-> world persists no mappable `GEOLOCATION` Evidence today: the fake catalog's
-> provider set (google_public_dns, rdap, ipinfo_lite, abuseipdb, threatfox,
-> urlhaus) contains no DB-IP source, and `DbIpCityLiteProvider` is composed
-> only when `dbip_city_lite_artifact_uri` is configured. Every fake-world
-> scenario (F01 benign, F02 malicious delivery, F03 relationship evolution,
-> F04 research-required, F05 insufficient-evidence) therefore yields an
-> honest empty geolocation projection, so E24's marker/plotted assertions
-> cannot pass yet and the spec records this STOP and skips precisely rather
-> than asserting a false pass. The smallest deterministic real-stack seeding
-> option — preferred: an existing deterministic E2E fixture/bootstrap seam
-> — does not exist; the viable options are (a) a harness-only seeding CLI
-> that persists a normal PR 25A-compatible `GEOLOCATION` Evidence row
-> through the normal repositories (test-fixture-only, does not change
-> product fake-mode data for manual local use), or (b) adding a
-> deterministic `urn:ati:source:dbip_city_lite` provider response to the
-> packaged fake world (changes product fake mode). Per PR 25B §53 that
-> decision is deliberately not taken inside 25B; PR 25B is therefore not
-> marked `[DONE]` until E24 passes with that seeding in place. No PR 25A
-> contract deficiency was discovered; nothing blocked the frontend feature
-> itself.
+> **E24 data prerequisite STOP (closed by PR 25C):** the PR 25C harness-only
+> deterministic geolocation seeding seam (`tests/e2e_support/seed_geolocation.py`
+> + `scripts/e2e-seed-geolocation.sh`) persists ordinary canonical IP Entities
+> and `GEOLOCATION` Evidence into the throwaway E2E database through the normal
+> repositories for an exact browser-created Investigation UUID, with no product
+> fake-mode change. E24 now passes end-to-end with a real marker and exact
+> Evidence provenance; PR 25B is therefore marked `[DONE]` and the original
+> STOP report below is retained as history.
 
-### PR 25C — Map analyst workflow integration and PR 25 closure
+### PR 25C — Map analyst workflow integration and PR 25 closure [DONE]
+
+**Delivered (PR 25C implementation summary):**
+
+- **Deterministic E2E seeding seam (harness-only):**
+  `tests/e2e_support/seed_geolocation.py` + `scripts/e2e-seed-geolocation.sh`
+  persist normal canonical IP Entities and immutable `GEOLOCATION` Evidence
+  into the isolated throwaway E2E PostgreSQL through the normal application
+  repositories/UnitOfWork for an exact browser-created Investigation UUID
+  and an allowlisted scenario (`single_mappable`, `multi_ioc`,
+  `non_mappable`, `same_location`). Deterministic uuid5 identities and a
+  fixed UTC retrieval epoch make repeated invocation idempotent/bounded;
+  the seam is offline, non-LLM, explicitly invoked, guarded by both
+  `ATI_OPERATING_MODE=fake` and the dedicated `ATI_E2E_SEEDING_ENABLED`
+  flag, and exposed through **no HTTP endpoint** (no browser DB
+  credentials, no seed service);
+- **Map-origin typed pivots:** marker popup and non-map rows expose
+  `entityActions(item.entity_id, item.ip_address, "map_entity")` through
+  `frontend/src/geolocation/GeolocationEntityActions.tsx` (single new
+  `map_entity` source kind; existing `Evidence`/`Relationships`/
+  `Research` resources, separate source/target Relationship actions,
+  IP-identity breadcrumb, unchanged PR 24 PivotWorkspace constraints, no
+  viewport state in the URL, no client OR merge, no dead-end broadening);
+- **E24 closure:** `zz-geolocation.spec.ts` seeds `single_mappable`, opens
+  the Map, consumes the real `/geolocations` endpoint, verifies a real
+  marker and exact persisted Evidence provenance, and no longer skips;
+- **Real-stack matrix** (`zz-geolocation-workflow.spec.ts`): E25 multi-IOC
+  typed pivots, E26 same-coordinate inspectability (no jitter/cluster),
+  E27 coordinate-less actionable context, E28 empty/isolation — all
+  passing on the full E2E stack;
+- **Coverage:** seeder unit C-S01..C-S12, real-PostgreSQL SG01..SG07
+  (including an authenticated real `/geolocations` read), map-action
+  C-P01..C-P12, pivot URL/model C-V01..C-V08, and the E24-E28 browser
+  specs;
+- **Docs/compliance:** `ARCHITECTURE.md`, `API.md`, `TESTING.md`, and this
+  plan reconciled; the PR 25A-C functional compliance sweep classifies all
+  material requirements COMPLIANT, with minor residuals (PR 25A duplicated
+  G-P labels, optional stronger statement-count instrumentation, naming/
+  test-traceability touches) carried to the dedicated final PR 25-series
+  cleanup, which is **not** marked complete here.
 
 Complete the map as an analyst exploration surface without turning geography into an inference engine:
 

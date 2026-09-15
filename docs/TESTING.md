@@ -1702,17 +1702,83 @@ mocked. Coverage:
   attribution present.
 
 Real-stack browser coverage **E24** (`frontend/e2e/zz-geolocation.spec.ts`)
-implements the PR 25B §52 path (built frontend + Nginx + real FastAPI +
-real PostgreSQL + the durable worker over the fake world, real PR 25A
-endpoint, no geolocation interception, no correctness dependency on live
-tile delivery). **E24 is currently skipped by its own data-prerequisite
-guard**: the PR 23D fake world persists no mappable `GEOLOCATION` Evidence
-(the catalog has no DB-IP source; `DbIpCityLiteProvider` is composed only
-when `dbip_city_lite_artifact_uri` is configured), so a completed
-fake-world Investigation honestly returns an empty geolocation projection.
-The recorded PR 25B STOP (docs/PR_PLAN.md PR 25B) names a deterministic
-real-stack seeding option; until that lands, no marker assertion is claimed
-as browser-passing. Unit/component coverage above does pass.
+runs the principal Map workflow over the full production-path stack (built
+frontend + Nginx + real FastAPI + real PostgreSQL + the durable worker
+over the fake world, real PR 25A endpoint, no geolocation interception,
+no correctness dependency on live tile delivery). The E24 data
+prerequisite is closed by the PR 25C deterministic real-stack seeding
+seam: after the browser completes the exact Investigation, the spec
+invokes `scripts/e2e-seed-geolocation.sh <investigation-id>
+single_mappable` (the harness-only seeder persists a normal canonical IP
+Entity + `GEOLOCATION` Evidence row through the normal repositories into
+the throwaway E2E database), then asserts the disclaimer, the exact
+seeded IP in the non-map representation, a real Leaflet marker, and the
+exact persisted geolocation Evidence provenance in the drawer (subject
+IP + `Geolocation` type + `urn:ati:source:dbip_city_lite` source),
+followed by a safe return, `FAKE DATA`, and a clean browser console.
+Seed failure is test failure; there is no data-path skip.
+
+### Map analyst workflow and E2E seeding (PR 25C)
+
+Deterministic E2E seeding and the Map-origin typed pivot workflow:
+
+- **seeder unit contracts** (`tests/unit/infrastructure/test_e2e_geolocation_seed.py`,
+  C-S01..C-S12): unknown scenarios rejected; malformed/nil Investigation
+  IDs rejected; missing/soft-deleted Investigation refused; the explicit
+  E2E guard (`ATI_OPERATING_MODE=fake` **and** `ATI_E2E_SEEDING_ENABLED`)
+  required with the CLI exiting nonzero without it; valid single mappable
+  construction; distinct multi-IOC identities; same-coordinate identities
+  remain distinct; null/null coordinate fixture valid; deterministic
+  timestamps/values on repeat derivation; repeated invocation bounded and
+  idempotent against an in-memory seam; no raw payload/secret-bearing
+  values; and a structural review that the seeder owns no raw SQL (only
+  `investigations.get_by_id` / `entities.upsert` / `evidence.insert` on
+  the real `PostgresUnitOfWork` seam);
+- **seeder real-PostgreSQL proof** (`tests/integration/test_e2e_geolocation_seed.py`,
+  SG01..SG07): a normal Investigation is created and seeded, then read
+  through `PostgresInvestigationGeolocationQueryService` with exact
+  seeded Entity/Evidence identity, mappable/unlocated/same-coordinate
+  records, deterministic ordering, idempotent repeat, and strict
+  cross-Investigation isolation; an authenticated FastAPI check proves
+  the real `/geolocations` endpoint returns the seeded projection without
+  leaking facts/raw payloads;
+- **map-origin entity action contracts**
+  (`frontend/src/geolocation/GeolocationEntityActions.test.tsx`, C-P01..C-P12):
+  the single `map_entity` source kind; exact Evidence subject filter;
+  exact Relationship source and target filters (never merged); exact
+  Research subject filter; IP display label (never coordinates); View
+  Evidence remains the exact `evidence_id`; marker popup and non-map row
+  expose equivalent Explore actions; coordinate-less items stay
+  actionable; same-coordinate items keep distinct Entity IDs; no client
+  Relationship OR merge; no unsupported resource/scoped selection; a
+  rendering test proves Explore opens the typed PivotWorkspace with the
+  `map_entity` step and an IP-identity breadcrumb;
+- **pivot model/URL validation** (`pivot-url.test.ts`, `pivot-capabilities.test.ts`,
+  C-V01..C-V08): `map_entity` accepted and URL round-trips; unknown
+  source kinds (`map_marker`, `map_row`) rejected; max pivot depth (5),
+  label bound (128), UUID filter validation, no-op suppression, and
+  close/back behavior unchanged;
+- **real-stack browser matrix** (`frontend/e2e/zz-geolocation-workflow.spec.ts`,
+  E25..E28): E25 seeds `multi_ioc` and explores each IP independently
+  through typed pivots (Evidence with breadcrumb IP identity and
+  server-filtered target; a legal Relationships-source target resolving
+  to an honest empty/dead-end state; exact Evidence drill-down and
+  disclaimer after return); E26 seeds two identical-coordinate IPs and
+  proves both remain distinct inspectable rows with their own View
+  Evidence/Explore actions and no co-location/cluster claim; E27 seeds a
+  coordinate-less item and proves the row is fully actionable (exact
+  Evidence, legal Explore action, honest empty Research target, safe
+  close/back) with no marker; E28 uses an unseeded fake-world
+  Investigation to prove the honest empty Map and strict isolation from
+  every other Investigation's seeded rows.
+
+Related real-stack instability is separately recorded: E22/E22-B
+(`zz-pivots.spec.ts`) and occasional E23 (`zz-relationship-evolution.spec.ts`)
+interactions hit the documented Chromium/MUI main-thread wedge under the
+existing retry-1 configuration (reproduced on the pre-PR base commit;
+E22/E22-B consistently, E23 intermittently) and are outside PR 25C scope
+per the PR 24F stability notes and `docs/INVESTIGATION_STABILITY.md`.
+The PR 25C E24-E28 geolocation suite passes deterministically.
 
 ### Relationship Evolution and graph (PR 24E)
 
