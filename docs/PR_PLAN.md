@@ -1406,11 +1406,148 @@ Across PR 25A–C:
 - no client-side reconstruction of unbounded datasets;
 - every displayed location retains exact Evidence provenance and the established Evidence/Research/Assessment epistemic boundaries.
 
-## PR 26 — Monitors, diffs, findings, jobs and administration
+## PR 26 — GEOINT
 
-Deliver Monitor persistence, scheduler, normal Investigation execution from monitors, snapshots/diffs, material Finding generation, findings inbox, PostgreSQL-backed jobs, administration/system UI, and operational visibility.
+PR 26 delivers ATI's v0.1 infrastructure-focused GEOINT subsystem as seven bounded PRs. It builds on PR 25's persisted `GEOLOCATION` Evidence and Investigation Map without replacing or retrofitting the PR 25 read path.
 
-The PostgreSQL job queue schedules durable investigation-level work. PR 19C `TaskDispatcher` is the in-investigation execution-dispatch seam. These are separate responsibilities.
+The Monitor/scheduler/snapshots/diffs/Findings/job-administration scope formerly assigned to PR 26 is deferred to **v0.2** and consigned to `docs/PR_PLAN_V02.md`. `PR_PLAN_V02.md` is not yet effective and does not supersede this active v0.1 plan.
+
+### PR 26 series invariants
+
+Across PR 26A-G:
+
+- **Locations are not Entities.** `Location` is canonical geographic/reference data. Geographic hierarchy, containment, and spatial relationships do not use ordinary ATI `Entity`, `Relationship`, or `RelationshipObservation` records.
+- **Historical geographic observations are explicit and immutable.** `EntityLocationObservation` explicitly records the Entity, canonical Location, supporting Evidence/provenance, precision, and relevant timing. It is append-only historical truth.
+- **Current state is separate from historical observation.** `EntityLocation` is the materialized current Entity-to-Location association and references the most specific canonical Location actually supported. Historical changes remain in `EntityLocationObservation`.
+- **Operational resolution state is separate from geographic truth.** `GeoResolution` owns pending/processing/resolved/unresolvable/failed workflow state, attempts, leases, retries, and resolution outcome metadata. Pending or failed work is not an `EntityLocationObservation`.
+- **Canonicalization never invents precision.** Country-level input cannot become city-level truth merely because reference or spatial data makes a more specific Location plausible.
+- **PR 25 remains valid and unchanged.** The existing persisted `GEOLOCATION` Evidence -> bounded PR 25A projection/API -> PR 25B/25C Map workflow remains supported. PR 26 derives richer geographic state from persisted Evidence; it does not make `EntityLocation` an alternate PR 25 Map source.
+- **PostGIS owns spatial computation, not threat interpretation.** Containment, intersection, distance, proximity, and common geography are geographic facts/signals only. They do not establish cyber relationships, maliciousness, common ownership, campaign association, coordination, targeting, or attribution.
+- **Exact provenance remains mandatory.** Analyst-visible geographic observations and derived geographic context remain drillable through `EntityLocationObservation` to exact supporting Evidence/source.
+- **Analyst-facing geographic reads remain bounded and appropriately Investigation-scoped.** Global canonical `Location` reference data must never become a route for cross-Investigation data leakage or unbounded client reconstruction.
+- **ATI's PostgreSQL ownership model continues.** All GEOINT mutations, reconciliation, current-state maintenance, versioning, asynchronous work claiming, leases/retries, stale-claim recovery, and workflow state transitions are performed through versioned PostgreSQL stored functions. Python repositories remain thin callers. Purpose-built bounded read/query services, including PostGIS spatial projections, may execute SQL directly under ATI's existing query-service pattern.
+- **Database locks coordinate only short atomic transitions.** Claiming uses a short stored-function transaction, internally permitted to use `FOR UPDATE SKIP LOCKED`, which persists ownership/lease state and commits before geographic resolution begins. No database transaction or row lock is held while external/application geographic resolution is performed.
+- **Leases coordinate asynchronous processing.** Completion occurs in a separate short stored-function transaction with ownership/version/idempotency validation. Expired claims are recoverable and contended updates use deterministic ordering.
+- **Infrastructure GEOINT is the v0.1 boundary.** PR 26 does not expand into victim geography, targeting geography, physical-person tracking, generalized movement intelligence, facilities intelligence, country-risk scoring, or attribution.
+- **Existing epistemic boundaries remain authoritative.** Evidence, Research, Assessment, and Report semantics are not weakened by geographic enrichment or agentic GEOINT reasoning.
+
+### PR 26A — GEOINT domain and persistence foundation
+
+Establish:
+
+- `Location` as canonical geographic/reference data, initially country, administrative-area, and city;
+- `EntityLocation` as current materialized Entity-to-Location association;
+- immutable append-only `EntityLocationObservation` with explicit Entity, Location, Evidence/provenance, precision, and timing;
+- `GeoResolution` as durable operational resolution/work state;
+- domain invariants for precision, canonical identity, provenance, current-vs-history separation, and fail-closed malformed state;
+- PostgreSQL schema/migrations and versioned stored functions for all mutations/reconciliation;
+- thin repositories and UnitOfWork integration;
+- deterministic unit and real-PostgreSQL integration tests.
+
+No PostGIS spatial analysis, asynchronous resolver, analyst GEOINT API/UI, or agentic reasoning yet.
+
+### PR 26B — Canonical geography and PostGIS foundation
+
+Establish:
+
+- PostGIS through normal migrations/deployment;
+- canonical `Location` hierarchy and stable reference identities;
+- deterministic reference-data ingestion/canonicalization for country/administrative-area/city;
+- geometry/centroid representation where appropriate and indexes justified by concrete query paths;
+- geographic claim -> canonical `Location` resolution primitives;
+- distinct hierarchy vs spatial-containment semantics;
+- PostgreSQL/PostGIS tests for canonicalization, containment, geometry validity, precision preservation, idempotency, ambiguity, and failure.
+
+No threat relationship may be inferred from spatial facts.
+
+### PR 26C — Asynchronous geographic resolution
+
+Deliver:
+
+- `LocationResolver` application abstraction and typed claim/result contracts;
+- bounded `GeoResolution` lifecycle;
+- versioned stored functions for atomic work claiming, leases, attempts/retries, stale-lease recovery, failure/unresolvable transitions, and completion;
+- bounded `FOR UPDATE SKIP LOCKED` claim semantics internally where appropriate, committed before resolution work;
+- separate Geo Resolver Python process/container;
+- no DB locks/transactions held while resolution executes;
+- atomic successful completion that canonicalizes/reuses Location state, appends `EntityLocationObservation`, reconciles `EntityLocation`, and transitions `GeoResolution`;
+- idempotency, version validation, deterministic lock/update ordering, multi-worker concurrency, crash/recovery, retry, and bounded-batch tests;
+- PostgreSQL durable state + leases as the initial work-queue mechanism; no Kafka/NATS/Redis requirement.
+
+The resolver issues no ad-hoc mutation SQL; mutations go through versioned stored functions.
+
+### PR 26D — GEOINT query and API layer
+
+Deliver:
+
+- bounded Investigation-scoped PostgreSQL/PostGIS query contracts;
+- Entity -> current Location and geographic observation history;
+- Location -> Investigation-scoped Entities/observations;
+- exact `EntityLocationObservation` -> Evidence provenance;
+- bounded geographic summaries;
+- narrowly justified containment/proximity primitives for concrete analyst workflows;
+- deterministic ordering, pagination/bounds, scope enforcement, DTOs/errors, and OpenAPI coverage;
+- no arbitrary PostGIS expression API or cross-Investigation leakage.
+
+Purpose-built bounded reads may execute SQL/PostGIS directly; mutations remain stored-function-owned.
+
+### PR 26E — Analyst GEOINT workspace
+
+Deliver:
+
+- geographic Map/table views over PR 26 query contracts;
+- Location and Entity exploration through the existing PR 24 typed pivot/workspace architecture;
+- Entity -> Locations, Location -> scoped Entities, and observation -> Evidence/provenance transitions;
+- explicit current-vs-historical geographic context;
+- precision/provider/provenance/approximation semantics;
+- individually inspectable same-location entities without implied cyber association;
+- accessible non-map representations;
+- bounded deterministic real-stack workflows.
+
+Visual proximity is never an analytical conclusion.
+
+### PR 26F — Agentic GEOINT reasoning
+
+Deliver:
+
+- bounded deterministic GEOINT tool contracts such as geographic summary, locations-for-entity, entities-in-location, geographic history, and narrowly approved spatial queries;
+- agent integration consuming deterministic PR 26 query results rather than arbitrary SQL/PostGIS;
+- structured outputs with exact geographic observation/Evidence support;
+- geographic pattern/signal and temporal reasoning where supported;
+- safeguards preventing proximity/common city/common coordinate from becoming relationship, maliciousness, ownership, campaign, coordination, targeting, or attribution without independent support;
+- deterministic `FakeLlmClient` tests and real PostgreSQL/PostGIS integration;
+- no LLM ownership of canonical Location resolution, persistence reconciliation, or spatial truth.
+
+### PR 26G — GEOINT evaluation and series closure
+
+Deliver:
+
+- deterministic fixtures covering country/region/city precision, changing locations, same-location unrelated infrastructure, coordinate-less/ambiguous/unresolvable claims, retries, stale leases, and Investigation isolation;
+- evaluation of tool selection/results, provenance closure, unsupported geographic inference, and structured agent outputs;
+- real-stack E2E from persisted geographic Evidence through asynchronous resolution, canonical Location/observations, API, analyst exploration, exact Evidence drill-down, and agentic GEOINT analysis;
+- concurrency/crash-recovery tests for claim/lease/completion;
+- boundedness and justified PostGIS query-plan/index eligibility checks;
+- final source/test compliance audit of PR 26A-F;
+- documentation reconciliation;
+- no generic PR 27 evaluator-platform scope.
+
+PR 26G is closure/evaluation, not feature expansion.
+
+### PR 26 overall boundaries
+
+Across PR 26A-G:
+
+- no Monitor/scheduler/snapshot/diff/Findings/job-administration work; it is deferred to v0.2 in `PR_PLAN_V02.md`;
+- no victim/targeting geography, infrastructure-to-victim correlation, physical-person tracking, generalized movement analysis, facilities intelligence, country-risk scoring, or attribution;
+- no geographic fact automatically creates an ATI `Relationship`;
+- no LLM-generated canonical geographic truth;
+- no direct browser/provider geocoding;
+- no unbounded client-side spatial reconstruction;
+- no distributed broker requirement;
+- no long-running transaction around asynchronous resolution;
+- no application-side mutation/reconciliation bypassing versioned stored functions;
+- PR 25's existing Map remains valid while PR 26 adds the richer GEOINT model and analyst workflows.
+
 
 ## PR 27 — Evaluation and release hardening
 
