@@ -15,6 +15,7 @@
 - [Provider failure behavior](#provider-failure-behavior)
 - [Provider URL, path, and redirect safety](#provider-url-path-and-redirect-safety)
 - [Pivot policy](#pivot-policy)
+- [Agentic GEOINT (planned PR 26F)](#agentic-geoint-planned-pr-26f)
 - [LLM contract](#llm-contract)
 - [Structured agent output contract](#structured-agent-output-contract)
 - [Prompt-injection resistance](#prompt-injection-resistance)
@@ -383,6 +384,54 @@ Contextual enrichment does not consume investigative depth.
 Network prefixes and ASNs may be enriched but are not recursively expanded into arbitrary contained infrastructure.
 
 Malware triggers research rather than recursive IOC expansion.
+
+## Agentic GEOINT (planned PR 26F)
+
+ATI does not begin GEOINT by introducing a Geo Agent. PR 26A-E first establish deterministic geographic domain, persistence, canonicalization, asynchronous enrichment, bounded query contracts, and analyst workflows.
+
+PR 26F then exposes selected deterministic GEOINT capabilities to agentic reasoning.
+
+### Tool boundary
+
+Agents may receive bounded application-level tools such as:
+
+- geographic summary for the current Investigation;
+- Locations for an Entity;
+- Investigation-scoped Entities observed in a Location;
+- geographic history for an Entity;
+- narrowly approved nearby/within queries.
+
+Agents do not:
+
+- issue arbitrary SQL or PostGIS;
+- canonicalize geographic claims;
+- create/update Location records;
+- reconcile EntityLocation;
+- mutate GeoResolution;
+- control leases/retries;
+- manufacture geographic precision;
+- convert geographic proximity into an ATI Relationship.
+
+### Epistemic boundary
+
+Geography is contextual unless independently supported as part of a stronger analytical conclusion.
+
+For example, an agent may report that multiple infrastructure IPs were observed in the same city during overlapping periods when deterministic tools and observations support that statement.
+
+It may not conclude solely from that fact that the IPs:
+
+- share an operator;
+- belong to one campaign;
+- coordinate;
+- target the same victim;
+- are malicious;
+- belong to a particular threat actor.
+
+### Structured support
+
+Material geographic statements produced by agentic reasoning must carry structured references to the exact geographic observations/Evidence supporting them. The model does not author persistence identity or canonical geographic truth.
+
+The existing Evidence/Research/Assessment/Report boundaries remain authoritative. GEOINT does not create a shortcut from reference geography to Evidence or attribution.
 
 ## LLM contract
 

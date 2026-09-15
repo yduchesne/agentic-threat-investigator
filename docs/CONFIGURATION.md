@@ -19,6 +19,8 @@
 - [Configuration loading lifecycle](#configuration-loading-lifecycle)
 - [Process consistency](#process-consistency)
 - [Task dispatch configuration](#task-dispatch-configuration)
+- [Operating mode (PR 23D)](#operating-mode-pr-23d)
+- [GEOINT configuration (planned PR 26)](#geoint-configuration-planned-pr-26)
 - [Authentication settings](#authentication-settings)
 - [Provider settings](#provider-settings)
 - [Configuration and secrets](#configuration-and-secrets)
@@ -452,6 +454,45 @@ The `fake` mode fakes the external intelligence world, not ATI's application arc
 Fake batch data is initialized only through the explicit idempotent `ati-fake-data-bootstrap` command. API startup, worker startup, and module import never ingest fake batch data. Production deployments must never run the fake-data bootstrap.
 
 Automated PR 23D tests are different from runtime mode semantics: they inject `FakeLlmClient` independently of operating mode and never require live LLM or network access.
+
+## GEOINT configuration (planned PR 26)
+
+PR 26 adds typed configuration for geographic reference data and the asynchronous Geo Resolver. Configuration must preserve the existing separation between deployment profile and operating mode.
+
+`ATI_CONFIG_PROFILE` continues to select deployment/runtime settings.
+
+`ATI_OPERATING_MODE` continues to select intelligence-source composition and is not repurposed as a GEOINT processing mode.
+
+Planned configuration categories include:
+
+- canonical geographic reference-data/artifact location;
+- Geo Resolver enabled/runtime composition;
+- bounded claim batch size;
+- polling interval;
+- lease duration;
+- retry/backoff limits;
+- bounded spatial-query limits where not already owned by API settings.
+
+Exact environment-variable names/defaults should be fixed in the detailed PR 26B/26C plans when the implementation contract is known. Do not publish speculative defaults as if delivered.
+
+### Fake mode and GEOINT
+
+Fake mode may provide deterministic geographic input data, but it must not select a fake persistence/canonicalization implementation.
+
+In fake mode the intended PR 26 path remains:
+
+```text
+deterministic geographic input
+ -> persisted geographic Evidence/claim
+ -> GeoResolution
+ -> production Geo Resolver
+ -> production PostgreSQL/PostGIS canonicalization
+ -> Location / EntityLocationObservation / EntityLocation
+```
+
+No `ATI_OPERATING_MODE` value may bypass this path by directly manufacturing derived geographic state.
+
+The existing `ATI_E2E_SEEDING_ENABLED` guard for the PR 25C harness remains test-only and is not a general fake-bootstrap or GEOINT runtime setting.
 
 ## LLM settings (PR 20B)
 

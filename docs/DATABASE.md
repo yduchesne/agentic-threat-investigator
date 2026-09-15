@@ -21,6 +21,7 @@
   - [PostgreSQL baseline](#postgresql-baseline)
 - [SourceRecord](#sourcerecord)
 - [Migrations](#migrations)
+- [PostGIS and GEOINT (PR 26)](#postgis-and-geoint-pr-26)
 - [RAG persistence](#rag-persistence)
 - [Authentication persistence](#authentication-persistence)
 - [Audit persistence](#audit-persistence)
@@ -33,7 +34,7 @@
 
 PostgreSQL is ATI's authoritative datastore. pgvector provides vector search for the RAG corpus.
 
-PostGIS is not required in v0.1.
+PostGIS is not required in v0.1. PR 25 did not require PostGIS; PR 26 introduces canonical geographic reference data and bounded spatial queries, which make PostGIS part of the v0.1 architecture (see [PostGIS and GEOINT (PR 26)](#postgis-and-geoint-pr-26)).
 
 ## Persistence categories
 
@@ -603,6 +604,76 @@ Rules:
 - new changes create new versioned SQL;
 - normal DDL remains in Alembic;
 - integration tests execute migrations against real PostgreSQL.
+
+## PostGIS and GEOINT (PR 26)
+
+These are planned PR 26 contracts. The previous statement that PostGIS is not required in v0.1 is superseded by PR 26: PR 25 did not require PostGIS; PR 26 does, because ATI now introduces canonical geographic reference data and bounded spatial queries.
+
+Planned PR 26 persistence categories:
+
+- `Location`: canonical geographic/reference identity;
+- `EntityLocation`: current materialized Entity-to-Location association;
+- `EntityLocationObservation`: immutable append-only geographic observation/provenance;
+- `GeoResolution`: mutable durable asynchronous work/state.
+
+### Location
+
+The initial Location model is bounded to country, administrative area, and city. Canonical hierarchy and geometric containment are separate concerns.
+
+Canonicalization must preserve supported precision. A country-only claim remains country-level; reference data must not manufacture a city-level assertion.
+
+### EntityLocationObservation
+
+`EntityLocationObservation` follows the same fundamental historical principle as `RelationshipObservation`: the observation row is itself history and is not duplicated merely to create a second historical representation.
+
+Each observation explicitly preserves its `entity_id` and `location_id`; historical observations do not derive Location through current `EntityLocation`.
+
+### EntityLocation
+
+`EntityLocation` is current materialized state. Reconciliation is database-owned and versioned. It does not replace immutable observations.
+
+### GeoResolution
+
+`GeoResolution` is the durable operational work record and conceptual queue for geographic enrichment. It is distinct from Evidence and from successful immutable geographic observations.
+
+The detailed PR 26C plan must finalize the exact lifecycle, retry eligibility, lease semantics, stale-claim recovery, error vocabulary, and version rules.
+
+### PR 26 stored-function ownership
+
+All GEOINT mutation and reconciliation operations are versioned PostgreSQL stored-function APIs. This includes:
+
+- creating/reconciling resolution work;
+- claiming bounded work;
+- lease/attempt transitions;
+- stale-claim recovery;
+- successful completion;
+- canonical Location reconciliation where mutation is required;
+- appending EntityLocationObservation;
+- reconciling current EntityLocation;
+- failure/unresolvable transitions;
+- optimistic/version checks and idempotency.
+
+Python must not implement these transitions through ad-hoc DML.
+
+Bounded read/query services may use direct SQL/PostGIS in the same manner as ATI's existing dedicated query services.
+
+### Work claiming and deadlock/lock-duration rule
+
+Claiming may use `FOR UPDATE SKIP LOCKED` internally, but only in a short transaction:
+
+```text
+claim rows -> persist lease/ownership -> commit
+```
+
+No row lock or transaction is retained while geographic resolution executes.
+
+Completion occurs in a separate short transaction. Contended records are processed in deterministic ordering. Leases---not long-lived database locks---coordinate workers.
+
+### Spatial indexing
+
+Spatial indexes are introduced only for concrete PR 26 query/canonicalization paths. Tests should verify query-plan/index eligibility where useful without asserting unstable planner cost estimates.
+
+PostGIS owns spatial computation. Spatial results do not mutate ATI cyber relationships merely because entities share or approach a geographic location.
 
 ## RAG persistence
 
