@@ -1190,6 +1190,8 @@ The canonical path is the bounded resource-specific PostgreSQL composite-array t
 
 v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are used for map visualization.
 
+The Investigation Map read data (PR 25A) is a read projection derived exclusively from already-persisted immutable `GEOLOCATION` Evidence joined to its canonical IP entity: the API never opens the DB-IP MMDB, never invokes a provider, performs no network I/O, and introduces no new geolocation persistence, spatial materialization, or map-snapshot storage. One deterministic latest observation per IP entity is selected by PostgreSQL and returned as one bounded server-owned collection with explicit truncation, retaining the exact Evidence ID as provenance.
+
 PostGIS is not required until ATI needs actual spatial queries.
 
 ## Observability

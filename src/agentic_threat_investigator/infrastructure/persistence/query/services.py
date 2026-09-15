@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.query.assessments import AssessmentQueryService
 from agentic_threat_investigator.app.query.evidence import EvidenceQueryService
+from agentic_threat_investigator.app.query.geolocation import (
+    DEFAULT_MAX_MAP_GEOLOCATION_ITEMS,
+    InvestigationGeolocationQueryService,
+)
 from agentic_threat_investigator.app.query.history import DomainHistoryQueryService
 from agentic_threat_investigator.app.query.investigations import (
     InvestigationQueryService,
@@ -27,6 +31,7 @@ from agentic_threat_investigator.app.query.timeline import TimelineQueryService
 
 from .assessments import PostgresAssessmentQueryService
 from .evidence import PostgresEvidenceQueryService
+from .geolocation import PostgresInvestigationGeolocationQueryService
 from .history import PostgresDomainHistoryQueryService
 from .investigations import PostgresInvestigationQueryService
 from .relationships import (
@@ -42,15 +47,31 @@ class PostgresQueryServices(QueryServiceBundle):
     """Expose every PR 23A read contract bound to one session."""
 
     def __init__(
-        self, session: AsyncSession, limits: QueryLimits | None = None
+        self,
+        session: AsyncSession,
+        limits: QueryLimits | None = None,
+        geolocation_max_items: int | None = None,
     ) -> None:
-        """Bind the session; defaults to the module-standard page limits."""
+        """Bind the session; defaults to the module-standard limits.
+
+        ``geolocation_max_items`` is the server-owned hard bound of the
+        PR 25A geolocation projection, semantically separate from pageable
+        collection sizes; it defaults to the module-standard map bound.
+        """
         self._session = session
         self.investigations: InvestigationQueryService = (
             PostgresInvestigationQueryService(session, limits or QueryLimits())
         )
         self.evidence: EvidenceQueryService = PostgresEvidenceQueryService(
             session, limits or QueryLimits()
+        )
+        self.geolocations: InvestigationGeolocationQueryService = (
+            PostgresInvestigationGeolocationQueryService(
+                session,
+                geolocation_max_items
+                if geolocation_max_items is not None
+                else DEFAULT_MAX_MAP_GEOLOCATION_ITEMS,
+            )
         )
         self.relationships: RelationshipQueryService = PostgresRelationshipQueryService(
             session, limits or QueryLimits()

@@ -14,6 +14,9 @@ from agentic_threat_investigator.api.dto.assessment import (
     FindingSupportResponse,
 )
 from agentic_threat_investigator.api.dto.evidence import EvidenceResponse
+from agentic_threat_investigator.api.dto.geolocation import (
+    InvestigationGeolocationResponse,
+)
 from agentic_threat_investigator.api.dto.history import HistoryRecordResponse
 from agentic_threat_investigator.api.dto.investigation import (
     CreateInvestigationResponse,
@@ -38,6 +41,9 @@ from agentic_threat_investigator.api.dto.research import (
     ResearchResultResponse,
 )
 from agentic_threat_investigator.api.dto.timeline import TimelineEventResponse
+from agentic_threat_investigator.app.query.geolocation import (
+    InvestigationGeolocationItem,
+)
 from agentic_threat_investigator.app.query.history import DomainObjectHistoryRecord
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationItem,
@@ -124,6 +130,31 @@ def to_evidence_response(evidence: Evidence) -> EvidenceResponse:
         observed_at=evidence.observed_at,
         retrieved_at=evidence.retrieved_at,
         facts=dict(evidence.facts),
+    )
+
+
+def to_geolocation_response(
+    item: InvestigationGeolocationItem,
+) -> InvestigationGeolocationResponse:
+    """Map one projected geolocation item to its public DTO.
+
+    Only allowlisted typed fields are copied; arbitrary normalized facts,
+    raw provider payloads, and artifact/filesystem locations never cross
+    this boundary. The mapper performs no database access and no inference.
+    """
+    return InvestigationGeolocationResponse(
+        evidence_id=item.evidence_id,
+        entity_id=item.entity_id,
+        ip_address=item.ip_address,
+        country_code=item.country_code,
+        region=item.region,
+        city=item.city,
+        latitude=item.latitude,
+        longitude=item.longitude,
+        precision=item.precision,
+        provider=item.provider,
+        observed_at=item.observed_at,
+        retrieved_at=item.retrieved_at,
     )
 
 

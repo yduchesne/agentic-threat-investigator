@@ -42,6 +42,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     ReportReferenceInvalidError,
     StaleReportInputError,
 )
+from agentic_threat_investigator.app.query.geolocation import GeolocationFactsError
 from agentic_threat_investigator.app.query.pagination import (
     CursorFilterMismatchError,
     CursorQueryMismatchError,
@@ -313,6 +314,16 @@ def map_typed_error(error: Exception) -> ApiError:
             ApiErrorCode.CURSOR_FILTER_MISMATCH,
             "The cursor does not match the supplied filters.",
             400,
+        )
+    if isinstance(error, GeolocationFactsError):
+        # Malformed persisted GEOLOCATION normalized facts fail the read
+        # closed as a safe internal contract error; raw fact values never
+        # reach the public boundary.
+        return ApiError(
+            ApiErrorCode.INTERNAL_ERROR,
+            "Geolocation projection failed.",
+            500,
+            expose=False,
         )
     # Unknown/unmapped errors: safe generic 500, no internals.
     LOGGER.warning("unmapped API error type=%s", type(error).__name__)

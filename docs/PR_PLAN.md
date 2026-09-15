@@ -1105,7 +1105,129 @@ Delivered (PR 24F implementation summary):
 
 ## PR 25 — Geolocation map
 
-Deliver Map tab, Leaflet, approximate IP geolocation, multi-IOC visualization, provenance/precision, disclaimer, and correlation-oriented presentation. General GEOINT/PostGIS remains deferred.
+Deliver the v0.1 Investigation geolocation map as three bounded PRs. PR 25 consumes the already-delivered DB-IP City Lite `GEOLOCATION` Evidence contract; it does not introduce a second geolocation persistence model, runtime map-time provider lookups, PostGIS, or broader GEOINT analysis.
+
+```text
+Persisted GEOLOCATION Evidence
+        |
+        v
+PR 25A bounded geolocation read projection/API
+        |
+        v
+PR 25B Investigation Map / Leaflet visualization
+        |
+        v
+PR 25C analyst integration, multi-IOC workflow, and E2E closure
+```
+
+### PR 25A — Investigation geolocation read projection and API [DONE]
+
+Deliver the backend/query foundation for the Map:
+
+- dedicated Investigation-scoped geolocation query/read contract;
+- projection exclusively from already-persisted `GEOLOCATION` Evidence joined to its canonical IP Entity;
+- one deterministic latest geolocation observation per IP entity, preserving the exact Evidence ID as provenance;
+- explicit typed country/region/city, optional paired latitude/longitude, provider, precision, and observation/retrieval timestamps;
+- coordinate-less valid geographic context retained rather than silently discarded;
+- bounded server-owned collection response with explicit truncation rather than browser reconstruction through paginated Evidence;
+- PostgreSQL latest-per-entity selection and strict cross-Investigation isolation;
+- dedicated public API DTO and `GET /api/v1/investigations/{investigation_id}/geolocations`;
+- normal analyst authentication/authorization and generated OpenAPI/client artifacts;
+- deterministic unit, real-PostgreSQL, HTTP, scope, truncation, and vertical-slice tests.
+
+PR 25A performs no MMDB/provider lookup at API request time, creates no new geolocation table, and adds no frontend Map behavior. A database migration/index is not expected; if current indexes are demonstrably insufficient, stop and propose a separate narrow prerequisite rather than silently adding schema work.
+
+Delivered (PR 25A implementation summary):
+
+- **Dedicated query read projection:** `app/query/geolocation.py` defines
+  the immutable `InvestigationGeolocationItem`/`InvestigationGeolocationResult`
+  read models, the Investigation-scoped
+  `InvestigationGeolocationQueryService` ABC, and the pure
+  `geolocation_item_from_persisted_facts` mapper that consumes only the
+  approved normalized facts and fails closed with `GeolocationFactsError`
+  on malformed persisted data (never silently dropping or reinterpreting
+  corrupt rows);
+- **PostgreSQL latest-per-entity selection:**
+  `infrastructure/persistence/query/geolocation.py` selects one row per
+  subject via `row_number() OVER (PARTITION BY subject_entity_id ORDER BY
+  retrieved_at DESC, id ASC)`, scopes to the Investigation GEOLOCATION
+  Evidence with IP_ADDRESS subjects, orders the final projection
+  `ip_address ASC, entity_id ASC`, and fetches at most `max_items + 1`
+  rows so truncation is explicit. The query drives through the existing
+  investigation-prefixed evidence listing indexes (verified by the
+  test_p13 plan-eligibility test), so no index/migration was required;
+- **Service composition:** `QueryServiceBundle.geolocations` is composed
+  by `PostgresQueryServices` with the server-owned bound
+  `ATI_API_MAX_MAP_GEOLOCATION_ITEMS` (default 500, semantically separate
+  from pageable collection sizes);
+- **API:** `GET /api/v1/investigations/{id}/geolocations` (operation id
+  `list_investigation_geolocations`, tag `geolocation`) returns the
+  dedicated allowlisted `InvestigationGeolocationCollectionResponse` DTO
+  (`items` + `truncated`, no cursor, no arbitrary facts, no raw payload,
+  no artifact paths) with normal analyst cookie-session
+  authentication/authorization. Unknown/not-visible Investigations follow
+  the established collection convention and return an empty `200`;
+- **Coverage:** G-Q01..G-Q10 read-model invariants, G-M01..G-M10 pure
+  fact mapping, G-P01..G-P13 real-PostgreSQL matrix (empty, single,
+  ordering, latest-per-entity, tie-breaker, type/IP exclusion,
+  cross-Investigation isolation, coordinate-less context, truncation
+  bound/exact, historical volume, fail-closed malformed persistence),
+  G-A01..G-A10 HTTP contract checks, and two real PostgreSQL + FastAPI
+  vertical slices (`tests/integration/test_api_geolocation.py`);
+- **Artifacts:** OpenAPI fixture regenerated
+  (`tests/fixtures/openapi_v1.json`) and frontend generated API types
+  regenerated (`frontend/src/api/schema.generated.ts`, verified with
+  `npm run api:check`); `docs/API.md` documents the delivered geolocation
+  endpoint, `docs/ARCHITECTURE.md` documents projection-from-Evidence
+  semantics, and `docs/TESTING.md` records the PR 25A matrices.
+
+No frontend Map/Leaflet feature, PostGIS, spatial query, provider change,
+new geolocation persistence, or GEOINT expansion is included.
+
+### PR 25B — Investigation Map and Leaflet visualization
+
+Consume the PR 25A endpoint and deliver the first-class Investigation Map frontend:
+
+- Investigation `Map` route/tab using the established PR 24 routing/TanStack Query architecture;
+- Leaflet and the minimum required React integration;
+- zero-, single-, and multi-point rendering with deterministic fit/zoom behavior;
+- markers representing IP entities with approximate city/region/country context;
+- visible provider/precision/provenance presentation;
+- persistent disclaimer that IP geolocation is approximate network-address context and does not establish attacker, user, or device physical location;
+- explicit presentation of valid geolocation context that lacks plottable coordinates;
+- exact Evidence drill-down using the PR 25A `evidence_id`;
+- loading/error/empty/truncated states and i18n;
+- component and real-browser coverage of the principal map rendering workflow.
+
+PR 25B does not add spatial queries, PostGIS, clustering-driven inference, geographic scoring, cross-Investigation maps, historical movement, or broader GEOINT capabilities.
+
+### PR 25C — Map analyst workflow integration and PR 25 closure
+
+Complete the map as an analyst exploration surface without turning geography into an inference engine:
+
+- integrate Map navigation with the existing PR 24 typed pivot/drill-down model where a semantically valid entity/Evidence transition already exists;
+- preserve exact Investigation, Entity, and Evidence identity across map/table/detail transitions;
+- provide bounded multi-IOC correlation-oriented presentation for the current Investigation without inventing geographic relationships;
+- ensure overlapping/same-location entities remain individually inspectable through an accessible non-map representation or bounded location grouping;
+- preserve provenance, precision, approximation warnings, and epistemic boundaries through all map interactions;
+- add deterministic real-stack E2E coverage for multi-IOC map exploration, exact Evidence provenance, non-mappable context, empty/dead-end behavior, and safe navigation;
+- reconcile `API.md`, `ARCHITECTURE.md`, `TESTING.md`, and `PR_PLAN.md` and perform a final PR 25A–C source/test compliance sweep.
+
+PR 25C must not infer co-location, coordination, common ownership, targeting, maliciousness, attribution, or victim geography merely because indicators appear geographically near one another.
+
+### PR 25 overall boundaries
+
+Across PR 25A–C:
+
+- DB-IP City Lite remains the v0.1 geolocation source and uses its already-delivered local MMDB provider path;
+- the Map consumes persisted Evidence and never invokes providers directly;
+- geolocation remains approximate contextual information, not maliciousness evidence or physical attacker/device location;
+- no new geolocation persistence model is introduced;
+- no PostGIS is required until ATI needs actual spatial queries;
+- no victim geography, targeting geography, infrastructure-to-victim correlation, movement analysis, country-risk scoring, heat-map inference, or broader GEOINT analytics;
+- no cross-Investigation/global map in v0.1;
+- no client-side reconstruction of unbounded datasets;
+- every displayed location retains exact Evidence provenance and the established Evidence/Research/Assessment epistemic boundaries.
 
 ## PR 26 — Monitors, diffs, findings, jobs and administration
 

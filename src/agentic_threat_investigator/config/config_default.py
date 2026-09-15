@@ -50,6 +50,9 @@ CONFIG: dict[str, Any] = {
     # Analyst-facing collection query page limits (PR 23A).
     "query_default_page_size": 50,
     "query_max_page_size": 200,
+    # Server-owned hard bound of the PR 25A investigation geolocation
+    # projection (semantically separate from pageable collection sizes).
+    "api_max_map_geolocation_items": 500,
     # Credentialed cookie CORS origins (PR 23C); the wildcard is rejected.
     "api_cors_origins": ["http://localhost:8080"],
     # Submission request bounds (PR 23C).
