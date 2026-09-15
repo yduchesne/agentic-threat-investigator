@@ -33,6 +33,9 @@ import {
   type PivotState,
   type PivotStep,
 } from "./pivot-types";
+import {
+  MAX_PIVOT_LABEL_CHARS,
+} from "./pivot-types";
 
 const EVIDENCE_ID = "40000000-0000-4000-8000-000000000001";
 const ENTITY_ID = "40000000-0000-4000-8000-000000000101";
@@ -306,6 +309,70 @@ describe("pivot URL serializer/parser", () => {
     const params = withPivotState(new URLSearchParams("a=b"), huge);
     expect(params.get("pivot")).toBeNull();
     expect(params.get("a")).toBe("b");
+  });
+
+  it("C-V01/C-V02: accepts map_entity through the URL round-trip", () => {
+    const mapStep = evidenceStep({
+      sourceKind: "map_entity",
+      label: "203.0.113.10",
+    });
+    const serialized = serializePivotState({ steps: [mapStep] });
+    expect(serialized).not.toBeNull();
+    expect(parsePivotState(serialized)).toEqual({ steps: [mapStep] });
+    // The exact same wire value is deterministic.
+    expect(serializePivotState({ steps: [mapStep] })).toBe(serialized);
+  });
+
+  it("C-V03: an unknown source kind is still rejected", () => {
+    const wire = `{"v":${PIVOT_VERSION},"steps":[{"r":"evidence","f":{},"s":null,"l":"l","k":"map_marker"}]}`;
+    expect(parsePivotState(encodeBase64Url(wire))).toBeNull();
+    const wire2 = `{"v":${PIVOT_VERSION},"steps":[{"r":"evidence","f":{},"s":null,"l":"l","k":"map_row"}]}`;
+    expect(parsePivotState(encodeBase64Url(wire2))).toBeNull();
+  });
+
+  it("C-V04: max pivot depth is unchanged at five", () => {
+    expect(MAX_PIVOT_STEPS).toBe(5);
+    expect(parseFromJson(steps(MAX_PIVOT_STEPS))).not.toBeNull();
+    expect(parseFromJson(steps(MAX_PIVOT_STEPS + 1))).toBeNull();
+  });
+
+  it("C-V05: label bound is unchanged at 128 characters", () => {
+    expect(MAX_PIVOT_LABEL_CHARS).toBe(128);
+    const mapStep = evidenceStep({
+      sourceKind: "map_entity",
+      label: "x".repeat(128),
+    });
+    expect(parseFromJson([mapStep])).not.toBeNull();
+    const overlong = [{ ...mapStep, label: "x".repeat(129) }] as unknown as PivotStep[];
+    expect(parseFromJson(overlong)).toBeNull();
+  });
+
+  it("C-V06: UUID filter validation is unchanged for map-origin steps", () => {
+    const bad = [
+      {
+        ...evidenceStep({
+          sourceKind: "map_entity",
+          filters: { subject_entity_id: "not-a-uuid" },
+        }),
+      },
+    ] as unknown as PivotStep[];
+    expect(parseFromJson(bad)).toBeNull();
+    const good = [evidenceStep({ sourceKind: "map_entity" })];
+    expect(parseFromJson(good)).not.toBeNull();
+  });
+
+  it("C-V08: close/back behavior is unchanged for map-origin stacks", () => {
+    const params = withPivotState(new URLSearchParams("source=x"), {
+      steps: [evidenceStep({ sourceKind: "map_entity", label: "203.0.113.10" })],
+    });
+    expect(readPivotState(params)?.steps[0].sourceKind).toBe("map_entity");
+    const cleared = clearPivotState(params);
+    expect(cleared.get("pivot")).toBeNull();
+    expect(cleared.get("source")).toBe("x");
+    // Truncation walks back exactly to the base route without residue.
+    const truncated = truncatePivotSteps(params, 0);
+    expect(truncated.get("pivot")).toBeNull();
+    expect(truncated.get("source")).toBe("x");
   });
 });
 

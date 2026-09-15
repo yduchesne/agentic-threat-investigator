@@ -6,8 +6,10 @@
 // these tests never perform live tile requests and never depend on a
 // layout engine; the real path is exercised by the real-stack E24 spec.
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, type RenderResult } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GeoPrecisionName, InvestigationGeolocation } from "../api/schema-types";
@@ -41,6 +43,12 @@ function item(
   };
 }
 
+
+/** Render one Map under a router so the popup Explore surface sees the URL. */
+function renderMap(children: ReactElement): RenderResult {
+  return render(<MemoryRouter>{children}</MemoryRouter>);
+}
+
 describe("InvestigationMap (B-F01..B-F08)", () => {
   beforeEach(resetFakeLeafletMap);
   afterEach(() => {
@@ -49,7 +57,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
 
   it("B-F01: one mappable item renders exactly one Marker", () => {
     const onViewEvidence = vi.fn();
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1)]}
@@ -63,7 +71,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
   });
 
   it("B-F02: multiple mappable items render one Marker per item", () => {
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1), item(2, { latitude: 51.5074, longitude: -0.1278 })]}
@@ -74,7 +82,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
   });
 
   it("B-F03: an unlocated item never produces a Marker", () => {
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1, { latitude: null, longitude: null })]}
@@ -91,7 +99,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
       observed_at: "2026-06-01T09:00:00Z",
       ip_address: "198.51.100.42",
     });
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[exact]}
@@ -106,7 +114,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
   });
 
   it("B-F05: the tile layer carries the centralized OSM attribution/URL", () => {
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1)]}
@@ -121,7 +129,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
   });
 
   it("B-F06: no fabricated precision/accuracy circle is rendered", () => {
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1)]}
@@ -133,7 +141,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
   });
 
   it("B-F07: no clustering plugin/component is used", () => {
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1), item(2)]}
@@ -147,7 +155,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
 
   it("B-F08: unmount leaves no application-owned timer/listener leak", () => {
     vi.useFakeTimers();
-    const { unmount } = render(
+    const { unmount } = renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1)]}
@@ -162,7 +170,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
   });
 
   it("single-point viewport issues one exact setView command (B-V02 wiring)", () => {
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1, { latitude: 47.6062, longitude: -122.3321 })]}
@@ -178,7 +186,7 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
   });
 
   it("multi-point viewport issues one fitBounds over all mappable points (B-V03 wiring)", () => {
-    render(
+    renderMap(
       <InvestigationMap
         investigationId={INVESTIGATION_ID}
         items={[item(1, { latitude: 10, longitude: -10 }), item(2, { latitude: 20, longitude: 5 })]}

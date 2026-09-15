@@ -230,6 +230,28 @@ describe("pivot capability registry", () => {
     expect(actions).toHaveLength(1);
   });
 
+  it("C-V07: no-op suppression applies identically to map_entity sources", () => {
+    const active: PivotStep = {
+      resource: "evidence",
+      filters: { subject_entity_id: ENTITY_ID },
+      selectedId: null,
+      label: "203.0.113.10",
+      sourceKind: "map_entity",
+    };
+    // Map-origin evidence-for-entity against the identical filter context
+    // is suppressed exactly like any other source kind; the independent
+    // relationship/research actions remain.
+    const actions = suppressNoOps(
+      entityActions(ENTITY_ID, "203.0.113.10", "map_entity"),
+      active,
+    );
+    expect(actions.map((action) => action.key)).toEqual([
+      "relationshipsSource",
+      "relationshipsTarget",
+      "researchForEntity",
+    ]);
+  });
+
   it("no actions are inferred for unsupported source kinds", () => {
     // The breadth of the registered surface: nothing outside the factory
     // functions above can produce an action.

@@ -39,6 +39,8 @@ export interface PivotMenuProps {
   actions: readonly PivotAction[];
   /** Optional accessible trigger name describing the source value. */
   ariaLabel?: string;
+  /** Optional visible trigger label (defaults to the pivots namespace). */
+  triggerLabel?: string;
 }
 
 /** Menu sits above the detail drawer (1300) and the workspace dialog (1250). */
@@ -166,6 +168,7 @@ function ActionMenu({
 export function PivotMenu({
   actions,
   ariaLabel,
+  triggerLabel,
 }: PivotMenuProps): ReactElement | null {
   const { t } = useTranslation("pivots");
   const [searchParams, setSearchParams] = useSearchParams();
@@ -197,8 +200,6 @@ export function PivotMenu({
     } as PivotStep;
     setSearchParams(pushPivotStep(searchParams, step), { replace: false });
   };
-  const triggerLabel = ariaLabel ?? t("trigger.aria");
-
   // Single obvious target: one direct accessible action (the action text
   // is the accessible name; an explicit ariaLabel stays overridable).
   if (legal.length === 1) {
@@ -234,10 +235,10 @@ export function PivotMenu({
         onKeyDown={onTriggerKeyDown}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={triggerLabel}
+        aria-label={ariaLabel ?? triggerLabel ?? t("trigger.aria")}
         sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
       >
-        {t("trigger.label")}
+        {triggerLabel ?? t("trigger.label")}
       </Button>
       <ActionMenu
         triggerRef={triggerRef}

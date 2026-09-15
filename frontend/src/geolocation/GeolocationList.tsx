@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 
 import type { InvestigationGeolocation } from "../api/schema-types";
 import { Timestamp } from "../components/Timestamp";
+import { GeolocationEntityActions } from "./GeolocationEntityActions";
 import {
   geoPrecisionKey,
   isPlottableCoordinate,
@@ -56,6 +57,7 @@ export function GeolocationList({
                 <TableCell>{t("list.columns.observed")}</TableCell>
                 <TableCell>{t("list.columns.status")}</TableCell>
                 <TableCell>{t("list.row.view")}</TableCell>
+                <TableCell>{t("list.row.explore")}</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -97,6 +99,9 @@ export function GeolocationList({
                       >
                         {t("list.row.view")}
                       </Button>
+                    </TableCell>
+                    <TableCell>
+                      <GeolocationEntityActions item={item} />
                     </TableCell>
                   </TableRow>
                 );
