@@ -40,13 +40,79 @@ from agentic_threat_investigator.domain.geoint import (
     LocationType,
 )
 
-_LOCATION_COLUMNS = """
-      id, location_type, name, canonical_name, country_code,
-      admin1_code, admin2_code, parent_location_id, version,
-      created_at, updated_at,
-      ST_AsEWKT(geometry) AS geometry_ewkt,
-      ST_AsEWKT(centroid) AS centroid_ewkt
-"""
+# Canonical Location read projection. Every statement below is a complete
+# literal constant (the projection is inlined per statement) so no SQL text
+# is assembled at runtime; every externally-derived value — including the
+# candidate limit — flows through bound parameters. The projection is:
+#   id, location_type, name, canonical_name, country_code, admin1_code,
+#   admin2_code, parent_location_id, version, created_at, updated_at,
+#   ST_AsEWKT(geometry) AS geometry_ewkt, ST_AsEWKT(centroid) AS centroid_ewkt
+_COUNTRY_BY_CODE_SQL = (
+    "SELECT id, location_type, name, canonical_name, country_code, "
+    "admin1_code, admin2_code, parent_location_id, version, "
+    "created_at, updated_at, "
+    "ST_AsEWKT(geometry) AS geometry_ewkt, "
+    "ST_AsEWKT(centroid) AS centroid_ewkt "
+    "FROM ati.location "
+    "WHERE location_type = 'country' AND country_code = :country_code LIMIT 1"
+)
+
+_ADMIN_CANDIDATES_SQL = (
+    "SELECT id, location_type, name, canonical_name, country_code, "
+    "admin1_code, admin2_code, parent_location_id, version, "
+    "created_at, updated_at, "
+    "ST_AsEWKT(geometry) AS geometry_ewkt, "
+    "ST_AsEWKT(centroid) AS centroid_ewkt "
+    "FROM ati.location "
+    "WHERE location_type = 'administrative_area' "
+    "AND country_code = :country_code "
+    "AND (CAST(:admin_code AS text) IS NULL "
+    "     OR admin1_code = :admin_code "
+    "     OR admin2_code = :admin_code) "
+    "AND (CAST(:admin_name AS text) IS NULL "
+    "     OR LOWER(canonical_name) = LOWER(:admin_name)) "
+    "ORDER BY country_code, admin1_code, COALESCE(admin2_code, ''), "
+    "canonical_name, id ASC LIMIT :candidate_limit"
+)
+
+_CITY_CANDIDATES_SQL = (
+    "SELECT id, location_type, name, canonical_name, country_code, "
+    "admin1_code, admin2_code, parent_location_id, version, "
+    "created_at, updated_at, "
+    "ST_AsEWKT(geometry) AS geometry_ewkt, "
+    "ST_AsEWKT(centroid) AS centroid_ewkt "
+    "FROM ati.location l "
+    "WHERE l.location_type = 'city' "
+    "AND l.country_code = :country_code "
+    "AND LOWER(l.canonical_name) = LOWER(:city_name) "
+    "ORDER BY l.country_code, l.admin1_code, COALESCE(l.admin2_code, ''), "
+    "l.canonical_name, l.id ASC LIMIT :candidate_limit"
+)
+
+_CITY_WITH_ADMIN_CONTEXT_SQL = (
+    "SELECT id, location_type, name, canonical_name, country_code, "
+    "admin1_code, admin2_code, parent_location_id, version, "
+    "created_at, updated_at, "
+    "ST_AsEWKT(geometry) AS geometry_ewkt, "
+    "ST_AsEWKT(centroid) AS centroid_ewkt "
+    "FROM ati.location l "
+    "WHERE l.location_type = 'city' "
+    "AND l.country_code = :country_code "
+    "AND LOWER(l.canonical_name) = LOWER(:city_name) "
+    "AND l.admin1_code = CAST(:admin1 AS text) "
+    "AND (CAST(:admin2 AS text) IS NULL OR l.admin2_code = :admin2) "
+    "ORDER BY l.country_code, l.admin1_code, COALESCE(l.admin2_code, ''), "
+    "l.canonical_name, l.id ASC LIMIT :candidate_limit"
+)
+
+_LOCATIONS_BY_IDS_SQL = (
+    "SELECT id, location_type, name, canonical_name, country_code, "
+    "admin1_code, admin2_code, parent_location_id, version, "
+    "created_at, updated_at, "
+    "ST_AsEWKT(geometry) AS geometry_ewkt, "
+    "ST_AsEWKT(centroid) AS centroid_ewkt "
+    "FROM ati.location WHERE id IN :location_ids"
+)
 
 
 def _location_from_row(row: Any) -> Location:
@@ -114,14 +180,13 @@ class PostgresCanonicalGeographyResolver(CanonicalGeographyResolver):
     # -- narrowing queries -------------------------------------------------
 
     async def _country_by_code(self, country_code: str) -> Location | None:
-        """Resolve the canonical country for one ISO-style code, if any."""
+        """Resolve the canonical country for one ISO-style code, if any.
+
+        The statement is assembled from static module constants only; every
+        externally-derived value is a bound parameter.
+        """
         result = await self._session.execute(
-            text(
-                f"SELECT {_LOCATION_COLUMNS} FROM ati.location "
-                "WHERE location_type = 'country' AND country_code = :country_code "
-                "LIMIT 1"
-            ),
-            {"country_code": country_code},
+            text(_COUNTRY_BY_CODE_SQL), {"country_code": country_code}
         )
         row = result.mappings().first()
         return None if row is None else _location_from_row(row)
@@ -162,23 +227,12 @@ class PostgresCanonicalGeographyResolver(CanonicalGeographyResolver):
         """
         assert claim.country_code is not None
         result = await self._session.execute(
-            text(
-                f"SELECT {_LOCATION_COLUMNS} FROM ati.location "
-                "WHERE location_type = 'administrative_area' "
-                "AND country_code = :country_code "
-                "AND (CAST(:admin_code AS text) IS NULL "
-                "     OR admin1_code = :admin_code "
-                "     OR admin2_code = :admin_code) "
-                "AND (CAST(:admin_name AS text) IS NULL "
-                "     OR LOWER(canonical_name) = LOWER(:admin_name)) "
-                "ORDER BY country_code, admin1_code, COALESCE(admin2_code, ''), "
-                "canonical_name, id ASC "
-                f"LIMIT {CANDIDATE_LIMIT + 1}"
-            ),
+            text(_ADMIN_CANDIDATES_SQL),
             {
                 "country_code": claim.country_code,
                 "admin_code": claim.administrative_area_code,
                 "admin_name": claim.administrative_area,
+                "candidate_limit": CANDIDATE_LIMIT + 1,
             },
         )
         matched: tuple[str, ...]
@@ -201,26 +255,14 @@ class PostgresCanonicalGeographyResolver(CanonicalGeographyResolver):
             "city_name": claim.city,
             "admin1": admin_context.admin1_code if admin_context is not None else None,
             "admin2": admin_context.admin2_code if admin_context is not None else None,
+            "candidate_limit": CANDIDATE_LIMIT + 1,
         }
-        admin_clause = ""
-        if admin_context is not None:
-            admin_clause = (
-                "AND l.admin1_code = CAST(:admin1 AS text) "
-                "AND (CAST(:admin2 AS text) IS NULL OR l.admin2_code = :admin2) "
-            )
-        result = await self._session.execute(
-            text(
-                f"SELECT {_LOCATION_COLUMNS} FROM ati.location l "
-                "WHERE l.location_type = 'city' "
-                "AND l.country_code = :country_code "
-                "AND LOWER(l.canonical_name) = LOWER(:city_name) "
-                f"{admin_clause}"
-                "ORDER BY l.country_code, l.admin1_code, "
-                "COALESCE(l.admin2_code, ''), l.canonical_name, l.id ASC "
-                f"LIMIT {CANDIDATE_LIMIT + 1}"
-            ),
-            params,
+        statement = (
+            _CITY_WITH_ADMIN_CONTEXT_SQL
+            if admin_context is not None
+            else _CITY_CANDIDATES_SQL
         )
+        result = await self._session.execute(text(statement), params)
         return [
             (_location_from_row(row), ("city_name",)) for row in result.mappings().all()
         ]
@@ -371,9 +413,9 @@ class PostgresCanonicalGeographyResolver(CanonicalGeographyResolver):
         """Fetch bounded canonical Locations by their identifiers."""
         if not location_ids:
             return []
-        statement = text(
-            f"SELECT {_LOCATION_COLUMNS} FROM ati.location WHERE id IN :location_ids"
-        ).bindparams(bindparam("location_ids", expanding=True))
+        statement = text(_LOCATIONS_BY_IDS_SQL).bindparams(
+            bindparam("location_ids", expanding=True)
+        )
         result = await self._session.execute(
             statement, {"location_ids": list(location_ids)}
         )
