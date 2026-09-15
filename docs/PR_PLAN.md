@@ -1431,7 +1431,7 @@ Across PR 26A-G:
 - **Infrastructure GEOINT is the v0.1 boundary.** PR 26 does not expand into victim geography, targeting geography, physical-person tracking, generalized movement intelligence, facilities intelligence, country-risk scoring, or attribution.
 - **Existing epistemic boundaries remain authoritative.** Evidence, Research, Assessment, and Report semantics are not weakened by geographic enrichment or agentic GEOINT reasoning.
 
-### PR 26A — GEOINT domain and persistence foundation
+### PR 26A — GEOINT domain and persistence foundation [DONE]
 
 Establish:
 
@@ -1445,6 +1445,61 @@ Establish:
 - deterministic unit and real-PostgreSQL integration tests.
 
 No PostGIS spatial analysis, asynchronous resolver, analyst GEOINT API/UI, or agentic reasoning yet.
+
+Delivered (PR 26A implementation summary):
+
+- **Domain contract** (`domain/geoint.py`): bounded `LocationType`/
+  `LocationPrecision` (`country`/`administrative_area`/`city`) and
+  `GeoResolutionStatus` (`pending`/`processing`/`resolved`/`unresolvable`/
+  `failed`) enums; frozen `Location`, `EntityLocation`,
+  `EntityLocationObservation`, and `GeoResolution` models with
+  `extra="forbid"`, timezone-aware-UTC validation, bounded nonblank
+  strings, deterministic two-letter country-code normalization (no
+  reference data), type-specific parent/admin shape rules, and the
+  approved identity tuple `(type, country_code, admin1_code, admin2_code,
+  canonical_name)`; `EntityType` unchanged (Location is not an Entity); no
+  geometry/PostGIS fields anywhere.
+- **PostgreSQL schema (migration 0025, SQL API v0021):**
+  `ati.location` (canonical identity enforced by a unique COALESCE
+  expression index, type-shape/country-code/bound checks, self-parent
+  guard), `ati.entity_location_observation` (immutable, exact
+  Entity/Location/Evidence FKs, no `investigation_id`, no
+  `domain_object_history` duplication), `ati.entity_location` (one row per
+  Entity, `latest_observation_id` FK to the observation table,
+  `first_observed_at <= last_observed_at`), and `ati.geo_resolution`
+  (unique `(entity_id, evidence_id)` pair, status/attempt/error-code
+  checks, no second queue table), plus four database-owned version
+  sequences.
+- **Versioned stored functions:** `ati.upsert_location` (race-safe
+  create-once/reuse, incompatible-state rejection), `ati.append_entity_location_observation`
+  (database-side provenance validation with typed SQLSTATEs `U26A1`-`U26A6`,
+  immutable append, and atomic EntityLocation reconciliation under
+  `(COALESCE(observed_at, retrieved_at), observation_id)` currentness with
+  UUID tie-break and no current-state rewind), and
+  `ati.create_geo_resolution` (initial PENDING create with race-safe
+  idempotent pair reuse and `U26A8` duplicate-state rejection). No
+  claim/lease/retry/completion functions exist.
+- **Repositories/UoW:** narrow `LocationRepository`,
+  `EntityLocationRepository` (read-only, no mutation path),
+  `EntityLocationObservationRepository`, and `GeoResolutionRepository`
+  ABCs plus thin `Postgres*` implementations wired into the existing
+  `UnitOfWork`/`PostgresUnitOfWork`; dedicated SQLSTATE-to-typed-error
+  mapping (`U26A1`-`U26A9`); repositories never commit, never allocate
+  versions, and never reconcile EntityLocation in Python.
+- **Tests:** G26A-D01..D14 domain unit matrix and G26A-P01..P34
+  real-PostgreSQL matrix (round-trip, identity reuse/version churn,
+  concurrent upsert/create, provenance, rewind/non-rewind reconciliation,
+  tie-breaks, rollback atomicity, no observation history duplication, no
+  claim/queue/PostGIS leakage, authoritative versions), plus migration
+  upgrade/downgrade coverage proving existing Entity/Evidence (including
+  PR 25 GEOLOCATION Evidence) data survives and no PostGIS extension is
+  required.
+- **Documentation:** `DATABASE.md` (delivered GEOINT persistence tables,
+  canonical identity, reconciliation, initial GeoResolution, SQL API
+  v0021 / migration 0025, PR 26B PostGIS qualification),
+  `ARCHITECTURE.md` (26A delivered vs 26B-G planned), `TESTING.md`
+  (G26A-D/G26A-P matrices and the canonical PostgreSQL path). Fake runtime
+  and PR 25 Map behavior are unchanged.
 
 ### PR 26B — Canonical geography and PostGIS foundation
 

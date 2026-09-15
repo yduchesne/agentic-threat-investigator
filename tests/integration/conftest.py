@@ -80,6 +80,10 @@ async def reset_application_data(
         "domain_object_history",
         "investigation_timeline_event",
         "research_result",
+        "entity_location",
+        "entity_location_observation",
+        "geo_resolution",
+        "location",
     )
     async with integration_engine.begin() as connection:
         await connection.execute(

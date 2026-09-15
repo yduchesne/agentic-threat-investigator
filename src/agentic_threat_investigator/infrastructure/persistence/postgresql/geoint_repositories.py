@@ -1,0 +1,392 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Thin PostgreSQL adapters for the PR 26A GEOINT persistence contracts.
+
+Every GEOINT mutation routes through the versioned SQL API v0021 stored
+functions (``ati.upsert_location``, ``ati.append_entity_location_observation``,
+``ati.create_geo_resolution``); PostgreSQL owns canonical identity,
+provenance validation, version allocation, and current-state reconciliation.
+These adapters never commit, never allocate versions, and never reconcile
+EntityLocation in Python. Reads use direct SELECT only for the approved
+exact/bounded lookups.
+"""
+
+from uuid import UUID
+
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from agentic_threat_investigator.app.persistence.repositories import (
+    EntityLocationObservationDuplicateError,
+    EntityLocationObservationRepository,
+    EntityLocationRepository,
+    GeoEntityNotFoundError,
+    GeoEvidenceNotFoundError,
+    GeoEvidenceSubjectMismatchError,
+    GeoEvidenceTypeError,
+    GeoInvalidInputError,
+    GeoLocationNotFoundError,
+    GeoResolutionDuplicateStateError,
+    GeoResolutionRepository,
+    LocationIdentityConflictError,
+    LocationRepository,
+)
+from agentic_threat_investigator.domain.geoint import (
+    EntityLocation,
+    EntityLocationObservation,
+    GeoResolution,
+    GeoResolutionStatus,
+    Location,
+    LocationPrecision,
+    LocationType,
+)
+
+from .errors import (
+    SQLSTATE_GEOLOCATION_ENTITY_NOT_FOUND,
+    SQLSTATE_GEOLOCATION_EVIDENCE_NOT_FOUND,
+    SQLSTATE_GEOLOCATION_EVIDENCE_SUBJECT_MISMATCH,
+    SQLSTATE_GEOLOCATION_EVIDENCE_TYPE_INVALID,
+    SQLSTATE_GEOLOCATION_INVALID_INPUT,
+    SQLSTATE_GEOLOCATION_LOCATION_IDENTITY_INCOMPATIBLE,
+    SQLSTATE_GEOLOCATION_LOCATION_NOT_FOUND,
+    SQLSTATE_GEOLOCATION_OBSERVATION_DUPLICATE,
+    SQLSTATE_GEOLOCATION_RESOLUTION_DUPLICATE_STATE,
+    sqlstate,
+)
+from .models import (
+    EntityLocationObservationRow,
+    EntityLocationRow,
+    GeoResolutionRow,
+    LocationRow,
+)
+
+
+def _location(row: LocationRow) -> Location:
+    """Map a Location row to its domain model."""
+    return Location(
+        id=row.id,
+        type=LocationType(row.location_type),
+        name=row.name,
+        canonical_name=row.canonical_name,
+        country_code=row.country_code,
+        admin1_code=row.admin1_code,
+        admin2_code=row.admin2_code,
+        parent_location_id=row.parent_location_id,
+        version=row.version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _observation(row: EntityLocationObservationRow) -> EntityLocationObservation:
+    """Map an observation row to its immutable domain model."""
+    return EntityLocationObservation(
+        id=row.id,
+        entity_id=row.entity_id,
+        location_id=row.location_id,
+        evidence_id=row.evidence_id,
+        precision=LocationPrecision(row.precision),
+        observed_at=row.observed_at,
+        retrieved_at=row.retrieved_at,
+        resolved_at=row.resolved_at,
+        resolution_method=row.resolution_method,
+        version=row.version,
+        created_at=row.created_at,
+    )
+
+
+def _entity_location(row: EntityLocationRow) -> EntityLocation:
+    """Map a current-state row to its domain model."""
+    return EntityLocation(
+        entity_id=row.entity_id,
+        location_id=row.location_id,
+        precision=LocationPrecision(row.precision),
+        latest_observation_id=row.latest_observation_id,
+        first_observed_at=row.first_observed_at,
+        last_observed_at=row.last_observed_at,
+        version=row.version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _resolution(row: GeoResolutionRow) -> GeoResolution:
+    """Map a GeoResolution row to its domain model."""
+    return GeoResolution(
+        id=row.id,
+        entity_id=row.entity_id,
+        evidence_id=row.evidence_id,
+        status=GeoResolutionStatus(row.status),
+        attempt_count=row.attempt_count,
+        next_attempt_at=row.next_attempt_at,
+        claimed_by=row.claimed_by,
+        lease_expires_at=row.lease_expires_at,
+        resolved_location_id=row.resolved_location_id,
+        last_error_code=row.last_error_code,
+        version=row.version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _map_location_error(error: DBAPIError) -> None:
+    """Map a versioned SQL API SQLSTATE to the typed Location error, if known."""
+    state = sqlstate(error)
+    if state == SQLSTATE_GEOLOCATION_LOCATION_NOT_FOUND:
+        raise GeoLocationNotFoundError() from error
+    if state == SQLSTATE_GEOLOCATION_LOCATION_IDENTITY_INCOMPATIBLE:
+        raise LocationIdentityConflictError() from error
+    if state == SQLSTATE_GEOLOCATION_INVALID_INPUT:
+        detail = getattr(getattr(error, "orig", None), "diag", None)
+        message = getattr(detail, "message_primary", None) or "invalid location input"
+        raise GeoInvalidInputError(message) from error
+    raise
+
+
+class PostgresLocationRepository(LocationRepository):
+    """Persist canonical Locations through the active transaction."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_id(self, location_id: UUID) -> Location | None:
+        """Return the canonical Location with the given identifier, if any."""
+        row = await self.session.get(LocationRow, location_id)
+        return None if row is None else _location(row)
+
+    async def get_by_identity(
+        self,
+        *,
+        location_type: str,
+        country_code: str,
+        admin1_code: str | None,
+        admin2_code: str | None,
+        canonical_name: str,
+    ) -> Location | None:
+        """Find a canonical Location by its approved identity tuple."""
+        result = await self.session.execute(
+            select(LocationRow).where(
+                LocationRow.location_type == location_type,
+                LocationRow.country_code == country_code,
+                LocationRow.admin1_code.is_(None)
+                if admin1_code is None
+                else LocationRow.admin1_code == admin1_code,
+                LocationRow.admin2_code.is_(None)
+                if admin2_code is None
+                else LocationRow.admin2_code == admin2_code,
+                LocationRow.canonical_name == canonical_name,
+            )
+        )
+        row = result.scalar_one_or_none()
+        return None if row is None else _location(row)
+
+    async def upsert(self, location: Location) -> Location:
+        """Create or reuse the canonical Location through the SQL function.
+
+        The database owns canonical-identity resolution, race-safe creation,
+        and version allocation; this adapter performs no Python-side version
+        allocation and never self-commits.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, created FROM ati.upsert_location(
+                        :id, :location_type, :name, :canonical_name,
+                        :country_code, :admin1_code, :admin2_code,
+                        :parent_location_id)
+                """),
+                {
+                    "id": location.id,
+                    "location_type": location.type.value,
+                    "name": location.name,
+                    "canonical_name": location.canonical_name,
+                    "country_code": location.country_code,
+                    "admin1_code": location.admin1_code,
+                    "admin2_code": location.admin2_code,
+                    "parent_location_id": location.parent_location_id,
+                },
+            )
+        except DBAPIError as error:
+            _map_location_error(error)
+        written_id, _version, _created = result.one()
+        row = await self.session.get(LocationRow, written_id)
+        if row is None:  # pragma: no cover - the function and transaction are atomic
+            raise RuntimeError("location write returned no row")
+        return _location(row)
+
+
+class PostgresEntityLocationRepository(EntityLocationRepository):
+    """Read-only repository for current materialized EntityLocation state."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_entity_id(self, entity_id: UUID) -> EntityLocation | None:
+        """Return the current EntityLocation of one Entity, if any."""
+        row = await self.session.get(EntityLocationRow, entity_id)
+        return None if row is None else _entity_location(row)
+
+
+class PostgresEntityLocationObservationRepository(EntityLocationObservationRepository):
+    """Append and read immutable EntityLocationObservation rows."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_id(self, observation_id: UUID) -> EntityLocationObservation | None:
+        """Return an immutable observation by its identity."""
+        row = await self.session.get(EntityLocationObservationRow, observation_id)
+        return None if row is None else _observation(row)
+
+    async def list_for_entity(
+        self,
+        entity_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EntityLocationObservation]:
+        """Return bounded observations for one Entity in deterministic order.
+
+        Ordering is newest-first by retrieval time with a stable UUID
+        tie-breaker, matching the Evidence/RelationshipObservation analyst
+        listing convention. ``limit`` and ``offset`` must be non-negative.
+        """
+        if limit < 0 or offset < 0:
+            raise ValueError("limit and offset must be non-negative")
+        limit = min(limit, 1000)
+        result = await self.session.execute(
+            select(EntityLocationObservationRow)
+            .where(EntityLocationObservationRow.entity_id == entity_id)
+            .order_by(
+                EntityLocationObservationRow.retrieved_at.desc(),
+                EntityLocationObservationRow.id.asc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        return [_observation(row) for row in result.scalars().all()]
+
+    async def append(
+        self, observation: EntityLocationObservation
+    ) -> EntityLocationObservation:
+        """Append one immutable observation and reconcile current state.
+
+        The versioned stored function validates Entity visibility, Location
+        and Evidence existence, the GEOLOCATION Evidence type, the exact
+        Evidence subject, and reconciles the current EntityLocation atomically
+        in the same transaction. No update/delete path exists.
+        """
+        try:
+            await self.session.execute(
+                text("""
+                    SELECT id, version FROM ati.append_entity_location_observation(
+                        :id, :entity_id, :location_id, :evidence_id, :precision,
+                        :observed_at, :retrieved_at, :resolved_at,
+                        :resolution_method)
+                """),
+                {
+                    "id": observation.id,
+                    "entity_id": observation.entity_id,
+                    "location_id": observation.location_id,
+                    "evidence_id": observation.evidence_id,
+                    "precision": observation.precision.value,
+                    "observed_at": observation.observed_at,
+                    "retrieved_at": observation.retrieved_at,
+                    "resolved_at": observation.resolved_at,
+                    "resolution_method": observation.resolution_method,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_GEOLOCATION_ENTITY_NOT_FOUND:
+                raise GeoEntityNotFoundError(observation.entity_id) from error
+            if state == SQLSTATE_GEOLOCATION_LOCATION_NOT_FOUND:
+                raise GeoLocationNotFoundError(observation.location_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_NOT_FOUND:
+                raise GeoEvidenceNotFoundError(observation.evidence_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_TYPE_INVALID:
+                raise GeoEvidenceTypeError(observation.evidence_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_SUBJECT_MISMATCH:
+                raise GeoEvidenceSubjectMismatchError(
+                    observation.evidence_id, observation.entity_id
+                ) from error
+            if state == SQLSTATE_GEOLOCATION_OBSERVATION_DUPLICATE:
+                raise EntityLocationObservationDuplicateError(observation.id) from error
+            if state == SQLSTATE_GEOLOCATION_INVALID_INPUT:
+                detail = getattr(getattr(error, "orig", None), "diag", None)
+                message = (
+                    getattr(detail, "message_primary", None) or "invalid observation"
+                )
+                raise GeoInvalidInputError(message) from error
+            raise
+        row = await self.session.get(EntityLocationObservationRow, observation.id)
+        if row is None:  # pragma: no cover - the function and transaction are atomic
+            raise RuntimeError("observation write returned no row")
+        return _observation(row)
+
+
+class PostgresGeoResolutionRepository(GeoResolutionRepository):
+    """Persist initial pending GeoResolution work in the active transaction."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_id(self, resolution_id: UUID) -> GeoResolution | None:
+        """Return one GeoResolution work record by its identity."""
+        row = await self.session.get(GeoResolutionRow, resolution_id)
+        return None if row is None else _resolution(row)
+
+    async def get_by_entity_evidence(
+        self, entity_id: UUID, evidence_id: UUID
+    ) -> GeoResolution | None:
+        """Return the GeoResolution for one Entity/Evidence pair, if any."""
+        result = await self.session.execute(
+            select(GeoResolutionRow).where(
+                GeoResolutionRow.entity_id == entity_id,
+                GeoResolutionRow.evidence_id == evidence_id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        return None if row is None else _resolution(row)
+
+    async def create_pending(self, resolution: GeoResolution) -> GeoResolution:
+        """Create (or idempotently reuse) the initial PENDING work record.
+
+        The database validates the Entity/Evidence binding and the GEOLOCATION
+        Evidence type, owns race safety on the unique pair, and rejects a
+        duplicate pair that is no longer in the initial pending shape.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, version, created FROM ati.create_geo_resolution(
+                        :id, :entity_id, :evidence_id)
+                """),
+                {
+                    "id": resolution.id,
+                    "entity_id": resolution.entity_id,
+                    "evidence_id": resolution.evidence_id,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_GEOLOCATION_ENTITY_NOT_FOUND:
+                raise GeoEntityNotFoundError(resolution.entity_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_NOT_FOUND:
+                raise GeoEvidenceNotFoundError(resolution.evidence_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_TYPE_INVALID:
+                raise GeoEvidenceTypeError(resolution.evidence_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_SUBJECT_MISMATCH:
+                raise GeoEvidenceSubjectMismatchError(
+                    resolution.evidence_id, resolution.entity_id
+                ) from error
+            if state == SQLSTATE_GEOLOCATION_RESOLUTION_DUPLICATE_STATE:
+                raise GeoResolutionDuplicateStateError(
+                    resolution.entity_id, resolution.evidence_id
+                ) from error
+            raise
+        written_id, _version, _created = result.one()
+        row = await self.session.get(GeoResolutionRow, written_id)
+        if row is None:  # pragma: no cover - the function and transaction are atomic
+            raise RuntimeError("geo resolution write returned no row")
+        return _resolution(row)

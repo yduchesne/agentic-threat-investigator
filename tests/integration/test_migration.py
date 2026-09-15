@@ -34,6 +34,10 @@ EXPECTED_TABLES = {
     "investigation_timeline_event",
     "investigation_job",
     "api_idempotency",
+    "location",
+    "entity_location_observation",
+    "entity_location",
+    "geo_resolution",
     "alembic_version",
 }
 
@@ -50,6 +54,10 @@ EXPECTED_SEQUENCES = {
     "document_version_seq",
     "document_chunk_version_seq",
     "investigation_timeline_event_seq",
+    "location_version_seq",
+    "entity_location_observation_version_seq",
+    "entity_location_version_seq",
+    "geo_resolution_version_seq",
 }
 
 EXPECTED_FUNCTIONS = {
@@ -74,6 +82,9 @@ EXPECTED_FUNCTIONS = {
     "create_investigation_job",
     "claim_next_investigation_job",
     "complete_investigation_job",
+    "upsert_location",
+    "append_entity_location_observation",
+    "create_geo_resolution",
 }
 
 
@@ -923,5 +934,195 @@ async def test_research_foundation_migration_downgrade_and_re_upgrade() -> None:
         command.upgrade(alembic_cfg, "head")
         result, citation, append = await research_state()
         assert result and citation and append
+    finally:
+        command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_geoint_migration_downgrade_and_re_upgrade() -> None:
+    """Migration 0025 downgrades cleanly and re-upgrades without data loss.
+
+    Representative pre-26A data (Investigation, Entity, Evidence, and a PR 25
+    GEOLOCATION Evidence row) must survive both directions unchanged; the
+    downgrade removes only the PR 26A GEOINT objects in dependency-safe
+    order, and no PostGIS extension is ever required.
+    """
+    alembic_cfg = Config("alembic.ini")
+
+    async def geoint_state() -> tuple[set[str], set[str], set[str]]:
+        """Return (tables, sequences, functions) for the ati schema."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                tables = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT table_name FROM information_schema.tables "
+                            "WHERE table_schema = 'ati'"
+                        )
+                    )
+                }
+                sequences = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT sequence_name FROM information_schema.sequences "
+                            "WHERE sequence_schema = 'ati'"
+                        )
+                    )
+                }
+                functions = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT routine_name FROM information_schema.routines "
+                            "WHERE routine_schema = 'ati'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        return tables, sequences, functions
+
+    geoint_tables = {
+        "location",
+        "entity_location_observation",
+        "entity_location",
+        "geo_resolution",
+    }
+    geoint_sequences = {
+        "location_version_seq",
+        "entity_location_observation_version_seq",
+        "entity_location_version_seq",
+        "geo_resolution_version_seq",
+    }
+    geoint_functions = {
+        "upsert_location",
+        "append_entity_location_observation",
+        "create_geo_resolution",
+    }
+    try:
+        # Seed representative pre-26A data plus one GEOINT row at head.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(
+                    text("""
+                    DO $$
+                    DECLARE
+                      v_inv uuid; v_entity uuid; v_geo_ev uuid; v_loc uuid;
+                      v_obs uuid;
+                    BEGIN
+                      INSERT INTO ati.investigation
+                        (status, trigger_type, objective, budget,
+                         operational_state, version, created_at, updated_at,
+                         started_at)
+                      VALUES ('running', 'manual', 'seed', '{}'::jsonb,
+                              '{}'::jsonb, 1, now(), now(), now())
+                      RETURNING id INTO v_inv;
+                      INSERT INTO ati.entity
+                        (entity_type, canonical_value, display_name,
+                         attributes, content_hash, version, created_at,
+                         updated_at)
+                      VALUES ('ip_address', '203.0.113.7', '203.0.113.7',
+                              '{}'::jsonb, NULL, 1, now(), now())
+                      RETURNING id INTO v_entity;
+                      INSERT INTO ati.evidence
+                        (id, investigation_id, evidence_type,
+                         subject_entity_id, source, retrieved_at, facts,
+                         raw_payload, version)
+                      VALUES (gen_random_uuid(), v_inv,
+                              'urn:ati:evidence:geolocation', v_entity,
+                              'urn:ati:source:dbip', now(), '{}'::jsonb,
+                              NULL, 1)
+                      RETURNING id INTO v_geo_ev;
+                      SELECT id INTO v_loc FROM ati.upsert_location(
+                        NULL, 'country', 'United States', 'United States',
+                        'US', NULL, NULL, NULL);
+                      v_obs := gen_random_uuid();
+                      PERFORM ati.append_entity_location_observation(
+                        v_obs, v_entity, v_loc, v_geo_ev, 'country', NULL,
+                        now(), now(), 'seed_method');
+                      PERFORM ati.create_geo_resolution(
+                        gen_random_uuid(), v_entity, v_geo_ev);
+                    END
+                    $$;
+                """)
+                )
+                await connection.commit()
+        finally:
+            await engine.dispose()
+
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                existing_entity_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.entity")
+                )
+                existing_evidence_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.evidence")
+                )
+                extensions = {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
+                            SELECT e.extname FROM pg_extension e
+                            JOIN pg_namespace n ON n.oid = e.extnamespace
+                            WHERE n.nspname = 'ati'
+                        """)
+                    )
+                }
+        finally:
+            await engine.dispose()
+        assert "postgis" not in extensions
+
+        command.downgrade(alembic_cfg, "0024_api_async_foundation")
+        tables, sequences, functions = await geoint_state()
+        assert geoint_tables.isdisjoint(tables)
+        assert geoint_sequences.isdisjoint(sequences)
+        assert geoint_functions.isdisjoint(functions)
+        # Existing pre-26A data survives the downgrade untouched.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                entity_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.entity")
+                )
+                evidence_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.evidence")
+                )
+                geo_evidence_count = await connection.scalar(
+                    text(
+                        "SELECT count(*) FROM ati.evidence "
+                        "WHERE evidence_type = 'urn:ati:evidence:geolocation'"
+                    )
+                )
+        finally:
+            await engine.dispose()
+        assert entity_count == existing_entity_count
+        assert evidence_count == existing_evidence_count
+        assert geo_evidence_count == 1
+
+        command.upgrade(alembic_cfg, "head")
+        tables, sequences, functions = await geoint_state()
+        assert geoint_tables <= tables
+        assert geoint_sequences <= sequences
+        assert geoint_functions <= functions
+        # Re-upgrade preserves the pre-existing data as well.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                entity_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.entity")
+                )
+                evidence_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.evidence")
+                )
+        finally:
+            await engine.dispose()
+        assert entity_count == existing_entity_count
+        assert evidence_count == existing_evidence_count
     finally:
         command.upgrade(alembic_cfg, "head")

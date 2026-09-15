@@ -530,3 +530,91 @@ class InvestigationTimelineEventRow(Base):
         BigInteger,
         server_default=text("nextval('ati.investigation_timeline_event_seq')"),
     )
+
+
+class LocationRow(Base):
+    """Database row for a canonical geographic/reference Location (PR 26A).
+
+    Mapped read-only for the repository; writes always route through the
+    versioned ``ati.upsert_location`` stored function.
+    """
+
+    __tablename__ = "location"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    location_type: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    canonical_name: Mapped[str] = mapped_column(String)
+    country_code: Mapped[str] = mapped_column(String)
+    admin1_code: Mapped[str | None] = mapped_column(String)
+    admin2_code: Mapped[str | None] = mapped_column(String)
+    parent_location_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EntityLocationObservationRow(Base):
+    """Database row for one immutable EntityLocationObservation (PR 26A).
+
+    Mapped read-only for the repository; writes always route through the
+    versioned ``ati.append_entity_location_observation`` stored function.
+    """
+
+    __tablename__ = "entity_location_observation"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    location_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    precision: Mapped[str] = mapped_column(String)
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolution_method: Mapped[str] = mapped_column(String)
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EntityLocationRow(Base):
+    """Database row for the current materialized EntityLocation (PR 26A).
+
+    Mapped read-only for the repository; current state is maintained
+    exclusively by ``ati.append_entity_location_observation``.
+    """
+
+    __tablename__ = "entity_location"
+    __table_args__ = {"schema": "ati"}
+    entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    location_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    precision: Mapped[str] = mapped_column(String)
+    latest_observation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    first_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class GeoResolutionRow(Base):
+    """Database row for durable operational GeoResolution work (PR 26A).
+
+    Mapped read-only for the repository; writes always route through the
+    versioned ``ati.create_geo_resolution`` stored function.
+    """
+
+    __tablename__ = "geo_resolution"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String)
+    attempt_count: Mapped[int] = mapped_column(Integer)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_by: Mapped[str | None] = mapped_column(String)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_location_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    last_error_code: Mapped[str | None] = mapped_column(String)
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
