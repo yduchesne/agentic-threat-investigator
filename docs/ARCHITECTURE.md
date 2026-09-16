@@ -1219,8 +1219,8 @@ PR 25C completes the Map as a bounded analyst exploration surface without turnin
 
 ## GEOINT architecture (PR 26)
 
-This section distinguishes **delivered PR 26A/26B/26C/26D/26E** from the planned PR
-26F-G architecture.
+This section distinguishes **delivered PR 26A/26B/26C/26D/26E/26F** from the planned PR
+26G architecture.
 
 PR 25 remains the delivered v0.1 geolocation presentation path:
 
@@ -1530,19 +1530,69 @@ PR 26D /api/v1/investigations/{I}/geoint/*  (sole canonical GEOINT read boundary
 - **Typed pivots.** The existing PR 24 PivotWorkspace/capability registry/URL codec is extended with four explicit allowlisted resources (`geoint-entity`, `geoint-location-entities`, `geoint-location-observations`, `geoint-observation`) whose filters hold only stable IDs and the bounded containment boolean. Investigation immutability, max depth 5, one modal, active-step-only mounting, Back/Forward/refresh, Close restoration, and the 4096-byte URL cap are unchanged; no geometry, API payload, viewport, or marker state is ever serialized.
 - **Visual inference is forbidden.** No clustering, heat map, risk coloring, fabricated radius, movement path, or inferred route exists. Same-Location Entities stay individually inspectable with an explicit neutral note that shared geography is context only.
 
-### Agentic GEOINT
+### Agentic GEOINT (PR 26F delivered)
 
-PR 26F introduces agentic reasoning only after deterministic geographic primitives exist. Agents receive bounded GEOINT tools; they do not issue arbitrary SQL/PostGIS, canonicalize Locations, or own persistence reconciliation.
+PR 26F adds bounded agentic use of the deterministic PR 26D geographic
+substrate without creating a seventh agent role: the **existing Evidence
+Analyst** remains the analytical authority. "GEOINT tools" are ATI-owned
+deterministic application/query contracts---never provider-native LLM tool
+calling and never arbitrary SQL/PostGIS.
 
-Potential deterministic tools include:
+```text
+PR26D GeointQueryService
+  -> GeointAnalysisTools (bounded read-only facade, PR 26F)
+  -> GeointAnalysisContextPolicy (deterministic context selection)
+  -> EvidenceAnalystInput.geoint_context (frozen model-visible DTOs)
+  -> existing LlmClient structured output
+  -> GeointFindingValidator + independent-support gate
+  -> existing Assessment persistence (GEOLOCATION findings, exact Evidence support)
+```
 
-- geographic summary;
-- locations for entity;
-- entities in location;
-- geographic history for entity;
-- narrowly bounded nearby/within queries.
+- **Facade delegates to PR 26D.** :class:`GeointAnalysisTools` exposes
+  `summary`, `current_for_entity`, `history_for_entity`, `entities_in_location`,
+  `observations_in_location`, and `observation`; every call is
+  Investigation-scoped, delegates to the existing query service, returns
+  exactly one bounded first page with explicit `has_more`/containment state,
+  never drains cursors, never exposes the opaque cursor to the model, and
+  performs no mutation and no LLM access.
+- **Deterministic context selection.** The policy (never the model) chooses
+  queries, page sizes, and ordering: bounded summary first, then
+  Investigation-relative current plus one bounded history page per eligible
+  Entity already present in the analyst input. No Location fan-out, no
+  automatic contained expansion, no proximity query. Entity, total
+  observation, and serialized-byte bounds fail closed with typed errors
+  before any LLM call instead of silently truncating.
+- **Model-visible context is frozen and bounded.** DTOs carry exact
+  `observation_id`/`evidence_id` pairs, precision, and the three timestamp
+  meanings; representative coordinates, raw EWKT/WKB geometry, and provider
+  payloads are omitted. Incomplete context is explicit through
+  `has_more_history`/`summary_truncated` flags.
+- **Structured output with exact support.** :class:`GeographicFinding` uses
+  the closed descriptive kind vocabulary (shared_location, location_history,
+  location_change_observed, geographic_distribution,
+  contained_location_context) and a bounded temporal enum. Every cited
+  observation must be an exact supplied observation/Evidence pair;
+  unknown, substituted, cross-Investigation, structurally unsupported, and
+  containment-less references are rejected before persistence. Location
+  change means two supported observations of one Entity at different
+  effective times and canonical Locations---never movement/travel.
+- **Geography is contextual only.** The independent-support gate requires
+  non-geographic material support for any non-INCONCLUSIVE verdict carrying
+  geographic findings; same city/country/coordinate, containment, or
+  spatial proximity never establishes relationship, ownership, campaign,
+  coordination, targeting, attribution, or maliciousness on its own.
+- **Zero new persistence.** Validated geographic findings map onto
+  existing GEOLOCATION-category Findings with exact Evidence support;
+  observation identities are validated analysis-time traceability because
+  the current Assessment schema has no geography-specific structured field.
+  PR 26F introduces no migration, no stored-function version, and no PR 26
+  persistence change; the LLM never owns canonical Location resolution,
+  persistence reconciliation, or spatial truth.
 
-Agent output must preserve exact geographic observation/Evidence support. Common geography or proximity remains contextual unless independent Evidence supports a stronger analytical conclusion.
+The canonical PR 26F integration slice uses real PostgreSQL 18 + PostGIS,
+the production GeoResolution path, and ``FakeLlmClient`` only at the model
+boundary; the fake-mode worker trajectory is unchanged because it does not
+run GeoResolution synchronization.
 
 ### v0.1 persistence taxonomy update
 

@@ -2260,6 +2260,70 @@ real seeded local analyst user.
   reference geography imported by `scripts/e2e-geography-import.sh`; the
   browser only observes clean console output.
 
+### Bounded agentic GEOINT reasoning (PR 26F)
+
+PR 26F keeps `FakeLlmClient` strictly at the model boundary: the canonical
+integration slice drives the real Evidence Analyst over production
+PostgreSQL 18 + PostGIS, the real PR 26D `PostgresGeointQueryService`, the
+real GeoResolution path, and the existing Assessment persistence.
+
+- **G26F-T01..T10** (`tests/unit/app/geoint/test_analysis_tools.py`): the
+  `GeointAnalysisTools` facade delegates the exact Investigation-scoped
+  summary/Entity/history/Location/observation queries; history returns one
+  bounded page only and `has_more` without a second query or cursor
+  exposure; containment flags report exact vs applied honestly; requested
+  page sizes over the bound are clamped before execution; cancellation
+  propagates; and the facade has no SQL/PostGIS import or mutation
+  surface.
+- **G26F-C01..C10** (`tests/unit/app/geoint/test_analysis_context.py`):
+  the deterministic context policy returns an empty context with no
+  GEOINT data, enriches eligible Entities from the authoritative analyst
+  input only (never fanning out to unrelated Investigation Entities),
+  keeps stable input ordering (roots, then Evidence subjects, then
+  RelationshipObservation endpoints), fails closed on entity/observation/
+  byte bounds with typed `GeointAnalysisInputBoundsError`, never drains
+  pages, preserves `summary_truncated` and `has_more_history` explicitly,
+  and fails closed when an observation's Evidence is outside the supplied
+  analyst input.
+- **G26F-S01..S08** (`tests/unit/domain/test_analyst_geoint_contract.py`):
+  the frozen model-visible context DTOs validate, reject extra fields/
+  malformed UUIDs, serialize to stable JSON without representative
+  coordinates, and the geographic output contract rejects unsupported
+  (inferential) kinds, empty/duplicate support, and collections over the
+  hard ceiling.
+- **G26F-V01..V12 / G26F-G01..G08**
+  (`tests/unit/app/test_geoint_finding_validator.py`): deterministic
+  validation accepts only exact supplied observation/Evidence pairs and
+  rejects unknown observations, substituted Evidence, wrong Entity/
+  Location sets, cross-Entity history, same-Location "change", equal-
+  effective-time "change", and containment claims without an established
+  containment selection. The closed kind vocabulary makes
+  coordination/common-ownership/campaign/movement claims structurally
+  impossible; the independent-support gate rejects geography-only
+  positive verdicts; independent evidence plus descriptive GEOINT
+  persists; and a missing `observed_at` never invents an observed time.
+- **Evidence Analyst execution tests**
+  (`tests/unit/app/test_evidence_analyst_geoint.py`, plus the extended
+  PR 20B world in `tests/unit/app/test_evidence_analyst.py`): GEOINT
+  context flows into one normal accounted model call; valid geographic
+  findings are validated then persist as `GEOLOCATION` Findings with
+  exact Evidence support; invalid/substituted/cross-scope references and
+  context-bound failures reserve zero or leave no pointer, exactly like
+  the existing fail-closed conventions; the one-repair ceiling,
+  cancellation accounting, and persistence-failure isolation are
+  unchanged.
+- **Canonical real-PostgreSQL vertical slice**
+  (`tests/integration/test_evidence_analyst_geoint.py`, G26F-I01..I07):
+  descriptive current geography persists with exact Evidence support;
+  same-Entity location history allows descriptive
+  `location_change_observed`; same-city unrelated Entities cannot drive a
+  positive verdict (no Relationship, no Assessment row); cross-
+  Investigation observation IDs stay invisible and are rejected; bounded
+  history never lets the model cite omitted observations
+  (`has_more_history: true` is explicit); independently supported
+  MALICIOUS may carry descriptive GEOINT context; and the no-GEOINT case
+  keeps baseline behavior with exactly one LLM call.
+
 ### Asynchronous resolution
 
 Multi-worker integration tests cover:

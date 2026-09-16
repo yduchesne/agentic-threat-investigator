@@ -48,6 +48,11 @@ from agentic_threat_investigator.app.evidence_analyst.analyst import EvidenceAna
 from agentic_threat_investigator.app.evidence_analyst.loader import (
     EvidenceAnalystInputLoader,
 )
+from agentic_threat_investigator.app.geoint.analysis_context import (
+    GeointAnalysisContextPolicy,
+    GeointAnalystContextLoader,
+)
+from agentic_threat_investigator.app.geoint.analysis_tools import GeointAnalysisTools
 from agentic_threat_investigator.app.geoint.resolution import LocationResolver
 from agentic_threat_investigator.app.geoint.worker import (
     GeoResolutionWorker,
@@ -65,6 +70,7 @@ from agentic_threat_investigator.app.orchestration.runner import (
 from agentic_threat_investigator.app.orchestration.services import (
     EvidenceAnalystAnalysisExecutor,
 )
+from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.app.report_writer.writer import ReportWriter
 from agentic_threat_investigator.app.secrets import EnvVarSecretsResolver
 from agentic_threat_investigator.config import get_settings
@@ -102,6 +108,9 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.composite
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
+)
+from agentic_threat_investigator.infrastructure.persistence.query.geoint import (
+    PostgresGeointQueryService,
 )
 from agentic_threat_investigator.infrastructure.report_writer_composition import (
     build_report_writer,
@@ -201,8 +210,16 @@ def _compose_runner(
     boundary is only ever composed for test/demo stacks.
     """
     recursion_limit = 120 if settings.llm_driver is LlmDriver.DETERMINISTIC else 40
+    geoint_context_loader = _compose_geoint_context_loader(settings, session_factory)
     analyst = EvidenceAnalyst(
-        input_loader=EvidenceAnalystInputLoader(uow_factory),
+        input_loader=EvidenceAnalystInputLoader(
+            uow_factory,
+            max_evidence_items=settings.llm_max_evidence_items,
+            max_relationship_observations=settings.llm_max_relationship_observations,
+            max_normalized_facts_bytes=settings.llm_max_normalized_facts_bytes,
+            max_input_bytes=settings.llm_max_input_bytes,
+            geoint_context_loader=geoint_context_loader,
+        ),
         llm_client=llm,
         assessment_persistence=AssessmentPersistenceService(
             uow_factory, batch_size=settings.db_batch_size
@@ -227,6 +244,57 @@ def _compose_runner(
             research_agent, bound_investigation_id=bound
         ),
         recursion_limit=recursion_limit,
+    )
+
+
+def _compose_geoint_context_loader(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> GeointAnalystContextLoader:
+    """Compose the bounded GEOINT context loader for the worker analyst.
+
+    Each analysis invocation opens one short-lived read session through the
+    existing per-request session factory, runs the deterministic context
+    policy over the real PR 26D ``PostgresGeointQueryService``, and closes
+    the session before any LLM accounting or model I/O. No second engine,
+    session factory, or GEOINT repository is created.
+    """
+    limits = QueryLimits(
+        default_page_size=settings.query_default_page_size,
+        max_page_size=settings.query_max_page_size,
+    )
+
+    def tools_factory() -> GeointAnalysisTools:
+        """Build one bounded tools facade over a fresh read session."""
+        session = session_factory()
+        service = PostgresGeointQueryService(
+            session,
+            limits,
+            summary_top_locations=settings.api_max_geoint_summary_top_locations,
+        )
+
+        async def close() -> None:
+            """Close the short-lived read session owned by this invocation."""
+            await session.close()
+
+        return GeointAnalysisTools(
+            service,
+            max_observations_per_entity=(
+                settings.analyst_geoint_max_observations_per_entity
+            ),
+            on_close=close,
+        )
+
+    return GeointAnalystContextLoader(
+        tools_factory=tools_factory,
+        policy=GeointAnalysisContextPolicy(
+            max_entities=settings.analyst_geoint_max_entities,
+            max_observations_per_entity=(
+                settings.analyst_geoint_max_observations_per_entity
+            ),
+            max_total_observations=settings.analyst_geoint_max_total_observations,
+            max_context_bytes=settings.analyst_geoint_max_context_bytes,
+        ),
     )
 
 

@@ -1761,7 +1761,7 @@ Delivered (PR 26E implementation summary):
   remains the sole canonical GEOINT read boundary; the PR 25 Map is
   unchanged).
 
-### PR 26F — Agentic GEOINT reasoning
+### PR 26F — Agentic GEOINT reasoning [DONE]
 
 Deliver:
 

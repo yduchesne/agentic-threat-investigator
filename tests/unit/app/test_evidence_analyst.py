@@ -52,10 +52,19 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 from agentic_threat_investigator.domain.analyst import (
     AnalystEntity,
+    AnalystEntityGeointContext,
     AnalystEvidenceItem,
+    AnalystGeointContext,
+    AnalystGeointLocation,
+    AnalystGeointObservation,
+    AnalystGeointPrecisionCounts,
+    AnalystGeointSummary,
     AnalystRelationshipObservation,
     EvidenceAnalystDecision,
     EvidenceAnalystInput,
+    GeographicFinding,
+    GeographicFindingKind,
+    GeographicTemporalInterpretation,
 )
 from agentic_threat_investigator.domain.assessment import (
     AnalyticalFinding,
@@ -73,6 +82,10 @@ from agentic_threat_investigator.domain.evidence import (
     EntityRef,
     Evidence,
     EvidenceType,
+)
+from agentic_threat_investigator.domain.geoint import (
+    LocationPrecision,
+    LocationType,
 )
 from agentic_threat_investigator.domain.investigation import (
     AnalysisDisposition,
@@ -95,13 +108,24 @@ _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 class AnalysisWorld:
     """One complete eligible provenance world with scripted LLM and reserves."""
 
-    def __init__(self, *, with_observation: bool = True) -> None:
+    def __init__(
+        self, *, with_observation: bool = True, with_geoint: bool = False
+    ) -> None:
+        """Bind the fixed world. ``with_geoint`` adds a second GEOLOCATION row."""
         self.investigation_id = uuid4()
         self.source_id = uuid4()
         self.target_id = uuid4()
         self.evidence_id = uuid4()
         self.relationship_id = uuid4()
         self.observation_id = uuid4()
+        # PR 26F GEOINT world: a second GEOLOCATION Evidence row plus two
+        # resolved city observations of the source Entity (Seattle, Dallas).
+        self.with_geoint = with_geoint
+        self.geoint_evidence_id = uuid4()
+        self.geoint_obs_seattle_id = uuid4()
+        self.geoint_obs_dallas_id = uuid4()
+        self.geoint_loc_seattle_id = uuid4()
+        self.geoint_loc_dallas_id = uuid4()
         self.investigation = InvestigationState(
             investigation_id=self.investigation_id,
             status=InvestigationStatus.RUNNING,
@@ -147,11 +171,132 @@ class AnalysisWorld:
         )
         self.with_observation = with_observation
 
+    # -- GEOINT context ------------------------------------------------------
+
+    def geoint_observation(
+        self,
+        *,
+        observation_id: UUID,
+        evidence_id: UUID,
+        location_id: UUID,
+        canonical_name: str,
+        retrieved_at: datetime,
+    ) -> AnalystGeointObservation:
+        """Build one resolved city observation of the source Entity."""
+        return AnalystGeointObservation(
+            observation_id=observation_id,
+            entity_id=self.source_id,
+            evidence_id=evidence_id,
+            location=AnalystGeointLocation(
+                location_id=location_id,
+                location_type=LocationType.CITY,
+                canonical_location_name=canonical_name,
+                country_code="US",
+                admin1_code="WA",
+            ),
+            precision=LocationPrecision.CITY,
+            resolution_method="canonical_geography_v1",
+            observed_at=None,
+            retrieved_at=retrieved_at,
+            resolved_at=retrieved_at,
+        )
+
+    def geoint_context(self) -> AnalystGeointContext:
+        """Build the deterministic model-visible GEOINT context."""
+        seattle = self.geoint_observation(
+            observation_id=self.geoint_obs_seattle_id,
+            evidence_id=self.evidence_id,
+            location_id=self.geoint_loc_seattle_id,
+            canonical_name="Seattle",
+            retrieved_at=_RETRIEVED_AT,
+        )
+        dallas = self.geoint_observation(
+            observation_id=self.geoint_obs_dallas_id,
+            evidence_id=self.geoint_evidence_id,
+            location_id=self.geoint_loc_dallas_id,
+            canonical_name="Dallas",
+            retrieved_at=datetime(2026, 1, 3, 3, 4, 5, tzinfo=UTC),
+        )
+        return AnalystGeointContext(
+            summary=AnalystGeointSummary(
+                entity_count_with_location=1,
+                observation_count=2,
+                location_count=2,
+                country_count=0,
+                administrative_area_count=0,
+                city_count=2,
+                precision_counts=AnalystGeointPrecisionCounts(
+                    country=0, administrative_area=0, city=2
+                ),
+                top_locations=(),
+                truncated=False,
+            ),
+            entities=(
+                AnalystEntityGeointContext(
+                    entity_id=self.source_id,
+                    entity_type=EntityType.DOMAIN,
+                    entity_value="example.com",
+                    current_observation=seattle,
+                    history=(dallas,),
+                ),
+            ),
+        )
+
+    def geoint_decision(
+        self,
+        *,
+        verdict: Verdict = Verdict.INCONCLUSIVE,
+        independent: bool = False,
+        observation_ids: tuple[UUID, ...] | None = None,
+        evidence_ids: tuple[UUID, ...] | None = None,
+        entity_ids: tuple[UUID, ...] | None = None,
+        location_ids: tuple[UUID, ...] | None = None,
+    ) -> EvidenceAnalystDecision:
+        """Build a decision with a valid descriptive location-change finding."""
+        findings: tuple[AnalyticalFinding, ...] = ()
+        if independent:
+            findings = (
+                AnalyticalFinding(
+                    category=FindingCategory.NETWORK,
+                    disposition=FindingDisposition.SUPPORTING,
+                    statement="The domain resolves to a block-listed controller.",
+                    confidence=AssessmentConfidence.MEDIUM,
+                    support=(
+                        EvidenceSupport(kind="evidence", evidence_id=self.evidence_id),
+                    ),
+                ),
+            )
+        geographic = (
+            GeographicFinding(
+                kind=GeographicFindingKind.LOCATION_CHANGE_OBSERVED,
+                statement=(
+                    "Two supported observations identify different canonical "
+                    "locations at different effective times."
+                ),
+                temporal_interpretation=GeographicTemporalInterpretation.LOCATION_CHANGE_OBSERVED,
+                observation_ids=observation_ids
+                or (self.geoint_obs_seattle_id, self.geoint_obs_dallas_id),
+                evidence_ids=evidence_ids
+                or (self.evidence_id, self.geoint_evidence_id),
+                entity_ids=entity_ids or (self.source_id,),
+                location_ids=location_ids
+                or (self.geoint_loc_seattle_id, self.geoint_loc_dallas_id),
+            ),
+        )
+        return EvidenceAnalystDecision(
+            verdict=verdict,
+            confidence=AssessmentConfidence.MEDIUM,
+            summary="Evidence supports the verdict.",
+            findings=findings,
+            geographic_findings=geographic,
+            disposition=AnalysisDisposition.SUFFICIENT,
+        )
+
     # -- analyst input -------------------------------------------------------
 
     def analyst_input(self) -> EvidenceAnalystInput:
         """Build the deterministic analyst input served by the fake loader."""
-        evidence_items = (
+        evidence_items: tuple[AnalystEvidenceItem, ...] = (
             AnalystEvidenceItem(
                 evidence_id=self.evidence_id,
                 type=EvidenceType.DNS,
@@ -165,6 +310,21 @@ class AnalysisWorld:
                 facts={"a_records": ["192.0.2.1"]},
             ),
         )
+        if self.with_geoint:
+            evidence_items = evidence_items + (
+                AnalystEvidenceItem(
+                    evidence_id=self.geoint_evidence_id,
+                    type=EvidenceType.GEOLOCATION,
+                    subject=AnalystEntity(
+                        entity_id=self.source_id,
+                        entity_type=EntityType.DOMAIN,
+                        value="example.com",
+                    ),
+                    source="urn:ati:source:test",
+                    retrieved_at=_RETRIEVED_AT,
+                    facts={"country_code": "US", "precision": "city"},
+                ),
+            )
         observations: tuple[AnalystRelationshipObservation, ...] = ()
         if self.with_observation:
             observations = (
@@ -199,6 +359,7 @@ class AnalysisWorld:
             ),
             evidence=evidence_items,
             relationship_observations=observations,
+            geoint_context=self.geoint_context() if self.with_geoint else None,
         )
 
     # -- decisions -----------------------------------------------------------
@@ -364,7 +525,8 @@ class FakeEvidenceRepository(EvidenceRepository):
     async def list_for_investigation(
         self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
     ) -> list[Evidence]:
-        raise NotImplementedError
+        del investigation_id, offset
+        return list(self.rows.values())[:limit]
 
 
 class FakeObservationRepository(RelationshipObservationRepository):
@@ -384,7 +546,8 @@ class FakeObservationRepository(RelationshipObservationRepository):
     async def list_for_investigation(
         self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
     ) -> list[RelationshipObservation]:
-        raise NotImplementedError
+        del investigation_id, offset
+        return list(self.rows.values())[:limit]
 
 
 class FakeRelationshipRepository(RelationshipRepository):
@@ -520,7 +683,20 @@ class FakePersistenceUnitOfWork(UnitOfWork):
     ) -> None:
         # One explicit argument per dependency is the UnitOfWork convention.
         self.investigations = investigations
-        self.evidence = FakeEvidenceRepository({world.evidence_id: world.evidence})
+        evidence_rows = {world.evidence_id: world.evidence}
+        if world.with_geoint:
+            evidence_rows[world.geoint_evidence_id] = Evidence(
+                id=world.geoint_evidence_id,
+                investigation_id=world.investigation_id,
+                type=EvidenceType.GEOLOCATION,
+                subject=EntityRef(
+                    id=world.source_id, type=EntityType.DOMAIN, value="example.com"
+                ),
+                source="urn:ati:source:test",
+                retrieved_at=_RETRIEVED_AT,
+                facts={"country_code": "US", "precision": "city"},
+            )
+        self.evidence = FakeEvidenceRepository(evidence_rows)
         self.relationship_observations = FakeObservationRepository(
             {world.observation_id: world.observation} if world.with_observation else {}
         )

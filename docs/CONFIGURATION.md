@@ -480,6 +480,26 @@ Bounds are validated fail-closed at configuration load (`batch_size >= 1`,
 id is operational, never a secret or authorization identity; no secret
 values are stored or logged.
 
+### Analyst GEOINT context bounds (PR 26F)
+
+PR 26F adds deterministic bounds for the geographic context the existing
+Evidence Analyst may see. The context-selection policy---never the model---
+chooses the queries, page sizes, and ordering; an oversize context fails
+with a typed application error before any model call instead of silently
+truncating geography.
+
+| Setting | Environment variable | Type | Default | Bounds | Description |
+|---|---|---|---|---|---|
+| `analyst_geoint_max_entities` | `ATI_ANALYST_GEONT_MAX_ENTITIES` | `int` | `10` | `1..200` | Maximum eligible Entities enriched with geographic context per analysis invocation |
+| `analyst_geoint_max_observations_per_entity` | `ATI_ANALYST_GEONT_MAX_OBSERVATIONS_PER_ENTITY` | `int` | `5` | `1..200` | Maximum observations (current plus strictly-older history) per enriched Entity; also the tool page bound |
+| `analyst_geoint_max_total_observations` | `ATI_ANALYST_GEONT_MAX_TOTAL_OBSERVATIONS` | `int` | `50` | `1..1000` | Aggregate maximum unique observations across the whole context |
+| `analyst_geoint_max_context_bytes` | `ATI_ANALYST_GEONT_MAX_CONTEXT_BYTES` | `int` | `262144` | `1000..1000000` | Serialized model-visible GEOINT context byte bound |
+
+Each bound has a safe default, hard constructor validation (mirrored by the
+``Settings`` validators and the policy constructor), and never allows an
+"unbounded" value. Bounds are independent: whichever aggregate bound is hit
+first fails closed with a typed bound error.
+
 ### Fake mode and GEOINT
 
 Fake mode may provide deterministic geographic input data, but it must not select a fake persistence/canonicalization implementation.

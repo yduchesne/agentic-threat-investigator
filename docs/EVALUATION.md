@@ -832,6 +832,26 @@ Canonical end-to-end fixture:
 
 PR 26G owns final implementation of the GEOINT evaluation baseline. GEOINT evaluation separates deterministic spatial correctness from agentic interpretation.
 
+### PR 26F runtime safety invariants (delivered)
+
+PR 26F proves the runtime contract invariants deterministically at the
+validator, prompt, and real-PostgreSQL integration level (see
+`TESTING.md` G26F-T/C/S/V/G and G26F-I01..I07); these are runtime
+contract tests and do not require a second LLM as judge:
+
+- same city/country/coordinate does not imply coordination, common
+  ownership, or any cyber relationship;
+- containment does not imply targeting or campaign membership;
+- two Locations do not imply travel or movement;
+- geography alone cannot support a positive verdict (independent
+  non-geographic support is required);
+- every geographic claim requires exact supplied observation/Evidence
+  support.
+
+PR 26G still owns the broader repository-owned behavioral scenario
+materialization and scoring of structured agent output over these
+deterministic primitives.
+
 ### Deterministic geographic correctness
 
 Evaluate:

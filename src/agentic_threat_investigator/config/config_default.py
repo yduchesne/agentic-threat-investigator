@@ -40,6 +40,13 @@ CONFIG: dict[str, Any] = {
     "llm_max_relationship_observations": 200,
     "llm_max_normalized_facts_bytes": 131072,
     "llm_max_input_bytes": 262144,
+    # Analyst GEOINT context bounds (PR 26F). Deterministic geographic
+    # context selection bounds; an oversize context fails before any model
+    # call instead of being silently truncated.
+    "analyst_geoint_max_entities": 10,
+    "analyst_geoint_max_observations_per_entity": 5,
+    "analyst_geoint_max_total_observations": 50,
+    "analyst_geoint_max_context_bytes": 262144,
     # Report Writer context bounds (PR 23B).
     "report_writer_max_findings": 50,
     "report_writer_max_evidence": 100,
