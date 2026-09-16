@@ -7,7 +7,7 @@
 
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from typing import Self, cast
+from typing import Any, Self, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -647,7 +647,7 @@ def test_constructor_rejects_values_outside_hard_ceilings(
     with pytest.raises(ValueError, match="range"):
         EvidenceAnalystInputLoader(
             cast_unit,
-            **kwargs,
+            **cast(dict[str, Any], kwargs),
         )
 
 

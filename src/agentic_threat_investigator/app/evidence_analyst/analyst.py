@@ -5,9 +5,11 @@ Execution path (PR 20B):
 
 ```text
 EvidenceAnalystInputLoader (read-only UnitOfWork, then closed)
+ -> optional bounded GEOINT context loading (PR 26F, read-only queries)
  -> deterministic prompt
  -> LlmClient.generate_structured(...)
  -> EvidenceAnalystDecision  (semantic output only)
+ -> GeointFindingValidator (geographic findings + independent-support gate)
  -> Assessment (application stamps investigation_id and analyzed_evidence_ids)
  -> AssessmentPersistenceService (PR 20A validation/persistence seam)
  -> persisted Assessment + Investigation assessment pointer
@@ -35,6 +37,10 @@ from agentic_threat_investigator.app.assessment_persistence import (
 )
 from agentic_threat_investigator.app.evidence_analyst.accounting import (
     LlmAccountingService,
+)
+from agentic_threat_investigator.app.evidence_analyst.geoint_validation import (
+    GeointFindingValidator,
+    map_geographic_findings,
 )
 from agentic_threat_investigator.app.evidence_analyst.loader import (
     EvidenceAnalystInputLoader,
@@ -145,6 +151,11 @@ class EvidenceAnalyst:
             investigation_id,
             expected_version=expected_investigation_version,
         )
+        # Deterministic geographic-output validation and the independent-
+        # support gate run after the model call and before any Assessment
+        # persistence; a rejected decision persists nothing and never starts
+        # an unbounded model loop.
+        GeointFindingValidator(analyst_input.geoint_context).validate(decision)
         return await self._persist_decision_result(
             analyst_input,
             decision,
@@ -219,7 +230,13 @@ class EvidenceAnalyst:
         actor_id: UUID | None,
         request_id: UUID | None,
     ) -> EvidenceAnalysisResult:
-        """Stamp authoritative IDs and persist once with the typed result."""
+        """Stamp authoritative IDs and persist once with the typed result.
+
+        Validated geographic findings map onto the existing GEOLOCATION
+        Finding representation with exact Evidence support; observation
+        identities remain validated analysis-time traceability (PR 26F adds
+        no geographic persistence).
+        """
         assessment = Assessment(
             investigation_id=analyst_input.investigation_id,
             analyzed_evidence_ids=tuple(
@@ -228,7 +245,7 @@ class EvidenceAnalyst:
             verdict=decision.verdict,
             confidence=decision.confidence,
             summary=decision.summary,
-            findings=decision.findings,
+            findings=map_geographic_findings(decision),
             limitations=decision.limitations,
             unresolved_questions=decision.unresolved_questions,
             recommended_next_steps=decision.recommended_next_steps,

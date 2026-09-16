@@ -200,6 +200,16 @@ class Settings(BaseSettings):
     llm_max_relationship_observations: int = Field(default=200, ge=1, le=1000)
     llm_max_normalized_facts_bytes: int = Field(default=131_072, ge=1000, le=1_000_000)
     llm_max_input_bytes: int = Field(default=262_144, ge=1_000, le=1_000_000)
+    # Deterministic analyst GEOINT context bounds (PR 26F). The policy---never
+    # the model---selects the bounded geographic context seen by one Evidence
+    # Analyst invocation; an oversize context fails with a typed application
+    # error before any model call instead of being silently truncated.
+    analyst_geoint_max_entities: int = Field(default=10, ge=1, le=200)
+    analyst_geoint_max_observations_per_entity: int = Field(default=5, ge=1, le=200)
+    analyst_geoint_max_total_observations: int = Field(default=50, ge=1, le=1000)
+    analyst_geoint_max_context_bytes: int = Field(
+        default=262_144, ge=1_000, le=1_000_000
+    )
     # Deterministic Report Writer context bounds (PR 23B). The same persisted
     # investigation state must produce the same bounded report input; an
     # oversize input fails with a typed application error before any model
@@ -396,6 +406,10 @@ class Settings(BaseSettings):
         "report_writer_max_research_results",
         "report_writer_max_research_claims",
         "report_writer_max_input_bytes",
+        "analyst_geoint_max_entities",
+        "analyst_geoint_max_observations_per_entity",
+        "analyst_geoint_max_total_observations",
+        "analyst_geoint_max_context_bytes",
         mode="before",
     )
     @classmethod

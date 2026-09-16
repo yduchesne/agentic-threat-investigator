@@ -6,6 +6,12 @@ authoritative resources only, then closes the transaction before the caller
 may invoke the LLM. Input ordering and bounds are deterministic: the same
 persisted investigation state always yields the same
 :class:`~agentic_threat_investigator.domain.analyst.EvidenceAnalystInput`.
+
+When a :class:`GeointAnalystContextLoader` is injected (PR 26F), the plain
+analyst input is loaded and its UnitOfWork closed, then the bounded GEOINT
+analysis context is loaded through the existing PR 26D ``GeointQueryService``
+beyond any open write transaction. No geographic observations remain a
+normal case: an empty or absent context changes no pre-26F behavior.
 """
 
 from __future__ import annotations
@@ -16,6 +22,9 @@ from uuid import UUID
 
 from agentic_threat_investigator.app.evidence_analyst.errors import (
     EvidenceAnalystInputBoundsError,
+)
+from agentic_threat_investigator.app.geoint.analysis_context import (
+    GeointAnalystContextLoader,
 )
 from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationNotFoundError,
@@ -89,7 +98,9 @@ class EvidenceAnalystInputLoader:
     context bounds; an oversize input raises
     :class:`EvidenceAnalystInputBoundsError` before any model call. Hard
     ceilings mirror the ``Settings`` validators so direct construction cannot
-    bypass them.
+    bypass them. ``geoint_context_loader`` (PR 26F) optionally extends the
+    input with the bounded GEOINT analysis context after the read-only
+    UnitOfWork has closed.
     """
 
     def __init__(
@@ -100,8 +111,15 @@ class EvidenceAnalystInputLoader:
         max_relationship_observations: int = 200,
         max_normalized_facts_bytes: int = 131_072,
         max_input_bytes: int = 262_144,
+        geoint_context_loader: GeointAnalystContextLoader | None = None,
     ) -> None:
-        """Bind the UnitOfWork factory and the explicit context bounds."""
+        """Bind the UnitOfWork factory and the explicit context bounds.
+
+        ``geoint_context_loader`` optionally extends the loaded input with
+        the bounded GEOINT analysis context (PR 26F). When it is ``None`` the
+        loader keeps the pre-26F behavior exactly: no GEOINT context is
+        loaded and the input carries ``geoint_context=None``.
+        """
         if not 1 <= max_evidence_items <= _MAX_EVIDENCE_ITEMS_CEILING:
             raise ValueError(
                 "max_evidence_items must be in the range "
@@ -130,15 +148,23 @@ class EvidenceAnalystInputLoader:
         self._max_relationship_observations = max_relationship_observations
         self._max_normalized_facts_bytes = max_normalized_facts_bytes
         self._max_input_bytes = max_input_bytes
+        self._geoint_context_loader = geoint_context_loader
 
     async def load(self, investigation_id: UUID) -> EvidenceAnalystInput:
         """Load the bounded input in one read-only UnitOfWork.
 
-        The UnitOfWork is closed before the returned input escapes, so no
-        transaction is ever left open across LLM latency.
+        The UnitOfWork is closed before the returned input escapes and the
+        optional bounded GEOINT context is loaded only after that close, so
+        no transaction is ever left open across LLM latency.
         """
         async with self._uow_factory() as uow:
-            return await self._load_in_transaction(uow, investigation_id)
+            analyst_input = await self._load_in_transaction(uow, investigation_id)
+        if self._geoint_context_loader is None or not analyst_input.evidence:
+            return analyst_input
+        geoint_context = await self._geoint_context_loader.load(
+            investigation_id, analyst_input
+        )
+        return analyst_input.model_copy(update={"geoint_context": geoint_context})
 
     async def _load_in_transaction(
         self, uow: UnitOfWork, investigation_id: UUID
