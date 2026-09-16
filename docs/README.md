@@ -10,6 +10,7 @@
 - `ARCHITECTURE.md` — system architecture and component boundaries.
 - `DOMAIN_MODEL.md` — entities, evidence, relationships, assessment, state, pivots, and stopping.
 - `DATA_SOURCES.md` — v0.1 evidence and research sources plus ingestion rules.
+- `DATASOURCE_ARCHITECTURE.md` — PR 27 target datasource architecture: acquisition, protocol/serialization/semantic-format separation, execution correlation, and semantic conversion to Evidence.
 - `AGENT_DESIGN.md` — agent roles, provider/LLM/RAG contracts, and decision boundaries.
 - `DATABASE.md` — persistence, transactions, migrations, batch upserts, and soft deletion.
 - `TESTING.md` — conventional software testing, Python tooling, and source-quality gates.
