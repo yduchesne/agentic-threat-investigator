@@ -63,9 +63,20 @@ from agentic_threat_investigator.app.query.pagination import (
 )
 from agentic_threat_investigator.domain.geoint import LocationType
 
-# Complete literal projection shared by every observation-level statement.
-# The centroid is exposed only as the paired latitude/longitude; raw
-# EWKT/WKB boundary geometry never leaves the query layer.
+# Every statement below is one complete literal constant with the shared
+# projection/joins/predicates inlined: SQL text is never assembled at runtime
+# (no concatenation, no format templates), every externally-derived value is
+# a bound parameter, and no user-derived SQL fragment or function name can
+# ever enter a statement. The centroid is exposed only as the paired
+# latitude/longitude; raw EWKT/WKB boundary geometry never leaves the query
+# layer. Evidence type is not re-filtered by reads: the immutable append
+# stored function already rejects non-GEOLOCATION Evidence (U26A4).
+#
+# Exact Evidence-scope key: ``ev.investigation_id = :investigation_id`` on
+# the observation's Evidence row. PR 26A currentness ordering: the greater
+# ``(COALESCE(observed_at, retrieved_at), observation id)`` pair wins; the
+# newest-first read order inverts that exact ordering.
+
 _OBSERVATION_PROJECTION = """
       ob.id AS observation_id,
       ob.entity_id AS entity_id,
@@ -88,115 +99,276 @@ _OBSERVATION_PROJECTION = """
       ST_Y(loc.centroid) AS latitude,
       ST_X(loc.centroid) AS longitude"""
 
-_OBSERVATION_JOINS = """
+_DETAIL_SQL = """
+    SELECT
+      ob.id AS observation_id,
+      ob.entity_id AS entity_id,
+      ob.evidence_id AS evidence_id,
+      ob."precision" AS "precision",
+      ob.observed_at AS observed_at,
+      ob.retrieved_at AS retrieved_at,
+      ob.resolved_at AS resolved_at,
+      ob.resolution_method AS resolution_method,
+      ent.entity_type AS entity_type,
+      ent.canonical_value AS canonical_value,
+      ent.display_name AS display_name,
+      loc.id AS location_id,
+      loc.location_type AS location_type,
+      loc.canonical_name AS canonical_name,
+      loc.country_code AS country_code,
+      loc.admin1_code AS admin1_code,
+      loc.admin2_code AS admin2_code,
+      loc.parent_location_id AS parent_location_id,
+      ST_Y(loc.centroid) AS latitude,
+      ST_X(loc.centroid) AS longitude
     FROM ati.entity_location_observation ob
     JOIN ati.evidence ev ON ev.id = ob.evidence_id
     JOIN ati.entity ent ON ent.id = ob.entity_id
-    JOIN ati.location loc ON loc.id = ob.location_id"""
-
-# Exact Evidence-scope key: the observation's Evidence row must belong to the
-# path Investigation. Evidence type is not re-checked here: the immutable
-# append stored function already rejects non-GEOLOCATION Evidence (U26A4).
-_SCOPE_PREDICATE = "ev.investigation_id = :investigation_id"
-
-# PR 26A currentness ordering: the greater
-# (COALESCE(observed_at, retrieved_at), observation id) pair wins. History
-# pages reverse that exact ordering so the current-most observation is first.
-_LATEST_ORDERING = "COALESCE(ob.observed_at, ob.retrieved_at) DESC, ob.id DESC"
-
-_DETAIL_SQL = (
-    "SELECT"
-    + _OBSERVATION_PROJECTION
-    + _OBSERVATION_JOINS
-    + f"""
+    JOIN ati.location loc ON loc.id = ob.location_id
     WHERE ob.id = :observation_id
-      AND {_SCOPE_PREDICATE}
-    LIMIT 1"""
-)
+      AND ev.investigation_id = :investigation_id
+    LIMIT 1
+"""
 
-_ENTITY_CURRENT_SQL = (
-    "SELECT"
-    + _OBSERVATION_PROJECTION
-    + _OBSERVATION_JOINS
-    + f"""
+_ENTITY_CURRENT_SQL = """
+    SELECT
+      ob.id AS observation_id,
+      ob.entity_id AS entity_id,
+      ob.evidence_id AS evidence_id,
+      ob."precision" AS "precision",
+      ob.observed_at AS observed_at,
+      ob.retrieved_at AS retrieved_at,
+      ob.resolved_at AS resolved_at,
+      ob.resolution_method AS resolution_method,
+      ent.entity_type AS entity_type,
+      ent.canonical_value AS canonical_value,
+      ent.display_name AS display_name,
+      loc.id AS location_id,
+      loc.location_type AS location_type,
+      loc.canonical_name AS canonical_name,
+      loc.country_code AS country_code,
+      loc.admin1_code AS admin1_code,
+      loc.admin2_code AS admin2_code,
+      loc.parent_location_id AS parent_location_id,
+      ST_Y(loc.centroid) AS latitude,
+      ST_X(loc.centroid) AS longitude
+    FROM ati.entity_location_observation ob
+    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.entity ent ON ent.id = ob.entity_id
+    JOIN ati.location loc ON loc.id = ob.location_id
     WHERE ob.entity_id = :entity_id
-      AND {_SCOPE_PREDICATE}
-    ORDER BY {_LATEST_ORDERING}
-    LIMIT 1"""
-)
+      AND ev.investigation_id = :investigation_id
+    ORDER BY COALESCE(ob.observed_at, ob.retrieved_at) DESC, ob.id DESC
+    LIMIT 1
+"""
 
-_OBSERVATION_KEYSET_PREDICATE = """
+_ENTITY_HISTORY_SQL = """
+    SELECT
+      ob.id AS observation_id,
+      ob.entity_id AS entity_id,
+      ob.evidence_id AS evidence_id,
+      ob."precision" AS "precision",
+      ob.observed_at AS observed_at,
+      ob.retrieved_at AS retrieved_at,
+      ob.resolved_at AS resolved_at,
+      ob.resolution_method AS resolution_method,
+      ent.entity_type AS entity_type,
+      ent.canonical_value AS canonical_value,
+      ent.display_name AS display_name,
+      loc.id AS location_id,
+      loc.location_type AS location_type,
+      loc.canonical_name AS canonical_name,
+      loc.country_code AS country_code,
+      loc.admin1_code AS admin1_code,
+      loc.admin2_code AS admin2_code,
+      loc.parent_location_id AS parent_location_id,
+      ST_Y(loc.centroid) AS latitude,
+      ST_X(loc.centroid) AS longitude
+    FROM ati.entity_location_observation ob
+    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.entity ent ON ent.id = ob.entity_id
+    JOIN ati.location loc ON loc.id = ob.location_id
+    WHERE ob.entity_id = :entity_id
+      AND ev.investigation_id = :investigation_id
       AND (CAST(:cursor_time AS timestamptz) IS NULL
            OR COALESCE(ob.observed_at, ob.retrieved_at) < CAST(:cursor_time AS timestamptz)
            OR (COALESCE(ob.observed_at, ob.retrieved_at) = CAST(:cursor_time AS timestamptz)
-               AND ob.id < CAST(:cursor_id AS uuid)))"""
-
-_ENTITY_HISTORY_SQL = (
-    "SELECT"
-    + _OBSERVATION_PROJECTION
-    + _OBSERVATION_JOINS
-    + f"""
-    WHERE ob.entity_id = :entity_id
-      AND {_SCOPE_PREDICATE}
+               AND ob.id < CAST(:cursor_id AS uuid)))
+    ORDER BY COALESCE(ob.observed_at, ob.retrieved_at) DESC, ob.id DESC
+    LIMIT :limit
 """
-    + _OBSERVATION_KEYSET_PREDICATE
-    + f"""
-    ORDER BY {_LATEST_ORDERING}
-    LIMIT :limit"""
-)
-
-_LOCATION_SCOPE_EXACT = "ob.location_id = :location_id"
 
 # Contained selection: the selected Location plus every canonical Location
 # whose geometry it covers. ``sel`` is the single selected row; the ``&&``
 # bounding-box pre-filter lets PostgreSQL use the GiST geometry index before
-# the boundary-inclusive ST_Covers test.
-_LOCATION_SCOPE_CONTAINED = (
-    "ob.location_id IN ("
-    "  SELECT l.id FROM ati.location l, ati.location sel"
-    "  WHERE sel.id = :location_id"
-    "    AND (l.id = sel.id"
-    "         OR (l.geometry IS NOT NULL AND sel.geometry IS NOT NULL"
-    "             AND l.geometry && sel.geometry"
-    "             AND ST_Covers(sel.geometry, l.geometry))))"
-)
+# the boundary-inclusive ST_Covers test. An exact selection is the same
+# statement shape with the single Location predicate.
+_LOCATION_OBSERVATIONS_EXACT_SQL = """
+    SELECT
+      ob.id AS observation_id,
+      ob.entity_id AS entity_id,
+      ob.evidence_id AS evidence_id,
+      ob."precision" AS "precision",
+      ob.observed_at AS observed_at,
+      ob.retrieved_at AS retrieved_at,
+      ob.resolved_at AS resolved_at,
+      ob.resolution_method AS resolution_method,
+      ent.entity_type AS entity_type,
+      ent.canonical_value AS canonical_value,
+      ent.display_name AS display_name,
+      loc.id AS location_id,
+      loc.location_type AS location_type,
+      loc.canonical_name AS canonical_name,
+      loc.country_code AS country_code,
+      loc.admin1_code AS admin1_code,
+      loc.admin2_code AS admin2_code,
+      loc.parent_location_id AS parent_location_id,
+      ST_Y(loc.centroid) AS latitude,
+      ST_X(loc.centroid) AS longitude
+    FROM ati.entity_location_observation ob
+    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.entity ent ON ent.id = ob.entity_id
+    JOIN ati.location loc ON loc.id = ob.location_id
+    WHERE ob.location_id = :location_id
+      AND ev.investigation_id = :investigation_id
+      AND (CAST(:cursor_time AS timestamptz) IS NULL
+           OR COALESCE(ob.observed_at, ob.retrieved_at) < CAST(:cursor_time AS timestamptz)
+           OR (COALESCE(ob.observed_at, ob.retrieved_at) = CAST(:cursor_time AS timestamptz)
+               AND ob.id < CAST(:cursor_id AS uuid)))
+    ORDER BY COALESCE(ob.observed_at, ob.retrieved_at) DESC, ob.id DESC
+    LIMIT :limit
+"""
 
-_LOCATION_OBSERVATIONS_SQL = (
-    "SELECT"
-    + _OBSERVATION_PROJECTION
-    + _OBSERVATION_JOINS
-    + "\n    WHERE {location_scope}\n"
-    + f"      AND {_SCOPE_PREDICATE}"
-    + _OBSERVATION_KEYSET_PREDICATE
-    + f"""
-    ORDER BY {_LATEST_ORDERING}
-    LIMIT :limit"""
-)
+_LOCATION_OBSERVATIONS_CONTAINED_SQL = """
+    SELECT
+      ob.id AS observation_id,
+      ob.entity_id AS entity_id,
+      ob.evidence_id AS evidence_id,
+      ob."precision" AS "precision",
+      ob.observed_at AS observed_at,
+      ob.retrieved_at AS retrieved_at,
+      ob.resolved_at AS resolved_at,
+      ob.resolution_method AS resolution_method,
+      ent.entity_type AS entity_type,
+      ent.canonical_value AS canonical_value,
+      ent.display_name AS display_name,
+      loc.id AS location_id,
+      loc.location_type AS location_type,
+      loc.canonical_name AS canonical_name,
+      loc.country_code AS country_code,
+      loc.admin1_code AS admin1_code,
+      loc.admin2_code AS admin2_code,
+      loc.parent_location_id AS parent_location_id,
+      ST_Y(loc.centroid) AS latitude,
+      ST_X(loc.centroid) AS longitude
+    FROM ati.entity_location_observation ob
+    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.entity ent ON ent.id = ob.entity_id
+    JOIN ati.location loc ON loc.id = ob.location_id
+    WHERE ob.location_id IN (
+            SELECT l.id FROM ati.location l, ati.location sel
+            WHERE sel.id = :location_id
+              AND (l.id = sel.id
+                   OR (l.geometry IS NOT NULL AND sel.geometry IS NOT NULL
+                       AND l.geometry && sel.geometry
+                       AND ST_Covers(sel.geometry, l.geometry))))
+      AND ev.investigation_id = :investigation_id
+      AND (CAST(:cursor_time AS timestamptz) IS NULL
+           OR COALESCE(ob.observed_at, ob.retrieved_at) < CAST(:cursor_time AS timestamptz)
+           OR (COALESCE(ob.observed_at, ob.retrieved_at) = CAST(:cursor_time AS timestamptz)
+               AND ob.id < CAST(:cursor_id AS uuid)))
+    ORDER BY COALESCE(ob.observed_at, ob.retrieved_at) DESC, ob.id DESC
+    LIMIT :limit
+"""
 
 # One Entity per row: DISTINCT ON entity_id selects the latest qualifying
 # observation (PR 26A ordering), then the outer keyset pages the
 # deterministic (entity_type, canonical_value, entity_id) order.
-_ENTITY_KEYSET_PREDICATE = """
-WHERE (CAST(:cursor_type AS text) IS NULL
-       OR (latest.entity_type, latest.canonical_value, latest.entity_id)
-          > (CAST(:cursor_type AS text), CAST(:cursor_value AS text),
-             CAST(:cursor_id AS uuid)))
-ORDER BY latest.entity_type, latest.canonical_value, latest.entity_id
-LIMIT :limit"""
-
-_LOCATION_ENTITIES_SQL = (
-    "SELECT * FROM ("
-    "  SELECT DISTINCT ON (ob.entity_id)"
-    + _OBSERVATION_PROJECTION
-    + _OBSERVATION_JOINS
-    + "\n  WHERE {location_scope}\n"
-    + f"    AND {_SCOPE_PREDICATE}"
-    + f"""
-    ORDER BY ob.entity_id, {_LATEST_ORDERING}
-  ) latest
+_LOCATION_ENTITIES_EXACT_SQL = """
+    SELECT * FROM (
+      SELECT DISTINCT ON (ob.entity_id)
+        ob.id AS observation_id,
+        ob.entity_id AS entity_id,
+        ob.evidence_id AS evidence_id,
+        ob."precision" AS "precision",
+        ob.observed_at AS observed_at,
+        ob.retrieved_at AS retrieved_at,
+        ob.resolved_at AS resolved_at,
+        ob.resolution_method AS resolution_method,
+        ent.entity_type AS entity_type,
+        ent.canonical_value AS canonical_value,
+        ent.display_name AS display_name,
+        loc.id AS location_id,
+        loc.location_type AS location_type,
+        loc.canonical_name AS canonical_name,
+        loc.country_code AS country_code,
+        loc.admin1_code AS admin1_code,
+        loc.admin2_code AS admin2_code,
+        loc.parent_location_id AS parent_location_id,
+        ST_Y(loc.centroid) AS latitude,
+        ST_X(loc.centroid) AS longitude
+      FROM ati.entity_location_observation ob
+      JOIN ati.evidence ev ON ev.id = ob.evidence_id
+      JOIN ati.entity ent ON ent.id = ob.entity_id
+      JOIN ati.location loc ON loc.id = ob.location_id
+      WHERE ob.location_id = :location_id
+        AND ev.investigation_id = :investigation_id
+      ORDER BY ob.entity_id, COALESCE(ob.observed_at, ob.retrieved_at) DESC,
+               ob.id DESC
+    ) latest
+    WHERE (CAST(:cursor_type AS text) IS NULL
+           OR (latest.entity_type, latest.canonical_value, latest.entity_id)
+              > (CAST(:cursor_type AS text), CAST(:cursor_value AS text),
+                 CAST(:cursor_id AS uuid)))
+    ORDER BY latest.entity_type, latest.canonical_value, latest.entity_id
+    LIMIT :limit
 """
-    + _ENTITY_KEYSET_PREDICATE
-)
+
+_LOCATION_ENTITIES_CONTAINED_SQL = """
+    SELECT * FROM (
+      SELECT DISTINCT ON (ob.entity_id)
+        ob.id AS observation_id,
+        ob.entity_id AS entity_id,
+        ob.evidence_id AS evidence_id,
+        ob."precision" AS "precision",
+        ob.observed_at AS observed_at,
+        ob.retrieved_at AS retrieved_at,
+        ob.resolved_at AS resolved_at,
+        ob.resolution_method AS resolution_method,
+        ent.entity_type AS entity_type,
+        ent.canonical_value AS canonical_value,
+        ent.display_name AS display_name,
+        loc.id AS location_id,
+        loc.location_type AS location_type,
+        loc.canonical_name AS canonical_name,
+        loc.country_code AS country_code,
+        loc.admin1_code AS admin1_code,
+        loc.admin2_code AS admin2_code,
+        loc.parent_location_id AS parent_location_id,
+        ST_Y(loc.centroid) AS latitude,
+        ST_X(loc.centroid) AS longitude
+      FROM ati.entity_location_observation ob
+      JOIN ati.evidence ev ON ev.id = ob.evidence_id
+      JOIN ati.entity ent ON ent.id = ob.entity_id
+      JOIN ati.location loc ON loc.id = ob.location_id
+      WHERE ob.location_id IN (
+              SELECT l.id FROM ati.location l, ati.location sel
+              WHERE sel.id = :location_id
+                AND (l.id = sel.id
+                     OR (l.geometry IS NOT NULL AND sel.geometry IS NOT NULL
+                         AND l.geometry && sel.geometry
+                         AND ST_Covers(sel.geometry, l.geometry))))
+        AND ev.investigation_id = :investigation_id
+      ORDER BY ob.entity_id, COALESCE(ob.observed_at, ob.retrieved_at) DESC,
+               ob.id DESC
+    ) latest
+    WHERE (CAST(:cursor_type AS text) IS NULL
+           OR (latest.entity_type, latest.canonical_value, latest.entity_id)
+              > (CAST(:cursor_type AS text), CAST(:cursor_value AS text),
+                 CAST(:cursor_id AS uuid)))
+    ORDER BY latest.entity_type, latest.canonical_value, latest.entity_id
+    LIMIT :limit
+"""
 
 # Selection capability lookup: does the selected Location exist, is it a
 # city Point, and does it carry a usable boundary geometry?
@@ -250,22 +422,6 @@ _SUMMARY_TOP_LOCATIONS_SQL = """
     ORDER BY scoped_entity_count DESC, loc.canonical_name ASC, loc.id ASC
     LIMIT :top_limit
 """
-
-
-def _contained_statement(kind: str) -> str:
-    """Return the contained variant of one location-scoped statement kind."""
-    if kind == "observations":
-        return _LOCATION_OBSERVATIONS_SQL.format(
-            location_scope=_LOCATION_SCOPE_CONTAINED
-        )
-    return _LOCATION_ENTITIES_SQL.format(location_scope=_LOCATION_SCOPE_CONTAINED)
-
-
-def _exact_statement(kind: str) -> str:
-    """Return the exact variant of one location-scoped statement kind."""
-    if kind == "observations":
-        return _LOCATION_OBSERVATIONS_SQL.format(location_scope=_LOCATION_SCOPE_EXACT)
-    return _LOCATION_ENTITIES_SQL.format(location_scope=_LOCATION_SCOPE_EXACT)
 
 
 def _observation_cursor_values(row: Any) -> tuple[str, str]:
@@ -433,9 +589,9 @@ class PostgresGeointQueryService(GeointQueryService):
                 envelope
             )
         statement = (
-            _contained_statement("entities")
+            _LOCATION_ENTITIES_CONTAINED_SQL
             if contained
-            else _exact_statement("entities")
+            else _LOCATION_ENTITIES_EXACT_SQL
         )
         params: dict[str, object] = {
             "location_id": query.location_id,
@@ -484,9 +640,9 @@ class PostgresGeointQueryService(GeointQueryService):
                 envelope, "location observation"
             )
         statement = (
-            _contained_statement("observations")
+            _LOCATION_OBSERVATIONS_CONTAINED_SQL
             if contained
-            else _exact_statement("observations")
+            else _LOCATION_OBSERVATIONS_EXACT_SQL
         )
         params: dict[str, object] = {
             "location_id": query.location_id,
