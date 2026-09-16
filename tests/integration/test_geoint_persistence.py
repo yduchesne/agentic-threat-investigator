@@ -990,14 +990,18 @@ async def test_gp28_missing_or_invisible_entity_evidence_rejected(
 
 
 @pytest.mark.asyncio
-async def test_gp29_no_claim_or_completion_api_exists(
+async def test_gp29_lifecycle_api_lives_on_the_single_repository(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P29 no claim/lease/completion function or repository API exists."""
+    """G26A-P29 (PR 26C) lifecycle API lives on the one GeoResolution repository.
+
+    PR 26A shipped no claim/lease/completion surface and this test asserted
+    its absence; PR 26C extends the same repository and SQL API v0024 with
+    the bounded lifecycle (no second queue repository/table was created). The
+    assertion now pins the complete v0024 function surface.
+    """
     async with uow_factory() as uow:
         repository = uow.geo_resolutions
-        assert not hasattr(repository, "claim")
-        assert not hasattr(repository, "complete")
         assert not hasattr(repository, "renew_lease")
         assert not hasattr(repository, "retry")
         assert uow.session is not None
@@ -1011,7 +1015,13 @@ async def test_gp29_no_claim_or_completion_api_exists(
             )
         }
         geo_routines = {name for name in routines if "geo_resolution" in name}
-        assert geo_routines == {"create_geo_resolution"}
+        assert geo_routines == {
+            "create_geo_resolution",
+            "claim_geo_resolutions",
+            "complete_geo_resolution_resolved",
+            "complete_geo_resolution_unresolvable",
+            "record_geo_resolution_failure",
+        }
 
 
 @pytest.mark.asyncio

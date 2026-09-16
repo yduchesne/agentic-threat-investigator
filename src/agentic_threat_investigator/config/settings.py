@@ -239,6 +239,25 @@ class Settings(BaseSettings):
     # artifact location, not a secret; it is validated as an authority-free
     # file:// URI without credentials, query, or fragment parts.
     dbip_city_lite_artifact_uri: str = ""
+    # Geo Resolver process policy (PR 26C). Operational, non-secret values:
+    # the worker identity is an ephemeral lease owner marker, never an
+    # authorization identity. A blank worker_id is auto-generated per
+    # process at the entry point. retry_max_seconds must be >=
+    # retry_base_seconds (validated below).
+    geo_resolver_enabled: bool = True
+    geo_resolver_worker_id: str = ""
+    geo_resolver_batch_size: int = Field(default=10, ge=1, le=1000)
+    geo_resolver_lease_seconds: int = Field(default=300, ge=1, le=86400)
+    geo_resolver_poll_interval_seconds: float = Field(
+        default=1.0, ge=0, allow_inf_nan=False
+    )
+    geo_resolver_max_attempts: int = Field(default=3, ge=1, le=1000)
+    geo_resolver_retry_base_seconds: float = Field(
+        default=60.0, gt=0, allow_inf_nan=False
+    )
+    geo_resolver_retry_max_seconds: float = Field(
+        default=3600.0, ge=0, allow_inf_nan=False
+    )
 
     @field_validator(
         "provider_max_retries",
@@ -406,6 +425,53 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             raise ValueError("operating_mode must not be blank")
         return value
+
+    @field_validator(
+        "geo_resolver_batch_size",
+        "geo_resolver_lease_seconds",
+        "geo_resolver_max_attempts",
+        mode="before",
+    )
+    @classmethod
+    def validate_geo_resolver_integer_types(cls, value: object) -> object:
+        """Reject coercive non-integers while retaining environment parsing."""
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ValueError("geo resolver integer setting must be an integer")
+        return value
+
+    @field_validator(
+        "geo_resolver_poll_interval_seconds",
+        "geo_resolver_retry_base_seconds",
+        "geo_resolver_retry_max_seconds",
+        mode="before",
+    )
+    @classmethod
+    def validate_geo_resolver_real_types(cls, value: object) -> object:
+        """Reject booleans masquerading as geo resolver numeric settings."""
+        if isinstance(value, bool):
+            raise ValueError("geo resolver numeric setting must be a real number")
+        return value
+
+    @field_validator("geo_resolver_worker_id")
+    @classmethod
+    def validate_geo_resolver_worker_id(cls, value: str) -> str:
+        """Require a blank or bounded operational worker identity."""
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        if len(stripped) > 200:
+            raise ValueError("geo_resolver_worker_id exceeds the maximum length")
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_geo_resolver_retry_bounds(self) -> "Settings":
+        """Require the retry maximum to be at least the retry base."""
+        if self.geo_resolver_retry_max_seconds < self.geo_resolver_retry_base_seconds:
+            raise ValueError(
+                "geo_resolver_retry_max_seconds must be >= "
+                "geo_resolver_retry_base_seconds"
+            )
+        return self
 
     @field_validator("dbip_city_lite_artifact_uri")
     @classmethod

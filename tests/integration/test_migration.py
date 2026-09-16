@@ -2,6 +2,7 @@
 """Integration tests run against the isolated PostgreSQL container."""
 
 import os
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -1310,5 +1311,223 @@ async def test_geoint_spatial_migration_upgrade_and_downgrade() -> None:
         # G26B-P18: pgvector/RAG remains available after the downgrade.
         assert "vector" in extensions
         assert "postgis" not in extensions
+    finally:
+        command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_geoint_lifecycle_migration_upgrade_and_downgrade() -> None:
+    """PR 26C lifecycle migration round-trip preserves authoritative data.
+
+    G26C-P40: upgrading a 0027 database that already holds PENDING work,
+    Locations, observations, and current state installs SQL API v0024 and
+    the claim/constraint objects without rewriting any existing row, and the
+    new lifecycle can then claim and resolve the pre-existing work.
+    G26C-P41: downgrading to 0027 removes only the PR 26C functions, claim
+    indexes, and CHECK constraints while preserving every authoritative row
+    (including terminal work created by the new API) and restoring the
+    pre-PR-26C API behavior.
+    """
+    alembic_cfg = Config("alembic.ini")
+
+    async def resolution_state() -> tuple[int, int, int, int]:
+        """Return (resolutions, observations, current rows, locations)."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                resolution_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.geo_resolution")
+                )
+                observation_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.entity_location_observation")
+                )
+                current_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.entity_location")
+                )
+                location_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.location")
+                )
+        finally:
+            await engine.dispose()
+        return (
+            int(resolution_count or 0),
+            int(observation_count or 0),
+            int(current_count or 0),
+            int(location_count or 0),
+        )
+
+    async def lifecycle_functions() -> set[str]:
+        """Return the PR 26C stored function names present in the ati schema."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                return {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
+                            SELECT routine_name FROM information_schema.routines
+                            WHERE routine_schema = 'ati'
+                        """)
+                    )
+                }
+        finally:
+            await engine.dispose()
+
+    lifecycle_function_names = {
+        "claim_geo_resolutions",
+        "complete_geo_resolution_resolved",
+        "complete_geo_resolution_unresolvable",
+        "record_geo_resolution_failure",
+    }
+    try:
+        # Seed pre-26C GEOINT state on a 0027 database: one Location, one
+        # observation/current pair, and one PENDING GeoResolution.
+        command.downgrade(alembic_cfg, "0027_geoint_reference_spatial")
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(
+                    text(
+                        """
+                        DO $$
+                        DECLARE
+                          v_inv uuid; v_entity uuid; v_ev uuid; v_loc uuid;
+                          v_obs uuid; v_res uuid;
+                        BEGIN
+                          INSERT INTO ati.investigation
+                            (status, trigger_type, objective, budget,
+                             operational_state, version, created_at, updated_at,
+                             started_at)
+                          VALUES ('running', 'manual', 'seed', '{}'::jsonb,
+                                  '{}'::jsonb, 1, now(), now(), now())
+                          RETURNING id INTO v_inv;
+                          INSERT INTO ati.entity
+                            (entity_type, canonical_value, display_name,
+                             attributes, content_hash, version, created_at,
+                             updated_at)
+                          VALUES ('ip_address', '203.0.113.11', '203.0.113.11',
+                                  '{}'::jsonb, NULL, 1, now(), now())
+                          RETURNING id INTO v_entity;
+                          INSERT INTO ati.evidence
+                            (id, investigation_id, evidence_type,
+                             subject_entity_id, source, retrieved_at, facts,
+                             raw_payload, version)
+                          VALUES (gen_random_uuid(), v_inv,
+                                  'urn:ati:evidence:geolocation', v_entity,
+                                  'urn:ati:source:dbip', now(),
+                                  '{"country_code":"US"}'::jsonb, NULL, 1)
+                          RETURNING id INTO v_ev;
+                          SELECT id INTO v_loc FROM ati.upsert_location(
+                            NULL, 'country', 'United States', 'United States',
+                            'US', NULL, NULL, NULL);
+                          v_obs := gen_random_uuid();
+                          PERFORM ati.append_entity_location_observation(
+                            v_obs, v_entity, v_loc, v_ev, 'country', NULL,
+                            now(), now(), 'seed_method');
+                          SELECT id INTO v_res
+                            FROM ati.create_geo_resolution(
+                              gen_random_uuid(), v_entity, v_ev);
+                        END
+                        $$;
+                        """
+                    )
+                )
+                await connection.commit()
+        finally:
+            await engine.dispose()
+        pre_upgrade = await resolution_state()
+        assert pre_upgrade == (1, 1, 1, 1)
+
+        # G26C-P40: upgrade to head preserves data and installs the API.
+        command.upgrade(alembic_cfg, "head")
+        assert lifecycle_function_names <= await lifecycle_functions()
+        assert await resolution_state() == pre_upgrade
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                pending = (
+                    await connection.execute(
+                        text(
+                            "SELECT id FROM ati.geo_resolution WHERE status = 'pending'"
+                        )
+                    )
+                ).all()
+                assert len(pending) == 1
+                location_id = (
+                    await connection.execute(
+                        text("SELECT id FROM ati.location LIMIT 1")
+                    )
+                ).scalar_one()
+                # The pre-existing PENDING work is claimable by the new API.
+                claimed = (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM ati.claim_geo_resolutions("
+                            "'worker-mig', 10, 300, 3)"
+                        )
+                    )
+                ).scalar_one()
+                assert int(claimed) == 1
+                # ...and the pre-existing location is a valid completion target.
+                created = (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM "
+                            "ati.complete_geo_resolution_resolved("
+                            ":res, (SELECT version FROM ati.geo_resolution "
+                            "WHERE id = :res), 'worker-mig', :obs, :loc, "
+                            "'country', :ret, :ret, :ret, 'canonical_geography_v1')"
+                        ),
+                        {
+                            "res": pending[0][0],
+                            "obs": pending[0][0],
+                            "loc": location_id,
+                            "ret": datetime.now(UTC),
+                        },
+                    )
+                ).scalar_one()
+                assert int(created) == 1
+                # The lifecycle exercise is a real durable transition: commit
+                # it so the downgrade below must preserve the terminal work.
+                await connection.commit()
+        finally:
+            await engine.dispose()
+
+        # G26C-P41: downgrade preserves authoritative data, removes only the
+        # PR 26C objects, and restores the pre-PR-26C API surface.
+        terminal_state = await resolution_state()
+        assert terminal_state == (1, 2, 1, 1)
+        command.downgrade(alembic_cfg, "0027_geoint_reference_spatial")
+        assert lifecycle_function_names.isdisjoint(await lifecycle_functions())
+        assert await resolution_state() == terminal_state
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                statuses = {
+                    row[0]
+                    for row in await connection.execute(
+                        text("SELECT status FROM ati.geo_resolution")
+                    )
+                }
+                indexes = {
+                    row[0]
+                    for row in await connection.execute(
+                        text("""
+                            SELECT indexname FROM pg_indexes
+                            WHERE schemaname = 'ati' AND tablename = 'geo_resolution'
+                        """)
+                    )
+                }
+        finally:
+            await engine.dispose()
+        assert statuses == {"resolved"}
+        assert (
+            not {
+                "geo_resolution_pending_claim_idx",
+                "geo_resolution_processing_claim_idx",
+            }
+            & indexes
+        )
     finally:
         command.upgrade(alembic_cfg, "head")

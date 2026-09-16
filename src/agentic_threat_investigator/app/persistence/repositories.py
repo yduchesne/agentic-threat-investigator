@@ -541,6 +541,115 @@ class GeoInvalidInputError(ValueError):
         self.detail = detail
 
 
+class GeoResolutionNotFoundError(LookupError):
+    """Raised when a GeoResolution lifecycle mutation targets an unknown row."""
+
+    def __init__(self, resolution_id: UUID) -> None:
+        """Record the missing work identity."""
+        super().__init__(f"geo resolution not found: {resolution_id}")
+        self.resolution_id = resolution_id
+
+
+class GeoResolutionInvalidTransitionError(ValueError):
+    """Raised when a lifecycle mutation is illegal for the current status.
+
+    A completion/failure is legal only against claimed PROCESSING work; a
+    PENDING row (never claimed) or a row in a status the transition may not
+    exit is rejected with no mutation (SQLSTATE ``U26C2``).
+    """
+
+    def __init__(self, resolution_id: UUID, status: str | None = None) -> None:
+        """Record the work identity and the offending current status when known."""
+        super().__init__(
+            f"invalid geo resolution transition: resolution {resolution_id} "
+            f"cannot mutate in its current status"
+            if status is None
+            else f"invalid geo resolution transition: resolution "
+            f"{resolution_id} is {status}"
+        )
+        self.resolution_id = resolution_id
+        self.status = status
+
+
+class GeoResolutionVersionConflictError(ValueError):
+    """Raised when a lifecycle mutation carries a stale expected version.
+
+    Completion/failure is an optimistic concurrency contract: the supplied
+    version must equal the current database version, otherwise another
+    worker already mutated the row (SQLSTATE ``U26C3``). A stale worker is
+    rejected with no observation or current-state mutation.
+    """
+
+    def __init__(self, resolution_id: UUID, expected_version: int) -> None:
+        """Record the work identity and the stale supplied version."""
+        super().__init__(
+            f"stale geo resolution version: resolution {resolution_id} "
+            f"expected version {expected_version}"
+        )
+        self.resolution_id = resolution_id
+        self.expected_version = expected_version
+
+
+class GeoResolutionClaimantMismatchError(RuntimeError):
+    """Raised when a lifecycle mutation is not owned by the current claimant.
+
+    The claim owner is the ephemeral lease-holder identity; a different
+    worker's completion/failure is rejected with no mutation (SQLSTATE
+    ``U26C4``).
+    """
+
+    def __init__(self, resolution_id: UUID) -> None:
+        """Record the work identity of the rejected mutation."""
+        super().__init__(f"geo resolution claim owner mismatch: {resolution_id}")
+        self.resolution_id = resolution_id
+
+
+class GeoResolutionLeaseExpiredError(RuntimeError):
+    """Raised when a lifecycle mutation arrives with an expired lease.
+
+    A completed/failed mutation requires a live lease at database time; an
+    expired lease means ownership already lapsed and a reclaim may be in
+    flight, so the mutation is rejected (SQLSTATE ``U26C5``).
+    """
+
+    def __init__(self, resolution_id: UUID) -> None:
+        """Record the work identity of the rejected mutation."""
+        super().__init__(f"geo resolution lease expired: {resolution_id}")
+        self.resolution_id = resolution_id
+
+
+class GeoResolutionRetryExhaustedError(RuntimeError):
+    """Raised when the attempt budget is already violated (defensive).
+
+    Retry/exhaustion bookkeeping is database-authoritative and normally
+    transitions exhausted work to FAILED without raising; this code is a
+    fail-closed guard for a corrupt work row whose attempt count already
+    exceeds the configured budget when a new claim is attempted (SQLSTATE
+    ``U26C6``).
+    """
+
+    def __init__(self, resolution_id: UUID) -> None:
+        """Record the work identity of the inconsistent row."""
+        super().__init__(f"geo resolution retry budget violated: {resolution_id}")
+        self.resolution_id = resolution_id
+
+
+class GeoResolutionTerminalReplayConflictError(ValueError):
+    """Raised when a terminal replay conflicts with the settled outcome.
+
+    Replaying the exact same successful completion is an idempotent no-op
+    (SQL API v0024 returns the authoritative terminal row); a terminal
+    replay that disagrees with the settled outcome (for example resolving a
+    RESOLVED row to a different Location, or failing a RESOLVED row) is a
+    typed conflict with no mutation (SQLSTATE ``U26C7``).
+    """
+
+    def __init__(self, resolution_id: UUID) -> None:
+        """Record the work identity of the conflicting replay."""
+        super().__init__(f"geo resolution terminal replay conflict: {resolution_id}")
+        self.resolution_id = resolution_id
+
+
 class ResearchResultDuplicateIdentityError(ValueError):
     """Raised when an immutable ResearchResult identity already exists."""
 
@@ -1490,10 +1599,13 @@ class EntityLocationObservationRepository(ABC):  # pragma: no cover
 
 
 class GeoResolutionRepository(ABC):  # pragma: no cover
-    """Repository for durable operational GeoResolution work (PR 26A).
+    """Repository for durable operational GeoResolution work (PR 26A/26C).
 
-    PR 26A supports creation of initial PENDING work and reads only.
-    Claim/lease/retry/completion methods are deliberately absent until PR 26C.
+    PR 26A supports creation of initial PENDING work and reads only. PR 26C
+    extends the same repository with the bounded lifecycle API:
+    claim/lease, atomic resolved completion, unresolvable transition, and
+    bounded retry/failure. Mutations route exclusively through the versioned
+    SQL API and never commit.
     """
 
     @abstractmethod
@@ -1513,6 +1625,88 @@ class GeoResolutionRepository(ABC):  # pragma: no cover
         self, entity_id: UUID, evidence_id: UUID
     ) -> GeoResolution | None:
         """Return the GeoResolution for one Entity/Evidence pair, if any."""
+
+    @abstractmethod
+    async def claim_batch(
+        self,
+        *,
+        claimed_by: str,
+        limit: int,
+        lease_seconds: int,
+        max_attempts: int,
+    ) -> list[GeoResolution]:
+        """Claim a bounded batch of eligible work in the active transaction.
+
+        Eligible work is PENDING due now (``next_attempt_at`` is NULL or in
+        the past) or PROCESSING with an expired lease. Terminal rows,
+        future-scheduled PENDING rows, and unexpired PROCESSING rows are
+        never claimed. Expired PROCESSING work already at the attempt budget
+        transitions to FAILED instead of being reclaimed. The stored
+        function transitions selected rows to PROCESSING, persists the
+        claimant/lease, allocates a fresh database version per row, and
+        returns the authoritative rows; the caller's UnitOfWork remains the
+        commit boundary (repositories never commit).
+        """
+
+    @abstractmethod
+    async def complete_resolved(
+        self,
+        resolution_id: UUID,
+        expected_version: int,
+        claimed_by: str,
+        observation: EntityLocationObservation,
+    ) -> GeoResolution:
+        """Atomically complete one claimed row as RESOLVED.
+
+        One versioned stored function validates the PROCESSING status,
+        expected version, claimant, live lease, Entity visibility, Evidence
+        existence/type/subject, and canonical Location; appends the exact
+        immutable observation (idempotent under replay); reconciles the
+        current EntityLocation; and terminates the work RESOLVED with the
+        resolved Location recorded and lease/retry state cleared. Replaying
+        the exact same successful completion is a no-op; a conflicting
+        terminal replay is a typed error and mutates nothing.
+        """
+
+    @abstractmethod
+    async def complete_unresolvable(
+        self,
+        *,
+        resolution_id: UUID,
+        expected_version: int,
+        claimed_by: str,
+        error_code: str,
+    ) -> GeoResolution:
+        """Terminate one claimed row as UNRESOLVABLE with a stable reason code.
+
+        No observation and no EntityLocation mutation are created; the
+        resolved Location stays NULL, the reason/error code is recorded, and
+        lease/retry state is cleared. Ambiguity is mapped to this transition
+        in v0.1 (``ambiguous_location``) and is never guessed or retried.
+        """
+
+    @abstractmethod
+    async def record_failure(
+        self,
+        resolution_id: UUID,
+        expected_version: int,
+        claimed_by: str,
+        error_code: str,
+        *,
+        retryable: bool,
+        retry_base_seconds: float,
+        retry_max_seconds: float,
+        max_attempts: int,
+    ) -> GeoResolution:
+        """Record one bounded failure on the claimed row.
+
+        A non-retryable failure or an exhausted attempt budget transitions
+        the row to FAILED (terminal, no next attempt). A retryable failure
+        with budget remaining returns the row to PENDING with a deterministic
+        bounded backoff (``base * 2^(attempt_count-1)`` capped at the max,
+        no jitter) and clears the lease/claim state. The error code is a
+        bounded machine code; raw exception text is never persisted.
+        """
 
 
 class UnitOfWork(ABC):  # pragma: no cover
