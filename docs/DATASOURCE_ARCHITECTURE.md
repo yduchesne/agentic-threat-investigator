@@ -37,6 +37,10 @@ Datasource
   acquisition policy
 ```
 
+## Other documents
+
+- [Data Sources](DATA_SOURCES.md)
+
 ### Datasource
 
 A **Datasource** is one configured acquisition source. It is the runtime/configuration unit ATI can execute. Two datasource instances may use the same provider and semantic format while differing in endpoint, local artifact, schedule, credentials, or acquisition policy.

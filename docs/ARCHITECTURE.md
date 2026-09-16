@@ -1189,6 +1189,10 @@ download
 
 The canonical path is the bounded resource-specific PostgreSQL composite-array transport described in DATABASE.md; PostgreSQL expands it into temporary staging tables and performs the set-based merge. There is no alternate small-batch path.
 
+See also:
+- [Data Source Architecture](DATASOURCE_ARCHITECTURE.md)
+- [Data Sources](DATA_SOURCES.md)
+
 ## Geospatial
 
 v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are used for map visualization.
