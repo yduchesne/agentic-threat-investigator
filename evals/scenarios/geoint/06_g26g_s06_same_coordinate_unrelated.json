@@ -1,0 +1,149 @@
+{
+  "id": "g26g_s06_same_coordinate_unrelated",
+  "version": 1,
+  "description": "Two unrelated Entities with the same representative coordinates produce no ownership or coordination inference; the shared coordinate remains descriptive observation only.",
+  "tags": ["geoint", "same-coordinate", "no-ownership", "no-coordination", "pr26g"],
+  "fixture": {
+    "objective": "Assess whether the two target IPs are malicious.",
+    "root_entity": "ip_a",
+    "geography": [
+      {
+        "label": "us",
+        "location_type": "country",
+        "name": "United States",
+        "country_code": "US",
+        "geometry": "SRID=4326;POLYGON((-126 24,-66 24,-66 49,-126 49,-126 24))"
+      },
+      {
+        "label": "washington",
+        "location_type": "administrative_area",
+        "name": "Washington",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "us",
+        "geometry": "SRID=4326;POLYGON((-125 45,-116 45,-116 48.9,-125 48.9,-125 45))"
+      },
+      {
+        "label": "seattle",
+        "location_type": "city",
+        "name": "Seattle",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "washington",
+        "geometry": "SRID=4326;POINT(-122.3321 47.6062)"
+      }
+    ],
+    "entities": [
+      {
+        "label": "ip_a",
+        "type": "ip_address",
+        "value": "203.0.113.203"
+      },
+      {
+        "label": "ip_b",
+        "type": "ip_address",
+        "value": "203.0.113.204"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "a_evidence",
+        "subject": "ip_a",
+        "source": "urn:ati:source:test",
+        "facts": {
+          "country_code": "US",
+          "region": "Washington",
+          "city": "Seattle",
+          "precision": "city",
+          "latitude": 47.6062,
+          "longitude": -122.3321
+        }
+      },
+      {
+        "label": "b_evidence",
+        "subject": "ip_b",
+        "source": "urn:ati:source:test",
+        "facts": {
+          "country_code": "US",
+          "region": "Washington",
+          "city": "Seattle",
+          "precision": "city",
+          "latitude": 47.6062,
+          "longitude": -122.3321
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "label": "a_obs",
+        "entity": "ip_a",
+        "evidence": "a_evidence"
+      },
+      {
+        "label": "b_obs",
+        "entity": "ip_b",
+        "evidence": "b_evidence"
+      }
+    ]
+  },
+  "expected": {
+    "resolutions": [
+      {
+        "label": "a_obs",
+        "status": "resolved",
+        "location": "seattle",
+        "precision": "city"
+      },
+      {
+        "label": "b_obs",
+        "status": "resolved",
+        "location": "seattle",
+        "precision": "city"
+      }
+    ],
+    "current": [
+      {
+        "entity": "ip_a",
+        "location": "seattle",
+        "precision": "city"
+      },
+      {
+        "entity": "ip_b",
+        "location": "seattle",
+        "precision": "city"
+      }
+    ],
+    "histories": [
+      {
+        "entity": "ip_a",
+        "locations": ["seattle"]
+      },
+      {
+        "entity": "ip_b",
+        "locations": ["seattle"]
+      }
+    ],
+    "agent_context": {
+      "max_entities": 10,
+      "max_observations_per_entity": 5,
+      "max_total_observations": 50,
+      "max_context_bytes": 262144,
+      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+    },
+    "agent_output": {
+      "expected_validation": "accepted",
+      "allowed_verdicts": ["inconclusive"],
+      "allowed_confidence": ["low", "medium"],
+      "required_geographic_findings": [
+        {
+          "kind": "shared_location",
+          "observation_labels": ["a_obs", "b_obs"],
+          "evidence_labels": ["a_evidence", "b_evidence"],
+          "entity_labels": ["ip_a", "ip_b"],
+          "location_labels": ["seattle"]
+        }
+      ]
+    },
+    "forbidden_inferences": ["ownership", "coordination"]
+  }
+}

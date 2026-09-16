@@ -1,0 +1,88 @@
+{
+  "id": "g26g_s07_coordinate_less_valid",
+  "version": 1,
+  "description": "A valid observation whose canonical Location has no representative coordinates remains queryable, table-visible, and fully provenanced; the agent never discards it because no coordinate exists.",
+  "tags": ["geoint", "coordinate-less", "non-mappable", "valid-context", "pr26g"],
+  "fixture": {
+    "objective": "Assess whether the target IP is malicious.",
+    "root_entity": "target_ip",
+    "geography": [
+      {
+        "label": "edge_land",
+        "location_type": "country",
+        "name": "EdgeLand",
+        "country_code": "ZZ"
+      }
+    ],
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.105"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "edge_evidence",
+        "subject": "target_ip",
+        "source": "urn:ati:source:test",
+        "facts": {
+          "country_code": "ZZ",
+          "precision": "country"
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "label": "edge_obs",
+        "entity": "target_ip",
+        "evidence": "edge_evidence"
+      }
+    ]
+  },
+  "expected": {
+    "resolutions": [
+      {
+        "label": "edge_obs",
+        "status": "resolved",
+        "location": "edge_land",
+        "precision": "country"
+      }
+    ],
+    "current": [
+      {
+        "entity": "target_ip",
+        "location": "edge_land",
+        "precision": "country"
+      }
+    ],
+    "histories": [
+      {
+        "entity": "target_ip",
+        "locations": ["edge_land"]
+      }
+    ],
+    "agent_context": {
+      "max_entities": 10,
+      "max_observations_per_entity": 5,
+      "max_total_observations": 50,
+      "max_context_bytes": 262144,
+      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+    },
+    "agent_output": {
+      "expected_validation": "accepted",
+      "allowed_verdicts": ["inconclusive"],
+      "allowed_confidence": ["low", "medium"],
+      "required_geographic_findings": [
+        {
+          "kind": "shared_location",
+          "observation_labels": ["edge_obs"],
+          "evidence_labels": ["edge_evidence"],
+          "entity_labels": ["target_ip"],
+          "location_labels": ["edge_land"]
+        }
+      ]
+    },
+    "forbidden_inferences": ["maliciousness"]
+  }
+}

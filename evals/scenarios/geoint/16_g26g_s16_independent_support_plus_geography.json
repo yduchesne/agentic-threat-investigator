@@ -1,0 +1,123 @@
+{
+  "id": "g26g_s16_independent_support_plus_geography",
+  "version": 1,
+  "description": "Independent non-geographic Evidence supports a positive verdict; GEOINT remains descriptive context only with exact observation/Evidence support.",
+  "tags": ["geoint", "independent-support", "descriptive-context", "pr26g"],
+  "fixture": {
+    "objective": "Assess whether the domain is malicious.",
+    "root_entity": "domain",
+    "geography": [
+      {
+        "label": "us",
+        "location_type": "country",
+        "name": "United States",
+        "country_code": "US",
+        "geometry": "SRID=4326;POLYGON((-126 24,-66 24,-66 49,-126 49,-126 24))"
+      },
+      {
+        "label": "washington",
+        "location_type": "administrative_area",
+        "name": "Washington",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "us",
+        "geometry": "SRID=4326;POLYGON((-125 45,-116 45,-116 48.9,-125 48.9,-125 45))"
+      },
+      {
+        "label": "seattle",
+        "location_type": "city",
+        "name": "Seattle",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "washington",
+        "geometry": "SRID=4326;POINT(-122.3321 47.6062)"
+      }
+    ],
+    "entities": [
+      {
+        "label": "domain",
+        "type": "domain",
+        "value": "dns-eval.example.com"
+      },
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.231"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "dns_evidence",
+        "subject": "domain",
+        "source": "urn:ati:source:test",
+        "type": "urn:ati:evidence:dns",
+        "facts": {
+          "a_records": ["192.0.2.10"]
+        }
+      },
+      {
+        "label": "geo_evidence",
+        "subject": "target_ip",
+        "source": "urn:ati:source:test",
+        "facts": {
+          "country_code": "US",
+          "region": "Washington",
+          "city": "Seattle",
+          "precision": "city"
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "label": "geo_obs",
+        "entity": "target_ip",
+        "evidence": "geo_evidence"
+      }
+    ]
+  },
+  "expected": {
+    "resolutions": [
+      {
+        "label": "geo_obs",
+        "status": "resolved",
+        "location": "seattle",
+        "precision": "city"
+      }
+    ],
+    "current": [
+      {
+        "entity": "target_ip",
+        "location": "seattle",
+        "precision": "city"
+      }
+    ],
+    "histories": [
+      {
+        "entity": "target_ip",
+        "locations": ["seattle"]
+      }
+    ],
+    "agent_context": {
+      "max_entities": 10,
+      "max_observations_per_entity": 5,
+      "max_total_observations": 50,
+      "max_context_bytes": 262144,
+      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+    },
+    "agent_output": {
+      "expected_validation": "accepted",
+      "allowed_verdicts": ["malicious", "suspicious"],
+      "allowed_confidence": ["medium", "high"],
+      "required_geographic_findings": [
+        {
+          "kind": "shared_location",
+          "observation_labels": ["geo_obs"],
+          "evidence_labels": ["geo_evidence"],
+          "entity_labels": ["target_ip"],
+          "location_labels": ["seattle"]
+        }
+      ]
+    },
+    "forbidden_inferences": ["maliciousness"]
+  }
+}

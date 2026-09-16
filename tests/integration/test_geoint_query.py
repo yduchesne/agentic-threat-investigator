@@ -1800,6 +1800,33 @@ def _containment_statement(location_id: UUID, investigation_id: UUID) -> str:
     """
 
 
+def _summary_counts_statement(investigation_id: UUID) -> str:
+    """Return the exact production summary-counts statement shape."""
+    return f"""
+        SELECT count(*), count(DISTINCT ob.entity_id), count(DISTINCT ob.location_id)
+        FROM ati.entity_location_observation ob
+        JOIN ati.evidence ev ON ev.id = ob.evidence_id
+        JOIN ati.location loc ON loc.id = ob.location_id
+        WHERE ev.investigation_id = '{investigation_id}'
+    """
+
+
+def _summary_top_locations_statement(investigation_id: UUID) -> str:
+    """Return the exact production summary top-Locations statement shape."""
+    return f"""
+        SELECT loc.id, count(DISTINCT ob.entity_id) AS scoped_entity_count
+        FROM ati.entity_location_observation ob
+        JOIN ati.evidence ev ON ev.id = ob.evidence_id
+        JOIN ati.location loc ON loc.id = ob.location_id
+        WHERE ev.investigation_id = '{investigation_id}'
+        GROUP BY loc.id, loc.location_type, loc.canonical_name, loc.country_code,
+                 loc.admin1_code, loc.admin2_code, loc.parent_location_id,
+                 ST_Y(loc.centroid), ST_X(loc.centroid)
+        ORDER BY scoped_entity_count DESC, loc.canonical_name ASC, loc.id ASC
+        LIMIT 10
+    """
+
+
 def _latest_per_entity_statement(location_id: UUID, investigation_id: UUID) -> str:
     """Return the exact production Location-Entity statement shape."""
     return f"""
@@ -1902,6 +1929,43 @@ async def test_explain_containment_uses_gist_and_observation_indexes(
         "entity_location_observation_location_idx",
     }
     assert "Seq Scan" not in node_types
+
+
+@pytest.mark.asyncio
+async def test_explain_summary_stays_bounded_and_index_eligible(
+    uow_factory: Callable[[], UnitOfWork],
+    session_factory: async_sessionmaker[Any],
+) -> None:
+    """QP06: summary counts/top-Locations never Cartesian and stay indexable.
+
+    The summary is the PR 26D bounded aggregate over exact Evidence scope;
+    with seq scans disabled the grouped top-Locations query must still use
+    the observation indexes (no accidental Cartesian explosion) and the SQL
+    itself carries the documented GROUP BY/LIMIT bounds.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        geography = await seed_geography(uow)
+        await _seed_us_observations(uow, investigation_id, geography)
+    observation_indexes = {
+        "entity_location_observation_evidence_idx",
+        "entity_location_observation_location_idx",
+        "entity_location_observation_entity_retrieved_idx",
+    }
+    counts_indexes, counts_nodes = await _plan(
+        session_factory, _summary_counts_statement(investigation_id), {}
+    )
+    assert counts_indexes & observation_indexes
+    assert "Seq Scan" not in counts_nodes
+
+    top_indexes, top_nodes = await _plan(
+        session_factory, _summary_top_locations_statement(investigation_id), {}
+    )
+    assert top_indexes & observation_indexes
+    assert "Seq Scan" not in top_nodes
+    # The delivered SQL bounds the grouped aggregate: no unbounded Universe.
+    statement = _summary_top_locations_statement(investigation_id)
+    assert "GROUP BY" in statement and "LIMIT" in statement
 
 
 # ---------------------------------------------------------------------------

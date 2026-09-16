@@ -1773,7 +1773,7 @@ Deliver:
 - deterministic `FakeLlmClient` tests and real PostgreSQL/PostGIS integration;
 - no LLM ownership of canonical Location resolution, persistence reconciliation, or spatial truth.
 
-### PR 26G — GEOINT evaluation and series closure
+### PR 26G — GEOINT evaluation and series closure [DONE]
 
 Deliver:
 

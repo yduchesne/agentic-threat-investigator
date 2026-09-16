@@ -1,0 +1,86 @@
+{
+  "id": "g26g_s09_unresolvable_claim",
+  "version": 1,
+  "description": "A claim with no canonical match terminates UNRESOLVABLE: no geographic truth is invented and the Evidence row remains intact.",
+  "tags": ["geoint", "unresolvable", "no-invention", "pr26g"],
+  "fixture": {
+    "objective": "Assess whether the target IP is malicious.",
+    "root_entity": "target_ip",
+    "geography": [
+      {
+        "label": "us",
+        "location_type": "country",
+        "name": "United States",
+        "country_code": "US",
+        "geometry": "SRID=4326;POLYGON((-126 24,-66 24,-66 49,-126 49,-126 24))"
+      },
+      {
+        "label": "washington",
+        "location_type": "administrative_area",
+        "name": "Washington",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "us",
+        "geometry": "SRID=4326;POLYGON((-125 45,-116 45,-116 48.9,-125 48.9,-125 45))"
+      },
+      {
+        "label": "seattle",
+        "location_type": "city",
+        "name": "Seattle",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "washington",
+        "geometry": "SRID=4326;POINT(-122.3321 47.6062)"
+      }
+    ],
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.107"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "atlantis_evidence",
+        "subject": "target_ip",
+        "source": "urn:ati:source:test",
+        "facts": {
+          "country_code": "US",
+          "city": "Atlantis",
+          "precision": "city"
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "label": "atlantis_obs",
+        "entity": "target_ip",
+        "evidence": "atlantis_evidence"
+      }
+    ]
+  },
+  "expected": {
+    "resolutions": [
+      {
+        "label": "atlantis_obs",
+        "status": "unresolvable"
+      }
+    ],
+    "current": [],
+    "histories": [],
+    "agent_context": {
+      "max_entities": 10,
+      "max_observations_per_entity": 5,
+      "max_total_observations": 50,
+      "max_context_bytes": 262144,
+      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+    },
+    "agent_output": {
+      "expected_validation": "accepted",
+      "allowed_verdicts": ["inconclusive"],
+      "allowed_confidence": ["low", "medium"]
+    },
+    "forbidden_inferences": ["maliciousness"]
+  }
+}

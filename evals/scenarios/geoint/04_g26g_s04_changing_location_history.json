@@ -1,0 +1,153 @@
+{
+  "id": "g26g_s04_changing_location_history",
+  "version": 1,
+  "description": "One Entity at two supported Locations at distinct effective times yields two immutable observations, the correct Investigation-relative current and history order, and a descriptive location_change_observed finding; movement/travel/route is never inferred.",
+  "tags": ["geoint", "changing-location", "history", "no-movement", "pr26g"],
+  "fixture": {
+    "objective": "Assess whether the target IP is malicious.",
+    "root_entity": "target_ip",
+    "geography": [
+      {
+        "label": "us",
+        "location_type": "country",
+        "name": "United States",
+        "country_code": "US",
+        "geometry": "SRID=4326;POLYGON((-126 24,-66 24,-66 49,-126 49,-126 24))"
+      },
+      {
+        "label": "washington",
+        "location_type": "administrative_area",
+        "name": "Washington",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "us",
+        "geometry": "SRID=4326;POLYGON((-125 45,-116 45,-116 48.9,-125 48.9,-125 45))"
+      },
+      {
+        "label": "seattle",
+        "location_type": "city",
+        "name": "Seattle",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "washington",
+        "geometry": "SRID=4326;POINT(-122.3321 47.6062)"
+      },
+      {
+        "label": "texas",
+        "location_type": "administrative_area",
+        "name": "Texas",
+        "country_code": "US",
+        "admin1_code": "TX",
+        "parent": "us",
+        "geometry": "SRID=4326;POLYGON((-106.6 25.8,-93.5 25.8,-93.5 36.5,-106.6 36.5,-106.6 25.8))"
+      },
+      {
+        "label": "dallas",
+        "location_type": "city",
+        "name": "Dallas",
+        "country_code": "US",
+        "admin1_code": "TX",
+        "parent": "texas",
+        "geometry": "SRID=4326;POINT(-96.7969 32.7767)"
+      }
+    ],
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.104"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "seattle_evidence",
+        "subject": "target_ip",
+        "source": "urn:ati:source:test",
+        "observed_at": "2026-01-01T00:00:00Z",
+        "retrieved_at": "2026-01-01T01:00:00Z",
+        "facts": {
+          "country_code": "US",
+          "region": "Washington",
+          "city": "Seattle",
+          "precision": "city"
+        }
+      },
+      {
+        "label": "dallas_evidence",
+        "subject": "target_ip",
+        "source": "urn:ati:source:test",
+        "observed_at": "2026-01-02T00:00:00Z",
+        "retrieved_at": "2026-01-02T01:00:00Z",
+        "facts": {
+          "country_code": "US",
+          "region": "Texas",
+          "city": "Dallas",
+          "precision": "city"
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "label": "seattle_obs",
+        "entity": "target_ip",
+        "evidence": "seattle_evidence"
+      },
+      {
+        "label": "dallas_obs",
+        "entity": "target_ip",
+        "evidence": "dallas_evidence"
+      }
+    ]
+  },
+  "expected": {
+    "resolutions": [
+      {
+        "label": "seattle_obs",
+        "status": "resolved",
+        "location": "seattle",
+        "precision": "city"
+      },
+      {
+        "label": "dallas_obs",
+        "status": "resolved",
+        "location": "dallas",
+        "precision": "city"
+      }
+    ],
+    "current": [
+      {
+        "entity": "target_ip",
+        "location": "dallas",
+        "precision": "city"
+      }
+    ],
+    "histories": [
+      {
+        "entity": "target_ip",
+        "locations": ["dallas", "seattle"]
+      }
+    ],
+    "agent_context": {
+      "max_entities": 10,
+      "max_observations_per_entity": 5,
+      "max_total_observations": 50,
+      "max_context_bytes": 262144,
+      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+    },
+    "agent_output": {
+      "expected_validation": "accepted",
+      "allowed_verdicts": ["inconclusive"],
+      "allowed_confidence": ["low", "medium"],
+      "required_geographic_findings": [
+        {
+          "kind": "location_change_observed",
+          "observation_labels": ["seattle_obs", "dallas_obs"],
+          "evidence_labels": ["seattle_evidence", "dallas_evidence"],
+          "entity_labels": ["target_ip"],
+          "location_labels": ["seattle", "dallas"]
+        }
+      ]
+    },
+    "forbidden_inferences": ["travel", "route"]
+  }
+}

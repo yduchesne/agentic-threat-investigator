@@ -1,0 +1,89 @@
+{
+  "id": "g26g_s01_country_precision_only",
+  "version": 1,
+  "description": "Country-only input resolves to the country canonical Location with country precision; no administrative area or city is invented, the exact Evidence is preserved, and the only acceptable verdict is INCONCLUSIVE.",
+  "tags": ["geoint", "precision", "country-only", "pr26g"],
+  "fixture": {
+    "objective": "Assess whether the target IP is malicious.",
+    "root_entity": "target_ip",
+    "geography": [
+      {
+        "label": "us",
+        "location_type": "country",
+        "name": "United States",
+        "country_code": "US",
+        "geometry": "SRID=4326;POLYGON((-126 24,-66 24,-66 49,-126 49,-126 24))"
+      }
+    ],
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.101"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "us_evidence",
+        "subject": "target_ip",
+        "source": "urn:ati:source:test",
+        "facts": {
+          "country_code": "US",
+          "precision": "country"
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "label": "us_obs",
+        "entity": "target_ip",
+        "evidence": "us_evidence"
+      }
+    ]
+  },
+  "expected": {
+    "resolutions": [
+      {
+        "label": "us_obs",
+        "status": "resolved",
+        "location": "us",
+        "precision": "country"
+      }
+    ],
+    "current": [
+      {
+        "entity": "target_ip",
+        "location": "us",
+        "precision": "country"
+      }
+    ],
+    "histories": [
+      {
+        "entity": "target_ip",
+        "locations": ["us"]
+      }
+    ],
+    "agent_context": {
+      "max_entities": 10,
+      "max_observations_per_entity": 5,
+      "max_total_observations": 50,
+      "max_context_bytes": 262144,
+      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+    },
+    "agent_output": {
+      "expected_validation": "accepted",
+      "allowed_verdicts": ["inconclusive"],
+      "allowed_confidence": ["low", "medium"],
+      "required_geographic_findings": [
+        {
+          "kind": "shared_location",
+          "observation_labels": ["us_obs"],
+          "evidence_labels": ["us_evidence"],
+          "entity_labels": ["target_ip"],
+          "location_labels": ["us"]
+        }
+      ]
+    },
+    "forbidden_inferences": ["maliciousness"]
+  }
+}

@@ -2401,6 +2401,84 @@ Tests must prove that agent output cannot silently promote:
 
 into maliciousness, cyber relationship, common ownership, campaign, coordination, targeting, or attribution without independent support.
 
+### PR 26G delivered testing (G26G evaluation baseline)
+
+PR 26G (`src/agentic_threat_investigator/evaluation/geoint/`,
+`evals/scenarios/geoint/`, `tests/unit/evaluation/geoint/`,
+`tests/integration/test_geoint_evaluation.py`) closes the PR 26 series
+with a deterministic evaluation/closure baseline over the delivered
+PR 26A--F runtime. No GEOINT runtime capability is added and no
+production migration/stored-function change is required.
+
+- **G26G-CC01..CC07** (`tests/unit/evaluation/geoint/test_geoint_evaluator.py`):
+  the pure evaluator's canonical passing path and exact metrics
+  (claim/support counts, provenance closure, tool calls, context
+  entity/observation counts).
+- **G26G-S01..S16** (`evals/scenarios/geoint/`): the committed canonical
+  corpus — country-only, administrative-only, and city precision
+  retention (no invented precision, no representative coordinates in
+  model context); changing Location with correct current/history and no
+  movement; same-Location and same-coordinate unrelated Entities with no
+  Relationship/ownership/coordination; coordinate-less valid geography;
+  ambiguous and unresolvable claims with no invented truth; retry,
+  stale-lease, and crash recovery with exactly one final truth;
+  cross-Investigation isolation; valid descriptive pattern with exact
+  support; model overstatement of co-location rejected; independent
+  non-geographic support plus descriptive GEOINT.
+- **G26G-E01..E16** (evaluation matrix): wrong/missing canonical
+  Location, precision inflation, duplicate truth after retry, broken
+  provenance, cross-Investigation visibility, unsupported agent
+  inference, bound exceeded, unexpected validation outcome, and
+  geography-only verdicts are all hard failures; a Location without an
+  observation is never support.
+- **G26G-P01..P06** (provenance matrix): exact observation/Evidence
+  closure, wrong Evidence, wrong Investigation, reference-Location-only
+  support, omitted-context citations, and persisted Assessment support
+  closing over exact Evidence — all evaluated at the structured boundary
+  without claiming the Assessment schema stores observation identities.
+- **G26G-T01..T10** (tool/bounds): evaluated via an evaluation-only
+  recording wrapper (`evaluation/geoint/tracing.py`) around the real
+  query service plus the unit fake: eligible Entity bounded queries only,
+  no unrelated Entity fan-out, one history page with `has_more` surfacing,
+  no cursor draining, entity/observation/byte bounds respected, no
+  Location fan-out, no automatic containment expansion, no proximity,
+  and arbitrary spatial queries impossible.
+- **G26G-A01..A14** (structured agent-output matrix): valid current
+  geography, valid history, supported location change, omitted/substituted
+  observations and Evidence, cross-Investigation support, same-city
+  coordination attempts, same-coordinate ownership attempts, containment
+  targeting attempts, geography-only MALICIOUS attempts, two-Location
+  travel attempts, independent support plus descriptive GEOINT, country
+  described as city, and the no-GEOINT baseline.
+- **G26G-R01..R05** (recovery closure): concurrent disjoint claims,
+  stale-lease takeover with stale-worker rejection, crash-after-claim
+  reclaim, retry-then-success, and duplicate/stale completion — the
+  existing PR 26C lifecycle/vertical-slice coverage plus the combined
+  exactly-one-final-truth assertions over the worker-completed state in
+  `test_geoint_evaluation.py::test_recovery_scenarios_produce_exactly_one_final_truth`.
+- **G26G-QP01..QP06** (query plans): the existing PR 26D EXPLAIN
+  infra now also covers the bounded summary (`test_explain_summary_stays_bounded_and_index_eligible`);
+  representative statements assert intended index eligibility and the
+  absence of accidental Cartesian joins — never exact costs/timings.
+- **G26G-X01** (`tests/integration/test_geoint_evaluation.py`): the
+  canonical real-stack closure — reference geography via the normal
+  reference API, Investigation + GEOLOCATION Evidence + PENDING work,
+  production `GeoResolutionWorker` + `PostgresCanonicalGeographyResolver`
+  completion, real `PostgresGeointQueryService` through the recording
+  wrapper, `GeointAnalysisTools`/`GeointAnalysisContextPolicy`, real
+  `EvidenceAnalystInputLoader`, `FakeLlmClient` at the model boundary
+  only, deterministic geographic validation, real
+  `AssessmentPersistenceService`, persisted Assessment read back, and
+  `GeointDeterministicEvaluator` — with the browser and analyst segments
+  sharing the same deterministic persisted scenario (browser coverage
+  remains `frontend/e2e/zz-geoint.spec.ts` G1..G6).
+
+No canonical closure fixture directly inserts derived geographic truth
+(`EntityLocationObservation`/`EntityLocation` are created only by the
+production worker completion), `FakeLlmClient` is the only model fake, no
+live network/geocoder/LLM is required, and no PR 27 generic
+evaluator/release framework is introduced.
+
 ## Definition of done
 
 A change is not complete until:

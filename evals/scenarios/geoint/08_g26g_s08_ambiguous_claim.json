@@ -1,0 +1,104 @@
+{
+  "id": "g26g_s08_ambiguous_claim",
+  "version": 1,
+  "description": "An ambiguous input (two equally-valued city candidates under the same country) terminates UNRESOLVABLE with no invented Location, observation, or current state.",
+  "tags": ["geoint", "ambiguous", "terminal-unresolvable", "no-invention", "pr26g"],
+  "fixture": {
+    "objective": "Assess whether the target IP is malicious.",
+    "root_entity": "target_ip",
+    "geography": [
+      {
+        "label": "us",
+        "location_type": "country",
+        "name": "United States",
+        "country_code": "US",
+        "geometry": "SRID=4326;POLYGON((-126 24,-66 24,-66 49,-126 49,-126 24))"
+      },
+      {
+        "label": "washington",
+        "location_type": "administrative_area",
+        "name": "Washington",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "us",
+        "geometry": "SRID=4326;POLYGON((-125 45,-116 45,-116 48.9,-125 48.9,-125 45))"
+      },
+      {
+        "label": "oregon",
+        "location_type": "administrative_area",
+        "name": "Oregon",
+        "country_code": "US",
+        "admin1_code": "OR",
+        "parent": "us",
+        "geometry": "SRID=4326;POLYGON((-124.6 42,-116.5 42,-116.5 46.3,-124.6 46.3,-124.6 42))"
+      },
+      {
+        "label": "springfield_wa",
+        "location_type": "city",
+        "name": "Springfield",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "washington",
+        "geometry": "SRID=4326;POINT(-123.02 46.32)"
+      },
+      {
+        "label": "springfield_or",
+        "location_type": "city",
+        "name": "Springfield",
+        "country_code": "US",
+        "admin1_code": "OR",
+        "parent": "oregon",
+        "geometry": "SRID=4326;POINT(-123.02 44.05)"
+      }
+    ],
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.106"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "springfield_evidence",
+        "subject": "target_ip",
+        "source": "urn:ati:source:test",
+        "facts": {
+          "country_code": "US",
+          "city": "Springfield",
+          "precision": "city"
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "label": "springfield_obs",
+        "entity": "target_ip",
+        "evidence": "springfield_evidence"
+      }
+    ]
+  },
+  "expected": {
+    "resolutions": [
+      {
+        "label": "springfield_obs",
+        "status": "unresolvable"
+      }
+    ],
+    "current": [],
+    "histories": [],
+    "agent_context": {
+      "max_entities": 10,
+      "max_observations_per_entity": 5,
+      "max_total_observations": 50,
+      "max_context_bytes": 262144,
+      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+    },
+    "agent_output": {
+      "expected_validation": "accepted",
+      "allowed_verdicts": ["inconclusive"],
+      "allowed_confidence": ["low", "medium"]
+    },
+    "forbidden_inferences": ["maliciousness"]
+  }
+}
