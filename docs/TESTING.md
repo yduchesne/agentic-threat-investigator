@@ -2135,6 +2135,67 @@ Real-PostgreSQL + PostGIS integration tests cover (PR 26B delivered):
 - migration upgrade/downgrade with data preservation;
 - Investigation isolation remains covered by PR 26D analyst query tests.
 
+### Analyst read/API layer (PR 26D)
+
+- **G26D-Q01..Q10** (`tests/unit/app/query/test_geoint_query.py`): typed
+  frozen query contracts carry the mandatory Investigation scope, page
+  limits reuse the PR 23A `QueryLimits` bound, the containment flag stays a
+  required bounded boolean, Location references expose coordinates only
+  (no raw geometry/EWKT/WKB field exists), observation read models retain
+  the exact `observation_id`/`evidence_id`, Entity current is explicitly
+  Investigation-relative (no global `EntityLocation` state fields), the
+  summary is bounded with consistent counts, and malformed persisted rows
+  fail the pure persisted-row mappers closed with `GeointReadError`.
+  Cursor codec tests pin the PR 26A currentness ordering
+  (`COALESCE(observed_at, retrieved_at)` + observation UUID, greater pair
+  wins) and the deterministic Location-Entity ordering, and cursor
+  fingerprints bind investigation/Entity/Location/containment scope.
+- **G26D-A01..A16** (`tests/unit/api/test_geoint.py`): 401
+  unauthenticated; shared `require_analyst` 403 gate; typed 200s
+  (summary, Entity detail, entity history `PageResponse`, Location-Entity
+  and Location-observation typed pages with the `containment_applied`
+  flag mapped exactly); 404 `geoint_entity_not_found` /
+  `geoint_observation_not_found` for cross-scope detail without resource
+  disclosure; stable `invalid_cursor` 400; bounded cursor length 422;
+  oversized limits forwarded to the shared bound; PR 25 `/geolocations`
+  unchanged; malformed persisted reads surface a safe `internal_error` 500
+  with no internals. Six explicit stable operation ids are pinned in the
+  OpenAPI snapshot.
+- **G26D-P01..P32** (`tests/integration/test_geoint_query.py`): real
+  PostgreSQL 18 + PostGIS matrices seeded with two Investigations sharing
+  Entities/Locations backed by different Evidence. Scope: observations
+  visible only under their Evidence's Investigation, shared Entities see
+  only own history, a newer I2 observation never advances I1 current,
+  Locations unused in scope are empty collections, cross-scope
+  observation detail is not found. Current/history: the exact PR 26A
+  ordering and UUID tie-break, `observed_at=NULL` -> `retrieved_at`
+  semantics, global-vs-scoped latest divergence. Location/pagination:
+  distinct scoped Entities once, every qualifying observation, static-set
+  paging with no gaps/duplicates, exact second-page continuation, terminal
+  cursor NULL. Containment (US/WA/Seattle, TX/Dallas, CA/BC/Vancouver):
+  WA exact vs contained, US contained scope, US excludes Canada,
+  boundary-point inclusion via `ST_Covers`, NULL selected geometry
+  degrades to exact with `containment_applied=false`, city Point never
+  expands, and reads never mutate hierarchy/Relationship rows. Summary:
+  zero/empty, exact observation/distinct-Entity counts, precision
+  vocabulary counts, deterministic top-group tie-breaks, bounded
+  truncation. Plus EXPLAIN-based index-eligibility proof (entity history
+  uses the PR 26A entity index; scope joins, Location reverse lookups,
+  latest-per-Entity, and containment use the PR 26D read indexes and the
+  GiST index, never scanning `entity_location_observation`) and the
+  canonical vertical slice: production PR 26C resolution -> real
+  `PostgresGeointQueryService` -> real FastAPI -> exact Evidence drill-down
+  via the existing Evidence endpoint, cross-scope 404, deterministic
+  pagination, and reads mutate nothing.
+- **G26D-P33/P34** (`tests/integration/test_migration.py`): migration
+  0029 round-trip installs exactly the two read indexes without touching
+  rows and downgrade drops only them.
+
+Every GEOINT integration case runs in the standard isolated PostgreSQL
+fixture (`reset_application_data` truncates the GEOINT tables between
+tests); the API slices reuse `tests/integration/api_helpers.py` with a
+real seeded local analyst user.
+
 ### Asynchronous resolution
 
 Multi-worker integration tests cover:

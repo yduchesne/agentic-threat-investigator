@@ -15,11 +15,10 @@ from uuid import UUID
 from fastapi import Request
 
 from agentic_threat_investigator.api.errors import ApiError, ApiErrorCode
-from agentic_threat_investigator.app.query.models import QueryPage
 from agentic_threat_investigator.app.query.pagination import QueryCursorError
 from agentic_threat_investigator.config import Settings
 
-T = TypeVar("T")
+P = TypeVar("P")
 
 
 def effective_page_limit(request: Request, limit: int | None) -> int:
@@ -49,14 +48,14 @@ def request_uuid(request: Request) -> UUID | None:
         return None
 
 
-async def run_page_query(
-    factory: Callable[[], Awaitable[QueryPage[T]]],
-) -> QueryPage[T]:
+async def run_page_query(factory: Callable[[], Awaitable[P]]) -> P:
     """Run one paginated query, mapping user-input failures to 400.
 
     Typed cursor errors are mapped centrally by the error handlers; only
     bounded user-input failures (invalid dates, limits, ranges) are
-    translated here with their safe messages.
+    translated here with their safe messages. The page type is generic so
+    every keyset collection (including the flag-carrying GEOINT Location
+    pages) uses the exact same central translation.
     """
     try:
         return await factory()

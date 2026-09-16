@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.query.assessments import AssessmentQueryService
 from agentic_threat_investigator.app.query.evidence import EvidenceQueryService
+from agentic_threat_investigator.app.query.geoint import (
+    DEFAULT_GEONT_SUMMARY_TOP_LOCATIONS,
+    GeointQueryService,
+)
 from agentic_threat_investigator.app.query.geolocation import (
     DEFAULT_MAX_MAP_GEOLOCATION_ITEMS,
     InvestigationGeolocationQueryService,
@@ -31,6 +35,7 @@ from agentic_threat_investigator.app.query.timeline import TimelineQueryService
 
 from .assessments import PostgresAssessmentQueryService
 from .evidence import PostgresEvidenceQueryService
+from .geoint import PostgresGeointQueryService
 from .geolocation import PostgresInvestigationGeolocationQueryService
 from .history import PostgresDomainHistoryQueryService
 from .investigations import PostgresInvestigationQueryService
@@ -51,12 +56,16 @@ class PostgresQueryServices(QueryServiceBundle):
         session: AsyncSession,
         limits: QueryLimits | None = None,
         geolocation_max_items: int | None = None,
+        geoint_summary_top_locations: int | None = None,
     ) -> None:
         """Bind the session; defaults to the module-standard limits.
 
         ``geolocation_max_items`` is the server-owned hard bound of the
         PR 25A geolocation projection, semantically separate from pageable
         collection sizes; it defaults to the module-standard map bound.
+        ``geoint_summary_top_locations`` is the server-owned hard bound of
+        the PR 26D summary top-location groups; it defaults to the
+        module-standard summary bound.
         """
         self._session = session
         self.investigations: InvestigationQueryService = (
@@ -72,6 +81,13 @@ class PostgresQueryServices(QueryServiceBundle):
                 if geolocation_max_items is not None
                 else DEFAULT_MAX_MAP_GEOLOCATION_ITEMS,
             )
+        )
+        self.geoint: GeointQueryService = PostgresGeointQueryService(
+            session,
+            limits or QueryLimits(),
+            geoint_summary_top_locations
+            if geoint_summary_top_locations is not None
+            else DEFAULT_GEONT_SUMMARY_TOP_LOCATIONS,
         )
         self.relationships: RelationshipQueryService = PostgresRelationshipQueryService(
             session, limits or QueryLimits()

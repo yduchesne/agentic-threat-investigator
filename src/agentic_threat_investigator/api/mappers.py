@@ -14,6 +14,15 @@ from agentic_threat_investigator.api.dto.assessment import (
     FindingSupportResponse,
 )
 from agentic_threat_investigator.api.dto.evidence import EvidenceResponse
+from agentic_threat_investigator.api.dto.geoint import (
+    GeointEntityLocationResponse,
+    GeointLocationResponse,
+    GeointObservationDetailResponse,
+    GeointObservationResponse,
+    GeointPrecisionCountsResponse,
+    GeointSummaryResponse,
+    GeointTopLocationResponse,
+)
 from agentic_threat_investigator.api.dto.geolocation import (
     InvestigationGeolocationResponse,
 )
@@ -41,6 +50,14 @@ from agentic_threat_investigator.api.dto.research import (
     ResearchResultResponse,
 )
 from agentic_threat_investigator.api.dto.timeline import TimelineEventResponse
+from agentic_threat_investigator.app.query.geoint import (
+    GeointEntityLocationItem,
+    GeointLocationRef,
+    GeointObservationDetail,
+    GeointObservationItem,
+    GeointSummary,
+    GeointTopLocation,
+)
 from agentic_threat_investigator.app.query.geolocation import (
     InvestigationGeolocationItem,
 )
@@ -130,6 +147,105 @@ def to_evidence_response(evidence: Evidence) -> EvidenceResponse:
         observed_at=evidence.observed_at,
         retrieved_at=evidence.retrieved_at,
         facts=dict(evidence.facts),
+    )
+
+
+def to_geoint_location_response(
+    ref: GeointLocationRef,
+) -> GeointLocationResponse:
+    """Map one internal Location reference to its public DTO.
+
+    Only allowlisted typed fields are copied; raw EWKT/WKB boundary
+    geometry and upstream metadata never cross this boundary. The mapper
+    performs no database access, no scope decision, and no PostGIS call.
+    """
+    return GeointLocationResponse(
+        location_id=ref.location_id,
+        location_type=ref.location_type,
+        canonical_name=ref.canonical_name,
+        country_code=ref.country_code,
+        admin1_code=ref.admin1_code,
+        admin2_code=ref.admin2_code,
+        parent_location_id=ref.parent_location_id,
+        latitude=ref.latitude,
+        longitude=ref.longitude,
+    )
+
+
+def to_geoint_observation_response(
+    item: GeointObservationItem,
+) -> GeointObservationResponse:
+    """Map one internal geographic observation to its public DTO.
+
+    The exact ``observation_id`` and ``evidence_id`` are always preserved so
+    Evidence drill-down stays exact.
+    """
+    return GeointObservationResponse(
+        observation_id=item.observation_id,
+        entity_id=item.entity_id,
+        location=to_geoint_location_response(item.location),
+        evidence_id=item.evidence_id,
+        precision=item.precision,
+        resolution_method=item.resolution_method,
+        observed_at=item.observed_at,
+        retrieved_at=item.retrieved_at,
+        resolved_at=item.resolved_at,
+    )
+
+
+def to_geoint_entity_location_response(
+    item: GeointEntityLocationItem,
+) -> GeointEntityLocationResponse:
+    """Map one Investigation-relative Entity context to its public DTO."""
+    return GeointEntityLocationResponse(
+        entity_id=item.entity_id,
+        entity_type=item.entity_type,
+        entity_value=item.entity_value,
+        display_name=item.display_name,
+        current_observation=to_geoint_observation_response(item.current_observation),
+    )
+
+
+def to_geoint_observation_detail_response(
+    detail: GeointObservationDetail,
+) -> GeointObservationDetailResponse:
+    """Map one exact observation detail to its public DTO."""
+    return GeointObservationDetailResponse(
+        observation=to_geoint_observation_response(detail.observation),
+        entity_type=detail.entity_type,
+        entity_value=detail.entity_value,
+        display_name=detail.display_name,
+    )
+
+
+def _to_geoint_top_location_response(
+    top: GeointTopLocation,
+) -> GeointTopLocationResponse:
+    """Map one summary top-location group to its public DTO."""
+    return GeointTopLocationResponse(
+        location=to_geoint_location_response(top.location),
+        scoped_entity_count=top.scoped_entity_count,
+    )
+
+
+def to_geoint_summary_response(summary: GeointSummary) -> GeointSummaryResponse:
+    """Map one bounded Investigation geographic summary to its public DTO."""
+    return GeointSummaryResponse(
+        entity_count_with_location=summary.entity_count_with_location,
+        observation_count=summary.observation_count,
+        location_count=summary.location_count,
+        country_count=summary.country_count,
+        administrative_area_count=summary.administrative_area_count,
+        city_count=summary.city_count,
+        precision_counts=GeointPrecisionCountsResponse(
+            country=summary.precision_counts.country,
+            administrative_area=summary.precision_counts.administrative_area,
+            city=summary.precision_counts.city,
+        ),
+        top_locations=tuple(
+            _to_geoint_top_location_response(top) for top in summary.top_locations
+        ),
+        truncated=summary.truncated,
     )
 
 

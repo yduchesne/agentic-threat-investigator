@@ -1219,8 +1219,8 @@ PR 25C completes the Map as a bounded analyst exploration surface without turnin
 
 ## GEOINT architecture (PR 26)
 
-This section distinguishes **delivered PR 26A/26B/26C** from the planned PR
-26D-G architecture.
+This section distinguishes **delivered PR 26A/26B/26C/26D** from the planned PR
+26E-G architecture.
 
 PR 25 remains the delivered v0.1 geolocation presentation path:
 
@@ -1453,15 +1453,60 @@ first-class results, and malformed claims remain errors.
 
 ### GEOINT query and analyst layers
 
-Canonical `Location` is global reference data, but analyst operational queries remain bounded and Investigation-scoped.
+Canonical `Location` is global reference data, but analyst operational reads remain bounded and Investigation-scoped.
 
-The application/query layer owns bounded geographic projections such as:
+PR 26D (delivered) establishes the bounded analyst-facing GEOINT read and
+API layer over the PR 26A-26C persistence:
+
+```text
+PostgresQueryServices (one per-request AsyncSession, PR 23A bundle)
+  -> GeointQueryService
+     -> PostgresGeointQueryService
+        -> purpose-built literal SELECT/PostGIS statements (read-only)
+  -> /api/v1/investigations/{I}/geoint/* FastAPI router (AnalystUser)
+```
+
+- **Exact Evidence scope join.** Every analyst GEOINT read proves the path
+  Investigation through the immutable provenance chain
+  `EntityLocationObservation.evidence_id -> Evidence.investigation_id`;
+  scope is never inferred from shared Entity or Location identity. The
+  read layer executes purpose-built bounded SELECT statements directly in
+  the existing query infrastructure; mutations remain 100% PR 26A-26C
+  stored-function-owned.
+- **Investigation-relative current.** Entity current
+  (`GeointEntityLocationItem.current_observation`) is the newest
+  qualifying observation **within the path Investigation** under the exact
+  PR 26A currentness ordering
+  (`COALESCE(observed_at, retrieved_at)` descending, observation UUID
+  descending, greater pair wins). The global materialized
+  `EntityLocation` row may have been advanced by another Investigation
+  and is therefore never exposed as scoped current unless its exact latest
+  observation is proven scoped.
+- **Location reverse lookup and containment.** Location -> scoped
+  Entities/observations page deterministically
+  (`(entity_type, canonical_value, entity_id)` for Entities; the PR 26A
+  effective-time ordering for observations). `include_contained=true`
+  selects the exact canonical Location plus child canonical Locations
+  whose SRID-4326 reference geometry the selected boundary covers
+  (boundary-inclusive `ST_Covers` with a GiST bounding-box pre-filter).
+  City Points never expand, NULL boundary geometry degrades to the exact
+  selection (honestly reported via `containment_applied`), and there is no
+  radius/nearest/proximity API and no arbitrary PostGIS input contract.
+- **Shared boundedness.** Page sizes reuse the PR 23A `QueryLimits`;
+  collections reuse the opaque versioned cursor codec with cursors bound
+  to the exact query scope (investigation, Entity/Location, containment
+  flag); the summary carries a server-owned `top_locations` bound.
+  Read models expose only approved fields and the centroid
+  latitude/longitude pair; raw EWKT/WKB geometry and provider payloads
+  never cross the boundary.
+
+The application query layer owns bounded geographic projections such as:
 
 - current and historical Locations for an Entity;
 - Investigation-scoped Entities/observations for a Location;
-- exact EntityLocationObservation provenance;
-- geographic summaries;
-- narrowly justified spatial queries.
+- exact EntityLocationObservation provenance with exact Evidence drill-down;
+- bounded geographic summaries;
+- narrowly justified containment reads.
 
 The PR 24 typed pivot/workspace architecture remains the navigation model. PR 26 extends it with semantically valid geographic pivots rather than creating a parallel navigation system.
 

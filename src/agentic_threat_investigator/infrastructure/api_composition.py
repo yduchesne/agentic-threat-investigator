@@ -144,6 +144,7 @@ class ApiComposition:
                 self._session_factory(),
                 limits,
                 geolocation_max_items=self._settings.api_max_map_geolocation_items,
+                geoint_summary_top_locations=self._settings.api_max_geoint_summary_top_locations,
             )
 
         return factory

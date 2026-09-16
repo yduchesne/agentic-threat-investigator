@@ -39,6 +39,9 @@ class QueryKind(str, Enum):
     REPORTS = "reports"
     TIMELINE = "timeline"
     DOMAIN_HISTORY = "domain_history"
+    GEOINT_ENTITY_OBSERVATIONS = "geoint_entity_observations"
+    GEOINT_LOCATION_ENTITIES = "geoint_location_entities"
+    GEOINT_LOCATION_OBSERVATIONS = "geoint_location_observations"
 
 
 CURSOR_VERSION: Literal[1] = 1

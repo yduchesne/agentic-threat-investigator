@@ -22,6 +22,7 @@
 - [SourceRecord](#sourcerecord)
 - [Migrations](#migrations)
 - [PostGIS and GEOINT (PR 26)](#postgis-and-geoint-pr-26)
+  - [PR 26D analyst read layer](#pr-26d-analyst-read-layer)
 - [RAG persistence](#rag-persistence)
 - [Authentication persistence](#authentication-persistence)
 - [Audit persistence](#audit-persistence)
@@ -951,6 +952,65 @@ asserting unstable planner cost estimates.
 PostGIS owns spatial computation. Spatial results do not mutate ATI cyber
 relationships merely because entities share or approach a geographic location.
 
+### PR 26D analyst read layer
+
+PR 26D reads are bounded, Investigation-scoped, and read-only; mutations
+remain 100% owned by the PR 26A-26C versioned stored functions (SQL APIs
+v0021-v0024).
+
+**Scope join.** Every analyst GEOINT read proves the path Investigation
+through the exact immutable provenance chain
+`ati.entity_location_observation.evidence_id -> ati.evidence,
+ati.evidence.investigation_id = <path Investigation>`. Scope is never
+inferred from shared Entity or Location identity, and the global
+materialized `ati.entity_location` row is never consulted for
+Investigation-relative current.
+
+**Read joins.** Purpose-built literal SELECT statements join observation ->
+Evidence (scope) -> Entity (display context) -> Location (canonical
+reference, `ST_Y`/`ST_X` of the on-surface centroid for the coordinate
+pair); the centroid coordinate pair is the only spatial value that leaves
+the query layer. Evidence type is not re-filtered by reads: the immutable
+append stored function already rejects non-`GEOLOCATION` Evidence (U26A4).
+
+**Currentness.** Entity current within the path Investigation and all
+history/observation pages use the exact PR 26A currentness ordering:
+`COALESCE(observed_at, retrieved_at)` descending, observation UUID
+descending (the greater `(effective time, observation id)` pair wins, in
+exact agreement with the persisted reconcile path). Location-Entity pages
+use the deterministic Entity ordering `(entity_type, canonical_value,
+entity_id)` with each Entity appearing once via its latest qualifying
+observation (`DISTINCT ON (entity_id)`).
+
+**Containment.** `include_contained=true` selects the exact canonical
+Location plus child canonical Locations whose SRID-4326 `geometry` the
+selected boundary covers: `l.geometry && sel.geometry` (GiST bounding-box
+pre-filter) then boundary-inclusive `ST_Covers(sel.geometry, l.geometry)`.
+City Points never expand; a NULL selected `geometry` degrades to the exact
+selection reported honestly via the response `containment_applied` flag.
+Containment never writes `parent_location_id` and never creates
+Relationships.
+
+**Read indexes (migration 0029).** The PR 26A entity history index
+(`entity_location_observation_entity_retrieved_idx`) served only the
+Entity dimension. PostgreSQL has no access path for the two PR 26D read
+shapes without these b-tree indexes:
+
+- `entity_location_observation_location_idx` `(location_id,
+  retrieved_at DESC, id ASC)` — Location reverse lookups
+  (Locations -> Entities/observations) filter observation rows by the
+  selected Location before the exact Evidence scope join;
+- `entity_location_observation_evidence_idx` `(evidence_id)` — the
+  observation-side continuation of the exact Evidence scope join for the
+  summary and scope-driven reads.
+
+Both are read-only: no data rewrite, no mutation SQL change; downgrade
+(0028) drops only the two indexes. The new collections page by the
+`COALESCE` currentness expression, which no plain b-tree serves, so the
+bounded filtered sort is accepted and proven by the EXPLAIN tests
+(`SET LOCAL enable_seqscan = off`; assert index eligibility, never brittle
+plans).
+
 ## RAG persistence
 
 Documents retain source provenance.
@@ -1228,3 +1288,18 @@ primary key `id` (pre-existing) is the stable pagination tie-breaker under
 
 RelationshipObservation is deliberately excluded from
 `domain_object_history`; its historical record is its own immutable rows.
+
+### GEOINT (PR 26D read layer)
+
+| Index | Columns/predicate | Query path |
+|---|---|---|
+| `entity_location_observation_entity_retrieved_idx` (PR 26A) | `(entity_id, retrieved_at DESC, id ASC)` | PR 26D Entity observation history (Entity dimension) |
+| `entity_location_observation_location_idx` (migration 0029) | `(location_id, retrieved_at DESC, id ASC)` | PR 26D Locations -> Entities/observations reverse lookup |
+| `entity_location_observation_evidence_idx` (migration 0029) | `(evidence_id)` | exact Evidence scope join for summary/scope-driven reads |
+| `location_geometry_gist_idx` (PR 26B) | GiST `(geometry) WHERE geometry IS NOT NULL` | containment `&&` bounding-box pre-filter |
+
+Observation cursors encode the PR 26A effective time
+(`COALESCE(observed_at, retrieved_at)`) and the observation UUID; the
+`COALESCE` ordering expression is served by a bounded filtered sort proven
+by the EXPLAIN tests. Location-Entity cursors encode
+`(entity_type, canonical_value, entity_id)`.

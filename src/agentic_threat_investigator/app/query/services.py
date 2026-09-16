@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 
 from agentic_threat_investigator.app.query.assessments import AssessmentQueryService
 from agentic_threat_investigator.app.query.evidence import EvidenceQueryService
+from agentic_threat_investigator.app.query.geoint import GeointQueryService
 from agentic_threat_investigator.app.query.geolocation import (
     InvestigationGeolocationQueryService,
 )
@@ -41,6 +42,7 @@ class QueryServiceBundle(ABC):
     investigations: InvestigationQueryService
     evidence: EvidenceQueryService
     geolocations: InvestigationGeolocationQueryService
+    geoint: GeointQueryService
     relationships: RelationshipQueryService
     relationship_observations: RelationshipObservationQueryService
     research_results: ResearchResultQueryService
