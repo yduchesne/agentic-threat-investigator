@@ -1,0 +1,99 @@
+{
+  "id": "g26g_s02_administrative_precision",
+  "version": 1,
+  "description": "Administrative-area input resolves to the correct administrative canonical Location with administrative_area precision; no city is invented and the exact provenance is preserved.",
+  "tags": ["geoint", "precision", "administrative-only", "pr26g"],
+  "fixture": {
+    "objective": "Assess whether the target IP is malicious.",
+    "root_entity": "target_ip",
+    "geography": [
+      {
+        "label": "us",
+        "location_type": "country",
+        "name": "United States",
+        "country_code": "US",
+        "geometry": "SRID=4326;POLYGON((-126 24,-66 24,-66 49,-126 49,-126 24))"
+      },
+      {
+        "label": "washington",
+        "location_type": "administrative_area",
+        "name": "Washington",
+        "country_code": "US",
+        "admin1_code": "WA",
+        "parent": "us",
+        "geometry": "SRID=4326;POLYGON((-125 45,-116 45,-116 48.9,-125 48.9,-125 45))"
+      }
+    ],
+    "entities": [
+      {
+        "label": "target_ip",
+        "type": "ip_address",
+        "value": "203.0.113.102"
+      }
+    ],
+    "evidence": [
+      {
+        "label": "wa_evidence",
+        "subject": "target_ip",
+        "source": "urn:ati:source:test",
+        "facts": {
+          "country_code": "US",
+          "region": "Washington",
+          "precision": "region"
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "label": "wa_obs",
+        "entity": "target_ip",
+        "evidence": "wa_evidence"
+      }
+    ]
+  },
+  "expected": {
+    "resolutions": [
+      {
+        "label": "wa_obs",
+        "status": "resolved",
+        "location": "washington",
+        "precision": "administrative_area"
+      }
+    ],
+    "current": [
+      {
+        "entity": "target_ip",
+        "location": "washington",
+        "precision": "administrative_area"
+      }
+    ],
+    "histories": [
+      {
+        "entity": "target_ip",
+        "locations": ["washington"]
+      }
+    ],
+    "agent_context": {
+      "max_entities": 10,
+      "max_observations_per_entity": 5,
+      "max_total_observations": 50,
+      "max_context_bytes": 262144,
+      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+    },
+    "agent_output": {
+      "expected_validation": "accepted",
+      "allowed_verdicts": ["inconclusive"],
+      "allowed_confidence": ["low", "medium"],
+      "required_geographic_findings": [
+        {
+          "kind": "shared_location",
+          "observation_labels": ["wa_obs"],
+          "evidence_labels": ["wa_evidence"],
+          "entity_labels": ["target_ip"],
+          "location_labels": ["washington"]
+        }
+      ]
+    },
+    "forbidden_inferences": ["maliciousness"]
+  }
+}

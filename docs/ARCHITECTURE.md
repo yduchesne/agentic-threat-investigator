@@ -1219,8 +1219,18 @@ PR 25C completes the Map as a bounded analyst exploration surface without turnin
 
 ## GEOINT architecture (PR 26)
 
-This section distinguishes **delivered PR 26A/26B/26C/26D/26E/26F** from the planned PR
-26G architecture.
+The GEOINT runtime is **delivered PR 26A/26B/26C/26D/26E/26F**. PR 26G
+adds a deterministic repository-owned evaluation/closure baseline over that
+unchanged runtime: scenario contracts, canonical fixtures, a pure
+deterministic evaluator, and a source/test compliance audit. PR 26G owns no
+runtime architecture: no new geographic model, resolver, query/API, UI,
+agent, or persistence behavior.
+
+> Closure note (PR 26G): the runtime remains exactly PR 26A--F. Evaluation
+> lives under `src/agentic_threat_investigator/evaluation/geoint/` with the
+> canonical corpus under `evals/scenarios/geoint/`; it consumes persisted
+> state and recorded tool traces, never production tracing, and absorbs none
+> of PR 27's generic evaluator-platform/release-gate scope.
 
 PR 25 remains the delivered v0.1 geolocation presentation path:
 

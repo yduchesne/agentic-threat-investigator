@@ -24,7 +24,7 @@
   - [Trajectory correctness](#trajectory-correctness)
   - [Trajectory efficiency](#trajectory-efficiency)
 - [Scenario families](#scenario-families)
-- [GEOINT evaluation baseline (planned PR 26G)](#geoint-evaluation-baseline-planned-pr-26g)
+- [GEOINT evaluation baseline (delivered PR 26G)](#geoint-evaluation-baseline-delivered-pr-26g)
 - [Adversarial evaluations](#adversarial-evaluations)
 - [Evaluator architecture](#evaluator-architecture)
 - [LLM-as-judge policy](#llm-as-judge-policy)
@@ -828,16 +828,46 @@ Canonical end-to-end fixture:
 
 `malicious_domain_with_ip_and_malware_pivot`
 
-## GEOINT evaluation baseline (planned PR 26G)
+## GEOINT evaluation baseline (delivered PR 26G)
 
-PR 26G owns final implementation of the GEOINT evaluation baseline. GEOINT evaluation separates deterministic spatial correctness from agentic interpretation.
+PR 26G closes the PR 26 series with a deterministic, repository-owned
+GEOINT evaluation baseline. GEOINT evaluation separates deterministic
+spatial correctness from agentic interpretation; every deterministic
+fact is checked deterministically (never by an LLM judge). The delivered
+baseline materializes the stored scenarios below, runs the **production**
+PostgreSQL 18 + PostGIS pipeline with `FakeLlmClient` only at the model
+boundary, and scores the deterministic state, the delivered PR 26F
+tool/context policy, structured agent output, provenance, and epistemic
+hard gates with `GeointDeterministicEvaluator`.
 
-### PR 26F runtime safety invariants (delivered)
+The delivered baseline is evaluation/closure only. It changes no GEOINT
+runtime semantics and absorbs none of PR 27's generic
+evaluator-platform/release-gate scope.
+
+### Delivered assets
+
+- Scenario contracts and stable failure codes under
+  `src/agentic_threat_investigator/evaluation/geoint/models.py`;
+- strict corpus loading (fail-closed authoring, duplicate-key/identity
+  rejection) under `loader.py`;
+- deterministic fixture materialization (reference geography through the
+  normal reference write API; derived geographic truth only through the
+  production worker) under `materializer.py`;
+- an evaluation-only query tracing seam (`tracing.py`) — PR 26F has no
+  production operation trace and PR 26G adds none;
+- the pure evaluator `GeointDeterministicEvaluator` (`evaluator.py`);
+- the committed canonical corpus under `evals/scenarios/geoint/`
+  (G26G-S01..S16);
+- canonical real-stack closure in
+  `tests/integration/test_geoint_evaluation.py` (G26G-X01) and pure unit
+  hard-check matrices under `tests/unit/evaluation/geoint/`.
+
+### PR 26F runtime safety invariants (proven, not reimplemented)
 
 PR 26F proves the runtime contract invariants deterministically at the
 validator, prompt, and real-PostgreSQL integration level (see
-`TESTING.md` G26F-T/C/S/V/G and G26F-I01..I07); these are runtime
-contract tests and do not require a second LLM as judge:
+`TESTING.md` G26F-T/C/S/V/G and G26F-I01..I07); PR 26G materializes and
+scores the same behaviors without reimplementing the validator:
 
 - same city/country/coordinate does not imply coordination, common
   ownership, or any cyber relationship;
@@ -848,33 +878,49 @@ contract tests and do not require a second LLM as judge:
 - every geographic claim requires exact supplied observation/Evidence
   support.
 
-PR 26G still owns the broader repository-owned behavioral scenario
-materialization and scoring of structured agent output over these
-deterministic primitives.
-
 ### Deterministic geographic correctness
 
-Evaluate:
+The evaluator hard-checks:
 
-- canonical Location identity;
-- preservation of input-supported precision;
-- correct historical EntityLocationObservation identity/provenance;
-- correct current EntityLocation reconciliation;
-- geographic history across changing observations;
-- bounded Investigation isolation;
-- spatial query correctness for approved deterministic tools.
+- canonical Location identity (wrong canonical Location is a hard
+  failure);
+- preservation of input-supported precision (precision inflation is a
+  hard failure);
+- correct historical `EntityLocationObservation` identity/provenance;
+- correct Investigation-relative current `EntityLocation` reconciliation;
+- geographic history ordering across changing observations;
+- bounded Investigation isolation (any cross-Investigation observation in
+  state/context is a hard failure);
+- exactly one final geographic truth after retry/stale-lease/crash
+  recovery (duplicate truth is a hard failure).
 
 ### Provenance closure
 
-Every material geographic claim exposed to an analyst or agent must resolve to the exact supporting EntityLocationObservation and ultimately to the exact Evidence/source that justified it.
+Every material geographic claim exposed to an analyst or an agent must
+resolve to the exact supporting `EntityLocationObservation` and ultimately
+to the exact Evidence/source that justified it. The evaluator checks:
 
-A geographic summary must not become support merely because a Location exists in canonical reference data.
+- every persisted observation closes to scenario Evidence in the same
+  Investigation;
+- every structured geographic finding cites only exact supplied
+  observation/Evidence pairs (unknown, substituted, and omitted-context
+  references are hard failures);
+- a persisted GEOLOCATION Finding must close to an observed Evidence; a
+  canonical Location alone (or Evidence without a persisted observation)
+  is never analytical support.
+
+A geographic summary must not become support merely because a Location
+exists in canonical reference data.
 
 ### Epistemic hard gates
 
-Evaluation scenarios explicitly forbid unsupported promotion of geographic context.
-
-The following facts alone are insufficient for cyber/threat conclusions:
+The evaluator enforces the closed descriptive finding vocabulary and the
+independent-support gate, and scenario-declared forbidden inferences
+(coordination, ownership, campaign, targeting, attribution, travel, route,
+maliciousness) map onto structural predicates: geography-only positive
+verdicts and non-GEOLOCATION findings materially supported by geographic
+Evidence are hard failures. The following facts alone are therefore
+insufficient for cyber/threat conclusions:
 
 - same country;
 - same administrative area;
@@ -884,47 +930,81 @@ The following facts alone are insufficient for cyber/threat conclusions:
 - containment in the same region;
 - temporal overlap of geographic observations.
 
-Without independent supporting Evidence these facts must not become claims of:
+Without independent supporting Evidence these facts must not become claims
+of maliciousness, cyber relationship, common ownership/operator, campaign
+association, coordination, targeting, or attribution.
 
-- maliciousness;
-- cyber relationship;
-- common ownership/operator;
-- campaign association;
-- coordination;
-- targeting;
-- attribution.
+### Delivered tool/context policy evaluation
 
-### Required scenario families
+PR 26F does not use provider-native tool calling. "Tool selection" means
+checking the deterministic `GeointAnalysisContextPolicy` /
+`GeointAnalysisTools` operations and results: bounded summary; only
+Entities already eligible in the analyst input; current/history only; one
+bounded history page; no unrelated Location fan-out; no automatic
+contained expansion; no proximity; no cursor exposure or draining; and
+explicit `summary_truncated` / `has_more_history`. The evaluator consumes
+an evaluation-only recording wrapper around the real query service and
+hard-fails on any disallowed operation, exceeded bound, cursor request, or
+unsurfaced truncation.
 
-PR 26G should include deterministic scenarios for:
+### Canonical scenario corpus (G26G-S01..S16)
 
-- country-only context retained without invented city precision;
-- city-level supported context;
-- one infrastructure Entity changing Location over time;
-- two unrelated entities sharing a Location;
-- two unrelated entities at the same coordinates;
-- ambiguous/unresolvable geographic input;
-- stale lease/retry recovery without duplicate geographic truth;
-- cross-Investigation isolation;
-- valid geographic pattern summary with exact support;
-- model attempt to overstate co-location/proximity, rejected by evaluation.
+The committed corpus covers:
+
+- country-only, administrative-only, and city precision retention
+  (S01-S03) with the model context never carrying representative
+  coordinates;
+- a changing Location with correct current/history and descriptive
+  `location_change_observed`, never movement (S04);
+- same-Location and same-coordinate unrelated Entities with no
+  Relationship and no cyber inference (S05, S06, S14);
+- coordinate-less valid geography retained and fully provenanced (S07);
+- ambiguous and unresolvable claims creating no geographic truth
+  (S08, S09);
+- retry-then-resolve, stale-lease, and crash recovery each producing
+  exactly one final truth (S10-S12);
+- cross-Investigation isolation with no leakage into state, context, or
+  agent output (S13);
+- a model overstatement of co-location rejected at runtime and hard-failed
+  by evaluation (S15);
+- independent non-geographic support plus descriptive GEOINT (S16).
 
 ### Agentic evaluation
 
-Agentic GEOINT evaluation should inspect structured outputs and tool use, not prose similarity.
-
-Measure/check:
+Agentic GEOINT evaluation inspects structured outputs and the recorded
+tool trace, never prose similarity. It checks:
 
 - allowed deterministic tool selection;
 - bounded tool invocation;
-- exact support references;
+- exact support references (observation -> Evidence -> Investigation);
 - provenance closure;
 - no arbitrary SQL/PostGIS;
 - no invented Location precision;
 - no unsupported geographic-to-threat inference;
-- termination/budget behavior where GEOINT tools participate in an Investigation.
+- validation outcome (accepted/rejected) matches the scenario envelope.
 
-PR 26G remains a repository-owned deterministic baseline and does not absorb PR 27's generic evaluator-platform/release-gate scope.
+Observation identity is checked at the structured-analysis-run boundary;
+the delivered Assessment schema stores Evidence support (not observation
+identities), and PR 26G never claims otherwise.
+
+### Metrics
+
+Only useful deterministic metrics are exposed:
+
+```text
+geographic_claim_count
+supported_geographic_claim_count
+unsupported_geographic_claim_count
+tool_call_count
+geoint_context_entity_count
+geoint_context_observation_count
+provenance_closure_rate
+observation_count
+resolution_count
+```
+
+Hard pass/fail remains primary; there is no weighted GEOINT quality score
+or leaderboard.
 
 ## Adversarial evaluations
 
