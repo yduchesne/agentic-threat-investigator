@@ -135,6 +135,11 @@ async def test_retrieve_embeds_before_session_and_maps_provenance() -> None:
     statement, params = execute.await_args.args
     sql = str(statement)
     assert "embedding <=> CAST(:query_embedding AS vector)" in sql
+    # Deterministic tie-break: distance is primary, the stable unique chunk
+    # identity is the secondary key for equal-distance rows.
+    assert (
+        "ORDER BY chunk.embedding <=> CAST(:query_embedding AS vector), chunk.id" in sql
+    )
     assert "source_id = ANY" in sql and "document_type = ANY" in sql
     assert params["max_results"] == 3
     assert params["source_ids"] == ["urn:test:source"]

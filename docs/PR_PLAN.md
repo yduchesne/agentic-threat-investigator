@@ -432,6 +432,54 @@ persistence; no release-threshold framework; no cost/latency/performance
 framework; no PR 27 evaluator-platform scope; no research runtime behavior
 change; no live source downloads or live LLM calls during evaluation.
 
+### PR 22D-2 — Deterministic research retrieval tie-breaking and single-retrieval citation selection [DONE]
+
+Corrective child of PR 22D (recorded separately rather than rewriting PR 22D
+history). PR #81 CI intermittently failed
+`test_i02b_s01_wrong_supplied_citation_fails_evaluation` with a runtime
+`ResearchAgentCitationError`: rag-s01's bounded retrieval (`max_results=3`)
+left three chunks tied at vector distance 1.0 across the `LIMIT` boundary,
+and PostgreSQL does not guarantee relative ordering among equal sort keys,
+so two otherwise identical executions could return different top-N sets. The
+test selected its deliberately wrong citation from an independent probe, and
+the production execution occasionally excluded that chunk before evaluation
+could reject it. Two defects were corrected together.
+
+**Delivered:**
+
+- **Deterministic production ordering:** `PgVectorResearchRetriever` keeps
+  vector distance as the primary ranking key and adds the stable unique
+  chunk identity (`chunk.id`) as the secondary key, giving every filtered
+  bounded retrieval a total deterministic order. Zero migration, schema,
+  stored-function, embedding, distance-metric, citation-validation,
+  evaluator, or Research Agent behavior change;
+- **Intentional-tie regression coverage:** a dedicated STIX fixture
+  (`tests/fixtures/mitre_attack/enterprise_attack_tie_small.json`) renders
+  three byte-identical technique documents whose chunks share one embedding
+  vector, plus distinct-distance and document-type-filter targets;
+  `tests/integration/test_research_retrieval_determinism.py` (RDET-01..05)
+  pins distinct-distance ranking, equal-distance stable ordering, a tie
+  crossing the `LIMIT` boundary with deterministic top-N membership,
+  repeated-retrieval identity, and filtered-set determinism through the
+  production parser/builder/indexing/pgvector path. The slices fail against
+  the pre-fix ordering;
+- **Single-retrieval citation selection:** `FakeLlmClient` gains a
+  test-support response factory (`set_response_factory`) consulted after the
+  FIFO outcome queue; the affected evaluation slice and its siblings derive
+  scripted citations from the exact chunks the executed Research Agent
+  supplied (observed by the `RecordingResearchRetriever`), so the
+  supplied-but-scenario-wrong citation is structurally valid by construction
+  while the genuinely unsupplied-citation failure path (rag-s05,
+  `test_s05_unsupported_citation_safe_failure`) is preserved;
+- **Documentation:** `TESTING.md` documents the bounded-retrieval
+  determinism contract and the rule that a claimed supplied citation must be
+  derived from the exact model execution's retrieval, never from an
+  independent probe.
+
+No PR 27 datasource-series (PR #81) or evaluation/release-hardening roadmap
+scope was touched; no retry/sleep/randomization or `max_results` change was
+introduced.
+
 ### PR 22E — RelationshipObservation history semantics [DONE]
 
 Corrects persistence semantics so `RelationshipObservation` is the historical

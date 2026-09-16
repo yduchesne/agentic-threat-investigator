@@ -1,0 +1,104 @@
+{
+ "type": "bundle",
+ "id": "bundle--1e6f6a4c-7f3b-4d5e-9a2c-002233445566",
+ "spec_version": "2.1",
+ "objects": [
+  {
+   "type": "identity",
+   "id": "identity--0f4e2a9b-8c5d-4e1f-a6b3-556677889900",
+   "name": "ATI Fixture",
+   "identity_class": "organization"
+  },
+  {
+   "type": "marking-definition",
+   "id": "marking-definition--1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+   "definition_type": "statement",
+   "definition": {
+    "statement": "Synthetic fixture content"
+   }
+  },
+  {
+   "type": "attack-pattern",
+   "id": "attack-pattern--1a2b3c4d-1001-4001-8001-000000000001",
+   "created": "2020-01-01T00:00:00.000Z",
+   "modified": "2023-05-01T00:00:00.000Z",
+   "name": "Tied Fixture Utility",
+   "description": "A synthetic software tool credential access fixture text.",
+   "x_mitre_attack_id": "T1501",
+   "x_mitre_platforms": ["Linux"],
+   "x_mitre_is_subtechnique": false,
+   "revoked": false,
+   "x_mitre_deprecated": false
+  },
+  {
+   "type": "attack-pattern",
+   "id": "attack-pattern--1a2b3c4d-1001-4001-8001-000000000002",
+   "created": "2020-01-01T00:00:00.000Z",
+   "modified": "2023-05-01T00:00:00.000Z",
+   "name": "Tied Fixture Utility",
+   "description": "A synthetic software tool credential access fixture text.",
+   "x_mitre_attack_id": "T1501",
+   "x_mitre_platforms": ["Linux"],
+   "x_mitre_is_subtechnique": false,
+   "revoked": false,
+   "x_mitre_deprecated": false
+  },
+  {
+   "type": "attack-pattern",
+   "id": "attack-pattern--1a2b3c4d-1001-4001-8001-000000000003",
+   "created": "2020-01-01T00:00:00.000Z",
+   "modified": "2023-05-01T00:00:00.000Z",
+   "name": "Tied Fixture Utility",
+   "description": "A synthetic software tool credential access fixture text.",
+   "x_mitre_attack_id": "T1501",
+   "x_mitre_platforms": ["Linux"],
+   "x_mitre_is_subtechnique": false,
+   "revoked": false,
+   "x_mitre_deprecated": false
+  },
+  {
+   "type": "attack-pattern",
+   "id": "attack-pattern--1a2b3c4d-1001-4001-8001-000000000004",
+   "created": "2020-01-01T00:00:00.000Z",
+   "modified": "2023-05-01T00:00:00.000Z",
+   "name": "Obfuscation Fixture",
+   "description": "Operators obfuscate command-and-control traffic to conceal exfiltrated data.",
+   "kill_chain_phases": [
+    {
+     "kill_chain_name": "mitre-attack",
+     "phase_name": "command-and-control"
+    }
+   ],
+   "x_mitre_attack_id": "T1001",
+   "x_mitre_platforms": ["Linux", "Windows", "macOS"],
+   "x_mitre_is_subtechnique": false,
+   "revoked": false,
+   "x_mitre_deprecated": false
+  },
+  {
+   "type": "attack-pattern",
+   "id": "attack-pattern--1a2b3c4d-1001-4001-8001-000000000005",
+   "created": "2020-01-01T00:00:00.000Z",
+   "modified": "2023-05-01T00:00:00.000Z",
+   "name": "Partial Obfuscation",
+   "description": "Operators obfuscate command-and-control traffic.",
+   "x_mitre_attack_id": "T1002",
+   "x_mitre_platforms": ["Linux", "Windows", "macOS"],
+   "x_mitre_is_subtechnique": false,
+   "revoked": false,
+   "x_mitre_deprecated": false
+  },
+  {
+   "type": "tool",
+   "id": "tool--5e6f7a8b-9c0d-4e1f-2a3b-4c5d6e7f8a9c",
+   "created": "2022-03-10T00:00:00.000Z",
+   "modified": "2024-01-05T00:00:00.000Z",
+   "name": "Fixture Exfil Tool",
+   "description": "A synthetic exfiltration tool that transmits archives over DNS queries.",
+   "x_mitre_attack_id": "S2001",
+   "x_mitre_platforms": ["Linux"],
+   "revoked": false,
+   "x_mitre_deprecated": false
+  }
+ ]
+}
