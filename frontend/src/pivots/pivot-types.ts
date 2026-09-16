@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pivot domain model (PR 24D §1.2, §4, §5, §11).
+// Pivot domain model (PR 24D §1.2, §4, §5, §11; PR 26E §11).
 //
 // One pivot step is an explicit typed identity: an allowlisted target
 // resource, an exact resource-specific filter set (wire-form keys matching
@@ -21,6 +21,13 @@ export const PIVOT_RESOURCES = [
   "relationships",
   "relationship-observations",
   "research",
+  // PR 26E: canonical GEOINT resources (§11). No generic
+  // arbitrary-parameter ``geoint`` target exists; each resource is an
+  // explicit scoped surface with exact stable-identity filters.
+  "geoint-entity",
+  "geoint-location-entities",
+  "geoint-location-observations",
+  "geoint-observation",
 ] as const;
 
 /** One allowlisted pivot target resource. */
@@ -40,6 +47,10 @@ export const PIVOT_SOURCE_KINDS = [
   "research_reference",
   "relationship_observation_reference",
   "map_entity",
+  // PR 26E: origins inside the canonical GEOINT workspace/map.
+  "geoint_entity",
+  "geoint_location",
+  "geoint_observation",
 ] as const;
 
 /** One bounded pivot source kind. */
@@ -84,12 +95,39 @@ export interface PivotResearchFilters {
   created_to?: string;
 }
 
+/** GEOINT Entity surface filters (current + pageable history). */
+export interface PivotGeointEntityFilters {
+  entity_id?: string;
+}
+
+/** GEOINT Location -> Entities surface filters. */
+export interface PivotGeointLocationEntitiesFilters {
+  location_id?: string;
+  /** Server-owned containment expansion; only ``true`` is serialized. */
+  include_contained?: boolean;
+}
+
+/** GEOINT Location -> observations surface filters. */
+export interface PivotGeointLocationObservationsFilters {
+  location_id?: string;
+  include_contained?: boolean;
+}
+
+/** GEOINT exact observation detail filters (stable identity only). */
+export interface PivotGeointObservationFilters {
+  observation_id?: string;
+}
+
 /** The typed filter set of one pivot step, correlated with its resource. */
 export type PivotFilterSet =
   | PivotEvidenceFilters
   | PivotRelationshipFilters
   | PivotObservationFilters
-  | PivotResearchFilters;
+  | PivotResearchFilters
+  | PivotGeointEntityFilters
+  | PivotGeointLocationEntitiesFilters
+  | PivotGeointLocationObservationsFilters
+  | PivotGeointObservationFilters;
 
 export interface PivotEvidenceStep {
   resource: "evidence";
@@ -128,12 +166,52 @@ export interface PivotResearchStep {
   cursor?: string;
 }
 
+export interface PivotGeointEntityStep {
+  resource: "geoint-entity";
+  filters: PivotGeointEntityFilters;
+  selectedId: string | null;
+  label: string;
+  sourceKind: PivotSourceKind;
+  cursor?: string;
+}
+
+export interface PivotGeointLocationEntitiesStep {
+  resource: "geoint-location-entities";
+  filters: PivotGeointLocationEntitiesFilters;
+  selectedId: string | null;
+  label: string;
+  sourceKind: PivotSourceKind;
+  cursor?: string;
+}
+
+export interface PivotGeointLocationObservationsStep {
+  resource: "geoint-location-observations";
+  filters: PivotGeointLocationObservationsFilters;
+  selectedId: string | null;
+  label: string;
+  sourceKind: PivotSourceKind;
+  cursor?: string;
+}
+
+export interface PivotGeointObservationStep {
+  resource: "geoint-observation";
+  filters: PivotGeointObservationFilters;
+  selectedId: string | null;
+  label: string;
+  sourceKind: PivotSourceKind;
+  cursor?: string;
+}
+
 /** One explicit typed pivot step (the authoritative stack element). */
 export type PivotStep =
   | PivotEvidenceStep
   | PivotRelationshipStep
   | PivotObservationStep
-  | PivotResearchStep;
+  | PivotResearchStep
+  | PivotGeointEntityStep
+  | PivotGeointLocationEntitiesStep
+  | PivotGeointLocationObservationsStep
+  | PivotGeointObservationStep;
 
 /** The bounded pivot stack. */
 export interface PivotState {
@@ -169,6 +247,10 @@ export const PIVOT_FILTER_KEYS: Readonly<Record<PivotResource, readonly string[]
     "counterparty_entity_id",
   ],
   research: ["subject_entity_id", "created_from", "created_to"],
+  "geoint-entity": ["entity_id"],
+  "geoint-location-entities": ["location_id", "include_contained"],
+  "geoint-location-observations": ["location_id", "include_contained"],
+  "geoint-observation": ["observation_id"],
 };
 
 /** The filter keys that must hold a canonical UUID value. */
@@ -181,6 +263,10 @@ export const PIVOT_UUID_FILTER_KEYS: Readonly<Record<PivotResource, readonly str
     "counterparty_entity_id",
   ],
   research: ["subject_entity_id"],
+  "geoint-entity": ["entity_id"],
+  "geoint-location-entities": ["location_id"],
+  "geoint-location-observations": ["location_id"],
+  "geoint-observation": ["observation_id"],
 };
 
 /** The filter keys that must hold a UTC ISO-8601 timestamp value. */
@@ -194,6 +280,22 @@ export const PIVOT_TIMESTAMP_FILTER_KEYS: Readonly<Record<PivotResource, readonl
     "retrieved_to",
   ],
   research: ["created_from", "created_to"],
+  "geoint-entity": [],
+  "geoint-location-entities": [],
+  "geoint-location-observations": [],
+  "geoint-observation": [],
+};
+
+/** The filter keys that must hold an exact boolean value. */
+export const PIVOT_BOOLEAN_FILTER_KEYS: Readonly<Record<PivotResource, readonly string[]>> = {
+  evidence: [],
+  relationships: [],
+  "relationship-observations": [],
+  research: [],
+  "geoint-entity": [],
+  "geoint-location-entities": ["include_contained"],
+  "geoint-location-observations": ["include_contained"],
+  "geoint-observation": [],
 };
 
 /** The neutral filter set of one resource (validated shape only). */
@@ -206,6 +308,14 @@ export function emptyPivotFilters(resource: PivotResource): PivotFilterSet {
     case "relationship-observations":
       return {};
     case "research":
+      return {};
+    case "geoint-entity":
+      return {};
+    case "geoint-location-entities":
+      return {};
+    case "geoint-location-observations":
+      return {};
+    case "geoint-observation":
       return {};
   }
 }
@@ -221,6 +331,10 @@ export function pivotFiltersKey(
   const parts: string[] = [];
   for (const key of PIVOT_FILTER_KEYS[resource]) {
     const value = (filters as Record<string, unknown>)[key];
+    if (value === true || value === false) {
+      parts.push(value ? "1" : "0");
+      continue;
+    }
     parts.push(value === undefined ? "" : String(value));
   }
   return parts.join("\u0000");

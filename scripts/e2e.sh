@@ -124,6 +124,13 @@ export E2E_BOOTSTRAP_PASSWORD="$BOOTSTRAP_PASSWORD"
 export ATI_E2E_SEEDING_ENABLED=1
 export ATI_DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 export E2E_SEED_SCRIPT="$PWD/scripts/e2e-seed-geolocation.sh"
+# PR 26E canonical GEOINT seeding + reference geography (GEOINT E2E): the
+# host-side seeder runs the production GeoResolution worker against the
+# throwaway E2E Postgres host port, and the reference geography is loaded
+# through the normal PR 26B-2 build/import work. Both helpers share the
+# harness environment; the browser never receives database URLs.
+export E2E_GEOINT_SEED_SCRIPT="$PWD/scripts/e2e-seed-geoint.sh"
+export E2E_GEOGRAPHY_IMPORT_SCRIPT="$PWD/scripts/e2e-geography-import.sh"
 # Required by the base bind-mount definition; the override replaces the
 # postgres volume with a throwaway named volume. The fake-data bootstrap
 # materializes its packaged datasets itself.
@@ -205,6 +212,9 @@ if [ "$bootstrap_code" != "0" ]; then
   exit 1
 fi
 echo "Fake-data bootstrap completed."
+
+echo "== Importing the canonical reference geography into the E2E database =="
+"$E2E_GEOGRAPHY_IMPORT_SCRIPT"
 
 echo "== Ensuring Playwright Chromium =="
 if [[ ! -d "${HOME}/.cache/ms-playwright/chromium-"* ]]; then

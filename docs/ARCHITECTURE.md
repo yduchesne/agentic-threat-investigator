@@ -1219,8 +1219,8 @@ PR 25C completes the Map as a bounded analyst exploration surface without turnin
 
 ## GEOINT architecture (PR 26)
 
-This section distinguishes **delivered PR 26A/26B/26C/26D** from the planned PR
-26E-G architecture.
+This section distinguishes **delivered PR 26A/26B/26C/26D/26E** from the planned PR
+26F-G architecture.
 
 PR 25 remains the delivered v0.1 geolocation presentation path:
 
@@ -1509,6 +1509,26 @@ The application query layer owns bounded geographic projections such as:
 - narrowly justified containment reads.
 
 The PR 24 typed pivot/workspace architecture remains the navigation model. PR 26 extends it with semantically valid geographic pivots rather than creating a parallel navigation system.
+
+### Analyst GEOINT workspace (PR 26E)
+
+PR 26E (delivered) adds the human analyst presentation/navigation layer over the PR 26D bounded GEOINT read boundary. It creates no second GEOINT backend, query stack, workspace system, or map truth model:
+
+```text
+PR 26D /api/v1/investigations/{I}/geoint/*  (sole canonical GEOINT read boundary)
+  -> TanStack Query server state (frontend)
+  -> GEOINT map/table presentations (bounded, neutral)
+  -> PR 24 typed URL-backed PivotWorkspace (geographic pivot steps)
+  -> existing Evidence detail/pivot surface (exact evidence_id)
+```
+
+- **First-class Investigation-scoped tab** (`/investigations/:id/geoint`): a persistent translated semantic disclaimer, the bounded PR 26D summary (exact observation/Entity/Location and type/precision counts, honest `truncated`), a neutral Leaflet map plotting only the currently loaded top Locations' representative coordinates, and an always-available non-map table with typed Explore actions.
+- **PR 25 remains distinct and unchanged.** The PR 25 Investigation Map is the separate Evidence-derived approximate geolocation projection; the PR 26E map renders PR 26D canonical representative coordinates. Neither replaces the other, and neither implies a cyber relationship from visual proximity.
+- **Current/history semantics.** Entity GEOINT shows "Current within this Investigation" (PR 26D Investigation-relative current, never the global `EntityLocation`) beside pageable immutable observation history. Observed/retrieved/resolved stay distinct; no movement path or ended/continuous inference is drawn, and current emphasis never implies historical observations were false.
+- **Containment is server-owned.** Location surfaces expose an Exact/Include-contained controller whose only effect is the `include_contained` boolean on the PR 26D request; `containment_applied` is rendered honestly (exact-only explanation when the server could not expand). No browser spatial calculation ever runs.
+- **Provenance.** Observation detail resolves through the exact `observation_id`; every Evidence action uses the exact returned `evidence_id` through the existing Evidence detail/pivot surface — no Evidence scanning, substitution, or History fallback. Provider is never fabricated: only the fixed `canonical_geography_v1` method is labelled; unknown identities render the raw bounded string.
+- **Typed pivots.** The existing PR 24 PivotWorkspace/capability registry/URL codec is extended with four explicit allowlisted resources (`geoint-entity`, `geoint-location-entities`, `geoint-location-observations`, `geoint-observation`) whose filters hold only stable IDs and the bounded containment boolean. Investigation immutability, max depth 5, one modal, active-step-only mounting, Back/Forward/refresh, Close restoration, and the 4096-byte URL cap are unchanged; no geometry, API payload, viewport, or marker state is ever serialized.
+- **Visual inference is forbidden.** No clustering, heat map, risk coloring, fabricated radius, movement path, or inferred route exists. Same-Location Entities stay individually inspectable with an explicit neutral note that shared geography is context only.
 
 ### Agentic GEOINT
 

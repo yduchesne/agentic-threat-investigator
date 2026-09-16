@@ -1687,7 +1687,7 @@ No migration rewrites authoritative data and no STOP condition was hit: containm
 was chosen because PR 26E concretely requires Location exploration and metric
 proximity was deliberately excluded (no reviewed metric contract exists).
 
-### PR 26E — Analyst GEOINT workspace
+### PR 26E — Analyst GEOINT workspace [DONE]
 
 Deliver:
 
@@ -1701,6 +1701,65 @@ Deliver:
 - bounded deterministic real-stack workflows.
 
 Visual proximity is never an analytical conclusion.
+
+Delivered (PR 26E implementation summary):
+
+- regenerated OpenAPI-derived frontend types covering all six PR 26D
+  operations with the API drift check green;
+- a typed GEOINT query layer (`frontend/src/geoint/`) reusing the
+  centralized API client and TanStack Query: summary, Entity
+  current/history, Location Entities/observations with the exact
+  `include_contained` boolean, and observation detail, keyed by
+  Investigation + every semantic identity/filter, with AbortSignal
+  threading and no polling;
+- a pure presentation model (`geoint-model.ts`): defensive WGS84
+  plottability, canonical display labels, precision/Location-type and
+  current/history semantics, bounded deterministic viewport derivation,
+  and mappable-vs-non-mappable classification;
+- a first-class Investigation-scoped GEOINT tab
+  (`/investigations/:id/geoint`) rendering the persistent translated
+  semantic disclaimer (shared/nearby locations never imply a cyber
+  relationship), the bounded PR 26D summary with honest `truncated`
+  handling, a neutral Leaflet map over only the currently loaded top
+  Locations' representative coordinates, and an always-available non-map
+  table with typed Explore actions;
+- route-independent Entity/Location/observation views: "Current in this
+  Investigation" (PR 26A ordering, never the global `EntityLocation`)
+  beside pageable immutable history, distinct observed/retrieved/resolved
+  timestamps, no movement path or ended/continuous inference, exact
+  Evidence provenance via the exact returned `evidence_id`, server-owned
+  containment with an honest `containment_applied` presentation, and the
+  same-Location neutrality disclaimer;
+- minimal typed pivot extension reusing the PR 24 PivotWorkspace/
+  capabilities/URL codec: four allowlisted resources (`geoint-entity`,
+  `geoint-location-entities`, `geoint-location-observations`,
+  `geoint-observation`) whose envelope carries only stable IDs and the
+  bounded containment boolean; Investigation immutability, depth 5, one
+  modal, active-step-only mounting, Back/Forward/refresh/Close, and old
+  PR 24/25 URL compatibility are preserved (no geometry/viewport/payload
+  in the URL);
+- English-first GEOINT i18n namespace and the pivots resource/action
+  additions;
+- unit/component/PivotWorkspace tests (G26E-Q/M/U/PV matrices, MSW
+  contract handlers, no-prefetch and one-modal proofs);
+- a harness-only deterministic E2E seeder (`tests/e2e_support/seed_geoint.py`)
+  plus `scripts/e2e-seed-geoint.sh`/`scripts/e2e-geography-import.sh`
+  wired into `scripts/e2e.sh`: browser-created Investigation -> normal
+  GEOLOCATION Evidence -> GeoResolution -> production worker with the
+  real PostGIS resolver -> canonical Location / EntityLocationObservation
+  -> PR 26D API -> browser (never a direct Location/Observation insert),
+  with reference geography loaded through the normal PR 26B-2
+  build/import work;
+- real-PostgreSQL + PostGIS integration proofs for the seeding path
+  (history/current, same-Location distinctness, exact-vs-contained,
+  non-mappable NULL coordinates, cross-Investigation isolation,
+  idempotent re-runs) and five deterministic Chromium E2E workflows plus
+  the GEOINT row -> Location -> Entity -> Evidence -> Back -> Close
+  stability regression;
+- documentation reconciliation (`ARCHITECTURE.md`, `TESTING.md`,
+  `FRONTEND.md`); no backend API/migration change was required (PR 26D
+  remains the sole canonical GEOINT read boundary; the PR 25 Map is
+  unchanged).
 
 ### PR 26F — Agentic GEOINT reasoning
 

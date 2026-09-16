@@ -2196,6 +2196,70 @@ fixture (`reset_application_data` truncates the GEOINT tables between
 tests); the API slices reuse `tests/integration/api_helpers.py` with a
 real seeded local analyst user.
 
+### Analyst GEOINT workspace (PR 26E)
+
+- **G26E-Q01..Q08** (`frontend/src/geoint/geoint-queries.test.tsx`): the
+  six PR 26D operations use the exact paths; the Entity query is keyed by
+  Investigation + Entity; the opaque history cursor is forwarded
+  unchanged; exact Location sends no `include_contained` while contained
+  sends `true`; the observation detail uses the exact scoped path;
+  AbortSignal flows through the centralized client; and no polling exists
+  (single fetch, typed `ApiError` on failure).
+- **G26E-M01..M08** (`frontend/src/geoint/geoint-model.test.ts`): a valid
+  centroid is plottable; null and malformed/out-of-range coordinates are
+  never plotted but remain table-visible; no clamping or (0,0) recovery;
+  Location-type and precision labels cover the exact PR 26D vocabulary;
+  current is Investigation-relative; history never encodes ended/
+  continuous inference; and same-coordinate items retain distinct stable
+  identities.
+- **G26E-U01..U28** (`frontend/src/geoint/GeointPage.test.tsx`,
+  `EntityGeointView.test.tsx`, `LocationViews.test.tsx`): empty state
+  renders no map; truncated summary is visible; top-Location typed Explore
+  works; the GEOINT tab is first-class and active; safe API error with
+  Retry; deterministic one-point/multi-point viewports; mixed
+  mappable/non-mappable sets; neutral markers; popup precision/provenance;
+  same-coordinate items individually actionable; no risk styling;
+  attribution present; current section says "Current in this
+  Investigation"; history follows server order; three timestamps stay
+  distinct; Evidence uses the exact returned id; opaque next-cursor;
+  no movement path; exact Location default; containment toggle triggers a
+  semantic filter change (resets cursor); `containment_applied` and
+  exact-only explanations are visible; the same-location disclaimer is
+  visible; coordinate-less rows stay actionable; observation detail shows
+  exact semantics; scoped 404 is safe; unknown resolution methods render
+  the raw bounded string (provider never fabricated).
+- **G26E-PV01..PV18** (`frontend/src/pivots/pivot-capabilities.test.ts`,
+  `pivot-url.test.ts`, `geoint-pivots.test.tsx`): Entity -> GEOINT,
+  GEOINT -> Location, Location -> Entities/observations, observation ->
+  exact Evidence, existing Entity exploration reuse, no generic `geoint`
+  target, one modal with active-step-only mounting, no API prefetch while
+  a menu is open, bounded breadcrumbs, old PR 24 URLs still decode, and
+  no geometry/response/viewport payload in the pivot envelope (containment
+  round-trips as the exact boolean only).
+- **G26E-S01..S06** (`tests/unit/infrastructure/test_e2e_geoint_seed.py`):
+  the harness-only seed scenarios are allowlisted and bounded, identity
+  derivation is deterministic, fixture facts use the exact PR 26C claim
+  vocabulary, cross-Investigation scoping and the other-Investigation
+  guard fail closed, and the E2E environment guard requires both fake
+  mode and `ATI_E2E_SEEDING_ENABLED`.
+- **G26E-P01..P06** (`tests/integration/test_e2e_geoint_seed.py`): the
+  real-stack seeding path (reference-geography build/import -> normal
+  GEOLOCATION Evidence -> GeoResolution -> production worker with the
+  real PostGIS resolver -> canonical Location / EntityLocationObservation)
+  proves Entity history current/order, same-Location distinctness,
+  exact-vs-contained expansion, non-mappable NULL coordinates, and
+  cross-Investigation isolation (I2 observation never visible to I1),
+  and a second seeding run is idempotent. No table is ever inserted
+  directly.
+- **G26E-E1..E6** (`frontend/e2e/zz-geoint.spec.ts`): deterministic
+  real-stack Chromium workflows (`geoint_entity_history`,
+  `geoint_same_location`, `geoint_containment`, `geoint_cross_investigation`,
+  `geoint_non_mappable`, and the GEOINT row -> Location -> Entity ->
+  Evidence -> Back -> Close stability regression) driven entirely through
+  the real PR 26 pipeline seeded by `scripts/e2e-seed-geoint.sh` against
+  reference geography imported by `scripts/e2e-geography-import.sh`; the
+  browser only observes clean console output.
+
 ### Asynchronous resolution
 
 Multi-worker integration tests cover:

@@ -381,3 +381,115 @@ function parseFromJson(steps: readonly PivotStep[]): ReturnType<typeof parsePivo
   const serialized = serializePivotState({ steps: [...steps] });
   return serialized === null ? null : parsePivotState(serialized);
 }
+// PR 26E pivot URL schema (PV09, PV15, PV14) --------------------------------
+
+describe("GEOINT pivot URL schema (PV09, PV14, PV15)", () => {
+  const ENTITY_ID = "40000000-0000-4000-8000-000000000101";
+  const LOCATION_ID = "40000000-0000-4000-8000-000000000201";
+  const OBSERVATION_ID = "40000000-0000-4000-8000-000000000301";
+
+  function geointEntityStep(): PivotStep {
+    return {
+      resource: "geoint-entity",
+      filters: { entity_id: ENTITY_ID },
+      selectedId: null,
+      label: "203.0.113.10",
+      sourceKind: "geoint_entity",
+    };
+  }
+
+  it("PV15: GEOINT entity steps round-trip with no response/geometry/viewport payload", () => {
+    const state: PivotState = { steps: [geointEntityStep()] };
+    const parsed = parsePivotState(serializePivotState(state)!);
+    expect(parsed).not.toBeNull();
+    const step = parsed!.steps[0];
+    expect(step.resource).toBe("geoint-entity");
+    expect(step.filters as Record<string, unknown>).toEqual({ entity_id: ENTITY_ID });
+    const envelope = JSON.parse(decodeBase64Url(serializePivotState(state)!)!);
+    expect(JSON.stringify(envelope)).not.toContain("latitude");
+    expect(JSON.stringify(envelope)).not.toContain("longitude");
+    expect(JSON.stringify(envelope)).not.toContain("viewport");
+    expect(JSON.stringify(envelope)).not.toContain("cursor-geometry");
+    expect(JSON.stringify(envelope)).not.toContain("canonical_name");
+  });
+
+  it("PV15b: containment round-trips as the exact boolean only", () => {
+    const state: PivotState = {
+      steps: [
+        {
+          resource: "geoint-location-entities",
+          filters: { location_id: LOCATION_ID, include_contained: true },
+          selectedId: null,
+          label: "Seattle",
+          sourceKind: "geoint_location",
+        },
+      ],
+    };
+    const serialized = serializePivotState(state);
+    expect(serialized).not.toBeNull();
+    const parsed = parsePivotState(serialized!);
+    const filters = parsed!.steps[0].filters as Record<string, unknown>;
+    expect(filters).toEqual({ location_id: LOCATION_ID, include_contained: true });
+  });
+
+  it("PV15c: malformed // non-boolean containment fails closed", () => {
+    const bad = [
+      {
+        r: "geoint-location-entities",
+        f: { location_id: LOCATION_ID, include_contained: "yes" },
+        s: null,
+        l: "Seattle",
+        k: "geoint_location",
+      },
+    ] as unknown as PivotStep[];
+    expect(parseFromJson(bad)).toBeNull();
+  });
+
+  it("PV14: existing PR 24 map_entity URLs continue to decode after the extension", () => {
+    const state: PivotState = {
+      steps: [
+        {
+          resource: "evidence",
+          filters: { subject_entity_id: ENTITY_ID },
+          selectedId: null,
+          label: "203.0.113.10",
+          sourceKind: "map_entity",
+        },
+      ],
+    };
+    const parsed = parsePivotState(serializePivotState(state)!);
+    expect(parsed?.steps).toHaveLength(1);
+    expect(parsed!.steps[0].sourceKind).toBe("map_entity");
+    expect(
+      (parsed!.steps[0] as unknown as { filters: Record<string, unknown> }).filters,
+    ).toEqual({ subject_entity_id: ENTITY_ID });
+  });
+
+  it("PV09: the fifth step is accepted and a sixth is refused for GEOINT steps", () => {
+    const steps: PivotStep[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      steps.push(geointEntityStep());
+    }
+    expect(parseFromJson(steps)).not.toBeNull();
+    expect(parseFromJson([...steps, geointEntityStep()])).toBeNull();
+  });
+
+  it("PV15d: the observation step carries only the stable identity", () => {
+    const state: PivotState = {
+      steps: [
+        {
+          resource: "geoint-observation",
+          filters: { observation_id: OBSERVATION_ID },
+          selectedId: null,
+          label: "203.0.113.10",
+          sourceKind: "geoint_observation",
+        },
+      ],
+    };
+    const parsed = parsePivotState(serializePivotState(state)!);
+    expect(parsed!.steps[0].resource).toBe("geoint-observation");
+    expect(
+      (parsed!.steps[0] as unknown as { filters: Record<string, unknown> }).filters,
+    ).toEqual({ observation_id: OBSERVATION_ID });
+  });
+});

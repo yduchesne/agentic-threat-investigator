@@ -29,6 +29,14 @@ export function pivotResourceLabelKey(resource: PivotResource): string {
       return "resources.relationshipObservations";
     case "research":
       return "resources.research";
+    case "geoint-entity":
+      return "resources.geointEntity";
+    case "geoint-location-entities":
+      return "resources.geointLocationEntities";
+    case "geoint-location-observations":
+      return "resources.geointLocationObservations";
+    case "geoint-observation":
+      return "resources.geointObservation";
   }
 }
 

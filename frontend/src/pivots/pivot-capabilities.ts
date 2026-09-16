@@ -12,11 +12,14 @@
 
 import type {
   Evidence,
+  GeointEntityLocation,
+  GeointObservation,
   Relationship,
   RelationshipObservation,
   ResearchResult,
 } from "../api/schema-types";
 import { shortUuid } from "../analyst-table/present";
+import { locationCanonicalLabel } from "../geoint/geoint-model";
 import {
   pivotFiltersEqual,
   type PivotFilterSet,
@@ -46,6 +49,10 @@ export const PIVOT_ACTION_KINDS = [
   "evidenceExact",
   "researchExact",
   "observationExact",
+  // PR 26E: canonical GEOINT surfaces (Step 11).
+  "geointEntity",
+  "geointLocationEntities",
+  "geointLocationObservations",
 ] as const;
 
 /** One stable pivot action identity. */
@@ -79,6 +86,10 @@ export function observationCompactLabel(observationId: string): string {
 
 export function researchCompactLabel(researchResultId: string): string {
   return `Research ${shortUuid(researchResultId)}`;
+}
+
+export function locationCompactLabel(locationId: string): string {
+  return `Location ${shortUuid(locationId)}`;
 }
 
 /**
@@ -292,6 +303,98 @@ export function observationSupportAction(
       label: observationCompactLabel(observationId),
     },
   };
+}
+
+// PR 26E GEOINT pivot capabilities (Step 11) ------------------------------
+
+/**
+ * Entity identity -> the canonical GEOINT current/history surface.
+ *
+ * The label is the persisted entity display value; the exact Entity ID is
+ * the pivot identity. Never derived from coordinates or Evidence payload.
+ */
+export function entityGeointAction(
+  entity: Pick<GeointEntityLocation, "entity_id" | "entity_value">,
+  sourceKind: PivotSourceKind,
+): PivotAction {
+  return {
+    key: "geointEntity",
+    labelKey: "actions.geointEntity",
+    sourceKind,
+    target: {
+      resource: "geoint-entity",
+      filters: { entity_id: entity.entity_id },
+      selectedId: null,
+      label: entity.entity_value,
+    },
+  };
+}
+
+/** Location identity -> the scoped Entities surface (exact default). */
+export function locationEntitiesAction(
+  locationId: string,
+  label: string,
+  sourceKind: PivotSourceKind,
+): PivotAction {
+  return {
+    key: "geointLocationEntities",
+    labelKey: "actions.geointLocationEntities",
+    sourceKind,
+    target: {
+      resource: "geoint-location-entities",
+      filters: { location_id: locationId },
+      selectedId: null,
+      label,
+    },
+  };
+}
+
+/** Location identity -> the scoped observations surface (exact default). */
+export function locationObservationsAction(
+  locationId: string,
+  label: string,
+  sourceKind: PivotSourceKind,
+): PivotAction {
+  return {
+    key: "geointLocationObservations",
+    labelKey: "actions.geointLocationObservations",
+    sourceKind,
+    target: {
+      resource: "geoint-location-observations",
+      filters: { location_id: locationId },
+      selectedId: null,
+      label,
+    },
+  };
+}
+
+/** The two Location exploration surfaces of one GEOINT observation. */
+export function geointObservationLocationActions(
+  observation: Pick<GeointObservation, "location">,
+  sourceKind: PivotSourceKind,
+): PivotAction[] {
+  const location = observation.location;
+  const label = locationCanonicalLabel(location) ?? locationCompactLabel(location.location_id);
+  return [
+    locationEntitiesAction(location.location_id, label, sourceKind),
+    locationObservationsAction(location.location_id, label, sourceKind),
+  ];
+}
+
+/** Entity identity -> existing valid Entity exploration (reused actions). */
+export function geointEntityActions(
+  entity: Pick<GeointEntityLocation, "entity_id" | "entity_value">,
+  sourceKind: PivotSourceKind,
+): PivotAction[] {
+  return entityActions(entity.entity_id, entity.entity_value, sourceKind);
+}
+
+/** One GEOINT observation -> the exact Evidence surface (no substitution). */
+export function geointObservationEvidenceAction(
+  observation: Pick<GeointObservation, "evidence_id">,
+  sourceKind: PivotSourceKind,
+): PivotAction[] {
+  return [evidenceSupportAction(observation.evidence_id, sourceKind)];
 }
 
 /**

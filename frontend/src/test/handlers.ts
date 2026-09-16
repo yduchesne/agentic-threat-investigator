@@ -16,9 +16,17 @@ import type {
   CreateInvestigationResult,
   Evidence,
   EvidenceTypeName,
+  GeointEntityLocation,
+  GeointLocation,
+  GeointObservation,
+  GeointObservationDetail,
+  GeointSummary,
+  GeointTopLocation,
   HistoryOperationName,
   HistoryRecord,
   Investigation,
+  LocationPrecisionName,
+  LocationTypeName,
   Relationship,
   RelationshipObservation,
   RelationshipTypeName,
@@ -682,3 +690,175 @@ export function buildHistoryRecord(overrides: Partial<HistoryRecord> = {}): Hist
     ...overrides,
   };
 }
+
+// PR 26E GEOINT fixtures + handlers ----------------------------------------
+
+/** One deterministic canonical Location reference. */
+export function buildGeointLocation(
+  ordinal: number,
+  overrides: Partial<GeointLocation> = {},
+): GeointLocation {
+  return {
+    location_id: uuidAt(200 + ordinal),
+    location_type: "city" as LocationTypeName,
+    canonical_name: `Seattle ${ordinal}`,
+    country_code: "US",
+    admin1_code: "WA",
+    admin2_code: null,
+    parent_location_id: null,
+    latitude: 47.6062 + ordinal * 0.01,
+    longitude: -122.3321,
+    ...overrides,
+  };
+}
+
+/** One deterministic immutable geographic observation. */
+export function buildGeointObservation(
+  ordinal: number,
+  overrides: Partial<GeointObservation> = {},
+): GeointObservation {
+  const location = buildGeointLocation(ordinal);
+  return {
+    observation_id: uuidAt(300 + ordinal),
+    entity_id: uuidAt(101 + ordinal),
+    location,
+    evidence_id: uuidAt(1 + ordinal),
+    precision: "city" as LocationPrecisionName,
+    resolution_method: "canonical_geography_v1",
+    observed_at: "2026-06-01T09:00:00Z",
+    retrieved_at: "2026-06-01T09:05:00Z",
+    resolved_at: "2026-06-01T09:06:00Z",
+    ...overrides,
+  };
+}
+
+/** One deterministic Entity-location item with Investigation-relative current. */
+export function buildGeointEntityLocation(
+  ordinal: number,
+  entityValue = `203.0.113.${ordinal}`,
+  overrides: Partial<GeointEntityLocation> = {},
+): GeointEntityLocation {
+  const observation = buildGeointObservation(ordinal, {
+    entity_id: uuidAt(101 + ordinal),
+  });
+  return {
+    entity_id: uuidAt(101 + ordinal),
+    entity_type: "ip_address",
+    entity_value: entityValue,
+    display_name: entityValue,
+    current_observation: observation,
+    ...overrides,
+  };
+}
+
+/** One deterministic bounded summary. */
+export function buildGeointSummary(
+  overrides: Partial<GeointSummary> = {},
+): GeointSummary {
+  const topLocations: GeointTopLocation[] = [];
+  for (let index = 1; index <= 2; index += 1) {
+    topLocations.push({
+      location: buildGeointLocation(index),
+      scoped_entity_count: index,
+    });
+  }
+  return {
+    entity_count_with_location: 2,
+    observation_count: 2,
+    location_count: 2,
+    country_count: 0,
+    administrative_area_count: 0,
+    city_count: 2,
+    precision_counts: { country: 0, administrative_area: 0, city: 2 },
+    top_locations: topLocations,
+    truncated: false,
+    ...overrides,
+  };
+}
+
+/** One deterministic observation detail. */
+export function buildGeointObservationDetail(
+  ordinal: number,
+  overrides: Partial<GeointObservationDetail> = {},
+): GeointObservationDetail {
+  const observation = buildGeointObservation(ordinal);
+  return {
+    observation,
+    entity_type: "ip_address",
+    entity_value: `203.0.113.${ordinal}`,
+    display_name: `203.0.113.${ordinal}`,
+    ...overrides,
+  };
+}
+
+/** A parameter-recording GEOINT list handler (opaque cursors). */
+export function geointPagedHandler<T>({
+  path,
+  pages,
+  recorder,
+  containment,
+  failCursor = false,
+}: {
+  path: string;
+  pages: T[][];
+  recorder: { requests: ResourceListRequestRecord[] };
+  containment?: boolean;
+  failCursor?: boolean;
+}) {
+  const cursors = ["", "cursor-1", "cursor-2"];
+  return http.get(path, ({ request }) => {
+    const url = new URL(request.url);
+    recorder.requests.push({
+      cursor: url.searchParams.get("cursor"),
+      limit: url.searchParams.get("limit"),
+      params: Object.fromEntries(url.searchParams.entries()),
+    });
+    const cursor = url.searchParams.get("cursor") ?? "";
+    const index = cursors.indexOf(cursor);
+    if (index < 0 || index >= pages.length) {
+      return failCursor
+        ? errorResponse(422, "invalid_cursor")
+        : errorResponse(422, "validation_error");
+    }
+    return jsonResponse({
+      items: pages[index],
+      next_cursor: index + 1 < pages.length ? cursors[index + 1] : null,
+      ...(containment !== undefined ? { containment_applied: containment } : {}),
+    } as JsonBodyType);
+  });
+}
+
+/** The summary handler. */
+export function geointSummaryHandler(body: GeointSummary) {
+  return http.get("*/api/v1/investigations/:id/geoint/summary", () =>
+    jsonResponse(body));
+}
+
+export const geointSummaryNetworkErrorHandler = http.get(
+  "*/api/v1/investigations/:id/geoint/summary",
+  () => HttpResponse.error(),
+);
+
+/** The Entity detail handler. */
+export function geointEntityHandler(body: GeointEntityLocation) {
+  return http.get("*/api/v1/investigations/:id/geoint/entities/:entityId", () =>
+    jsonResponse(body));
+}
+
+export const geointEntity404Handler = http.get(
+  "*/api/v1/investigations/:id/geoint/entities/:entityId",
+  () => errorResponse(404, "geoint_entity_not_found"),
+);
+
+/** The observation detail handler. */
+export function geointObservationDetailHandler(
+  body: GeointObservationDetail,
+) {
+  return http.get("*/api/v1/investigations/:id/geoint/observations/:observationId", () =>
+    jsonResponse(body));
+}
+
+export const geointObservation404Handler = http.get(
+  "*/api/v1/investigations/:id/geoint/observations/:observationId",
+  () => errorResponse(404, "geoint_observation_not_found"),
+);
