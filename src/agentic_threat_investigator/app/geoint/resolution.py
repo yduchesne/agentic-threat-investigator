@@ -159,3 +159,39 @@ class CanonicalGeographyResolver(ABC):
         This method never mutates Entities, Relationships, Evidence,
         GeoResolution, or any persisted state.
         """
+
+
+class LocationResolver(ABC):
+    """Async geographic-resolution application seam (PR 26C).
+
+    The worker depends on this narrow seam; production composition binds the
+    deterministic :class:`CanonicalGeographyResolver` behind it. The seam
+    owns no persistence, no leases/attempts/retries, no observation or
+    current-state creation, and no commits: it answers one bounded claim
+    with one canonical outcome. Malformed claims raise
+    :class:`InvalidGeographicClaimError`.
+    """
+
+    @abstractmethod
+    async def resolve(self, claim: GeographicClaim) -> CanonicalLocationResolution:
+        """Resolve one bounded claim to its canonical outcome.
+
+        Must be callable without any database transaction or UnitOfWork
+        open on the caller's side and must never mutate persisted state.
+        """
+
+
+class CanonicalLocationResolver(LocationResolver):
+    """Production :class:`LocationResolver` delegating to a canonical resolver.
+
+    A thin composition adapter: canonical matching remains owned by the PR
+    26B primitive, and PR 26C never duplicates the narrowing contract.
+    """
+
+    def __init__(self, canonical: CanonicalGeographyResolver) -> None:
+        """Bind the deterministic canonical geography primitive."""
+        self._canonical = canonical
+
+    async def resolve(self, claim: GeographicClaim) -> CanonicalLocationResolution:
+        """Delegate the bounded claim to the canonical geography resolver."""
+        return await self._canonical.resolve(claim)

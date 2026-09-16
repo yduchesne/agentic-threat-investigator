@@ -113,3 +113,29 @@ def test_map_geolocation_bound_default_and_validation() -> None:
         settings_from_config({"api_max_map_geolocation_items": "many"})
     with pytest.raises(ValidationError):
         settings_from_config({"api_max_map_geolocation_items": True})
+
+
+def test_geo_resolver_bounds_default_and_validation() -> None:
+    """PR 26C resolver settings default safely and reject bad values."""
+    settings = settings_from_config({})
+    assert settings.geo_resolver_enabled is True
+    assert settings.geo_resolver_batch_size == 10
+    assert settings.geo_resolver_lease_seconds == 300
+    assert settings.geo_resolver_max_attempts == 3
+    assert settings.geo_resolver_retry_base_seconds == 60.0
+    assert settings.geo_resolver_retry_max_seconds == 3600.0
+    with pytest.raises(ValidationError, match="retry_max_seconds"):
+        settings_from_config(
+            {
+                "geo_resolver_retry_base_seconds": 120.0,
+                "geo_resolver_retry_max_seconds": 60.0,
+            }
+        )
+    with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_batch_size": 0})
+    with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_lease_seconds": True})
+    with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_max_attempts": 0})
+    with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_poll_interval_seconds": -1})

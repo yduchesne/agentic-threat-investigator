@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Narrow CLI entrypoints (PR 23D, extended PR 26B/26B-2).
+"""Narrow CLI entrypoints (PR 23D, extended PR 26B/26B-2/26C).
 
 Explicit, repository-owned entrypoints follow the current bootstrap
 convention (plain modules invoked by deployment; no general-purpose CLI
@@ -9,7 +9,9 @@ framework):
 - ``ati-worker``: the durable investigation job worker loop;
 - ``ati-geography-import``: canonical reference geography corpus import;
 - ``ati-geography-build``: deterministic ATI Geography Corpus derivation
-  from the documented GeoNames/Natural Earth local source artifacts.
+  from the documented GeoNames/Natural Earth local source artifacts;
+- ``ati-geo-resolver``: the bounded asynchronous geographic-resolution
+  worker loop (PR 26C).
 
 All load the cached typed settings once and never read environment
 variables themselves, and none ever download upstream data. The worker
@@ -23,8 +25,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 from collections.abc import Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.ext.asyncio import (
@@ -44,6 +47,11 @@ from agentic_threat_investigator.app.evidence_analyst.accounting import (
 from agentic_threat_investigator.app.evidence_analyst.analyst import EvidenceAnalyst
 from agentic_threat_investigator.app.evidence_analyst.loader import (
     EvidenceAnalystInputLoader,
+)
+from agentic_threat_investigator.app.geoint.resolution import LocationResolver
+from agentic_threat_investigator.app.geoint.worker import (
+    GeoResolutionWorker,
+    GeoResolutionWorkerConfig,
 )
 from agentic_threat_investigator.app.investigation_worker import (
     InvestigationJobWorker,
@@ -65,6 +73,10 @@ from agentic_threat_investigator.config.settings import (
     OperatingMode,
     Settings,
 )
+from agentic_threat_investigator.domain.geoint import (
+    CanonicalLocationResolution,
+    GeographicClaim,
+)
 from agentic_threat_investigator.infrastructure.embeddings import (
     HashingEmbeddingClient,
     build_openai_embedding_client,
@@ -81,6 +93,9 @@ from agentic_threat_investigator.infrastructure.llm.deterministic import (
 )
 from agentic_threat_investigator.infrastructure.llm.langchain_client import (
     LangChainLlmClient,
+)
+from agentic_threat_investigator.infrastructure.persistence.postgresql.canonical_geography_resolver import (
+    PostgresCanonicalGeographyResolver,
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.composites import (
     register_batch_composites,
@@ -584,6 +599,99 @@ def worker_main(argv: list[str] | None = None) -> int:
                 )
         except KeyboardInterrupt:
             LOGGER.info("worker interrupted")
+            return 0
+        finally:
+            await engine.dispose()
+        return 0
+
+    return asyncio.run(run())
+
+
+class _SessionBoundLocationResolver(LocationResolver):
+    """Production :class:`LocationResolver` with one short read session per call.
+
+    Each resolve opens a fresh SQLAlchemy session (the canonical geography
+    resolver's own bounded read boundary) and closes it on return, so the
+    worker never holds a work transaction or row lock while resolving.
+    """
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        """Bind the read-session factory."""
+        self._session_factory = session_factory
+
+    async def resolve(self, claim: GeographicClaim) -> CanonicalLocationResolution:
+        """Resolve one bounded claim through the PR 26B canonical resolver."""
+        async with self._session_factory() as session:
+            return await PostgresCanonicalGeographyResolver(session).resolve(claim)
+
+
+def _compose_geo_worker(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> GeoResolutionWorker:
+    """Compose the production Geo Resolution worker (PR 26C)."""
+    worker_id = settings.geo_resolver_worker_id or (
+        f"geo-resolver-{os.getpid()}-{uuid4().hex[:8]}"
+    )
+    config = GeoResolutionWorkerConfig(
+        enabled=settings.geo_resolver_enabled,
+        worker_id=worker_id,
+        batch_size=settings.geo_resolver_batch_size,
+        lease_seconds=settings.geo_resolver_lease_seconds,
+        poll_interval_seconds=settings.geo_resolver_poll_interval_seconds,
+        max_attempts=settings.geo_resolver_max_attempts,
+        retry_base_seconds=settings.geo_resolver_retry_base_seconds,
+        retry_max_seconds=settings.geo_resolver_retry_max_seconds,
+    )
+    return GeoResolutionWorker(
+        uow_factory=uow_factory,
+        resolver=_SessionBoundLocationResolver(session_factory),
+        config=config,
+    )
+
+
+def geo_resolver_main(argv: list[str] | None = None) -> int:
+    """Run the bounded async geographic-resolution worker loop (PR 26C).
+
+    ``--once`` runs a single claim/resolve/complete iteration and exits,
+    which tests exercise instead of the endless daemon. The durable loop
+    claims bounded work in short committed transactions, resolves outside
+    any database transaction, persists outcomes through the versioned SQL
+    API v0024, and sleeps the configured poll interval when no work is due.
+    Cancellation (``KeyboardInterrupt``/``CancelledError``) exits cleanly:
+    committed leases recover by expiry.
+    """
+    parser = argparse.ArgumentParser(prog="ati-geo-resolver")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="run a single claim/resolve/complete iteration and exit",
+    )
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO)
+    settings = get_settings()
+    _log_operating_mode(settings)
+    if not settings.geo_resolver_enabled:
+        LOGGER.info("geo resolver disabled by configuration; exiting")
+        return 0
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    worker = _compose_geo_worker(settings, factory, uow_factory)
+
+    async def run() -> int:
+        try:
+            while True:
+                processed = await worker.run_once()
+                if processed == 0:
+                    if args.once:
+                        return 0
+                    await asyncio.sleep(
+                        max(0.0, settings.geo_resolver_poll_interval_seconds)
+                    )
+        except KeyboardInterrupt:
+            LOGGER.info("geo resolver interrupted")
             return 0
         finally:
             await engine.dispose()

@@ -52,6 +52,11 @@ _PRECISION_VOCABULARY = ("country", "administrative_area", "city")
 # identity, so it is an immutable contract.
 ATI_LOCATION_NAMESPACE = UUID("d94572fc-fb6d-4626-ba99-b760fee02afd")
 
+# Fixed namespace for deterministic resolution-produced observation identity
+# (PR 26C). Generated once at authoring time; changing it would change every
+# persisted observation identity, so it is an immutable contract.
+ATI_OBSERVATION_NAMESPACE = UUID("8f61470b-3e21-4624-9c0f-24c285acba6c")
+
 
 class LocationType(str, Enum):
     """Classification of a canonical geographic reference object.
@@ -293,6 +298,20 @@ class EntityLocation(BaseModel):
         if self.first_observed_at > self.last_observed_at:
             raise ValueError("first_observed_at must not be after last_observed_at")
         return self
+
+
+def observation_uuid_for_resolution(resolution_id: UUID) -> UUID:
+    """Return the deterministic observation identity for one successful work item.
+
+    PR 26C resolution-produced ``EntityLocationObservation`` identities are
+    UUIDv5 of the stable successful-work identity (``GeoResolution.id``)
+    under the fixed :data:`ATI_OBSERVATION_NAMESPACE`. The identity therefore
+    never changes across an uncertain-commit replay: the exact same
+    successful completion always resolves to the same observation UUID, so
+    replay can never duplicate an observation or fabricate a fresh random
+    identity.
+    """
+    return uuid5(ATI_OBSERVATION_NAMESPACE, str(resolution_id))
 
 
 class GeoResolution(BaseModel):

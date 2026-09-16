@@ -158,7 +158,7 @@ Updates are permitted with auditing where material:
 - Finding workflow metadata.
 - User/session state.
 - Job state.
-- GeoResolution lifecycle (PR 26C); PR 26A persists initial PENDING rows and reads only.
+- GeoResolution lifecycle (PR 26C); PR 26A persists initial PENDING rows and PR 26C delivers the full asynchronous lifecycle (SQL API v0024).
 
 `EntityLocation` current materialized state is updated exclusively by the
 versioned stored-function reconciliation inside
@@ -611,7 +611,7 @@ Any adapter that persists a `SourceRecord` must recompute `source_record_content
 
 Alembic orchestrates schema migrations.
 
-Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions; SQL API v0022 (`migrations/sql/ati/v0022/geoint_persistence.sql`, migration 0026, PR 26A-2) redefines only `ati.append_entity_location_observation` to allocate EntityLocation versions from `ati.entity_location_version_seq` on every actual current-state mutation. SQL API v0023 (`migrations/sql/ati/v0023/geoint_reference_spatial.sql`, migration 0027, PR 26B) adds the canonical reference/spatial write path `ati.upsert_reference_location` and the PostGIS extension; it only adds objects and never edits v0021/v0022. The shipped files are never edited in place.
+Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions; SQL API v0022 (`migrations/sql/ati/v0022/geoint_persistence.sql`, migration 0026, PR 26A-2) redefines only `ati.append_entity_location_observation` to allocate EntityLocation versions from `ati.entity_location_version_seq` on every actual current-state mutation. SQL API v0023 (`migrations/sql/ati/v0023/geoint_reference_spatial.sql`, migration 0027, PR 26B) adds the canonical reference/spatial write path `ati.upsert_reference_location` and the PostGIS extension; it only adds objects and never edits v0021/v0022. SQL API v0024 (`migrations/sql/ati/v0024/geo_resolution_lifecycle.sql`, migration 0028, PR 26C) adds the asynchronous work lifecycle on the same `ati.geo_resolution` table (`ati.claim_geo_resolutions`, `ati.complete_geo_resolution_resolved`, `ati.complete_geo_resolution_unresolvable`, `ati.record_geo_resolution_failure`) plus the claim-support indexes and lifecycle CHECK constraints; it only adds objects and never edits v0021-v0023. The shipped files are never edited in place.
 
 Rules:
 
@@ -787,7 +787,7 @@ consumed internally), and an older observation that extends
 when Location, precision, latest observation, and `last_observed_at` remain
 unchanged.
 
-### GeoResolution (delivered: initial persistence only)
+### GeoResolution (delivered: PR 26A initial persistence + PR 26C lifecycle)
 
 `ati.geo_resolution` is the durable operational work record and conceptual
 queue for geographic enrichment. It is distinct from Evidence and from
@@ -799,41 +799,148 @@ constraint makes creation race-safe, and an exact duplicate pair reuses the
 existing record unchanged only while it still has the initial pending shape
 (`U26A8` otherwise). `next_attempt_at` may be null in 26A.
 
-The detailed PR 26C plan must finalize the exact lifecycle, retry
-eligibility, lease semantics, stale-claim recovery, error vocabulary, and
-version rules. PR 26A deliberately adds no claim/lease/retry/completion
-function and no second queue table.
+PR 26C (SQL API v0024, migration 0028) delivers the asynchronous work
+lifecycle on this same row; there is no second queue table and no broker.
+
+#### State machine
+
+```text
+PENDING
+  -> PROCESSING on eligible claim
+PROCESSING
+  -> RESOLVED            (atomic successful completion)
+  -> UNRESOLVABLE        (deterministic no-match/ambiguity, never guessed)
+  -> PENDING             (retryable failure with attempts remaining)
+  -> FAILED              (terminal error or attempt budget exhausted)
+  -> PENDING (next attempt, same N) on retry
+  -> PROCESSING (next claim, N+1) from an expired lease
+  -> FAILED              (expired lease already at the attempt budget)
+```
+
+Terminal: RESOLVED, UNRESOLVABLE, FAILED. Terminal rows are never claimed.
+Canonical AMBIGUOUS is treated as UNRESOLVABLE in v0.1 with the stable code
+`ambiguous_location`; it is never automatically retried and never guessed.
+
+#### Claim eligibility and ordering
+
+`ati.claim_geo_resolutions(p_claimed_by, p_claim_limit, p_lease_seconds,
+p_max_attempts)` selects in ONE bounded stored-function transaction:
+
+```text
+PENDING and (next_attempt_at IS NULL or <= DB now)
+OR
+PROCESSING with expired lease (lease_expires_at <= now)
+```
+
+Terminal rows, future-scheduled PENDING rows, and unexpired PROCESSING rows
+are never claimed. Rows are locked with bounded `FOR UPDATE SKIP LOCKED` and
+ordered deterministically by eligibility time ASC (for PENDING,
+`COALESCE(next_attempt_at, created_at)`; for PROCESSING, `lease_expires_at`),
+then `created_at` ASC, then `id` ASC. Two claim-support partial indexes make
+both predicates AND the ordering index-eligible (proven with EXPLAIN in
+G26C-P39): `geo_resolution_pending_claim_idx (next_attempt_at, created_at,
+id) WHERE status = 'pending'` and `geo_resolution_processing_claim_idx
+(lease_expires_at, created_at, id) WHERE status = 'processing'`.
+
+#### Attempts and leases
+
+`attempt_count` counts started processing attempts: a new PENDING row is 0,
+the first claim makes it 1, a retry transition retains N, and the next claim
+(from either a fresh retry schedule or an expired-lease reclaim) makes it
+N+1. Attempt `max_attempts + 1` is never started: expired PROCESSING work
+already at the budget becomes FAILED (`attempts_exhausted`) instead of being
+reclaimed. PROCESSING requires a non-null claimant and lease expiry; leaving
+PROCESSING always clears the lease fields. DB time (`now()`) is authoritative
+for eligibility and expiry; the lease duration is bounded configuration.
+Repeated claims allocate fresh `ati.geo_resolution_version_seq` versions
+(every lifecycle mutation is a database-issued version, never
+application `version + 1`).
+
+#### Retry policy
+
+Retryable failures with budget remaining return the row to PENDING with the
+deterministic bounded exponential backoff `base * 2^(attempt_count - 1)`
+capped at the configured maximum and **no jitter**; the failed attempt's
+number drives the delay. At exhaustion, or for a non-retryable condition the
+row becomes FAILED with no next attempt. Malformed Evidence, provenance
+violations, and deterministic ambiguity/no-match are never transient.
+`last_error_code` is always a bounded lowercase machine code; raw exception
+text is never persisted.
+
+#### Stale-worker protection and lock ordering
+
+Every completion/failure request supplies `(resolution_id, expected_version,
+claimed_by)`; the stored functions lock the row (`SELECT ... FOR UPDATE`) and
+verify PROCESSING status, matching version, matching claimant, and a live
+lease before any mutation, so a stale worker whose lease expired and whose
+row was reclaimed can never create an observation or overwrite the newer
+owner (G26C-P17/P18). The deterministic lock order is the work row only; the
+versioned append function it composes touches the observation/current-state
+rows in the same order as PR 26A, so multi-worker contention stays
+deadlock-free under bounded batches.
+
+#### Atomic successful completion
+
+`ati.complete_geo_resolution_resolved(...)` is ONE atomic stored function: it
+validates status/version/claimant/live lease and the exact Entity/Evidence/
+Location provenance (reusing the `U26A1`-`U26A5`/`U26A2` semantics), appends
+exactly one immutable `EntityLocationObservation` (reusing SQL API v0022's
+append + EntityLocation reconciliation), records the resolved Location,
+clears lease/retry/error state, and allocates a fresh DB version. The
+observation identity is deterministic (UUIDv5 of the `GeoResolution.id` under
+the fixed ATI observation namespace; `observation_uuid_for_resolution` in the
+domain), so an uncertain-commit replay of the exact same successful
+completion is an idempotent no-op that can never duplicate an observation; a
+terminal replay that disagrees with the settled outcome (for example the same
+work resolved to a different Location) is a typed conflict with no mutation
+(`U26C7`).
 
 ### PR 26 stored-function ownership
 
-All PR 26A GEOINT mutations and current-state reconciliation go through the
-versioned SQL API stored functions (`ati.upsert_location`,
-`ati.append_entity_location_observation`, `ati.create_geo_resolution`). SQL
-API v0021 (migration 0025) shipped the PR 26A functions; SQL API v0022
-(migration 0026, PR 26A-2) redefines `ati.append_entity_location_observation`
-so `EntityLocation` versions are always allocated from
-`ati.entity_location_version_seq` — never derived arithmetically from the
-current row — while `ati.upsert_location` and `ati.create_geo_resolution`
-remain v0021. Python repositories are thin callers and never issue ad-hoc
-GEOINT DML.
+All PR 26A/26B GEOINT mutations and current-state reconciliation go through
+the versioned SQL API stored functions (`ati.upsert_location`,
+`ati.append_entity_location_observation`, `ati.create_geo_resolution`, and
+the PR 26B `ati.upsert_reference_location`). SQL API v0021 (migration 0025)
+shipped the PR 26A functions; SQL API v0022 (migration 0026, PR 26A-2)
+redefines `ati.append_entity_location_observation` so `EntityLocation`
+versions are always allocated from `ati.entity_location_version_seq` — never
+derived arithmetically from the current row — while `ati.upsert_location`
+and `ati.create_geo_resolution` remain v0021. SQL API v0024 (migration 0028,
+PR 26C) installs the four lifecycle functions
+(`ati.claim_geo_resolutions`, `ati.complete_geo_resolution_resolved`,
+`ati.complete_geo_resolution_unresolvable`, `ati.record_geo_resolution_failure`)
+on the same table. Python repositories are thin callers and never issue
+ad-hoc GEOINT DML.
 
 Bounded read/query services may use direct SQL in the same manner as ATI's
 existing dedicated query services; PostGIS-capable spatial projections are
 PR 26B+ scope.
 
-### Work claiming and deadlock/lock-duration rule (PR 26C)
+### Work claiming and deadlock/lock-duration rule (PR 26C, delivered)
 
-Claiming may use `FOR UPDATE SKIP LOCKED` internally, but only in a short
+Claiming uses `FOR UPDATE SKIP LOCKED` internally, but only in a short
 transaction:
 
 ```text
-claim rows -> persist lease/ownership -> commit
+claim rows -> persist lease/ownership/attempt -> commit
 ```
 
 No row lock or transaction is retained while geographic resolution executes.
 Completion occurs in a separate short transaction. Contended records are
-processed in deterministic ordering. Leases---not long-lived database
-locks---coordinate workers. None of this exists in PR 26A.
+processed in deterministic ordering documented above. Leases---not long-lived
+database locks---coordinate workers, and expired leases recover deterministically
+(a stale worker is rejected by version/claimant/lease validation; its committed
+claim simply lapses). 
+
+PR 26C lifecycle SQLSTATE mapping (SQL API v0024):
+
+```text
+U26A1..U26A6, U26A9  provenance/input codes reused from PR 26A
+U26C1 geo resolution not found       U26C5 geo resolution lease expired
+U26C2 invalid transition             U26C6 invalid retry/exhaustion (defensive)
+U26C3 stale version                  U26C7 terminal replay conflict
+U26C4 claim owner mismatch
+```
 
 ### Spatial indexing (PR 26B+)
 

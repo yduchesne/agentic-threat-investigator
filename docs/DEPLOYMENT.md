@@ -11,7 +11,7 @@
 - [Database migrations](#database-migrations)
 - [Backend image](#backend-image)
 - [API and worker](#api-and-worker)
-- [Geographic resolver (planned PR 26C)](#geographic-resolver-planned-pr-26c)
+- [Geographic resolver (PR 26C)](#geographic-resolver-pr-26c)
 - [Scheduler](#scheduler)
 - [Frontend development](#frontend-development)
 - [Configuration](#configuration)
@@ -43,7 +43,7 @@ Host
  |    +-- ati-frontend
  |    +-- ati-api
  |    +-- ati-worker
- |    +-- ati-geo-resolver        # planned PR 26C
+ |    +-- ati-geo-resolver        # PR 26C
  |    +-- ati-migrate (one-shot)
  |    +-- ati-fake-data-bootstrap # fake mode, one-shot
  |    +-- ati-postgres            # project PostgreSQL 18 + pgvector + PostGIS
@@ -232,7 +232,7 @@ One backend image is reused with different commands for:
 - API;
 - worker;
 - migrations;
-- geographic resolver (planned PR 26C).
+- geographic resolver (PR 26C).
 
 A future v0.2 scheduler reuses the same image when introduced (see
 `PR_PLAN_V02.md`).
@@ -291,16 +291,16 @@ Operational requirements for the delivered API:
   scheduler; deployments define retention for `ati.api_idempotency` and
   `ati.investigation_job` (see `docs/DATABASE.md`).
 
-## Geographic resolver (planned PR 26C)
+## Geographic resolver (PR 26C)
 
-PR 26 plans a distinct Geo Resolver process:
+PR 26C ships a distinct Geo Resolver process (``ati-geo-resolver``):
 
 ```text
 Host
  |
  +-- Compose
-      +-- ati-geo-resolver        # planned PR 26C
-```
+      +-- ati-geo-resolver        # PR 26C
+ ```
 
 The Geo Resolver is not the Investigation worker and does not execute
 LangGraph. It performs bounded asynchronous geographic enrichment.
@@ -317,14 +317,30 @@ claim bounded GeoResolution work
   -> sleep/poll
 ```
 
-The process may eventually run in a separate container, but PostgreSQL remains
-the initial durable queue/state mechanism. Kafka, NATS, Redis, or another
-broker is not required.
+The resolver runs as a separate compose service using the existing ATI app
+image; there is no lifecycle inside the API process and no broker (Kafka,
+NATS, Redis, or another broker is not required). PostgreSQL
+(`ati.geo_resolution` + leases) is the initial durable queue/state
+mechanism.
 
-Operational settings such as batch size, polling interval, lease duration, and
-retry policy are typed configuration. Exact defaults should be established by
-the detailed PR 26C plan and tests/benchmarks rather than guessed in
-architecture documentation.
+Operational configuration (typed, non-secret):
+
+- `ATI_GEO_RESOLVER_ENABLED` (default true);
+- `ATI_GEO_RESOLVER_WORKER_ID` (blank auto-generates a per-process id);
+- `ATI_GEO_RESOLVER_BATCH_SIZE` (default 10);
+- `ATI_GEO_RESOLVER_LEASE_SECONDS` (default 300);
+- `ATI_GEO_RESOLVER_POLL_INTERVAL_SECONDS` (default 1.0);
+- `ATI_GEO_RESOLVER_MAX_ATTEMPTS` (default 3);
+- `ATI_GEO_RESOLVER_RETRY_BASE_SECONDS` (default 60.0);
+- `ATI_GEO_RESOLVER_RETRY_MAX_SECONDS` (default 3600.0).
+
+`retry_max_seconds` must be >= `retry_base_seconds`; bounds are validated
+fail-closed at configuration load. The resolver needs the migrated
+PostgreSQL + PostGIS database (canonical reference geography must be
+imported with `ati-geography-import` for coordinates/cities to resolve).
+Crash recovery is lease-based: a committed claim that is never completed
+expires and is reclaimed (with its attempt budget enforced) by another
+worker; no manual queue surgery is needed.
 
 ## Scheduler
 

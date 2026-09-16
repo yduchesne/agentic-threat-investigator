@@ -1947,10 +1947,12 @@ PR 26A's non-spatial foundation is covered by:
   path; initial pending GeoResolution creation with exact state, duplicate
   pair idempotency, concurrent duplicate creation yielding one row,
   non-GEOLOCATION and subject-mismatch rejection, missing/invisible
-  Entity/Evidence rejection, no claim/lease/completion API, no second
-  queue table; normal UnitOfWork participation, exception rollback,
-  no independent repository commits, and authoritative database-assigned
-  versions.
+  Entity/Evidence rejection, no second queue table; normal UnitOfWork
+  participation, exception rollback, no independent repository commits,
+  and authoritative database-assigned versions. (PR 26C supersedes the
+  historical "no claim/lease/completion API" assertion: the lifecycle API
+  now lives on this same repository and is asserted complete in
+  G26A-P29/P42/P43.)
 
 #### PR 26A-2 corrective matrix (G26A2-P01..P05 + corrected G26A-P34)
 
@@ -2048,8 +2050,9 @@ PR 26B's deterministic geographic substrate is covered by real PostgreSQL
   ambiguous; coordinate-less semantic claims resolve normally; no
   nearest-city inference; candidate ordering is deterministic; hierarchy
   and spatial containment can disagree without rewriting either;
-  resolution performs no mutation and never touches `GeoResolution`
-  (PR 26C scope).
+  resolution performs no mutation and never touches `GeoResolution` (the
+  resolver boundary holds in PR 26C: mutations belong to the lifecycle SQL
+  API, never the canonical resolver).
 
 ### PR 26B-2 delivered testing (G26B2-CLI/SRC/BLD/E2E matrices)
 
@@ -2230,3 +2233,80 @@ Configuration tests must cover default/profile selection, shallow override seman
 ## Batch persistence and history tests
 
 Integration tests against pinned PostgreSQL 18 must exercise composite-array input, `unnest` staging with ordinality, temporary-table reconciliation, INSERT/UPDATE/UNCHANGED/CONFLICT outcomes, optimistic version conflict detection, set-based version allocation/history insertion, and large batches up to the configured application boundary. Tests must prove UNCHANGED rows receive no new version/history. JSONB diff tests cover scalar changes, additions/removals, missing versus JSON null, nested objects as atomic top-level values, excluded metadata fields, and empty diffs. No SQLite substitute is acceptable for these behaviors.
+
+#### PR 26C delivered testing (G26C-D/W/B/P + vertical slices)
+
+PR 26C (`tests/unit/app/geoint/test_geo_claim_extraction.py`,
+`tests/unit/domain/test_geoint_observation_identity.py`,
+`tests/unit/app/geoint/test_geo_retry_policy.py`,
+`tests/unit/app/geoint/test_geo_resolution_worker.py`,
+`tests/integration/test_geo_resolution_lifecycle.py`) delivers the
+asynchronous geographic-resolution lifecycle on the PR 26A/26B foundation:
+
+- **G26C-D01..D06** (`tests/unit/app/geoint/test_geo_claim_extraction.py`,
+  `tests/unit/domain/test_geoint_observation_identity.py`): exact
+  GEOLOCATION Evidence -> `GeographicClaim` conversion preserves source
+  semantic precision; coordinates never upgrade precision; non-GEOLOCATION
+  and malformed payloads fail closed with typed errors; the deterministic
+  resolution-produced observation identity is UUIDv5 of the `GeoResolution`
+  id under the fixed ATI observation namespace (stable per work, unique
+  across work).
+- **G26C-B01..B05** (`tests/unit/app/geoint/test_geo_retry_policy.py`):
+  deterministic bounded exponential backoff (`base * 2^(attempt-1)` capped at
+  the max, no jitter), attempt-1 base, attempt-2 doubling, high-attempt cap,
+  invalid config/input rejection.
+- **G26C-W01..W11** (`tests/unit/app/geoint/test_geo_resolution_worker.py`):
+  worker orchestration with a fake `LocationResolver` only — resolved /
+  unresolvable / ambiguity (never guessed) completions; malformed/missing/
+  wrong-type Evidence as terminal failures; bounded retryable failure;
+  cancellation propagation with no persisted transition; empty batch no-op;
+  resolver executes with NO claim UnitOfWork open; every completion opens a
+  NEW short UnitOfWork; a rejected failure persistence never terminates the
+  iteration (lease expiry recovers).
+- **G26C-P01..P12** (`tests/integration/test_geo_resolution_lifecycle.py`):
+  eligible PENDING claimed exactly once with claimant/lease/attempt/version;
+  future-scheduled PENDING and unexpired PROCESSING never claimed; expired
+  PROCESSING reclaimed (attempt N+1); terminal rows never claimed; bounded
+  claim limit; deterministic (eligibility, created, id) ordering; two
+  concurrent workers claim disjoint batches; each claim increments attempt
+  exactly once and allocates a fresh DB version; expired-at-budget work
+  becomes FAILED instead of being reclaimed; claim rollback preserves the
+  prior durable state.
+- **G26C-P13..P18** (stale-claim matrix): correct owner/version/live lease
+  accepted; wrong owner, stale version, and expired lease all typed
+  conflicts with zero mutation; A expires -> B reclaims -> A's completion
+  rejected and B completes (the required stale-worker race on real
+  PostgreSQL).
+- **G26C-P19..P30** (resolved-completion matrix): one atomic success appends
+  the exact observation and reconciles current state; missing/soft-deleted
+  Entity, missing Evidence, wrong Evidence type, subject mismatch, and
+  missing Location are full rollbacks; the exact replay (deterministic
+  observation identity) is a no-op with no duplicate; a conflicting terminal
+  replay is typed; existing current-state/first-observed/latest semantics are
+  preserved; an injected post-append rollback commits nothing; unknown work
+  is not-found; PENDING completion is an invalid transition; a deterministic
+  observation identity bound to a different tuple is a duplicate-identity
+  conflict.
+- **G26C-P31..P38** (failure/unresolvable matrix): unresolvable and
+  ambiguity are terminal with no observation/current-state mutation; retry
+  schedules PENDING with the bounded backoff and clears the lease; terminal
+  errors FAIL with no next attempt; stale failure requests are rejected; a
+  rolled-back failure transition keeps PROCESSING.
+- **G26C-P39..P43** (migration/index matrix): the claim predicates are proven
+  index-eligible by EXPLAIN using the two partial claim indexes (no seq
+  scan); pgvector + PostGIS coexist with the v0024 API installed; the
+  v0021/v0022/v0023 APIs remain installed and callable; migration
+  `tests/integration/test_migration.py::test_geoint_lifecycle_migration_upgrade_and_downgrade`
+  proves the 0028 upgrade preserves existing PENDING LOCATION/OBSERVATION/
+  resolution rows and allows claiming/completing the pre-existing work, and
+  the downgrade removes only the PR 26C functions/indexes/constraints while
+  preserving every authoritative row (terminal work included).
+- **Vertical slices** (production `GeoResolutionWorker` against real
+  PostgreSQL + PostGIS): multi-worker disjoint claims with exactly one
+  observation per work item and terminal RESOLVED; crash/recovery (A claims
+  and dies, lease expires, B reclaims at attempt N+1 under a new version, A
+  is rejected, B completes with exactly one final observation); retry/
+  exhaustion with a fake `LocationResolver` only (no early claims, exact
+  attempt boundaries, no observations on failures, exactly one observation
+  on the eventual success, and terminal FAILED at exhaustion). Timestamp
+  control is deterministic SQL, never sleep-based.

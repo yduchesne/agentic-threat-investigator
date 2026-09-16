@@ -1219,8 +1219,8 @@ PR 25C completes the Map as a bounded analyst exploration surface without turnin
 
 ## GEOINT architecture (PR 26)
 
-This section distinguishes **delivered PR 26A/26B** from the planned PR
-26C-G architecture.
+This section distinguishes **delivered PR 26A/26B/26C** from the planned PR
+26D-G architecture.
 
 PR 25 remains the delivered v0.1 geolocation presentation path:
 
@@ -1259,6 +1259,14 @@ PR 26A delivers:
 PR 26B (delivered) establishes the deterministic geographic substrate on
 that foundation; PR 26B-2 (corrective completion) adds the upstream
 reference-data supply path that produces the corpus:
+
+PR 26C (delivered) adds the asynchronous geographic-resolution lifecycle on
+the same `GeoResolution` work rows: bounded claim/lease with `FOR UPDATE
+SKIP LOCKED`, deterministic attempt/backoff bookkeeping, stale-worker
+protection, atomic resolved completion (observation + current-state
+reconciliation + terminal transition in one stored function), and a
+separate `ati-geo-resolver` process/container. The lifecycle adds no broker,
+no second queue table, and no query API.
 
 ```text
 GeoNames local files       Natural Earth local files
@@ -1362,38 +1370,56 @@ The initial canonical Location vocabulary is deliberately bounded to:
 
 `EntityLocation` is the current materialized association, maintained by the database from observations under the deterministic ordering `(COALESCE(observed_at, retrieved_at), observation_id)`. It references the most specific canonical Location actually supported by the underlying claim. Canonicalization must never manufacture additional precision.
 
-`GeoResolution` is mutable operational state, not geographic evidence. PR 26A persists the initial PENDING row; the asynchronous lifecycle (processing, resolved, unresolvable, failed, attempts, lease/claim metadata, outcome metadata, version/audit state) is PR 26C scope.
+`GeoResolution` is mutable operational state, not geographic evidence. PR 26C delivers the full asynchronous lifecycle on top of the PR 26A initial PENDING row: processing, resolved, unresolvable, and failed transitions with attempts, bounded leases/claims, retry scheduling, terminal replay protection, and versioned mutations — all database-owned through SQL API v0024.
+
+`GeoResolution` is operational work; the geographic truth it produces lives only in the immutable `EntityLocationObservation` history and the database-maintained `EntityLocation` current state. A work row never becomes geographic evidence, and no geography-derived threat Relationship is ever created.
 
 ### PostgreSQL ownership and asynchronous resolution
 
-PR 26A delivers the database-ownership model for GEOINT persistence:
+PR 26A/26B deliver the database-ownership model for GEOINT persistence:
 
-> All PR 26A/26B GEOINT mutations, current-state reconciliation, and versioning are performed through versioned PostgreSQL stored functions (SQL API v0021/v0022; the PR 26B canonical reference/spatial path is SQL API v0023). Python repositories/processes remain thin callers. Asynchronous work claiming, lease/retry transitions, stale-claim recovery, and completion are PR 26C scope but follow the same stored-function ownership model.
+> All PR 26A/26B/26C GEOINT mutations, current-state reconciliation, and versioning are performed through versioned PostgreSQL stored functions (SQL API v0021/v0022; the PR 26B canonical reference/spatial path is SQL API v0023; the PR 26C asynchronous lifecycle is SQL API v0024). Python repositories/processes remain thin callers.
 
 Purpose-built bounded read/query services, including PostGIS spatial projections, may execute SQL directly under ATI's existing query-service pattern.
 
-The Geo Resolver uses two short database transactions around external/application work:
+The Geo Resolver executes PR 26C's committed work-lifecycle transaction split:
 
 ```text
-claim_geo_resolution_work(...)
-  -> bounded eligible rows
-  -> FOR UPDATE SKIP LOCKED internally where appropriate
-  -> persist worker/lease/attempt state
+claim bounded work  -> ati.claim_geo_resolutions (FOR UPDATE SKIP LOCKED
+                       internally, bounded) -> own claimant/lease/attempt
+                       -> COMMIT
+resolve geographic claim       (no database transaction or row lock held)
+complete outcome    -> ati.complete_geo_resolution_resolved (observation +
+                       current-state reconciliation + RESOLVED termination
+                       in ONE atomic stored function) / unresolvable /
+                       failure with bounded backoff  -> COMMIT
+```
+
+```text
+claim:  ati.claim_geo_resolutions(claimed_by, limit, lease, max_attempts)
+  -> bounded eligible rows (PENDING due now / expired PROCESSING)
+  -> FOR UPDATE SKIP LOCKED internally; deterministic ordering
+     (eligibility time, created_at, id)
+  -> persist worker/lease/attempt +1 state, fresh DB version
   -> COMMIT
 
 resolve geographic claim
   -> no database transaction or row lock held
 
-complete_geo_resolution(...)
-  -> validate ownership/version/idempotency
-  -> canonicalize/reuse Location
-  -> append EntityLocationObservation
-  -> reconcile EntityLocation
-  -> transition GeoResolution
+complete: one of ati.complete_geo_resolution_resolved |
+               ati.complete_geo_resolution_unresolvable |
+               ati.record_geo_resolution_failure
+  -> validate ownership/version/live lease (+ exact provenance for RESOLVED)
+  -> RESOLVED: append EntityLocationObservation + reconcile EntityLocation
+     + transition GeoResolution in ONE atomic stored function
   -> COMMIT
 ```
 
-Leases coordinate asynchronous processing; long-held row locks do not. Expired claims are recoverable. Completion/reconciliation uses deterministic update ordering where records may contend.
+Leases coordinate asynchronous processing; long-held row locks do not.
+Expired claims are recoverable under a new claimant; stale workers are
+rejected by version/claimant/lease validation and never create observations.
+Completion/reconciliation uses deterministic update ordering where records
+may contend.
 
 ### PostGIS responsibility
 
@@ -1464,9 +1490,10 @@ With PR 26A/26B delivered, the persistence categories are:
 - versioned outputs: Assessment, InvestigationReport;
 - replaceable derived indexing: document chunks/embeddings.
 
-`GeoResolution` remains read-only from the application perspective in PR 26A
-(initial PENDING persistence only); its lifecycle transitions are PR 26C
-scope.
+`GeoResolution` is durable operational work state in every PR 26A-C
+release: PR 26A persists the initial PENDING row, and PR 26C (delivered)
+owner of claim/lease/retry/completion lifecycle transitions through SQL API
+v0024 stored functions. The application never issues ad-hoc lifecycle DML.
 
 Monitor is no longer a v0.1 persistence requirement. Monitor/scheduler/snapshots/diffs/Findings administration is deferred to v0.2 and tracked in `PR_PLAN_V02.md`.
 

@@ -455,25 +455,30 @@ Fake batch data is initialized only through the explicit idempotent `ati-fake-da
 
 Automated PR 23D tests are different from runtime mode semantics: they inject `FakeLlmClient` independently of operating mode and never require live LLM or network access.
 
-## GEOINT configuration (planned PR 26)
+## GEOINT configuration (PR 26)
 
-PR 26 adds typed configuration for geographic reference data and the asynchronous Geo Resolver. Configuration must preserve the existing separation between deployment profile and operating mode.
+PR 26 adds typed configuration for the asynchronous Geo Resolver (PR 26C). Configuration preserves the existing separation between deployment profile and operating mode.
 
 `ATI_CONFIG_PROFILE` continues to select deployment/runtime settings.
 
 `ATI_OPERATING_MODE` continues to select intelligence-source composition and is not repurposed as a GEOINT processing mode.
 
-Planned configuration categories include:
+The Geo Resolver policy is delivered as typed, non-secret settings (see `DEPLOYMENT.md`):
 
-- canonical geographic reference-data/artifact location;
-- Geo Resolver enabled/runtime composition;
-- bounded claim batch size;
-- polling interval;
-- lease duration;
-- retry/backoff limits;
-- bounded spatial-query limits where not already owned by API settings.
+- `ATI_GEO_RESOLVER_ENABLED` (default `true`);
+- `ATI_GEO_RESOLVER_WORKER_ID` (blank auto-generates a per-process id);
+- `ATI_GEO_RESOLVER_BATCH_SIZE` (default 10);
+- `ATI_GEO_RESOLVER_LEASE_SECONDS` (default 300);
+- `ATI_GEO_RESOLVER_POLL_INTERVAL_SECONDS` (default 1.0);
+- `ATI_GEO_RESOLVER_MAX_ATTEMPTS` (default 3);
+- `ATI_GEO_RESOLVER_RETRY_BASE_SECONDS` (default 60.0);
+- `ATI_GEO_RESOLVER_RETRY_MAX_SECONDS` (default 3600.0).
 
-Exact environment-variable names/defaults should be fixed in the detailed PR 26B/26C plans when the implementation contract is known. Do not publish speculative defaults as if delivered.
+Bounds are validated fail-closed at configuration load (`batch_size >= 1`,
+`lease_seconds >= 1`, `max_attempts >= 1`, `retry_base_seconds > 0`,
+`retry_max_seconds >= retry_base_seconds`, bounded poll interval). The worker
+id is operational, never a secret or authorization identity; no secret
+values are stored or logged.
 
 ### Fake mode and GEOINT
 

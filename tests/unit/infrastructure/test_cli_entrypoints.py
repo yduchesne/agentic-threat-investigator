@@ -14,10 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from agentic_threat_investigator.cli import geography_build_main, geography_import_main
+from agentic_threat_investigator.cli import (
+    geo_resolver_main,
+    geography_build_main,
+    geography_import_main,
+)
 
 _IMPORT_TARGET = "agentic_threat_investigator.cli:geography_import_main"
 _BUILD_TARGET = "agentic_threat_investigator.cli:geography_build_main"
+_RESOLVER_TARGET = "agentic_threat_investigator.cli:geo_resolver_main"
 
 
 def _console_scripts() -> dict[str, metadata.EntryPoint]:
@@ -91,3 +96,34 @@ def test_cli05b_build_refuses_output_and_validate_only(tmp_path: Path) -> None:
         == 2
     )
     assert geography_build_main([*common]) == 2
+
+
+def test_cli06_geo_resolver_registered() -> None:
+    """G26C-CLI ati-geo-resolver is registered and resolves to its main."""
+    scripts = _console_scripts()
+    assert "ati-geo-resolver" in scripts
+    assert scripts["ati-geo-resolver"].value == _RESOLVER_TARGET
+    assert scripts["ati-geo-resolver"].load() is geo_resolver_main
+
+
+def test_cli07_geo_resolver_help_succeeds_offline() -> None:
+    """G26C-CLI resolver --help exits 0 without DB or network access."""
+    with pytest.raises(SystemExit) as excinfo:
+        geo_resolver_main(["--help"])
+    assert excinfo.value.code == 0
+
+
+def test_cli08_geo_resolver_once_documented_in_help() -> None:
+    """G26C-CLI the resolver exposes --once for single-iteration runs."""
+    import io
+    import sys
+
+    captured = io.StringIO()
+    previous = sys.stdout
+    sys.stdout = captured
+    try:
+        with pytest.raises(SystemExit):
+            geo_resolver_main(["--help"])
+    finally:
+        sys.stdout = previous
+    assert "--once" in captured.getvalue()
