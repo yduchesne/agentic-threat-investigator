@@ -31,8 +31,15 @@ from agentic_threat_investigator.app.persistence.repositories import (
     GeoEvidenceTypeError,
     GeoInvalidInputError,
     GeoLocationNotFoundError,
+    GeoResolutionClaimantMismatchError,
     GeoResolutionDuplicateStateError,
+    GeoResolutionInvalidTransitionError,
+    GeoResolutionLeaseExpiredError,
+    GeoResolutionNotFoundError,
     GeoResolutionRepository,
+    GeoResolutionRetryExhaustedError,
+    GeoResolutionTerminalReplayConflictError,
+    GeoResolutionVersionConflictError,
     InvalidReferenceGeometryError,
     InvalidReferenceHierarchyError,
     LocationIdentityConflictError,
@@ -61,6 +68,13 @@ from .errors import (
     SQLSTATE_GEOLOCATION_LOCATION_NOT_FOUND,
     SQLSTATE_GEOLOCATION_OBSERVATION_DUPLICATE,
     SQLSTATE_GEOLOCATION_RESOLUTION_DUPLICATE_STATE,
+    SQLSTATE_GEORESOLUTION_CLAIMANT_MISMATCH,
+    SQLSTATE_GEORESOLUTION_INVALID_TRANSITION,
+    SQLSTATE_GEORESOLUTION_LEASE_EXPIRED,
+    SQLSTATE_GEORESOLUTION_NOT_FOUND,
+    SQLSTATE_GEORESOLUTION_RETRY_EXHAUSTED,
+    SQLSTATE_GEORESOLUTION_STALE_VERSION,
+    SQLSTATE_GEORESOLUTION_TERMINAL_REPLAY_CONFLICT,
     SQLSTATE_REFERENCE_CANONICAL_CONFLICT,
     SQLSTATE_REFERENCE_GEOMETRY_INVALID,
     SQLSTATE_REFERENCE_HIERARCHY_INVALID,
@@ -140,8 +154,13 @@ def _entity_location(row: EntityLocationRow) -> EntityLocation:
     )
 
 
-def _resolution(row: GeoResolutionRow) -> GeoResolution:
-    """Map a GeoResolution row to its domain model."""
+def _resolution(row: Any) -> GeoResolution:
+    """Map a GeoResolution row to its domain model.
+
+    Accepts both SQLAlchemy ORM rows and stored-function ``RowMapping``
+    results (SQL API v0024 returns authoritative rows as mappings), both of
+    which expose the same attribute surface.
+    """
     return GeoResolution(
         id=row.id,
         entity_id=row.entity_id,
@@ -170,6 +189,35 @@ def _map_location_error(error: DBAPIError) -> None:
         detail = getattr(getattr(error, "orig", None), "diag", None)
         message = getattr(detail, "message_primary", None) or "invalid location input"
         raise GeoInvalidInputError(message) from error
+    raise
+
+
+def _map_resolution_error(error: DBAPIError, *, resolution_id: UUID) -> None:
+    """Map a SQL API v0024 lifecycle SQLSTATE to the typed resolution error.
+
+    Provenance SQLSTATEs (U26A1-U26A6) are mapped at the call site where
+    the exact identities are known; this helper owns the U26C lifecycle
+    codes and the shared invalid-input state.
+    """
+    state = sqlstate(error)
+    detail = getattr(getattr(error, "orig", None), "diag", None)
+    message = getattr(detail, "message_primary", None)
+    if state == SQLSTATE_GEORESOLUTION_NOT_FOUND:
+        raise GeoResolutionNotFoundError(resolution_id) from error
+    if state == SQLSTATE_GEORESOLUTION_INVALID_TRANSITION:
+        raise GeoResolutionInvalidTransitionError(resolution_id) from error
+    if state == SQLSTATE_GEORESOLUTION_STALE_VERSION:
+        raise GeoResolutionVersionConflictError(resolution_id, 0) from error
+    if state == SQLSTATE_GEORESOLUTION_CLAIMANT_MISMATCH:
+        raise GeoResolutionClaimantMismatchError(resolution_id) from error
+    if state == SQLSTATE_GEORESOLUTION_LEASE_EXPIRED:
+        raise GeoResolutionLeaseExpiredError(resolution_id) from error
+    if state == SQLSTATE_GEORESOLUTION_RETRY_EXHAUSTED:
+        raise GeoResolutionRetryExhaustedError(resolution_id) from error
+    if state == SQLSTATE_GEORESOLUTION_TERMINAL_REPLAY_CONFLICT:
+        raise GeoResolutionTerminalReplayConflictError(resolution_id) from error
+    if state == SQLSTATE_GEOLOCATION_INVALID_INPUT:
+        raise GeoInvalidInputError(message or "invalid geo resolution input") from error
     raise
 
 
@@ -432,7 +480,12 @@ class PostgresEntityLocationObservationRepository(EntityLocationObservationRepos
 
 
 class PostgresGeoResolutionRepository(GeoResolutionRepository):
-    """Persist initial pending GeoResolution work in the active transaction."""
+    """Persist and progress GeoResolution work through the active transaction.
+
+    Lifecycle mutations (claim, resolved/unresolvable completion, bounded
+    retry/failure) route exclusively through SQL API v0024 stored functions;
+    this adapter maps the typed SQLSTATEs and never commits.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -496,3 +549,195 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         if row is None:  # pragma: no cover - the function and transaction are atomic
             raise RuntimeError("geo resolution write returned no row")
         return _resolution(row)
+
+    @staticmethod
+    def _resolution_rows(result: Any) -> list[GeoResolution]:
+        """Deserialize authoritative lifecycle rows from a stored function."""
+        return [_resolution(row) for row in result.mappings().all()]
+
+    async def claim_batch(
+        self,
+        *,
+        claimed_by: str,
+        limit: int,
+        lease_seconds: int,
+        max_attempts: int,
+    ) -> list[GeoResolution]:
+        """Claim a bounded batch of eligible work in the active transaction.
+
+        Routes through ``ati.claim_geo_resolutions`` (SQL API v0024), which
+        performs the bounded ``FOR UPDATE SKIP LOCKED`` selection, persists
+        the claimant/lease/attempt/version state, and returns the
+        authoritative claimed rows. The caller's UnitOfWork is the commit
+        boundary; repositories never commit.
+        """
+        result = await self.session.execute(
+            text("""
+                SELECT id, entity_id, evidence_id, status, attempt_count,
+                       next_attempt_at, claimed_by, lease_expires_at,
+                       resolved_location_id, last_error_code, version,
+                       created_at, updated_at
+                  FROM ati.claim_geo_resolutions(
+                       :claimed_by, :claim_limit, :lease_seconds,
+                       :max_attempts)
+            """),
+            {
+                "claimed_by": claimed_by,
+                "claim_limit": limit,
+                "lease_seconds": lease_seconds,
+                "max_attempts": max_attempts,
+            },
+        )
+        return self._resolution_rows(result)
+
+    async def complete_resolved(
+        self,
+        resolution_id: UUID,
+        expected_version: int,
+        claimed_by: str,
+        observation: EntityLocationObservation,
+    ) -> GeoResolution:
+        """Atomically complete one claimed row as RESOLVED (SQL API v0024).
+
+        The single versioned stored function validates status/version/
+        claimant/live lease and the exact Entity/Evidence/Location
+        provenance, appends the immutable observation (idempotent under
+        replay), reconciles the current EntityLocation, and terminates the
+        work. A replay of the exact same successful completion is a no-op;
+        any conflicting terminal replay is a typed error with no mutation.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, entity_id, evidence_id, status, attempt_count,
+                           next_attempt_at, claimed_by, lease_expires_at,
+                           resolved_location_id, last_error_code, version,
+                           created_at, updated_at
+                      FROM ati.complete_geo_resolution_resolved(
+                           :resolution_id, :expected_version, :claimed_by,
+                           :observation_id, :location_id, :precision,
+                           :observed_at, :retrieved_at, :resolved_at,
+                           :resolution_method)
+                """),
+                {
+                    "resolution_id": resolution_id,
+                    "expected_version": expected_version,
+                    "claimed_by": claimed_by,
+                    "observation_id": observation.id,
+                    "location_id": observation.location_id,
+                    "precision": observation.precision.value,
+                    "observed_at": observation.observed_at,
+                    "retrieved_at": observation.retrieved_at,
+                    "resolved_at": observation.resolved_at,
+                    "resolution_method": observation.resolution_method,
+                },
+            )
+        except DBAPIError as error:
+            state = sqlstate(error)
+            if state == SQLSTATE_GEOLOCATION_ENTITY_NOT_FOUND:
+                raise GeoEntityNotFoundError(observation.entity_id) from error
+            if state == SQLSTATE_GEOLOCATION_LOCATION_NOT_FOUND:
+                raise GeoLocationNotFoundError(observation.location_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_NOT_FOUND:
+                raise GeoEvidenceNotFoundError(observation.evidence_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_TYPE_INVALID:
+                raise GeoEvidenceTypeError(observation.evidence_id) from error
+            if state == SQLSTATE_GEOLOCATION_EVIDENCE_SUBJECT_MISMATCH:
+                raise GeoEvidenceSubjectMismatchError(
+                    observation.evidence_id, observation.entity_id
+                ) from error
+            if state == SQLSTATE_GEOLOCATION_OBSERVATION_DUPLICATE:
+                raise EntityLocationObservationDuplicateError(observation.id) from error
+            _map_resolution_error(error, resolution_id=resolution_id)
+        rows = result.mappings().all()
+        if not rows:  # pragma: no cover - the function always returns one row
+            raise RuntimeError("geo resolution completion returned no row")
+        return _resolution(rows[0])
+
+    async def complete_unresolvable(
+        self,
+        *,
+        resolution_id: UUID,
+        expected_version: int,
+        claimed_by: str,
+        error_code: str,
+    ) -> GeoResolution:
+        """Terminate one claimed row as UNRESOLVABLE with a stable reason code.
+
+        Routes through ``ati.complete_geo_resolution_unresolvable``: no
+        observation and no EntityLocation mutation are created, the resolved
+        Location stays NULL, and lease/retry state is cleared.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, entity_id, evidence_id, status, attempt_count,
+                           next_attempt_at, claimed_by, lease_expires_at,
+                           resolved_location_id, last_error_code, version,
+                           created_at, updated_at
+                      FROM ati.complete_geo_resolution_unresolvable(
+                           :resolution_id, :expected_version, :claimed_by,
+                           :error_code)
+                """),
+                {
+                    "resolution_id": resolution_id,
+                    "expected_version": expected_version,
+                    "claimed_by": claimed_by,
+                    "error_code": error_code,
+                },
+            )
+        except DBAPIError as error:
+            _map_resolution_error(error, resolution_id=resolution_id)
+        rows = result.mappings().all()
+        if not rows:  # pragma: no cover - the function always returns one row
+            raise RuntimeError("geo resolution completion returned no row")
+        return _resolution(rows[0])
+
+    async def record_failure(
+        self,
+        resolution_id: UUID,
+        expected_version: int,
+        claimed_by: str,
+        error_code: str,
+        *,
+        retryable: bool,
+        retry_base_seconds: float,
+        retry_max_seconds: float,
+        max_attempts: int,
+    ) -> GeoResolution:
+        """Record one bounded failure on the claimed row (SQL API v0024).
+
+        A retryable failure with budget remaining returns the row to PENDING
+        with a deterministic bounded backoff; exhaustion or a non-retryable
+        failure terminates it as FAILED with no next attempt. The error code
+        is a bounded machine code; exception text is never persisted.
+        """
+        try:
+            result = await self.session.execute(
+                text("""
+                    SELECT id, entity_id, evidence_id, status, attempt_count,
+                           next_attempt_at, claimed_by, lease_expires_at,
+                           resolved_location_id, last_error_code, version,
+                           created_at, updated_at
+                      FROM ati.record_geo_resolution_failure(
+                           :resolution_id, :expected_version, :claimed_by,
+                           :error_code, :retryable, :retry_base_seconds,
+                           :retry_max_seconds, :max_attempts)
+                """),
+                {
+                    "resolution_id": resolution_id,
+                    "expected_version": expected_version,
+                    "claimed_by": claimed_by,
+                    "error_code": error_code,
+                    "retryable": retryable,
+                    "retry_base_seconds": retry_base_seconds,
+                    "retry_max_seconds": retry_max_seconds,
+                    "max_attempts": max_attempts,
+                },
+            )
+        except DBAPIError as error:
+            _map_resolution_error(error, resolution_id=resolution_id)
+        rows = result.mappings().all()
+        if not rows:  # pragma: no cover - the function always returns one row
+            raise RuntimeError("geo resolution failure returned no row")
+        return _resolution(rows[0])

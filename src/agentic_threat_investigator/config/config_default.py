@@ -60,4 +60,14 @@ CONFIG: dict[str, Any] = {
     "api_max_indicator_value_length": 2048,
     "api_max_objective_length": 4000,
     "api_max_request_body_bytes": 65536,
+    # Geo Resolver process policy (PR 26C). Operational, non-secret bounds;
+    # a blank worker_id is auto-generated per process at the entry point.
+    "geo_resolver_enabled": True,
+    "geo_resolver_worker_id": "",
+    "geo_resolver_batch_size": 10,
+    "geo_resolver_lease_seconds": 300,
+    "geo_resolver_poll_interval_seconds": 1.0,
+    "geo_resolver_max_attempts": 3,
+    "geo_resolver_retry_base_seconds": 60.0,
+    "geo_resolver_retry_max_seconds": 3600.0,
 }

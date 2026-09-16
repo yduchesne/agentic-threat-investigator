@@ -79,6 +79,30 @@ services:
       fake-data-bootstrap: { condition: service_completed_successfully }
     networks: [ati]
 
+  geo-resolver:
+    # PR 26C: the bounded asynchronous geographic-resolution worker. It is a
+    # separate process from the API and the investigation worker, runs no
+    # LangGraph, and uses PostgreSQL (geo_resolution + leases) as its durable
+    # queue; no broker is involved. It claims bounded work in short committed
+    # transactions, resolves outside any database transaction, and persists
+    # outcomes through the versioned SQL API v0024.
+    build: .
+    environment:
+      ATI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
+      ATI_DATA_DIR: /var/lib/ati
+      ATI_OPERATING_MODE: ${ATI_OPERATING_MODE:-fake}
+      ATI_GEO_RESOLVER_ENABLED: ${ATI_GEO_RESOLVER_ENABLED:-true}
+      ATI_GEO_RESOLVER_BATCH_SIZE: ${ATI_GEO_RESOLVER_BATCH_SIZE:-10}
+      ATI_GEO_RESOLVER_LEASE_SECONDS: ${ATI_GEO_RESOLVER_LEASE_SECONDS:-300}
+      ATI_GEO_RESOLVER_POLL_INTERVAL_SECONDS: ${ATI_GEO_RESOLVER_POLL_INTERVAL_SECONDS:-1.0}
+      ATI_GEO_RESOLVER_MAX_ATTEMPTS: ${ATI_GEO_RESOLVER_MAX_ATTEMPTS:-3}
+      ATI_GEO_RESOLVER_RETRY_BASE_SECONDS: ${ATI_GEO_RESOLVER_RETRY_BASE_SECONDS:-60.0}
+      ATI_GEO_RESOLVER_RETRY_MAX_SECONDS: ${ATI_GEO_RESOLVER_RETRY_MAX_SECONDS:-3600.0}
+    command: ["ati-geo-resolver"]
+    depends_on:
+      fake-data-bootstrap: { condition: service_completed_successfully }
+    networks: [ati]
+
   scheduler:
     build: .
     command: ["python", "-c", "print('ATI scheduler bootstrap')"]

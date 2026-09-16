@@ -1619,7 +1619,7 @@ Deliver:
 - idempotency, version validation, deterministic lock/update ordering, multi-worker concurrency, crash/recovery, retry, and bounded-batch tests;
 - PostgreSQL durable state + leases as the initial work-queue mechanism; no Kafka/NATS/Redis requirement.
 
-The resolver issues no ad-hoc mutation SQL; mutations go through versioned stored functions.
+The resolver issues no ad-hoc mutation SQL; mutations go through versioned stored functions. [DONE]
 
 ### PR 26D — GEOINT query and API layer
 
