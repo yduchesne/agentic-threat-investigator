@@ -32,7 +32,13 @@ def _finite_vector(vector: list[float], dimension: int) -> None:
 
 
 class PgVectorResearchRetriever(ResearchRetriever):
-    """Retrieve compatible, visible chunks using PostgreSQL cosine distance."""
+    """Retrieve compatible, visible chunks using PostgreSQL cosine distance.
+
+    Ordering is total and deterministic: vector distance is the primary key
+    and the stable unique chunk identity is the secondary key, so chunks with
+    equal cosine distance have a well-defined order and bounded top-N
+    membership cannot vary across otherwise identical executions.
+    """
 
     def __init__(
         self,
@@ -100,7 +106,12 @@ class PgVectorResearchRetriever(ResearchRetriever):
             # dynamic value is a bound parameter (:source_ids, :document_types,
             # :query_embedding, :max_results), never interpolated input.
             + " AND ".join(predicates)
-            + " ORDER BY chunk.embedding <=> CAST(:query_embedding AS vector)"
+            # Vector distance stays the primary ranking key; the stable unique
+            # chunk identity is the deterministic tie-breaker so that rows with
+            # equal distance have a total order and bounded top-N membership is
+            # identical across repeated executions (corrective determinism PR).
+            + " ORDER BY chunk.embedding <=> CAST(:query_embedding AS vector),"
+            + " chunk.id"
             + " LIMIT :max_results"
         )
         async with self._session_factory() as session:

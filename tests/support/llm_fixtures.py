@@ -9,6 +9,7 @@ never parses prose.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from pydantic import BaseModel
@@ -26,6 +27,19 @@ class FakeLlmCall:
     operation_name: str
 
 
+ResponseFactory = Callable[[FakeLlmCall], BaseModel | BaseException]
+"""Derive one scripted outcome from the exact recorded request.
+
+The factory receives the ``FakeLlmCall`` that the fake just recorded for the
+current invocation and must return the scripted Pydantic response (or a
+scripted exception, mirroring :meth:`FakeLlmClient.enqueue`) for that call.
+It lets evaluation tests script responses that depend on the exact context
+rendered into the prompt (for example, picking a citation from the actual
+supplied set) without performing a second retrieval or probing the
+production retriever independently.
+"""
+
+
 class FakeLlmClient(LlmClient):
     """A scripted, deterministic structured-output fake.
 
@@ -40,6 +54,7 @@ class FakeLlmClient(LlmClient):
         """Initialize with an empty outcome queue and call log."""
         self._outcomes: list[BaseModel | BaseException] = []
         self._default: BaseModel | None = None
+        self._response_factory: ResponseFactory | None = None
         self.calls: list[FakeLlmCall] = []
         self.expected_response_model: type[BaseModel] | None = None
 
@@ -50,6 +65,22 @@ class FakeLlmClient(LlmClient):
     def set_default(self, outcome: BaseModel) -> None:
         """Set the fixed result returned when the outcome queue is empty."""
         self._default = outcome
+
+    def set_response_factory(self, factory: ResponseFactory) -> None:
+        """Derive each scripted outcome from the exact recorded request.
+
+        The factory is consulted only when the FIFO outcome queue is empty,
+        before the configured default. It receives the ``FakeLlmCall`` recorded
+        for the current invocation and must return the Pydantic response (or a
+        scripted exception) for that call; the outcome is verified like every
+        other outcome. Backwards compatible: callers that only use ``enqueue``
+        and ``set_default`` observe no behavior change.
+        """
+        self._response_factory = factory
+
+    def clear_response_factory(self) -> None:
+        """Remove a previously configured response factory."""
+        self._response_factory = None
 
     def expect_response_model_type(self, response_model: type[BaseModel]) -> None:
         """Assert every invocation requests exactly this response model."""
@@ -64,14 +95,13 @@ class FakeLlmClient(LlmClient):
         operation_name: str,
     ) -> ResponseT:
         """Record the invocation and return/raise the next scripted outcome."""
-        self.calls.append(
-            FakeLlmCall(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                response_model=response_model,
-                operation_name=operation_name,
-            )
+        record_call = FakeLlmCall(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            operation_name=operation_name,
         )
+        self.calls.append(record_call)
         if (
             self.expected_response_model is not None
             and response_model is not self.expected_response_model
@@ -82,6 +112,8 @@ class FakeLlmClient(LlmClient):
             )
         if self._outcomes:
             outcome = self._outcomes.pop(0)
+        elif self._response_factory is not None:
+            outcome = self._response_factory(record_call)
         elif self._default is not None:
             outcome = self._default
         else:

@@ -971,6 +971,20 @@ fail the behavioral evaluation (22D-I03). The canonical synthesis/trajectory
 career observes the exact supplied citation set with a recording wrapper
 around the production retriever; nothing is re-ranked or substituted.
 
+Bounded research retrieval is total and deterministic: production pgvector
+retrieval orders by vector distance first and the stable unique chunk
+identity second, so chunks with equal distance have a well-defined order and
+top-N membership cannot vary across otherwise identical executions. A test
+that claims a citation was supplied to a model execution must derive it from
+the exact retrieval of that execution (a `FakeLlmClient` response factory
+over the chunks recorded by the `RecordingResearchRetriever`), never from an
+independent probe retrieval; only the genuinely unsupplied-citation failure
+path (rag-S05) intentionally probes a wider set. Intentional equal-distance
+regression coverage (`tests/integration/test_research_retrieval_determinism.py`,
+RDET-01..05) pins distinct-distance ranking, equal-distance stable ordering,
+ties crossing the `LIMIT` boundary, repeated-retrieval identity, and
+filtered-set determinism through the production path.
+
 Coordinator trajectory evaluation slices
 (`tests/integration/test_research_trajectory_evaluation.py`, 22D-I07/I08)
 run the full production research lifecycle (real CoordinatorPolicy, real
@@ -2057,7 +2071,7 @@ PR 26B's deterministic geographic substrate is covered by real PostgreSQL
 ### PR 26B-2 delivered testing (G26B2-CLI/SRC/BLD/E2E matrices)
 
 PR 26B-2 (corrective completion) proves the upstream reference-data supply
-path: source adapters -> deterministic corpus builder -> installed CLI -> 
+path: source adapters -> deterministic corpus builder -> installed CLI ->
 existing importer -> PostgreSQL/PostGIS.
 
 - **G26B2-CLI01..05** (`tests/unit/infrastructure/test_cli_entrypoints.py`):
