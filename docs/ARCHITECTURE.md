@@ -1257,19 +1257,31 @@ PR 26A delivers:
   agentic reasoning.
 
 PR 26B (delivered) establishes the deterministic geographic substrate on
-that foundation:
+that foundation; PR 26B-2 (corrective completion) adds the upstream
+reference-data supply path that produces the corpus:
 
 ```text
-Canonical reference sources (GeoNames-style naming/hierarchy + coordinates,
-Natural Earth-style boundary geometry, documented in DATA_SOURCES.md)
-                        |
-                        v  operator derives the ATI Geography Corpus NDJSON
+GeoNames local files       Natural Earth local files
+(operator-supplied)        (operator-supplied, GeoJSON)
+        |                           |
+        v                           v
+ GeoNamesReferenceSource      NaturalEarthReferenceSource
+ (source-specific adapters; normalized records only; never write PostgreSQL)
+        |                           |
+        +--------------+------------+
+                       |
+                       v
+              GeographyCorpusBuilder (PR 26B-2)
+              deterministic joins, hierarchy, ordering,
+              geometry validation; emits source-neutral records
+                       |
+                       v  ati-geography-build writes the ATI Geography Corpus NDJSON
                  ati-geography-import (CLI)
-                        |
-                        v  ReferenceIngestionService (validated, ordered)
-                 ati.upsert_reference_location (SQL API v0023)
-                        |
-                        v
+                       |
+                       v  ReferenceIngestionService (validated, ordered)
+                ati.upsert_reference_location (SQL API v0023)
+                       |
+                       v
         +-------------------------------------------+
         |  ati.location                              |
         |  canonical identity (unchanged from 26A)   |
@@ -1277,7 +1289,7 @@ Natural Earth-style boundary geometry, documented in DATA_SOURCES.md)
         |  geometry       (SRID 4326, never geography)|
         |  centroid       (on-surface representative) |
         +-------------------------------------------+
-                        |
+                       |
  geographic claim ------+
         |
         v  CanonicalGeographyResolver (PR 26B primitive)
@@ -1285,6 +1297,17 @@ Natural Earth-style boundary geometry, documented in DATA_SOURCES.md)
         +--> AMBIGUOUS(candidates)
         +--> UNRESOLVABLE(reason code)
 ```
+
+The deliberate boundary (PR 26B-2): the source-specific adapters
+(`infrastructure/geoint/geonames.py`, `infrastructure/geoint/natural_earth.py`)
+turn upstream files into normalized source records; `GeographyCorpusBuilder`
+(`infrastructure/geoint/geography_corpus_builder.py`) joins them into the
+source-neutral ATI Geography Corpus; the canonical Location ingestion
+(`ReferenceIngestionService` + `ati.upsert_reference_location`) consumes only
+that corpus. GeoNames/Natural Earth fields never leak into `Location`,
+`GeographicClaim`, canonical identity, resolution results,
+`EntityLocation`, or `GeoResolution`, and corpus construction never writes
+PostgreSQL.
 
 Key PR 26B properties: PostGIS is installed through the normal
 migration/deployment path (the project-owned PostgreSQL 18 image ships both

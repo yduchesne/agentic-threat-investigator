@@ -1,0 +1,9 @@
+# GeoNames countryInfo.txt -- synthetic ATI fixture (PR 26B-2).
+# Conforms exactly to the production input contract: 19 tab-separated
+# columns and '#' comment lines. Rows are synthetic (including the fictional
+# EdgeLand "ZZ"); no upstream GeoNames record is reproduced.
+#ISO	ISO3	ISO-Numeric	fips	Country	Capital	Area(in sq km)	Population	Continent	tld	CurrencyCode	CurrencyName	Phone	Postal Code Format	Postal Code Regex	Languages	geonameid	neighbours	EquivalentFipsCode
+US	USA	840	US	United States	Washington	9826675	331002651	NA	.us	USD	Dollar	1	#####-####	^(\d{5}(-\d{4})?)$	en-US	6252001	CA MX	US
+CA	CAN	124	CA	Canada	Ottawa	9984670	37742154	NA	.ca	CAD	Dollar	1		^([A-Z]\d[A-Z]\s?\d[A-Z]\d)$	en-CA	6251999	US	CA
+DE	DEU	276	GM	Germany	Berlin	357022	83783942	EU	.de	EUR	Euro	49	#####	^(\d{5})$	de	2921044	DK PL CZ CH AT LU FR BE NL	GM
+ZZ	ZZZ	999	ZZ	EdgeLand	Athens	1000	5000	EU	.zz	ZZZ	Zed	0	####	^(....)$	zz	9999999	XX	ZZ

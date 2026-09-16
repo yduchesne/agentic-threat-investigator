@@ -2051,6 +2051,56 @@ PR 26B's deterministic geographic substrate is covered by real PostgreSQL
   resolution performs no mutation and never touches `GeoResolution`
   (PR 26C scope).
 
+### PR 26B-2 delivered testing (G26B2-CLI/SRC/BLD/E2E matrices)
+
+PR 26B-2 (corrective completion) proves the upstream reference-data supply
+path: source adapters -> deterministic corpus builder -> installed CLI -> 
+existing importer -> PostgreSQL/PostGIS.
+
+- **G26B2-CLI01..05** (`tests/unit/infrastructure/test_cli_entrypoints.py`):
+  `ati-geography-import` and `ati-geography-build` exist in the installed
+  package metadata and resolve to `geography_import_main`/
+  `geography_build_main`; both `--help` exits succeed offline with no
+  database or network access; the builder refuses mutually exclusive
+  output modes fail-closed.
+- **G26B2-SRC01..07** (`tests/unit/infrastructure/test_geonames_source.py`):
+  the supported GeoNames files parse deterministically (countryInfo.txt,
+  admin1CodesASCII.txt, cities-file schema); malformed/non-finite/
+out-of-bounds coordinates fail closed; malformed admin/country references
+  fail closed; Unicode/diacritics parse and stay NFC-normalizable;
+  unsupported record shapes (wrong column counts) can never silently
+  become a Location.
+- **G26B2-SRC08..12** (`tests/unit/infrastructure/test_natural_earth_source.py`):
+  country Polygon and MultiPolygon and admin Polygon parse to canonical
+  SRID-4326 EWKT; invalid/non-polygonal/empty/unclosed geometry is
+  rejected; country identifiers normalize deterministically (`iso_a2` with
+  `iso_a2_eh`/`iso_a2_wb` fallbacks; unusable codes stay `None`).
+- **G26B2-BLD01..14** (`tests/unit/infrastructure/test_geography_corpus_builder.py`):
+  countries join by stable ISO code; admins join deterministically within
+  country; the reviewed `ADMIN1_CODE_EXCEPTIONS` mapping resolves a known
+  fixture mismatch; ambiguous admin matches are reported, never guessed;
+  unmatched Natural Earth objects cannot create canonical records; a
+  GeoNames record without a polygon emits null geometry; parent-before-
+  child output ordering; byte-identical output for identical inputs;
+  input ordering never changes output; no timestamps/random values;
+  output conforms exactly to the PR 26B corpus schema (production parser
+  round-trip); city coordinates never become polygons; orphan cities are
+  rejected and reported; geometry stays WGS84/SRID-4326; explicit
+  `--min-population`/`--countries` filters; invalid options and duplicate
+  source codes fail closed.
+- **G26B2-E2E** (`tests/integration/test_geography_build_import.py`): real
+  PostgreSQL + PostGIS end-to-end proof: real-format fixtures ->
+  `ati-geography-build` -> corpus NDJSON -> production corpus parser ->
+  `ReferenceIngestionService` -> `ati.location`; United States -> Washington
+  -> Seattle is created with deterministic canonical UUIDv5 identities,
+  correct parent hierarchy, country MultiPolygon / admin Polygon / city
+  point, correct PostGIS SRID (4326) and geometry types, and a second
+  import is a true no-op with no version churn. The actual installed
+  `ati-geography-import` console script is executed in a subprocess against
+  the isolated database (first import creates the corpus atomically, second
+  import has no version churn), and a malformed artifact exits non-zero
+  committing nothing.
+
 ### Domain and persistence
 
 Cover:
