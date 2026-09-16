@@ -22,6 +22,12 @@ from agentic_threat_investigator.api.app import (
 )
 from agentic_threat_investigator.api.errors import install_error_handlers
 from agentic_threat_investigator.app.identity import AuthenticationError
+from agentic_threat_investigator.app.query.geoint import (
+    GeointEntityLocationItem,
+    GeointLocationPage,
+    GeointObservationDetail,
+    GeointSummary,
+)
 from agentic_threat_investigator.app.query.geolocation import (
     InvestigationGeolocationResult,
 )
@@ -141,6 +147,84 @@ class FakeGeolocationService:
         return self.result
 
 
+class FakeGeointService:
+    """Record every GEOINT read and return configured results.
+
+    ``detail_results`` maps exact (kind, investigation_id, resource_id)
+    tuples to detail responses so route tests can distinguish in-scope from
+    cross-scope lookups without a database.
+    """
+
+    def __init__(
+        self,
+        summary_result: GeointSummary | None = None,
+        page: QueryPage[Any] | None = None,
+        location_page: GeointLocationPage[Any] | None = None,
+    ) -> None:
+        """Bind the default results and empty call logs."""
+        self.summary_result = summary_result
+        self.page = page or QueryPage(items=(), next_cursor=None)
+        self.location_page = location_page or GeointLocationPage(
+            items=(), next_cursor=None, containment_applied=False
+        )
+        self.summaries: list[Any] = []
+        self.entity_queries: list[Any] = []
+        self.observation_queries: list[Any] = []
+        self.entity_lists: list[Any] = []
+        self.location_entity_lists: list[Any] = []
+        self.location_observation_lists: list[Any] = []
+        self.entity_results: dict[tuple[Any, ...], GeointEntityLocationItem | None] = {}
+        self.observation_results: dict[
+            tuple[Any, ...], GeointObservationDetail | None
+        ] = {}
+        self.errors: list[BaseException] = []
+
+    async def summary(self, query: Any) -> GeointSummary:
+        """Record the summary query and return the configured result."""
+        self.summaries.append(query)
+        self._raise_errors()
+        if self.summary_result is None:
+            raise AssertionError("FakeGeointService.summary_result is not configured")
+        return self.summary_result
+
+    async def get_entity(self, query: Any) -> GeointEntityLocationItem | None:
+        """Record the entity query and return its configured result."""
+        self.entity_queries.append(query)
+        self._raise_errors()
+        return self.entity_results.get((query.investigation_id, query.entity_id))
+
+    async def list_entity_observations(self, query: Any) -> QueryPage[Any]:
+        """Record the entity-history query and return the configured page."""
+        self.entity_lists.append(query)
+        self._raise_errors()
+        return self.page
+
+    async def list_location_entities(self, query: Any) -> GeointLocationPage[Any]:
+        """Record the Location-Entity query and return the configured page."""
+        self.location_entity_lists.append(query)
+        self._raise_errors()
+        return self.location_page
+
+    async def list_location_observations(self, query: Any) -> GeointLocationPage[Any]:
+        """Record the Location-observation query and return the configured page."""
+        self.location_observation_lists.append(query)
+        self._raise_errors()
+        return self.location_page
+
+    async def get_observation(self, query: Any) -> GeointObservationDetail | None:
+        """Record the observation query and return its configured result."""
+        self.observation_queries.append(query)
+        self._raise_errors()
+        return self.observation_results.get(
+            (query.investigation_id, query.observation_id)
+        )
+
+    def _raise_errors(self) -> None:
+        """Raise every configured error exactly once per call."""
+        for error in self.errors:
+            raise error
+
+
 class FakeQueryBundle:
     """One in-memory query bundle with per-collection fakes.
 
@@ -150,11 +234,12 @@ class FakeQueryBundle:
     it at the app factory boundary.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, geoint: FakeGeointService | None = None) -> None:
         """Bind fresh collection fakes for every read contract."""
         self.investigations = FakeCollectionService()
         self.evidence = FakeCollectionService()
         self.geolocations = FakeGeolocationService()
+        self.geoint = geoint or FakeGeointService()
         self.relationships = FakeCollectionService()
         self.relationship_observations = FakeCollectionService()
         self.research_results = FakeCollectionService()

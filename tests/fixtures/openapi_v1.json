@@ -431,6 +431,406 @@
         "title": "GeoPrecision",
         "type": "string"
       },
+      "GeointEntityLocationResponse": {
+        "additionalProperties": false,
+        "description": "One Entity's Investigation-relative current geographic context.\n\n``current_observation`` is the newest qualifying observation within the\npath Investigation, never the global materialized ``EntityLocation``\nstate (which may have been advanced by another Investigation).",
+        "properties": {
+          "current_observation": {
+            "$ref": "#/components/schemas/GeointObservationResponse"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "entity_value": {
+            "title": "Entity Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "entity_type",
+          "entity_value",
+          "display_name",
+          "current_observation"
+        ],
+        "title": "GeointEntityLocationResponse",
+        "type": "object"
+      },
+      "GeointLocationEntitiesResponse_GeointEntityLocationResponse_": {
+        "additionalProperties": false,
+        "properties": {
+          "containment_applied": {
+            "title": "Containment Applied",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GeointEntityLocationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "containment_applied"
+        ],
+        "title": "GeointLocationEntitiesResponse[GeointEntityLocationResponse]",
+        "type": "object"
+      },
+      "GeointLocationObservationsResponse_GeointObservationResponse_": {
+        "additionalProperties": false,
+        "properties": {
+          "containment_applied": {
+            "title": "Containment Applied",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GeointObservationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "containment_applied"
+        ],
+        "title": "GeointLocationObservationsResponse[GeointObservationResponse]",
+        "type": "object"
+      },
+      "GeointLocationResponse": {
+        "additionalProperties": false,
+        "description": "One bounded canonical Location display reference.\n\nCentroid coordinates are exposed as the paired latitude/longitude only;\nno raw geometry or upstream metadata is ever included.",
+        "properties": {
+          "admin1_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin1 Code"
+          },
+          "admin2_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin2 Code"
+          },
+          "canonical_name": {
+            "title": "Canonical Name",
+            "type": "string"
+          },
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "location_id": {
+            "format": "uuid",
+            "title": "Location Id",
+            "type": "string"
+          },
+          "location_type": {
+            "$ref": "#/components/schemas/LocationType"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "parent_location_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Location Id"
+          }
+        },
+        "required": [
+          "location_id",
+          "location_type",
+          "canonical_name",
+          "country_code",
+          "admin1_code",
+          "admin2_code",
+          "parent_location_id",
+          "latitude",
+          "longitude"
+        ],
+        "title": "GeointLocationResponse",
+        "type": "object"
+      },
+      "GeointObservationDetailResponse": {
+        "additionalProperties": false,
+        "description": "One exact geographic observation with bounded display context.",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "entity_value": {
+            "title": "Entity Value",
+            "type": "string"
+          },
+          "observation": {
+            "$ref": "#/components/schemas/GeointObservationResponse"
+          }
+        },
+        "required": [
+          "observation",
+          "entity_type",
+          "entity_value",
+          "display_name"
+        ],
+        "title": "GeointObservationDetailResponse",
+        "type": "object"
+      },
+      "GeointObservationResponse": {
+        "additionalProperties": false,
+        "description": "One immutable geographic observation with exact provenance.\n\n``observation_id`` and ``evidence_id`` are exact persisted identities:\nthe observation -> Evidence drill-down route accepts ``evidence_id``\nunchanged.",
+        "properties": {
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "evidence_id": {
+            "format": "uuid",
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "location": {
+            "$ref": "#/components/schemas/GeointLocationResponse"
+          },
+          "observation_id": {
+            "format": "uuid",
+            "title": "Observation Id",
+            "type": "string"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/LocationPrecision"
+          },
+          "resolution_method": {
+            "title": "Resolution Method",
+            "type": "string"
+          },
+          "resolved_at": {
+            "format": "date-time",
+            "title": "Resolved At",
+            "type": "string"
+          },
+          "retrieved_at": {
+            "format": "date-time",
+            "title": "Retrieved At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation_id",
+          "entity_id",
+          "location",
+          "evidence_id",
+          "precision",
+          "resolution_method",
+          "observed_at",
+          "retrieved_at",
+          "resolved_at"
+        ],
+        "title": "GeointObservationResponse",
+        "type": "object"
+      },
+      "GeointPrecisionCountsResponse": {
+        "additionalProperties": false,
+        "description": "Observation counts by the approved precision vocabulary.",
+        "properties": {
+          "administrative_area": {
+            "title": "Administrative Area",
+            "type": "integer"
+          },
+          "city": {
+            "title": "City",
+            "type": "integer"
+          },
+          "country": {
+            "title": "Country",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "country",
+          "administrative_area",
+          "city"
+        ],
+        "title": "GeointPrecisionCountsResponse",
+        "type": "object"
+      },
+      "GeointSummaryResponse": {
+        "additionalProperties": false,
+        "description": "One bounded Investigation-scoped geographic summary (PR 26D).",
+        "properties": {
+          "administrative_area_count": {
+            "title": "Administrative Area Count",
+            "type": "integer"
+          },
+          "city_count": {
+            "title": "City Count",
+            "type": "integer"
+          },
+          "country_count": {
+            "title": "Country Count",
+            "type": "integer"
+          },
+          "entity_count_with_location": {
+            "title": "Entity Count With Location",
+            "type": "integer"
+          },
+          "location_count": {
+            "title": "Location Count",
+            "type": "integer"
+          },
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "precision_counts": {
+            "$ref": "#/components/schemas/GeointPrecisionCountsResponse"
+          },
+          "top_locations": {
+            "items": {
+              "$ref": "#/components/schemas/GeointTopLocationResponse"
+            },
+            "title": "Top Locations",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entity_count_with_location",
+          "observation_count",
+          "location_count",
+          "country_count",
+          "administrative_area_count",
+          "city_count",
+          "precision_counts",
+          "top_locations",
+          "truncated"
+        ],
+        "title": "GeointSummaryResponse",
+        "type": "object"
+      },
+      "GeointTopLocationResponse": {
+        "additionalProperties": false,
+        "description": "One exact observed Location group in the bounded summary.\n\n``scoped_entity_count`` is an exact scoped fact, never a risk or\nconcentration label.",
+        "properties": {
+          "location": {
+            "$ref": "#/components/schemas/GeointLocationResponse"
+          },
+          "scoped_entity_count": {
+            "title": "Scoped Entity Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "location",
+          "scoped_entity_count"
+        ],
+        "title": "GeointTopLocationResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -839,6 +1239,26 @@
         "title": "InvestigationTimelineEventType",
         "type": "string"
       },
+      "LocationPrecision": {
+        "description": "Precision supported by a geographic observation or association.\n\nAlthough the initial vocabulary mirrors :class:`LocationType`, the\nsemantics are distinct: ``LocationType`` classifies the canonical\nreference object while ``LocationPrecision`` records the precision\nsupported by an observation/association. Canonicalization never infers a\nmore precise value from a less precise one.",
+        "enum": [
+          "country",
+          "administrative_area",
+          "city"
+        ],
+        "title": "LocationPrecision",
+        "type": "string"
+      },
+      "LocationType": {
+        "description": "Classification of a canonical geographic reference object.\n\nThe v0.1 vocabulary is deliberately bounded to country, administrative\narea, and city. ``LocationType`` classifies the canonical reference\nobject; it is not a precision claim.",
+        "enum": [
+          "country",
+          "administrative_area",
+          "city"
+        ],
+        "title": "LocationType",
+        "type": "string"
+      },
       "LoginRequest": {
         "additionalProperties": false,
         "description": "Public login request DTO.",
@@ -956,6 +1376,34 @@
           "items"
         ],
         "title": "PageResponse[EvidenceResponse]",
+        "type": "object"
+      },
+      "PageResponse_GeointObservationResponse_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GeointObservationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PageResponse[GeointObservationResponse]",
         "type": "object"
       },
       "PageResponse_HistoryRecordResponse_": {
@@ -3246,6 +3694,769 @@
         "summary": "Get Evidence",
         "tags": [
           "evidence"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/geoint/entities/{entity_id}": {
+      "get": {
+        "description": "Return one Entity's Investigation-relative current geographic context.\n\n``current_observation`` is the newest qualifying observation within the\npath Investigation; a cross-scope Entity maps to 404 and never discloses\nexistence in another Investigation.",
+        "operationId": "get_investigation_geoint_entity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeointEntityLocationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "Get Investigation Geoint Entity",
+        "tags": [
+          "geoint"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/geoint/entities/{entity_id}/observations": {
+      "get": {
+        "description": "List the Entity's Investigation-scoped geographic observation history.\n\nOrdered newest-first under the exact PR 26A currentness ordering with\nopaque keyset cursors and the shared server page bounds.",
+        "operationId": "list_investigation_geoint_entity_observations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponse_GeointObservationResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "List Investigation Geoint Entity Observations",
+        "tags": [
+          "geoint"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/geoint/locations/{location_id}/entities": {
+      "get": {
+        "description": "List Entities observed at one canonical Location of the Investigation.\n\n``include_contained=true`` additionally selects child canonical\nLocations spatially covered by the selected boundary (``ST_Covers``,\nboundary-inclusive); city Points and NULL boundaries never expand.\nEach Entity appears once using its latest qualifying observation.",
+        "operationId": "list_investigation_geoint_location_entities",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "location_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Location Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_contained",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Contained",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeointLocationEntitiesResponse_GeointEntityLocationResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "List Investigation Geoint Location Entities",
+        "tags": [
+          "geoint"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/geoint/locations/{location_id}/observations": {
+      "get": {
+        "description": "List geographic observations at one canonical Location of the Investigation.\n\n``include_contained=true`` additionally selects child canonical\nLocations spatially covered by the selected boundary; city Points and\nNULL boundaries never expand. Every qualifying immutable observation is\nreturned pageably with exact ``observation_id``/``evidence_id``.",
+        "operationId": "list_investigation_geoint_location_observations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "location_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Location Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_contained",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Contained",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeointLocationObservationsResponse_GeointObservationResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "List Investigation Geoint Location Observations",
+        "tags": [
+          "geoint"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/geoint/observations/{observation_id}": {
+      "get": {
+        "description": "Return one exact geographic observation bound to the Investigation.\n\nThe response carries the exact ``observation_id`` and ``evidence_id``;\na cross-Investigation observation maps to 404 and never discloses\nexistence elsewhere. Full Evidence drill-down remains\n``GET /investigations/{I}/evidence/{evidence_id}``.",
+        "operationId": "get_investigation_geoint_observation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "observation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Observation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeointObservationDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "Get Investigation Geoint Observation",
+        "tags": [
+          "geoint"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/geoint/summary": {
+      "get": {
+        "description": "Return one bounded geographic summary of the Investigation.\n\nCounts are exact Investigation-scoped facts; ``top_locations`` carries\nat most the server-owned bound in deterministic order and is never a\nrisk/concentration label.",
+        "operationId": "get_investigation_geoint_summary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeointSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "Get Investigation Geoint Summary",
+        "tags": [
+          "geoint"
         ]
       }
     },

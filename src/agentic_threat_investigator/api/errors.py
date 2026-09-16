@@ -42,6 +42,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     ReportReferenceInvalidError,
     StaleReportInputError,
 )
+from agentic_threat_investigator.app.query.geoint import GeointReadError
 from agentic_threat_investigator.app.query.geolocation import GeolocationFactsError
 from agentic_threat_investigator.app.query.pagination import (
     CursorFilterMismatchError,
@@ -68,6 +69,8 @@ class ApiErrorCode(str, Enum):
     RESEARCH_RESULT_NOT_FOUND = "research_result_not_found"
     ASSESSMENT_NOT_FOUND = "assessment_not_found"
     REPORT_NOT_FOUND = "report_not_found"
+    GEOINT_ENTITY_NOT_FOUND = "geoint_entity_not_found"
+    GEOINT_OBSERVATION_NOT_FOUND = "geoint_observation_not_found"
     INVALID_CURSOR = "invalid_cursor"
     CURSOR_QUERY_MISMATCH = "cursor_query_mismatch"
     CURSOR_FILTER_MISMATCH = "cursor_filter_mismatch"
@@ -322,6 +325,16 @@ def map_typed_error(error: Exception) -> ApiError:
         return ApiError(
             ApiErrorCode.INTERNAL_ERROR,
             "Geolocation projection failed.",
+            500,
+            expose=False,
+        )
+    if isinstance(error, GeointReadError):
+        # Malformed persisted GEOINT read state fails the read closed as a
+        # safe internal contract error; raw persisted values never reach the
+        # public boundary.
+        return ApiError(
+            ApiErrorCode.INTERNAL_ERROR,
+            "GEOINT read failed.",
             500,
             expose=False,
         )

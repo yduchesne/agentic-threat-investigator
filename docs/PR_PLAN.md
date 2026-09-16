@@ -1621,7 +1621,7 @@ Deliver:
 
 The resolver issues no ad-hoc mutation SQL; mutations go through versioned stored functions. [DONE]
 
-### PR 26D — GEOINT query and API layer
+### PR 26D — GEOINT query and API layer [DONE]
 
 Deliver:
 
@@ -1635,6 +1635,57 @@ Deliver:
 - no arbitrary PostGIS expression API or cross-Investigation leakage.
 
 Purpose-built bounded reads may execute SQL/PostGIS directly; mutations remain stored-function-owned.
+
+Delivered (PR 26D implementation summary):
+
+- one focused read boundary (`GeointQueryService` + `PostgresGeointQueryService`)
+  spread through the existing PR 23A bundle (`QueryServiceBundle.geoint`) over one
+  per-request `AsyncSession`, six typed frozen query inputs (summary, Entity,
+  Entity-history, Location-Entity, Location-observation, observation), and frozen
+  read models (`GeointLocationRef`, `GeointObservationItem`,
+  `GeointEntityLocationItem`, `GeointObservationDetail`, `GeointLocationPage`,
+  `GeointSummary`, `GeointTopLocation`, `GeointPrecisionCounts`);
+- strict Investigation scope proven through the exact Evidence chain
+  (`EntityLocationObservation.evidence_id -> Evidence.investigation_id`):
+  cross-scope detail is 404 (`geoint_entity_not_found` /
+  `geoint_observation_not_found`), collections return the established empty
+  `200`, and the global materialized `EntityLocation` is never exposed as
+  scoped current (current is the newest scoped observation under the exact
+  PR 26A ordering `COALESCE(observed_at, retrieved_at)` + observation UUID,
+  greater pair wins);
+- Entity history, Location -> Entities/observations, and the summary reuse
+  `QueryLimits`, the opaque versioned cursor codec (new query kinds bound to
+  investigation/Entity/Location/containment fingerprints), and the existing
+  `PageResponse`; Location collections carry an explicit
+  `containment_applied` flag (false for exact selections, city Points, and
+  NULL boundary geometry);
+- purpose-built containment (`include_contained=true`) via boundary-inclusive
+  `ST_Covers` over SRID-4326 geometry with a GiST pre-filter: country/admin
+  polygons include exactly covered child canonical Locations, city Points
+  never expand, NULL geometry degrades to exact, no radius/nearest/proximity
+  API, no arbitrary PostGIS/WKT/GeoJSON input;
+- bounded summaries: exact scoped observation/Entity/Location counts,
+  per-type and per-precision counts, and `top_locations` capped by the new
+  `ATI_API_MAX_GEOINT_SUMMARY_TOP_LOCATIONS` bound in deterministic
+  (entity count DESC, canonical name ASC, Location UUID ASC) order with an
+  explicit `truncated` flag;
+- read-only proof: only literal bounded SELECT statements, no mutation SQL,
+  no commit; migration 0029 adds only the two smallest proven read indexes
+  (`entity_location_observation_location_idx`, and
+  `entity_location_observation_evidence_idx`) justified by EXPLAIN,
+  with a data-preserving downgrade;
+- API surface: one `/api/v1/investigations/{I}/geoint` router (six GET-only
+  operations, `AnalystUser` + cookie security, no CSRF), typed bounded DTOs
+  exposing centroid coordinates only (never raw geometry), central safe
+  internal-contract errors for malformed persisted state, and unchanged
+  PR 25 `/geolocations`;
+- docs updated (`ARCHITECTURE.md`, `DATABASE.md`, `API.md`, `TESTING.md`)
+  and PR_PLAN marked DONE only after the full unit, static-typing, lint,
+  real-PostgreSQL integration, migration, and EXPLAIN gates pass.
+
+No migration rewrites authoritative data and no STOP condition was hit: containment
+was chosen because PR 26E concretely requires Location exploration and metric
+proximity was deliberately excluded (no reviewed metric contract exists).
 
 ### PR 26E — Analyst GEOINT workspace
 

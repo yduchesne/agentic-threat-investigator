@@ -1531,3 +1531,70 @@ async def test_geoint_lifecycle_migration_upgrade_and_downgrade() -> None:
         )
     finally:
         command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_geoint_read_indexes_migration_upgrade_and_downgrade() -> None:
+    """PR 26D read-index migration round-trip preserves authoritative data.
+
+    G26D-P33: upgrading a 0028 database installs exactly the two PR 26D
+    observation read indexes without rewriting any row, and the indexes are
+    eligible for the Investigation-scoped read shapes. G26D-P34: downgrading
+    to 0028 drops only the two new indexes while preserving every
+    authoritative GEOINT row and restoring the prior query surface.
+    """
+    alembic_cfg = Config("alembic.ini")
+
+    async def observation_indexes() -> set[str]:
+        """Return the entity_location_observation index names in the ati schema."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                return {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            """
+                            SELECT indexname FROM pg_indexes
+                            WHERE schemaname = 'ati'
+                              AND tablename = 'entity_location_observation'
+                            """
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+
+    async def observation_count() -> int:
+        """Return the total persisted observation rows."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                value = await connection.scalar(
+                    text("SELECT count(*) FROM ati.entity_location_observation")
+                )
+        finally:
+            await engine.dispose()
+        return int(value or 0)
+
+    pr26d_indexes = {
+        "entity_location_observation_location_idx",
+        "entity_location_observation_evidence_idx",
+    }
+    try:
+        command.downgrade(alembic_cfg, "0028_geo_resolution_lifecycle")
+        assert not pr26d_indexes & await observation_indexes()
+        before = await observation_count()
+
+        # Upgrade: the two read indexes install; no observations are touched.
+        command.upgrade(alembic_cfg, "head")
+        assert pr26d_indexes <= await observation_indexes()
+        assert await observation_count() == before
+
+        # Downgrade: only the two read indexes are dropped; rows survive.
+        command.downgrade(alembic_cfg, "0028_geo_resolution_lifecycle")
+        assert not pr26d_indexes & await observation_indexes()
+        assert await observation_count() == before
+    finally:
+        command.upgrade(alembic_cfg, "head")

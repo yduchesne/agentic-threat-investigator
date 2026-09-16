@@ -14,6 +14,7 @@
 - [Research](#research)
 - [Timeline](#timeline)
 - [Map/geolocation](#mapgeolocation)
+- [GEOINT (PR 26D)](#geoint-pr-26d)
 - [Monitors](#monitors)
 - [Findings](#findings)
 - [Administration](#administration)
@@ -264,6 +265,12 @@ Delivered routes (PR 23C):
 - `GET /api/v1/investigations/{id}/reports/{report_id}/markdown`
 - `GET /api/v1/investigations/{id}/timeline`
 - `GET /api/v1/investigations/{id}/geolocations` (PR 25A)
+- `GET /api/v1/investigations/{id}/geoint/summary` (PR 26D)
+- `GET /api/v1/investigations/{id}/geoint/entities/{entity_id}` (PR 26D)
+- `GET /api/v1/investigations/{id}/geoint/entities/{entity_id}/observations` (PR 26D)
+- `GET /api/v1/investigations/{id}/geoint/locations/{location_id}/entities` (PR 26D)
+- `GET /api/v1/investigations/{id}/geoint/locations/{location_id}/observations` (PR 26D)
+- `GET /api/v1/investigations/{id}/geoint/observations/{observation_id}` (PR 26D)
 - `GET /api/v1/investigations/{id}/history`
 - `GET /api/v1/investigations/{id}/history/{object_type}/{object_id}`
 - `GET /api/v1/investigations/{id}/history/{object_type}/{object_id}/{version}`
@@ -558,6 +565,136 @@ ordinary rows through the normal application repositories into the
 throwaway E2E database; it is **not** an HTTP endpoint, carries no
 credentials to browsers, and is inert in normal fake mode without the
 explicit `ATI_E2E_SEEDING_ENABLED` flag.
+
+## GEOINT (PR 26D)
+
+### Bounded Investigation-scoped GEOINT reads
+
+Base prefix (one router, stable order):
+
+```text
+/api/v1/investigations/{investigation_id}/geoint
+```
+
+| Route | Operation id | Purpose |
+| --- | --- | --- |
+| `GET /summary` | `get_investigation_geoint_summary` | one bounded geographic summary of the Investigation |
+| `GET /entities/{entity_id}` | `get_investigation_geoint_entity` | Entity's Investigation-relative current geographic context |
+| `GET /entities/{entity_id}/observations` | `list_investigation_geoint_entity_observations` | the Entity's scoped observation history (paged) |
+| `GET /locations/{location_id}/entities` | `list_investigation_geoint_location_entities` | distinct Entities observed at a Location (paged; optional containment) |
+| `GET /locations/{location_id}/observations` | `list_investigation_geoint_location_observations` | observations at a Location (paged; optional containment) |
+| `GET /observations/{observation_id}` | `get_investigation_geoint_observation` | one exact observation with Exact Evidence provenance |
+
+Every endpoint requires the ANALYST/ADMIN role, is GET-only (no CSRF), and
+is mandatory Investigation-scoped: there is **no global GEOINT browse** in
+v0.1.
+
+**Scope is proved through exact Evidence provenance**: a returned
+observation's `observation_id` is the exact
+`EntityLocationObservation` identity, its `evidence_id` is the exact
+immutable `GEOLOCATION` Evidence that produced it, and that Evidence's
+`investigation_id` must equal the path Investigation. An Entity or
+Location observed only by another Investigation is never disclosed:
+
+- detail endpoints (`/entities/{entity_id}`, `/observations/{observation_id}`)
+  return `404 geoint_entity_not_found` / `404 geoint_observation_not_found`
+  when no qualifying data exists in the path Investigation;
+- collections follow the established PR 23C convention and return an
+  empty successful `200` collection for unknown/not-visible
+  Investigations and for Locations unused in scope.
+
+**Current-vs-history semantics are explicit.** Entity current
+(`GET /entities/{entity_id}` and the `current_observation` of Location
+Entity lists) is current **within the path Investigation**: the newest
+qualifying observation under the exact PR 26A currentness ordering
+(`COALESCE(observed_at, retrieved_at)` descending, observation UUID
+descending with the greater pair winning). It is never the global
+materialized `EntityLocation` row, which may have been advanced by
+another Investigation. History lists are ordered newest-first under the
+same ordering.
+
+**Collections reuse the PR 23A opaque keyset contract**: `limit` defaults
+to `ATI_QUERY_DEFAULT_PAGE_SIZE` (ceiling `ATI_QUERY_MAX_PAGE_SIZE`, both
+server-validated), `cursor` is the opaque versioned cursor bound to the
+exact query scope (investigation, entity/Location, and the containment
+flag), and `next_cursor` is `null` exactly on the final page. No offset
+pagination exists for GEOINT collections.
+
+**Containment** (`include_contained=true` on Location collections) is a
+purpose-built, boundary-inclusive spatial selection: the exact selected
+canonical Location plus child canonical Locations whose SRID-4326
+reference geometry is covered by the selected boundary (PostGIS
+`ST_Covers`, boundary-inclusive). It exists so country/admin exploration
+works (PR 26E):
+
+- a selected **country/admin polygon** includes the exact Location plus
+  qualifying child canonical Locations inside its boundary;
+- a selected **city Point** behaves exactly like the exact-city selection
+  (`containment_applied=false`); no radius/nearest search exists;
+- a selected Location with **NULL boundary geometry** degrades to the
+  exact selection without guessing from names;
+- the response exposes `containment_applied`: `true` exactly when the
+  selection was performed with boundary containment, otherwise `false`;
+- containment never writes `parent_location_id`, never creates
+  Relationships, and never implies a threat relationship or attribution.
+
+There is **no proximity/radius/nearest endpoint** and **no arbitrary
+PostGIS/WKT/GeoJSON input API** in v0.1: spatial reads are fixed,
+bounded, purpose-built SQL shapes.
+
+**Location references** expose only approved canonical fields plus the
+centroid latitude/longitude pair when available. Raw EWKT/WKB boundary
+geometry, upstream metadata, and provider payloads are never returned.
+`location` is reference geography, never a threat Entity.
+
+### Summary
+
+`GET /summary` returns one bounded dataset:
+
+```json
+{
+  "entity_count_with_location": 5,
+  "observation_count": 6,
+  "location_count": 4,
+  "country_count": 1,
+  "administrative_area_count": 2,
+  "city_count": 1,
+  "precision_counts": {"country": 3, "administrative_area": 1, "city": 2},
+  "top_locations": [
+    {
+      "location": {"location_id": "...", "location_type": "country",
+                    "canonical_name": "United States", "country_code": "US",
+                    "admin1_code": null, "admin2_code": null,
+                    "parent_location_id": null,
+                    "latitude": 39.8, "longitude": -98.5},
+      "scoped_entity_count": 3
+    }
+  ],
+  "truncated": false
+}
+```
+
+- counts are exact Investigation-scoped facts: `observation_count` (all
+  qualifying observations), `entity_count_with_location` (distinct scoped
+  Entities), `location_count` (distinct canonical Locations observed),
+  `country_count`/`administrative_area_count`/`city_count` (distinct
+  observed canonical Locations of each reference type), and
+  `precision_counts` (observation counts by the approved precision
+  vocabulary).
+- `top_locations` carries at most `ATI_API_MAX_GEOINT_SUMMARY_TOP_LOCATIONS`
+  groups ordered by scoped Entity count descending, canonical name
+  ascending, Location UUID ascending; `truncated` is true exactly when
+  more groups existed beyond the bound.
+- counts are never labeled as risk/concentration/attribution.
+
+### Observation detail provenance drill-down
+
+`GET /observations/{observation_id}` returns
+`{observation, entity_type, entity_value, display_name}` where
+`observation` carries the exact `observation_id` and `evidence_id`.
+Full Evidence drill-down remains the existing
+`GET /api/v1/investigations/{investigation_id}/evidence/{evidence_id}`
+endpoint, which accepts the exact returned `evidence_id` unchanged.
 
 ## Monitors
 

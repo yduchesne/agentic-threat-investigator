@@ -220,6 +220,11 @@ class Settings(BaseSettings):
     # visualization set; this bound is semantically separate from pageable
     # collection sizes and is never caller-controllable at the HTTP layer.
     api_max_map_geolocation_items: int = Field(default=500, ge=1)
+    # Server-owned hard bound of the PR 26D GEOINT summary top-location
+    # groups. The summary is one bounded analyst-facing dataset, not a
+    # pageable collection; the bound is semantically distinct from page
+    # sizes and is never caller-controllable at the HTTP layer.
+    api_max_geoint_summary_top_locations: int = Field(default=10, ge=1)
     # Credentialed cookie CORS (PR 23C). Explicit configured frontend
     # origin(s) only; the wildcard is rejected so credentialed requests can
     # never be sent cross-origin. Defaults to the local dev frontend.
@@ -368,6 +373,7 @@ class Settings(BaseSettings):
         "api_max_objective_length",
         "api_max_request_body_bytes",
         "api_max_map_geolocation_items",
+        "api_max_geoint_summary_top_locations",
         mode="before",
     )
     @classmethod
