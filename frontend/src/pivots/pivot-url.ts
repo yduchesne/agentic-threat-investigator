@@ -38,6 +38,7 @@ import {
   MAX_PIVOT_FILTER_VALUE_CHARS,
   MAX_PIVOT_LABEL_CHARS,
   MAX_PIVOT_STEPS,
+  PIVOT_BOOLEAN_FILTER_KEYS,
   PIVOT_FILTER_KEYS,
   PIVOT_SOURCE_KINDS,
   PIVOT_TIMESTAMP_FILTER_KEYS,
@@ -114,11 +115,18 @@ export function parsePivotFilters(
     return null;
   }
   const source = raw as Record<string, unknown>;
-  const output: Record<string, string> = {};
+  const output: Record<string, string | boolean> = {};
   for (const key of PIVOT_FILTER_KEYS[resource]) {
     const value = source[key];
     if (value === undefined) {
       continue;
+    }
+    if ((PIVOT_BOOLEAN_FILTER_KEYS[resource] as readonly string[]).includes(key)) {
+      if (value === true || value === false) {
+        output[key] = value;
+        continue;
+      }
+      return null;
     }
     if (!isBoundedString(value)) {
       return null;
@@ -177,6 +185,12 @@ export function serializePivotFilters(
   const output: Record<string, unknown> = {};
   for (const key of PIVOT_FILTER_KEYS[resource]) {
     const value = (filters as Record<string, unknown>)[key];
+    if ((PIVOT_BOOLEAN_FILTER_KEYS[resource] as readonly string[]).includes(key)) {
+      if (value === true || value === false) {
+        output[key] = value;
+      }
+      continue;
+    }
     if (typeof value === "string" && value !== "") {
       output[key] = value;
     }
@@ -404,6 +418,12 @@ export function stepToSearchParams(step: PivotStep): URLSearchParams {
   const params = new URLSearchParams();
   for (const key of PIVOT_FILTER_KEYS[step.resource]) {
     const value = (step.filters as Record<string, unknown>)[key];
+    if ((PIVOT_BOOLEAN_FILTER_KEYS[step.resource] as readonly string[]).includes(key)) {
+      if (value === true) {
+        params.set(key, "true");
+      }
+      continue;
+    }
     if (typeof value === "string" && value !== "") {
       params.set(key, value);
     }
@@ -437,13 +457,22 @@ export function stepFromSearchParams(
 export function filtersFromParams(
   resource: PivotResource,
   params: URLSearchParams,
-): Record<string, string> {
-  const output: Record<string, string> = {};
+): Record<string, string | boolean> {
+  const output: Record<string, string | boolean> = {};
   for (const key of PIVOT_FILTER_KEYS[resource]) {
     const value = params.get(key);
-    if (value !== null && value !== "") {
-      output[key] = value;
+    if (value === null || value === "") {
+      continue;
     }
+    if ((PIVOT_BOOLEAN_FILTER_KEYS[resource] as readonly string[]).includes(key)) {
+      if (value === "true" || value === "1") {
+        output[key] = true;
+      } else if (value === "false" || value === "0") {
+        output[key] = false;
+      }
+      continue;
+    }
+    output[key] = value;
   }
   return output;
 }

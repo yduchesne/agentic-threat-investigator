@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { Evidence, Relationship, RelationshipObservation, ResearchResult } from "../api/schema-types";
+import type { Evidence, GeointObservation, Relationship, RelationshipObservation, ResearchResult } from "../api/schema-types";
 import {
   entityActions,
   evidenceSubjectActions,
@@ -265,3 +265,146 @@ describe("pivot capability registry", () => {
     expect(keys.size).toBe(allRegistered.length);
   });
 });
+// PR 26E GEOINT pivot capabilities (PV01..PV07) -----------------------------
+
+import {
+  entityGeointAction,
+  geointEntityActions,
+  geointObservationEvidenceAction,
+  geointObservationLocationActions,
+  locationCompactLabel,
+  locationEntitiesAction,
+  locationObservationsAction,
+} from "./pivot-capabilities";
+
+describe("GEOINT pivot capabilities (PV01..PV07, PV15)", () => {
+  const GEOINT_ENTITY: GeointObservationSource = {
+    entity_id: ENTITY_ID,
+    entity_value: "203.0.113.10",
+  };
+
+  it("PV01: Entity -> GEOINT current/history is an explicit typed step", () => {
+    const action = entityGeointAction(GEOINT_ENTITY, "geoint_entity");
+    expect(action.key).toBe("geointEntity");
+    expect(action.sourceKind).toBe("geoint_entity");
+    expect(action.target).toEqual({
+      resource: "geoint-entity",
+      filters: { entity_id: ENTITY_ID },
+      selectedId: null,
+      label: "203.0.113.10",
+    });
+  });
+
+  it("PV05: observation -> exact Evidence reuses the existing evidenceExact target", () => {
+    const actions = geointObservationEvidenceAction(
+      { evidence_id: EVIDENCE_ID },
+      "geoint_observation",
+    );
+    expect(actions).toHaveLength(1);
+    expect(actions[0].key).toBe("evidenceExact");
+    expect(actions[0].target).toEqual({
+      resource: "evidence",
+      filters: {},
+      selectedId: EVIDENCE_ID,
+      label: `Evidence ${EVIDENCE_ID.slice(0, 8)}`,
+    });
+  });
+
+  it("PV02/PV03/PV04: GEOINT observations expose exact Location surfaces", () => {
+    const observation = {
+      observation_id: "40000000-0000-4000-8000-000000000301",
+      entity_id: ENTITY_ID,
+      evidence_id: EVIDENCE_ID,
+      precision: "city",
+      resolution_method: "canonical_geography_v1",
+      observed_at: "2026-06-01T09:00:00Z",
+      retrieved_at: "2026-06-01T09:05:00Z",
+      resolved_at: "2026-06-01T09:06:00Z",
+      location: {
+        location_id: LOCATION_ID,
+        location_type: "city",
+        canonical_name: "Seattle",
+        country_code: "US",
+        admin1_code: "WA",
+        admin2_code: null,
+        parent_location_id: null,
+        latitude: 47.6062,
+        longitude: -122.3321,
+      },
+    } as unknown as GeointObservation;
+    const actions = geointObservationLocationActions(observation, "geoint_location");
+    expect(actions.map((action) => action.key)).toEqual([
+      "geointLocationEntities",
+      "geointLocationObservations",
+    ]);
+    expect(actions[0].target).toEqual({
+      resource: "geoint-location-entities",
+      filters: { location_id: LOCATION_ID },
+      selectedId: null,
+      label: "Seattle",
+    });
+    expect(actions[1].target).toEqual({
+      resource: "geoint-location-observations",
+      filters: { location_id: LOCATION_ID },
+      selectedId: null,
+      label: "Seattle",
+    });
+  });
+
+  it("PV02b: a top Location -> scoped Entities action keeps the bounded label", () => {
+    const action = locationEntitiesAction(LOCATION_ID, "Seattle", "geoint_location");
+    expect(action.target).toEqual({
+      resource: "geoint-location-entities",
+      filters: { location_id: LOCATION_ID },
+      selectedId: null,
+      label: "Seattle",
+    });
+  });
+
+  it("PV04b: Location -> scoped observations action exists", () => {
+    const action = locationObservationsAction(LOCATION_ID, "Seattle", "geoint_location");
+    expect(action.target.resource).toBe("geoint-location-observations");
+    expect(action.target.filters).toEqual({ location_id: LOCATION_ID });
+    expect(action.target.selectedId).toBeNull();
+  });
+
+  it("PV06: GEOINT Entity exploration reuses the existing valid entity actions", () => {
+    const actions = geointEntityActions(GEOINT_ENTITY, "geoint_observation");
+    expect(actions.map((action) => action.key)).toEqual([
+      "evidenceForEntity",
+      "relationshipsSource",
+      "relationshipsTarget",
+      "researchForEntity",
+    ]);
+    expect(actions[0].target.filters).toEqual({ subject_entity_id: ENTITY_ID });
+    expect(actions[1].target.filters).toEqual({ source_entity_id: ENTITY_ID });
+    expect(actions[2].target.filters).toEqual({ target_entity_id: ENTITY_ID });
+    expect(actions[3].target.filters).toEqual({ subject_entity_id: ENTITY_ID });
+  });
+
+  it("PV07: no generic arbitrary-parameter geoint target exists", () => {
+    const locationAction = locationEntitiesAction(LOCATION_ID, "Seattle", "geoint_location");
+    // The target filters hold exactly the stable identity; no cursor,
+    // viewport, payload, or geometry is ever serialized.
+    expect(Object.keys(locationAction.target.filters)).toEqual(["location_id"]);
+    const observationTarget = geointObservationEvidenceAction(
+      { evidence_id: EVIDENCE_ID },
+      "geoint_observation",
+    )[0].target;
+    expect(Object.keys(observationTarget.filters)).toEqual([]);
+    expect(observationTarget.selectedId).toBe(EVIDENCE_ID);
+  });
+
+  it("bounded compact Location labels (PV18)", () => {
+    expect(locationCompactLabel(LOCATION_ID)).toBe(`Location ${LOCATION_ID.slice(0, 8)}`);
+    const label = locationCompactLabel(LOCATION_ID);
+    expect(label.length).toBeLessThanOrEqual(32);
+  });
+});
+
+/** Narrow source shapes for the capability assertions. */
+interface GeointObservationSource {
+  entity_id: string;
+  entity_value: string;
+}
+const LOCATION_ID = "40000000-0000-4000-8000-000000000201";

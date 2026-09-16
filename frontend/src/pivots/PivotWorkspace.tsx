@@ -30,6 +30,8 @@ import { useSearchParams } from "react-router";
 
 import type { ResourceFilterCodec } from "../analyst-table/resource-page";
 import { useResourceTable } from "../analyst-table/resource-page";
+import { DrawerError, DrawerLoading } from "../analyst-table/DetailDrawer";
+import { EmptyState } from "../components/AsyncState";
 import type { Investigation } from "../api/schema-types";
 import { EvidenceWorkspace } from "../evidence/EvidenceWorkspace";
 import {
@@ -38,6 +40,20 @@ import {
   parseEvidenceFilters,
   type EvidenceFilters,
 } from "../evidence/evidence-filters";
+import { EntityGeointView } from "../geoint/EntityGeointView";
+import {
+  emptyGeointEntityFilters,
+  emptyGeointLocationFilters,
+  geointEntityFiltersToParams,
+  geointLocationFiltersToParams,
+  parseGeointEntityFilters,
+  parseGeointLocationFilters,
+  type GeointEntityFilters,
+  type GeointLocationFilters,
+} from "../geoint/geoint-filters";
+import { LocationEntitiesView, LocationObservationsView } from "../geoint/LocationViews";
+import { GeointObservationDetailBody } from "../geoint/GeointObservationDetail";
+import { useGeointObservation } from "../geoint/geoint-queries";
 import {
   emptyObservationFilters,
   observationFiltersToParams,
@@ -257,6 +273,39 @@ function PivotStepHost({
           investigation={investigation}
         />
       );
+    case "geoint-entity":
+      return (
+        <GeointEntityPivotStep
+          step={step}
+          onCommitStep={onCommitStep}
+          investigationId={investigationId}
+        />
+      );
+    case "geoint-location-entities":
+      return (
+        <GeointLocationPivotStep
+          step={step}
+          onCommitStep={onCommitStep}
+          investigationId={investigationId}
+          view="entities"
+        />
+      );
+    case "geoint-location-observations":
+      return (
+        <GeointLocationPivotStep
+          step={step}
+          onCommitStep={onCommitStep}
+          investigationId={investigationId}
+          view="observations"
+        />
+      );
+    case "geoint-observation":
+      return (
+        <GeointObservationPivotStep
+          step={step}
+          investigationId={investigationId}
+        />
+      );
     case "research":
       return (
         <ResearchPivotStep
@@ -391,4 +440,105 @@ function ResearchPivotStep({
       embedded
     />
   );
+}
+
+/** GEOINT Entity step adapter over the pivot step port (current + history). */
+function GeointEntityPivotStep({
+  step,
+  onCommitStep,
+  investigationId,
+}: {
+  step: PivotStep;
+  onCommitStep: (next: PivotStep, replace: boolean) => void;
+  investigationId: string;
+}): ReactElement {
+  const codec: ResourceFilterCodec<GeointEntityFilters> = {
+    parse: parseGeointEntityFilters,
+    toParams: geointEntityFiltersToParams,
+    empty: emptyGeointEntityFilters,
+  };
+  const table = useResourceTable(
+    codec,
+    createPivotStatePort(step, codec, onCommitStep),
+  );
+  return (
+    <EntityGeointView
+      investigationId={investigationId}
+      table={table}
+    />
+  );
+}
+
+/** GEOINT Location step adapter (Entities or observations surface). */
+function GeointLocationPivotStep({
+  step,
+  onCommitStep,
+  investigationId,
+  view,
+}: {
+  step: PivotStep;
+  onCommitStep: (next: PivotStep, replace: boolean) => void;
+  investigationId: string;
+  view: "entities" | "observations";
+}): ReactElement {
+  const codec: ResourceFilterCodec<GeointLocationFilters> = {
+    parse: parseGeointLocationFilters,
+    toParams: geointLocationFiltersToParams,
+    empty: emptyGeointLocationFilters,
+  };
+  const table = useResourceTable(
+    codec,
+    createPivotStatePort(step, codec, onCommitStep),
+  );
+  return view === "entities" ? (
+    <LocationEntitiesView investigationId={investigationId} table={table} />
+  ) : (
+    <LocationObservationsView investigationId={investigationId} table={table} />
+  );
+}
+
+/** GEOINT exact observation detail step (no list/pagination surface). */
+function GeointObservationPivotStep({
+  step,
+  investigationId,
+}: {
+  step: PivotStep;
+  investigationId: string;
+}): ReactElement {
+  const observationId =
+    step.resource === "geoint-observation"
+      ? (step.filters.observation_id ?? null)
+      : null;
+  return <ObservationPivotBody investigationId={investigationId} observationId={observationId} />;
+}
+
+/** The observation detail body with its bounded states. */
+function ObservationPivotBody({
+  investigationId,
+  observationId,
+}: {
+  investigationId: string;
+  observationId: string | null;
+}): ReactElement {
+  const { t } = useTranslation("geoint");
+  const { detail, isLoading, isError, error, refetch } = useGeointObservation(
+    investigationId,
+    observationId,
+  );
+  if (observationId === null) {
+    return <EmptyState title={t("detail.observation.missing.title")} />;
+  }
+  if (isLoading && detail === null) {
+    return <DrawerLoading label={t("detail.observation.loading")} />;
+  }
+  if (isError && detail === null && error !== null) {
+    if (error.kind === "api" && error.status === 404) {
+      return <Alert severity="info" role="status">{t("detail.observation.notFound.title")}</Alert>;
+    }
+    return <DrawerError title={t("detail.observation.loadError.title")} onRetry={refetch} />;
+  }
+  if (detail === null) {
+    return <DrawerLoading label={t("detail.observation.loading")} />;
+  }
+  return <GeointObservationDetailBody detail={detail} />;
 }

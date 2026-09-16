@@ -20,6 +20,7 @@ const WORKSPACE_TABS = [
   { path: "evidence", key: "evidence" },
   { path: "relationships", key: "relationships" },
   { path: "map", key: "map" },
+  { path: "geoint", key: "geoint" },
   { path: "research", key: "research" },
   { path: "timeline", key: "timeline" },
 ] as const;

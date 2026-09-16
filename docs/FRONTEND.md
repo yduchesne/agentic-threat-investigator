@@ -57,9 +57,10 @@ Tabs:
 2. Evidence
 3. Relationships
 4. Map
-5. Research
-6. Timeline
-7. Report
+5. Geographic context (GEOINT)
+6. Research
+7. Timeline
+8. Report
 
 This is the centerpiece of the product.
 
@@ -154,6 +155,12 @@ Always include a clear qualification equivalent to:
 > Approximate IP geolocation; this does not identify the physical location of an attacker or device.
 
 Map markers link back to entity/evidence details.
+
+### Geographic context (GEOINT)
+
+Show the bounded PR 26D canonical geographic summary for the Investigation: entities with geographic context, observations, canonical Locations, type/precision counts and top Locations, with the persistent semantic disclaimer that shared or nearby locations do not establish a cyber relationship, ownership, coordination, targeting, or attribution.
+
+Map markers plot only the currently loaded top Locations' representative coordinates (never all pages) with neutral markers; an always-available non-map table covers every map action. Entities show Investigation-relative current context and pageable immutable observation history; Locations expose scoped Entities/observations with the exact/contained controller (server-owned containment, `containment_applied` rendered honestly). Every observation reaches its exact Evidence through the returned `evidence_id`; geographic exploration uses the PR 24 typed PivotWorkspace.
 
 ## Research
 

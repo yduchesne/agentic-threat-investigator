@@ -55,6 +55,9 @@ export function AnalystTable<T>({
 
   // TanStack Table in manual/server mode: declarative columns + the loaded
   // server page only. No sorting/filtering/grouping features are enabled.
+  // An empty ``viewLabel`` omits the generic action column (used by
+  // presentation-only tables whose rows carry their own Explore actions).
+  const includeActions = viewLabel !== "";
   const table = useReactTable<T>({
     columns: [
       ...columns.map((column) => ({
@@ -63,22 +66,26 @@ export function AnalystTable<T>({
         accessorFn: column.exportValue,
         cell: (info: { row: { original: T } }) => column.render(info.row.original),
       })),
-      {
-        id: "actions",
-        header: "",
-        accessorFn: () => "",
-        cell: (info: { row: { original: T } }) => (
-          <Button
-            size="small"
-            variant="text"
-            onClick={() => onView(info.row.original)}
-            aria-label={`${viewLabel} ${getRowId(info.row.original)}`}
-            sx={{ textTransform: "none" }}
-          >
-            {viewLabel}
-          </Button>
-        ),
-      },
+      ...(includeActions
+        ? [
+            {
+              id: "actions",
+              header: "",
+              accessorFn: () => "",
+              cell: (info: { row: { original: T } }) => (
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => onView(info.row.original)}
+                  aria-label={`${viewLabel} ${getRowId(info.row.original)}`}
+                  sx={{ textTransform: "none" }}
+                >
+                  {viewLabel}
+                </Button>
+              ),
+            },
+          ]
+        : []),
     ],
     data: [...rows],
     getRowId: (row) => getRowId(row),

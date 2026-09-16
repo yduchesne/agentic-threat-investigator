@@ -42,6 +42,7 @@ import { RelationshipsPage } from "../relationships/RelationshipsPage";
 import { RelationshipObservationsPage } from "../relationships/RelationshipObservationsPage";
 import { RelationshipEvolutionPage } from "../relationship-evolution/RelationshipEvolutionPage";
 import { InvestigationMapPage } from "../geolocation/InvestigationMapPage";
+import { GeointPage } from "../geoint/GeointPage";
 import { ResearchPage } from "../research/ResearchPage";
 import { TimelinePage } from "../timeline/TimelinePage";
 
@@ -90,6 +91,7 @@ export function createAppRoutes(): RouteObject[] {
                 },
                 { path: "research", Component: ResearchPage },
                 { path: "map", Component: InvestigationMapPage },
+                { path: "geoint", Component: GeointPage },
                 { path: "timeline", Component: TimelinePage },
                 { path: "history", Component: HistoryPage },
               ],

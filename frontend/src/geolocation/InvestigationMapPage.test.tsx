@@ -105,6 +105,7 @@ describe("InvestigationMapPage states (B-U01..B-U17)", () => {
       "Evidence",
       "Relationships",
       "Map",
+      "Geographic context",
       "Research",
       "Timeline",
     ]);

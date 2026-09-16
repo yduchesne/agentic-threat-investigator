@@ -19,6 +19,15 @@ import type {
   FindingResponse,
   FindingSupportResponse,
   GeoPrecision,
+  GeointEntityLocationResponse,
+  GeointLocationEntitiesResponseGeointEntityLocationResponse,
+  GeointLocationObservationsResponseGeointObservationResponse,
+  GeointLocationResponse,
+  GeointObservationDetailResponse,
+  GeointObservationResponse,
+  GeointPrecisionCountsResponse,
+  GeointSummaryResponse,
+  GeointTopLocationResponse,
   HistoryOperation,
   HistoryRecordResponse,
   IndicatorRequest,
@@ -27,6 +36,9 @@ import type {
   InvestigationResponse,
   InvestigationStatus,
   InvestigationTimelineEventType,
+  LocationPrecision,
+  LocationType,
+  PageResponseGeointObservationResponse,
   LoginRequest,
   NarrativeStatementResponse,
   PageResponseEvidenceResponse,
@@ -51,6 +63,44 @@ import type {
   UserRole,
   Verdict,
 } from "./schema.generated";
+
+/** One bounded canonical Location display reference (PR 26D). */
+export type GeointLocation = GeointLocationResponse;
+
+/** One immutable geographic observation with exact provenance (PR 26D). */
+export type GeointObservation = GeointObservationResponse;
+
+/** One Entity's Investigation-relative current geographic context (PR 26D). */
+export type GeointEntityLocation = GeointEntityLocationResponse;
+
+/** One exact geographic observation with bounded display context (PR 26D). */
+export type GeointObservationDetail = GeointObservationDetailResponse;
+
+/** One bounded Investigation-scoped geographic summary (PR 26D). */
+export type GeointSummary = GeointSummaryResponse;
+
+/** One exact observed Location group in the bounded summary (PR 26D). */
+export type GeointTopLocation = GeointTopLocationResponse;
+
+/** Precision/type counts of the bounded summary (PR 26D). */
+export type GeointPrecisionCounts = GeointPrecisionCountsResponse;
+
+/** One page of Investigation-scoped observations (PR 26D). */
+export type GeointObservationPage = PageResponseGeointObservationResponse;
+
+/** One Location-scoped page of Entities with current context (PR 26D). */
+export type GeointLocationEntitiesPage =
+  GeointLocationEntitiesResponseGeointEntityLocationResponse;
+
+/** One Location-scoped page of observations (PR 26D). */
+export type GeointLocationObservationsPage =
+  GeointLocationObservationsResponseGeointObservationResponse;
+
+/** The exact v0.1 canonical Location-type vocabulary (PR 26D). */
+export type LocationTypeName = LocationType;
+
+/** The exact v0.1 observation precision vocabulary (PR 26D). */
+export type LocationPrecisionName = LocationPrecision;
 
 /** The public authenticated-user DTO delivered by `/auth/me` and login. */
 export type PublicUser = AuthenticatedUserResponse;
