@@ -1,17 +1,21 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Narrow CLI entrypoints (PR 23D).
+"""Narrow CLI entrypoints (PR 23D, extended PR 26B/26B-2).
 
-Two explicit, repository-owned entrypoints follow the current bootstrap
+Explicit, repository-owned entrypoints follow the current bootstrap
 convention (plain modules invoked by deployment; no general-purpose CLI
 framework):
 
 - ``ati-fake-data-bootstrap``: one-shot idempotent fake batch-data bootstrap;
-- ``ati-worker``: the durable investigation job worker loop.
+- ``ati-worker``: the durable investigation job worker loop;
+- ``ati-geography-import``: canonical reference geography corpus import;
+- ``ati-geography-build``: deterministic ATI Geography Corpus derivation
+  from the documented GeoNames/Natural Earth local source artifacts.
 
-Both load the cached typed settings once and never read environment
-variables themselves. The worker composes the selected intelligence-source
-registry through the operating-mode boundary and the configured real LLM;
-operating mode never selects the LLM implementation.
+All load the cached typed settings once and never read environment
+variables themselves, and none ever download upstream data. The worker
+composes the selected intelligence-source registry through the
+operating-mode boundary and the configured real LLM; operating mode never
+selects the LLM implementation.
 """
 
 from __future__ import annotations
@@ -286,6 +290,197 @@ def geography_import_main(argv: list[str] | None = None) -> int:
         return 0
 
     return asyncio.run(run())
+
+
+def geography_build_main(argv: list[str] | None = None) -> int:
+    """Derive the ATI Geography Corpus from supported upstream source files.
+
+    Parses the documented supported GeoNames artifacts (``countryInfo.txt``,
+    ``admin1CodesASCII.txt``, and a supported cities file such as
+    ``cities1000.txt``) and Natural Earth GeoJSON collections (10m admin-0
+    countries and admin-1 states/provinces) into the deterministic ATI
+    Geography Corpus NDJSON consumed by ``ati-geography-import``. Only
+    local operator-supplied files are ever read; the command never
+    downloads upstream data. ``--validate-only`` parses and validates the
+    complete build without writing an artifact.
+    """
+    from pathlib import Path
+
+    from agentic_threat_investigator.app.persistence.repositories import (
+        InvalidReferenceGeometryError,
+    )
+    from agentic_threat_investigator.infrastructure.geoint.geography_corpus_builder import (
+        CorpusBuildError,
+        GeographyCorpusBuilder,
+        serialize_corpus,
+    )
+    from agentic_threat_investigator.infrastructure.geoint.geonames import (
+        GeoNamesReferenceSource,
+        GeonamesSourceError,
+    )
+    from agentic_threat_investigator.infrastructure.geoint.natural_earth import (
+        NaturalEarthReferenceSource,
+        NaturalEarthSourceError,
+    )
+
+    parser = argparse.ArgumentParser(prog="ati-geography-build")
+    parser.add_argument(
+        "--geonames-country-info",
+        type=Path,
+        required=True,
+        help="GeoNames countryInfo.txt artifact",
+    )
+    parser.add_argument(
+        "--geonames-admin1",
+        type=Path,
+        required=True,
+        help="GeoNames admin1CodesASCII.txt artifact",
+    )
+    parser.add_argument(
+        "--geonames-cities",
+        type=Path,
+        required=True,
+        help="supported GeoNames cities file (cities1000.txt layout)",
+    )
+    parser.add_argument(
+        "--natural-earth-countries",
+        type=Path,
+        help="Natural Earth 10m admin-0 countries GeoJSON (optional)",
+    )
+    parser.add_argument(
+        "--natural-earth-admin1",
+        type=Path,
+        help="Natural Earth 10m admin-1 states/provinces GeoJSON (optional)",
+    )
+    parser.add_argument(
+        "--output", type=Path, help="write the corpus NDJSON artifact here"
+    )
+    parser.add_argument(
+        "--min-population",
+        type=int,
+        help="drop cities below this population (optional)",
+    )
+    parser.add_argument(
+        "--countries",
+        nargs="+",
+        help="build only these two-letter country codes (optional)",
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="parse and validate without writing an artifact",
+    )
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO)
+
+    if args.validate_only and args.output is not None:
+        LOGGER.error(
+            "geography build refused: --validate-only and --output are "
+            "mutually exclusive"
+        )
+        return 2
+    if not args.validate_only and args.output is None:
+        LOGGER.error(
+            "geography build refused: --output is required unless "
+            "--validate-only is set"
+        )
+        return 2
+    if args.min_population is not None and args.min_population < 0:
+        LOGGER.error("geography build refused: --min-population must not be negative")
+        return 2
+    country_codes: frozenset[str] = frozenset()
+    if args.countries:
+        normalized_codes = [code.strip().upper() for code in args.countries]
+        if any(len(code) != 2 or not code.isalpha() for code in normalized_codes):
+            LOGGER.error(
+                "geography build refused: --countries values must be "
+                "two-letter country codes"
+            )
+            return 2
+        country_codes = frozenset(normalized_codes)
+
+    try:
+        geonames = GeoNamesReferenceSource()
+        countries = geonames.parse_countries(args.geonames_country_info)
+        admin1 = geonames.parse_admin1(args.geonames_admin1)
+        cities = geonames.parse_cities(args.geonames_cities)
+        natural_earth = NaturalEarthReferenceSource()
+        ne_countries = (
+            natural_earth.parse_countries(args.natural_earth_countries)
+            if args.natural_earth_countries
+            else ()
+        )
+        ne_admin1 = (
+            natural_earth.parse_admin1(args.natural_earth_admin1)
+            if args.natural_earth_admin1
+            else ()
+        )
+        result = GeographyCorpusBuilder().build(
+            countries=countries,
+            admin1=admin1,
+            cities=cities,
+            natural_earth_countries=ne_countries,
+            natural_earth_admin1=ne_admin1,
+            min_population=args.min_population,
+            country_filter=country_codes,
+        )
+    except (
+        GeonamesSourceError,
+        NaturalEarthSourceError,
+        CorpusBuildError,
+        InvalidReferenceGeometryError,
+    ) as error:
+        LOGGER.error("geography corpus build failed: %s", error)
+        return 1
+
+    if args.output is not None:
+        try:
+            args.output.write_text(serialize_corpus(result.records), encoding="utf-8")
+        except OSError as error:
+            LOGGER.error("geography corpus write failed: %s", error)
+            return 1
+
+    report = result.report
+    LOGGER.info(
+        "geography corpus build complete countries=%d administrative_areas=%d "
+        "cities=%d polygon_geometries=%d records_without_geometry=%d "
+        "unmatched=%d rejected_cities=%d ambiguous=%d",
+        report.countries,
+        report.administrative_areas,
+        report.cities,
+        report.polygon_geometries,
+        report.records_without_geometry,
+        len(report.unmatched),
+        len(report.rejected_cities),
+        len(report.ambiguous),
+    )
+    for entry in report.unmatched:
+        LOGGER.warning(
+            "geography corpus unmatched object source=%s kind=%s identifier=%s "
+            "reason=%s",
+            entry.source,
+            entry.kind,
+            entry.identifier,
+            entry.reason,
+        )
+    for rejection in report.rejected_cities:
+        LOGGER.warning(
+            "geography corpus rejected city name=%s country=%s admin1=%s reason=%s",
+            rejection.name,
+            rejection.country_code,
+            rejection.admin1_code,
+            rejection.reason,
+        )
+    for ambiguity in report.ambiguous:
+        LOGGER.warning(
+            "geography corpus ambiguous match kind=%s identifier=%s reason=%s",
+            ambiguity.kind,
+            ambiguity.identifier,
+            ambiguity.reason,
+        )
+    if args.validate_only:
+        LOGGER.info("geography corpus validation passed: no artifact written")
+    return 0
 
 
 def fake_data_bootstrap_main(argv: list[str] | None = None) -> int:

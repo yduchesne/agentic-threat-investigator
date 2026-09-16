@@ -1704,13 +1704,169 @@ Source identifier:
 
 `urn:ati:source:cisa_kev`
 
-## Canonical reference geography (PR 26B)
+## Canonical reference geography (PR 26B / PR 26B-2)
 
 ATI's canonical country/administrative-area/city reference corpus is a
 documented deterministic intermediate format, the *ATI Geography Corpus*
-(NDJSON; one JSON object per line). The production parser live in
+(NDJSON; one JSON object per line). The production parser lives in
 `agentic_threat_investigator.infrastructure.sources.geography` and the
 fixtures under `tests/fixtures/geoint/` exercise exactly that parser.
+
+PR 26B delivered the corpus format and the canonical ingestion path
+(`ati-geography-import`). PR 26B-2 completes the deterministic derivation
+path ATI itself uses to produce that corpus from supported upstream
+reference data: bounded source adapters (`GeoNamesReferenceSource`,
+`NaturalEarthReferenceSource` under
+`agentic_threat_investigator.infrastructure.geoint`), the deterministic
+`GeographyCorpusBuilder`, and the installed `ati-geography-build` command.
+The canonical ingestion layer remains source-neutral: GeoNames/Natural
+Earth fields never leak into `Location`, `GeographicClaim`, canonical
+identity, resolution results, `EntityLocation`, or `GeoResolution`.
+
+### Supported upstream sources (exact inputs)
+
+The supported inputs are explicit and bounded. Nothing else is claimed:
+
+GeoNames (`https://www.geonames.org/export/`, CC BY 4.0 — operators must
+comply with the license and export terms; ATI never embeds GeoNames
+records in source control):
+
+- `countryInfo.txt` — 19-column TSV with `#` comment lines; the adapter
+  reads the ISO-3166 code, the English country name, and the geoname id;
+- `admin1CodesASCII.txt` — 4-column TSV (`<ISO>.<code>`, name, ASCII name,
+  geoname id), first-order administrative divisions;
+- one documented cities file such as `cities1000.txt` — 19-column TSV
+  matching the main geonames table layout (geoname id, name, coordinates,
+  country code, admin1 code, population).
+
+Natural Earth (`https://www.naturalearthdata.com/`, public domain) — one
+explicitly versioned country boundary collection and one explicitly
+versioned first-order administrative boundary collection, supplied as
+GeoJSON FeatureCollections in the standard 10m schema:
+
+- country boundaries (`ne_10m_admin_0_countries`-style): per-feature
+  `iso_a2` with deterministic `iso_a2_eh`/`iso_a2_wb` fallbacks and
+  `name`;
+- admin-1 boundaries (`ne_10m_admin_1_states_provinces`-style): per-feature
+  `iso_a2`, `iso_3166_2` (subdivision tail), `name`, and the raw `adm1_code`
+  retained only as a diagnostic identifier.
+
+Operators pin the dataset versions they build from; ATI's adapters are
+versioned against the schemas above and fail closed on any other record
+shape, so an unsupported file can never silently create a canonical
+Location.
+
+### Build the corpus (`ati-geography-build`)
+
+The derivation path is:
+
+```text
+GeoNames + Natural Earth local files
+  -> GeoNamesReferenceSource / NaturalEarthReferenceSource (normalized records)
+  -> GeographyCorpusBuilder (deterministic joins + ordering)
+  -> ATI Geography Corpus NDJSON
+  -> ati-geography-import -> ati.location + PostGIS geometry
+```
+
+Example:
+
+```bash
+uv run ati-geography-build \
+  --geonames-country-info ./countryInfo.txt \
+  --geonames-admin1 ./admin1CodesASCII.txt \
+  --geonames-cities ./cities1000.txt \
+  --natural-earth-countries ./ne_10m_admin_0_countries.geojson \
+  --natural-earth-admin1 ./ne_10m_admin_1_states_provinces.geojson \
+  --output ./ati-geography.ndjson
+```
+
+Natural Earth inputs are optional: without them the same corpus is
+produced with null geometry where the corpus permits it. GeoNames inputs
+are required. `--min-population N` drops cities below a population bound;
+`--countries US CA` builds only those countries with their complete child
+hierarchy. `--validate-only` parses and validates the complete build
+without writing an artifact. The command prints concise counts (countries,
+administrative areas, cities, attached polygon geometries, records lacking
+geometry) and reports every unmatched/rejected object with enough
+identifiers for diagnosis; it never guesses.
+
+Determinism: identical inputs and options produce byte-identical output —
+records are emitted parent-before-child in the fixed class order country,
+administrative_area, city, each class sorted by stable canonical keys;
+coordinates are formatted deterministically; no timestamps, random values,
+or absolute source paths appear in the artifact. Input file ordering never
+changes the output.
+
+### Deterministic joining
+
+- Countries join by stable ISO-compatible code (GeoNames ISO code against
+  the resolved Natural Earth `iso_a2`/`iso_a2_eh`/`iso_a2_wb`); display
+  names are never matched for countries. A Natural Earth feature with no
+  usable code or no GeoNames counterpart is reported and skipped.
+- Administrative areas join by country + administrative subdivision code.
+  When a code is not directly compatible, the bounded fallback is exact
+  normalized-name equality within one country (never global fuzzy
+  matching), and reviewed mismatches are handled by the version-controlled
+  exception table in
+  `infrastructure/geoint/geography_corpus_builder.py`
+  (`ADMIN1_CODE_EXCEPTIONS`), keyed by GeoNames admin1 code and mapped to
+  the Natural Earth subdivision code. The v0.1 table carries the
+  fixture-verified example (Berlin); real-world entries (for example
+  GeoNames numeric admin codes versus ISO 3166-2 letters) are added only
+  after explicit review against the pinned dataset versions. Ambiguous
+  matches are reported and left unresolved.
+- A valid GeoNames record without Natural Earth geometry keeps null
+  geometry. A Natural Earth polygon that cannot be deterministically
+  associated with a supported canonical record is reported and skipped —
+  geometry alone never creates a guessed canonical identity.
+
+### City selection policy
+
+GeoNames is large; ATI is not a general gazetteer. The supported cities
+file is an explicitly supplied file (for example `cities1000.txt`); no
+undocumented population threshold is embedded. Optional filtering is
+bounded (`--min-population`, `--countries`). A city is emitted only when
+its parent administrative context is representable deterministically under
+the ATI hierarchy: orphan cities (unknown country, missing admin1, admin1
+without a GeoNames record) and duplicate canonical identities are rejected
+and reported, never created.
+
+### Geometry processing
+
+Geometry stays WGS84/SRID-4326 PostGIS `geometry` (never `geography`).
+Country/admin boundaries are Polygon or MultiPolygon from Natural Earth;
+cities keep the point from the supported GeoNames coordinates — city
+coordinates never become polygons and no city polygons are synthesized.
+Upstream geometry is validated during corpus construction (structure,
+closure, type rules, SRID, WGS84 bounds) with the same canonical EWKT
+validation the ingestion service applies, so a built corpus is importable
+by construction; malformed geometry fails the build instead of being
+silently accepted.
+
+### Known unsupported cases
+
+- `admin2Codes.txt` and deeper admin levels are not part of the v0.1
+  supported set (current canonical semantics need admin1 only);
+- shapefile (`.shp`) and other non-GeoJSON Natural Earth distributions;
+- any other GeoNames cities file layout (for example 18-column files);
+- runtime downloading or scraping of any upstream source (builds operate
+  on local operator-supplied files only);
+- generic fuzzy place matching.
+
+### Import the corpus (`ati-geography-import`)
+
+Import the built artifact(s) explicitly — migrations never download or
+import reference geography:
+
+```bash
+uv run ati-geography-import ./ati-geography.ndjson
+```
+
+The importer validates the complete batch, processes deterministically in
+parent-before-child order, derives canonical UUIDv5 identities, and commits
+one atomic transaction; any rejected record rolls back the whole batch.
+Re-running the same corpus is a true no-op; a refresh that changes approved
+reference geometry enriches the same canonical row with a new version.
 
 Upstream derivation (verified licensing):
 
@@ -1720,17 +1876,17 @@ Upstream derivation (verified licensing):
   BY 4.0; operators who download it must comply with that license and
   https://www.geonames.org/export/ terms. ATI does not embed GeoNames
   records in source control.
-- **Natural Earth** (`https://www.naturalearthdata.com/`, public domain) is
-  the proposed source of country/administrative boundary polygons.
-  Natural Earth is in the public domain; no attribution is required for
-  redistribution.
+- **Natural Earth** (`https://www.naturalearthdata.com/`, public domain)
+  provides the country/administrative boundary polygons. Natural Earth is
+  in the public domain; no attribution is required for redistribution.
 
 License/attribution guidance: ATI itself only ships *synthetic* fixture
-geometry (simplified boxes with no third-party data). Operators who build a
+data (simplified box geometry and fictional rows in the exact upstream
+schemas under `tests/fixtures/geoint/geonames/` and
+`tests/fixtures/geoint/natural_earth/`) with no third-party data, so no
+redistribution license is engaged by the repository. Operators who build a
 full corpus derive it locally from the upstream sources and import it with
 `ati-geography-import`; schema migrations never download reference data.
-The 26B fixtures and derived corpus carry no Natural Earth or GeoNames
-records, so no redistribution license is engaged by the repository.
 
 Corpus record fields: `location_type` (`country`/`administrative_area`/
 `city`), `name`, `canonical_name`, `country_code`, optional

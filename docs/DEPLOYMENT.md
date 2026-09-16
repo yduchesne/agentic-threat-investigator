@@ -159,22 +159,55 @@ ATI_POSTGRES_HOST_PORT=54320
 
 to avoid collisions with host PostgreSQL.
 
-## Canonical reference geography import (PR 26B)
+## Canonical reference geography (PR 26B / PR 26B-2)
 
 Reference geography is data, not schema: it is loaded separately from
-migrations by an explicit operator action once the ATI Geography Corpus
-artifacts are available (see `DATA_SOURCES.md` for the upstream derivation
-and licensing):
+migrations by an explicit operator action, and schema migrations never
+download or import reference geography. The complete operator workflow is:
 
-```bash
-uv run ati-geography-import path/to/corpus.jsonl path/to/dir
+```text
+obtain supported local source files
+  -> ati-geography-build   (deterministic ATI Geography Corpus derivation)
+  -> ati-geography-import  (canonical reference ingestion -> PostgreSQL/PostGIS)
+  -> later resolver/runtime use (PR 26C)
 ```
+
+1. Obtain the documented supported upstream files locally (see
+   `DATA_SOURCES.md` for the exact inputs, versions, licensing, and
+   attribution): GeoNames `countryInfo.txt`, `admin1CodesASCII.txt`, and a
+   supported cities file such as `cities1000.txt`, plus the optional
+   Natural Earth GeoJSON country/admin-1 boundary collections. ATI never
+   downloads them.
+2. Derive the corpus artifact:
+
+   ```bash
+   uv run ati-geography-build \
+     --geonames-country-info ./countryInfo.txt \
+     --geonames-admin1 ./admin1CodesASCII.txt \
+     --geonames-cities ./cities1000.txt \
+     --natural-earth-countries ./ne_10m_admin_0_countries.geojson \
+     --natural-earth-admin1 ./ne_10m_admin_1_states_provinces.geojson \
+     --output ./ati-geography.ndjson
+   ```
+
+   The build is deterministic (identical inputs -> identical output bytes),
+   runs entirely on the local files, and prints concise counts plus every
+   unmatched/rejected object for diagnosis. `--validate-only` checks a
+   build without writing it.
+3. Import the corpus explicitly, after the database is migrated:
+
+   ```bash
+   uv run ati-geography-import ./ati-geography.ndjson
+   ```
 
 The import validates the complete batch, processes deterministically in
 parent-before-child order, derives canonical UUIDv5 identities, and commits
-one atomic transaction (any rejected record rolls back the whole batch).
+one atomic transaction (any rejected record rolls back the whole batch, so
+a malformed corpus can never leave a partial inconsistent hierarchy).
 Re-running the same corpus is a true no-op; a refresh that changes approved
 reference geometry enriches the same canonical row with a new version.
+Both commands require neither a database connection nor network access
+merely to display `--help`.
 
 ## Database migrations
 

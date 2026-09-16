@@ -1554,6 +1554,57 @@ Delivered the deterministic geographic substrate:
 - **Tests:** G26B-D/P/I/R matrices (unit + real PostgreSQL + PostGIS integration, EXPLAIN-based index eligibility, migration upgrade/downgrade with data preservation), plus `G26A-P08` updated for the intentional PostGIS/spatial-column introduction; all prior G26A/G26A-2, PR 25 map, RAG/pgvector, and migration suites remain green.
 - **Documentation:** `ARCHITECTURE.md`, `DATABASE.md`, `DEPLOYMENT.md`, `TESTING.md`, `DATA_SOURCES.md`, `LICENSING.md` reconciled with the delivered behavior.
 
+### PR 26B-2 — Geography import operational completion [DONE]
+
+Corrective child of PR 26B (compliance-review completion work, recorded
+separately rather than rewriting PR 26B history). PR 26B delivered the
+canonical-geography and PostGIS foundation. Two operational gaps remained:
+(1) ``geography_import_main()`` existed but the installed entry point was
+believed unregistered — fresh `main` in fact already registers
+`ati-geography-import` (PR 26B shipped it), so 26B-2 closes gap 1 with
+installed-package proofs instead of a re-registration; and (2) ATI
+documented the ATI Geography Corpus but provided no deterministic
+derivation path from supported upstream reference data, which 26B-2
+closes end to end:
+
+- **Source adapters** (`infrastructure/geoint/geonames.py`,
+  `infrastructure/geoint/natural_earth.py`): bounded `GeoNamesReferenceSource`
+  and `NaturalEarthReferenceSource` parsers for the exact supported inputs
+  (GeoNames `countryInfo.txt`, `admin1CodesASCII.txt`, and a supported
+  cities file such as `cities1000.txt`; Natural Earth 10m country and
+  admin-1 GeoJSON collections). Parsers normalize only, never write
+  PostgreSQL, never download, and fail closed on unsupported record
+  shapes, malformed coordinates, and invalid/non-polygonal geometry.
+- **Deterministic builder** (`infrastructure/geoint/geography_corpus_builder.py`):
+  `GeographyCorpusBuilder` joins GeoNames records with Natural Earth
+  geometry by stable ISO country codes and country+subdivision codes,
+  with the bounded fallback of exact normalized-name equality within one
+  country and the version-controlled `ADMIN1_CODE_EXCEPTIONS` table
+  (documented, tested; never guessy). Emits the existing PR 26B corpus
+  schema with parent-before-child ordering, byte-deterministic
+  serialization, WGS84/SRID-4326 geometry only, a bounded city policy
+  (orphan/duplicate cities rejected and reported; optional
+  `--min-population`/`--countries` filters), and reports every unmatched
+  Natural Earth object without ever creating a guessed identity.
+- **CLI:** installed `ati-geography-build` command
+  (`geography_build_main` in `cli.py`, registered in `[project.scripts]`)
+  building the corpus from explicit local-file arguments with concise
+  reporting and `--validate-only`; `ati-geography-import` semantics are
+  unchanged.
+- **Tests:** G26B2-CLI/SRC/BLD unit matrices and the G26B2-E2E
+  real-PostgreSQL + PostGIS proof (real-format fixtures -> build -> corpus
+  -> import -> `ati.location`: US -> Washington -> Seattle with
+  deterministic UUIDv5 identities, hierarchy, polygon/city-point
+  geometry, correct SRID/type, and an idempotent second import with no
+  version churn). All PR 26A/26A-2/26B, postgres/pgvector, migration, and
+  PR 25 Map suites remain green.
+- **Documentation:** `DATA_SOURCES.md` (executable upstream derivation
+  workflow, exact supported inputs/versions, licensing, unsupported
+  cases), `DEPLOYMENT.md` (obtain -> build -> import -> runtime),
+  `ARCHITECTURE.md` (explicit adapters != corpus != ingestion boundary),
+  `TESTING.md` (G26B2 matrices). No database migration or SQL API change;
+  no canonical-identity, schema, or PR 26C lifecycle change.
+
 ### PR 26C — Asynchronous geographic resolution
 
 Deliver:

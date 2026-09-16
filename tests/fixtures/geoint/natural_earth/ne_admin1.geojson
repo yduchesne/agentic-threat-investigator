@@ -1,0 +1,92 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "US",
+        "iso_3166_2": "US-WA",
+        "name": "Washington",
+        "adm1_code": "USA-0001",
+        "postal": "WA"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-125, 45],
+            [-116, 45],
+            [-116, 49.5],
+            [-125, 49.5],
+            [-125, 45]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "CA",
+        "iso_3166_2": "CA-BC",
+        "name": "British Columbia",
+        "adm1_code": "CA-0001",
+        "postal": "BC"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-127, 48.5],
+            [-119, 48.5],
+            [-119, 60.5],
+            [-127, 60.5],
+            [-127, 48.5]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "DE",
+        "iso_3166_2": "DE-BE",
+        "name": "Berlin City",
+        "adm1_code": "DE-0001",
+        "postal": "BE"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [13.1, 52.3],
+            [13.8, 52.3],
+            [13.8, 52.75],
+            [13.1, 52.75],
+            [13.1, 52.3]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "ZZ",
+        "iso_3166_2": "ZZ-NOPE",
+        "name": "Nope District",
+        "adm1_code": "ZZ-0001"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-2, -2],
+            [2, -2],
+            [2, 2],
+            [-2, 2],
+            [-2, -2]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "US",
+        "iso_a2_eh": "US",
+        "iso_a2_wb": "US",
+        "name": "United States"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [-125, 25],
+              [-65, 25],
+              [-65, 49.5],
+              [-125, 49.5],
+              [-125, 25]
+            ]
+          ],
+          [
+            [
+              [-170, 55],
+              [-130, 55],
+              [-130, 72],
+              [-170, 72],
+              [-170, 55]
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "CA",
+        "iso_a2_eh": "CA",
+        "iso_a2_wb": "CA",
+        "name": "Canada"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-140, 42],
+            [-52, 42],
+            [-52, 70],
+            [-140, 70],
+            [-140, 42]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "DE",
+        "iso_a2_eh": "DE",
+        "iso_a2_wb": "DE",
+        "name": "Germany"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [5, 47],
+            [15, 47],
+            [15, 55],
+            [5, 55],
+            [5, 47]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "XE",
+        "iso_a2_eh": "XE",
+        "iso_a2_wb": "XE",
+        "name": "Xenovia"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [10, 10],
+            [20, 10],
+            [20, 20],
+            [10, 20],
+            [10, 10]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "iso_a2": "-99",
+        "iso_a2_eh": "XY",
+        "iso_a2_wb": "XY",
+        "name": "Fallbackia"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [30, 30],
+            [40, 30],
+            [40, 40],
+            [30, 40],
+            [30, 30]
+          ]
+        ]
+      }
+    }
+  ]
+}

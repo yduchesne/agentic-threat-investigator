@@ -1,0 +1,10 @@
+# GeoNames cities1000.txt -- synthetic ATI fixture (PR 26B-2).
+# Conforms exactly to the production cities-file input contract: 19
+# tab-separated columns matching the main geonames table layout and '#'
+# comment lines. Rows are synthetic; no upstream GeoNames record is
+# reproduced.
+5809844	Seattle	Seattle	Seattle	47.60621	-122.33207	P	PPLA	US		WA				737015	56	56	America/Los_Angeles	2011-06-22
+4687392	Dallas	Dallas	Dallas	32.78306	-96.80667	P	PPLA2	US		TX				1343573	131	131	America/Chicago	2011-06-22
+5815135	Vancouver	Vancouver	Vancouver	49.24966	-123.11934	P	PPLA	CA		BC				631486	20	20	America/Vancouver	2011-06-22
+2950157	Berlin	Berlin	Berlin	52.52437	13.41053	P	PPLC	DE		BER				3675622	34	34	Europe/Berlin	2011-06-22
+9999997	Orphanville	Orphanville	Orphanville	39.12345	-99.12345	P	PPLA	US		BOGUS				12345	1	1	America/Chicago	2011-06-22

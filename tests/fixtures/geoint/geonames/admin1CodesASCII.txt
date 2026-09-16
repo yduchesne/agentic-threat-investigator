@@ -1,0 +1,10 @@
+# GeoNames admin1CodesASCII.txt -- synthetic ATI fixture (PR 26B-2).
+# Conforms exactly to the production input contract: 4 tab-separated
+# columns (code, name, ASCII name, geoname id) and '#' comment lines.
+# Rows are synthetic; no upstream GeoNames record is reproduced.
+US.WA	Washington	Washington	1128279
+US.TX	Texas	Texas	4736286
+CA.BC	British Columbia	British Columbia	5909050
+DE.BER	Berlin	Berlin	2950157
+ZZ.ALPHA	Alpha District	Alpha District	1111111
+ZZ.BETA	Beta District	Beta District	2222222
