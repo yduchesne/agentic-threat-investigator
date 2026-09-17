@@ -643,7 +643,7 @@ class GeointDeterministicEvaluator:
             if observation.observation_id in finding.observation_ids
         }
         for observation_id, evidence_id in zip(
-            finding.observation_ids, finding.evidence_ids, strict=True
+            finding.observation_ids, finding.evidence_observation_ids, strict=True
         ):
             observation = observation_by_id.get(observation_id)
             if observation is None or observation.evidence_id != evidence_id:
@@ -991,7 +991,9 @@ def _finding_satisfies(
     ):
         return False
     if not _labels_satisfied(
-        expectation.evidence_labels, finding.evidence_ids, resolution.evidence_ids
+        expectation.evidence_labels,
+        finding.evidence_observation_ids,
+        resolution.evidence_ids,
     ):
         return False
     if not _labels_satisfied(

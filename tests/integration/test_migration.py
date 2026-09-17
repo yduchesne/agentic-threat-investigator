@@ -19,6 +19,9 @@ EXPECTED_TABLES = {
     "relationship",
     "relationship_observation",
     "evidence",
+    "evidence_observation",
+    "evidence_observation_entity",
+    "investigation_evidence",
     "investigation",
     "assessment",
     "assessment_finding",
@@ -72,6 +75,9 @@ EXPECTED_FUNCTIONS = {
     "upsert_relationship",
     "append_relationship_observation",
     "soft_delete_relationship",
+    "persist_evidence_observation",
+    "associate_evidence_observation_entity",
+    "admit_investigation_evidence",
     "append_assessment",
     "set_investigation_assessment",
     "soft_delete_assessment",
@@ -319,7 +325,7 @@ async def test_graph_integrity_schema_contract() -> None:
                 JOIN pg_class rel ON rel.oid = con.conrelid
                 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                 WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
-                  AND con.conname = 'relationship_observation_evidence_fk'
+                  AND con.conname = 'relationship_observation_evidence_observation_fk'
             """)
             )
             parameters = await connection.execute(
@@ -337,7 +343,7 @@ async def test_graph_integrity_schema_contract() -> None:
     finally:
         await engine.dispose()
     assert foreign_key is not None
-    assert "evidence(id)" in foreign_key
+    assert "evidence_observation(id)" in foreign_key
     # Evidence and observations are immutable; deletion is soft only, so the
     # provenance foreign key must never cascade.
     assert "CASCADE" not in foreign_key
@@ -374,7 +380,7 @@ async def test_graph_integrity_migration_downgrade_and_re_upgrade() -> None:
                     JOIN pg_class rel ON rel.oid = con.conrelid
                     JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                     WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
-                      AND con.conname = 'relationship_observation_evidence_fk'
+                      AND con.conname = 'relationship_observation_evidence_observation_fk'
                 """)
                 )
         finally:
@@ -533,7 +539,7 @@ async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
                     JOIN pg_class rel ON rel.oid = con.conrelid
                     JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                     WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
-                      AND con.conname = 'relationship_observation_evidence_fk'
+                      AND con.conname = 'relationship_observation_evidence_observation_fk'
                 """)
                 )
         finally:
@@ -671,7 +677,9 @@ async def test_assessment_schema_contract() -> None:
     assert ("assessment_finding", "ordinal") in columns
     assert ("assessment_finding_support", "kind") in columns
     # Provenance integrity is relational.
-    assert any("evidence(id)" in definition for definition in checks.values())
+    assert any(
+        "evidence_observation(id)" in definition for definition in checks.values()
+    )
     assert any(
         "relationship_observation(id)" in definition for definition in checks.values()
     )
@@ -1041,7 +1049,8 @@ async def test_geoint_migration_downgrade_and_re_upgrade() -> None:
                          raw_payload, version)
                       VALUES (gen_random_uuid(), v_inv,
                               'urn:ati:evidence:geolocation', v_entity,
-                              'urn:ati:source:dbip', now(), '{}'::jsonb,
+                              'urn:ati:source:threatfox',
+                              'legacy-geoint-seed', now(), '{}'::jsonb,
                               NULL, 1)
                       RETURNING id INTO v_geo_ev;
                       SELECT id INTO v_loc FROM ati.upsert_location(
@@ -1217,7 +1226,8 @@ async def test_geoint_spatial_migration_upgrade_and_downgrade() -> None:
                              raw_payload, version)
                           VALUES (gen_random_uuid(), v_inv,
                                   'urn:ati:evidence:geolocation', v_entity,
-                                  'urn:ati:source:dbip', now(), '{}'::jsonb,
+                                  'urn:ati:source:threatfox',
+                                  'legacy-geoint-seed', now(), '{}'::jsonb,
                                   NULL, 1)
                           RETURNING id INTO v_ev;
                           SELECT id INTO v_loc FROM ati.upsert_location(
@@ -1417,7 +1427,8 @@ async def test_geoint_lifecycle_migration_upgrade_and_downgrade() -> None:
                              raw_payload, version)
                           VALUES (gen_random_uuid(), v_inv,
                                   'urn:ati:evidence:geolocation', v_entity,
-                                  'urn:ati:source:dbip', now(),
+                                  'urn:ati:source:threatfox',
+                                  'legacy-geoint-seed', now(),
                                   '{"country_code":"US"}'::jsonb, NULL, 1)
                           RETURNING id INTO v_ev;
                           SELECT id INTO v_loc FROM ati.upsert_location(

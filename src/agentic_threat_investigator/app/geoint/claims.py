@@ -1,19 +1,20 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Exact GEOLOCATION LegacyEvidence -> geographic claim extraction (PR 26C).
+"""Exact GEOLOCATION observation -> geographic claim extraction (PR 26C/28B).
 
-The worker seam converts one immutable ``GEOLOCATION`` LegacyEvidence observation
-into the bounded :class:`GeographicClaim` consumed by PR 26C's
-:class:`LocationResolver`. The conversion is pure: no external I/O, no
-Location creation, no persistence. Only the already-observed facts
-(``country_code``, ``region``/``administrative_area``,
-``administrative_area_code``, ``city``, ``latitude``, ``longitude``) are
-mapped, and the claim's precision never exceeds the semantic detail the
-source actually supplied (coordinates never upgrade precision).
+The worker seam converts one immutable ``GEOLOCATION`` EvidenceObservation
+(material facts) plus its stable Evidence (type) into the bounded
+:class:`GeographicClaim` consumed by PR 26C's :class:`LocationResolver`. The
+conversion is pure: no external I/O, no Location creation, no persistence.
+Only the already-observed facts (``country_code``,
+``region``/``administrative_area``, ``administrative_area_code``, ``city``,
+``latitude``, ``longitude``) are mapped, and the claim's precision never
+exceeds the semantic detail the source actually supplied (coordinates never
+upgrade precision).
 
 Malformed or unsupported payloads fail closed with a typed bounded error:
 
-- non-``GEOLOCATION`` LegacyEvidence raises :class:`GeoEvidenceTypeError`;
+- non-``GEOLOCATION`` Evidence raises :class:`GeoEvidenceTypeError`;
 - payloads with no geographic facts, non-finite/out-of-range coordinates,
   or a precision vocabulary the claim contract rejects raise
   :class:`InvalidGeographicClaimError`.
@@ -23,7 +24,6 @@ from __future__ import annotations
 
 import math
 from typing import Any
-from uuid import UUID
 
 from pydantic import ValidationError
 
@@ -31,12 +31,15 @@ from agentic_threat_investigator.app.persistence.repositories import (
     GeoEvidenceTypeError,
     InvalidGeographicClaimError,
 )
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservation,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.geoint import (
     GeographicClaim,
     LocationPrecision,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 # Persisted facts precision vocabulary (mirrors the DB-IP City Lite
 # normalization output consumed by the PR 25A projection): the claim keeps
@@ -113,20 +116,23 @@ def _derived_precision(facts: dict[str, Any]) -> LocationPrecision:
     return LocationPrecision.COUNTRY
 
 
-def geographic_claim_from_evidence(evidence: LegacyEvidence) -> GeographicClaim:
-    """Build the bounded claim from the exact GEOLOCATION LegacyEvidence facts.
+def geographic_claim_from_evidence(
+    evidence: Evidence, observation: EvidenceObservation
+) -> GeographicClaim:
+    """Build the bounded claim from the exact GEOLOCATION observation facts.
 
-    Requires ``GEOLOCATION`` LegacyEvidence; maps only the existing
-    country/admin/admin-code/city/lat/lon facts and preserves the source's
-    semantic precision (a declared source precision is kept, otherwise the
-    minimal supported precision is derived). The :class:`GeographicClaim`
-    validator is the final authority: any vocabulary mismatch fails closed
-    as :class:`InvalidGeographicClaimError`.
+    Requires ``GEOLOCATION`` Evidence; maps only the existing
+    country/admin/admin-code/city/lat/lon facts of the exact observation and
+    preserves the source's semantic precision (a declared source precision is
+    kept, otherwise the minimal supported precision is derived). The
+    :class:`GeographicClaim` validator is the final authority: any
+    vocabulary mismatch fails closed as
+    :class:`InvalidGeographicClaimError`.
     """
     if evidence.type is not EvidenceType.GEOLOCATION:
-        raise GeoEvidenceTypeError(evidence.id or UUID(int=0))
+        raise GeoEvidenceTypeError(observation.id)
 
-    facts = evidence.facts
+    facts = observation.facts
     country_code = _optional_string(facts, _FACT_COUNTRY_CODE)
     region = _optional_string(facts, _FACT_REGION)
     administrative_area = _optional_string(facts, _FACT_ADMINISTRATIVE_AREA)

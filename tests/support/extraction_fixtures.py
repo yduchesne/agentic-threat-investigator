@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Normalized LegacyEvidence fixtures for deterministic extraction tests.
+"""Normalized EvidenceExtractionView fixtures for deterministic extraction tests.
 
-Every fixture starts from normalized LegacyEvidence, never from raw HTTP
+Every fixture starts from a PR 28B extraction view (stable Evidence +
+observation candidate + canonical invocation Entity), never from raw HTTP
 responses: extraction tests consume exactly the fact shapes the providers
 promise. All values are synthetic documentation-safe test data (RFC 5737
 addresses, RFC 2606 ``.test`` domains, and synthetic identifiers).
@@ -28,10 +29,14 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.app.extraction.models import EvidenceExtractionView
+from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 CANONICAL_INVESTIGATION_ID = UUID("22222222-2222-4222-8222-222222222222")
 """Fixed synthetic investigation identity of the canonical scenario."""
@@ -59,6 +64,48 @@ RETRIEVED_AT = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 # One explicit argument per fixture dimension is intentional for tests.
+def extraction_view(
+    *,
+    evidence_id: UUID | None = None,
+    evidence_type: EvidenceType,
+    source: str,
+    subject_type: EntityType,
+    subject_value: str,
+    facts: dict[str, Any],
+    retrieved_at: datetime | None = None,
+    source_record_id: str | None = None,
+    observed_at: datetime | None = None,
+) -> EvidenceExtractionView:
+    """Build one normalized PR 28B extraction view for the given facts.
+
+    ``evidence_id`` is the deterministic stable Evidence identity of the
+    fixture; ``source_record_id`` defaults to a synthetic fixture identity.
+    The invocation Entity is the fixture subject (ordinary observation-level
+    provenance, never a restricted domain field).
+    """
+    identity = evidence_id if evidence_id is not None else uuid4()
+    record_id = (
+        source_record_id if source_record_id is not None else f"fixture:{identity}"
+    )
+    evidence = Evidence(
+        id=identity,
+        type=evidence_type,
+        source=source,
+        source_record_id=record_id,
+    )
+    candidate = EvidenceObservationCandidate(
+        evidence_id=identity,
+        observed_at=observed_at,
+        retrieved_at=retrieved_at if retrieved_at is not None else RETRIEVED_AT,
+        facts=facts,
+    )
+    return EvidenceExtractionView(
+        evidence=evidence,
+        observation=candidate,
+        invocation_entity=Entity(type=subject_type, value=subject_value),
+    )
+
+
 def evidence(
     *,
     source: str,
@@ -69,25 +116,25 @@ def evidence(
     evidence_id: UUID | None = None,
     investigation_id: UUID | None = None,
     retrieved_at: datetime | None = None,
-) -> LegacyEvidence:
-    """Build one normalized persisted LegacyEvidence observation."""
-    return LegacyEvidence(
-        id=evidence_id if evidence_id is not None else uuid4(),
-        investigation_id=(
-            investigation_id
-            if investigation_id is not None
-            else CANONICAL_INVESTIGATION_ID
-        ),
-        type=evidence_type,
-        subject=EntityRef(type=subject_type, value=subject_value),
+) -> EvidenceExtractionView:
+    """Build one normalized PR 28B extraction view (legacy argument shape).
+
+    ``investigation_id`` is accepted for test-source compatibility but is
+    deliberately ignored: a global extraction view never owns an
+    Investigation (exact admission happens at persistence).
+    """
+    return extraction_view(
+        evidence_id=evidence_id,
+        evidence_type=evidence_type,
         source=source,
-        retrieved_at=retrieved_at if retrieved_at is not None else RETRIEVED_AT,
+        subject_type=subject_type,
+        subject_value=subject_value,
         facts=facts,
-        raw_payload=None,
+        retrieved_at=retrieved_at,
     )
 
 
-def canonical_dns_evidence() -> LegacyEvidence:
+def canonical_dns_evidence() -> EvidenceExtractionView:
     """Build the canonical A-record evidence: domain resolves to the scenario IP."""
     return evidence(
         source=SourceId.GOOGLE_PUBLIC_DNS.value,
@@ -112,7 +159,7 @@ def canonical_dns_evidence() -> LegacyEvidence:
     )
 
 
-def canonical_threatfox_evidence() -> LegacyEvidence:
+def canonical_threatfox_evidence() -> EvidenceExtractionView:
     """Build the canonical ThreatFox evidence: the scenario IP is AsyncRAT C2."""
     return evidence(
         source=SourceId.THREATFOX.value,
@@ -152,8 +199,8 @@ def dns_evidence(
     query_name: str | None = None,
     facts_overrides: dict[str, object] | None = None,
     evidence_id: UUID | None = None,
-) -> LegacyEvidence:
-    """Build one normalized DNS evidence observation with the given answers."""
+) -> EvidenceExtractionView:
+    """Build one normalized DNS extraction view with the given answers."""
     facts: dict[str, object] = {
         "query_name": query_name if query_name is not None else subject_value,
         "query_type": query_type,

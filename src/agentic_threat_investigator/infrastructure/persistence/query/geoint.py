@@ -72,15 +72,16 @@ from agentic_threat_investigator.domain.geoint import LocationType
 # layer. Evidence type is not re-filtered by reads: the immutable append
 # stored function already rejects non-GEOLOCATION Evidence (U26A4).
 #
-# Exact Evidence-scope key: ``ev.investigation_id = :investigation_id`` on
-# the observation's Evidence row. PR 26A currentness ordering: the greater
+# Exact Evidence-scope key (PR 28B): an observation is scoped to the
+# Investigation iff its exact evidence_observation_id is admitted through
+# ati.investigation_evidence. PR 26A currentness ordering: the greater
 # ``(COALESCE(observed_at, retrieved_at), observation id)`` pair wins; the
 # newest-first read order inverts that exact ordering.
 
 _OBSERVATION_PROJECTION = """
       ob.id AS observation_id,
       ob.entity_id AS entity_id,
-      ob.evidence_id AS evidence_id,
+      ob.evidence_observation_id AS evidence_observation_id,
       ob."precision" AS "precision",
       ob.observed_at AS observed_at,
       ob.retrieved_at AS retrieved_at,
@@ -103,7 +104,7 @@ _DETAIL_SQL = """
     SELECT
       ob.id AS observation_id,
       ob.entity_id AS entity_id,
-      ob.evidence_id AS evidence_id,
+      ob.evidence_observation_id AS evidence_observation_id,
       ob."precision" AS "precision",
       ob.observed_at AS observed_at,
       ob.retrieved_at AS retrieved_at,
@@ -122,11 +123,15 @@ _DETAIL_SQL = """
       ST_Y(loc.centroid) AS latitude,
       ST_X(loc.centroid) AS longitude
     FROM ati.entity_location_observation ob
-    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
     JOIN ati.entity ent ON ent.id = ob.entity_id
     JOIN ati.location loc ON loc.id = ob.location_id
     WHERE ob.id = :observation_id
-      AND ev.investigation_id = :investigation_id
+      AND EXISTS (
+            SELECT 1 FROM ati.investigation_evidence ie
+            WHERE ie.evidence_observation_id = ob.evidence_observation_id
+              AND ie.investigation_id = :investigation_id)
     LIMIT 1
 """
 
@@ -134,7 +139,7 @@ _ENTITY_CURRENT_SQL = """
     SELECT
       ob.id AS observation_id,
       ob.entity_id AS entity_id,
-      ob.evidence_id AS evidence_id,
+      ob.evidence_observation_id AS evidence_observation_id,
       ob."precision" AS "precision",
       ob.observed_at AS observed_at,
       ob.retrieved_at AS retrieved_at,
@@ -153,11 +158,15 @@ _ENTITY_CURRENT_SQL = """
       ST_Y(loc.centroid) AS latitude,
       ST_X(loc.centroid) AS longitude
     FROM ati.entity_location_observation ob
-    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
     JOIN ati.entity ent ON ent.id = ob.entity_id
     JOIN ati.location loc ON loc.id = ob.location_id
     WHERE ob.entity_id = :entity_id
-      AND ev.investigation_id = :investigation_id
+      AND EXISTS (
+            SELECT 1 FROM ati.investigation_evidence ie
+            WHERE ie.evidence_observation_id = ob.evidence_observation_id
+              AND ie.investigation_id = :investigation_id)
     ORDER BY COALESCE(ob.observed_at, ob.retrieved_at) DESC, ob.id DESC
     LIMIT 1
 """
@@ -166,7 +175,7 @@ _ENTITY_HISTORY_SQL = """
     SELECT
       ob.id AS observation_id,
       ob.entity_id AS entity_id,
-      ob.evidence_id AS evidence_id,
+      ob.evidence_observation_id AS evidence_observation_id,
       ob."precision" AS "precision",
       ob.observed_at AS observed_at,
       ob.retrieved_at AS retrieved_at,
@@ -185,11 +194,15 @@ _ENTITY_HISTORY_SQL = """
       ST_Y(loc.centroid) AS latitude,
       ST_X(loc.centroid) AS longitude
     FROM ati.entity_location_observation ob
-    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
     JOIN ati.entity ent ON ent.id = ob.entity_id
     JOIN ati.location loc ON loc.id = ob.location_id
     WHERE ob.entity_id = :entity_id
-      AND ev.investigation_id = :investigation_id
+      AND EXISTS (
+            SELECT 1 FROM ati.investigation_evidence ie
+            WHERE ie.evidence_observation_id = ob.evidence_observation_id
+              AND ie.investigation_id = :investigation_id)
       AND (CAST(:cursor_time AS timestamptz) IS NULL
            OR COALESCE(ob.observed_at, ob.retrieved_at) < CAST(:cursor_time AS timestamptz)
            OR (COALESCE(ob.observed_at, ob.retrieved_at) = CAST(:cursor_time AS timestamptz)
@@ -207,7 +220,7 @@ _LOCATION_OBSERVATIONS_EXACT_SQL = """
     SELECT
       ob.id AS observation_id,
       ob.entity_id AS entity_id,
-      ob.evidence_id AS evidence_id,
+      ob.evidence_observation_id AS evidence_observation_id,
       ob."precision" AS "precision",
       ob.observed_at AS observed_at,
       ob.retrieved_at AS retrieved_at,
@@ -226,11 +239,15 @@ _LOCATION_OBSERVATIONS_EXACT_SQL = """
       ST_Y(loc.centroid) AS latitude,
       ST_X(loc.centroid) AS longitude
     FROM ati.entity_location_observation ob
-    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
     JOIN ati.entity ent ON ent.id = ob.entity_id
     JOIN ati.location loc ON loc.id = ob.location_id
     WHERE ob.location_id = :location_id
-      AND ev.investigation_id = :investigation_id
+      AND EXISTS (
+            SELECT 1 FROM ati.investigation_evidence ie
+            WHERE ie.evidence_observation_id = ob.evidence_observation_id
+              AND ie.investigation_id = :investigation_id)
       AND (CAST(:cursor_time AS timestamptz) IS NULL
            OR COALESCE(ob.observed_at, ob.retrieved_at) < CAST(:cursor_time AS timestamptz)
            OR (COALESCE(ob.observed_at, ob.retrieved_at) = CAST(:cursor_time AS timestamptz)
@@ -243,7 +260,7 @@ _LOCATION_OBSERVATIONS_CONTAINED_SQL = """
     SELECT
       ob.id AS observation_id,
       ob.entity_id AS entity_id,
-      ob.evidence_id AS evidence_id,
+      ob.evidence_observation_id AS evidence_observation_id,
       ob."precision" AS "precision",
       ob.observed_at AS observed_at,
       ob.retrieved_at AS retrieved_at,
@@ -262,7 +279,8 @@ _LOCATION_OBSERVATIONS_CONTAINED_SQL = """
       ST_Y(loc.centroid) AS latitude,
       ST_X(loc.centroid) AS longitude
     FROM ati.entity_location_observation ob
-    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
     JOIN ati.entity ent ON ent.id = ob.entity_id
     JOIN ati.location loc ON loc.id = ob.location_id
     WHERE ob.location_id IN (
@@ -272,7 +290,10 @@ _LOCATION_OBSERVATIONS_CONTAINED_SQL = """
                    OR (l.geometry IS NOT NULL AND sel.geometry IS NOT NULL
                        AND l.geometry && sel.geometry
                        AND ST_Covers(sel.geometry, l.geometry))))
-      AND ev.investigation_id = :investigation_id
+      AND EXISTS (
+            SELECT 1 FROM ati.investigation_evidence ie
+            WHERE ie.evidence_observation_id = ob.evidence_observation_id
+              AND ie.investigation_id = :investigation_id)
       AND (CAST(:cursor_time AS timestamptz) IS NULL
            OR COALESCE(ob.observed_at, ob.retrieved_at) < CAST(:cursor_time AS timestamptz)
            OR (COALESCE(ob.observed_at, ob.retrieved_at) = CAST(:cursor_time AS timestamptz)
@@ -289,7 +310,7 @@ _LOCATION_ENTITIES_EXACT_SQL = """
       SELECT DISTINCT ON (ob.entity_id)
         ob.id AS observation_id,
         ob.entity_id AS entity_id,
-        ob.evidence_id AS evidence_id,
+        ob.evidence_observation_id AS evidence_observation_id,
         ob."precision" AS "precision",
         ob.observed_at AS observed_at,
         ob.retrieved_at AS retrieved_at,
@@ -308,11 +329,15 @@ _LOCATION_ENTITIES_EXACT_SQL = """
         ST_Y(loc.centroid) AS latitude,
         ST_X(loc.centroid) AS longitude
       FROM ati.entity_location_observation ob
-      JOIN ati.evidence ev ON ev.id = ob.evidence_id
+      JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
       JOIN ati.entity ent ON ent.id = ob.entity_id
       JOIN ati.location loc ON loc.id = ob.location_id
       WHERE ob.location_id = :location_id
-        AND ev.investigation_id = :investigation_id
+        AND EXISTS (
+            SELECT 1 FROM ati.investigation_evidence ie
+            WHERE ie.evidence_observation_id = ob.evidence_observation_id
+              AND ie.investigation_id = :investigation_id)
       ORDER BY ob.entity_id, COALESCE(ob.observed_at, ob.retrieved_at) DESC,
                ob.id DESC
     ) latest
@@ -329,7 +354,7 @@ _LOCATION_ENTITIES_CONTAINED_SQL = """
       SELECT DISTINCT ON (ob.entity_id)
         ob.id AS observation_id,
         ob.entity_id AS entity_id,
-        ob.evidence_id AS evidence_id,
+        ob.evidence_observation_id AS evidence_observation_id,
         ob."precision" AS "precision",
         ob.observed_at AS observed_at,
         ob.retrieved_at AS retrieved_at,
@@ -348,7 +373,8 @@ _LOCATION_ENTITIES_CONTAINED_SQL = """
         ST_Y(loc.centroid) AS latitude,
         ST_X(loc.centroid) AS longitude
       FROM ati.entity_location_observation ob
-      JOIN ati.evidence ev ON ev.id = ob.evidence_id
+      JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
       JOIN ati.entity ent ON ent.id = ob.entity_id
       JOIN ati.location loc ON loc.id = ob.location_id
       WHERE ob.location_id IN (
@@ -358,7 +384,10 @@ _LOCATION_ENTITIES_CONTAINED_SQL = """
                      OR (l.geometry IS NOT NULL AND sel.geometry IS NOT NULL
                          AND l.geometry && sel.geometry
                          AND ST_Covers(sel.geometry, l.geometry))))
-        AND ev.investigation_id = :investigation_id
+        AND EXISTS (
+            SELECT 1 FROM ati.investigation_evidence ie
+            WHERE ie.evidence_observation_id = ob.evidence_observation_id
+              AND ie.investigation_id = :investigation_id)
       ORDER BY ob.entity_id, COALESCE(ob.observed_at, ob.retrieved_at) DESC,
                ob.id DESC
     ) latest
@@ -395,9 +424,13 @@ _SUMMARY_COUNTS_SQL = """
         AS precision_administrative_area,
       count(*) FILTER (WHERE ob."precision" = 'city') AS precision_city
     FROM ati.entity_location_observation ob
-    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
     JOIN ati.location loc ON loc.id = ob.location_id
-    WHERE ev.investigation_id = :investigation_id
+    WHERE EXISTS (
+          SELECT 1 FROM ati.investigation_evidence ie
+          WHERE ie.evidence_observation_id = ob.evidence_observation_id
+            AND ie.investigation_id = :investigation_id)
 """
 
 _SUMMARY_TOP_LOCATIONS_SQL = """
@@ -413,9 +446,13 @@ _SUMMARY_TOP_LOCATIONS_SQL = """
       ST_X(loc.centroid) AS longitude,
       count(DISTINCT ob.entity_id) AS scoped_entity_count
     FROM ati.entity_location_observation ob
-    JOIN ati.evidence ev ON ev.id = ob.evidence_id
+    JOIN ati.evidence_observation eo ON eo.id = ob.evidence_observation_id
+    JOIN ati.evidence ev ON ev.id = eo.evidence_id
     JOIN ati.location loc ON loc.id = ob.location_id
-    WHERE ev.investigation_id = :investigation_id
+    WHERE EXISTS (
+          SELECT 1 FROM ati.investigation_evidence ie
+          WHERE ie.evidence_observation_id = ob.evidence_observation_id
+            AND ie.investigation_id = :investigation_id)
     GROUP BY loc.id, loc.location_type, loc.canonical_name, loc.country_code,
              loc.admin1_code, loc.admin2_code, loc.parent_location_id,
              ST_Y(loc.centroid), ST_X(loc.centroid)

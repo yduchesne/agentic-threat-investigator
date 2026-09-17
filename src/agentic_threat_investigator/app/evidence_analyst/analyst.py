@@ -240,7 +240,7 @@ class EvidenceAnalyst:
         assessment = Assessment(
             investigation_id=analyst_input.investigation_id,
             analyzed_evidence_ids=tuple(
-                item.evidence_id for item in analyst_input.evidence
+                item.evidence_observation_id for item in analyst_input.evidence
             ),
             verdict=decision.verdict,
             confidence=decision.confidence,

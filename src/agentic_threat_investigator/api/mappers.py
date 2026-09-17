@@ -50,6 +50,7 @@ from agentic_threat_investigator.api.dto.research import (
     ResearchResultResponse,
 )
 from agentic_threat_investigator.api.dto.timeline import TimelineEventResponse
+from agentic_threat_investigator.app.query.evidence import EvidenceReadItem
 from agentic_threat_investigator.app.query.geoint import (
     GeointEntityLocationItem,
     GeointLocationRef,
@@ -75,7 +76,6 @@ from agentic_threat_investigator.domain.investigation import InvestigationState
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import Relationship
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
@@ -126,27 +126,28 @@ def to_create_investigation_response(
     )
 
 
-def to_evidence_response(evidence: LegacyEvidence) -> EvidenceResponse:
-    """Map one LegacyEvidence observation; the raw provider payload is excluded.
+def to_evidence_response(item: EvidenceReadItem) -> EvidenceResponse:
+    """Map one exact admitted observation; the raw provider payload is excluded.
 
-    Read models always carry their persisted identity; a missing identity is
-    an internal contract failure and never a synthesized fallback.
+    Read models always carry their persisted identities; a missing identity
+    is an internal contract failure and never a synthesized fallback. The
+    legacy ``subject_*`` names resolve to the observation's first associated
+    Entity in deterministic order (PR 28B association semantics; no
+    privileged subject).
     """
-    subject = evidence.subject
-    if evidence.id is None or subject.id is None:
-        raise ValueError("evidence response requires persisted identities")
+    first = item.entities[0] if item.entities else None
     return EvidenceResponse(
-        id=evidence.id,
-        type=evidence.type,
-        subject_entity_id=subject.id,
-        subject_type=subject.type,
-        subject_value=subject.value,
-        source=evidence.source,
-        source_record_id=evidence.source_record_id,
-        source_url=evidence.source_url,
-        observed_at=evidence.observed_at,
-        retrieved_at=evidence.retrieved_at,
-        facts=dict(evidence.facts),
+        id=item.observation.id,
+        type=item.evidence.type,
+        subject_entity_id=first.id if first is not None else None,
+        subject_type=first.type if first is not None else None,
+        subject_value=first.value if first is not None else None,
+        source=item.evidence.source,
+        source_record_id=item.evidence.source_record_id,
+        source_url=item.observation.source_url,
+        observed_at=item.observation.observed_at,
+        retrieved_at=item.observation.retrieved_at,
+        facts=dict(item.observation.facts),
     )
 
 
@@ -184,7 +185,7 @@ def to_geoint_observation_response(
         observation_id=item.observation_id,
         entity_id=item.entity_id,
         location=to_geoint_location_response(item.location),
-        evidence_id=item.evidence_id,
+        evidence_id=item.evidence_observation_id,
         precision=item.precision,
         resolution_method=item.resolution_method,
         observed_at=item.observed_at,
@@ -259,7 +260,7 @@ def to_geolocation_response(
     this boundary. The mapper performs no database access and no inference.
     """
     return InvestigationGeolocationResponse(
-        evidence_id=item.evidence_id,
+        evidence_id=item.evidence_observation_id,
         entity_id=item.entity_id,
         ip_address=item.ip_address,
         country_code=item.country_code,
@@ -299,7 +300,7 @@ def to_relationship_observation_response(
     return RelationshipObservationResponse(
         id=item.id,
         relationship_id=item.relationship_id,
-        evidence_id=item.evidence_id,
+        evidence_id=item.evidence_observation_id,
         investigation_id=item.investigation_id,
         observed_at=item.observed_at,
         retrieved_at=item.retrieved_at,

@@ -66,6 +66,7 @@ from agentic_threat_investigator.app.datasource_provider import (
 )
 from agentic_threat_investigator.app.extraction.models import (
     EvidenceExtractionError,
+    EvidenceExtractionView,
     ExtractionResult,
 )
 from agentic_threat_investigator.app.investigation_timeline import (
@@ -81,6 +82,7 @@ from agentic_threat_investigator.app.provider_observation_persistence import (
 )
 from agentic_threat_investigator.app.providers import EvidenceProvider, ProviderResult
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     InvestigationError,
@@ -92,7 +94,6 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -268,7 +269,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
         *,
         entity_reader: EntityReader,
         provider_registry: Mapping[SourceId, EvidenceProvider],
-        extractor: Callable[[LegacyEvidence], ExtractionResult],
+        extractor: Callable[[EvidenceExtractionView], ExtractionResult],
         persistence_service: ProviderObservationPersistenceService,
         timeline_service: InvestigationTimelineSink | None,
         context: ProviderExecutionContext,
@@ -336,13 +337,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             )
             return await self._fail_work(work_item, ERROR_PROVIDER_ERROR)
 
-        binding_error = self._binding_violation(
-            work_item,
-            target,
-            provider,
-            result,
-            self._context.investigation_id,
-        )
+        binding_error = self._binding_violation(work_item, provider, result)
         if binding_error is not None:
             await _best_effort_datasource_terminal(
                 _datasource_completion(result),
@@ -351,7 +346,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             return await self._fail_work(work_item, binding_error)
 
         try:
-            return await self._process_result(work_item, result)
+            return await self._process_result(work_item, target, result)
         except asyncio.CancelledError:
             # Cancellation observed after acquisition/conversion: the
             # datasource execution terminal is CANCELLED (best effort) and
@@ -367,10 +362,8 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
     @staticmethod
     def _binding_violation(
         work_item: ProviderWorkItem,
-        target: Entity,
         provider: EvidenceProvider,
         result: ProviderResult,
-        investigation_id: UUID,
     ) -> str | None:
         """Return a stable error code when provider output is not bound to the work.
 
@@ -378,17 +371,15 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
         argument was already validated by ``execute()`` against the work item
         (identifier equality and an already-canonical value) before any provider
         invocation; it is authoritative and immutable for the remainder of the
-        call. The result must declare the selected provider, and every returned
-        LegacyEvidence must belong to the selected provider, the owning investigation,
-        and the authoritative target. Each LegacyEvidence subject must be already
-        canonical and equal the persisted target's canonical value exactly —
-        canonical equivalence after normalization is not accepted — and carry
-        the target identifier when present. The complete tuple is validated
-        before any LegacyEvidence identity is assigned or extracted, so one invalid
-        item never lets an earlier item commit. Canonicalization failures return
-        ``ERROR_PROVIDER_BINDING``; they never escape and no source values,
-        subject values, exception text, or payload content can reach the
-        failure message built from the stable code.
+        call and is the exact invocation Entity the executor passes to the
+        extraction view and persistence admission — a provider can never
+        substitute a different target because global ``ConvertedEvidence``
+        carries no Investigation and no subject. The result must declare the
+        selected provider, and every returned ``ConvertedEvidence`` must
+        belong to the selected provider and carry the exact stable
+        source-record identity (no identity-less evidence). The complete
+        tuple is validated before any observation is persisted, so one
+        invalid item never lets an earlier item commit.
         """
         # The return count is intrinsic to the independent binding gates; the
         # narrow disable follows repository convention.
@@ -399,23 +390,17 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             or result.provider != provider.id
         ):
             return ERROR_PROVIDER_BINDING
-        for evidence in result.evidence:
-            if evidence.source != work_item.provider.value:
+        for item in result.evidence:
+            if not isinstance(item, ConvertedEvidence):
+                # A provider that still emits the transitional v0.1
+                # LegacyEvidence shape has no approved PR 28A semantic
+                # identity contract; the observation fails closed with a
+                # deterministic stable code and nothing is persisted. No
+                # identity is ever invented.
                 return ERROR_PROVIDER_BINDING
-            if evidence.investigation_id != investigation_id:
+            if item.evidence.source != work_item.provider.value:
                 return ERROR_PROVIDER_BINDING
-            if evidence.subject.type is not target.type:
-                return ERROR_PROVIDER_BINDING
-            canonical_subject = _canonicalize_or_none(
-                evidence.subject.type, evidence.subject.value
-            )
-            if canonical_subject is None:
-                return ERROR_PROVIDER_BINDING
-            if evidence.subject.value != canonical_subject:
-                return ERROR_PROVIDER_BINDING
-            if evidence.subject.value != target.value:
-                return ERROR_PROVIDER_BINDING
-            if evidence.subject.id is not None and evidence.subject.id != target.id:
+            if not item.evidence.source_record_id.strip():
                 return ERROR_PROVIDER_BINDING
         return None
 
@@ -450,6 +435,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
     async def _process_result(
         self,
         work_item: ProviderWorkItem,
+        target: Entity,
         result: ProviderResult,
     ) -> ProviderExecutionOutcome:
         """Process one provider result deterministically in provider-return order.
@@ -468,14 +454,23 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
         discovered: list[UUID] = []
         provider_error: InvestigationError | None = None
 
-        for evidence in result.evidence:
-            normalized = (
-                evidence
-                if evidence.id is not None
-                else evidence.model_copy(update={"id": uuid4()})
+        for item in result.evidence:
+            if not isinstance(
+                item, ConvertedEvidence
+            ):  # pragma: no cover - binding gate
+                raise RuntimeError("unconverted provider evidence reached processing")
+            converted = item
+            # The smallest immutable execution/extraction view combines the
+            # stable Evidence, the observation candidate, and the
+            # authoritative persisted target Entity (never a provider-supplied
+            # subject): execution context only, never Evidence ownership.
+            extraction_view = EvidenceExtractionView(
+                evidence=converted.evidence,
+                observation=converted.observation,
+                invocation_entity=target,
             )
             try:
-                extraction = self._extractor(normalized)
+                extraction = self._extractor(extraction_view)
             except EvidenceExtractionError:
                 LOGGER.warning(
                     "extraction failed for evidence from %s",
@@ -494,8 +489,10 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
             try:
                 persisted = await self._persistence_service.persist(
-                    normalized,
+                    converted,
+                    target,
                     extraction,
+                    investigation_id=self._context.investigation_id,
                     actor_id=self._context.actor_id,
                     request_id=self._context.request_id,
                 )
@@ -516,8 +513,9 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                     relationship_ids=relationship_ids,
                 )
 
-            assert persisted.evidence.id is not None  # DB invariant
-            _append_unique(evidence_ids, persisted.evidence.id)
+            # Timeline/outcome carry exact EvidenceObservation identities
+            # (PR 28B): the stable Evidence is never an observation identity.
+            _append_unique(evidence_ids, persisted.observation.id)
             for relationship in persisted.relationships:
                 if relationship.id is not None:
                     _append_unique(relationship_ids, relationship.id)
@@ -709,7 +707,11 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
         work_item: ProviderWorkItem,
         persisted: ProviderObservationPersistenceResult,
     ) -> InvestigationTimelineEvent:
-        """Build the event emitted only after one observation committed."""
+        """Build the event emitted only after one observation committed.
+
+        ``evidence_ids`` carries the exact EvidenceObservation identity of the
+        committed observation (PR 28B), never the stable Evidence identity.
+        """
         return InvestigationTimelineEvent(
             id=uuid4(),
             investigation_id=self._context.investigation_id,
@@ -717,9 +719,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             occurred_at=self._context.clock(),
             provider=work_item.provider,
             target_entity_id=work_item.entity_id,
-            evidence_ids=(
-                (persisted.evidence.id,) if persisted.evidence.id is not None else ()
-            ),
+            evidence_ids=(persisted.observation.id,),
             entity_ids=tuple(
                 entity.id for entity in persisted.entities if entity.id is not None
             ),

@@ -16,23 +16,32 @@ from agentic_threat_investigator.app.extraction import (
     ExtractionErrorReason,
     extract,
 )
-from agentic_threat_investigator.app.extraction.models import ExtractionResult
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.app.extraction.models import (
+    EvidenceExtractionView,
+    ExtractionResult,
+)
+from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 RETRIEVED_AT = datetime(2026, 1, 15, tzinfo=UTC)
 
 
-def dbip_geolocation_evidence() -> LegacyEvidence:
-    """Build realistic DB-IP City Lite geolocation evidence."""
-    return LegacyEvidence(
-        id=uuid4(),
-        investigation_id=uuid4(),
+def dbip_geolocation_evidence() -> EvidenceExtractionView:
+    """Build a PR 28B extraction view for DB-IP City Lite geolocation."""
+    identity = uuid4()
+    evidence = Evidence(
+        id=identity,
         type=EvidenceType.GEOLOCATION,
-        subject=EntityRef(type=EntityType.IP_ADDRESS, value="203.0.113.42"),
         source=SourceId.DBIP_CITY_LITE.value,
+        source_record_id=f"fixture:{identity}",
+    )
+    candidate = EvidenceObservationCandidate(
+        evidence_id=identity,
         retrieved_at=RETRIEVED_AT,
         facts={
             "country_code": "US",
@@ -44,18 +53,25 @@ def dbip_geolocation_evidence() -> LegacyEvidence:
             "precision": "city",
             "provider": "urn:ati:source:dbip_city_lite",
         },
-        raw_payload=None,
+    )
+    return EvidenceExtractionView(
+        evidence=evidence,
+        observation=candidate,
+        invocation_entity=Entity(type=EntityType.IP_ADDRESS, value="203.0.113.42"),
     )
 
 
-def abuseipdb_reputation_evidence() -> LegacyEvidence:
-    """Build realistic AbuseIPDB reputation evidence."""
-    return LegacyEvidence(
-        id=uuid4(),
-        investigation_id=uuid4(),
+def abuseipdb_reputation_evidence() -> EvidenceExtractionView:
+    """Build a PR 28B extraction view for AbuseIPDB reputation."""
+    identity = uuid4()
+    evidence = Evidence(
+        id=identity,
         type=EvidenceType.REPUTATION,
-        subject=EntityRef(type=EntityType.IP_ADDRESS, value="203.0.113.42"),
         source=SourceId.ABUSEIPDB.value,
+        source_record_id=f"fixture:{identity}",
+    )
+    candidate = EvidenceObservationCandidate(
+        evidence_id=identity,
         retrieved_at=RETRIEVED_AT,
         facts={
             "ipAddress": "203.0.113.42",
@@ -65,7 +81,11 @@ def abuseipdb_reputation_evidence() -> LegacyEvidence:
             "lastReportedAt": "2026-01-14T00:00:00+00:00",
             "reports": [],
         },
-        raw_payload=None,
+    )
+    return EvidenceExtractionView(
+        evidence=evidence,
+        observation=candidate,
+        invocation_entity=Entity(type=EntityType.IP_ADDRESS, value="203.0.113.42"),
     )
 
 
@@ -86,7 +106,11 @@ def test_abuseipdb_reputation_yields_empty_result() -> None:
 def test_unknown_source_yields_empty_result() -> None:
     """Unregistered sources deliberately yield an empty result."""
     evidence = abuseipdb_reputation_evidence().model_copy(
-        update={"source": "urn:ati:source:some_future_source"}
+        update={
+            "evidence": abuseipdb_reputation_evidence().evidence.model_copy(
+                update={"source": "urn:ati:source:some_future_source"}
+            )
+        }
     )
 
     assert extract(evidence) == ExtractionResult()
@@ -95,7 +119,11 @@ def test_unknown_source_yields_empty_result() -> None:
 def test_known_source_with_impossible_type_fails() -> None:
     """A known source paired with an impossible evidence type is a contract failure."""
     evidence = abuseipdb_reputation_evidence().model_copy(
-        update={"type": EvidenceType.DNS}
+        update={
+            "evidence": abuseipdb_reputation_evidence().evidence.model_copy(
+                update={"type": EvidenceType.DNS}
+            )
+        }
     )
 
     with pytest.raises(EvidenceExtractionError) as excinfo:

@@ -24,6 +24,13 @@ from agentic_threat_investigator.domain.datasource import (
 )
 from agentic_threat_investigator.domain.documents import Document, DocumentChunk
 from agentic_threat_investigator.domain.entities import Entity
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservation,
+    EvidenceObservationEntity,
+    InvestigationEvidence,
+)
 from agentic_threat_investigator.domain.geoint import (
     EntityLocation,
     EntityLocationObservation,
@@ -44,7 +51,6 @@ from agentic_threat_investigator.domain.investigation_job import (
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -145,12 +151,116 @@ class InvestigationJobInvalidTransitionError(ValueError):
 
 
 class EvidenceDuplicateIdentityError(ValueError):
-    """Raised when an evidence identity already exists; never an update."""
+    """Raised when an evidence observation identity already exists; never an update.
+
+    Retained for the transitional v0.1 contract; PR 28B persistence routes
+    through :func:`EvidenceRepository.persist` and surfaces the typed PR 28B
+    errors below.
+    """
 
     def __init__(self, evidence_id: UUID) -> None:
-        """Record the conflicting evidence identity."""
+        """Record the conflicting observation identity."""
         super().__init__(f"evidence observation already exists: {evidence_id}")
         self.evidence_id = evidence_id
+
+
+class EvidenceMetadataConflictError(ValueError):
+    """Raised when one deterministic Evidence ID carries conflicting stable metadata.
+
+    The same stable Evidence identity can never be rebound to a different
+    evidence type, source, or source-record identity (SQLSTATE ``U28B1``);
+    the conflicting write is rejected with no mutation.
+    """
+
+    def __init__(self, evidence_id: UUID) -> None:
+        """Record the conflicting stable Evidence identity."""
+        super().__init__(f"stable evidence metadata conflict: {evidence_id}")
+        self.evidence_id = evidence_id
+
+
+class EvidenceObservationNotFoundError(LookupError):
+    """Raised when an exact EvidenceObservation is missing (SQLSTATE ``U28B2``)."""
+
+    def __init__(self, observation_id: UUID) -> None:
+        """Record the missing observation identity."""
+        super().__init__(f"evidence observation not found: {observation_id}")
+        self.observation_id = observation_id
+
+
+class EvidenceObservationInputError(ValueError):
+    """Raised when malformed evidence-observation input is rejected database-side.
+
+    SQLSTATE ``U28B3``: nullable identifiers, blank stable identity, or an
+    impossible transition (a committed Evidence with no observation).
+    """
+
+    def __init__(self, detail: str) -> None:
+        """Record the database-reported input failure detail."""
+        super().__init__(f"invalid evidence observation input: {detail}")
+        self.detail = detail
+
+
+class InvestigationEvidenceAdmissionConflictError(ValueError):
+    """Raised when an admission replay changes immutable admission metadata.
+
+    Replaying the exact admission is an idempotent no-op; any change to
+    ``inclusion_reason``/``added_by``/``discovered_from`` on replay is a
+    typed conflict (SQLSTATE ``U28B5``).
+    """
+
+    def __init__(self, investigation_id: UUID, observation_id: UUID) -> None:
+        """Record the conflicting admission pair."""
+        super().__init__(
+            f"investigation admission metadata conflict: investigation "
+            f"{investigation_id} observation {observation_id}"
+        )
+        self.investigation_id = investigation_id
+        self.observation_id = observation_id
+
+
+class InvalidDiscoveredFromProvenanceError(ValueError):
+    """Raised when discovered-from references an observation not admitted to the
+    same Investigation (SQLSTATE ``U28B6``)."""
+
+    def __init__(self, observation_id: UUID) -> None:
+        """Record the invalid discovered-from observation identity."""
+        super().__init__(
+            f"invalid discovered-from provenance: observation is not admitted "
+            f"to the same investigation: {observation_id}"
+        )
+        self.observation_id = observation_id
+
+
+class EvidenceObservationEntityAssociationError(ValueError):
+    """Raised when an observation/Entity association is rejected database-side.
+
+    SQLSTATE ``U28B7``: a missing observation, or a missing or soft-deleted
+    Entity. Association is idempotent for valid pairs only.
+    """
+
+    def __init__(self, observation_id: UUID, entity_id: UUID) -> None:
+        """Record the rejected pair."""
+        super().__init__(
+            f"invalid evidence observation entity association: observation "
+            f"{observation_id} entity {entity_id}"
+        )
+        self.observation_id = observation_id
+        self.entity_id = entity_id
+
+
+class RelationshipObservationProvenanceError(ValueError):
+    """Raised when a RelationshipObservation references an unknown observation.
+
+    SQLSTATE ``U28B8``: the backing EvidenceObservation must exist.
+    """
+
+    def __init__(self, observation_id: UUID) -> None:
+        """Record the invalid backing observation identity."""
+        super().__init__(
+            f"relationship observation provenance is invalid: evidence "
+            f"observation not found: {observation_id}"
+        )
+        self.observation_id = observation_id
 
 
 class AssessmentDuplicateIdentityError(ValueError):
@@ -387,37 +497,40 @@ class GeoLocationNotFoundError(LookupError):
 
 
 class GeoEvidenceNotFoundError(LookupError):
-    """Raised when a GEOINT write references missing LegacyEvidence."""
+    """Raised when a GEOINT write references a missing EvidenceObservation."""
 
-    def __init__(self, evidence_id: UUID) -> None:
-        """Record the missing LegacyEvidence identity."""
-        super().__init__(f"geo evidence not found: {evidence_id}")
-        self.evidence_id = evidence_id
+    def __init__(self, evidence_observation_id: UUID) -> None:
+        """Record the missing exact-observation identity."""
+        super().__init__(
+            f"geo evidence observation not found: {evidence_observation_id}"
+        )
+        self.evidence_observation_id = evidence_observation_id
 
 
 class GeoEvidenceTypeError(ValueError):
-    """Raised when LegacyEvidence backing geographic work is not GEOLOCATION."""
+    """Raised when the stable Evidence backing geographic work is not GEOLOCATION."""
 
-    def __init__(self, evidence_id: UUID) -> None:
-        """Record the offending LegacyEvidence identity."""
-        super().__init__(f"geo evidence is not GEOLOCATION: {evidence_id}")
-        self.evidence_id = evidence_id
+    def __init__(self, evidence_observation_id: UUID) -> None:
+        """Record the offending observation identity."""
+        super().__init__(f"geo evidence is not GEOLOCATION: {evidence_observation_id}")
+        self.evidence_observation_id = evidence_observation_id
 
 
 class GeoEvidenceSubjectMismatchError(ValueError):
-    """Raised when LegacyEvidence's subject is not the observation/work Entity.
+    """Raised when the exact observation is not associated with the work Entity.
 
     Cross-context provenance can never be fabricated: geographic observations
-    and resolution work bind the exact LegacyEvidence subject to the exact Entity.
+    and resolution work bind the exact EvidenceObservation (through
+    ``evidence_observation_entity``) to the exact Entity.
     """
 
-    def __init__(self, evidence_id: UUID, entity_id: UUID) -> None:
-        """Record the mismatched LegacyEvidence/Entity identities."""
+    def __init__(self, evidence_observation_id: UUID, entity_id: UUID) -> None:
+        """Record the mismatched observation/Entity identities."""
         super().__init__(
-            f"geo evidence subject mismatch: evidence {evidence_id} is not "
-            f"about entity {entity_id}"
+            f"geo evidence subject mismatch: observation "
+            f"{evidence_observation_id} is not about entity {entity_id}"
         )
-        self.evidence_id = evidence_id
+        self.evidence_observation_id = evidence_observation_id
         self.entity_id = entity_id
 
 
@@ -1227,36 +1340,92 @@ class RelationshipObservationRepository(ABC):  # pragma: no cover
         limit: int = 100,
         offset: int = 0,
     ) -> list[RelationshipObservation]:
-        """Return bounded observations backed by the Investigation's LegacyEvidence.
+        """Return bounded observations backed by admitted EvidenceObservations.
 
-        Every returned observation resolves to LegacyEvidence belonging to the
-        supplied Investigation, so the Evidence Analyst never sees
-        observations rendered from another Investigation's LegacyEvidence. Ordering
-        is deterministic by retrieved/observed time with a stable UUID
-        tie-breaker.
+        Every returned observation's backing ``evidence_observation_id`` must
+        be admitted to the supplied Investigation through
+        ``InvestigationEvidence``; the Investigation never infers scope from
+        Evidence ownership and never sees observations backed by unadmitted
+        global observations. Ordering is deterministic by retrieved/observed
+        time with a stable UUID tie-breaker.
         """
+
+
+class EvidencePersistenceOutcome(str, Enum):
+    """Authoritative outcome of one ``EvidenceRepository.persist`` call.
+
+    Mirrors the SQL ``ati.persist_evidence_observation`` outcome:
+
+    - ``CREATED``: new stable Evidence plus observation version 1;
+    - ``UNCHANGED``: the latest material state equals the candidate (no new
+      row; the existing exact observation is returned);
+    - ``APPENDED``: a material change appended the next immutable version.
+    """
+
+    CREATED = "CREATED"
+    UNCHANGED = "UNCHANGED"
+    APPENDED = "APPENDED"
+
+
+@dataclass(frozen=True)
+class EvidencePersistenceResult:
+    """Authoritative PR 28B persistence result of one observation candidate.
+
+    Carries the exact stable Evidence, the exact persisted observation, the
+    per-Evidence version, and the outcome. Repositories never allocate
+    versions and never self-commit.
+    """
+
+    evidence: Evidence
+    observation: EvidenceObservation
+    outcome: EvidencePersistenceOutcome
+    version: int
 
 
 class EvidenceRepository(ABC):  # pragma: no cover
-    """Append-only evidence repository; immutable observations."""
+    """PR 28B global Evidence persistence boundary.
+
+    PostgreSQL owns stable Evidence validation, atomic Evidence + v1
+    creation, race-safe per-Evidence version allocation, material no-op
+    detection, and canonical diffs; this repository never computes
+    ``latest.version + 1`` and never self-commits.
+    """
 
     @abstractmethod
-    async def insert(
-        self,
-        evidence: LegacyEvidence,
-        *,
-        actor_id: UUID | None = None,
-        request_id: UUID | None = None,
-    ) -> LegacyEvidence:
-        """Insert a new immutable evidence observation.
+    async def persist(
+        self, converted: ConvertedEvidence, *, observation_id: UUID | None = None
+    ) -> EvidencePersistenceResult:
+        """Persist or reuse the exact observation of one ConvertedEvidence.
 
-        A duplicate evidence identity is rejected with a typed error and
-        never becomes an update of a prior observation.
+        A new stable Evidence plus its first observation commits atomically;
+        an unchanged material state returns the existing exact observation
+        with outcome ``UNCHANGED``; a material change appends the next
+        version with the canonical diff. Stable metadata conflicts raise
+        :class:`EvidenceMetadataConflictError` and roll back. Evidence and
+        EvidenceObservation never write generic history, so no
+        actor/request correlation is accepted (audit events carry them).
+        ``observation_id`` overrides the created observation identity for
+        deterministic evaluation seams only; production callers leave it
+        ``None`` so PostgreSQL owns observation identity.
         """
 
     @abstractmethod
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
-        """Return an evidence observation by its immutable identity."""
+    async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
+        """Return the stable global Evidence with the given identity, if any."""
+
+    @abstractmethod
+    async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
+        """Return one exact EvidenceObservation by its immutable identity."""
+
+    @abstractmethod
+    async def list_observations(
+        self,
+        evidence_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
+        """Return bounded observations of one stable Evidence, oldest first."""
 
     @abstractmethod
     async def list_for_investigation(
@@ -1265,8 +1434,62 @@ class EvidenceRepository(ABC):  # pragma: no cover
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[LegacyEvidence]:
-        """Return bounded observations in deterministic newest-first order."""
+    ) -> list[EvidenceObservation]:
+        """Return the exact admitted observations of one Investigation.
+
+        Scope comes exclusively from ``InvestigationEvidence`` admission;
+        newer unadmitted global observations never appear. Ordering is
+        deterministic newest-first (``retrieved_at DESC, observation id ASC``).
+        """
+
+
+class EvidenceObservationEntityRepository(ABC):  # pragma: no cover
+    """Observation-level Entity association repository (PR 28B).
+
+    Associations are structural many-to-many provenance with no role field;
+    exact replay is idempotent.
+    """
+
+    @abstractmethod
+    async def associate(
+        self, observation_id: UUID, entity_id: UUID
+    ) -> EvidenceObservationEntity:
+        """Associate one canonical Entity with one exact observation.
+
+        Reassociation of an existing pair is a harmless no-op; a missing
+        observation or a missing/soft-deleted Entity is a typed error.
+        """
+
+    @abstractmethod
+    async def list_for_observation(
+        self, observation_id: UUID
+    ) -> list[EvidenceObservationEntity]:
+        """Return the exact associated Entities of one observation."""
+
+
+class InvestigationEvidenceRepository(ABC):  # pragma: no cover
+    """Append-only/idempotent exact admission repository (PR 28B).
+
+    One Investigation may admit several observations of the same stable
+    Evidence; a newer global observation never silently enters an
+    Investigation.
+    """
+
+    @abstractmethod
+    async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
+        """Admit one exact observation into one Investigation.
+
+        Replaying the exact admission is an idempotent no-op; changing
+        immutable admission metadata or referencing a discovered-from
+        observation that is not admitted to the same Investigation is a
+        typed error with no mutation.
+        """
+
+    @abstractmethod
+    async def list_for_investigation(
+        self, investigation_id: UUID
+    ) -> list[InvestigationEvidence]:
+        """Return the exact admissions of one Investigation."""
 
 
 class InvestigationRepository(ABC):  # pragma: no cover
@@ -1810,6 +2033,8 @@ class UnitOfWork(ABC):  # pragma: no cover
     relationships: RelationshipRepository
     relationship_observations: RelationshipObservationRepository
     evidence: EvidenceRepository
+    evidence_observation_entities: EvidenceObservationEntityRepository
+    investigation_evidence: InvestigationEvidenceRepository
     investigations: InvestigationRepository
     assessments: AssessmentRepository
     investigation_reports: InvestigationReportRepository

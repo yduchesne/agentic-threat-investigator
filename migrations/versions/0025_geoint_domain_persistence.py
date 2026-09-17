@@ -34,14 +34,14 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove only the PR 26A GEOINT objects in dependency-safe order."""
-    op.execute("DROP FUNCTION IF EXISTS ati.upsert_location(uuid, text, text, text, text, text, text, uuid)")
+    op.execute(
+        "DROP FUNCTION IF EXISTS ati.upsert_location(uuid, text, text, text, text, text, text, uuid)"
+    )
     op.execute(
         "DROP FUNCTION IF EXISTS ati.append_entity_location_observation("
         "uuid, uuid, uuid, uuid, text, timestamptz, timestamptz, timestamptz, text)"
     )
-    op.execute(
-        "DROP FUNCTION IF EXISTS ati.create_geo_resolution(uuid, uuid, uuid)"
-    )
+    op.execute("DROP FUNCTION IF EXISTS ati.create_geo_resolution(uuid, uuid, uuid)")
     op.execute("DROP TABLE IF EXISTS ati.entity_location")
     op.execute("DROP TABLE IF EXISTS ati.entity_location_observation")
     op.execute("DROP TABLE IF EXISTS ati.geo_resolution")

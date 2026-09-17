@@ -83,7 +83,7 @@ def observation_item(
         observation_id=observation_id or uuid4(),
         entity_id=entity_id,
         location=location or location_ref(),
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
         precision=precision,
         resolution_method="canonical_geography_v1",
         observed_at=observed_at,
@@ -125,7 +125,7 @@ def analyst_observation(
     return AnalystGeointObservation(
         observation_id=observation_id,
         entity_id=entity_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
         location=location
         or AnalystGeointLocation(
             location_id=uuid4(),

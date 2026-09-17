@@ -43,6 +43,7 @@ from uuid import UUID
 from agentic_threat_investigator.app.extraction.models import (
     EntityIdentity,
     EvidenceExtractionError,
+    EvidenceExtractionView,
     ExtractedEntity,
     ExtractionResult,
     RelationshipAssertion,
@@ -58,7 +59,6 @@ from agentic_threat_investigator.domain.entities import (
 )
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 _QUERY_TYPES = frozenset({"A", "AAAA", "CNAME", "MX", "NS", "PTR", "SOA", "TXT"})
@@ -71,16 +71,17 @@ _DNS_FLAGS = frozenset({"tc", "rd", "ra", "ad", "cd"})
 _MAX_UINT32 = 4294967295
 
 
-def extract_dns(evidence: LegacyEvidence) -> ExtractionResult:
-    """Extract the documented DNS identities and assertions from one LegacyEvidence."""
-    evidence_id = validate_extractor_input(
-        evidence,
+def extract_dns(view: EvidenceExtractionView) -> ExtractionResult:
+    """Extract the documented DNS identities and assertions from one observation."""
+    evidence_id = view.evidence.id
+    validate_extractor_input(
+        view,
         source=SourceId.GOOGLE_PUBLIC_DNS.value,
         evidence_type=EvidenceType.DNS,
         subject_types=(EntityType.DOMAIN, EntityType.IP_ADDRESS),
     )
-    query_name, query_type = _validate_query_envelope(evidence, evidence_id)
-    answers = evidence.facts.get("answers")
+    query_name, query_type = _validate_query_envelope(view, evidence_id)
+    answers = view.observation.facts.get("answers")
     if not isinstance(answers, (list, tuple)) or not answers:
         raise _malformed(
             evidence_id,
@@ -106,7 +107,7 @@ def _malformed(evidence_id: UUID, message: str) -> EvidenceExtractionError:
 
 
 def _validate_query_envelope(
-    evidence: LegacyEvidence, evidence_id: UUID
+    view: EvidenceExtractionView, evidence_id: UUID
 ) -> tuple[str, str]:
     """Validate the complete query envelope and return the validated values.
 
@@ -116,7 +117,7 @@ def _validate_query_envelope(
     and PTR queries carry the queried canonical IP whose reverse-pointer
     name is ``query_name``.
     """
-    facts = evidence.facts
+    facts = view.observation.facts
     query_type = facts.get("query_type")
     if not isinstance(query_type, str) or query_type not in _QUERY_TYPES:
         raise _malformed(evidence_id, "DNS evidence carries an unsupported query type")
@@ -126,7 +127,7 @@ def _validate_query_envelope(
     _validate_flags(facts.get("flags"), evidence_id)
 
     query_name = _validate_query_name(facts, evidence_id)
-    expected_query_name = _validate_subject_pairing(evidence, query_type, evidence_id)
+    expected_query_name = _validate_subject_pairing(view, query_type, evidence_id)
     if query_name != expected_query_name:
         raise _malformed(evidence_id, "DNS query name does not match the subject")
     return query_name, query_type
@@ -147,7 +148,7 @@ def _validate_query_name(facts: Mapping[str, Any], evidence_id: UUID) -> str:
 
 
 def _validate_subject_pairing(
-    evidence: LegacyEvidence, query_type: str, evidence_id: UUID
+    view: EvidenceExtractionView, query_type: str, evidence_id: UUID
 ) -> str:
     """Return the query name the evidence subject pairing requires.
 
@@ -155,7 +156,7 @@ def _validate_subject_pairing(
     name; PTR queries require a canonical IP subject whose reverse-pointer
     name is the query name.
     """
-    subject = evidence.subject
+    subject = view.invocation_entity
     if query_type == "PTR":
         if subject.type is not EntityType.IP_ADDRESS:
             raise _malformed(evidence_id, "a PTR query requires an IP_ADDRESS subject")
@@ -296,7 +297,6 @@ def _extract_answer(
                 source=owner_identity,
                 type=RelationshipType.RESOLVES_TO,
                 target=address,
-                evidence_id=evidence_id,
             )
         )
         entities.append(
@@ -346,7 +346,6 @@ def _name_relation_output(
             source=owner,
             type=relationship_type,
             target=target,
-            evidence_id=evidence_id,
         ),
     )
 
@@ -386,7 +385,6 @@ def _extract_mx_record(
             source=owner,
             type=RelationshipType.USES_MAIL_SERVER,
             target=target,
-            evidence_id=evidence_id,
         )
     )
     entities.append(ExtractedEntity(type=EntityType.DOMAIN, value=target.value))

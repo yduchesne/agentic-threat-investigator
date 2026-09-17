@@ -38,6 +38,7 @@ from agentic_threat_investigator.domain.relationships import (
 )
 
 from ..postgresql.models import (
+    InvestigationEvidenceRow,
     RelationshipObservationRow,
     RelationshipRow,
 )
@@ -54,16 +55,11 @@ def _relationship_from_row(row: RelationshipRow) -> Relationship:
 
 
 def _observation_from_row(row: RelationshipObservationRow) -> RelationshipObservation:
-    """Map an observation row to its immutable domain model.
-
-    PR 28A compatibility: the v0.1 Evidence row *is* the observation, so the
-    row's ``evidence_id`` maps onto the domain ``evidence_observation_id``
-    until PR 28B migrates the schema.
-    """
+    """Map an observation row to its immutable domain model."""
     return RelationshipObservation(
         id=row.id,
         relationship_id=row.relationship_id,
-        evidence_observation_id=row.evidence_id,
+        evidence_observation_id=row.evidence_observation_id,
         observed_at=row.observed_at,
         retrieved_at=row.retrieved_at,
         source=row.source,
@@ -99,8 +95,13 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
                 RelationshipObservationRow,
                 RelationshipObservationRow.relationship_id == RelationshipRow.id,
             )
+            .join(
+                InvestigationEvidenceRow,
+                InvestigationEvidenceRow.evidence_observation_id
+                == RelationshipObservationRow.evidence_observation_id,
+            )
             .where(
-                RelationshipObservationRow.investigation_id == query.investigation_id,
+                InvestigationEvidenceRow.investigation_id == query.investigation_id,
                 RelationshipRow.deleted_at.is_(None),
             )
         )
@@ -162,10 +163,15 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
                 )
                 .where(
                     select(RelationshipObservationRow.id)
+                    .join(
+                        InvestigationEvidenceRow,
+                        InvestigationEvidenceRow.evidence_observation_id
+                        == RelationshipObservationRow.evidence_observation_id,
+                    )
                     .where(
                         RelationshipObservationRow.relationship_id
                         == RelationshipRow.id,
-                        RelationshipObservationRow.investigation_id == investigation_id,
+                        InvestigationEvidenceRow.investigation_id == investigation_id,
                     )
                     .exists()
                 )
@@ -217,9 +223,11 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
             RelationshipRow.id == RelationshipObservationRow.relationship_id,
         )
         if query.investigation_id is not None:
-            stmt = stmt.where(
-                RelationshipObservationRow.investigation_id == query.investigation_id
-            )
+            stmt = stmt.join(
+                InvestigationEvidenceRow,
+                InvestigationEvidenceRow.evidence_observation_id
+                == RelationshipObservationRow.evidence_observation_id,
+            ).where(InvestigationEvidenceRow.investigation_id == query.investigation_id)
         if query.relationship_id is not None:
             stmt = stmt.where(
                 RelationshipObservationRow.relationship_id == query.relationship_id
@@ -348,9 +356,14 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
                     RelationshipRow,
                     RelationshipRow.id == RelationshipObservationRow.relationship_id,
                 )
+                .join(
+                    InvestigationEvidenceRow,
+                    InvestigationEvidenceRow.evidence_observation_id
+                    == RelationshipObservationRow.evidence_observation_id,
+                )
                 .where(
                     RelationshipObservationRow.id == observation_id,
-                    RelationshipObservationRow.investigation_id == investigation_id,
+                    InvestigationEvidenceRow.investigation_id == investigation_id,
                 )
             )
         ).one_or_none()

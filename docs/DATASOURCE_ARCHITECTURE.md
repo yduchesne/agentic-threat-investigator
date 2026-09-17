@@ -324,12 +324,11 @@ Converters assign the deterministic global Evidence identity but never
 allocate observation versions (authoritative version allocation is PR 28B
 persistence), perform no I/O/persistence/clock/random/secret reads, and
 synthesize no verdicts, confidence weights, attribution, relationships,
-pivots, or Investigation control flow. PR 28A persists nothing: the
-runner's `ConvertedEvidence` output stays in memory; PR 27E owns migration
-and persisted end-to-end closure, and the v0.1 runtime/persistence boundary
-rebinds converter output onto the transitional `LegacyEvidence` shape
-(see below) until PR 28B. This document makes no claim of
-`EvidenceMessage`/log publication, which stays PR 28C+.
+pivots, or Investigation control flow. Since PR 28B the runtime carries
+the `ConvertedEvidence` values unchanged — there is no `LegacyEvidence`
+rebind at the runtime/persistence boundary; PostgreSQL owns observation
+identity, versioning, and material no-op detection. This document makes no
+claim of `EvidenceMessage`/log publication, which stays PR 28C+.
 
 ## Runtime datasource migration (PR 27E, delivered)
 
@@ -345,9 +344,9 @@ EvidenceProvider compatibility (app/datasource_provider.py)
  -> EvidenceConversionContext (global, PR 28A)
  -> ToEvidenceConverterRegistry (selected by semantic_format only)
  -> ConvertedEvidence (global Evidence + observation candidate)
- -> PR 28A runtime rebind onto the v0.1 LegacyEvidence shape
- -> ProviderResult
- -> existing ProviderWorkExecutor binding/extraction/persistence
+ -> ProviderResult (global model; no v0.1 rebind since PR 28B)
+ -> ProviderWorkExecutor binding/extraction/persistence
+    (exact EvidenceObservation admission per Investigation)
 ```
 
 Delivered:

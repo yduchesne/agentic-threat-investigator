@@ -208,16 +208,75 @@ not duplicated into `domain_object_history`.
 
 A DNS relationship is not physically removed because a later lookup no longer observes it. Currentness is a query/view concept based on observations.
 
-## Evidence
+## Evidence (PR 28B global model)
 
-> **PR 28A note:** the Python domain now models Evidence as a stable global
-> identity with immutable `EvidenceObservation` states, but PostgreSQL
-> persistence has **not** been migrated — this section remains the
-> authoritative description of the v0.1 schema in use until PR 28B. No
-> `EvidenceObservation`/`InvestigationEvidence`/`EvidenceObservationEntity`
-> tables exist yet; the v0.1 `ati.evidence` row continues to play the role of
-> one immutable observation and `domain_object_history` still records its
-> CREATE history.
+> **PR 28B:** PostgreSQL now persists the PR 28A global Evidence model
+> authoritatively (SQL API v0026, migration 0031). This section is the
+> authoritative schema description; the v0.1 Investigation-owned table was
+> transformed in place (old rows became `evidence_observation` rows) and the
+> legacy shape is gone.
+
+`ati.evidence` is a stable global source-intelligence identity with exactly
+four columns: `id` (the deterministic PR 28A UUID — PostgreSQL stores the
+identity, application converters derive it; it is never a retrieval-specific
+UUID), `evidence_type`, `source`, `source_record_id`. There is no
+Investigation, subject, observation state, soft-delete path, or generic
+history.
+
+`ati.evidence_observation` is one immutable material state of an Evidence
+item: `(evidence_id, version)` unique, `version >= 1`, material columns
+`source_url`/`observed_at`/`facts`/`raw_payload`, operational
+`retrieved_at`/`created_at`, and `diff` (canonical shallow `{key: {old,
+new}}` diff from the immediate predecessor; `NULL` for version 1).
+
+`ati.persist_evidence_observation(...)` is the sole normal mutation path and
+owns everything PostgreSQL-authoritative:
+
+- validates stable Evidence metadata (a conflicting
+  type/source/source-record under one deterministic ID is SQLSTATE `U28B1`);
+- creates Evidence + observation v1 atomically (`CREATED`);
+- compares the candidate's material state with the latest observation:
+  equal state is `UNCHANGED` (no row, no diff); a material
+  change appends the next version with the canonical diff (`APPENDED`);
+- serializes every write for one Evidence through a deterministic
+  transaction-scoped advisory lock, so version allocation is race-safe
+  (concurrent identical first states produce one Evidence + one v1;
+  concurrent identical updates produce one next version; concurrent distinct
+  updates produce serialized unique versions);
+- a committed Evidence can never exist without observation v1 (SQLSTATE
+  `U28B2`).
+
+`retrieved_at`-only replays are semantic no-ops. `Evidence` and
+`EvidenceObservation` never use `domain_object_history`; the observation row
+is authoritative intelligence history.
+
+`ati.evidence_observation_entity` is the structural many-to-many
+observation/Entity provenance (no role field); replay is idempotent
+(`U28B7` on invalid pairs).
+
+`ati.investigation_evidence` admits **exact immutable observations** into one
+Investigation (append-only/idempotent; replaying the identical admission is
+a no-op, changing immutable admission metadata is a typed conflict `U28B5`,
+and `discovered_from_evidence_observation_id` must reference an observation
+already admitted to the same Investigation `U28B6`).
+
+`ati.relationship_observation` references the exact
+`evidence_observation_id` (FK to `evidence_observation(id)`) and has no
+Investigation correlation column; `entity_location_observation` and
+`geo_resolution` provenance are `evidence_observation_id` for the same
+reason. Assessment analyzed/support evidence, report source/support
+evidence, Investigation-state analyzed/recorded provenance, coordinator
+`evidence_ids`/relationship correlation, and timeline `evidence_persisted`
+events all use exact EvidenceObservation identities, and every write-path
+validation proves same-Investigation admission through
+`ati.investigation_evidence` — a newer global observation never alters an
+Investigation, Assessment, or report.
+
+## Evidence (historical v0.1 notes retained for the migration record)
+
+The v0.1 section below describes the pre-28B shape that migration 0031
+transformed in place; it is retained only as the migration record and the
+downgrade limitation reference.
 
 Evidence is immutable.
 
@@ -226,28 +285,13 @@ A new provider retrieval creates a new Evidence observation rather than overwrit
 
 Raw payload, when retained, is part of that immutable observation.
 
-`ati.append_evidence(...)` is the canonical persistence path. It requires an
-existing visible Investigation parent — validated with a row lock inside the
-function so the parent cannot be soft-deleted between validation and
-insertion, and additionally enforced by the
-`evidence(investigation_id) -> investigation(id)` foreign key, which uses no
-delete cascade because Investigation deletion is soft and Evidence is
-immutable — inserts the observation with version `1`, writes a single
-immutable CREATE `domain_object_history` entry carrying
-actor/request/investigation correlation, and rejects a duplicate evidence
-identity with a dedicated error state. The INSERT itself is authoritative for
-duplicate identities, so a concurrent losing insert raises the dedicated
-evidence duplicate error state instead of a raw unique violation; a repeated
-identity is a conflict, never an update of the prior observation. The normal
-repository surface is insert/read only (`insert`, `get_by_id`,
-`list_for_investigation`); there is no evidence update, delete, or upsert
-operation. `list_for_investigation` returns observations in deterministic
-newest-first order (`retrieved_at DESC`, then evidence `id ASC`), backed by
-the `evidence_investigation_listing_idx` index. Evidence timestamps must be
-timezone-aware and are normalized to UTC.
+`ati.append_evidence(...)` was the canonical v0.1 persistence path... (removed in PR 28B) The INSERT itself was authoritative for
+duplicate identities. The v0.1 repository surface was insert/read only
+(`insert`, `get_by_id`, `list_for_investigation`) with newest-first order
+backed by `evidence_investigation_listing_idx`.
 
-Evidence subject identity is resolved by the caller before persistence: the
-stored observation references the canonical entity row, and reads rebuild the
+Evidence subject identity was resolved by the caller before persistence: the
+stored observation referenced the canonical entity row, and reads rebuilt the
 subject reference from that canonical identity.
 
 ## Investigation persistence

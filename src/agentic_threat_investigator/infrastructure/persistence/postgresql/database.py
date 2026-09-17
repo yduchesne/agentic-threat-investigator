@@ -26,6 +26,11 @@ from .assessment_repositories import PostgresAssessmentRepository
 from .audit_repositories import PostgresAuditEventRepository
 from .composites import register_batch_composites
 from .datasource_log_repositories import PostgresDatasourceLogRepository
+from .evidence_repositories import (
+    PostgresEvidenceObservationEntityRepository,
+    PostgresEvidenceRepository,
+    PostgresInvestigationEvidenceRepository,
+)
 from .geoint_repositories import (
     PostgresEntityLocationObservationRepository,
     PostgresEntityLocationRepository,
@@ -48,7 +53,6 @@ from .rag_repositories import (
     PostgresResearchResultRepository,
 )
 from .relationship_repositories import (
-    PostgresEvidenceRepository,
     PostgresRelationshipObservationRepository,
     PostgresRelationshipRepository,
 )
@@ -77,6 +81,12 @@ class PostgresUnitOfWork(UnitOfWork):
             PostgresRelationshipObservationRepository, None
         )
         self.evidence = cast(PostgresEvidenceRepository, None)
+        self.evidence_observation_entities = cast(
+            PostgresEvidenceObservationEntityRepository, None
+        )
+        self.investigation_evidence = cast(
+            PostgresInvestigationEvidenceRepository, None
+        )
         self.investigations = cast(PostgresInvestigationRepository, None)
         self.assessments = cast(PostgresAssessmentRepository, None)
         self.investigation_reports = cast(PostgresInvestigationReportRepository, None)
@@ -119,6 +129,12 @@ class PostgresUnitOfWork(UnitOfWork):
             self.session
         )
         self.evidence = PostgresEvidenceRepository(self.session)
+        self.evidence_observation_entities = (
+            PostgresEvidenceObservationEntityRepository(self.session)
+        )
+        self.investigation_evidence = PostgresInvestigationEvidenceRepository(
+            self.session
+        )
         self.investigations = PostgresInvestigationRepository(self.session)
         self.assessments = PostgresAssessmentRepository(self.session, self._batch_size)
         self.investigation_reports = PostgresInvestigationReportRepository(
@@ -172,6 +188,12 @@ class PostgresUnitOfWork(UnitOfWork):
                 PostgresRelationshipObservationRepository, None
             )
             self.evidence = cast(PostgresEvidenceRepository, None)
+            self.evidence_observation_entities = cast(
+                PostgresEvidenceObservationEntityRepository, None
+            )
+            self.investigation_evidence = cast(
+                PostgresInvestigationEvidenceRepository, None
+            )
             self.investigations = cast(PostgresInvestigationRepository, None)
             self.assessments = cast(PostgresAssessmentRepository, None)
             self.investigation_reports = cast(

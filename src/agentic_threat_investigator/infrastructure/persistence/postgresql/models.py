@@ -304,22 +304,82 @@ class InvestigationRow(Base):
 
 
 class EvidenceRow(Base):
-    """Database row for immutable evidence."""
+    """A stable global source-intelligence identity (PR 28B).
+
+    Exactly the PR 28A shape: deterministic identity plus stable
+    type/source/source-record identity. There is deliberately no
+    Investigation, subject, observation state, soft-delete path, or generic
+    history — those live in EvidenceObservation / InvestigationEvidence.
+    """
 
     __tablename__ = "evidence"
     __table_args__ = {"schema": "ati"}
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
-    investigation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     evidence_type: Mapped[str] = mapped_column(String)
-    subject_entity_id: Mapped[UUID] = mapped_column(ForeignKey("ati.entity.id"))
     source: Mapped[str] = mapped_column(String)
-    source_record_id: Mapped[str | None] = mapped_column(String)
+    source_record_id: Mapped[str] = mapped_column(String)
+
+
+class EvidenceObservationRow(Base):
+    """One immutable material state of a global Evidence item (PR 28B).
+
+    ``version`` is the per-Evidence monotonic revision (>= 1) allocated by
+    PostgreSQL; ``diff`` is the canonical shallow material diff from the
+    immediate predecessor (NULL for the first observation). Never uses
+    ``domain_object_history``: the observation row is authoritative
+    intelligence history.
+    """
+
+    __tablename__ = "evidence_observation"
+    __table_args__ = {"schema": "ati"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    version: Mapped[int] = mapped_column(BigInteger)
     source_url: Mapped[str | None] = mapped_column(String)
     observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     facts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
-    version: Mapped[int] = mapped_column(BigInteger)
+    diff: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EvidenceObservationEntityRow(Base):
+    """Observation-level many-to-many Entity provenance (PR 28B).
+
+    Structural https://association only: no role, confidence, version, or
+    history. Exact replay is idempotent.
+    """
+
+    __tablename__ = "evidence_observation_entity"
+    __table_args__ = {"schema": "ati"}
+    evidence_observation_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True
+    )
+    entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+
+
+class InvestigationEvidenceRow(Base):
+    """Exact admission of one immutable observation into one Investigation (PR 28B).
+
+    Append-only/idempotent: the primary key is the admission pair and
+    immutable admission metadata is never silently rewritten.
+    """
+
+    __tablename__ = "investigation_evidence"
+    __table_args__ = {"schema": "ati"}
+    investigation_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True
+    )
+    evidence_observation_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True
+    )
+    inclusion_reason: Mapped[str] = mapped_column(String)
+    discovered_from_evidence_observation_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True)
+    )
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    added_by: Mapped[str] = mapped_column(String)
 
 
 class RelationshipObservationRow(Base):
@@ -329,8 +389,7 @@ class RelationshipObservationRow(Base):
     __table_args__ = {"schema": "ati"}
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     relationship_id: Mapped[UUID] = mapped_column(ForeignKey("ati.relationship.id"))
-    evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
-    investigation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    evidence_observation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     source: Mapped[str] = mapped_column(String)
@@ -559,6 +618,7 @@ class EntityLocationObservationRow(Base):
 
     Mapped read-only for the repository; writes always route through the
     versioned ``ati.append_entity_location_observation`` stored function.
+    Provenance is the exact EvidenceObservation identity (PR 28B).
     """
 
     __tablename__ = "entity_location_observation"
@@ -566,7 +626,7 @@ class EntityLocationObservationRow(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     location_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
-    evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    evidence_observation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     precision: Mapped[str] = mapped_column(String)
     observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -600,14 +660,15 @@ class GeoResolutionRow(Base):
     """Database row for durable operational GeoResolution work (PR 26A).
 
     Mapped read-only for the repository; writes always route through the
-    versioned ``ati.create_geo_resolution`` stored function.
+    versioned ``ati.create_geo_resolution`` stored function. Provenance is
+    the exact EvidenceObservation identity (PR 28B).
     """
 
     __tablename__ = "geo_resolution"
     __table_args__ = {"schema": "ati"}
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
-    evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    evidence_observation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     status: Mapped[str] = mapped_column(String)
     attempt_count: Mapped[int] = mapped_column(Integer)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

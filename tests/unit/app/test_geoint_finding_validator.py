@@ -161,7 +161,7 @@ def shared_finding(
     world: World,
     *,
     observation_ids: tuple[UUID, ...] | None = None,
-    evidence_ids: tuple[UUID, ...] | None = None,
+    evidence_observation_ids: tuple[UUID, ...] | None = None,
     entity_ids: tuple[UUID, ...] | None = None,
     location_ids: tuple[UUID, ...] | None = None,
 ) -> GeographicFinding:
@@ -172,7 +172,8 @@ def shared_finding(
         temporal_interpretation=GeographicTemporalInterpretation.DIFFERENT_OBSERVATION_TIMES,
         observation_ids=observation_ids
         or (world.o1.observation_id, world.o3.observation_id),
-        evidence_ids=evidence_ids or (world.o1.evidence_id, world.o3.evidence_id),
+        evidence_observation_ids=evidence_observation_ids
+        or (world.o1.evidence_observation_id, world.o3.evidence_observation_id),
         entity_ids=entity_ids or (world.e1, world.e2),
         location_ids=location_ids or (world.loc_sea.location_id,),
     )
@@ -212,7 +213,10 @@ def test_g26f_v03_substitute_evidence_rejected() -> None:
     finding = shared_finding(
         world,
         observation_ids=(world.o1.observation_id, world.o3.observation_id),
-        evidence_ids=(world.o3.evidence_id, world.o1.evidence_id),
+        evidence_observation_ids=(
+            world.o3.evidence_observation_id,
+            world.o1.evidence_observation_id,
+        ),
     )
     decision, context = world.decision(finding=finding)
     with pytest.raises(Exception) as holder:
@@ -256,7 +260,7 @@ def test_g26f_v06b_single_observation_descriptive_context_accepted() -> None:
         statement="The entity was observed in Seattle.",
         temporal_interpretation=GeographicTemporalInterpretation.NONE,
         observation_ids=(world.o1.observation_id,),
-        evidence_ids=(world.o1.evidence_id,),
+        evidence_observation_ids=(world.o1.evidence_observation_id,),
         entity_ids=(world.e1,),
         location_ids=(world.loc_sea.location_id,),
     )
@@ -292,7 +296,7 @@ def test_g26f_v07_different_locations_claimed_shared_rejected() -> None:
     finding = shared_finding(
         world,
         observation_ids=(world.o1.observation_id, o5.observation_id),
-        evidence_ids=(world.o1.evidence_id, ev5),
+        evidence_observation_ids=(world.o1.evidence_observation_id, ev5),
         entity_ids=(world.e1, e3),
         location_ids=(world.loc_sea.location_id, world.loc_dal.location_id),
     )
@@ -310,7 +314,10 @@ def test_g26f_v08_history_across_entities_rejected() -> None:
         statement="Entity history.",
         temporal_interpretation=GeographicTemporalInterpretation.DIFFERENT_OBSERVATION_TIMES,
         observation_ids=(world.o1.observation_id, world.o3.observation_id),
-        evidence_ids=(world.o1.evidence_id, world.o3.evidence_id),
+        evidence_observation_ids=(
+            world.o1.evidence_observation_id,
+            world.o3.evidence_observation_id,
+        ),
         entity_ids=(world.e1, world.e2),
         location_ids=(world.loc_sea.location_id,),
     )
@@ -328,7 +335,10 @@ def test_g26f_v09_location_change_accepted() -> None:
         statement="The entity was observed in Seattle and later in Dallas.",
         temporal_interpretation=GeographicTemporalInterpretation.LOCATION_CHANGE_OBSERVED,
         observation_ids=(world.o1.observation_id, world.o4.observation_id),
-        evidence_ids=(world.o1.evidence_id, world.o4.evidence_id),
+        evidence_observation_ids=(
+            world.o1.evidence_observation_id,
+            world.o4.evidence_observation_id,
+        ),
         entity_ids=(world.e1,),
         location_ids=(world.loc_sea.location_id, world.loc_dal.location_id),
     )
@@ -344,7 +354,10 @@ def test_g26f_v10_same_location_repeated_is_not_change() -> None:
         statement="Location changed.",
         temporal_interpretation=GeographicTemporalInterpretation.LOCATION_CHANGE_OBSERVED,
         observation_ids=(world.o1.observation_id, world.o2.observation_id),
-        evidence_ids=(world.o1.evidence_id, world.o2.evidence_id),
+        evidence_observation_ids=(
+            world.o1.evidence_observation_id,
+            world.o2.evidence_observation_id,
+        ),
         entity_ids=(world.e1,),
         location_ids=(world.loc_sea.location_id,),
     )
@@ -396,7 +409,7 @@ def test_g26f_v10b_equal_effective_times_not_change() -> None:
             both_retrieved.observation_id,
             both_retrieved_dal.observation_id,
         ),
-        evidence_ids=(first_evidence, second_evidence),
+        evidence_observation_ids=(first_evidence, second_evidence),
         entity_ids=(world.e1,),
         location_ids=(world.loc_sea.location_id, world.loc_dal.location_id),
     )
@@ -414,7 +427,7 @@ def test_g26f_v11_containment_not_established_rejected() -> None:
         statement="The country contains these observations.",
         temporal_interpretation=GeographicTemporalInterpretation.NONE,
         observation_ids=(world.o1.observation_id,),
-        evidence_ids=(world.o1.evidence_id,),
+        evidence_observation_ids=(world.o1.evidence_observation_id,),
         entity_ids=(world.e1,),
         location_ids=(world.loc_sea.location_id,),
     )
@@ -440,7 +453,10 @@ def test_g26f_v12_omitted_observation_rejected() -> None:
     finding = shared_finding(
         world,
         observation_ids=(observation.observation_id, world.o3.observation_id),
-        evidence_ids=(observation.evidence_id, world.o3.evidence_id),
+        evidence_observation_ids=(
+            observation.evidence_observation_id,
+            world.o3.evidence_observation_id,
+        ),
         entity_ids=(world.e1, world.e2),
         location_ids=(world.loc_sea.location_id,),
     )
@@ -457,7 +473,7 @@ def test_g26f_g01_same_city_coordination_impossible() -> None:
             kind="coordinated_activity",  # type: ignore[arg-type]
             statement="Both are coordinated because both are in Seattle.",
             observation_ids=(uuid4(), uuid4()),
-            evidence_ids=(uuid4(), uuid4()),
+            evidence_observation_ids=(uuid4(), uuid4()),
             entity_ids=(uuid4(), uuid4()),
             location_ids=(uuid4(),),
         )
@@ -470,7 +486,7 @@ def test_g26f_g02_same_coordinate_ownership_impossible() -> None:
             kind="common_owner",  # type: ignore[arg-type]
             statement="Same coordinates imply common ownership.",
             observation_ids=(uuid4(), uuid4()),
-            evidence_ids=(uuid4(), uuid4()),
+            evidence_observation_ids=(uuid4(), uuid4()),
             entity_ids=(uuid4(), uuid4()),
             location_ids=(uuid4(),),
         )
@@ -483,7 +499,7 @@ def test_g26f_g03_containment_campaign_impossible() -> None:
             kind="campaign_match",  # type: ignore[arg-type]
             statement="Country containment implies one campaign.",
             observation_ids=(uuid4(),),
-            evidence_ids=(uuid4(),),
+            evidence_observation_ids=(uuid4(),),
             entity_ids=(uuid4(),),
             location_ids=(uuid4(),),
         )
@@ -532,7 +548,7 @@ def test_g26f_g05_independent_evidence_plus_geographic_context_allowed() -> None
     assert mapped[1].category is FindingCategory.GEOLOCATION
     assert [
         s.evidence_id for s in mapped[1].support if isinstance(s, EvidenceSupport)
-    ] == [world.o1.evidence_id, world.o3.evidence_id]
+    ] == [world.o1.evidence_observation_id, world.o3.evidence_observation_id]
 
 
 def test_g26f_g06_two_locations_movement_impossible() -> None:
@@ -542,7 +558,7 @@ def test_g26f_g06_two_locations_movement_impossible() -> None:
             kind="movement_route",  # type: ignore[arg-type]
             statement="The entity traveled between the locations.",
             observation_ids=(uuid4(), uuid4()),
-            evidence_ids=(uuid4(), uuid4()),
+            evidence_observation_ids=(uuid4(), uuid4()),
             entity_ids=(uuid4(),),
             location_ids=(uuid4(), uuid4()),
         )
@@ -556,7 +572,10 @@ def test_g26f_g07_two_locations_change_allowed() -> None:
         statement="Two supported observations identify different locations.",
         temporal_interpretation=GeographicTemporalInterpretation.LOCATION_CHANGE_OBSERVED,
         observation_ids=(world.o1.observation_id, world.o4.observation_id),
-        evidence_ids=(world.o1.evidence_id, world.o4.evidence_id),
+        evidence_observation_ids=(
+            world.o1.evidence_observation_id,
+            world.o4.evidence_observation_id,
+        ),
         entity_ids=(world.e1,),
         location_ids=(world.loc_sea.location_id, world.loc_dal.location_id),
     )
@@ -607,7 +626,7 @@ def test_g26f_g08_missing_observed_at_uses_retrieved_at() -> None:
         statement="The entity was observed at different locations at different times.",
         temporal_interpretation=GeographicTemporalInterpretation.LOCATION_CHANGE_OBSERVED,
         observation_ids=(first.observation_id, second.observation_id),
-        evidence_ids=(first_evidence, second_evidence),
+        evidence_observation_ids=(first_evidence, second_evidence),
         entity_ids=(world.e1,),
         location_ids=(world.loc_sea.location_id, world.loc_dal.location_id),
     )

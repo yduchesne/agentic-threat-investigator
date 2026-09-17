@@ -1,11 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Deterministic assembly of the Evidence Analyst input.
+"""Deterministic assembly of the Evidence Analyst input (PR 28B).
 
 The loader runs one short, read-only UnitOfWork against persisted
 authoritative resources only, then closes the transaction before the caller
 may invoke the LLM. Input ordering and bounds are deterministic: the same
 persisted investigation state always yields the same
 :class:`~agentic_threat_investigator.domain.analyst.EvidenceAnalystInput`.
+
+Evidence items identify exact admitted EvidenceObservations (never stable
+global Evidence identity) and carry the deterministic bounded tuple of
+Entities associated with the exact observation instead of a privileged
+subject. Every model-visible RelationshipObservation is backed by an
+EvidenceObservation in the exact admitted analyst Evidence set.
 
 When a :class:`GeointAnalystContextLoader` is injected (PR 26F), the plain
 analyst input is loaded and its UnitOfWork closed, then the bounded GEOINT
@@ -37,7 +44,10 @@ from agentic_threat_investigator.domain.analyst import (
     EvidenceAnalystInput,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservation,
+)
 from agentic_threat_investigator.domain.relationships import Relationship
 
 _BOUND_EVIDENCE = "evidence_items"
@@ -53,14 +63,14 @@ _MAX_INPUT_BYTES_CEILING = 1_000_000
 _MAX_INPUT_BYTES_FLOOR = 1000
 
 
-def _normalized_facts_bytes(evidence: LegacyEvidence) -> int:
-    """Return the UTF-8 byte size of one LegacyEvidence item's normalized facts.
+def _normalized_facts_bytes(observation: EvidenceObservation) -> int:
+    """Return the UTF-8 byte size of one observation's normalized facts.
 
     Only the normalized ``facts`` mapping is serialized in deterministic JSON
     form; ``raw_payload`` is never inspected or included.
     """
     payload = json.dumps(
-        evidence.facts,
+        observation.facts,
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -76,17 +86,6 @@ def _analyst_entity(entity: Entity) -> AnalystEntity:
         entity_id=entity.id,
         entity_type=entity.type,
         value=entity.value,
-    )
-
-
-def _evidence_subject(subject: EntityRef) -> AnalystEntity:
-    """Map the subject reference of a LegacyEvidence row to its analyst view."""
-    if subject.id is None:  # pragma: no cover - persisted rows carry an id
-        raise ValueError("persisted evidence subject has no identity")
-    return AnalystEntity(
-        entity_id=subject.id,
-        entity_type=subject.type,
-        value=subject.value,
     )
 
 
@@ -176,27 +175,35 @@ class EvidenceAnalystInputLoader:
         if investigation is None:
             raise InvestigationNotFoundError(str(investigation_id))
 
-        evidence_rows = await uow.evidence.list_for_investigation(
+        observation_rows = await uow.evidence.list_for_investigation(
             investigation_id, limit=self._max_evidence_items + 1
         )
-        if len(evidence_rows) > self._max_evidence_items:
+        if len(observation_rows) > self._max_evidence_items:
             raise EvidenceAnalystInputBoundsError(
                 _BOUND_EVIDENCE,
                 self._max_evidence_items,
-                len(evidence_rows),
+                len(observation_rows),
             )
-        evidence_rows = evidence_rows[: self._max_evidence_items]
+        observation_rows = observation_rows[: self._max_evidence_items]
 
-        observation_rows = await uow.relationship_observations.list_for_investigation(
+        observation_meta: dict[UUID, Evidence] = {}
+        for observation_row in observation_rows:
+            evidence = await uow.evidence.get_stable_evidence(
+                observation_row.evidence_id
+            )
+            if evidence is not None:
+                observation_meta[observation_row.id] = evidence
+
+        relationship_rows = await uow.relationship_observations.list_for_investigation(
             investigation_id, limit=self._max_relationship_observations + 1
         )
-        if len(observation_rows) > self._max_relationship_observations:
+        if len(relationship_rows) > self._max_relationship_observations:
             raise EvidenceAnalystInputBoundsError(
                 _BOUND_OBSERVATIONS,
                 self._max_relationship_observations,
-                len(observation_rows),
+                len(relationship_rows),
             )
-        observation_rows = observation_rows[: self._max_relationship_observations]
+        relationship_rows = relationship_rows[: self._max_relationship_observations]
 
         # Resolve the stable Relationships and endpoint Entities referenced by
         # the eligible observations. A missing or soft-deleted Relationship or
@@ -205,7 +212,7 @@ class EvidenceAnalystInputLoader:
         # which would reject any citation to it).
         relationships: dict[UUID, Relationship] = {}
         pending_relationship_ids = {
-            observation.relationship_id for observation in observation_rows
+            observation.relationship_id for observation in relationship_rows
         }
         for relationship_id in pending_relationship_ids:
             relationship = await uow.relationships.get_by_id(relationship_id)
@@ -216,6 +223,16 @@ class EvidenceAnalystInputLoader:
         for relationship in relationships.values():
             pending_entity_ids.add(relationship.source_entity_id)
             pending_entity_ids.add(relationship.target_entity_id)
+        # Associated Entities of the exact admitted observations (PR 28B):
+        # the analyst views the deterministic associated set, never a
+        # privileged subject.
+        for observation_row in observation_rows:
+            for (
+                association
+            ) in await uow.evidence_observation_entities.list_for_observation(
+                observation_row.id
+            ):
+                pending_entity_ids.add(association.entity_id)
         entities: dict[UUID, Entity] = {}
         for entity_id in pending_entity_ids:
             entity = await uow.entities.get_by_id(entity_id)
@@ -228,14 +245,19 @@ class EvidenceAnalystInputLoader:
             if entity_id in entities
         )
 
-        evidence_items = tuple(
-            self._build_evidence_item(evidence) for evidence in evidence_rows
-        )
+        built_items: list[AnalystEvidenceItem] = []
+        for observation in observation_rows:
+            built_items.append(
+                await self._build_evidence_item(
+                    uow, observation, observation_meta, entities
+                )
+            )
+        evidence_items = tuple(built_items)
         # Independently bound the aggregate normalized-facts size: only each
-        # LegacyEvidence item's ``facts`` mapping is serialized (deterministic JSON,
+        # observation's ``facts`` mapping is serialized (deterministic JSON,
         # UTF-8 byte counts); ``raw_payload`` is never inspected.
         facts_bytes = sum(
-            _normalized_facts_bytes(evidence) for evidence in evidence_rows
+            _normalized_facts_bytes(observation) for observation in observation_rows
         )
         if facts_bytes > self._max_normalized_facts_bytes:
             raise EvidenceAnalystInputBoundsError(
@@ -245,8 +267,8 @@ class EvidenceAnalystInputLoader:
             )
 
         observations: list[AnalystRelationshipObservation] = []
-        for observation in observation_rows:
-            relationship = relationships.get(observation.relationship_id)
+        for relationship_observation in relationship_rows:
+            relationship = relationships.get(relationship_observation.relationship_id)
             if relationship is None:
                 continue
             source_entity = entities.get(relationship.source_entity_id)
@@ -255,16 +277,18 @@ class EvidenceAnalystInputLoader:
                 continue
             observations.append(
                 AnalystRelationshipObservation(
-                    relationship_observation_id=observation.id,
-                    evidence_id=observation.evidence_observation_id,
-                    relationship_id=observation.relationship_id,
+                    relationship_observation_id=relationship_observation.id,
+                    evidence_observation_id=(
+                        relationship_observation.evidence_observation_id
+                    ),
+                    relationship_id=relationship_observation.relationship_id,
                     relationship_type=relationship.type,
                     source_entity=_analyst_entity(source_entity),
                     target_entity=_analyst_entity(target_entity),
-                    observed_at=observation.observed_at,
-                    retrieved_at=observation.retrieved_at,
-                    source=observation.source,
-                    confidence=observation.confidence,
+                    observed_at=relationship_observation.observed_at,
+                    retrieved_at=relationship_observation.retrieved_at,
+                    source=relationship_observation.source,
+                    confidence=relationship_observation.confidence,
                 )
             )
 
@@ -284,18 +308,37 @@ class EvidenceAnalystInputLoader:
             )
         return analyst_input
 
-    @staticmethod
-    def _build_evidence_item(evidence: LegacyEvidence) -> AnalystEvidenceItem:
-        """Map one persisted LegacyEvidence row to its minimized analyst view."""
+    async def _build_evidence_item(
+        self,
+        uow: UnitOfWork,
+        observation: EvidenceObservation,
+        evidence_by_observation: dict[UUID, Evidence],
+        entities: dict[UUID, Entity],
+    ) -> AnalystEvidenceItem:
+        """Map one exact admitted observation to its minimized analyst view."""
+        evidence = evidence_by_observation.get(observation.id)
+        if evidence is None:  # pragma: no cover - observation rows are admitted
+            raise ValueError("admitted observation has no stable evidence")
+        associated_ids = tuple(
+            association.entity_id
+            for association in await uow.evidence_observation_entities.list_for_observation(
+                observation.id
+            )
+        )
+        associated = tuple(
+            entity
+            for entity_id in associated_ids
+            if (entity := entities.get(entity_id)) is not None
+        )
         return AnalystEvidenceItem(
-            evidence_id=evidence.id or _raise_missing_identity(),
+            evidence_observation_id=observation.id,
             type=evidence.type,
-            subject=_evidence_subject(evidence.subject),
+            entities=tuple(_analyst_entity(entity) for entity in associated),
             source=evidence.source,
             source_record_id=evidence.source_record_id,
-            observed_at=evidence.observed_at,
-            retrieved_at=evidence.retrieved_at,
-            facts=evidence.facts,
+            observed_at=observation.observed_at,
+            retrieved_at=observation.retrieved_at,
+            facts=observation.facts,
         )
 
 
@@ -309,8 +352,3 @@ def _deduplicate(values: list[UUID]) -> list[UUID]:
         seen.add(value)
         result.append(value)
     return result
-
-
-def _raise_missing_identity() -> UUID:  # pragma: no cover - persisted rows carry it
-    """Raise when a persisted LegacyEvidence row lacks its immutable identity."""
-    raise ValueError("persisted evidence has no identity")

@@ -216,7 +216,7 @@ class RelationshipObservationItem(BaseModel):
 
     id: UUID
     relationship_id: UUID
-    evidence_id: UUID
+    evidence_observation_id: UUID
     investigation_id: UUID | None = None
     observed_at: datetime | None = None
     retrieved_at: datetime
@@ -249,7 +249,7 @@ class RelationshipObservationItem(BaseModel):
         return cls(
             id=observation.id,
             relationship_id=observation.relationship_id,
-            evidence_id=observation.evidence_observation_id,
+            evidence_observation_id=observation.evidence_observation_id,
             investigation_id=investigation_id,
             observed_at=observation.observed_at,
             retrieved_at=observation.retrieved_at,

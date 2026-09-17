@@ -36,8 +36,8 @@ from agentic_threat_investigator.domain.audit import (
     AuditOutcome,
 )
 from agentic_threat_investigator.domain.entities import Entity
+from agentic_threat_investigator.domain.evidence import EvidenceObservation
 from agentic_threat_investigator.domain.investigation import AnalysisDisposition
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -104,7 +104,7 @@ class AssessmentPersistenceService:
         """Persist one Assessment atomically with its analysis metadata (PR 21).
 
         One short transaction writes the new immutable Assessment, the
-        Investigation current Assessment pointer, the exact analyzed LegacyEvidence
+        Investigation current Assessment pointer, the exact analyzed EvidenceObservation
         identities, the typed disposition, and the Investigation version/
         history update. The returned result carries the authoritative
         Investigation version after the transaction so the caller never
@@ -155,7 +155,7 @@ class AssessmentPersistenceService:
                         )
                     expected_version = current_state.version
                 # One coherent Investigation transition records the pointer,
-                # the exact analyzed LegacyEvidence identities, and the disposition
+                # the exact analyzed EvidenceObservation identities, and the disposition
                 # in a single version/history row.
                 analysis_result = await uow.investigations.set_analysis_result(
                     assessment.investigation_id,
@@ -257,6 +257,12 @@ class AssessmentPersistenceService:
         # Loading several correlated resource maps in one loop per resource is
         # intrinsic; the branch/local counts reflect that shape.
         investigation = await uow.investigations.get_by_id(assessment.investigation_id)
+        admitted = {
+            admission.evidence_observation_id
+            for admission in await uow.investigation_evidence.list_for_investigation(
+                assessment.investigation_id
+            )
+        }
         evidence_ids = set(assessment.analyzed_evidence_ids)
         observation_ids: set[UUID] = set()
         for finding in assessment.findings:
@@ -266,9 +272,11 @@ class AssessmentPersistenceService:
                 else:
                     observation_ids.add(support.relationship_observation_id)
 
-        evidence: dict[UUID, LegacyEvidence] = {}
+        # Analyzed/finding-support identities are exact EvidenceObservation
+        # values (PR 28B); validity is existence + exact admission.
+        evidence: dict[UUID, EvidenceObservation] = {}
         for evidence_id in list(evidence_ids):
-            evidence_row = await uow.evidence.get_by_id(evidence_id)
+            evidence_row = await uow.evidence.get_observation(evidence_id)
             if evidence_row is not None:
                 evidence[evidence_id] = evidence_row
 
@@ -281,7 +289,7 @@ class AssessmentPersistenceService:
                 observations[observation_id] = observation_row
                 pending = observation_row.evidence_observation_id
                 if pending not in evidence:
-                    pending_row = await uow.evidence.get_by_id(pending)
+                    pending_row = await uow.evidence.get_observation(pending)
                     if pending_row is not None:
                         evidence[pending] = pending_row
 
@@ -311,6 +319,7 @@ class AssessmentPersistenceService:
         return AssessmentProvenanceContext(
             investigation=investigation,
             evidence=evidence,
+            admitted_observation_ids=frozenset(admitted),
             relationship_observations=observations,
             relationships=relationships,
             entities=entities,

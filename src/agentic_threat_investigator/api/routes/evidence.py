@@ -52,13 +52,18 @@ async def list_evidence(
     limit: int | None = None,
     cursor: Annotated[str | None, Query(max_length=2048)] = None,
 ) -> PageResponse[EvidenceResponse]:
-    """List Evidence observations of one Investigation (PR 23A contract)."""
+    """List Evidence observations of one Investigation (PR 23A/28B contract).
+
+    ``subject_entity_id`` is the retained public filter name; it implements
+    PR 28B association semantics (the exact observation is associated with
+    the Entity) — there is no privileged subject.
+    """
     page = await run_page_query(
         lambda: services.evidence.list(
             EvidenceListQuery(
                 investigation_id=investigation_id,
                 source=source,
-                subject_entity_id=subject_entity_id,
+                entity_id=subject_entity_id,
                 evidence_type=evidence_type,
                 retrieved_from=retrieved_from,
                 retrieved_to=retrieved_to,

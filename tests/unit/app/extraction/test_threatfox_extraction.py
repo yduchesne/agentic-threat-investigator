@@ -16,16 +16,19 @@ from agentic_threat_investigator.app.extraction import (
     ExtractionErrorReason,
     extract_threatfox,
 )
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.app.extraction.models import EvidenceExtractionView
+from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 from tests.support.extraction_fixtures import (
     CANONICAL_ASYNCRAT_IP,
     CANONICAL_ASYNCRAT_MALWARE,
     CANONICAL_ASYNCRAT_PRINTABLE,
-    CANONICAL_THREATFOX_EVIDENCE_ID,
     canonical_threatfox_evidence,
 )
 
@@ -38,17 +41,24 @@ def threatfox_evidence(
     subject_type: EntityType = EntityType.IP_ADDRESS,
     subject_value: str = CANONICAL_ASYNCRAT_IP,
     evidence_id: UUID | None = None,
-) -> LegacyEvidence:
-    """Build one normalized ThreatFox evidence observation with the given matches."""
-    return LegacyEvidence(
-        id=evidence_id if evidence_id is not None else uuid4(),
-        investigation_id=uuid4(),
+) -> EvidenceExtractionView:
+    """Build one normalized ThreatFox extraction view with the given matches."""
+    identity = evidence_id if evidence_id is not None else uuid4()
+    evidence = Evidence(
+        id=identity,
         type=EvidenceType.THREAT_INTELLIGENCE,
-        subject=EntityRef(type=subject_type, value=subject_value),
         source=SOURCE,
+        source_record_id=f"fixture:{identity}",
+    )
+    candidate = EvidenceObservationCandidate(
+        evidence_id=identity,
         retrieved_at=datetime(2026, 1, 15, tzinfo=UTC),
         facts={"matches": matches},
-        raw_payload=None,
+    )
+    return EvidenceExtractionView(
+        evidence=evidence,
+        observation=candidate,
+        invocation_entity=Entity(type=subject_type, value=subject_value),
     )
 
 
@@ -88,7 +98,6 @@ def test_canonical_scenario_extracts_asyncrat() -> None:
     assert edge.type is RelationshipType.ASSOCIATED_WITH
     assert edge.target.type is EntityType.MALWARE
     assert edge.target.value == CANONICAL_ASYNCRAT_MALWARE
-    assert edge.evidence_id == CANONICAL_THREATFOX_EVIDENCE_ID
 
 
 def test_domain_subject_is_associated_with_malware() -> None:
@@ -204,21 +213,10 @@ def test_missing_or_empty_matches_fail() -> None:
         {"matches": [{"malware": 42}]},
     )
     for facts in fact_shapes:
-        evidence = threatfox_evidence([]).model_copy(update={"facts": facts})
+        evidence = _with_facts(threatfox_evidence([]), facts)
         with pytest.raises(EvidenceExtractionError) as excinfo:
             extract_threatfox(evidence)
         assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
-
-
-def test_missing_persisted_evidence_id_fails() -> None:
-    """Unpersisted evidence cannot back assertions and fails explicitly."""
-    evidence = threatfox_evidence([asyncrat_match()])
-    unpersisted = evidence.model_copy(update={"id": None})
-
-    with pytest.raises(EvidenceExtractionError) as excinfo:
-        extract_threatfox(unpersisted)
-
-    assert excinfo.value.reason is ExtractionErrorReason.MISSING_EVIDENCE_ID
 
 
 def test_noncanonical_subject_fails() -> None:
@@ -231,11 +229,11 @@ def test_noncanonical_subject_fails() -> None:
     assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
 
 
-def test_unsupported_subject_type_fails() -> None:
-    """ThreatFox evidence never has a subject outside the IOC domain/IP contract."""
+def test_unsupported_invocation_type_fails() -> None:
+    """ThreatFox evidence never carries an invocation target outside IOC types."""
     evidence = threatfox_evidence([asyncrat_match()]).model_copy(
         update={
-            "subject": EntityRef(
+            "invocation_entity": Entity(
                 type=EntityType.MALWARE, value=CANONICAL_ASYNCRAT_MALWARE
             )
         }
@@ -263,11 +261,28 @@ def test_noncanonical_but_valid_domain_subject_fails() -> None:
 
 def test_non_mapping_match_fails() -> None:
     """A match entry that is not an object is a contract failure."""
-    evidence = threatfox_evidence([]).model_copy(
-        update={"facts": {"matches": ("not-an-object",)}}
+    evidence = _with_facts(
+        threatfox_evidence([]),
+        {"matches": ("not-an-object",)},
     )
 
     with pytest.raises(EvidenceExtractionError) as excinfo:
         extract_threatfox(evidence)
 
     assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+def _with_facts(
+    view: EvidenceExtractionView, facts: dict[object, object]
+) -> EvidenceExtractionView:
+    """Return a copy of the view whose observation carries the given facts."""
+    return view.model_copy(
+        update={"observation": view.observation.model_copy(update={"facts": facts})}
+    )
+
+
+def _with_id(view: EvidenceExtractionView, identity: object) -> EvidenceExtractionView:
+    """Return a copy of the view whose stable Evidence carries the given id."""
+    return view.model_copy(
+        update={"evidence": view.evidence.model_copy(update={"id": identity})}
+    )

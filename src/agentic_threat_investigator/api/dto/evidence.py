@@ -16,15 +16,23 @@ from agentic_threat_investigator.domain.evidence import EvidenceType
 
 
 class EvidenceResponse(BaseModel):
-    """One immutable Evidence observation, normalized facts only."""
+    """One exact admitted EvidenceObservation, normalized facts only (PR 28B).
+
+    ``id`` is the exact EvidenceObservation identity, never the stable
+    Evidence ID. The legacy ``subject_*`` field names are retained for wire
+    compatibility: they resolve to the observation's first associated Entity
+    in deterministic order (or ``None`` when the observation has none). They
+    are presentation compatibility only; there is no privileged Evidence
+    subject and no role semantics.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: UUID
     type: EvidenceType
-    subject_entity_id: UUID
-    subject_type: EntityType
-    subject_value: str
+    subject_entity_id: UUID | None = None
+    subject_type: EntityType | None = None
+    subject_value: str | None = None
     source: str
     source_record_id: str | None
     source_url: str | None

@@ -24,10 +24,14 @@ from agentic_threat_investigator.app.extraction import (
     ExtractionErrorReason,
     extract_dns,
 )
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.app.extraction.models import EvidenceExtractionView
+from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from tests.support.extraction_fixtures import (
     CANONICAL_ASYNCRAT_DOMAIN,
     CANONICAL_ASYNCRAT_IP,
@@ -43,21 +47,28 @@ def raw_dns_evidence(
     *,
     subject_type: EntityType = EntityType.DOMAIN,
     subject_value: str = CANONICAL_ASYNCRAT_DOMAIN,
-) -> LegacyEvidence:
-    """Build one normalized DNS evidence observation from a raw fact mapping."""
-    return LegacyEvidence(
-        id=uuid4(),
-        investigation_id=uuid4(),
+) -> EvidenceExtractionView:
+    """Build one normalized DNS extraction view from a raw fact mapping."""
+    identity = uuid4()
+    evidence = Evidence(
+        id=identity,
         type=EvidenceType.DNS,
-        subject=EntityRef(type=subject_type, value=subject_value),
         source=SOURCE,
+        source_record_id=f"fixture:{identity}",
+    )
+    candidate = EvidenceObservationCandidate(
+        evidence_id=identity,
         retrieved_at=datetime(2026, 1, 15, tzinfo=UTC),
         facts=facts,
-        raw_payload=None,
+    )
+    return EvidenceExtractionView(
+        evidence=evidence,
+        observation=candidate,
+        invocation_entity=Entity(type=subject_type, value=subject_value),
     )
 
 
-def assert_malformed(evidence: LegacyEvidence) -> None:
+def assert_malformed(evidence: EvidenceExtractionView) -> None:
     """Assert the evidence raises a malformed-facts contract failure."""
     with pytest.raises(EvidenceExtractionError) as excinfo:
         extract_dns(evidence)
@@ -533,3 +544,19 @@ def test_root_cname_cannot_be_followed_by_cname_at_old_owner() -> None:
     }
 
     assert_malformed(raw_dns_evidence(facts))
+
+
+def _with_facts(
+    view: EvidenceExtractionView, facts: dict[object, object]
+) -> EvidenceExtractionView:
+    """Return a copy of the view whose observation carries the given facts."""
+    return view.model_copy(
+        update={"observation": view.observation.model_copy(update={"facts": facts})}
+    )
+
+
+def _with_id(view: EvidenceExtractionView, identity: object) -> EvidenceExtractionView:
+    """Return a copy of the view whose stable Evidence carries the given id."""
+    return view.model_copy(
+        update={"evidence": view.evidence.model_copy(update={"id": identity})}
+    )

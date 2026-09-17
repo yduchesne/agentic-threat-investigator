@@ -1,12 +1,34 @@
 # ATI — v0.2 Global Evidence and Distributed Ingestion Architecture
 
-> **Status: approved v0.2 target architecture; domain contracts delivered by PR 28A.**
+> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered.**
 >
 > This document records the architectural decisions that govern the PR 28 series. `ROADMAP_V02.md` defines the delivery sequence. Delivered v0.1 behavior remains authoritative until the corresponding PR 28 slice lands.
 >
-> **PR 28A delivered scope:** the Python/domain contracts below — stable global `Evidence`, immutable `EvidenceObservation` with per-Evidence versions and material-state transitions, `EvidenceObservationEntity`, global `RelationshipObservation` provenance, exact `InvestigationEvidence` admission, deterministic semantic-format/source-record Evidence identity, and the Investigation-independent `ToEvidenceConverter` boundary producing `ConvertedEvidence` (global Evidence + observation candidate). The v0.1 runtime/persistence boundary keeps a transitional `LegacyEvidence` shape until PR 28B.
+> **PR 28A delivered scope:** the Python/domain contracts below — stable global `Evidence`, immutable `EvidenceObservation` with per-Evidence versions and material-state transitions, `EvidenceObservationEntity`, global `RelationshipObservation` provenance, exact `InvestigationEvidence` admission, deterministic semantic-format/source-record Evidence identity, and the Investigation-independent `ToEvidenceConverter` boundary producing `ConvertedEvidence` (global Evidence + observation candidate).
 >
-> **Not yet implemented (PR 28B+):** PostgreSQL tables/migrations for `EvidenceObservation`/associations/admission, the distributed log, `EvidenceMessage`, and consumer processing. The converter currently defines the global identity and candidate, but the v0.1 PostgreSQL schema still stores the transitional per-observation rows.
+> **PR 28B delivered scope:** PostgreSQL tables/migrations for `Evidence`/`EvidenceObservation`/`EvidenceObservationEntity`/`InvestigationEvidence` (SQL API v0026, migration 0031), DB-owned race-safe per-Evidence version allocation with material no-op detection and canonical diffs, exact `RelationshipObservation`→`EvidenceObservation` provenance, exact Investigation admission, Investigation-scoped Evidence/Relationship/Analyst/GEOINT reads through admission, GEOINT provenance on `EvidenceObservation`, the synchronous datasource (ThreatFox) write path on the global model without any `LegacyEvidence` rebind, and exact-observation Assessment/report/coordinator/timeline provenance. The distributed log, `EvidenceMessage`, and consumer processing remain PR 28C–28H.
+
+## PR 28B persistence and Investigation-scoped reads
+
+```text
+ConvertedEvidence
+  -> ati.persist_evidence_observation   (CREATED | UNCHANGED | APPENDED;
+                                        PostgreSQL owns versions/diff/no-op)
+  -> EvidenceObservationEntity          (idempotent association)
+  -> RelationshipObservation -> EvidenceObservation
+  -> InvestigationEvidence              (exact, append-only, idempotent admission)
+  -> Investigation-scoped reads (evidence / relationships / analyst / GEOINT)
+```
+
+PostgreSQL is authoritative for: stable Evidence metadata validation, atomic
+Evidence + observation v1, per-Evidence serialization (transaction-scoped
+advisory lock) and next-version allocation, material-state comparison,
+canonical shallow `{key: {old, new}}` diffs, idempotent associations,
+exact admission (including discovered-from validation), and
+`RelationshipObservation` provenance. Evidence/EvidenceObservation never use
+`domain_object_history`; the observation row is authoritative intelligence
+history. Newer global observations never leak into an Investigation:
+scope comes exclusively from `ati.investigation_evidence`.
 
 ## Domain model
 

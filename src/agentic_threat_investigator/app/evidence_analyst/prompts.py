@@ -106,9 +106,9 @@ def _render_evidence_item(item: AnalystEvidenceItem, ordinal: int) -> str:
     facts = json.dumps(dump["facts"], ensure_ascii=True, separators=(",", ":"))
     lines = [
         f"Evidence item {ordinal}",
-        f"  evidence_id: {dump['evidence_id']}",
+        f"  evidence_observation_id: {dump['evidence_observation_id']}",
         f"  type: {dump['type']}",
-        f"  subject: {_render_entity_value(dump['subject'])}",
+        f"  entities: {','.join(_render_entity_value(e) for e in dump['entities'])}",
         f"  source: {dump['source']}",
         f"  source_record_id: {dump.get('source_record_id')}",
         f"  observed_at: {dump.get('observed_at')}",
@@ -126,7 +126,7 @@ def _render_observation(
     lines = [
         f"Relationship observation {ordinal}",
         f"  relationship_observation_id: {dump['relationship_observation_id']}",
-        f"  evidence_id: {dump['evidence_id']}",
+        f"  evidence_observation_id: {dump['evidence_observation_id']}",
         f"  relationship_id: {dump['relationship_id']}",
         f"  relationship_type: {dump['relationship_type']}",
         f"  source_entity: {_render_entity_value(dump['source_entity'])}",

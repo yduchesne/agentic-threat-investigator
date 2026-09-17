@@ -40,7 +40,7 @@ from agentic_threat_investigator.domain.assessment import (
     RelationshipSupport,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
+from agentic_threat_investigator.domain.evidence import Evidence, EvidenceObservation
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -211,24 +211,50 @@ class ReportWriterInputLoader:
         investigation_id: UUID,
         assessment: Assessment,
     ) -> list[AnalystEvidenceItem]:
-        """Load the exact analyzed LegacyEvidence set in Assessment order."""
+        """Load the exact analyzed EvidenceObservation set in Assessment order.
+
+        ``analyzed_evidence_ids`` are exact EvidenceObservation identities
+        (PR 28B): each is re-read with its stable Evidence and deterministic
+        associated Entities, and its exact admission to the Investigation is
+        re-proven from ``investigation_evidence`` (the Assessment's own
+        validation already guaranteed it; a later event cannot reorder state
+        inside one read-only UnitOfWork).
+        """
         analyzed = list(assessment.analyzed_evidence_ids)
         if len(analyzed) > self._max_evidence:
             raise ReportWriterInputLimitError(
                 _BOUND_EVIDENCE, self._max_evidence, len(analyzed)
             )
+        admitted = {
+            admission.evidence_observation_id
+            for admission in await uow.investigation_evidence.list_for_investigation(
+                investigation_id
+            )
+        }
         items: list[AnalystEvidenceItem] = []
-        for evidence_id in analyzed:
-            evidence = await uow.evidence.get_by_id(evidence_id)
-            if evidence is None:
+        for observation_id in analyzed:
+            observation = await uow.evidence.get_observation(observation_id)
+            if observation is None or observation_id not in admitted:
                 raise ReportWriterInputConsistencyError(
-                    f"analyzed evidence is missing or not visible: {evidence_id}"
+                    f"analyzed evidence is missing or not admitted: {observation_id}"
                 )
-            if evidence.investigation_id != investigation_id:
+            stable = await uow.evidence.get_stable_evidence(observation.evidence_id)
+            if stable is None:  # pragma: no cover - FK invariant
                 raise ReportWriterInputConsistencyError(
-                    f"analyzed evidence belongs to another investigation: {evidence_id}"
+                    f"analyzed evidence is missing stable metadata: {observation_id}"
                 )
-            items.append(self._build_evidence_item(evidence))
+            associated: list[AnalystEntity] = []
+            for (
+                association
+            ) in await uow.evidence_observation_entities.list_for_observation(
+                observation_id
+            ):
+                entity = await uow.entities.get_by_id(association.entity_id)
+                if entity is not None:
+                    associated.append(_analyst_entity(entity))
+            items.append(
+                self._build_evidence_item(observation, stable, tuple(associated))
+            )
         return items
 
     async def _load_observation_context(
@@ -350,7 +376,7 @@ class ReportWriterInputLoader:
             items.append(
                 AnalystRelationshipObservation(
                     relationship_observation_id=observation.id,
-                    evidence_id=observation.evidence_observation_id,
+                    evidence_observation_id=observation.evidence_observation_id,
                     relationship_id=observation.relationship_id,
                     relationship_type=relationship.type,
                     source_entity=_analyst_entity(source_entity),
@@ -364,24 +390,25 @@ class ReportWriterInputLoader:
         return tuple(items)
 
     @staticmethod
-    def _build_evidence_item(evidence: LegacyEvidence) -> AnalystEvidenceItem:
-        """Map one persisted LegacyEvidence row to its minimized analyst view.
+    def _build_evidence_item(
+        observation: EvidenceObservation,
+        evidence: Evidence,
+        entities: tuple[AnalystEntity, ...],
+    ) -> AnalystEvidenceItem:
+        """Map one exact admitted observation to its minimized analyst view.
 
         Only normalized facts are carried; ``raw_payload`` never enters the
         Report Writer context.
         """
-        evidence_id = evidence.id
-        if evidence_id is None:  # pragma: no cover - persisted rows carry it
-            raise ValueError("persisted evidence has no identity")
         return AnalystEvidenceItem(
-            evidence_id=evidence_id,
+            evidence_observation_id=observation.id,
             type=evidence.type,
-            subject=_evidence_subject(evidence.subject),
+            entities=entities,
             source=evidence.source,
             source_record_id=evidence.source_record_id,
-            observed_at=evidence.observed_at,
-            retrieved_at=evidence.retrieved_at,
-            facts=dict(evidence.facts),
+            observed_at=observation.observed_at,
+            retrieved_at=observation.retrieved_at,
+            facts=dict(observation.facts),
         )
 
 
@@ -393,15 +420,4 @@ def _analyst_entity(entity: Entity) -> AnalystEntity:
         entity_id=entity.id,
         entity_type=entity.type,
         value=entity.value,
-    )
-
-
-def _evidence_subject(subject: EntityRef) -> AnalystEntity:
-    """Map the subject reference of a LegacyEvidence row to its analyst view."""
-    if subject.id is None:  # pragma: no cover - persisted rows carry an id
-        raise ValueError("persisted evidence subject has no identity")
-    return AnalystEntity(
-        entity_id=subject.id,
-        entity_type=subject.type,
-        value=subject.value,
     )
