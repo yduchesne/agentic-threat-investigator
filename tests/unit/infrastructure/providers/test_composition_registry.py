@@ -56,10 +56,16 @@ async def test_composition_provider_registry_maps_source_ids() -> None:
         assert registry[SourceId.RDAP] is comp.rdap
         assert registry[SourceId.IPINFO_LITE] is comp.ipinfo_lite
         assert registry[SourceId.ABUSEIPDB] is comp.abuseipdb
-        assert registry[SourceId.THREATFOX] is comp.threatfox
         assert registry[SourceId.URLHAUS] is comp.urlhaus
         # The DB-IP provider is composed only with a configured artifact URI.
         assert SourceId.DBIP_CITY_LITE not in registry
+        # ThreatFox is deliberately absent from the infrastructure registry:
+        # the PR 27E datasource-backed provider adapter is composed at the
+        # operating-mode bootstrap boundary where the UnitOfWork factory and
+        # converter registry are available; the infrastructure composition
+        # owns only the PR 27C ThreatFox acquirer.
+        assert SourceId.THREATFOX not in registry
+        assert comp.threatfox_datasource is not None
         # Every key is a SourceId member whose provider identity equals its
         # source URN, keeping registry typing end-to-end consistent.
         assert all(

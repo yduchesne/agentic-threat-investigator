@@ -301,7 +301,7 @@ async def test_composition_properties_require_create() -> None:
     with pytest.raises(RuntimeError, match="create"):
         _ = comp.abuseipdb
     with pytest.raises(RuntimeError, match="create"):
-        _ = comp.threatfox
+        _ = comp.threatfox_datasource
         _ = comp.urlhaus
     with pytest.raises(RuntimeError, match="create"):
         _ = comp.urlhaus
@@ -584,7 +584,7 @@ async def test_composition_normal_close_closes_all_clients_once() -> None:
         _ = comp.rdap
         _ = comp.ipinfo_lite
         _ = comp.abuseipdb
-        _ = comp.threatfox
+        _ = comp.threatfox_datasource
         _ = comp.urlhaus
 
     # The normal context exit closed Google DNS, RDAP, IPinfo, AbuseIPDB,

@@ -122,20 +122,21 @@ async def test_composition_wires_threatfox_settings(
         assert seen[4] == RateLimiterSettings(
             max_concurrency=5, requests_per_second=3.0
         )
-        assert comp.threatfox.supports(
+        # Infrastructure composes the PR 27C acquirer, whose deterministic
+        # entity-type applicability mirrors the legacy ThreatFox provider.
+        assert comp.threatfox_datasource.supports(
             Entity(type=EntityType.DOMAIN, value="example.com")
         )
-        assert comp.threatfox.supports(
+        assert comp.threatfox_datasource.supports(
             Entity(type=EntityType.IP_ADDRESS, value="192.0.2.39")
         )
-        assert not comp.threatfox.supports(
+        assert not comp.threatfox_datasource.supports(
             Entity(type=EntityType.URL, value="https://example.com/")
         )
-        assert comp.threatfox.id == "urn:ati:source:threatfox"
 
         # White-box assertion proving bootstrap resolution and settings
         # wiring; the value is a fake test credential only.
-        assert comp.threatfox._auth_key == _FAKE_KEY
+        assert comp.threatfox_datasource._auth_key == _FAKE_KEY
 
 
 @pytest.mark.parametrize("blank_key", ["", "   ", "\t"])
