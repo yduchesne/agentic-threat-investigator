@@ -340,6 +340,48 @@ vocabulary deterministically and offline (stable matrix IDs D27A-01..D27A-13):
 
 These tests never touch the network or the database.
 
+### Datasource execution logging (PR 27B)
+
+`tests/unit/domain/test_datasource_log.py`, `tests/unit/app/test_datasource_execution_recorder.py`
+and `tests/integration/test_datasource_log.py` pin the PR 27B acquisition
+lifecycle deterministically and offline/against real PostgreSQL (stable
+matrix IDs D27B-U01..U13, D27B-P01..P15, D27B-V01/V02, D27B-C01, D27B-S01):
+
+- fresh per-execution UUIDs; identity stability across every event of one
+  execution (same `execution_id`, same `datasource_id`);
+- immutable `DatasourceLogEvent` model: aware timestamps normalize to UTC,
+  naive timestamps fail closed, zero/positive stage-local counts accepted and
+  negative counts rejected, bounded canonical error codes (blank/
+  whitespace/over-bound/malformed rejected) bound to `FAILED` only, and
+  `extra="forbid"` rejecting any payload/exception/credential/metadata field;
+- recorder lifecycles: success (STARTED + selected stages + COMPLETED),
+  failure (STARTED + FAILED with a safe code), deterministic sleep-free
+  cancellation (`CancelledError` propagates after a best-effort CANCELLED
+  append; the durable log holds STARTED + CANCELLED and no
+  FAILED/COMPLETED), terminal exclusivity, stage-after-terminal and
+  duplicate-STARTED local rejection, and legal omitted stages
+  (STARTED -> COMPLETED);
+- real-PostgreSQL lifecycle/concurrency matrices: append/persist correlation,
+  STARTED-first and STARTED-unique enforcement, datasource identity
+  stability, terminal exclusivity, post-terminal rejection, concurrent
+  terminal and initial-STARTED races yielding exactly one durable row,
+  independent concurrent executions, database-owned count/error-code
+  constraint backstops (direct SQL bypassing the Python model), and
+  append-only repository shape (no update/delete method);
+- migration round trip (D27B-P15): upgrade creates exactly the PR 27B
+  objects and no `datasource_execution` table; downgrade removes only PR 27B
+  objects while pre-existing authoritative rows (source records,
+  investigations) survive unchanged;
+- the canonical vertical slice (D27B-V01/V02): the real
+  `DatasourceExecutionRecorder` -> append port -> PostgreSQL repository ->
+  stored function path over real PostgreSQL with simulated local work
+  between short committed transactions, asserting exact ordering, counts
+  only where supplied, no payload columns, no credentials/raw exception
+  text, and no execution table;
+- schema-level proof (D27B-S01) that the durable log columns are exactly
+  the bounded operational set, so source bodies, Evidence bodies,
+  credentials, and tracebacks cannot be persisted by the event schema.
+
 ### Deterministic vertical-slice provider execution (PR 19B)
 
 `tests/integration/test_provider_execution_pipeline.py` proves the real

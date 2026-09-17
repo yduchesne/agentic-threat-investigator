@@ -20,6 +20,7 @@
   - [JSONB diff](#jsonb-diff)
   - [PostgreSQL baseline](#postgresql-baseline)
 - [SourceRecord](#sourcerecord)
+- [Datasource execution log (PR 27B)](#datasource-execution-log-pr-27b)
 - [Migrations](#migrations)
 - [PostGIS and GEOINT (PR 26)](#postgis-and-geoint-pr-26)
   - [PR 26D analyst read layer](#pr-26d-analyst-read-layer)
@@ -608,11 +609,80 @@ Any adapter that persists a `SourceRecord` must recompute `source_record_content
 
 `ati.ingestion_checkpoint` is mutable internal operational state rather than a versioned domain record. Its identity is `(source_id, artifact_uri, normalization_version)`. The application stores each post-batch opaque checkpoint and completion marker in the same transaction as the corresponding source-record batch, so failed/conflicted batches never advance progress.
 
+## Datasource execution log (PR 27B)
+
+PR 27B adds the smallest durable append-only datasource execution log
+(`ati.datasource_log`, migration 0030, SQL API v0025). One acquisition
+execution receives a fresh application UUID `execution_id`; every operational
+event of that execution is appended with the same `execution_id` and the
+same `datasource_id`. There is deliberately **no** durable
+`datasource_execution` table: the log itself establishes execution existence
+(STARTED), datasource correlation, stage history, and the terminal outcome.
+
+Logical columns:
+
+```text
+id              bigint IDENTITY          append-event identity/order key
+ execution_id    uuid NOT NULL           one acquisition execution
+ datasource_id   text NOT NULL           canonical bounded PR 27A identity
+ event_type      text NOT NULL           closed seven-value vocabulary
+ occurred_at     timestamptz NOT NULL    application event time (UTC)
+ item_count      bigint NULL             stage-local non-negative count
+ byte_count      bigint NULL             stage-local non-negative count
+ error_code      text NULL               bounded safe code, FAILED only
+ created_at      timestamptz NOT NULL    DEFAULT transaction_timestamp()
+```
+
+Constraints (database-owned backstops, not Python-only rules):
+
+- `datasource_id` must be canonical lowercase kebab, unpadded, at most 64
+  characters;
+- `event_type` is closed to `started`/`acquired`/`decoded`/`converted`/
+  `completed`/`failed`/`cancelled`;
+- `item_count`/`byte_count` are nullable and never negative;
+- `error_code` matches `^[a-z][a-z0-9_]{0,63}$` (unpadded) and is required
+  for `failed` and forbidden on every other event type;
+- events are immutable; there is no version column and no soft-delete
+  column. Direct owner/admin SQL is outside the application immutability
+  boundary; application mutation is append-only through the stored function.
+
+Indexes:
+
+```text
+datasource_log_started_uq   UNIQUE (execution_id) WHERE event_type='started'
+datasource_log_terminal_uq  UNIQUE (execution_id) WHERE event_type IN
+                            ('completed','failed','cancelled')
+datasource_log_execution_idx (execution_id, id) deterministic correlation
+```
+
+Lifecycle/concurrency enforcement: every normal write routes through the
+versioned stored function `ati.append_datasource_log_event`, which
+serializes per-execution lifecycle validation with a transaction-scoped
+advisory lock derived deterministically from `execution_id`
+(`hashtextextended`), then enforces first-event-STARTED, datasource identity
+stability, duplicate-STARTED rejection, and append-after-terminal rejection
+with typed `U27B*` SQLSTATEs (`U27B1` invalid input, `U27B2` first event
+must be STARTED, `U27B3` datasource identity mismatch, `U27B4` duplicate
+STARTED, `U27B5` append after terminal). The partial unique indexes remain
+constraint backstops for one STARTED and at most one terminal even if the
+function is bypassed. Two concurrent terminal (or initial STARTED) writers
+for the same execution therefore yield exactly one durable terminal (or
+STARTED) row; independent executions use distinct advisory locks and never
+block each other.
+
+Transaction rule: each event append participates in the caller's short
+UnitOfWork transaction and commits before any external
+acquisition/decode/conversion work; no database transaction is held across
+external I/O. Migration 0030 is additive with no backfill; its downgrade
+drops only the PR 27B function, indexes, constraints, and table in
+dependency-safe order and never touches source records, checkpoints,
+Evidence, or other authoritative rows.
+
 ## Migrations
 
 Alembic orchestrates schema migrations.
 
-Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions; SQL API v0022 (`migrations/sql/ati/v0022/geoint_persistence.sql`, migration 0026, PR 26A-2) redefines only `ati.append_entity_location_observation` to allocate EntityLocation versions from `ati.entity_location_version_seq` on every actual current-state mutation. SQL API v0023 (`migrations/sql/ati/v0023/geoint_reference_spatial.sql`, migration 0027, PR 26B) adds the canonical reference/spatial write path `ati.upsert_reference_location` and the PostGIS extension; it only adds objects and never edits v0021/v0022. SQL API v0024 (`migrations/sql/ati/v0024/geo_resolution_lifecycle.sql`, migration 0028, PR 26C) adds the asynchronous work lifecycle on the same `ati.geo_resolution` table (`ati.claim_geo_resolutions`, `ati.complete_geo_resolution_resolved`, `ati.complete_geo_resolution_unresolvable`, `ati.record_geo_resolution_failure`) plus the claim-support indexes and lifecycle CHECK constraints; it only adds objects and never edits v0021-v0023. The shipped files are never edited in place.
+Substantial PostgreSQL stored functions/objects live in separate immutable versioned SQL files. Versioned SQL API v0018 (`migrations/sql/ati/v0018/relationship_persistence.sql`) owns relationship/observation writes; it supersedes v0008 (PR 18C) by removing the redundant RelationshipObservation `domain_object_history` write while preserving the stable Relationship write path. Versioned SQL API v0021 (`migrations/sql/ati/v0021/geoint_persistence.sql`, migration 0025) owns the PR 26A GEOINT persistence functions; SQL API v0022 (`migrations/sql/ati/v0022/geoint_persistence.sql`, migration 0026, PR 26A-2) redefines only `ati.append_entity_location_observation` to allocate EntityLocation versions from `ati.entity_location_version_seq` on every actual current-state mutation. SQL API v0023 (`migrations/sql/ati/v0023/geoint_reference_spatial.sql`, migration 0027, PR 26B) adds the canonical reference/spatial write path `ati.upsert_reference_location` and the PostGIS extension; it only adds objects and never edits v0021/v0022. SQL API v0024 (`migrations/sql/ati/v0024/geo_resolution_lifecycle.sql`, migration 0028, PR 26C) adds the asynchronous work lifecycle on the same `ati.geo_resolution` table (`ati.claim_geo_resolutions`, `ati.complete_geo_resolution_resolved`, `ati.complete_geo_resolution_unresolvable`, `ati.record_geo_resolution_failure`) plus the claim-support indexes and lifecycle CHECK constraints; it only adds objects and never edits v0021-v0023. SQL API v0025 (`migrations/sql/ati/v0025/datasource_log.sql`, migration 0030, PR 27B) adds the append-only datasource execution log (`ati.datasource_log` plus `ati.append_datasource_log_event`); it only adds objects and never edits v0021-v0024. The shipped files are never edited in place.
 
 Rules:
 

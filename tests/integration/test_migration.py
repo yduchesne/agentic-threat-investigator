@@ -39,6 +39,7 @@ EXPECTED_TABLES = {
     "entity_location_observation",
     "entity_location",
     "geo_resolution",
+    "datasource_log",
     "alembic_version",
 }
 
@@ -89,6 +90,7 @@ EXPECTED_FUNCTIONS = {
     "upsert_reference_location",
     "reference_geometry_parse",
     "reference_centroid_parse",
+    "append_datasource_log_event",
 }
 
 
@@ -1598,3 +1600,174 @@ async def test_geoint_read_indexes_migration_upgrade_and_downgrade() -> None:
         assert await observation_count() == before
     finally:
         command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_datasource_log_migration_downgrade_and_re_upgrade() -> None:
+    """PR 27B datasource-log migration round-trip (D27B-P15).
+
+    Upgrading a 0029 database installs exactly the PR 27B objects
+    (``ati.datasource_log`` + ``ati.append_datasource_log_event``) without
+    touching pre-existing domain rows; downgrading to 0029 drops only those
+    objects in dependency-safe order while every authoritative row (Entity,
+    Evidence, source records, checkpoints) survives unchanged.
+    """
+    alembic_cfg = Config("alembic.ini")
+
+    async def log_state() -> tuple[bool, set[str], set[str]]:
+        """Return (table present, PR 27B indexes, PR 27B checks)."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                tables = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT table_name FROM information_schema.tables "
+                            "WHERE table_schema = 'ati'"
+                        )
+                    )
+                }
+                indexes = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT indexname FROM pg_indexes "
+                            "WHERE schemaname = 'ati' "
+                            "AND tablename = 'datasource_log'"
+                        )
+                    )
+                }
+                checks = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT con.conname FROM pg_constraint con "
+                            "JOIN pg_class rel ON rel.oid = con.conrelid "
+                            "JOIN pg_namespace ns ON ns.oid = rel.relnamespace "
+                            "WHERE ns.nspname = 'ati' "
+                            "AND rel.relname = 'datasource_log' "
+                            "AND con.contype = 'c'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        return (
+            "datasource_log" in tables,
+            indexes,
+            checks,
+        )
+
+    async def functions() -> set[str]:
+        """Return the ati routine names."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                return {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT routine_name FROM information_schema.routines "
+                            "WHERE routine_schema = 'ati'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+
+    pr27b_indexes = {
+        "datasource_log_started_uq",
+        "datasource_log_terminal_uq",
+        "datasource_log_execution_idx",
+    }
+    pr27b_checks = {
+        "datasource_log_datasource_id_check",
+        "datasource_log_event_type_check",
+        "datasource_log_item_count_check",
+        "datasource_log_byte_count_check",
+        "datasource_log_error_code_check",
+        "datasource_log_error_code_compat_check",
+    }
+    try:
+        command.downgrade(alembic_cfg, "0029_geoint_read_indexes")
+        table_present, indexes, checks = await log_state()
+        assert not table_present and not indexes and not checks
+        assert "append_datasource_log_event" not in await functions()
+
+        # Seed representative pre-27B domain rows at 0029 so the round-trip
+        # proves authoritative data is never touched.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(
+                    text("""
+                        INSERT INTO ati.source_record (
+                          id, source_id, source_record_id, record_type,
+                          normalization_version, retrieved_at, canonical_payload,
+                          content_hash, version)
+                        VALUES (
+                          gen_random_uuid(), 'urn:ati:source:threatfox', 'rec-1',
+                          'observation', 1, now(), '{}'::jsonb,
+                          decode(repeat('a', 64), 'hex'), 1)
+                    """)
+                )
+                await connection.execute(
+                    text("""
+                        INSERT INTO ati.investigation (
+                          status, trigger_type, objective, budget,
+                          operational_state, version, created_at, updated_at,
+                          started_at)
+                        VALUES ('running', 'manual', 'seed', '{}'::jsonb,
+                                '{}'::jsonb, 1, now(), now(), now())
+                    """)
+                )
+                await connection.commit()
+        finally:
+            await engine.dispose()
+        source_count_before = await _count_rows("source_record")
+        investigation_count_before = await _count_rows("investigation")
+
+        command.upgrade(alembic_cfg, "head")
+        table_present, indexes, checks = await log_state()
+        assert table_present
+        assert pr27b_indexes <= indexes
+        assert pr27b_checks <= checks
+        assert "append_datasource_log_event" in await functions()
+        # PR 27B adds the append-only log, never a durable execution table.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                tables = {
+                    row[0]
+                    for row in await connection.execute(
+                        text(
+                            "SELECT table_name FROM information_schema.tables "
+                            "WHERE table_schema = 'ati'"
+                        )
+                    )
+                }
+        finally:
+            await engine.dispose()
+        assert "datasource_execution" not in tables
+
+        command.downgrade(alembic_cfg, "0029_geoint_read_indexes")
+        table_present, indexes, checks = await log_state()
+        assert not table_present and not indexes and not checks
+        assert "append_datasource_log_event" not in await functions()
+        assert await _count_rows("source_record") == source_count_before
+        assert await _count_rows("investigation") == investigation_count_before
+    finally:
+        command.upgrade(alembic_cfg, "head")
+
+
+async def _count_rows(table: str) -> int:
+    """Return the row count of one ati table."""
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            value = await connection.scalar(text(f"SELECT count(*) FROM ati.{table}"))
+    finally:
+        await engine.dispose()
+    return int(value or 0)
