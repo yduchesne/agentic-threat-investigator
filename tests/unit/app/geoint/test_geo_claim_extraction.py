@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""G26C-D matrix: exact GEOLOCATION Evidence -> geographic claim extraction.
+"""G26C-D matrix: exact GEOLOCATION LegacyEvidence -> geographic claim extraction.
 
 Proves the pure conversion boundary of PR 26C: an immutable GEOLOCATION
-Evidence observation maps to the bounded GeographicClaim with exact fact
+LegacyEvidence observation maps to the bounded GeographicClaim with exact fact
 mapping and preserved source precision, and malformed/unsupported payloads
 fail closed with typed errors. No database, resolver, or I/O is involved.
 """
@@ -22,12 +22,9 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvalidGeographicClaimError,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import LocationPrecision
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
@@ -36,9 +33,9 @@ def evidence_factory(
     *,
     type_: EvidenceType = EvidenceType.GEOLOCATION,
     facts: dict[str, object] | None = None,
-) -> Evidence:
-    """Build a deterministic immutable Evidence observation fixture."""
-    return Evidence(
+) -> LegacyEvidence:
+    """Build a deterministic immutable LegacyEvidence observation fixture."""
+    return LegacyEvidence(
         id=uuid4(),
         investigation_id=uuid4(),
         type=type_,
@@ -50,7 +47,7 @@ def evidence_factory(
 
 
 def test_g26c_d01_valid_geolocation_evidence_yields_exact_claim() -> None:
-    """G26C-D01 a valid GEOLOCATION Evidence maps to the exact claim facts."""
+    """G26C-D01 a valid GEOLOCATION LegacyEvidence maps to the exact claim facts."""
     claim = geographic_claim_from_evidence(
         evidence_factory(
             facts={
@@ -90,7 +87,7 @@ def test_g26c_d02_coordinates_do_not_upgrade_semantic_precision() -> None:
 
 
 def test_g26c_d03_non_geolocation_evidence_is_a_typed_error() -> None:
-    """G26C-D03 non-GEOLOCATION Evidence fails closed with the typed error."""
+    """G26C-D03 non-GEOLOCATION LegacyEvidence fails closed with the typed error."""
     with pytest.raises(GeoEvidenceTypeError):
         geographic_claim_from_evidence(evidence_factory(type_=EvidenceType.DNS))
 

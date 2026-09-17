@@ -38,9 +38,12 @@ from agentic_threat_investigator.domain.entities import (
     EntityType,
     validate_dns_name,
 )
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
     validate_entity_url_path,
@@ -727,7 +730,7 @@ class RdapProvider(EvidenceProvider):
         """Initialize the provider with an injected HTTP client and clocks.
 
         The HTTP client and bootstrap cache are owned by the caller-supplied
-        client; the UTC wall clock (used only for Evidence ``retrieved_at``
+        client; the UTC wall clock (used only for LegacyEvidence ``retrieved_at``
         timestamps) and the monotonic clock (used only for bootstrap cache
         expiration) default to production implementations when omitted, and
         tests may inject deterministic replacements for either.
@@ -761,7 +764,7 @@ class RdapProvider(EvidenceProvider):
         Discovers the authoritative RDAP service from the IANA bootstrap
         registry for the entity's DNS, IPv4/IPv6, or ASN category, then
         queries the authoritative service and normalizes the strict-validated
-        response into immutable Evidence. No persistence occurs here.
+        response into immutable LegacyEvidence. No persistence occurs here.
         """
         canonical_value, error_result = validate_investigation_entity(self, entity)
         if error_result is not None:
@@ -979,7 +982,7 @@ class RdapProvider(EvidenceProvider):
                 ),
             )
 
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=investigation_id,
             type=evidence_type,
             subject=EvidenceEntityRef(

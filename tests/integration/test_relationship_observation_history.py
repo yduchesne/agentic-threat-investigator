@@ -5,7 +5,7 @@
 RelationshipObservation is itself the historical record: appending one
 observation must create exactly one immutable ``relationship_observation``
 row and never a ``domain_object_history`` row for that observation. The
-stable Relationship resource and the Evidence resource keep their existing
+stable Relationship resource and the LegacyEvidence resource keep their existing
 historization contracts. Covers the PR 22E regression tests I01..I07.
 """
 
@@ -20,17 +20,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -72,7 +69,7 @@ async def seed_graph(
         Entity(type=EntityType.IP_ADDRESS, value="192.0.2.1")
     )
     assert source.id is not None and target.id is not None
-    evidence = Evidence(
+    evidence = LegacyEvidence(
         investigation_id=investigation_id,
         type=EvidenceType.DNS,
         subject=EntityRef(id=source.id, type=EntityType.DOMAIN, value=source.value),
@@ -105,8 +102,7 @@ def observation_factory(
         RelationshipObservation(
             id=observation_id,
             relationship_id=relationship_id,
-            evidence_id=evidence_id,
-            investigation_id=investigation_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=retrieved_at or _RETRIEVED_AT,
             source="urn:ati:source:google_public_dns",
             confidence=0.9,
@@ -304,7 +300,7 @@ async def test_multiple_observations_create_rows_but_no_history(
 async def test_invalid_observation_append_rolls_back_atomically(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """22E-I05: a dangling-Evidence append aborts with no row and no history."""
+    """22E-I05: a dangling-LegacyEvidence append aborts with no row and no history."""
     async with uow_factory() as uow:
         investigation_id, evidence_id, relationship_id = await seed_graph(uow)
         valid, _valid_id = observation_factory(
@@ -321,8 +317,7 @@ async def test_invalid_observation_append_rolls_back_atomically(
         dangling = RelationshipObservation(
             id=uuid4(),
             relationship_id=relationship_id,
-            evidence_id=uuid4(),  # no such Evidence row exists
-            investigation_id=investigation_id,
+            evidence_observation_id=uuid4(),  # no such LegacyEvidence row exists
             observed_at=None,
             retrieved_at=_RETRIEVED_AT,
             source="urn:ati:source:google_public_dns",
@@ -352,7 +347,7 @@ async def test_invalid_observation_append_rolls_back_atomically(
 async def test_evidence_still_writes_create_history(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """22E-I06: Evidence retains its approved immutable CREATE history contract."""
+    """22E-I06: LegacyEvidence retains its approved immutable CREATE history contract."""
     async with uow_factory() as uow:
         _investigation_id, evidence_id, _relationship_id = await seed_graph(uow)
         created = await history_count(uow, "evidence", evidence_id)

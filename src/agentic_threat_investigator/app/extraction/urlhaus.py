@@ -38,12 +38,13 @@ from agentic_threat_investigator.domain.entities import (
     canonicalize_url,
     validate_dns_name,
 )
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 
-def extract_urlhaus(evidence: Evidence) -> ExtractionResult:
-    """Extract the documented URLhaus identities from one Evidence."""
+def extract_urlhaus(evidence: LegacyEvidence) -> ExtractionResult:
+    """Extract the documented URLhaus identities from one LegacyEvidence."""
     evidence_id = validate_extractor_input(
         evidence,
         source=SourceId.URLHAUS.value,
@@ -66,8 +67,8 @@ def _malformed(evidence_id: UUID, message: str) -> EvidenceExtractionError:
     return malformed_facts(SourceId.URLHAUS.value, message, evidence_id=evidence_id)
 
 
-def _validate_subject(evidence: Evidence, evidence_id: UUID) -> None:
-    """Require the canonical Evidence subject promised by the provider."""
+def _validate_subject(evidence: LegacyEvidence, evidence_id: UUID) -> None:
+    """Require the canonical LegacyEvidence subject promised by the provider."""
     try:
         canonical = canonicalize(evidence.subject.type, evidence.subject.value)
     except ValueError as exc:

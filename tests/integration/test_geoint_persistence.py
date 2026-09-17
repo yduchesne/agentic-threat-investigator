@@ -37,11 +37,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     LocationIdentityConflictError,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import (
     EntityLocationObservation,
     GeoResolution,
@@ -56,6 +52,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
@@ -92,10 +89,10 @@ def location_factory(
 async def seed_geolocation_evidence(
     uow: PostgresUnitOfWork,
 ) -> tuple[UUID, UUID, UUID, UUID]:
-    """Create one investigation, an IP Entity, and GEOLOCATION Evidence.
+    """Create one investigation, an IP Entity, and GEOLOCATION LegacyEvidence.
 
     Returns (investigation_id, ip_entity_id, domain_entity_id, evidence_id).
-    The domain Entity exists for the Evidence-subject-mismatch tests.
+    The domain Entity exists for the LegacyEvidence-subject-mismatch tests.
     """
     investigation_id = uuid4()
     await uow.investigations.create(
@@ -117,7 +114,7 @@ async def seed_geolocation_evidence(
     )
     assert ip_entity.id is not None and domain_entity.id is not None
     evidence = await uow.evidence.insert(
-        Evidence(
+        LegacyEvidence(
             investigation_id=investigation_id,
             type=EvidenceType.GEOLOCATION,
             subject=EntityRef(
@@ -367,7 +364,7 @@ async def test_gp08_postgis_enabled_only_for_reference_location_state(
     state on ``ati.location`` only. EntityLocation,
     EntityLocationObservation, and GeoResolution remain spatial-free, no
     PostGIS ``geography`` column exists anywhere, and no latitude/longitude
-    columns exist on the GEOINT tables (those live in GEOLOCATION Evidence
+    columns exist on the GEOINT tables (those live in GEOLOCATION LegacyEvidence
     facts, not GEOINT persistence).
     """
     async with integration_engine.connect() as connection:
@@ -431,7 +428,7 @@ async def test_gp09_first_observation_creates_entity_location_atomically(
 async def test_gp10_observation_stores_exact_provenance(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P10 an observation stores exact Entity/Location/Evidence/timing."""
+    """G26A-P10 an observation stores exact Entity/Location/LegacyEvidence/timing."""
     async with uow_factory() as uow:
         _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
         country = await uow.locations.upsert(location_factory())
@@ -462,7 +459,7 @@ async def test_gp10_observation_stores_exact_provenance(
 async def test_gp11_observation_requires_geolocation_evidence(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P11 non-GEOLOCATION Evidence cannot back an observation."""
+    """G26A-P11 non-GEOLOCATION LegacyEvidence cannot back an observation."""
     async with uow_factory() as uow:
         investigation_id = uuid4()
         await uow.investigations.create(
@@ -481,7 +478,7 @@ async def test_gp11_observation_requires_geolocation_evidence(
         )
         assert domain.id is not None
         dns_evidence = await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 investigation_id=investigation_id,
                 type=EvidenceType.DNS,
                 subject=EntityRef(
@@ -508,7 +505,7 @@ async def test_gp11_observation_requires_geolocation_evidence(
 async def test_gp12_evidence_subject_mismatch_rejected(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P12 Evidence subject must equal the observation Entity."""
+    """G26A-P12 LegacyEvidence subject must equal the observation Entity."""
     async with uow_factory() as uow:
         _, entity_id, domain_entity_id, evidence_id = await seed_geolocation_evidence(
             uow
@@ -531,7 +528,7 @@ async def test_gp12_evidence_subject_mismatch_rejected(
 async def test_gp13_missing_entity_location_evidence_rejected(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P13 missing Entity/Location/Evidence references fail closed."""
+    """G26A-P13 missing Entity/Location/LegacyEvidence references fail closed."""
     async with uow_factory() as uow:
         _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
         country = await uow.locations.upsert(location_factory())
@@ -843,7 +840,7 @@ async def test_gp22_entity_location_has_no_public_mutation_path(
 async def test_gp23_geolocation_evidence_creates_pending_work(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P23 valid GEOLOCATION Evidence creates PENDING work with exact state."""
+    """G26A-P23 valid GEOLOCATION LegacyEvidence creates PENDING work with exact state."""
     async with uow_factory() as uow:
         _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
         resolution = await uow.geo_resolutions.create_pending(
@@ -866,7 +863,7 @@ async def test_gp23_geolocation_evidence_creates_pending_work(
 async def test_gp24_duplicate_pair_is_idempotent_single_row(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P24 a duplicate Entity/Evidence pair reuses one pending row."""
+    """G26A-P24 a duplicate Entity/LegacyEvidence pair reuses one pending row."""
     async with uow_factory() as uow:
         _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
         first = await uow.geo_resolutions.create_pending(
@@ -906,7 +903,7 @@ async def test_gp25_concurrent_duplicate_creation_creates_one_row(
 async def test_gp26_non_geolocation_evidence_rejected(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P26 non-GEOLOCATION Evidence cannot create resolution work."""
+    """G26A-P26 non-GEOLOCATION LegacyEvidence cannot create resolution work."""
     async with uow_factory() as uow:
         investigation_id = uuid4()
         await uow.investigations.create(
@@ -925,7 +922,7 @@ async def test_gp26_non_geolocation_evidence_rejected(
         )
         assert domain.id is not None
         dns_evidence = await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 investigation_id=investigation_id,
                 type=EvidenceType.DNS,
                 subject=EntityRef(
@@ -948,7 +945,7 @@ async def test_gp26_non_geolocation_evidence_rejected(
 async def test_gp27_resolution_evidence_subject_mismatch_rejected(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P27 resolution Evidence subject mismatch is rejected."""
+    """G26A-P27 resolution LegacyEvidence subject mismatch is rejected."""
     async with uow_factory() as uow:
         _, entity_id, domain_entity_id, evidence_id = await seed_geolocation_evidence(
             uow
@@ -965,7 +962,7 @@ async def test_gp27_resolution_evidence_subject_mismatch_rejected(
 async def test_gp28_missing_or_invisible_entity_evidence_rejected(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G26A-P28 missing/invisible Entity or Evidence is rejected."""
+    """G26A-P28 missing/invisible Entity or LegacyEvidence is rejected."""
     async with uow_factory() as uow:
         _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
     async with uow_factory() as uow:

@@ -36,8 +36,8 @@ from agentic_threat_investigator.domain.audit import (
     AuditOutcome,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.investigation import AnalysisDisposition
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -104,7 +104,7 @@ class AssessmentPersistenceService:
         """Persist one Assessment atomically with its analysis metadata (PR 21).
 
         One short transaction writes the new immutable Assessment, the
-        Investigation current Assessment pointer, the exact analyzed Evidence
+        Investigation current Assessment pointer, the exact analyzed LegacyEvidence
         identities, the typed disposition, and the Investigation version/
         history update. The returned result carries the authoritative
         Investigation version after the transaction so the caller never
@@ -155,7 +155,7 @@ class AssessmentPersistenceService:
                         )
                     expected_version = current_state.version
                 # One coherent Investigation transition records the pointer,
-                # the exact analyzed Evidence identities, and the disposition
+                # the exact analyzed LegacyEvidence identities, and the disposition
                 # in a single version/history row.
                 analysis_result = await uow.investigations.set_analysis_result(
                     assessment.investigation_id,
@@ -266,7 +266,7 @@ class AssessmentPersistenceService:
                 else:
                     observation_ids.add(support.relationship_observation_id)
 
-        evidence: dict[UUID, Evidence] = {}
+        evidence: dict[UUID, LegacyEvidence] = {}
         for evidence_id in list(evidence_ids):
             evidence_row = await uow.evidence.get_by_id(evidence_id)
             if evidence_row is not None:
@@ -279,7 +279,7 @@ class AssessmentPersistenceService:
             )
             if observation_row is not None:
                 observations[observation_id] = observation_row
-                pending = observation_row.evidence_id
+                pending = observation_row.evidence_observation_id
                 if pending not in evidence:
                     pending_row = await uow.evidence.get_by_id(pending)
                     if pending_row is not None:

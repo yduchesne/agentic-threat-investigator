@@ -39,11 +39,11 @@ from agentic_threat_investigator.app.providers import (
     ProviderResult,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from tests.support.provider_executor_fixtures import (
     DOMAIN_ENTITY_ID,
     FIXED_TS,
@@ -198,7 +198,7 @@ class TestProviderResultProcessing:
     ) -> None:
         """A Google-DNS-shaped partial result succeeds and keeps the first error.
 
-        One DNS Evidence plus one typed RR-query error commits the Evidence,
+        One DNS LegacyEvidence plus one typed RR-query error commits the LegacyEvidence,
         returns SUCCEEDED, retains only the first provider error (stable code
         and retryability, never its free-form message), and exposes the
         retained code on the PROVIDER_WORK_COMPLETED timeline event.
@@ -230,7 +230,7 @@ class TestProviderResultProcessing:
         )
         outcome = await executor.execute(dns_work_item())
         assert outcome.status.name == "SUCCEEDED"
-        # Exactly one Evidence is processed and persisted, in provider-return
+        # Exactly one LegacyEvidence is processed and persisted, in provider-return
         # order, carrying the assigned identity.
         assert len(persistence.calls) == 1
         assert persistence.calls[0][0].id == evidence.id
@@ -276,12 +276,12 @@ class TestExtractionPersistenceSequencing:
 
     @pytest.mark.asyncio
     async def test_extraction_called_once_per_evidence_in_order(self) -> None:
-        """Extraction runs once per Evidence, in provider-return order."""
+        """Extraction runs once per LegacyEvidence, in provider-return order."""
         first = dns_evidence()
         second = dns_evidence()
         order: list[str] = []
 
-        def extractor(evidence: Evidence) -> ExtractionResult:
+        def extractor(evidence: LegacyEvidence) -> ExtractionResult:
             order.append(evidence.facts["query_name"])
             return ExtractionResult()
 
@@ -304,18 +304,18 @@ class TestExtractionPersistenceSequencing:
 
     @pytest.mark.asyncio
     async def test_extraction_happens_before_persistence(self) -> None:
-        """Each Evidence is extracted before it is persisted."""
+        """Each LegacyEvidence is extracted before it is persisted."""
         seen: list[str] = []
         evidence = dns_evidence()
 
-        def extractor(_evidence: Evidence) -> ExtractionResult:
+        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
             seen.append("extract")
             return ExtractionResult()
 
         class RecordingPersistence(FakePersistenceService):
             async def persist(
                 self,
-                evidence: Evidence,
+                evidence: LegacyEvidence,
                 extraction: ExtractionResult,
                 **kwargs: Any,
             ) -> ProviderObservationPersistenceResult:
@@ -336,9 +336,9 @@ class TestExtractionPersistenceSequencing:
 
     @pytest.mark.asyncio
     async def test_extraction_failure_prevents_persistence(self) -> None:
-        """An extraction failure discards that Evidence and fails the work item."""
+        """An extraction failure discards that LegacyEvidence and fails the work item."""
 
-        def failing_extractor(_evidence: Evidence) -> ExtractionResult:
+        def failing_extractor(_evidence: LegacyEvidence) -> ExtractionResult:
             raise EvidenceExtractionError(
                 SourceId.GOOGLE_PUBLIC_DNS.value,
                 ExtractionErrorReason.MALFORMED_FACTS,
@@ -387,7 +387,7 @@ class TestExtractionPersistenceSequencing:
 
     @pytest.mark.asyncio
     async def test_prior_committed_evidence_retained_after_later_failure(self) -> None:
-        """Already committed Evidence IDs remain represented when later work fails."""
+        """Already committed LegacyEvidence IDs remain represented when later work fails."""
         first = dns_evidence()
         second = dns_evidence()
         persistence = FakePersistenceService()
@@ -395,7 +395,7 @@ class TestExtractionPersistenceSequencing:
         calls = {"count": 0}
 
         async def persist(
-            evidence: Evidence,
+            evidence: LegacyEvidence,
             extraction: ExtractionResult,
             *,
             actor_id: UUID | None = None,
@@ -436,7 +436,7 @@ class TestExtractionPersistenceSequencing:
         class OrderedPersistence(FakePersistenceService):
             async def persist(
                 self,
-                evidence: Evidence,
+                evidence: LegacyEvidence,
                 extraction: ExtractionResult,
                 **kwargs: object,
             ) -> ProviderObservationPersistenceResult:

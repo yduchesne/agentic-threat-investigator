@@ -210,6 +210,15 @@ A DNS relationship is not physically removed because a later lookup no longer ob
 
 ## Evidence
 
+> **PR 28A note:** the Python domain now models Evidence as a stable global
+> identity with immutable `EvidenceObservation` states, but PostgreSQL
+> persistence has **not** been migrated — this section remains the
+> authoritative description of the v0.1 schema in use until PR 28B. No
+> `EvidenceObservation`/`InvestigationEvidence`/`EvidenceObservationEntity`
+> tables exist yet; the v0.1 `ati.evidence` row continues to play the role of
+> one immutable observation and `domain_object_history` still records its
+> CREATE history.
+
 Evidence is immutable.
 
 A new provider retrieval creates a new Evidence observation rather than overwriting the prior observation.

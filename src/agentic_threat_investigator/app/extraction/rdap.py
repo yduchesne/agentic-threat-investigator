@@ -3,7 +3,7 @@
 """Conservative RDAP extraction.
 
 Implements the documented conservative RDAP extraction matrix. The RDAP
-source envelope (persisted Evidence ID, canonical subject, and object-class
+source envelope (persisted LegacyEvidence ID, canonical subject, and object-class
 pairing) is validated on every registered branch before any empty return.
 
 Only IP-subject RDAP network evidence participates in PR 18B extraction:
@@ -46,8 +46,9 @@ from agentic_threat_investigator.domain.entities import (
     canonicalize_network_prefix,
     validate_dns_name,
 )
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 _NETWORK_OBJECT_CLASS = "ip network"
@@ -55,10 +56,10 @@ _DOMAIN_OBJECT_CLASS = "domain"
 _AUTNUM_OBJECT_CLASS = "autnum"
 
 
-def extract_rdap(evidence: Evidence) -> ExtractionResult:
-    """Extract the documented conservative RDAP output from one Evidence.
+def extract_rdap(evidence: LegacyEvidence) -> ExtractionResult:
+    """Extract the documented conservative RDAP output from one LegacyEvidence.
 
-    Both registered RDAP branches require a persisted Evidence ID, a
+    Both registered RDAP branches require a persisted LegacyEvidence ID, a
     canonical subject of the expected type, and the object-class pairing
     promised by the provider, and then return conservative output: an empty
     result for ``REGISTRATION`` (domain and ASN objects) and explicit-prefix
@@ -87,7 +88,7 @@ def extract_rdap(evidence: Evidence) -> ExtractionResult:
     return _extract_ip_network(evidence, evidence_id)
 
 
-def _validated_registration(evidence: Evidence) -> ExtractionResult:
+def _validated_registration(evidence: LegacyEvidence) -> ExtractionResult:
     """Validate the registration envelope and return an empty result.
 
     Only canonical DOMAIN and ASN subjects with their promised object-class
@@ -132,7 +133,9 @@ def _validated_registration(evidence: Evidence) -> ExtractionResult:
     return ExtractionResult()
 
 
-def _extract_ip_network(evidence: Evidence, evidence_id: UUID) -> ExtractionResult:
+def _extract_ip_network(
+    evidence: LegacyEvidence, evidence_id: UUID
+) -> ExtractionResult:
     """Extract explicit CIDR0 prefixes for a validated IP-network observation.
 
     The canonical subject identity is validated first — even when no CIDR0

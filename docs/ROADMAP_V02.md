@@ -144,7 +144,7 @@ Reference-corpus ingestion remains distinct. Sources such as MITRE ATT&CK that f
 
 | PR | Scope | Principal result |
 |---|---|---|
-| **28A** | Global Evidence domain model | Stable global `Evidence`; immutable versioned `EvidenceObservation`; observation-level Entity, Relationship and Investigation provenance |
+| **28A** | Global Evidence domain model | Stable global `Evidence`; immutable versioned `EvidenceObservation`; observation-level Entity, Relationship and Investigation provenance **(delivered)** |
 | **28B** | Persistence and query migration | PostgreSQL schema/functions/repositories plus migration of Investigation-scoped reads to the new observation model |
 | **28C** | Evidence wire contract | Explicit versioned `EvidenceMessage` with stable producer-side identity and replay-safe provenance |
 | **28D** | Distributed-log abstraction | `EvidencePublisher`/consumer contracts plus deterministic `InMemoryEvidenceLog` |
@@ -153,9 +153,11 @@ Reference-corpus ingestion remains distinct. Sources such as MITRE ATT&CK that f
 | **28G** | Kafka-compatible infrastructure | Kafka/Redpanda adapter, partitioning, consumer groups, retry/recovery and configuration |
 | **28H** | End-to-end closure | Real-stack producer -> log -> consumer -> PostgreSQL crash/replay/recovery tests and compliance documentation |
 
-### PR 28A — Global Evidence domain model
+### PR 28A — Global Evidence domain model **`[DONE]`**
 
 Define the domain contracts and invariants above without absorbing broker infrastructure. Remove Investigation and subject ownership from Evidence, introduce stable Evidence plus immutable EvidenceObservation, observation-level Entity association, global RelationshipObservation provenance, and exact InvestigationEvidence admission semantics. Detailed implementation scope must be generated from fresh `main`.
+
+**Delivered:** stable global `Evidence` with deterministic `evidence_id_for_source_record` identity; immutable per-Evidence `EvidenceObservation` with pure create/no-change/append material-state transitions and the canonical shallow `{old, new}` diff contract; `EvidenceObservationEntity`; exact `InvestigationEvidence` admission with bounded reason/actor vocabularies; `RelationshipObservation` referencing the exact `evidence_observation_id` (no Investigation field); Investigation-independent `EvidenceConversionContext`/`ConvertedEvidence`; ThreatFox converter migration; and the transitional `LegacyEvidence` v0.1 runtime boundary (removed in 28B). Unit matrix E28A-01..75 and vertical slices D28A-V01..V04 pass; PostgreSQL persistence, log, message, and consumer work remain 28B+.
 
 ### PR 28B — Persistence and Investigation-scoped query migration
 

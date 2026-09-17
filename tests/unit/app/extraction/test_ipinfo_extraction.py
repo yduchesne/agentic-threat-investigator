@@ -3,7 +3,7 @@
 """Unit tests for conservative IPinfo Lite extraction."""
 
 # The evidence-builder helpers in extraction test modules intentionally
-# share the normalized Evidence construction shape (see the established
+# share the normalized LegacyEvidence construction shape (see the established
 # provider fixture family); the duplication is test-only and accepted.
 
 from collections.abc import Mapping
@@ -20,12 +20,9 @@ from agentic_threat_investigator.app.extraction import (
 )
 from agentic_threat_investigator.app.extraction.models import ExtractionResult
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 SOURCE = SourceId.IPINFO_LITE.value
@@ -33,9 +30,9 @@ SOURCE = SourceId.IPINFO_LITE.value
 
 def ipinfo_evidence(
     facts: Mapping[str, Any], evidence_id: UUID | None = None
-) -> Evidence:
+) -> LegacyEvidence:
     """Build one normalized IPinfo Lite NETWORK evidence observation."""
-    return Evidence(
+    return LegacyEvidence(
         id=evidence_id if evidence_id is not None else uuid4(),
         investigation_id=uuid4(),
         type=EvidenceType.NETWORK,
@@ -94,7 +91,7 @@ def test_malformed_asn_fails() -> None:
 
 
 def test_missing_persisted_evidence_id_fails() -> None:
-    """IPinfo extraction requires a persisted Evidence ID."""
+    """IPinfo extraction requires a persisted LegacyEvidence ID."""
     evidence = ipinfo_evidence({"ip": "203.0.113.42", "asn": "AS64496"})
     unpersisted = evidence.model_copy(update={"id": None})
 

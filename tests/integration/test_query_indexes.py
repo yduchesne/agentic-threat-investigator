@@ -27,17 +27,15 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef as EvidenceEntityRef,
-)
-from agentic_threat_investigator.domain.evidence import (
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
@@ -120,7 +118,7 @@ async def test_p01_investigation_status_time_index(
 async def test_p02_evidence_investigation_retrieved_index(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Investigation Evidence listing uses the existing listing index."""
+    """Investigation LegacyEvidence listing uses the existing listing index."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(uow)
@@ -140,7 +138,7 @@ async def test_p02_evidence_investigation_retrieved_index(
 async def test_p03_evidence_source_listing_index(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Investigation+source Evidence listing uses the source composite."""
+    """Investigation+source LegacyEvidence listing uses the source composite."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(uow)
@@ -510,7 +508,7 @@ async def test_p13_geolocation_projection_drives_existing_type_index(
             uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
         )
         await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 investigation_id=investigation_id,
                 type=EvidenceType.GEOLOCATION,
                 subject=EvidenceEntityRef(

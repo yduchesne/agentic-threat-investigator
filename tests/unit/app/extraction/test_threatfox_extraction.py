@@ -3,7 +3,7 @@
 """Unit tests for deterministic ThreatFox extraction."""
 
 # The evidence-builder helpers in extraction test modules intentionally
-# share the normalized Evidence construction shape (see the established
+# share the normalized LegacyEvidence construction shape (see the established
 # provider fixture family); the duplication is test-only and accepted.
 
 from datetime import UTC, datetime
@@ -17,12 +17,9 @@ from agentic_threat_investigator.app.extraction import (
     extract_threatfox,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 from tests.support.extraction_fixtures import (
     CANONICAL_ASYNCRAT_IP,
@@ -41,9 +38,9 @@ def threatfox_evidence(
     subject_type: EntityType = EntityType.IP_ADDRESS,
     subject_value: str = CANONICAL_ASYNCRAT_IP,
     evidence_id: UUID | None = None,
-) -> Evidence:
+) -> LegacyEvidence:
     """Build one normalized ThreatFox evidence observation with the given matches."""
-    return Evidence(
+    return LegacyEvidence(
         id=evidence_id if evidence_id is not None else uuid4(),
         investigation_id=uuid4(),
         type=EvidenceType.THREAT_INTELLIGENCE,

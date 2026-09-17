@@ -15,17 +15,14 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -86,9 +83,9 @@ def evidence_factory(
     retrieved_at: datetime = FIXED_TIME,
     source: str = "urn:ati:source:google_public_dns",
     evidence_type: EvidenceType = EvidenceType.DNS,
-) -> Evidence:
+) -> LegacyEvidence:
     """Build one deterministic immutable evidence observation."""
-    return Evidence(
+    return LegacyEvidence(
         investigation_id=investigation_id,
         type=evidence_type,
         subject=EntityRef(id=entity_id, type=EntityType.DOMAIN, value="example.com"),
@@ -121,13 +118,13 @@ async def seed_observation(
     *,
     investigation_id: UUID,
     relationship: Relationship,
-    evidence: Evidence,
+    evidence: LegacyEvidence,
     retrieved_at: datetime = FIXED_TIME,
     observed_at: datetime | None = None,
 ) -> RelationshipObservation:
     """Append one immutable relationship observation.
 
-    ``evidence`` must be the recorded observation returned by the Evidence
+    ``evidence`` must be the recorded observation returned by the LegacyEvidence
     repository insert, so its database identity is authoritative.
     """
     if evidence.id is None:
@@ -135,8 +132,7 @@ async def seed_observation(
     observation = RelationshipObservation(
         id=uuid4(),
         relationship_id=relationship.id,
-        evidence_id=evidence.id,
-        investigation_id=investigation_id,
+        evidence_observation_id=evidence.id,
         observed_at=observed_at,
         retrieved_at=retrieved_at,
         source=evidence.source,

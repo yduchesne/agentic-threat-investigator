@@ -39,11 +39,7 @@ from agentic_threat_investigator.domain.audit import (
     AuditOutcome,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvalidInvestigationStatusTransitionError,
     InvestigationState,
@@ -51,6 +47,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 _STARTED_AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -206,25 +203,25 @@ class FakeEvidenceRepository(EvidenceRepository):
 
     async def insert(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         *,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
-    ) -> Evidence:
+    ) -> LegacyEvidence:
         """Return the evidence with an identity, or raise the configured error."""
         self.calls.append("insert")
         if self.insert_error is not None:
             raise self.insert_error
         return evidence.model_copy(update={"id": uuid4()})
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         """Reads are unused in these tests."""
         self.calls.append("get_by_id")
         return None
 
     async def list_for_investigation(
         self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
-    ) -> list[Evidence]:
+    ) -> list[LegacyEvidence]:
         """Reads are unused in these tests."""
         self.calls.append("list_for_investigation")
         return []
@@ -334,9 +331,9 @@ def state_factory(
     )
 
 
-def evidence_factory(investigation_id: UUID | None = None) -> Evidence:
+def evidence_factory(investigation_id: UUID | None = None) -> LegacyEvidence:
     """Build a deterministic valid evidence observation."""
-    return Evidence(
+    return LegacyEvidence(
         investigation_id=investigation_id or uuid4(),
         type=EvidenceType.DNS,
         subject=EntityRef(type=EntityType.DOMAIN, value="example.com"),
@@ -536,7 +533,7 @@ async def test_stale_expected_version_conflict_rolls_back(
 async def test_record_evidence_appends_observation_and_audit(
     service: tuple[InvestigationPersistenceService, FakeUnitOfWorkFactory],
 ) -> None:
-    """Evidence records for an existing investigation with its audit event."""
+    """LegacyEvidence records for an existing investigation with its audit event."""
     investigation_service, factory = service
     investigation_id = uuid4()
     unit = factory.configure(FakeUnitOfWork())
@@ -559,7 +556,7 @@ async def test_record_evidence_appends_observation_and_audit(
 async def test_record_evidence_requires_existing_investigation(
     service: tuple[InvestigationPersistenceService, FakeUnitOfWorkFactory],
 ) -> None:
-    """Evidence for an unknown investigation is rejected without mutation."""
+    """LegacyEvidence for an unknown investigation is rejected without mutation."""
     investigation_service, factory = service
     unit = factory.configure(FakeUnitOfWork())
     evidence = evidence_factory()
@@ -591,7 +588,7 @@ async def test_duplicate_evidence_identity_propagates_typed_error(
 def test_malformed_evidence_rejected_before_repository_mutation() -> None:
     """Timezone-naive evidence timestamps are rejected at the domain boundary."""
     with pytest.raises(ValidationError, match="timezone-aware"):
-        Evidence(
+        LegacyEvidence(
             investigation_id=uuid4(),
             type=EvidenceType.DNS,
             subject=EntityRef(type=EntityType.DOMAIN, value="example.com"),

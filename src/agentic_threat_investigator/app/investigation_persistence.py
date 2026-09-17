@@ -27,12 +27,12 @@ from agentic_threat_investigator.domain.audit import (
     AuditEvent,
     AuditOutcome,
 )
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     require_status_transition,
 )
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 # Explicit actor/request/expected-version arguments are intentional.
 
@@ -131,11 +131,11 @@ class InvestigationPersistenceService:
 
     async def record_evidence(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         *,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
-    ) -> Evidence:
+    ) -> LegacyEvidence:
         """Record one immutable evidence observation with its audit event.
 
         The observation is appended for an existing, visible investigation;

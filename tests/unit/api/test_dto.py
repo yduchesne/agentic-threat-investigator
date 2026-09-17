@@ -39,11 +39,7 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
@@ -54,6 +50,7 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
@@ -192,8 +189,8 @@ def test_u09_investigation_mapping_omits_internal_fields() -> None:
 
 
 def test_u10_evidence_mapping_omits_raw_payload() -> None:
-    """Evidence mapping excludes the raw provider payload."""
-    evidence = Evidence(
+    """LegacyEvidence mapping excludes the raw provider payload."""
+    evidence = LegacyEvidence(
         id=uuid4(),
         investigation_id=uuid4(),
         type=EvidenceType.DNS,

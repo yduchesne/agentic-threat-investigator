@@ -78,11 +78,7 @@ from agentic_threat_investigator.domain.assessment import (
 )
 from agentic_threat_investigator.domain.audit import AuditEvent
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import (
     LocationPrecision,
     LocationType,
@@ -95,6 +91,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -118,7 +115,7 @@ class AnalysisWorld:
         self.evidence_id = uuid4()
         self.relationship_id = uuid4()
         self.observation_id = uuid4()
-        # PR 26F GEOINT world: a second GEOLOCATION Evidence row plus two
+        # PR 26F GEOINT world: a second GEOLOCATION LegacyEvidence row plus two
         # resolved city observations of the source Entity (Seattle, Dallas).
         self.with_geoint = with_geoint
         self.geoint_evidence_id = uuid4()
@@ -136,7 +133,7 @@ class AnalysisWorld:
             started_at=_RETRIEVED_AT,
             version=5,
         )
-        self.evidence = Evidence(
+        self.evidence = LegacyEvidence(
             id=self.evidence_id,
             investigation_id=self.investigation_id,
             type=EvidenceType.DNS,
@@ -156,8 +153,7 @@ class AnalysisWorld:
         self.observation = RelationshipObservation(
             id=self.observation_id,
             relationship_id=self.relationship_id,
-            evidence_id=self.evidence_id,
-            investigation_id=self.investigation_id,
+            evidence_observation_id=self.evidence_id,
             retrieved_at=_RETRIEVED_AT,
             source="urn:ati:source:google_public_dns",
         )
@@ -286,7 +282,7 @@ class AnalysisWorld:
         return EvidenceAnalystDecision(
             verdict=verdict,
             confidence=AssessmentConfidence.MEDIUM,
-            summary="Evidence supports the verdict.",
+            summary="LegacyEvidence supports the verdict.",
             findings=findings,
             geographic_findings=geographic,
             disposition=AnalysisDisposition.SUFFICIENT,
@@ -402,7 +398,7 @@ class AnalysisWorld:
         return EvidenceAnalystDecision(
             verdict=verdict,
             confidence=AssessmentConfidence.MEDIUM,
-            summary="Evidence supports the verdict.",
+            summary="LegacyEvidence supports the verdict.",
             findings=findings if support else (),
             disposition=AnalysisDisposition.SUFFICIENT,
         )
@@ -513,18 +509,18 @@ class FakeInvestigationRepository(InvestigationRepository):
 class FakeEvidenceRepository(EvidenceRepository):
     """Serves the configured evidence rows."""
 
-    def __init__(self, rows: dict[UUID, Evidence]) -> None:
+    def __init__(self, rows: dict[UUID, LegacyEvidence]) -> None:
         self.rows = rows
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         return self.rows.get(evidence_id)
 
-    async def insert(self, evidence: Evidence, **_: object) -> Evidence:
+    async def insert(self, evidence: LegacyEvidence, **_: object) -> LegacyEvidence:
         raise NotImplementedError
 
     async def list_for_investigation(
         self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
-    ) -> list[Evidence]:
+    ) -> list[LegacyEvidence]:
         del investigation_id, offset
         return list(self.rows.values())[:limit]
 
@@ -685,7 +681,7 @@ class FakePersistenceUnitOfWork(UnitOfWork):
         self.investigations = investigations
         evidence_rows = {world.evidence_id: world.evidence}
         if world.with_geoint:
-            evidence_rows[world.geoint_evidence_id] = Evidence(
+            evidence_rows[world.geoint_evidence_id] = LegacyEvidence(
                 id=world.geoint_evidence_id,
                 investigation_id=world.investigation_id,
                 type=EvidenceType.GEOLOCATION,
@@ -945,7 +941,7 @@ async def test_evidence_only_finding_persists(
     harness: Harness,
     world: AnalysisWorld,
 ) -> None:
-    """A direct Evidence-only finding validates and persists exactly once."""
+    """A direct LegacyEvidence-only finding validates and persists exactly once."""
     analyst, fake_llm, persistence_uow, accounting_repo = (
         harness.analyst,
         harness.llm,
@@ -1144,7 +1140,7 @@ async def test_invented_evidence_support_rejected(
     harness: Harness,
     world: AnalysisWorld,
 ) -> None:
-    """A model-invented Evidence citation is rejected by PR 20A validation."""
+    """A model-invented LegacyEvidence citation is rejected by PR 20A validation."""
     analyst, fake_llm, persistence_uow = (
         harness.analyst,
         harness.llm,
@@ -1290,7 +1286,7 @@ async def test_repair_prompts_never_reach_investigation_state(
     await analyst.analyze(world.investigation_id)
 
     state = accounting_repo.state
-    assert "Evidence items" not in str(state)
+    assert "LegacyEvidence items" not in str(state)
     assert "structured-schema validation" not in str(state)
     assert state.budget.llm_calls_used == 2
     assert persistence_uow.audit_events.events[0].metadata == {

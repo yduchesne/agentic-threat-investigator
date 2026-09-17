@@ -19,7 +19,6 @@ import pytest
 
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.geoint import (
     EntityLocationObservation,
     GeoResolution,
@@ -28,6 +27,7 @@ from agentic_threat_investigator.domain.geoint import (
     LocationType,
 )
 from agentic_threat_investigator.domain.investigation import InvestigationState
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.evaluation.geoint.materializer import (
     GeointScenarioMaterializer,
     other_investigation_id,
@@ -108,14 +108,14 @@ class MemoryEvidenceRepository:
 
     def __init__(self) -> None:
         """Initialize the persisted list."""
-        self.persisted: list[Evidence] = []
+        self.persisted: list[LegacyEvidence] = []
 
-    async def insert(self, evidence: Evidence) -> Evidence:
+    async def insert(self, evidence: LegacyEvidence) -> LegacyEvidence:
         """Record and return the evidence."""
         self.persisted.append(evidence)
         return evidence
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         """Return one persisted evidence row by identity."""
         return next((item for item in self.persisted if item.id == evidence_id), None)
 
@@ -368,7 +368,7 @@ def test_build_geographic_state_scopes_to_investigation() -> None:
     resolution = asyncio_run(materializer.materialize(_as_uow(memory), scenario))
     seattle_obs = uuid4()
     dallas_obs = uuid4()
-    # The worker completed both, but the Dallas Evidence belongs to I2.
+    # The worker completed both, but the Dallas LegacyEvidence belongs to I2.
     memory.entity_location_observations.seed(
         resolution.entity_ids["target_ip"],
         [

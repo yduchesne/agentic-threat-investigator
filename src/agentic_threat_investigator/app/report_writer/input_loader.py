@@ -5,9 +5,9 @@ The loader runs one short, read-only UnitOfWork against persisted
 authoritative resources only, then closes the transaction before the caller
 may invoke the LLM. The current Assessment is resolved through the
 Investigation's durable ``assessment_id`` pointer — never ``MAX(version)`` —
-and the Evidence/RelationshipObservation material is exactly the
+and the LegacyEvidence/RelationshipObservation material is exactly the
 Assessment's analyzed set and finding supports (PR 23B snapshot rule), never
-arbitrary later Evidence/Research added after the Assessment.
+arbitrary later LegacyEvidence/Research added after the Assessment.
 
 Raw provider payloads never enter the Report Writer: evidence is minimized
 through the analyst view (:class:`AnalystEvidenceItem`), which carries
@@ -40,7 +40,7 @@ from agentic_threat_investigator.domain.assessment import (
     RelationshipSupport,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import EntityRef, Evidence
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -166,15 +166,15 @@ class ReportWriterInputLoader:
                 _BOUND_FINDINGS, self._max_findings, len(assessment.findings)
             )
 
-        # Evidence material is exactly the Assessment's analyzed set (PR 23B
-        # snapshot rule). Every identity must resolve to a visible Evidence of
+        # LegacyEvidence material is exactly the Assessment's analyzed set (PR 23B
+        # snapshot rule). Every identity must resolve to a visible LegacyEvidence of
         # this Investigation; missing provenance fails closed.
         evidence_items = tuple(
             await self._load_analyzed_evidence(uow, investigation_id, assessment)
         )
 
         observations, relationships, entities = await self._load_observation_context(
-            uow, investigation_id, assessment
+            uow, assessment
         )
         observation_items = self._build_observation_items(
             observations, relationships, entities
@@ -211,7 +211,7 @@ class ReportWriterInputLoader:
         investigation_id: UUID,
         assessment: Assessment,
     ) -> list[AnalystEvidenceItem]:
-        """Load the exact analyzed Evidence set in Assessment order."""
+        """Load the exact analyzed LegacyEvidence set in Assessment order."""
         analyzed = list(assessment.analyzed_evidence_ids)
         if len(analyzed) > self._max_evidence:
             raise ReportWriterInputLimitError(
@@ -234,7 +234,6 @@ class ReportWriterInputLoader:
     async def _load_observation_context(
         self,
         uow: UnitOfWork,
-        investigation_id: UUID,
         assessment: Assessment,
     ) -> tuple[
         list[RelationshipObservation],
@@ -244,8 +243,10 @@ class ReportWriterInputLoader:
         """Load the observation support set and its render context.
 
         Only RelationshipObservations referenced by Assessment findings are
-        report material; each must resolve to Evidence of the analyzed set
-        and to a stable Relationship with visible endpoint Entities.
+        report material; each must resolve to a LegacyEvidence of the
+        analyzed set (whose Investigation membership was already verified by
+        ``_load_analyzed_evidence``) and to a stable Relationship with
+        visible endpoint Entities.
         """
         observation_ids: list[UUID] = []
         for finding in assessment.findings:
@@ -268,15 +269,12 @@ class ReportWriterInputLoader:
                     f"relationship observation support is missing or not visible: "
                     f"{observation_id}"
                 )
-            if (
-                observation.investigation_id is not None
-                and observation.investigation_id != investigation_id
-            ):
-                raise ReportWriterInputConsistencyError(
-                    f"relationship observation belongs to another investigation: "
-                    f"{observation_id}"
-                )
-            if observation.evidence_id not in analyzed:
+            # PR 28A: the domain observation guards investigation membership
+            # through exact admission, not a correlation column; the v0.1
+            # per-observation isolation holds through the analyzed Evidence
+            # set, whose members are verified to belong to this Investigation
+            # by ``_load_analyzed_evidence`` before observations are accepted.
+            if observation.evidence_observation_id not in analyzed:
                 raise ReportWriterInputConsistencyError(
                     f"observation evidence is outside the analyzed set: "
                     f"{observation_id}"
@@ -352,7 +350,7 @@ class ReportWriterInputLoader:
             items.append(
                 AnalystRelationshipObservation(
                     relationship_observation_id=observation.id,
-                    evidence_id=observation.evidence_id,
+                    evidence_id=observation.evidence_observation_id,
                     relationship_id=observation.relationship_id,
                     relationship_type=relationship.type,
                     source_entity=_analyst_entity(source_entity),
@@ -366,8 +364,8 @@ class ReportWriterInputLoader:
         return tuple(items)
 
     @staticmethod
-    def _build_evidence_item(evidence: Evidence) -> AnalystEvidenceItem:
-        """Map one persisted Evidence row to its minimized analyst view.
+    def _build_evidence_item(evidence: LegacyEvidence) -> AnalystEvidenceItem:
+        """Map one persisted LegacyEvidence row to its minimized analyst view.
 
         Only normalized facts are carried; ``raw_payload`` never enters the
         Report Writer context.
@@ -399,7 +397,7 @@ def _analyst_entity(entity: Entity) -> AnalystEntity:
 
 
 def _evidence_subject(subject: EntityRef) -> AnalystEntity:
-    """Map the subject reference of an Evidence row to its analyst view."""
+    """Map the subject reference of a LegacyEvidence row to its analyst view."""
     if subject.id is None:  # pragma: no cover - persisted rows carry an id
         raise ValueError("persisted evidence subject has no identity")
     return AnalystEntity(

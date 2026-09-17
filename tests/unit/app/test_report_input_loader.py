@@ -36,17 +36,14 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -88,10 +85,10 @@ class FakeAssessmentRepository:
 class FakeEvidenceRepository:
     """Serves the configured evidence rows by identity."""
 
-    def __init__(self, rows: dict[UUID, Evidence]) -> None:
+    def __init__(self, rows: dict[UUID, LegacyEvidence]) -> None:
         self.rows = rows
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         return self.rows.get(evidence_id)
 
 
@@ -213,7 +210,7 @@ class World:
         )
         self.evidence = FakeEvidenceRepository(
             {
-                self.evidence_id: Evidence(
+                self.evidence_id: LegacyEvidence(
                     id=self.evidence_id,
                     investigation_id=self.investigation_id,
                     type=EvidenceType.REPUTATION,
@@ -255,8 +252,7 @@ class World:
         self.observation = RelationshipObservation(
             id=self.observation_id,
             relationship_id=self.relationship_id,
-            evidence_id=self.evidence_id,
-            investigation_id=self.investigation_id,
+            evidence_observation_id=self.evidence_id,
             retrieved_at=_RETRIEVED_AT,
             source="urn:ati:source:abuseipdb",
         )
@@ -319,9 +315,9 @@ class World:
         )
 
     def add_second_evidence(self) -> UUID:
-        """Extend the world with a second analyzed Evidence row."""
+        """Extend the world with a second analyzed LegacyEvidence row."""
         second_id = uuid4()
-        self.evidence.rows[second_id] = Evidence(
+        self.evidence.rows[second_id] = LegacyEvidence(
             id=second_id,
             investigation_id=self.investigation_id,
             type=EvidenceType.REPUTATION,
@@ -427,7 +423,7 @@ async def test_u12_assessment_of_another_investigation_fails_closed() -> None:
 
 @pytest.mark.asyncio
 async def test_u13_missing_analyzed_evidence_fails_closed() -> None:
-    """23B-U13: missing analyzed Evidence fails closed (never dropped)."""
+    """23B-U13: missing analyzed LegacyEvidence fails closed (never dropped)."""
     world = World()
     world.evidence.rows.clear()
     with pytest.raises(ReportWriterInputConsistencyError):
@@ -474,7 +470,7 @@ async def test_u15_research_of_another_investigation_excluded() -> None:
 
 @pytest.mark.asyncio
 async def test_u16_oversized_evidence_set_is_typed_limit_failure() -> None:
-    """23B-U16: an oversized analyzed Evidence set fails typed before LLM."""
+    """23B-U16: an oversized analyzed LegacyEvidence set fails typed before LLM."""
     world = World()
     world.add_second_evidence()
     with pytest.raises(ReportWriterInputLimitError):
@@ -494,7 +490,7 @@ async def test_u17_oversized_research_set_is_typed_limit_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_u18_raw_evidence_payload_never_included() -> None:
-    """23B-U18: raw Evidence payloads never enter the report input."""
+    """23B-U18: raw LegacyEvidence payloads never enter the report input."""
     world = World()
     loaded = await world.loader().load(world.investigation_id)
     assert len(loaded.evidence) == 1

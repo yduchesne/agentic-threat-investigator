@@ -54,12 +54,16 @@ def _relationship_from_row(row: RelationshipRow) -> Relationship:
 
 
 def _observation_from_row(row: RelationshipObservationRow) -> RelationshipObservation:
-    """Map an observation row to its immutable domain model."""
+    """Map an observation row to its immutable domain model.
+
+    PR 28A compatibility: the v0.1 Evidence row *is* the observation, so the
+    row's ``evidence_id`` maps onto the domain ``evidence_observation_id``
+    until PR 28B migrates the schema.
+    """
     return RelationshipObservation(
         id=row.id,
         relationship_id=row.relationship_id,
-        evidence_id=row.evidence_id,
-        investigation_id=row.investigation_id,
+        evidence_observation_id=row.evidence_id,
         observed_at=row.observed_at,
         retrieved_at=row.retrieved_at,
         source=row.source,
@@ -301,6 +305,7 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
         items = tuple(
             RelationshipObservationItem.from_observation(
                 _observation_from_row(observation_row),
+                investigation_id=query.investigation_id,
                 relationship_source_entity_id=relationship_row.source_entity_id,
                 relationship_target_entity_id=relationship_row.target_entity_id,
                 relationship_type=RelationshipType(
@@ -354,6 +359,7 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
         observation_row, relationship_row = row
         return RelationshipObservationItem.from_observation(
             _observation_from_row(observation_row),
+            investigation_id=investigation_id,
             relationship_source_entity_id=relationship_row.source_entity_id,
             relationship_target_entity_id=relationship_row.target_entity_id,
             relationship_type=RelationshipType(relationship_row.relationship_type_urn),

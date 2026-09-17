@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Datasource-backed ``EvidenceProvider`` compatibility seam (PR 27E).
+"""Datasource-backed ``EvidenceProvider`` compatibility seam (PR 27E + PR 28A).
 
 Migrates one PR 27A-D acquisition stack onto the existing Investigation
 runtime contract without redesigning the mature executor/persistence
@@ -11,16 +11,28 @@ EvidenceProvider compatibility
  -> DatasourceDefinition
  -> semantic datasource acquisition (SemanticAcquirer[T])
  -> SemanticAcquisitionResult[T]
- -> EvidenceConversionContext
+ -> global EvidenceConversionContext
  -> ToEvidenceConverterRegistry (selected by semantic_format)
+ -> ConvertedEvidence (global Evidence + observation candidate)
+ -> PR 28A runtime rebind onto the v0.1 LegacyEvidence shape
  -> ProviderResult
 ```
 
 :class:`DatasourceProvider` is the small generic adapter: it owns the
 acquisition/conversion lifecycle through the PR 27B
 :class:`DatasourceExecutionRecorder` (STARTED + the acquirer's stage appends
-+ CONVERTED with the exact produced Evidence count) and defers the terminal
-outcome. A typed acquisition failure records FAILED with the bounded
++ CONVERTED with the exact produced count) and defers the terminal outcome.
+Conversion is global and Investigation-independent (PR 28A): the context
+carries only cross-cutting semantic provenance, and the converter emits
+stable global Evidence plus observation candidates. Because the v0.1
+Investigation executor, extractors, and PostgreSQL persistence still require
+the Investigation-bound single-subject shape until PR 28B, the adapter
+rebinds each ``ConvertedEvidence`` onto the transitional
+:class:`LegacyEvidence` shape at the runtime boundary — a pure field
+rebind, never a conversion, that keeps the v0.1 per-observation ``uuid4``
+append semantics.
+
+A typed acquisition failure records FAILED with the bounded
 source-stage error code and returns a mapped legacy ``ProviderResult``
 error; conversion failure records FAILED(``conversion_failed``) and raises;
 cancellation records CANCELLED (best effort) and always propagates. A
@@ -30,14 +42,14 @@ so the terminating COMPLETED/FAILED/CANCELLED decision belongs to the
 Investigation executor only after required Evidence extraction/persistence
 processing succeeds.
 
-The adapter constructs its ``EntityRef`` from the exact canonical persisted
-``Entity`` passed by ``ProviderWorkExecutor`` — it never re-resolves or
-substitutes the subject — and performs no I/O from ``supports()``. Nothing
-in this module understands ThreatFox (or any other source's) semantic
-model; the source-specific acquirer, converter, and legacy error mapping
-are injected. No UoW is ever held across acquisition, parsing, conversion,
-or extraction, and no raw exception text, source body, or credential is
-persisted.
+The adapter constructs its ``EntityRef`` subject binding from the exact
+canonical persisted ``Entity`` passed by ``ProviderWorkExecutor`` — it never
+re-resolves or substitutes the subject — and performs no I/O from
+``supports()``. Nothing in this module understands ThreatFox (or any other
+source's) semantic model; the source-specific acquirer, converter, and
+legacy error mapping are injected. No UoW is ever held across acquisition,
+parsing, conversion, or extraction, and no raw exception text, source body,
+or credential is persisted.
 """
 
 from __future__ import annotations
@@ -74,7 +86,8 @@ from agentic_threat_investigator.domain.datasource import (
     DatasourceId,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import EntityRef, Evidence
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 T = TypeVar("T")
 """One validated source-native semantic object type."""
@@ -167,10 +180,45 @@ class DatasourceEvidenceResult(ProviderResult):
         return self._completion
 
 
+def legacy_evidence_from_converted(
+    converted: ConvertedEvidence,
+    *,
+    investigation_id: UUID,
+    subject: EntityRef,
+) -> LegacyEvidence:
+    """Bind one global ConvertedEvidence onto the v0.1 runtime shape (PR 28A).
+
+    Transitional compatibility at the runtime/persistence boundary only: the
+    Investigation executor, extractors, and v0.1 PostgreSQL persistence still
+    require the Investigation-bound single-subject :class:`LegacyEvidence`
+    shape until PR 28B migrates persistence. The mapping is a pure field
+    rebind, never a conversion: the stable Evidence identity and the
+    observation candidate fields flow through unchanged. The persisted
+    v0.1 evidence ID stays ``None`` so the executor keeps its v0.1
+    per-observation ``uuid4`` append semantics — the deterministic global
+    identity remains authoritative on the domain model for PR 28B and is
+    not used as a v0.1 table key. Removed together with the v0.1
+    persistence boundary.
+    """
+    return LegacyEvidence(
+        id=None,
+        investigation_id=investigation_id,
+        type=converted.evidence.type,
+        subject=subject,
+        source=converted.evidence.source,
+        source_record_id=converted.evidence.source_record_id,
+        source_url=converted.observation.source_url,
+        observed_at=converted.observation.observed_at,
+        retrieved_at=converted.observation.retrieved_at,
+        facts=converted.observation.facts,
+        raw_payload=converted.observation.raw_payload,
+    )
+
+
 def datasource_evidence_result(
     *,
     provider: str,
-    evidence: tuple[Evidence, ...],
+    evidence: tuple[LegacyEvidence, ...],
     completion: DatasourceExecutionCompletion,
 ) -> DatasourceEvidenceResult:
     """Build one lifecycle-aware provider result with its completion.
@@ -316,14 +364,15 @@ class DatasourceProvider(EvidenceProvider, Generic[T]):
             await recorder.fail(error_code=result.error.code)
             return self._error_mapper(result.error)
 
-        # The exact persisted Entity passed by the executor is authoritative;
-        # the subject is never re-resolved or substituted.
-        subject = EntityRef(id=entity.id, type=entity.type, value=entity.value)
-        context = EvidenceConversionContext(
-            investigation_id=investigation_id,
-            subject=subject,
-            semantic_source=result.context,
-        )
+        # PR 28A conversion is global and Investigation-independent: the
+        # context carries only the cross-cutting semantic provenance, and
+        # the converter yields stable global Evidence plus observation
+        # candidates. The executor's v0.1 runtime still needs the legacy
+        # Investigation/subject-bound shape, so each ConvertedEvidence is
+        # rebound here at the runtime boundary (see
+        # ``legacy_evidence_from_converted``); no other code constructs the
+        # legacy shape from the new converter output.
+        context = EvidenceConversionContext(semantic_source=result.context)
         try:
             converted = convert_semantic_source_objects(
                 result.objects, context, self._registry
@@ -337,12 +386,38 @@ class DatasourceProvider(EvidenceProvider, Generic[T]):
             )
             raise
 
-        await recorder.converted(item_count=len(converted))
-        return datasource_evidence_result(
-            provider=self.id,
-            evidence=converted,
-            completion=RecorderDatasourceExecutionCompletion(recorder),
+        # The exact persisted Entity passed by the executor is authoritative;
+        # the v0.1 subject binding is never re-resolved or substituted.
+        subject = EntityRef(id=entity.id, type=entity.type, value=entity.value)
+        runtime_evidence = tuple(
+            legacy_evidence_from_converted(
+                item,
+                investigation_id=investigation_id,
+                subject=subject,
+            )
+            for item in converted
         )
+
+        await recorder.converted(item_count=len(runtime_evidence))
+        try:
+            return datasource_evidence_result(
+                provider=self.id,
+                evidence=runtime_evidence,
+                completion=RecorderDatasourceExecutionCompletion(recorder),
+            )
+        except Exception:
+            # The v0.1 ProviderResult contract rejects converter output that
+            # is not bound to the provider (for example an emitted Evidence
+            # whose ``source`` claims a different source URN). The execution
+            # is terminated with the bounded binding code before the typed
+            # failure propagates to the executor's provider-error path; no
+            # raw exception text is ever persisted.
+            await _best_effort_terminal(
+                recorder,
+                cancelled=False,
+                error_code="provider_binding_failed",
+            )
+            raise
 
 
 async def _best_effort_terminal(

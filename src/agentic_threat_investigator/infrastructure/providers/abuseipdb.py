@@ -36,9 +36,12 @@ from agentic_threat_investigator.domain.entities import (
     EntityType,
     canonicalize_ip_address,
 )
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import ProviderHttpClient
 
 _ABUSEIPDB_ENDPOINT = "https://api.abuseipdb.com/api/v2/check"
@@ -182,7 +185,7 @@ class AbuseIpdbProvider(EvidenceProvider):
         only in the ``Key`` header, never in URLs, facts, or logs.
         ``max_age_in_days`` is the fixed report look-back window sent on
         every lookup and retained in evidence facts. The UTC wall clock is
-        used only for Evidence ``retrieved_at`` timestamps; tests may
+        used only for LegacyEvidence ``retrieved_at`` timestamps; tests may
         inject a deterministic replacement, otherwise ``datetime.now(UTC)``
         is used.
         """
@@ -297,7 +300,7 @@ class AbuseIpdbProvider(EvidenceProvider):
             type=EntityType.IP_ADDRESS,
             value=canonical_ip,
         )
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=investigation_id,
             type=EvidenceType.REPUTATION,
             subject=subject,

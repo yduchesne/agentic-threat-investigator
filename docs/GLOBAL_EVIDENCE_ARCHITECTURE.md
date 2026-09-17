@@ -1,8 +1,12 @@
 # ATI — v0.2 Global Evidence and Distributed Ingestion Architecture
 
-> **Status: approved v0.2 target architecture; not yet implemented.**
+> **Status: approved v0.2 target architecture; domain contracts delivered by PR 28A.**
 >
 > This document records the architectural decisions that govern the PR 28 series. `ROADMAP_V02.md` defines the delivery sequence. Delivered v0.1 behavior remains authoritative until the corresponding PR 28 slice lands.
+>
+> **PR 28A delivered scope:** the Python/domain contracts below — stable global `Evidence`, immutable `EvidenceObservation` with per-Evidence versions and material-state transitions, `EvidenceObservationEntity`, global `RelationshipObservation` provenance, exact `InvestigationEvidence` admission, deterministic semantic-format/source-record Evidence identity, and the Investigation-independent `ToEvidenceConverter` boundary producing `ConvertedEvidence` (global Evidence + observation candidate). The v0.1 runtime/persistence boundary keeps a transitional `LegacyEvidence` shape until PR 28B.
+>
+> **Not yet implemented (PR 28B+):** PostgreSQL tables/migrations for `EvidenceObservation`/associations/admission, the distributed log, `EvidenceMessage`, and consumer processing. The converter currently defines the global identity and candidate, but the v0.1 PostgreSQL schema still stores the transitional per-observation rows.
 
 ## Domain model
 

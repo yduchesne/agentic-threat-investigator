@@ -10,12 +10,12 @@ event — or nothing at all.
 
 Approved policy decisions implemented here:
 
-- Preflight performs no database work; it validates the Evidence identity,
-  canonical identities, assertion Evidence-ID equality, endpoint coverage,
+- Preflight performs no database work; it validates the LegacyEvidence identity,
+  canonical identities, assertion LegacyEvidence-ID equality, endpoint coverage,
   and the deterministic duplicate policy before BEGIN.
-- Repeated semantic edges under a new Evidence ID reuse the stable Entity and
+- Repeated semantic edges under a new LegacyEvidence ID reuse the stable Entity and
   Relationship identities and append a new RelationshipObservation.
-- Replay of the same Evidence ID is a typed conflict; the UnitOfWork rolls
+- Replay of the same LegacyEvidence ID is a typed conflict; the UnitOfWork rolls
   back every earlier mutation in the transaction.
 - Rediscovery of a soft-deleted Entity or Relationship is a fail-closed typed
   error: no second canonical row, no silent restore, and no new observation
@@ -45,7 +45,7 @@ from agentic_threat_investigator.domain.audit import (
     AuditOutcome,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
-from agentic_threat_investigator.domain.evidence import Evidence
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -58,14 +58,14 @@ EntityIdentityKey = tuple[EntityType, str]
 class ProviderObservationPersistenceResult:
     """Objects written by one atomic provider-observation transaction."""
 
-    evidence: Evidence
+    evidence: LegacyEvidence
     entities: tuple[Entity, ...]
     relationships: tuple[Relationship, ...]
     observations: tuple[RelationshipObservation, ...]
 
 
 def _evidence_audit_event(
-    evidence: Evidence,
+    evidence: LegacyEvidence,
     actor_id: UUID | None,
     request_id: UUID | None,
 ) -> AuditEvent:
@@ -94,7 +94,7 @@ class ProviderObservationPersistenceService:
 
     async def persist(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         extraction: ExtractionResult,
         *,
         actor_id: UUID | None = None,
@@ -176,12 +176,12 @@ class ProviderObservationPersistenceService:
     @staticmethod
     async def _insert_evidence(
         uow: UnitOfWork,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         identity_map: dict[EntityIdentityKey, Entity],
         actor_id: UUID | None,
         request_id: UUID | None,
-    ) -> Evidence:
-        """Insert the immutable Evidence observation with its resolved subject."""
+    ) -> LegacyEvidence:
+        """Insert the immutable LegacyEvidence observation with its resolved subject."""
         subject = identity_map[(evidence.subject.type, evidence.subject.value)]
         if subject.id is None:  # pragma: no cover - repository invariant
             raise RuntimeError("entity repository returned an entity without an ID")
@@ -203,7 +203,7 @@ class ProviderObservationPersistenceService:
         uow: UnitOfWork,
         assertions: tuple[RelationshipAssertion, ...],
         identity_map: dict[EntityIdentityKey, Entity],
-        recorded: Evidence,
+        recorded: LegacyEvidence,
     ) -> tuple[list[Relationship], list[RelationshipObservation]]:
         """Resolve each stable edge and append exactly one observation per edge."""
         if recorded.id is None:  # pragma: no cover - repository invariant
@@ -227,8 +227,7 @@ class ProviderObservationPersistenceService:
             observation = RelationshipObservation(
                 id=uuid4(),
                 relationship_id=relationship.id,
-                evidence_id=recorded.id,
-                investigation_id=recorded.investigation_id,
+                evidence_observation_id=recorded.id,
                 observed_at=recorded.observed_at,
                 retrieved_at=recorded.retrieved_at,
                 source=recorded.source,
@@ -237,7 +236,7 @@ class ProviderObservationPersistenceService:
         return persisted_relationships, observations
 
     @staticmethod
-    def _validate(evidence: Evidence, extraction: ExtractionResult) -> None:
+    def _validate(evidence: LegacyEvidence, extraction: ExtractionResult) -> None:
         """Perform all deterministic preflight validation without database work.
 
         Duplicate entities and duplicate assertions are rejected outright:
@@ -265,7 +264,9 @@ class ProviderObservationPersistenceService:
             identities.add(key)
         for assertion in extraction.relationships:
             if assertion.evidence_id != evidence.id:
-                raise ValueError("relationship assertion Evidence ID does not match")
+                raise ValueError(
+                    "relationship assertion LegacyEvidence ID does not match"
+                )
             for endpoint in (assertion.source, assertion.target):
                 if canonicalize(endpoint.type, endpoint.value) != endpoint.value:
                     raise ValueError("relationship endpoint is not canonical")
@@ -282,7 +283,7 @@ class ProviderObservationPersistenceService:
 
     @staticmethod
     def _ordered_entities(
-        evidence: Evidence, extraction: ExtractionResult
+        evidence: LegacyEvidence, extraction: ExtractionResult
     ) -> tuple[ExtractedEntity, ...]:
         """Return subject and discoveries in stable identity order.
 

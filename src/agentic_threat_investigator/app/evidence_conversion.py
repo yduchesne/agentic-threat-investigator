@@ -1,24 +1,25 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Semantic-format-driven Evidence conversion boundary (PR 27D).
+"""Semantic-format-driven Evidence conversion boundary (PR 27D + PR 28A).
 
 One :class:`ToEvidenceConverter` transforms **one already-validated semantic
 source object** plus explicit ATI conversion context into zero, one, or
-multiple immutable :class:`Evidence` observations. Selection is based only
-on ``semantic_format``; converters perform no I/O, no persistence, no clock
-or random reads, no secret/config lookup, and never assign persistent
-identity, verdicts, relationships, pivots, attribution, or Investigation
-control flow.
+multiple :class:`ConvertedEvidence` values (each a stable global
+:class:`Evidence` plus its immutable :class:`EvidenceObservationCandidate`).
+Selection is based only on ``semantic_format``; converters perform no I/O,
+no persistence, no clock or random reads, no secret/config lookup, and
+never assign observation versions, verdicts, relationships, pivots,
+attribution, or Investigation control flow.
 
 The boundary is deliberately narrower than the roadmap's conceptual
-``convert(source)``: ATI Evidence requires exact Investigation and subject
-binding, so conversion receives an :class:`EvidenceConversionContext` that
-combines the ATI-side Investigation/subject binding (intentionally absent
-from :class:`SemanticSourceContext`) with the cross-cutting acquisition
-provenance of the semantic acquisition. The registry is immutable and keyed
-only by :class:`SemanticFormatId`; duplicate registration and unknown
-formats fail closed. The flattening helper preserves deterministic ordering:
-semantic source-object order, then each converter's return order.
+``convert(source)``: conversion receives an :class:`EvidenceConversionContext`
+carrying only the cross-cutting semantic acquisition provenance
+(:class:`SemanticSourceContext`). Since PR 28A, conversion is global and
+Investigation-independent — the context carries no Investigation identity
+and no subject binding. The registry is immutable and keyed only by
+:class:`SemanticFormatId`; duplicate registration and unknown formats fail
+closed. The flattening helper preserves deterministic ordering: semantic
+source-object order, then each converter's return order.
 """
 
 from __future__ import annotations
@@ -27,12 +28,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
-from uuid import UUID
 
 from agentic_threat_investigator.app.datasource_semantics import (
     SemanticSourceContext,
 )
-from agentic_threat_investigator.domain.evidence import EntityRef, Evidence
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 from agentic_threat_investigator.domain.identifiers import SemanticFormatId
 
 TSource = TypeVar("TSource")
@@ -71,17 +71,15 @@ class UnknownSemanticFormatError(KeyError):
 
 @dataclass(frozen=True)
 class EvidenceConversionContext:
-    """Immutable ATI-side context of one conversion pass.
+    """Immutable cross-cutting context of one conversion pass (PR 28A).
 
-    Carries the exact Investigation identity and the exact canonical subject
-    binding (ATI-side concerns that must never live inside
-    :class:`SemanticSourceContext`) plus one reused semantic acquisition
-    context. There is deliberately no Investigation identity inside
-    ``SemanticSourceContext``; conversion callers bind both sides here.
+    Carries only the reused semantic acquisition context; there is
+    deliberately no Investigation identity and no subject binding — global
+    Evidence conversion is Investigation-independent, and exact Observation
+    admission happens later through ``InvestigationEvidence`` at a separate
+    boundary.
     """
 
-    investigation_id: UUID
-    subject: EntityRef
     semantic_source: SemanticSourceContext
 
 
@@ -90,9 +88,11 @@ class ToEvidenceConverter(ABC, Generic[TSource]):
 
     Implementations are stateless, reusable, and deterministic: converting
     the same validated object with the same context always yields
-    structurally equal immutable Evidence. ``convert`` is synchronous local
-    mapping performed with no I/O or persistence and no persistent Evidence
-    identity assignment.
+    structurally equal immutable :class:`ConvertedEvidence` values.
+    ``convert`` is synchronous local mapping performed with no I/O or
+    persistence. A converter assigns the deterministic stable Evidence
+    identity (derived from the approved source-record identity) but never
+    fabricates a persisted observation ID, version, or diff.
     """
 
     @property
@@ -105,8 +105,8 @@ class ToEvidenceConverter(ABC, Generic[TSource]):
         self,
         source: TSource,
         context: EvidenceConversionContext,
-    ) -> tuple[Evidence, ...]:
-        """Convert one validated source object into zero or more Evidence."""
+    ) -> tuple[ConvertedEvidence, ...]:
+        """Convert one validated source object into zero or more ConvertedEvidence."""
 
 
 class ToEvidenceConverterRegistry:
@@ -155,8 +155,8 @@ def convert_semantic_source_objects(
     objects: tuple[TSource, ...],
     context: EvidenceConversionContext,
     registry: ToEvidenceConverterRegistry,
-) -> tuple[Evidence, ...]:
-    """Flatten 0..N Evidence from one bounded tuple of validated objects.
+) -> tuple[ConvertedEvidence, ...]:
+    """Flatten 0..N ConvertedEvidence from one bounded tuple of validated objects.
 
     Each source object is converted through the semantic-format-selected
     converter (`registry.get(context.semantic_source.semantic_format)`), and
@@ -168,7 +168,7 @@ def convert_semantic_source_objects(
     """
     converter = registry.get(context.semantic_source.semantic_format)
     return tuple(
-        evidence
+        converted
         for source_object in objects
-        for evidence in converter.convert(source_object, context)
+        for converted in converter.convert(source_object, context)
     )

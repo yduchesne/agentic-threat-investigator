@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Evidence collection query contract and service boundary."""
+"""LegacyEvidence collection query contract and service boundary."""
 
 from __future__ import annotations
 
@@ -18,16 +18,17 @@ from agentic_threat_investigator.app.query.pagination import (
     CursorEnvelope,
     filter_fingerprint,
 )
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 
 class EvidenceListQuery(BaseModel):
-    """Bounded Evidence listing filters for one Investigation.
+    """Bounded LegacyEvidence listing filters for one Investigation.
 
     Canonical order preserves the persisted execution semantics:
     ``retrieved_at DESC, id ASC``. ``retrieved_from``/``retrieved_to`` bound a
     half-open ``[from, to)`` UTC interval. The Investigation scope is
-    mandatory; there is no global Evidence browse contract in v0.1.
+    mandatory; there is no global LegacyEvidence browse contract in v0.1.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -78,19 +79,21 @@ class EvidenceListQuery(BaseModel):
 
 
 class EvidenceQueryService(ABC):
-    """Analyst-facing Evidence read contract (PR 23A)."""
+    """Analyst-facing LegacyEvidence read contract (PR 23A)."""
 
     @abstractmethod
-    async def list(self, query: EvidenceListQuery) -> QueryPage[Evidence]:
-        """Return one bounded page of immutable Evidence observations.
+    async def list(self, query: EvidenceListQuery) -> QueryPage[LegacyEvidence]:
+        """Return one bounded page of immutable LegacyEvidence observations.
 
         Ordering is ``retrieved_at DESC, id ASC``; cursors are bound to the
         exact filter set.
         """
 
     @abstractmethod
-    async def get(self, investigation_id: UUID, evidence_id: UUID) -> Evidence | None:
-        """Return one Evidence observation bound to the Investigation, if any.
+    async def get(
+        self, investigation_id: UUID, evidence_id: UUID
+    ) -> LegacyEvidence | None:
+        """Return one LegacyEvidence observation bound to the Investigation, if any.
 
         A cross-Investigation lookup fails closed by returning ``None`` so
         the HTTP layer can map it to a 404 without enumerating resources.

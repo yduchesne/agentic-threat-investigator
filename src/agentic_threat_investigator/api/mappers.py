@@ -71,11 +71,11 @@ from agentic_threat_investigator.domain.assessment import (
     EvidenceSupport,
     RelationshipSupport,
 )
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.investigation import InvestigationState
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import Relationship
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
@@ -126,8 +126,8 @@ def to_create_investigation_response(
     )
 
 
-def to_evidence_response(evidence: Evidence) -> EvidenceResponse:
-    """Map one Evidence observation; the raw provider payload is excluded.
+def to_evidence_response(evidence: LegacyEvidence) -> EvidenceResponse:
+    """Map one LegacyEvidence observation; the raw provider payload is excluded.
 
     Read models always carry their persisted identity; a missing identity is
     an internal contract failure and never a synthesized fallback.
@@ -178,7 +178,7 @@ def to_geoint_observation_response(
     """Map one internal geographic observation to its public DTO.
 
     The exact ``observation_id`` and ``evidence_id`` are always preserved so
-    Evidence drill-down stays exact.
+    LegacyEvidence drill-down stays exact.
     """
     return GeointObservationResponse(
         observation_id=item.observation_id,

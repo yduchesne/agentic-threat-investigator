@@ -3,7 +3,7 @@
 """Deterministic Report Writer fixtures, materialization, and canonical output (PR 23B).
 
 The materializer persists one report scenario fixture through the production
-application seams — graph (Investigation, Entities, Evidence, Relationships,
+application seams — graph (Investigation, Entities, LegacyEvidence, Relationships,
 RelationshipObservations) through the ``UnitOfWork``, the authoritative
 Assessment through ``AssessmentPersistenceService``, and the ResearchResults
 through ``ResearchResultPersistenceService`` — and returns the resolution
@@ -45,13 +45,13 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import EntityRef, Evidence
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -294,7 +294,7 @@ class ReportWriterScenarioMaterializer:
         dict[str, UUID],
         dict[str, UUID],
     ]:
-        """Persist entities, Investigation, Evidence, Relationships, Observations.
+        """Persist entities, Investigation, LegacyEvidence, Relationships, Observations.
 
         Returns the repository-confirmed identity maps; canonical Entity and
         Relationship identities are taken from the repository return values.
@@ -330,7 +330,7 @@ class ReportWriterScenarioMaterializer:
             for evidence in fixture.evidence:
                 subject = _entity_by_label(fixture, evidence.subject)
                 persisted_evidence = await uow.evidence.insert(
-                    Evidence(
+                    LegacyEvidence(
                         id=planned.evidence_ids[evidence.label],
                         investigation_id=planned.investigation_id,
                         type=evidence.type,
@@ -365,8 +365,7 @@ class ReportWriterScenarioMaterializer:
                     RelationshipObservation(
                         id=planned.observation_ids[observation.label],
                         relationship_id=relationship_ids[observation.relationship],
-                        evidence_id=evidence_ids[observation.evidence],
-                        investigation_id=planned.investigation_id,
+                        evidence_observation_id=evidence_ids[observation.evidence],
                         retrieved_at=_FIXED,
                         source=observation.source,
                         confidence=observation.confidence,

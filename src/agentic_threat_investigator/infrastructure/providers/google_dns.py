@@ -30,9 +30,12 @@ from agentic_threat_investigator.domain.entities import (
     EntityType,
     validate_dns_name,
 )
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import ProviderHttpClient
 
 _GOOGLE_DNS_ENDPOINT = "https://dns.google/resolve"
@@ -110,7 +113,7 @@ class DnsQueryContext:
 class DnsQueryOutcome:
     """Internal result of querying one DNS RR type."""
 
-    evidence: Evidence | None = None
+    evidence: LegacyEvidence | None = None
     errors: tuple[ProviderError, ...] = ()
     is_nxdomain: bool = False
 
@@ -547,7 +550,7 @@ class GooglePublicDnsProvider(EvidenceProvider):
         """Initialize the provider with an injected HTTP client and UTC clock.
 
         The HTTP client is owned by the caller. The UTC wall clock is used
-        only for Evidence ``retrieved_at`` timestamps; tests may inject a
+        only for LegacyEvidence ``retrieved_at`` timestamps; tests may inject a
         deterministic replacement, otherwise ``datetime.now(UTC)`` is used.
         """
         self._http = http_client
@@ -574,7 +577,7 @@ class GooglePublicDnsProvider(EvidenceProvider):
         Domains are queried once per RR type in the fixed A, AAAA, CNAME,
         MX, NS, TXT, SOA order; IP addresses yield a single reverse PTR
         query. Answers are strictly validated and normalized into immutable
-        DNS Evidence; NXDOMAIN is a valid miss and no persistence occurs.
+        DNS LegacyEvidence; NXDOMAIN is a valid miss and no persistence occurs.
         """
         canonical_value, error_result = validate_investigation_entity(self, entity)
         if error_result is not None:
@@ -610,7 +613,7 @@ class GooglePublicDnsProvider(EvidenceProvider):
             subject=subject,
             retrieved_at=retrieved_at,
         )
-        evidence_list: list[Evidence] = []
+        evidence_list: list[LegacyEvidence] = []
         errors_list: list[ProviderError] = []
 
         first_outcome = await self._query_rr_type(
@@ -718,7 +721,7 @@ class GooglePublicDnsProvider(EvidenceProvider):
         query_name: str,
         rr_type: str,
     ) -> DnsQueryOutcome:
-        """Normalize answer records and build an Evidence observation."""
+        """Normalize answer records and build a LegacyEvidence observation."""
         normalized_answers: list[dict[str, Any]] = []
         for answer in parsed.Answer:
             norm = _normalize_single_answer(answer, rr_type)
@@ -766,7 +769,7 @@ class GooglePublicDnsProvider(EvidenceProvider):
             "answers": normalized_answers,
         }
 
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=context.investigation_id,
             type=EvidenceType.DNS,
             subject=context.subject,

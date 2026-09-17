@@ -29,7 +29,8 @@ from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationListQuery,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     RelationshipDirection,
     RelationshipType,
@@ -800,15 +801,14 @@ async def _seed_evolution_world(
 def _observation(
     investigation_id: UUID,
     relationship_id: UUID,
-    evidence: Evidence,
+    evidence: LegacyEvidence,
 ) -> ObservationModel:
     """Build one appended observation row on an already-recorded evidence row."""
     assert evidence.id is not None
     return ObservationModel(
         id=uuid4(),
         relationship_id=relationship_id,
-        evidence_id=evidence.id,
-        investigation_id=investigation_id,
+        evidence_observation_id=evidence.id,
         observed_at=None,
         retrieved_at=FIXED_TIME + timedelta(days=5),
         source=evidence.source,

@@ -209,6 +209,11 @@ mutations.
 
 ## Evidence
 
+### Stable global Evidence (PR 28A)
+
+PR 28A replaced the v0.1 Investigation-owned, single-subject Evidence with a
+stable global source-intelligence identity and immutable observations:
+
 ```python
 class EvidenceType(str, Enum):
     DNS = "urn:ati:evidence:dns"
@@ -219,36 +224,113 @@ class EvidenceType(str, Enum):
     THREAT_INTELLIGENCE = "urn:ati:evidence:threat_intelligence"
     VULNERABILITY = "urn:ati:evidence:vulnerability"
     THREAT_RESEARCH = "urn:ati:evidence:threat_research"
-```
-
-```python
-class EntityRef(BaseModel):
-    id: UUID | None = None
-    type: EntityType
-    value: str
 
 class Evidence(BaseModel):
     model_config = ConfigDict(frozen=True)
-    id: UUID | None = None
-    investigation_id: UUID
+    id: UUID
     type: EvidenceType
-    subject: EntityRef
     source: str
-    source_record_id: str | None = None
-    source_url: str | None = None
-    observed_at: datetime | None = None
-    retrieved_at: datetime
-    facts: dict[str, Any] = Field(default_factory=dict)
-    raw_payload: dict[str, Any] | None = None
+    source_record_id: str
 ```
 
-Evidence is an immutable observation from a source about one primary subject.
-Its subject and nested JSON facts/raw payload are defensively snapshotted and
-recursively immutable, not merely protected from top-level field assignment.
+``Evidence`` is **global** (never Investigation-owned), has **no single
+subject**, and carries no retrieval state, no mutable facts, and no raw
+payload. Stable identity is `evidence_id_for_source_record(semantic_format,
+source, source_record_id)`: a deterministic UUIDv5 over the ATI-owned
+Evidence namespace and the exact (semantic format URN, source URN, upstream
+source-record identity) triple. Retrieval time, Investigation/Entity
+identity, datasource execution identity, and broker position never
+participate. A semantic format without an approved stable upstream identity
+fails closed rather than making identity optional.
 
-Provider-specific scores remain normalized facts. ATI analytical confidence belongs in Assessment.
+```python
+class EvidenceObservation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    id: UUID
+    evidence_id: UUID
+    version: int            # >= 1, monotonic per Evidence
+    source_url: str | None
+    observed_at: datetime | None
+    retrieved_at: datetime  # acquisition provenance, never material
+    facts: dict[str, Any]
+    raw_payload: dict[str, Any] | None
+    diff: dict[str, Any] | None  # None for the first observation
+```
 
-`observed_at` is the time represented by the source when known. `retrieved_at` is when ATI retrieved the information.
+``EvidenceObservation`` is the immutable provenance-bearing state of one
+Evidence item. Versions are monotonically increasing per Evidence and
+``(evidence_id, version)`` is unique. **Creating a new Evidence necessarily
+entails observation version 1** (a normal committed Evidence with zero
+observations is invalid). A later retrieval whose **material state** is
+unchanged creates **no new observation** — ``retrieved_at`` alone never
+manufactures a semantic version. A material change appends the next
+immutable observation with a diff from the immediately prior material
+state. Material state is exactly ``observed_at``, ``source_url``,
+normalized ``facts``, and normalized ``raw_payload``; IDs, version,
+``retrieved_at``, datasource execution metadata, and diff are operational
+only. Converters emit ``EvidenceObservationCandidate`` (pre-persistence
+material state with no ID/version/diff) wrapped in ``ConvertedEvidence``;
+authoritative version allocation is persistence-owned (PR 28B).
+
+The pure transition decision is `decide_evidence_transition(...)`: no
+Evidence + no latest observation -> `CREATE_EVIDENCE_AND_OBSERVATION`;
+existing Evidence + equal material state -> `NO_CHANGE`; existing Evidence +
+changed material state -> `APPEND_OBSERVATION`; impossible Evidence/latest
+combinations fail closed. The canonical diff contract
+(`material_state_diff`) mirrors `ati.ati_jsonb_diff`: a shallow top-level
+`{key: {old, new}}` diff where absent and JSON null remain distinct.
+
+Observation-level provenance anchors:
+
+```python
+class EvidenceObservationEntity(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    evidence_observation_id: UUID
+    entity_id: UUID
+```
+
+```python
+class InvestigationEvidenceReason(str, Enum):
+    INITIAL = "initial"
+    PROVIDER_RESULT = "provider_result"
+    CORRELATION = "correlation"
+    AGENT_SELECTED = "agent_selected"
+    ANALYST_ADDED = "analyst_added"
+
+class InvestigationEvidenceActor(str, Enum):
+    SYSTEM = "system"
+    AGENT = "agent"
+    ANALYST = "analyst"
+
+class InvestigationEvidence(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    investigation_id: UUID
+    evidence_observation_id: UUID
+    inclusion_reason: InvestigationEvidenceReason
+    discovered_from_evidence_observation_id: UUID | None
+    added_at: datetime
+    added_by: InvestigationEvidenceActor
+```
+
+Investigations admit **exact immutable observations** with a bounded
+mechanism/actor vocabulary; logical identity is
+``(investigation_id, evidence_observation_id)``, admission is
+append-only/idempotent, and a newer global observation never silently
+alters an Investigation. ``discovered_from_evidence_observation_id`` is
+workflow provenance only.
+
+### v0.1 runtime shape (transitional, removed in PR 28B)
+
+The v0.1 Investigation-bound single-subject shape still exists as
+``LegacyEvidence`` (with its ``EntityRef`` subject) in
+``agentic_threat_investigator.domain.legacy_evidence``. It is the explicit
+transitional v0.1 runtime/persistence boundary shape: the Investigation
+executor, extractors, providers, API/GEOINT/report/RAG consumers and the
+v0.1 PostgreSQL tables keep using it until PR 28B migrates persistence.
+PR 28A binds the datasource-backed converter output onto this shape only at
+the runtime boundary (`datasource_provider`), keeping the v0.1
+per-observation ``uuid4`` append semantics; the deterministic global
+identity is authoritative on the domain model for PR 28B.
 
 ## Relationships
 
@@ -282,8 +364,7 @@ class RelationshipObservation(BaseModel):
     model_config = ConfigDict(frozen=True)
     id: UUID
     relationship_id: UUID
-    evidence_id: UUID
-    investigation_id: UUID | None
+    evidence_observation_id: UUID
     observed_at: datetime | None
     retrieved_at: datetime
     source: str
@@ -292,9 +373,7 @@ class RelationshipObservation(BaseModel):
 
 Relationship identity is unique by source entity, relationship URN, and target entity.
 
-A Relationship is the durable semantic edge. RelationshipObservation records when and why ATI observed or imported the assertion and is frozen after validation.
-
-Historical relationships are not deleted merely because they are no longer current.
+A Relationship is the durable semantic edge. RelationshipObservation records when and why ATI observed or imported the assertion and is frozen after validation. Since PR 28A the observation references the exact supporting ``EvidenceObservation`` (``evidence_observation_id``) and carries no Investigation correlation: relationships are global per observation, and reusing an observation in multiple Investigations never duplicates the observation. In v0.1 persistence the Evidence row *is* the observation, so the v0.1 adapter maps its ``evidence_id`` onto this field until PR 28B migrates the schema. Historical relationships are not deleted merely because they are no longer current.
 
 ## Assessment
 

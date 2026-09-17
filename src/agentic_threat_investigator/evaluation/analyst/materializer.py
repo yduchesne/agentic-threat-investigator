@@ -3,7 +3,7 @@
 """Deterministic fixture materialization for analyst scenarios (PR 20C).
 
 The materializer persists one :class:`AnalystScenario` fixture through the
-application ``UnitOfWork`` seam — Investigation, Entities, Evidence,
+application ``UnitOfWork`` seam — Investigation, Entities, LegacyEvidence,
 Relationships, and RelationshipObservations — and returns the
 :class:`AnalystScenarioResolution` that maps every semantic label to the
 exact persisted UUID. It is storage-agnostic (any ``UnitOfWork``
@@ -26,13 +26,13 @@ from uuid import UUID, uuid5
 
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import EntityRef, Evidence
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -91,7 +91,7 @@ class AnalystScenarioMaterializer:
         Persistence order is deterministic: entities (in declaration order),
         then Investigation, evidence, relationships, observations. Entities
         are persisted first so the Investigation root pointer and every
-        Evidence subject reference the identities the repository actually
+        LegacyEvidence subject reference the identities the repository actually
         returned. Every id recorded in the resolution is the identity the
         repository actually persisted, so label resolution always matches
         durable rows.
@@ -130,7 +130,7 @@ class AnalystScenarioMaterializer:
         for evidence in fixture.evidence:
             subject = _entity_by_label(fixture.entities, evidence.subject)
             persisted_evidence = await uow.evidence.insert(
-                Evidence(
+                LegacyEvidence(
                     id=self._planned(scenario, "evidence", evidence.label),
                     investigation_id=investigation_id,
                     type=evidence.type,
@@ -169,8 +169,7 @@ class AnalystScenarioMaterializer:
                 RelationshipObservation(
                     id=self._planned(scenario, "observation", observation.label),
                     relationship_id=relationship_ids[observation.relationship],
-                    evidence_id=evidence_ids[observation.evidence],
-                    investigation_id=investigation_id,
+                    evidence_observation_id=evidence_ids[observation.evidence],
                     retrieved_at=_FIXED_TIMESTAMP,
                     source=observation.source,
                     confidence=observation.confidence,

@@ -4,7 +4,7 @@
 
 Implements the documented Google Public DNS extraction matrix on normalized
 ``DNS`` evidence facts. Extraction is pure and synchronous: it consumes
-already-normalized, persisted Evidence, re-canonicalizes every identity
+already-normalized, persisted LegacyEvidence, re-canonicalizes every identity
 through the shared domain canonicalizers, and fails explicitly on malformed
 facts instead of producing a partial result.
 
@@ -17,7 +17,7 @@ are validated before any result is returned.
 Semantics (exactly, nothing more):
 
 - A/AAAA: answer owner DOMAIN ``RESOLVES_TO`` answer IP_ADDRESS; the address
-  is discovered. The answer owner (not blindly the Evidence subject) is the
+  is discovered. The answer owner (not blindly the LegacyEvidence subject) is the
   relationship source because CNAME chains legitimately change owners.
 - CNAME: answer owner DOMAIN ``CNAME_OF`` target DOMAIN; the target is
   discovered.
@@ -56,8 +56,9 @@ from agentic_threat_investigator.domain.entities import (
     canonicalize_ip_address,
     validate_dns_name,
 )
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 _QUERY_TYPES = frozenset({"A", "AAAA", "CNAME", "MX", "NS", "PTR", "SOA", "TXT"})
@@ -70,8 +71,8 @@ _DNS_FLAGS = frozenset({"tc", "rd", "ra", "ad", "cd"})
 _MAX_UINT32 = 4294967295
 
 
-def extract_dns(evidence: Evidence) -> ExtractionResult:
-    """Extract the documented DNS identities and assertions from one Evidence."""
+def extract_dns(evidence: LegacyEvidence) -> ExtractionResult:
+    """Extract the documented DNS identities and assertions from one LegacyEvidence."""
     evidence_id = validate_extractor_input(
         evidence,
         source=SourceId.GOOGLE_PUBLIC_DNS.value,
@@ -104,7 +105,9 @@ def _malformed(evidence_id: UUID, message: str) -> EvidenceExtractionError:
     )
 
 
-def _validate_query_envelope(evidence: Evidence, evidence_id: UUID) -> tuple[str, str]:
+def _validate_query_envelope(
+    evidence: LegacyEvidence, evidence_id: UUID
+) -> tuple[str, str]:
     """Validate the complete query envelope and return the validated values.
 
     Persisted DNS evidence is only ever emitted for a NOERROR query whose
@@ -144,7 +147,7 @@ def _validate_query_name(facts: Mapping[str, Any], evidence_id: UUID) -> str:
 
 
 def _validate_subject_pairing(
-    evidence: Evidence, query_type: str, evidence_id: UUID
+    evidence: LegacyEvidence, query_type: str, evidence_id: UUID
 ) -> str:
     """Return the query name the evidence subject pairing requires.
 

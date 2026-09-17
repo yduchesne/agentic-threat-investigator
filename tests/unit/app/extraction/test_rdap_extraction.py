@@ -3,7 +3,7 @@
 """Unit tests for conservative RDAP extraction."""
 
 # The evidence-builder helpers in extraction test modules intentionally
-# share the normalized Evidence construction shape (see the established
+# share the normalized LegacyEvidence construction shape (see the established
 # provider fixture family); the duplication is test-only and accepted.
 
 from datetime import UTC, datetime
@@ -18,12 +18,9 @@ from agentic_threat_investigator.app.extraction import (
 )
 from agentic_threat_investigator.app.extraction.models import ExtractionResult
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 SOURCE = SourceId.RDAP.value
@@ -36,9 +33,9 @@ def rdap_evidence(
     subject_value: str = "198.51.100.42",
     evidence_type: EvidenceType = EvidenceType.NETWORK,
     evidence_id: UUID | None = None,
-) -> Evidence:
+) -> LegacyEvidence:
     """Build one normalized RDAP evidence observation with the given facts."""
-    return Evidence(
+    return LegacyEvidence(
         id=evidence_id if evidence_id is not None else uuid4(),
         investigation_id=uuid4(),
         type=evidence_type,
@@ -238,7 +235,7 @@ def test_network_evidence_without_ip_subject_fails() -> None:
 
 
 def test_missing_persisted_evidence_id_fails() -> None:
-    """RDAP network extraction requires a persisted Evidence ID."""
+    """RDAP network extraction requires a persisted LegacyEvidence ID."""
     evidence = rdap_evidence(network_facts())
     unpersisted = evidence.model_copy(update={"id": None})
 
@@ -372,7 +369,7 @@ def test_invalid_registration_envelope_fails(
 
 
 def test_registration_requires_persisted_evidence_id() -> None:
-    """Both RDAP branches follow the same persisted-Evidence ID policy."""
+    """Both RDAP branches follow the same persisted-LegacyEvidence ID policy."""
     evidence = rdap_evidence(
         {
             "object_class_name": "domain",

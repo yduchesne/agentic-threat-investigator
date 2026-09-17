@@ -1,22 +1,29 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 27D generic evidence-conversion contract tests.
+"""PR 27D + PR 28A generic evidence-conversion contract tests.
 
-Stable matrix IDs D27D-C01..C10 pin the immutable conversion context, the
-0..N cardinality of the ``ToEvidenceConverter`` contract, deterministic
+Stable matrix IDs D27D-C01..C10 pin the immutable global conversion context,
+the 0..N cardinality of the ``ToEvidenceConverter`` contract, deterministic
 flattening order, structural repeatability, and deterministic local
 conversion failures. Matrix IDs D27D-R01..R10 pin the semantic-format
 registry: keyed selection by ``SemanticFormatId`` only, duplicate
 registration failing closed, typeless lookup failures for unknown formats,
 and no fallback on provider/protocol/serialization/datasource/shape.
-Test-only converters are used for formats without production converters;
-no database, network, or persistence is involved.
+
+PR 28A contract updates: conversion is Investigation-independent — the
+context carries only the semantic acquisition provenance (no Investigation
+identity, no subject binding), and converters emit
+``ConvertedEvidence`` values (stable global ``Evidence`` plus an
+``EvidenceObservationCandidate`` carrying the material state, with no
+fabricated observation ID/version/diff). Test-only converters are used for
+formats without production converters; no database, network, or persistence
+is involved.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -38,11 +45,12 @@ from agentic_threat_investigator.domain.datasource import (
     DatasourceProtocol,
     SerializationFormat,
 )
-from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
+    ConvertedEvidence,
     Evidence,
+    EvidenceObservationCandidate,
     EvidenceType,
+    evidence_id_for_source_record,
 )
 from agentic_threat_investigator.domain.identifiers import (
     SemanticFormatId,
@@ -52,8 +60,6 @@ from agentic_threat_investigator.domain.identifiers import (
 pytestmark = pytest.mark.unit
 
 _FIXED_TS = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
-_INVESTIGATION_ID = UUID("11111111-2222-3333-4444-555555555555")
-_SUBJECT = EntityRef(type=EntityType.DOMAIN, value="malicious-domain.test")
 
 _THREATFOX_DEFINITION = DatasourceDefinition(
     datasource_id=DatasourceId("threatfox-live"),
@@ -80,32 +86,49 @@ def _context(
         retrieved_at=_FIXED_TS,
         source_reference="https://threatfox-api.abuse.ch/api/v1/",
     )
-    return EvidenceConversionContext(
-        investigation_id=_INVESTIGATION_ID,
-        subject=_SUBJECT,
-        semantic_source=semantic,
-    )
+    return EvidenceConversionContext(semantic_source=semantic)
 
 
-def _evidence(
+def _converted(
     context: EvidenceConversionContext, *, seq: str | None = None
-) -> Evidence:
-    """Build one deterministic Evidence observation from a conversion context."""
+) -> ConvertedEvidence:
+    """Build one deterministic ConvertedEvidence from a conversion context."""
+    evidence_id = evidence_id_for_source_record(
+        context.semantic_source.semantic_format,
+        context.semantic_source.source_id,
+        f"record-{seq}" if seq is not None else "record",
+    )
     facts: dict[str, object] = {}
     if seq is not None:
         facts["seq"] = seq
-    return Evidence(
-        investigation_id=context.investigation_id,
-        type=EvidenceType.THREAT_INTELLIGENCE,
-        subject=context.subject,
-        source=context.semantic_source.source_id.value,
+    return ConvertedEvidence(
+        evidence=Evidence(
+            id=evidence_id,
+            type=EvidenceType.THREAT_INTELLIGENCE,
+            source=context.semantic_source.source_id.value,
+            source_record_id=f"record-{seq}" if seq is not None else "record",
+        ),
+        observation=_candidate(context, evidence_id=evidence_id, facts=facts),
+    )
+
+
+def _candidate(
+    context: EvidenceConversionContext,
+    *,
+    evidence_id: UUID,
+    facts: dict[str, object],
+) -> EvidenceObservationCandidate:
+    """Build one deterministic observation candidate."""
+    return EvidenceObservationCandidate(
+        evidence_id=evidence_id,
+        source_url=context.semantic_source.source_reference,
         retrieved_at=context.semantic_source.retrieved_at,
         facts=facts,
     )
 
 
 class _CardinalityConverter(ToEvidenceConverter[str]):
-    """Test-only converter emitting a fixed number of Evidence per object.
+    """Test-only converter emitting a fixed number of ConvertedEvidence per object.
 
     Proves the 0..N contract without distorting a production semantic
     format (the plan's cardinality proof uses test-only converters).
@@ -123,10 +146,10 @@ class _CardinalityConverter(ToEvidenceConverter[str]):
 
     def convert(
         self, source: str, context: EvidenceConversionContext
-    ) -> tuple[Evidence, ...]:
-        """Emit exactly ``count`` deterministic Evidence in fixed order."""
+    ) -> tuple[ConvertedEvidence, ...]:
+        """Emit exactly ``count`` deterministic ConvertedEvidence in fixed order."""
         return tuple(
-            _evidence(context, seq=f"{source}-{index}") for index in range(self._count)
+            _converted(context, seq=f"{source}-{index}") for index in range(self._count)
         )
 
 
@@ -140,55 +163,48 @@ class _FailingConverter(ToEvidenceConverter[str]):
 
     def convert(
         self, source: str, context: EvidenceConversionContext
-    ) -> tuple[Evidence, ...]:
+    ) -> tuple[ConvertedEvidence, ...]:
         """Raise the typed deterministic conversion failure."""
         raise ConversionError("deterministic local conversion failure")
 
 
 class TestEvidenceConversionContext:
-    """D27D-C01..C04: immutable context and exact identity preservation."""
+    """D27D-C01..C04: immutable global context and exact provenance."""
 
     def test_c01_valid_immutable_context_accepted(self) -> None:
         """D27D-C01: a valid conversion context is accepted and immutable."""
         context = _context()
-        assert context.investigation_id == _INVESTIGATION_ID
-        assert context.subject == _SUBJECT
         assert context.semantic_source.semantic_format is SemanticFormatId.THREATFOX
         with pytest.raises(Exception):  # noqa: B017 - dataclasses raises FrozenInstanceError
-            context.investigation_id = UUID(int=0)  # type: ignore[misc]
+            context.semantic_source = context.semantic_source  # type: ignore[misc]
 
-    def test_c02_investigation_uuid_exact_preservation(self) -> None:
-        """D27D-C02: the Investigation UUID is preserved exactly by conversion."""
+    def test_c02_no_investigation_identity_in_context(self) -> None:
+        """D27D-C02: the context carries no Investigation identity."""
         context = _context()
-        (evidence,) = _CardinalityConverter(
-            SemanticFormatId.THREATFOX, count=1
-        ).convert("source-a", context)
-        assert evidence.investigation_id == _INVESTIGATION_ID
+        assert not hasattr(context, "investigation_id")
+        assert not hasattr(context.semantic_source, "investigation_id")
 
-    def test_c03_subject_exact_preservation(self) -> None:
-        """D27D-C03: the canonical subject binding is preserved exactly."""
+    def test_c03_no_subject_binding_in_context(self) -> None:
+        """D27D-C03: the context carries no subject binding."""
         context = _context()
-        (evidence,) = _CardinalityConverter(
-            SemanticFormatId.THREATFOX, count=1
-        ).convert("source-a", context)
-        assert evidence.subject == _SUBJECT
+        assert not hasattr(context, "subject")
 
     def test_c04_semantic_context_exact_preservation(self) -> None:
         """D27D-C04: semantic source URN and retrieval time are preserved."""
         context = _context()
-        (evidence,) = _CardinalityConverter(
+        (converted,) = _CardinalityConverter(
             SemanticFormatId.THREATFOX, count=1
         ).convert("source-a", context)
-        assert evidence.source == SourceId.THREATFOX.value
-        assert evidence.retrieved_at == _FIXED_TS
-        assert evidence.observed_at is None
+        assert converted.evidence.source == SourceId.THREATFOX.value
+        assert converted.observation.retrieved_at == _FIXED_TS
+        assert converted.observation.observed_at is None
 
 
 class TestCardinality:
     """D27D-C05..C09: zero/one/many and deterministic flattening."""
 
     def test_c05_zero_evidence_legal_success(self) -> None:
-        """D27D-C05: a valid object may yield zero Evidence."""
+        """D27D-C05: a valid object may yield zero ConvertedEvidence."""
         context = _context()
         output = _CardinalityConverter(SemanticFormatId.THREATFOX, count=0).convert(
             "source-a", context
@@ -196,22 +212,22 @@ class TestCardinality:
         assert output == ()
 
     def test_c06_one_evidence_legal_success(self) -> None:
-        """D27D-C06: a valid object may yield exactly one Evidence."""
+        """D27D-C06: a valid object may yield exactly one ConvertedEvidence."""
         context = _context()
         output = _CardinalityConverter(SemanticFormatId.THREATFOX, count=1).convert(
             "source-a", context
         )
         assert len(output) == 1
-        assert output[0].facts == {"seq": "source-a-0"}
+        assert output[0].observation.facts == {"seq": "source-a-0"}
 
     def test_c07_multiple_evidence_legal_success(self) -> None:
-        """D27D-C07: a valid object may yield multiple Evidence observations."""
+        """D27D-C07: a valid object may yield multiple ConvertedEvidence."""
         context = _context()
         output = _CardinalityConverter(SemanticFormatId.THREATFOX, count=2).convert(
             "source-a", context
         )
         assert len(output) == 2
-        assert [item.facts for item in output] == [
+        assert [item.observation.facts for item in output] == [
             {"seq": "source-a-0"},
             {"seq": "source-a-1"},
         ]
@@ -230,7 +246,7 @@ class TestCardinality:
         output = convert_semantic_source_objects(
             ("source-a", "source-b", "source-c"), context, registry
         )
-        assert [item.facts for item in output] == [
+        assert [item.observation.facts for item in output] == [
             {"seq": "source-a-0"},
             {"seq": "source-a-1"},
             {"seq": "source-b-0"},
@@ -246,7 +262,6 @@ class TestCardinality:
         first = converter.convert("source-a", context)
         second = converter.convert("source-a", context)
         assert first == second
-        assert all(item.id is None for item in first)
 
     def test_c10_conversion_failure_deterministic_local(self) -> None:
         """D27D-C10: a converter violation fails locally and typed."""
@@ -328,8 +343,6 @@ class TestRegistry:
         registry = ToEvidenceConverterRegistry(
             (_CardinalityConverter(SemanticFormatId.THREATFOX, count=1),)
         )
-        # Serialization has one vocabulary value in v0.1; a second definition
-        # with the same semantic format still resolves identically.
         definition = DatasourceDefinition(
             datasource_id=DatasourceId("threatfox-live"),
             source_id=SourceId.THREATFOX,
@@ -391,3 +404,51 @@ class TestRegistry:
                 "definitely-not-a-record",  # type: ignore[arg-type]
                 _context(),
             )
+
+
+class TestGlobalIdentity:
+    """E28A-40..44: deterministic stable Evidence identity (PR 28A)."""
+
+    def test_same_record_same_identity(self) -> None:
+        """E28A-40: converting the same source record twice yields the same UUID."""
+        first = evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864201"
+        )
+        second = evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864201"
+        )
+        assert first == second
+
+    def test_different_record_different_identity(self) -> None:
+        """E28A-41: a different source record yields a different UUID."""
+        assert evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864201"
+        ) != evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864299"
+        )
+
+    def test_different_semantic_format_different_identity(self) -> None:
+        """E28A-42: the same record under a different semantic format differs."""
+        assert evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864201"
+        ) != evidence_id_for_source_record(
+            SemanticFormatId.STIX_21, SourceId.THREATFOX, "864201"
+        )
+
+    def test_different_source_different_identity(self) -> None:
+        """E28A-43: the same record under a different source namespace differs."""
+        assert evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864201"
+        ) != evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX, SourceId.URLHAUS, "864201"
+        )
+
+    def test_identity_is_uuidv5_deterministic_value(self) -> None:
+        """The identity is a stable UUIDv5, never uuid4 or a Python hash."""
+        value = evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864201"
+        )
+        assert isinstance(value, UUID)
+        assert value.version == 5
+        # Retrieval time and Investigation identity never participate.
+        assert value != uuid4()

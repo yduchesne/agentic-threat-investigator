@@ -61,14 +61,22 @@ class Relationship(BaseModel):
 
 
 class RelationshipObservation(BaseModel):
-    """A historical, append-oriented record of when/why a relationship was observed."""
+    """A historical, append-oriented record of when/why a relationship was observed.
+
+    The observation references the exact supporting immutable
+    ``EvidenceObservation`` (``evidence_observation_id``) and has no
+    Investigation ownership (PR 28A): relationships are global per
+    observation, and reusing an observation in multiple Investigations never
+    duplicates the observation. In v0.1 persistence the Evidence row *is*
+    the observation, so the v0.1 adapter maps its ``evidence_id`` onto this
+    field until PR 28B migrates the schema.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     id: UUID
     relationship_id: UUID
-    evidence_id: UUID
-    investigation_id: UUID | None = None
+    evidence_observation_id: UUID
     observed_at: datetime | None = None
     retrieved_at: datetime
     source: str

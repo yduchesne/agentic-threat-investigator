@@ -7,7 +7,7 @@ PostgreSQL: deterministic local ThreatFox HTTP fixture via
 ``httpx.MockTransport`` -> real ``ProviderHttpClient`` -> real
 ``ThreatFoxDatasource`` -> real ThreatFox semantic parser -> real
 ``SemanticSourceContext`` -> real ``ToEvidenceConverterRegistry`` -> real
-``ThreatFoxToEvidenceConverter`` -> in-memory ``Evidence`` -> real
+``ThreatFoxToEvidenceConverter`` -> in-memory ``LegacyEvidence`` -> real
 ``DatasourceExecutionRecorder`` -> real ``PostgresUnitOfWork`` -> real
 ``ati.append_datasource_log_event`` stored function -> real
 ``ati.datasource_log``. Only the external Internet endpoint is faked;
@@ -15,7 +15,7 @@ ATI's acquisition, semantic, conversion, logging, and PostgreSQL
 architecture are all real. Matrix IDs D27D-I01..I06 cover one-record
 success, valid no-result (CONVERTED 0), two semantic records, conversion
 failure (bounded ``conversion_failed``), cancellation, and minimization.
-No Evidence is ever persisted by this slice.
+No LegacyEvidence is ever persisted by this slice.
 """
 
 from __future__ import annotations
@@ -46,9 +46,8 @@ from agentic_threat_investigator.domain.datasource import (
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
     EvidenceType,
+    evidence_id_for_source_record,
 )
 from agentic_threat_investigator.domain.identifiers import (
     SemanticFormatId,
@@ -91,7 +90,6 @@ _DEFINITION = DatasourceDefinition(
     semantic_format=SemanticFormatId.THREATFOX,
 )
 _DOMAIN_ENTITY = Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN)
-_DOMAIN_SUBJECT = EntityRef(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN)
 
 _BODY = json.dumps(threatfox_search_response(asyncrat_domain_record())).encode("utf-8")
 """Deterministic response body; its exact byte length is asserted on ACQUIRED."""
@@ -170,12 +168,12 @@ async def test_i01_one_record_success_real_stack(
     uow_factory: Callable[[], PostgresUnitOfWork],
     integration_engine: AsyncEngine,
 ) -> None:
-    """D27D-I01: one Evidence with exact provenance and a full lifecycle.
+    """D27D-I01: one LegacyEvidence with exact provenance and a full lifecycle.
 
     The full real path records STARTED -> ACQUIRED -> DECODED -> CONVERTED
     (item_count=1) -> COMPLETED under exactly one execution ID with the
     exact acquired byte count and decoded record count, and the in-memory
-    Evidence carries exact provenance. No Evidence, SourceRecord, or
+    LegacyEvidence carries exact provenance. No LegacyEvidence, SourceRecord, or
     Investigation is persisted.
     """
     async with _client(
@@ -185,8 +183,6 @@ async def test_i01_one_record_success_real_stack(
             datasource=_datasource(client),
             definition=_DEFINITION,
             entity=_DOMAIN_ENTITY,
-            investigation_id=_INVESTIGATION_ID,
-            subject=_DOMAIN_SUBJECT,
             registry=build_threatfox_conversion_registry(),
             uow_factory=uow_factory,
             clock=lambda: _OCCURRED_AT,
@@ -199,20 +195,21 @@ async def test_i01_one_record_success_real_stack(
     assert result.context.semantic_format is SemanticFormatId.THREATFOX
     assert len(result.objects) == 1
 
-    # The conversion produced exactly one in-memory Evidence with provenance.
+    # The conversion produced exactly one in-memory LegacyEvidence with provenance.
     assert len(evidence) == 1
     item = evidence[0]
-    assert item.type == EvidenceType.THREAT_INTELLIGENCE
-    assert item.investigation_id == _INVESTIGATION_ID
-    assert item.subject == _DOMAIN_SUBJECT
-    assert item.source == SourceId.THREATFOX.value
-    assert item.source_record_id == "864201"
-    assert item.source_url == _ENDPOINT
-    assert item.retrieved_at == _OCCURRED_AT
-    assert item.observed_at == datetime(2026, 8, 21, 12, 0, 0, tzinfo=UTC)
-    assert item.raw_payload is None
-    assert item.id is None
-    match = item.facts["matches"][0]
+    assert item.evidence.type == EvidenceType.THREAT_INTELLIGENCE
+    # PR 28A: conversion is global and Investigation-independent.
+    assert item.evidence.id == evidence_id_for_source_record(
+        SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864201"
+    )
+    assert item.evidence.source == SourceId.THREATFOX.value
+    assert item.evidence.source_record_id == "864201"
+    assert item.observation.source_url == _ENDPOINT
+    assert item.observation.retrieved_at == _OCCURRED_AT
+    assert item.observation.observed_at == datetime(2026, 8, 21, 12, 0, 0, tzinfo=UTC)
+    assert item.observation.raw_payload is None
+    match = item.observation.facts["matches"][0]
     assert thaw_json(match)["threatfox_id"] == "864201"
     assert thaw_json(match)["confidence_level"] == 100
     assert thaw_json(match)["malware"] == "win.asyncrat"
@@ -234,7 +231,7 @@ async def test_i01_one_record_success_real_stack(
     assert rows[3][5] == 1
     assert all(row[7] is None for row in rows)
 
-    # No Evidence is persisted by the PR 27D slice.
+    # No LegacyEvidence is persisted by the PR 27D slice.
     assert await _count(integration_engine, "evidence") == 0
     assert await _count(integration_engine, "source_record") == 0
     assert await _count(integration_engine, "investigation") == 0
@@ -257,8 +254,6 @@ async def test_i02_valid_no_result_converted_zero_real_stack(
             datasource=_datasource(client),
             definition=_DEFINITION,
             entity=_DOMAIN_ENTITY,
-            investigation_id=_INVESTIGATION_ID,
-            subject=_DOMAIN_SUBJECT,
             registry=build_threatfox_conversion_registry(),
             uow_factory=uow_factory,
             clock=lambda: _OCCURRED_AT,
@@ -288,7 +283,7 @@ async def test_i03_two_semantic_records_two_evidence_in_order_real_stack(
     uow_factory: Callable[[], PostgresUnitOfWork],
     integration_engine: AsyncEngine,
 ) -> None:
-    """D27D-I03: two records yield two Evidence in semantic source order.
+    """D27D-I03: two records yield two LegacyEvidence in semantic source order.
 
     Two distinct validated records matching the same queried domain are
     converted in source order with CONVERTED item_count=2.
@@ -302,8 +297,6 @@ async def test_i03_two_semantic_records_two_evidence_in_order_real_stack(
             datasource=_datasource(client),
             definition=_DEFINITION,
             entity=_DOMAIN_ENTITY,
-            investigation_id=_INVESTIGATION_ID,
-            subject=_DOMAIN_SUBJECT,
             registry=build_threatfox_conversion_registry(),
             uow_factory=uow_factory,
             clock=lambda: _OCCURRED_AT,
@@ -312,8 +305,11 @@ async def test_i03_two_semantic_records_two_evidence_in_order_real_stack(
     assert result.error is None
     assert len(result.objects) == 2
     assert len(evidence) == 2
-    assert [item.source_record_id for item in evidence] == ["864201", "864299"]
-    assert [item.observed_at for item in evidence] == [
+    assert [item.evidence.source_record_id for item in evidence] == [
+        "864201",
+        "864299",
+    ]
+    assert [item.observation.observed_at for item in evidence] == [
         datetime(2026, 8, 21, 12, 0, 0, tzinfo=UTC),
         datetime(2026, 8, 20, 12, 0, 0, tzinfo=UTC),
     ]
@@ -344,7 +340,7 @@ class _FailingConverter(ToEvidenceConverter[Any]):
         self,
         source: Any,
         context: EvidenceConversionContext,
-    ) -> tuple[Evidence, ...]:
+    ) -> tuple[Any, ...]:
         """Raise the typed deterministic conversion failure."""
         raise ConversionError("deterministic local conversion failure")
 
@@ -374,8 +370,6 @@ async def test_i04_conversion_failure_real_stack(
                 datasource=_datasource(client),
                 definition=_DEFINITION,
                 entity=_DOMAIN_ENTITY,
-                investigation_id=_INVESTIGATION_ID,
-                subject=_DOMAIN_SUBJECT,
                 registry=_failing_registry(),
                 uow_factory=uow_factory,
                 clock=lambda: _OCCURRED_AT,
@@ -421,8 +415,6 @@ async def test_i05_cancellation_real_stack_propagates(
                 datasource=_datasource(client),
                 definition=_DEFINITION,
                 entity=_DOMAIN_ENTITY,
-                investigation_id=_INVESTIGATION_ID,
-                subject=_DOMAIN_SUBJECT,
                 registry=build_threatfox_conversion_registry(),
                 uow_factory=uow_factory,
                 clock=lambda: _OCCURRED_AT,
@@ -450,8 +442,8 @@ async def test_i06_minimization_no_credentials_or_bodies(
     """D27D-I06: Auth-Key, raw body, credential URL, exception text absent.
 
     The full success path persists only the bounded operational log and
-    returns in-memory Evidence; the Auth-Key, raw HTTP body fragments, and
-    credential-bearing content never reach durable logs or Evidence.
+    returns in-memory LegacyEvidence; the Auth-Key, raw HTTP body fragments, and
+    credential-bearing content never reach durable logs or LegacyEvidence.
     """
     async with _client(
         lambda _: _json_response(threatfox_search_response(asyncrat_domain_record()))
@@ -460,8 +452,6 @@ async def test_i06_minimization_no_credentials_or_bodies(
             datasource=_datasource(client),
             definition=_DEFINITION,
             entity=_DOMAIN_ENTITY,
-            investigation_id=_INVESTIGATION_ID,
-            subject=_DOMAIN_SUBJECT,
             registry=build_threatfox_conversion_registry(),
             uow_factory=uow_factory,
             clock=lambda: _OCCURRED_AT,
@@ -477,13 +467,13 @@ async def test_i06_minimization_no_credentials_or_bodies(
     assert '"ok"' not in serialized.replace(" ", "")
     assert FIXED_KEY not in serialized
 
-    # The Evidence is credential-free and payload-free.
+    # The LegacyEvidence is credential-free and payload-free.
     assert result.error is None
     item = evidence[0]
-    assert item.source_url == _ENDPOINT
-    assert FIXED_KEY not in str(item.facts)
-    assert item.raw_payload is None
-    assert "auth" not in item.source_url.lower()
+    assert item.observation.source_url == _ENDPOINT
+    assert FIXED_KEY not in str(item.observation.facts)
+    assert item.observation.raw_payload is None
+    assert "auth" not in item.observation.source_url.lower()
 
     # The bounded schema cannot represent a body or credential: no such
     # columns exist.

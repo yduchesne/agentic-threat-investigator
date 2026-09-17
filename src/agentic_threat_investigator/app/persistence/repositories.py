@@ -24,7 +24,6 @@ from agentic_threat_investigator.domain.datasource import (
 )
 from agentic_threat_investigator.domain.documents import Document, DocumentChunk
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.geoint import (
     EntityLocation,
     EntityLocationObservation,
@@ -45,6 +44,7 @@ from agentic_threat_investigator.domain.investigation_job import (
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -166,7 +166,7 @@ class AssessmentSizeLimitExceededError(ValueError):
     """Raised when an Assessment candidate collection exceeds the configured limit.
 
     The message reports only the collection name, the count, and the limit;
-    it never includes Finding statements, Evidence payloads, summary text,
+    it never includes Finding statements, LegacyEvidence payloads, summary text,
     or any other analytical content.
     """
 
@@ -387,32 +387,32 @@ class GeoLocationNotFoundError(LookupError):
 
 
 class GeoEvidenceNotFoundError(LookupError):
-    """Raised when a GEOINT write references missing Evidence."""
+    """Raised when a GEOINT write references missing LegacyEvidence."""
 
     def __init__(self, evidence_id: UUID) -> None:
-        """Record the missing Evidence identity."""
+        """Record the missing LegacyEvidence identity."""
         super().__init__(f"geo evidence not found: {evidence_id}")
         self.evidence_id = evidence_id
 
 
 class GeoEvidenceTypeError(ValueError):
-    """Raised when Evidence backing geographic work is not GEOLOCATION."""
+    """Raised when LegacyEvidence backing geographic work is not GEOLOCATION."""
 
     def __init__(self, evidence_id: UUID) -> None:
-        """Record the offending Evidence identity."""
+        """Record the offending LegacyEvidence identity."""
         super().__init__(f"geo evidence is not GEOLOCATION: {evidence_id}")
         self.evidence_id = evidence_id
 
 
 class GeoEvidenceSubjectMismatchError(ValueError):
-    """Raised when Evidence's subject is not the observation/work Entity.
+    """Raised when LegacyEvidence's subject is not the observation/work Entity.
 
     Cross-context provenance can never be fabricated: geographic observations
-    and resolution work bind the exact Evidence subject to the exact Entity.
+    and resolution work bind the exact LegacyEvidence subject to the exact Entity.
     """
 
     def __init__(self, evidence_id: UUID, entity_id: UUID) -> None:
-        """Record the mismatched Evidence/Entity identities."""
+        """Record the mismatched LegacyEvidence/Entity identities."""
         super().__init__(
             f"geo evidence subject mismatch: evidence {evidence_id} is not "
             f"about entity {entity_id}"
@@ -1227,11 +1227,11 @@ class RelationshipObservationRepository(ABC):  # pragma: no cover
         limit: int = 100,
         offset: int = 0,
     ) -> list[RelationshipObservation]:
-        """Return bounded observations backed by the Investigation's Evidence.
+        """Return bounded observations backed by the Investigation's LegacyEvidence.
 
-        Every returned observation resolves to Evidence belonging to the
+        Every returned observation resolves to LegacyEvidence belonging to the
         supplied Investigation, so the Evidence Analyst never sees
-        observations rendered from another Investigation's Evidence. Ordering
+        observations rendered from another Investigation's LegacyEvidence. Ordering
         is deterministic by retrieved/observed time with a stable UUID
         tie-breaker.
         """
@@ -1243,11 +1243,11 @@ class EvidenceRepository(ABC):  # pragma: no cover
     @abstractmethod
     async def insert(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         *,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
-    ) -> Evidence:
+    ) -> LegacyEvidence:
         """Insert a new immutable evidence observation.
 
         A duplicate evidence identity is rejected with a typed error and
@@ -1255,7 +1255,7 @@ class EvidenceRepository(ABC):  # pragma: no cover
         """
 
     @abstractmethod
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         """Return an evidence observation by its immutable identity."""
 
     @abstractmethod
@@ -1265,7 +1265,7 @@ class EvidenceRepository(ABC):  # pragma: no cover
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[Evidence]:
+    ) -> list[LegacyEvidence]:
         """Return bounded observations in deterministic newest-first order."""
 
 
@@ -1344,7 +1344,7 @@ class InvestigationRepository(ABC):  # pragma: no cover
         """Atomically record one coherent analysis result (PR 21).
 
         A single Investigation version/history row records the current
-        Assessment pointer, the exact ordered analyzed Evidence identities,
+        Assessment pointer, the exact ordered analyzed LegacyEvidence identities,
         and the typed disposition. The database verifies the Assessment is
         visible and belongs to the Investigation, that the supplied analyzed
         IDs exactly equal the Assessment's persisted analyzed IDs and all
@@ -1662,7 +1662,7 @@ class EntityLocationObservationRepository(ABC):  # pragma: no cover
     """Append-only repository for immutable geographic observations.
 
     One persisted row is one immutable historical observation with exact
-    Entity/Location/Evidence provenance. There is no update, delete, or
+    Entity/Location/LegacyEvidence provenance. There is no update, delete, or
     soft-delete path.
     """
 
@@ -1673,7 +1673,7 @@ class EntityLocationObservationRepository(ABC):  # pragma: no cover
         """Append one immutable observation and reconcile current state.
 
         The database validates provenance (Entity visibility, Location and
-        Evidence existence, GEOLOCATION type, exact Evidence subject) and
+        LegacyEvidence existence, GEOLOCATION type, exact LegacyEvidence subject) and
         reconciles the current EntityLocation atomically in one transaction.
         """
 
@@ -1706,7 +1706,7 @@ class GeoResolutionRepository(ABC):  # pragma: no cover
     async def create_pending(self, resolution: GeoResolution) -> GeoResolution:
         """Create (or idempotently reuse) the initial PENDING work record.
 
-        Exactly one row exists per Entity/Evidence pair; the database owns
+        Exactly one row exists per Entity/LegacyEvidence pair; the database owns
         the initial-state invariants and race safety.
         """
 
@@ -1718,7 +1718,7 @@ class GeoResolutionRepository(ABC):  # pragma: no cover
     async def get_by_entity_evidence(
         self, entity_id: UUID, evidence_id: UUID
     ) -> GeoResolution | None:
-        """Return the GeoResolution for one Entity/Evidence pair, if any."""
+        """Return the GeoResolution for one Entity/LegacyEvidence pair, if any."""
 
     @abstractmethod
     async def claim_batch(
@@ -1753,7 +1753,7 @@ class GeoResolutionRepository(ABC):  # pragma: no cover
         """Atomically complete one claimed row as RESOLVED.
 
         One versioned stored function validates the PROCESSING status,
-        expected version, claimant, live lease, Entity visibility, Evidence
+        expected version, claimant, live lease, Entity visibility, LegacyEvidence
         existence/type/subject, and canonical Location; appends the exact
         immutable observation (idempotent under replay); reconciles the
         current EntityLocation; and terminates the work RESOLVED with the

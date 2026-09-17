@@ -17,7 +17,7 @@ Application correctness must not depend on Kafka APIs. PR 28D first provides det
 
 ## DOMAIN_MODEL.md
 
-The delivered v0.1 `Evidence(investigation_id, subject, ...)` model is transitional. The v0.2 target is `Evidence` as stable global source identity plus immutable per-Evidence-versioned `EvidenceObservation`. `EvidenceObservationEntity` replaces the single subject association. `RelationshipObservation` references exact EvidenceObservation. `InvestigationEvidence` references exact EvidenceObservation and records admission provenance. See `GLOBAL_EVIDENCE_ARCHITECTURE.md` for the authoritative target semantics.
+The delivered v0.1 `Evidence(investigation_id, subject, ...)` model is transitional. [CLOSED — PR 28A delivered] the v0.2 domain contracts: `Evidence` is now the stable global source identity, `EvidenceObservation` is the immutable per-Evidence-versioned state with deterministic material-state transitions (`create`/`no change`/`append`), `EvidenceObservationEntity` replaces the single subject association, `RelationshipObservation` references the exact `evidence_observation_id` (no Investigation field), and `InvestigationEvidence` records exact observation admission with bounded reason/actor vocabularies. The v0.1 runtime/persistence boundary keeps a transitional `LegacyEvidence` shape; `DOMAIN_MODEL.md` documents both.
 
 ## DATABASE.md
 
@@ -37,7 +37,9 @@ Exact schema, stored-function, migration, indexing, concurrency-safe per-Evidenc
 
 ## DATASOURCE_ARCHITECTURE.md
 
-PR 27 remains the delivered acquisition/semantic-conversion foundation. PR 28 extends the post-conversion side: conversion produces global Evidence state suitable for an explicit versioned `EvidenceMessage`, publication becomes the durable producer boundary, and PostgreSQL persistence moves behind a consumer. Converter selection remains based only on `semantic_format`; transport/log infrastructure must not leak into semantic conversion.
+PR 27 remains the delivered acquisition/semantic-conversion foundation. [CLOSED — PR 28A delivered] the post-conversion boundary: the `ToEvidenceConverter` now produces global `ConvertedEvidence` (deterministic stable `Evidence` identity plus an `EvidenceObservationCandidate`) and conversion is Investigation-independent — the context carries no Investigation or subject. Publication (PR 28C+), durable producer boundaries, and consumer-side persistence remain future work; the datasource provider currently rebinds converter output onto the transitional v0.1 `LegacyEvidence` shape only to keep the Investigation executor/persistence coherent until PR 28B.
+
+Converter selection remains based only on `semantic_format`; transport/log infrastructure must not leak into semantic conversion.
 
 Datasource lifecycle logging remains execution-level operational provenance. Durable publication success and database-consumer success are separate facts. The exact PR 28 event vocabulary is intentionally deferred to the relevant detailed plan; `datasource_log` must not become a consumer-offset or deduplication table.
 
@@ -59,7 +61,7 @@ No broker dependency is added by this documentation PR. PR 28D uses an ATI-owned
 
 ## TESTING.md
 
-PR 28 tests must eventually pin at least: deterministic Evidence identity, per-Evidence observation versioning, unchanged-retrieval no-op, material-change observation creation/diff, exact Investigation admission, observation-level Entity/Relationship provenance, duplicate/replayed messages, database failure, crash after DB commit before offset commit, redelivery idempotency, and producer/consumer restart behavior. Detailed matrices belong to each coding-agent-ready PR plan.
+PR 28 tests must eventually pin at least: deterministic Evidence identity, per-Evidence observation versioning, unchanged-retrieval no-op, material-change observation creation/diff, exact Investigation admission, observation-level Entity/Relationship provenance, duplicate/replayed messages, database failure, crash after DB commit before offset commit, redelivery idempotency, and producer/consumer restart behavior. Detailed matrices belong to each coding-agent-ready PR plan. [CLOSED — PR 28A delivered] the domain half of this matrix (E28A-01..75 plus vertical slices D28A-V01..V04): deterministic identity, observation versioning, unchanged/no-op, material-change append/diff, exact admission, and observation-level Entity/Relationship provenance are pinned by the delivered unit suites.
 
 ## Documentation authority rule
 

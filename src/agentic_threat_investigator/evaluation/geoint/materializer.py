@@ -4,7 +4,7 @@
 
 The materializer persists one :class:`GeointScenario` fixture through the
 application ``UnitOfWork`` seam -- reference geography, Investigation,
-Entities, GEOLOCATION Evidence, and PENDING ``GeoResolution`` work -- and
+Entities, GEOLOCATION LegacyEvidence, and PENDING ``GeoResolution`` work -- and
 returns the :class:`GeointScenarioResolution` that maps every semantic
 label to the exact persisted UUID. It is storage-agnostic (any
 ``UnitOfWork`` implementation works) and deterministic: stable UUID
@@ -27,10 +27,6 @@ from uuid import UUID, uuid5
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.query.geoint import effective_observation_time
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-)
 from agentic_threat_investigator.domain.geoint import (
     GeoResolution,
     Location,
@@ -41,6 +37,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.evaluation.geoint.models import (
     GeointCurrentState,
     GeointFixture,
@@ -108,7 +105,7 @@ class GeointScenarioMaterializer:
         """Persist the fixture graph and return the label resolution.
 
         Persistence order is deterministic: reference geography (parents
-        first, declaration order), Entities, the Investigation, Evidence,
+        first, declaration order), Entities, the Investigation, LegacyEvidence,
         then PENDING GeoResolution work. Every id recorded in the resolution
         is the identity the repository actually persisted.
         """
@@ -183,7 +180,7 @@ class GeointScenarioMaterializer:
             else:
                 scope_id = investigation_id
             persisted_evidence = await uow.evidence.insert(
-                Evidence(
+                LegacyEvidence(
                     id=self._planned(scenario, "evidence", evidence.label),
                     investigation_id=scope_id,
                     type=evidence.type,
@@ -233,7 +230,7 @@ class GeointScenarioMaterializer:
 
         For every fixture resolution the exact observation produced by the
         production worker completion (matching the resolution's Entity and
-        Evidence) is recorded under the resolution label. An unresolved
+        LegacyEvidence) is recorded under the resolution label. An unresolved
         resolution records no observation.
         """
         observation_ids: dict[str, UUID] = {}
@@ -260,7 +257,7 @@ class GeointScenarioMaterializer:
         production worker completed; the evaluator never reads a database
         itself. ``observations`` and the Investigation-relative current are
         scoped to the scenario Investigation exactly like the PR 26D query
-        layer: rows whose Evidence belongs to the deterministic second
+        layer: rows whose LegacyEvidence belongs to the deterministic second
         Investigation (isolation scenarios) never enter the state, so the
         evaluator independently proves "I1 never sees I2 support/global
         current".
@@ -315,9 +312,9 @@ class GeointScenarioMaterializer:
     async def _evidence_scopes(
         uow: UnitOfWork, resolution: GeointScenarioResolution
     ) -> dict[UUID, UUID]:
-        """Return the Investigation of every scenario Evidence row.
+        """Return the Investigation of every scenario LegacyEvidence row.
 
-        The authoritative scope is read from the persisted Evidence rows;
+        The authoritative scope is read from the persisted LegacyEvidence rows;
         cross-Investigation fixtures attach some rows to the deterministic
         second Investigation.
         """

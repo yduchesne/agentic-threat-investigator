@@ -4,15 +4,15 @@
 
 Implements the documented ThreatFox extraction matrix on normalized
 ``THREAT_INTELLIGENCE`` evidence facts. For every ``facts.matches[]`` entry,
-the Evidence subject IOC is asserted ``ASSOCIATED_WITH`` the canonical
+the LegacyEvidence subject IOC is asserted ``ASSOCIATED_WITH`` the canonical
 ``MALWARE`` entity derived from the machine malware identifier:
 
-    Evidence subject IOC ASSOCIATED_WITH MALWARE(matches[].malware)
+    LegacyEvidence subject IOC ASSOCIATED_WITH MALWARE(matches[].malware)
 
 The machine identifier is the identity; ``malware_printable`` is display
 metadata only and never determines identity. Confidence levels, threat
 types, tags, references, and timestamps are ignored for graph semantics.
-Repeated same-malware matches within one Evidence deduplicate to one entity
+Repeated same-malware matches within one LegacyEvidence deduplicate to one entity
 and one assertion while first-seen source order is preserved.
 """
 
@@ -32,16 +32,17 @@ from agentic_threat_investigator.app.extraction.models import (
     validate_extractor_input,
 )
 from agentic_threat_investigator.domain.entities import EntityType, canonicalize
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 _PRINTABLE_MAX_LENGTH = 256
 """Bounded printable-name length promised by the normalized fact contract."""
 
 
-def extract_threatfox(evidence: Evidence) -> ExtractionResult:
-    """Extract the documented ThreatFox identities and assertions from one Evidence."""
+def extract_threatfox(evidence: LegacyEvidence) -> ExtractionResult:
+    """Extract the documented ThreatFox identities and assertions from one LegacyEvidence."""
     evidence_id = validate_extractor_input(
         evidence,
         source=SourceId.THREATFOX.value,
@@ -68,7 +69,7 @@ def _malformed(evidence_id: UUID, message: str) -> EvidenceExtractionError:
     return malformed_facts(SourceId.THREATFOX.value, message, evidence_id=evidence_id)
 
 
-def _subject_identity(evidence: Evidence, evidence_id: UUID) -> EntityIdentity:
+def _subject_identity(evidence: LegacyEvidence, evidence_id: UUID) -> EntityIdentity:
     """Return the canonical identity of the queried IOC subject.
 
     Normalized subjects promise canonical values, so a subject that

@@ -16,8 +16,8 @@ import pytest
 
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import EntityRef, Evidence
 from agentic_threat_investigator.domain.investigation import InvestigationState
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -75,11 +75,11 @@ class MemoryEvidenceRepository:
         self, *, id_override: UUID | None = None, drop_id: bool = False
     ) -> None:
         """Initialize the persisted list and optional ID substitution."""
-        self.persisted: list[Evidence] = []
+        self.persisted: list[LegacyEvidence] = []
         self.id_override = id_override
         self.drop_id = drop_id
 
-    async def insert(self, evidence: Evidence, **_: object) -> Evidence:
+    async def insert(self, evidence: LegacyEvidence, **_: object) -> LegacyEvidence:
         """Record and return the evidence, optionally with a substituted ID."""
         self.persisted.append(evidence)
         if self.drop_id:
@@ -203,7 +203,11 @@ async def test_materialize_persists_fixture_graph_in_order() -> None:
     assert len(uow.relationships.persisted) == 1
     assert len(uow.relationship_observations.persisted) == 1
     [observation] = uow.relationship_observations.persisted
-    assert observation.investigation_id == state.investigation_id
+    # PR 28A: the observation carries no Investigation correlation; its
+    # supporting evidence owns the Investigation binding.
+    assert observation.evidence_observation_id in {
+        evidence.id for evidence in uow.evidence.persisted
+    }
 
 
 @pytest.mark.asyncio
@@ -261,7 +265,7 @@ async def test_materialize_version_isolates_identities() -> None:
 
 @pytest.mark.asyncio
 async def test_materialize_evidence_subjects_resolve() -> None:
-    """Evidence subject refs point at the persisted entity identities."""
+    """LegacyEvidence subject refs point at the persisted entity identities."""
     scenario = unit_scenario()
     uow = MemoryUnitOfWork()
     resolution = await AnalystScenarioMaterializer().materialize(
@@ -275,7 +279,7 @@ async def test_materialize_evidence_subjects_resolve() -> None:
     # The observation backs a persisted relationship and evidence row.
     [observation] = uow.relationship_observations.persisted
     assert observation.relationship_id in resolution.relationship_ids.values()
-    assert observation.evidence_id in resolution.evidence_ids.values()
+    assert observation.evidence_observation_id in resolution.evidence_ids.values()
 
 
 @pytest.mark.asyncio
@@ -331,7 +335,7 @@ async def test_repository_redirected_entity_id_is_authoritative() -> None:
     target_ip_id = resolution.entity_ids["target_ip"]
     assert target_ip_id == redirected
 
-    # The Investigation root pointer and every Evidence subject ref use it.
+    # The Investigation root pointer and every LegacyEvidence subject ref use it.
     [state] = uow.investigations.created
     assert state.root_entity_ids == [redirected]
     for evidence in uow.evidence.persisted:

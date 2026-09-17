@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Immutable deterministic extraction output and the extraction error contract.
 
-Extraction converts one normalized, persisted :class:`Evidence` observation
+Extraction converts one normalized, persisted :class:`LegacyEvidence` observation
 into canonical discovered entity identities and evidence-backed relationship
 assertions without any I/O, persistence, provider calls, or database access.
 
 The output models are deliberately small, frozen, and independent of the
 persisted ``Relationship`` contract: persistence (PR 18C) allocates database
 entity/relationship identifiers, so extraction never fabricates UUIDs. Every
-assertion carries the supporting persisted ``Evidence`` ID directly.
+assertion carries the supporting persisted ``LegacyEvidence`` ID directly.
 """
 
 from collections.abc import Iterable
@@ -19,7 +19,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 
@@ -53,7 +54,7 @@ class EntityIdentity(BaseModel):
 
 
 class RelationshipAssertion(BaseModel):
-    """A source-semantic relationship assertion backed by one persisted Evidence.
+    """A source-semantic relationship assertion backed by one persisted LegacyEvidence.
 
     Assertions are candidate semantic edges justified by the documented
     semantics of the source that produced the evidence; they are not yet
@@ -69,11 +70,11 @@ class RelationshipAssertion(BaseModel):
 
 
 class ExtractionResult(BaseModel):
-    """Deterministic, deduplicated extraction output for one Evidence.
+    """Deterministic, deduplicated extraction output for one LegacyEvidence.
 
     Entities and relationships are already collapsed by canonical identity
     and preserve first-seen source order; extraction is all-or-nothing per
-    Evidence, so a result is either complete or replaced by a typed error.
+    LegacyEvidence, so a result is either complete or replaced by a typed error.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -91,13 +92,13 @@ class ExtractionErrorReason(str, Enum):
 
 
 class EvidenceExtractionError(Exception):
-    """Raised when normalized Evidence cannot be extracted deterministically.
+    """Raised when normalized LegacyEvidence cannot be extracted deterministically.
 
     Context is deliberately restricted to safe values: the source identifier,
-    a bounded reason category, and the Evidence ID when known. Messages are
+    a bounded reason category, and the LegacyEvidence ID when known. Messages are
     static strings authored by ATI and never include raw payloads,
     credentials, or uncontrolled third-party response bodies. Extraction is
-    all-or-nothing per Evidence: callers must treat this error as discarding
+    all-or-nothing per LegacyEvidence: callers must treat this error as discarding
     the whole result rather than a partial one.
     """
 
@@ -117,15 +118,15 @@ class EvidenceExtractionError(Exception):
 
 
 def validate_extractor_input(
-    evidence: Evidence,
+    evidence: LegacyEvidence,
     *,
     source: str,
     evidence_type: EvidenceType,
     subject_types: tuple[EntityType, ...] = (),
 ) -> UUID:
-    """Validate the per-extractor Evidence contract and return the Evidence ID.
+    """Validate the per-extractor LegacyEvidence contract and return the LegacyEvidence ID.
 
-    Every non-empty extractor requires a persisted Evidence (a database-assigned
+    Every non-empty extractor requires a persisted LegacyEvidence (a database-assigned
     ID) because every relationship assertion must carry that provenance, a
     source/type combination matching the documented contract, and — when the
     contract restricts them — a subject entity type the source actually
@@ -142,7 +143,7 @@ def validate_extractor_input(
         raise EvidenceExtractionError(
             source,
             ExtractionErrorReason.MISSING_EVIDENCE_ID,
-            "extraction requires a persisted Evidence identifier",
+            "extraction requires a persisted LegacyEvidence identifier",
         )
     if subject_types and evidence.subject.type not in subject_types:
         raise EvidenceExtractionError(
@@ -224,7 +225,7 @@ def deduplicate_assertions(
 
     The key is ``(source type, source value, relationship type, target
     type, target value, evidence id)``. First-seen source order is
-    preserved; duplicate semantic output within one Evidence is emitted once.
+    preserved; duplicate semantic output within one LegacyEvidence is emitted once.
     """
     seen: set[tuple[EntityType, str, RelationshipType, EntityType, str, UUID]] = set()
     ordered: list[RelationshipAssertion] = []

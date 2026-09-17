@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """PR 26D Investigation-scoped GEOINT query/API matrices on real PostgreSQL.
 
-G26D-P01..P32 matrix: exact-Evidence scope isolation, Investigation-relative
+G26D-P01..P32 matrix: exact-LegacyEvidence scope isolation, Investigation-relative
 current/history under the exact PR 26A currentness ordering, Location
 reverse lookups with deterministic keyset pagination, purpose-built
 containment (boundary-inclusive ``ST_Covers`` over SRID-4326 geometry),
 bounded summaries, EXPLAIN-based index-eligibility proof, the canonical
-vertical slice (production resolution -> query -> API -> Evidence
+vertical slice (production resolution -> query -> API -> LegacyEvidence
 drill-down), and read-only guarantees.
 
 Seeding uses two Investigations sharing Entities/Locations backed by
-different Evidence so every scope assertion holds against the real
+different LegacyEvidence so every scope assertion holds against the real
 database. Timestamps are controlled deterministically through the normal
 repositories (``observed_at``/``retrieved_at`` are stamped by the seeding
 helpers; no sleeps).
@@ -46,11 +46,7 @@ from agentic_threat_investigator.app.query.geoint import (
 )
 from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     EntityLocationObservation,
@@ -66,6 +62,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.canonical_geography_resolver import (
     PostgresCanonicalGeographyResolver,
 )
@@ -296,12 +293,12 @@ async def seed_observation(
     """Create, persist, and observe one Entity at one Location in scope.
 
     Writes through the normal repositories exactly like the production
-    resolution path: canonical Entity, immutable GEOLOCATION Evidence with
+    resolution path: canonical Entity, immutable GEOLOCATION LegacyEvidence with
     the exact subject binding, then the versioned append.
     """
     entity_id = await seed_entity(uow, value=entity_value)
     evidence = await uow.evidence.insert(
-        Evidence(
+        LegacyEvidence(
             investigation_id=investigation_id,
             type=EvidenceType.GEOLOCATION,
             subject=EntityRef(
@@ -376,7 +373,7 @@ async def test_p01_observation_evidence_in_scope_visible(
     uow_factory: Callable[[], UnitOfWork],
     session_factory: async_sessionmaker[Any],
 ) -> None:
-    """G26D-P01 an observation backed by I1 Evidence is visible under I1."""
+    """G26D-P01 an observation backed by I1 LegacyEvidence is visible under I1."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         await seed_geography(uow)
@@ -1938,7 +1935,7 @@ async def test_explain_summary_stays_bounded_and_index_eligible(
 ) -> None:
     """QP06: summary counts/top-Locations never Cartesian and stay indexable.
 
-    The summary is the PR 26D bounded aggregate over exact Evidence scope;
+    The summary is the PR 26D bounded aggregate over exact LegacyEvidence scope;
     with seq scans disabled the grouped top-Locations query must still use
     the observation indexes (no accidental Cartesian explosion) and the SQL
     itself carries the documented GROUP BY/LIMIT bounds.
@@ -1980,7 +1977,7 @@ async def test_vs_api_vertical_slice(
     uow_factory: Callable[[], UnitOfWork],
     session_factory: async_sessionmaker[Any],
 ) -> None:
-    """I1 sees only I1 observations; Evidence drill-down stays exact.
+    """I1 sees only I1 observations; LegacyEvidence drill-down stays exact.
 
     The production FastAPI application runs over the real PostgreSQL with
     the real per-request ``PostgresQueryServices``; only authentication is a
@@ -2063,7 +2060,7 @@ async def test_vs_api_vertical_slice(
         detail = observation_detail.json()
         assert detail["observation"]["evidence_id"] == item["evidence_id"]
 
-        # Exact Evidence drill-down through the existing Evidence endpoint.
+        # Exact LegacyEvidence drill-down through the existing LegacyEvidence endpoint.
         evidence = client.get(
             f"/api/v1/investigations/{investigation_a}/evidence/{item['evidence_id']}"
         )
@@ -2144,15 +2141,15 @@ async def test_vs_canonical_resolution_to_query_to_api(
     uow_factory: Callable[[], UnitOfWork],
     session_factory: async_sessionmaker[Any],
 ) -> None:
-    """Real PR 26C resolution -> query -> API -> Evidence end to end."""
+    """Real PR 26C resolution -> query -> API -> LegacyEvidence end to end."""
     async with uow_factory() as uow:
         investigation_a = await seed_investigation(uow)
         investigation_b = await seed_investigation(uow)
         geography = await seed_geography(uow)
-        # I1 GEOLOCATION Evidence resolves canonically to Seattle.
+        # I1 GEOLOCATION LegacyEvidence resolves canonically to Seattle.
         entity_id = await seed_entity(uow, value="203.0.113.200")
         evidence_a = await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 investigation_id=investigation_a,
                 type=EvidenceType.GEOLOCATION,
                 subject=EntityRef(
@@ -2175,7 +2172,7 @@ async def test_vs_canonical_resolution_to_query_to_api(
         assert resolution_a.id is not None
         # I2 resolves the same Entity to Vancouver with a newer timestamp.
         evidence_b = await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 investigation_id=investigation_b,
                 type=EvidenceType.GEOLOCATION,
                 subject=EntityRef(
@@ -2258,7 +2255,7 @@ async def test_vs_canonical_resolution_to_query_to_api(
         assert body["current_observation"]["evidence_id"] == str(evidence_a.id)
         assert body["current_observation"]["precision"] == "city"
 
-        # Exact Evidence endpoint accepts the exact evidence_id from the API.
+        # Exact LegacyEvidence endpoint accepts the exact evidence_id from the API.
         evidence_response = client.get(
             f"/api/v1/investigations/{investigation_a}/evidence/{evidence_a.id}"
         )

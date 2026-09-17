@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Real-PostgreSQL coverage for atomic provider-observation graph persistence.
 
-Every scenario persists synthetic, deterministic Evidence plus PR 18B
+Every scenario persists synthetic, deterministic LegacyEvidence plus PR 18B
 extraction output through the PR 18C service against the isolated migrated
 database, asserting atomicity, stable-identity reuse, immutable observations,
 history/version invariants, and the documented soft-deleted identity policy.
@@ -34,17 +34,14 @@ from agentic_threat_investigator.app.provider_observation_persistence import (
     ProviderObservationPersistenceService,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     RelationshipObservation,
     RelationshipType,
@@ -88,9 +85,11 @@ async def seed_investigation(uow: PostgresUnitOfWork) -> UUID:
     return investigation_id
 
 
-def dns_evidence(investigation_id: UUID, evidence_id: UUID | None = None) -> Evidence:
-    """Build deterministic DNS Evidence with a canonical domain subject."""
-    return Evidence(
+def dns_evidence(
+    investigation_id: UUID, evidence_id: UUID | None = None
+) -> LegacyEvidence:
+    """Build deterministic DNS LegacyEvidence with a canonical domain subject."""
+    return LegacyEvidence(
         id=evidence_id or uuid4(),
         investigation_id=investigation_id,
         type=EvidenceType.DNS,
@@ -104,7 +103,7 @@ def dns_evidence(investigation_id: UUID, evidence_id: UUID | None = None) -> Evi
 
 
 def dns_extraction(evidence_id: UUID) -> ExtractionResult:
-    """Build the deterministic DNS extraction for the DNS Evidence fixture."""
+    """Build the deterministic DNS extraction for the DNS LegacyEvidence fixture."""
     return ExtractionResult(
         entities=(ExtractedEntity(type=EntityType.IP_ADDRESS, value=_IP),),
         relationships=(
@@ -137,9 +136,9 @@ def threatfox_extraction(evidence_id: UUID, subject: str = _IP) -> ExtractionRes
     )
 
 
-def threatfox_evidence(investigation_id: UUID) -> Evidence:
-    """Build deterministic ThreatFox Evidence with the IP as subject."""
-    return Evidence(
+def threatfox_evidence(investigation_id: UUID) -> LegacyEvidence:
+    """Build deterministic ThreatFox LegacyEvidence with the IP as subject."""
+    return LegacyEvidence(
         id=uuid4(),
         investigation_id=investigation_id,
         type=EvidenceType.THREAT_INTELLIGENCE,
@@ -156,8 +155,8 @@ def threatfox_evidence(investigation_id: UUID) -> Evidence:
     )
 
 
-def require_id(evidence: Evidence) -> UUID:
-    """Narrow the optional Evidence identity for extraction construction."""
+def require_id(evidence: LegacyEvidence) -> UUID:
+    """Narrow the optional LegacyEvidence identity for extraction construction."""
     assert evidence.id is not None  # fixtures always set one
     return evidence.id
 
@@ -334,7 +333,7 @@ async def test_threatfox_reuses_the_ip_and_creates_malware(
 async def test_new_evidence_same_edge_appends_observation(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """A new Evidence ID on the same semantic edge appends only an observation."""
+    """A new LegacyEvidence ID on the same semantic edge appends only an observation."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
@@ -367,7 +366,7 @@ async def test_new_evidence_same_edge_appends_observation(
 async def test_same_evidence_replay_conflicts_and_rolls_back(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Replaying one Evidence ID is a typed conflict with unchanged graph state."""
+    """Replaying one LegacyEvidence ID is a typed conflict with unchanged graph state."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
@@ -391,7 +390,7 @@ async def test_same_evidence_replay_conflicts_and_rolls_back(
 async def test_empty_extraction_persists_evidence_only(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Empty extraction persists Evidence and audit; prior graph history stays."""
+    """Empty extraction persists LegacyEvidence and audit; prior graph history stays."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
@@ -400,7 +399,7 @@ async def test_empty_extraction_persists_evidence_only(
     async with uow_factory() as uow:
         before = await snapshot_counts(uow)
 
-    geolocation = Evidence(
+    geolocation = LegacyEvidence(
         id=uuid4(),
         investigation_id=investigation_id,
         type=EvidenceType.GEOLOCATION,
@@ -433,7 +432,7 @@ async def test_fact_only_and_urlhaus_entities_do_not_invent_edges(
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
 
-    reputation = Evidence(
+    reputation = LegacyEvidence(
         id=uuid4(),
         investigation_id=investigation_id,
         type=EvidenceType.REPUTATION,
@@ -447,7 +446,7 @@ async def test_fact_only_and_urlhaus_entities_do_not_invent_edges(
     abuse_result = await service.persist(reputation, ExtractionResult())
     assert abuse_result.relationships == ()
 
-    urlhaus = Evidence(
+    urlhaus = LegacyEvidence(
         id=uuid4(),
         investigation_id=investigation_id,
         type=EvidenceType.THREAT_INTELLIGENCE,
@@ -536,7 +535,7 @@ async def test_concurrent_writers_share_one_canonical_identity(
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
 
-    async def writer() -> Evidence:
+    async def writer() -> LegacyEvidence:
         evidence = dns_evidence(investigation_id)
         await service.persist(evidence, dns_extraction(evidence.id))  # type: ignore[arg-type]
         return evidence
@@ -572,7 +571,7 @@ async def test_soft_deleted_entity_rediscovery_fails_closed(
         assert address.id is not None  # persisted above
         await uow.entities.soft_delete(address.id)
 
-    reputation = Evidence(
+    reputation = LegacyEvidence(
         id=uuid4(),
         investigation_id=investigation_id,
         type=EvidenceType.REPUTATION,
@@ -858,7 +857,7 @@ async def test_canonical_race_recovery_rejects_a_soft_deleted_row(
     def racing_factory() -> _SimulatedRaceUow:
         return _SimulatedRaceUow(session_factory, race_identity)
 
-    reputation = Evidence(
+    reputation = LegacyEvidence(
         id=uuid4(),
         investigation_id=investigation_id,
         type=EvidenceType.REPUTATION,
@@ -1032,7 +1031,7 @@ async def test_relationship_soft_delete_rejects_stale_missing_and_repeat(
 async def test_observation_evidence_provenance_is_relationally_enforced(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """A dangling Evidence reference is rejected and leaves no partial rows."""
+    """A dangling LegacyEvidence reference is rejected and leaves no partial rows."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
@@ -1044,8 +1043,7 @@ async def test_observation_evidence_provenance_is_relationally_enforced(
         dangling = RelationshipObservation(
             id=uuid4(),
             relationship_id=relationship.id,
-            evidence_id=uuid4(),  # no such Evidence row exists
-            investigation_id=investigation_id,
+            evidence_observation_id=uuid4(),  # no such LegacyEvidence row exists
             observed_at=None,
             retrieved_at=_RETRIEVED_AT,
             source=evidence.source,

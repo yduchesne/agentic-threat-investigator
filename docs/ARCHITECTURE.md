@@ -91,6 +91,8 @@ React / TypeScript UI
 
 Pure Pydantic domain models and enums. The domain must not depend on SQLAlchemy, HTTP clients, FastAPI, LangChain, LangGraph, pgvector, or a specific LLM provider.
 
+**PR 28A delivered v0.2 Python domain contracts:** `Evidence` is now a stable global source-intelligence identity (deterministic `evidence_id_for_source_record` UUIDv5, no Investigation/subject/state fields), `EvidenceObservation` is its immutable per-Evidence versioned state with pure create/no-change/append material-state transitions, `EvidenceObservationEntity` and `InvestigationEvidence` provide observation-level Entity provenance and exact Investigation admission, and `RelationshipObservation` references the exact `evidence_observation_id` with no Investigation field. The v0.1 Investigation-bound single-subject shape still exists as the transitional `LegacyEvidence` (with `EntityRef`) in `domain/legacy_evidence.py` and remains the v0.1 runtime/persistence boundary shape until PR 28B migrates persistence; the datasource-backed provider rebinds `ConvertedEvidence` onto it only at that boundary. See `DOMAIN_MODEL.md` and `GLOBAL_EVIDENCE_ARCHITECTURE.md` for the authoritative contracts; the PostgreSQL schema remains v0.1 until PR 28B.
+
 ### Application
 
 Coordinates use cases, persistence, transactions, policies, jobs, and state transitions. Application services enforce invariants.

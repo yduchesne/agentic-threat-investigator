@@ -69,11 +69,7 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     AnalysisDisposition,
@@ -90,6 +86,7 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.domain.research_agent import (
     ResearchAgentClaim,
@@ -192,9 +189,9 @@ class _ThreatFoxIpProvider(EvidenceProvider):
     async def investigate(
         self, investigation_id: UUID, entity: Entity
     ) -> ProviderResult:
-        """Return one ThreatFox Evidence discovering the malware family."""
+        """Return one ThreatFox LegacyEvidence discovering the malware family."""
         self.calls.append((investigation_id, entity))
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             id=uuid4(),
             investigation_id=investigation_id,
             type=EvidenceType.THREAT_INTELLIGENCE,
@@ -480,7 +477,7 @@ async def test_i01_complete_research_trajectory(
     # Valid citation provenance: the cited citation_id equals the top chunk.
     assert result.citations[0].citation_id == top[0]
 
-    # Research never becomes Evidence or Assessment: the only Assessment
+    # Research never becomes LegacyEvidence or Assessment: the only Assessment
     # rows are the two analyst rounds (NEEDS_MORE_EVIDENCE + SUFFICIENT),
     # and no research result identity ever enters evidence_ids.
     assert await _count_rows(integration_engine, "research_result") == 1

@@ -18,9 +18,9 @@ extractor can later derive the canonical ``MALWARE`` entity and the
 queried IOC ``ASSOCIATED_WITH`` malware relationship. A no-result response
 is an empty result, never a benign assessment.
 
-This legacy provider remains the pre-27E transitional Evidence path: it
+This legacy provider remains the pre-27E transitional v0.1 Evidence path: it
 reuses the extracted semantic parser and maps its typed outcome onto
-``ProviderResult``. Evidence-specific construction (grouped match facts via
+``ProviderResult``. LegacyEvidence-specific construction (grouped match facts via
 :func:`build_threatfox_match_facts` and
 :func:`format_threatfox_fact_timestamp`) is shared with the PR 27D
 :class:`ThreatFoxToEvidenceConverter` from
@@ -28,7 +28,7 @@ reuses the extracted semantic parser and maps its typed outcome onto
 
 As of PR 27E the production runtime is the datasource-backed
 :class:`~agentic_threat_investigator.app.datasource_provider.DatasourceProvider`
-adapter over ``ThreatFoxDatasource`` (one validated record -> one Evidence
+adapter over ``ThreatFoxDatasource`` (one validated record -> one LegacyEvidence
 with exact ``source_record_id`` provenance); this legacy grouped-Evidence
 provider is no longer composed by the production bootstrap and is retained
 for the pinned legacy contract tests and the documented pre-27E path.
@@ -54,9 +54,12 @@ from agentic_threat_investigator.domain.entities import (
     Entity,
     EntityType,
 )
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.datasources.threatfox_evidence import (
     build_threatfox_match_facts,
     format_threatfox_fact_timestamp,
@@ -73,7 +76,7 @@ _THREATFOX_ENDPOINT = "https://threatfox-api.abuse.ch/api/v1/"
 """Fixed ThreatFox Community API v1 authority; the JSON body carries the query."""
 
 # PR 27C/27D compatibility re-exports: the strict ThreatFox semantic model,
-# matching helpers, and the shared Evidence mapping now live in the
+# matching helpers, and the shared LegacyEvidence mapping now live in the
 # format-specific semantic/evidence modules and are re-exported here so the
 # legacy provider contract (and its tests) remain import-stable. They are the
 # same objects, never duplicated copies.
@@ -113,7 +116,7 @@ class ThreatFoxProvider(EvidenceProvider):
         the provider never reads configuration or the environment and the
         value is used only in the ``Auth-Key`` header, never in URLs,
         bodies, facts, errors, or logs. The UTC wall clock is used only
-        for Evidence ``retrieved_at`` timestamps; tests may inject a
+        for LegacyEvidence ``retrieved_at`` timestamps; tests may inject a
         deterministic replacement, otherwise ``datetime.now(UTC)`` is
         used.
         """
@@ -210,7 +213,7 @@ class ThreatFoxProvider(EvidenceProvider):
 
         The extracted semantic parser validates the envelope, every record,
         query matching, and duplicate rules fail-closed; this method maps the
-        typed outcome onto the legacy Evidence path. The body-encoded
+        typed outcome onto the v0.1 legacy Evidence path. The body-encoded
         ``ratelimited`` status maps to the typed rate-limit error; any other
         semantic failure becomes one non-retryable INVALID_RESPONSE error.
         """
@@ -234,7 +237,7 @@ class ThreatFoxProvider(EvidenceProvider):
             type=context.entity.type,
             value=context.canonical_value,
         )
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=context.investigation_id,
             type=EvidenceType.THREAT_INTELLIGENCE,
             subject=subject,

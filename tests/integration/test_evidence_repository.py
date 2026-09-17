@@ -17,17 +17,14 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationNotFoundError,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
@@ -63,7 +60,7 @@ async def seed_investigation(
 
 def evidence_factory(
     investigation_id: UUID, entity_id: UUID, **overrides: object
-) -> Evidence:
+) -> LegacyEvidence:
     """Build a deterministic valid evidence observation."""
     values: dict[str, object] = {
         "investigation_id": investigation_id,
@@ -77,7 +74,7 @@ def evidence_factory(
         "source_record_id": None,
     }
     values.update(overrides)
-    return Evidence(**values)  # type: ignore[arg-type]
+    return LegacyEvidence(**values)  # type: ignore[arg-type]
 
 
 async def evidence_history_rows(
@@ -251,7 +248,7 @@ async def test_duplicate_evidence_identity_never_mutates(
 async def test_evidence_requires_existing_investigation(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Evidence for an unknown investigation is rejected via the service."""
+    """LegacyEvidence for an unknown investigation is rejected via the service."""
     service = InvestigationPersistenceService(uow_factory)
     async with uow_factory() as uow:
         entity = await uow.entities.upsert(
@@ -398,7 +395,7 @@ async def test_evidence_rejects_soft_deleted_investigation_parent(
 async def test_evidence_cannot_follow_concurrent_parent_soft_deletion(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Evidence insertion fails when the parent is deleted in the gap."""
+    """LegacyEvidence insertion fails when the parent is deleted in the gap."""
     async with uow_factory() as uow:
         investigation_id, entity_id = await seed_investigation(uow)
     evidence = evidence_factory(investigation_id, entity_id)
@@ -457,7 +454,7 @@ async def test_concurrent_duplicate_evidence_identity_is_typed(
         asyncio.wait_for(insert_writer(), 10),
         asyncio.wait_for(insert_writer(), 10),
     )
-    winners = [o for o in outcomes if isinstance(o, Evidence)]
+    winners = [o for o in outcomes if isinstance(o, LegacyEvidence)]
     losers = [o for o in outcomes if isinstance(o, EvidenceDuplicateIdentityError)]
     assert len(winners) == 1 and len(losers) == 1
     assert winners[0].id is not None

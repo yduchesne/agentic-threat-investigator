@@ -7,7 +7,7 @@ One iteration of the durable worker follows the approved transaction split:
 ```text
 short UoW: claim bounded batch        -> COMMIT/CLOSE
 for each claimed item:
-    short UoW: load exact immutable Evidence -> CLOSE
+    short UoW: load exact immutable LegacyEvidence -> CLOSE
     extract GeographicClaim                   (no DB I/O)
     LocationResolver.resolve(claim)           (NO UoW open, no locks held)
     short UoW: persist outcome                -> COMMIT/CLOSE
@@ -48,13 +48,13 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvalidGeographicClaimError,
     UnitOfWork,
 )
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolutionStatus,
     EntityLocationObservation,
     GeoResolution,
     observation_uuid_for_resolution,
 )
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ FAILURE_EVIDENCE_SUBJECT = "evidence_subject_mismatch"
 class EvidenceLoadError(RuntimeError):
     """Bounded marker for a transient evidence-load failure.
 
-    Distinct from a missing Evidence row (which is terminal and
+    Distinct from a missing LegacyEvidence row (which is terminal and
     non-retryable): the load itself could not complete.
     """
 
@@ -273,12 +273,12 @@ class GeoResolutionWorker:
             raise RuntimeError("claimed geo resolution lacks work identity")
         return resolution_id, expected_version, claimed_by
 
-    async def _load_evidence(self, resolution: GeoResolution) -> Evidence | None:
-        """Load the exact immutable Evidence for one claimed item.
+    async def _load_evidence(self, resolution: GeoResolution) -> LegacyEvidence | None:
+        """Load the exact immutable LegacyEvidence for one claimed item.
 
         A transient load failure (database availability) raises
         :class:`EvidenceLoadError` so the caller persists a retryable bounded
-        failure; ``None`` means the Evidence row is genuinely absent (a
+        failure; ``None`` means the LegacyEvidence row is genuinely absent (a
         terminal, non-retryable condition).
         """
         try:
@@ -315,7 +315,7 @@ class GeoResolutionWorker:
             GeoEvidenceTypeError,
             GeoEvidenceSubjectMismatchError,
         ) as error:
-            # Wrong/missing Evidence at database-authoritative completion time:
+            # Wrong/missing LegacyEvidence at database-authoritative completion time:
             # a terminal, non-retryable condition. Provenance is never patched.
             LOGGER.warning(
                 "geo completion evidence conflict resolution_id=%s code=%s",

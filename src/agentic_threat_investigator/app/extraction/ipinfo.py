@@ -3,7 +3,7 @@
 """Conservative IPinfo Lite extraction.
 
 Implements the documented IPinfo Lite extraction matrix. The source
-envelope is validated first: the Evidence subject must be a canonical IP
+envelope is validated first: the LegacyEvidence subject must be a canonical IP
 address, before any ASN-presence decision. When the normalized ``facts.asn``
 member is present, it is canonicalized and discovered as a canonical
 ``ASN`` entity. When the member is absent, extraction yields an empty
@@ -27,12 +27,13 @@ from agentic_threat_investigator.domain.entities import (
     canonicalize_asn,
     canonicalize_ip_address,
 )
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 
-def extract_ipinfo(evidence: Evidence) -> ExtractionResult:
-    """Extract the documented IPinfo Lite output from one Evidence."""
+def extract_ipinfo(evidence: LegacyEvidence) -> ExtractionResult:
+    """Extract the documented IPinfo Lite output from one LegacyEvidence."""
     evidence_id = validate_extractor_input(
         evidence,
         source=SourceId.IPINFO_LITE.value,
@@ -56,7 +57,7 @@ def extract_ipinfo(evidence: Evidence) -> ExtractionResult:
     )
 
 
-def _validate_canonical_subject(evidence: Evidence, evidence_id: UUID) -> None:
+def _validate_canonical_subject(evidence: LegacyEvidence, evidence_id: UUID) -> None:
     """Require a canonical IP subject before any ASN-presence decision."""
     try:
         canonical = canonicalize_ip_address(evidence.subject.value)

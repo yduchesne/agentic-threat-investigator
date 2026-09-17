@@ -4,7 +4,7 @@
 Runs the production path end to end:
 
 ```text
-seed Investigation + GEOLOCATION Evidence
+seed Investigation + GEOLOCATION LegacyEvidence
   -> real GeoResolutionWorker + PostgresCanonicalGeographyResolver
   -> EntityLocationObservation
   -> real PostgresGeointQueryService
@@ -72,17 +72,14 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     GeographicClaim,
     GeoResolution,
 )
 from agentic_threat_investigator.domain.investigation import AnalysisDisposition
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.canonical_geography_resolver import (
     PostgresCanonicalGeographyResolver,
 )
@@ -142,9 +139,9 @@ def _worker_instance(
 async def seed_geolocation_evidence(
     uow: PostgresUnitOfWork, *, investigation_id: UUID, entity_id: UUID, value: str
 ) -> UUID:
-    """Persist one normal GEOLOCATION Evidence row and return its identity."""
+    """Persist one normal GEOLOCATION LegacyEvidence row and return its identity."""
     evidence = await uow.evidence.insert(
-        Evidence(
+        LegacyEvidence(
             investigation_id=investigation_id,
             type=EvidenceType.GEOLOCATION,
             subject=EntityRef(id=entity_id, type=EntityType.IP_ADDRESS, value=value),
@@ -166,9 +163,9 @@ async def seed_geolocation_evidence(
 async def seed_dns_evidence(
     uow: PostgresUnitOfWork, *, investigation_id: UUID, entity_id: UUID, value: str
 ) -> UUID:
-    """Persist one independent non-geographic DNS Evidence row."""
+    """Persist one independent non-geographic DNS LegacyEvidence row."""
     evidence = await uow.evidence.insert(
-        Evidence(
+        LegacyEvidence(
             investigation_id=investigation_id,
             type=EvidenceType.DNS,
             subject=EntityRef(id=entity_id, type=EntityType.DOMAIN, value=value),
@@ -322,7 +319,7 @@ async def test_g26f_i01_descriptive_current_geography(
     uow_factory: Callable[[], PostgresUnitOfWork],
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """I01 one resolved city observation persists with exact Evidence support."""
+    """I01 one resolved city observation persists with exact LegacyEvidence support."""
     investigation_id, entity_id, evidence_id = await seeded_investigation(
         uow_factory, session_factory
     )
@@ -373,7 +370,7 @@ async def test_g26f_i02_location_history(
         geography = await seed_geography(uow)
         entity_id = await seed_entity(uow, value="203.0.113.202")
         seattle_evidence = await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 investigation_id=investigation_id,
                 type=EvidenceType.GEOLOCATION,
                 subject=EntityRef(
@@ -391,7 +388,7 @@ async def test_g26f_i02_location_history(
             )
         )
         dallas_evidence = await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 investigation_id=investigation_id,
                 type=EvidenceType.GEOLOCATION,
                 subject=EntityRef(
@@ -632,7 +629,7 @@ async def test_g26f_i05_bounded_history_cannot_cite_omitted(
                 "precision": "city",
             }
             evidence = await uow.evidence.insert(
-                Evidence(
+                LegacyEvidence(
                     investigation_id=investigation_id,
                     type=EvidenceType.GEOLOCATION,
                     subject=EntityRef(

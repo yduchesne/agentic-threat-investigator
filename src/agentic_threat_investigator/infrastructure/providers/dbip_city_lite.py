@@ -34,10 +34,13 @@ from agentic_threat_investigator.app.providers import (
     validate_investigation_entity,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geolocation import GeoLocation, GeoPrecision
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 _MAX_NAME_LENGTH = 200
 """Bound for English city/region display names."""
@@ -333,7 +336,7 @@ class DbIpCityLiteProvider(EvidenceProvider):
             # results; neither is a benign assessment.
             return ProviderResult(provider=self.id)
 
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=investigation_id,
             type=EvidenceType.GEOLOCATION,
             subject=EvidenceEntityRef(

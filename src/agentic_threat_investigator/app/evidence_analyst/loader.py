@@ -37,7 +37,7 @@ from agentic_threat_investigator.domain.analyst import (
     EvidenceAnalystInput,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import EntityRef, Evidence
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import Relationship
 
 _BOUND_EVIDENCE = "evidence_items"
@@ -53,8 +53,8 @@ _MAX_INPUT_BYTES_CEILING = 1_000_000
 _MAX_INPUT_BYTES_FLOOR = 1000
 
 
-def _normalized_facts_bytes(evidence: Evidence) -> int:
-    """Return the UTF-8 byte size of one Evidence item's normalized facts.
+def _normalized_facts_bytes(evidence: LegacyEvidence) -> int:
+    """Return the UTF-8 byte size of one LegacyEvidence item's normalized facts.
 
     Only the normalized ``facts`` mapping is serialized in deterministic JSON
     form; ``raw_payload`` is never inspected or included.
@@ -80,7 +80,7 @@ def _analyst_entity(entity: Entity) -> AnalystEntity:
 
 
 def _evidence_subject(subject: EntityRef) -> AnalystEntity:
-    """Map the subject reference of an Evidence row to its analyst view."""
+    """Map the subject reference of a LegacyEvidence row to its analyst view."""
     if subject.id is None:  # pragma: no cover - persisted rows carry an id
         raise ValueError("persisted evidence subject has no identity")
     return AnalystEntity(
@@ -232,7 +232,7 @@ class EvidenceAnalystInputLoader:
             self._build_evidence_item(evidence) for evidence in evidence_rows
         )
         # Independently bound the aggregate normalized-facts size: only each
-        # Evidence item's ``facts`` mapping is serialized (deterministic JSON,
+        # LegacyEvidence item's ``facts`` mapping is serialized (deterministic JSON,
         # UTF-8 byte counts); ``raw_payload`` is never inspected.
         facts_bytes = sum(
             _normalized_facts_bytes(evidence) for evidence in evidence_rows
@@ -256,7 +256,7 @@ class EvidenceAnalystInputLoader:
             observations.append(
                 AnalystRelationshipObservation(
                     relationship_observation_id=observation.id,
-                    evidence_id=observation.evidence_id,
+                    evidence_id=observation.evidence_observation_id,
                     relationship_id=observation.relationship_id,
                     relationship_type=relationship.type,
                     source_entity=_analyst_entity(source_entity),
@@ -285,8 +285,8 @@ class EvidenceAnalystInputLoader:
         return analyst_input
 
     @staticmethod
-    def _build_evidence_item(evidence: Evidence) -> AnalystEvidenceItem:
-        """Map one persisted Evidence row to its minimized analyst view."""
+    def _build_evidence_item(evidence: LegacyEvidence) -> AnalystEvidenceItem:
+        """Map one persisted LegacyEvidence row to its minimized analyst view."""
         return AnalystEvidenceItem(
             evidence_id=evidence.id or _raise_missing_identity(),
             type=evidence.type,
@@ -312,5 +312,5 @@ def _deduplicate(values: list[UUID]) -> list[UUID]:
 
 
 def _raise_missing_identity() -> UUID:  # pragma: no cover - persisted rows carry it
-    """Raise when a persisted Evidence row lacks its immutable identity."""
+    """Raise when a persisted LegacyEvidence row lacks its immutable identity."""
     raise ValueError("persisted evidence has no identity")

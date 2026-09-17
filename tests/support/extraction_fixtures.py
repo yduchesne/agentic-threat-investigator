@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Normalized Evidence fixtures for deterministic extraction tests.
+"""Normalized LegacyEvidence fixtures for deterministic extraction tests.
 
-Every fixture starts from normalized Evidence, never from raw HTTP
+Every fixture starts from normalized LegacyEvidence, never from raw HTTP
 responses: extraction tests consume exactly the fact shapes the providers
 promise. All values are synthetic documentation-safe test data (RFC 5737
 addresses, RFC 2606 ``.test`` domains, and synthetic identifiers).
@@ -19,7 +19,7 @@ win.asyncrat (AsyncRAT)
 """
 
 # The evidence-builder helpers in extraction test modules intentionally
-# share the normalized Evidence construction shape (see the established
+# share the normalized LegacyEvidence construction shape (see the established
 # provider fixture family); the duplication is test-only and accepted.
 
 from __future__ import annotations
@@ -29,21 +29,18 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 CANONICAL_INVESTIGATION_ID = UUID("22222222-2222-4222-8222-222222222222")
 """Fixed synthetic investigation identity of the canonical scenario."""
 
 CANONICAL_DNS_EVIDENCE_ID = UUID("33333333-3333-4333-8333-333333333333")
-"""Fixed persisted Evidence ID of the canonical DNS observation."""
+"""Fixed persisted LegacyEvidence ID of the canonical DNS observation."""
 
 CANONICAL_THREATFOX_EVIDENCE_ID = UUID("44444444-4444-4444-8444-444444444444")
-"""Fixed persisted Evidence ID of the canonical ThreatFox observation."""
+"""Fixed persisted LegacyEvidence ID of the canonical ThreatFox observation."""
 
 CANONICAL_ASYNCRAT_DOMAIN = "malicious-domain.test"
 """Synthetic documentation-safe C2 domain of the canonical scenario."""
@@ -72,9 +69,9 @@ def evidence(
     evidence_id: UUID | None = None,
     investigation_id: UUID | None = None,
     retrieved_at: datetime | None = None,
-) -> Evidence:
-    """Build one normalized persisted Evidence observation."""
-    return Evidence(
+) -> LegacyEvidence:
+    """Build one normalized persisted LegacyEvidence observation."""
+    return LegacyEvidence(
         id=evidence_id if evidence_id is not None else uuid4(),
         investigation_id=(
             investigation_id
@@ -90,7 +87,7 @@ def evidence(
     )
 
 
-def canonical_dns_evidence() -> Evidence:
+def canonical_dns_evidence() -> LegacyEvidence:
     """Build the canonical A-record evidence: domain resolves to the scenario IP."""
     return evidence(
         source=SourceId.GOOGLE_PUBLIC_DNS.value,
@@ -115,7 +112,7 @@ def canonical_dns_evidence() -> Evidence:
     )
 
 
-def canonical_threatfox_evidence() -> Evidence:
+def canonical_threatfox_evidence() -> LegacyEvidence:
     """Build the canonical ThreatFox evidence: the scenario IP is AsyncRAT C2."""
     return evidence(
         source=SourceId.THREATFOX.value,
@@ -155,7 +152,7 @@ def dns_evidence(
     query_name: str | None = None,
     facts_overrides: dict[str, object] | None = None,
     evidence_id: UUID | None = None,
-) -> Evidence:
+) -> LegacyEvidence:
     """Build one normalized DNS evidence observation with the given answers."""
     facts: dict[str, object] = {
         "query_name": query_name if query_name is not None else subject_value,

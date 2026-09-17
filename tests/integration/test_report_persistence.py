@@ -30,7 +30,7 @@ from agentic_threat_investigator.domain.assessment import (
     FindingDisposition,
     Verdict,
 )
-from agentic_threat_investigator.domain.evidence import Evidence
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.report import (
     InvestigationReport,
     ReportFindingSnapshot,
@@ -121,7 +121,7 @@ async def seed_report_context(
     async with uow_factory() as uow:
         entity_id = await seed_entity(uow)
         investigation_id = await seed_investigation(uow, root_entity_ids=(entity_id,))
-        evidence: Evidence = await uow.evidence.insert(
+        evidence: LegacyEvidence = await uow.evidence.insert(
             evidence_factory(investigation_id, entity_id)
         )
         if evidence.id is None:  # pragma: no cover - insert assigns identity
