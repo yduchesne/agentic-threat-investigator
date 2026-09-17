@@ -264,7 +264,9 @@ class ProviderObservationPersistenceService:
             identities.add(key)
         for assertion in extraction.relationships:
             if assertion.evidence_id != evidence.id:
-                raise ValueError("relationship assertion LegacyEvidence ID does not match")
+                raise ValueError(
+                    "relationship assertion LegacyEvidence ID does not match"
+                )
             for endpoint in (assertion.source, assertion.target):
                 if canonicalize(endpoint.type, endpoint.value) != endpoint.value:
                     raise ValueError("relationship endpoint is not canonical")

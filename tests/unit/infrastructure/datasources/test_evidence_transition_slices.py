@@ -124,9 +124,7 @@ class TestFirstThreatFoxRecord:
         """One record converts; Evidence absent -> CREATE with exact provenance."""
         registry = build_threatfox_conversion_registry()
         record = _record()
-        converted = convert_semantic_source_objects(
-            (record,), _context(), registry
-        )
+        converted = convert_semantic_source_objects((record,), _context(), registry)
         assert len(converted) == 1
         item = converted[0]
 
@@ -222,9 +220,7 @@ class TestMaterialUpdate:
     def test_v03_material_update_appends_with_diff(self) -> None:
         """A changed material fact appends and yields the canonical diff."""
         registry = build_threatfox_conversion_registry()
-        first = convert_semantic_source_objects(
-            (_record(),), _context(), registry
-        )[0]
+        first = convert_semantic_source_objects((_record(),), _context(), registry)[0]
         changed = convert_semantic_source_objects(
             (_record(ioc="changed.example"),), _context(), registry
         )[0]
@@ -265,9 +261,7 @@ class TestInvestigationIndependence:
         """Global conversion is successful with no Investigation or subject."""
         registry = build_threatfox_conversion_registry()
         record = _record(record_id="864299")
-        converted = convert_semantic_source_objects(
-            (record,), _context(), registry
-        )
+        converted = convert_semantic_source_objects((record,), _context(), registry)
         assert len(converted) == 1
         assert converted[0].evidence.id == evidence_id_for_source_record(
             SemanticFormatId.THREATFOX, SourceId.THREATFOX, "864299"

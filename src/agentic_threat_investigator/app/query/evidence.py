@@ -90,7 +90,9 @@ class EvidenceQueryService(ABC):
         """
 
     @abstractmethod
-    async def get(self, investigation_id: UUID, evidence_id: UUID) -> LegacyEvidence | None:
+    async def get(
+        self, investigation_id: UUID, evidence_id: UUID
+    ) -> LegacyEvidence | None:
         """Return one LegacyEvidence observation bound to the Investigation, if any.
 
         A cross-Investigation lookup fails closed by returning ``None`` so

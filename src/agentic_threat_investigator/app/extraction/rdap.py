@@ -133,7 +133,9 @@ def _validated_registration(evidence: LegacyEvidence) -> ExtractionResult:
     return ExtractionResult()
 
 
-def _extract_ip_network(evidence: LegacyEvidence, evidence_id: UUID) -> ExtractionResult:
+def _extract_ip_network(
+    evidence: LegacyEvidence, evidence_id: UUID
+) -> ExtractionResult:
     """Extract explicit CIDR0 prefixes for a validated IP-network observation.
 
     The canonical subject identity is validated first — even when no CIDR0

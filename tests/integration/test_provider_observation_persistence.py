@@ -85,7 +85,9 @@ async def seed_investigation(uow: PostgresUnitOfWork) -> UUID:
     return investigation_id
 
 
-def dns_evidence(investigation_id: UUID, evidence_id: UUID | None = None) -> LegacyEvidence:
+def dns_evidence(
+    investigation_id: UUID, evidence_id: UUID | None = None
+) -> LegacyEvidence:
     """Build deterministic DNS LegacyEvidence with a canonical domain subject."""
     return LegacyEvidence(
         id=evidence_id or uuid4(),

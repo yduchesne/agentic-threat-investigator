@@ -105,7 +105,9 @@ def _malformed(evidence_id: UUID, message: str) -> EvidenceExtractionError:
     )
 
 
-def _validate_query_envelope(evidence: LegacyEvidence, evidence_id: UUID) -> tuple[str, str]:
+def _validate_query_envelope(
+    evidence: LegacyEvidence, evidence_id: UUID
+) -> tuple[str, str]:
     """Validate the complete query envelope and return the validated values.
 
     Persisted DNS evidence is only ever emitted for a NOERROR query whose

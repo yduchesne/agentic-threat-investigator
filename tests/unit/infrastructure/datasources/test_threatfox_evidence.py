@@ -348,8 +348,7 @@ class TestThreatFoxToEvidenceConverter:
             _record(), _conversion_context()
         )
         serialized = (
-            f"{converted.evidence.model_dump()} "
-            f"{converted.observation.model_dump()}"
+            f"{converted.evidence.model_dump()} {converted.observation.model_dump()}"
         )
         assert FIXED_KEY not in serialized
         assert "Auth-Key" not in serialized

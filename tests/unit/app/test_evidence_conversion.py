@@ -149,8 +149,7 @@ class _CardinalityConverter(ToEvidenceConverter[str]):
     ) -> tuple[ConvertedEvidence, ...]:
         """Emit exactly ``count`` deterministic ConvertedEvidence in fixed order."""
         return tuple(
-            _converted(context, seq=f"{source}-{index}")
-            for index in range(self._count)
+            _converted(context, seq=f"{source}-{index}") for index in range(self._count)
         )
 
 
@@ -175,9 +174,7 @@ class TestEvidenceConversionContext:
     def test_c01_valid_immutable_context_accepted(self) -> None:
         """D27D-C01: a valid conversion context is accepted and immutable."""
         context = _context()
-        assert (
-            context.semantic_source.semantic_format is SemanticFormatId.THREATFOX
-        )
+        assert context.semantic_source.semantic_format is SemanticFormatId.THREATFOX
         with pytest.raises(Exception):  # noqa: B017 - dataclasses raises FrozenInstanceError
             context.semantic_source = context.semantic_source  # type: ignore[misc]
 

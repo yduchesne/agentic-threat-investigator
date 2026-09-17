@@ -205,9 +205,7 @@ class FakeObservationRepository(RelationshipObservationRepository):
             if evidence.investigation_id == investigation_id
         }
         scoped = [
-            row
-            for row in self.rows
-            if row.evidence_observation_id in scoped_evidence
+            row for row in self.rows if row.evidence_observation_id in scoped_evidence
         ]
         return scoped[offset : offset + limit]
 

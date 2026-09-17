@@ -120,7 +120,9 @@ class PostgresEvidenceQueryService(EvidenceQueryService):
             )
         return QueryPage(items=items, next_cursor=next_cursor)
 
-    async def get(self, investigation_id: UUID, evidence_id: UUID) -> LegacyEvidence | None:
+    async def get(
+        self, investigation_id: UUID, evidence_id: UUID
+    ) -> LegacyEvidence | None:
         """Return one LegacyEvidence observation bound to the Investigation, if any.
 
         The binding predicate makes a cross-Investigation lookup fail closed

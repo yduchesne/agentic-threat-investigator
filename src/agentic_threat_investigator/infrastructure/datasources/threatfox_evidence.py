@@ -366,9 +366,7 @@ async def acquire_and_convert_threatfox_execution(
 
     context = EvidenceConversionContext(semantic_source=result.context)
     try:
-        converted = convert_semantic_source_objects(
-            result.objects, context, registry
-        )
+        converted = convert_semantic_source_objects(result.objects, context, registry)
     except asyncio.CancelledError:
         await _best_effort_terminal(recorder, cancelled=True)
         raise

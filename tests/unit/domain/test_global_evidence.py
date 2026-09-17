@@ -285,7 +285,9 @@ class TestMaterialState:
 
     def test_material_state_excludes_operational_fields(self) -> None:
         """Material state has exactly the four material fields."""
-        fields = set(EvidenceMaterialState.from_observation(_observation()).model_dump())
+        fields = set(
+            EvidenceMaterialState.from_observation(_observation()).model_dump()
+        )
         assert fields == {"observed_at", "source_url", "facts", "raw_payload"}
 
 
@@ -320,9 +322,7 @@ class TestTransition:
             decide_evidence_transition(
                 evidence_exists=True,
                 latest_observation=_observation(),
-                candidate=_candidate(
-                    facts={"matches": [{"threatfox_id": "864299"}]}
-                ),
+                candidate=_candidate(facts={"matches": [{"threatfox_id": "864299"}]}),
             )
             is EvidenceTransition.APPEND_OBSERVATION
         )
