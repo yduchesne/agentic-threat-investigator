@@ -1239,6 +1239,64 @@ source bodies, Evidence bodies, credentials, or raw exception text.
 Existing providers, batch normalization, Evidence construction, and
 Investigation behavior are unchanged; PR 27C–27E will reuse this substrate.
 
+### Datasource acquisition-to-semantic boundary (PR 27C)
+
+PR 27C establishes the boundary between decoded external data and ATI-owned
+downstream products on the target path:
+
+```text
+DatasourceDefinition
+ -> acquisition execution (PR 27B recorder)
+ -> protocol transport / local artifact read
+ -> serialization decode
+ -> decoded external value
+ -> semantic-format-specific parser/validator
+ -> typed semantic source objects + bounded provenance context
+ ---------------- PR 27D boundary ----------------
+ -> ToEvidenceConverter selected by semantic_format (future)
+ -> 0..N Evidence
+```
+
+Delivered in this slice:
+
+- cross-cutting provenance (`SemanticSourceContext`), the stage-aware
+  failure contract (`DatasourceStage`/`DatasourceStageError`), and the
+  generic `SemanticAcquisitionResult` live in `app/datasource_semantics.py`;
+  the context carries only cross-cutting provenance (datasource/source/
+  semantic-format identities derived from one `DatasourceDefinition`,
+  retrieval time, credential-free references) and never a union of
+  source-specific semantic fields;
+- the ThreatFox semantic contract (strict model, timestamps, URL
+  validation, IOC parsing/matching, envelope/query-status validation,
+  duplicate-ID rules) is extracted into
+  `infrastructure/datasources/threatfox_semantics.py` and is reused, not
+  duplicated, by the legacy `ThreatFoxProvider` (whose transitional
+  Evidence mapping remains unchanged until PR 27E);
+- a narrow production ThreatFox acquisition-to-semantic reference path
+  (`infrastructure/datasources/threatfox.py`) validates explicit datasource
+  dimensions before I/O, reuses `ProviderHttpClient` and
+  `DatasourceExecutionRecorder`, and logs STARTED/ACQUIRED/DECODED/…/term;
+  failures persist only safe bounded stage-aware codes
+  (`acquisition_failed`/`serialization_failed`/`semantic_validation_failed`
+  and stable specific codes such as `timeout`, `rate_limited`,
+  `authentication_failed`, `provider_unavailable`) — never raw bodies,
+  credentials, or exception text;
+- a STIX 2.1 semantic parser (`infrastructure/datasources/stix21_semantics.py`)
+  validates the decoded bundle/object identity contract, snapshots nested
+  source values as deeply immutable data, and preserves extension fields
+  (`x_mitre_*` and unknown valid types) without reimplementing the full
+  STIX 2.1 standard; the MITRE batch source consumes it as its
+  decoded-value boundary with `SourceRecord` identity/content-hash/
+  checkpoint behavior unchanged.
+
+Semantic modules construct no ATI Evidence, perform no network/DB/
+persistence I/O, and never infer semantics from provider IDs, protocol,
+serialization, or JSON shape. There is no `ToEvidenceConverter`, no
+converter registry, no semantic-object persistence table, and no new
+datasource-log event type in this slice — conversion is PR 27D, and the
+legacy `EvidenceProvider` contract remains authoritative for Investigation
+execution until PR 27E migrates it.
+
 ## Geospatial
 
 v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are used for map visualization.

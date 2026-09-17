@@ -259,6 +259,18 @@ plus identities and timestamps. Cancellation is recorded as `CANCELLED` and
 never as a failure code; raw exception text, tracebacks, source bodies,
 credentials, and unsafe URLs never enter the log.
 
+### Stage-aware failure ownership (PR 27C)
+
+The PR 27C acquisition-to-semantic path distinguishes where a datasource
+acquisition failed through typed `DatasourceStage` values
+(ACQUISITION / SERIALIZATION / SEMANTIC_VALIDATION) on the application-side
+`DatasourceStageError`; the durable log persists only the corresponding
+bounded safe `FAILED` code (`acquisition_failed`, `serialization_failed`,
+`semantic_validation_failed`, or stable specific codes such as `timeout`,
+`rate_limited`, `authentication_failed`, `provider_unavailable`). No new
+event type was added; stage classification is typed at the failure boundary
+and is never inferred by matching free-form error-message text.
+
 ## Data minimization
 
 Default telemetry favors identifiers and normalized execution metadata.

@@ -1355,6 +1355,21 @@ error. It is **not** a benign assessment and never implies benignity.
 Because ThreatFox expires IOCs older than six months from API
 visibility, a no-result also never proves historical absence.
 
+#### Ownership boundary (PR 27C)
+
+The ThreatFox source semantics (strict record model, timestamps, IOC
+parsing/matching, envelope validation, duplicate rules) live in the
+format-specific semantic module
+`agentic_threat_investigator/infrastructure/datasources/threatfox_semantics.py`
+and are reused by the legacy `ThreatFoxProvider` unchanged. The production
+ThreatFox acquisition-to-semantic reference path
+(`infrastructure/datasources/threatfox.py`) validates the configured
+datasource dimensions fail-closed (THREATFOX + HTTPS + JSON + ThreatFox
+semantics), reuses `ProviderHttpClient` and the PR 27B
+`DatasourceExecutionRecorder`, and logs bounded stage-aware terminal codes;
+it constructs no ATI Evidence and persists nothing beyond the safe
+datasource-log events. Evidence conversion belongs to PR 27D.
+
 #### Evidence semantics
 
 A successful search emits:
@@ -1680,6 +1695,19 @@ clearly non-authoritative content that conforms exactly to the production
 input contract) exercise the same production parser, document builder,
 indexing service, and pgvector retrieval path offline. The test fixtures are
 a real-format fixture subset, not a separate fake data source.
+
+#### STIX semantic boundary (PR 27C)
+
+The STIX 2.1 decoded-value semantic parser
+(`agentic_threat_investigator/infrastructure/datasources/stix21_semantics.py`)
+owns the shared STIX 2.1 envelope/object identity contract and deep
+immutable snapshots that preserve extension fields (`x_mitre_*` and unknown
+valid object types). `MitreAttackBatchSource` consumes it as its
+decoded-value boundary before the existing ATT&CK-specific `SourceRecord`
+normalization; record identities, canonical payloads, content hashes,
+checkpoints, and batch/ingestion behavior are unchanged. STIX semantics and
+MITRE ATT&CK normalization remain distinct layers: the parser never
+constructs `SourceRecord` or ATI Evidence.
 
 STIX relationships are normalized to `urn:ati:relationship:attack:uses_technique`
 when a `uses` relationship targets an `attack-pattern`. Other relationship

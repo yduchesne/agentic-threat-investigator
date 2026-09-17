@@ -1,5 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""MITRE ATT&CK STIX 2.1 batch-source normalization."""
+"""MITRE ATT&CK STIX 2.1 batch-source normalization.
+
+The batch source consumes the shared PR 27C STIX 2.1 semantic parser
+(``infrastructure.datasources.stix21_semantics``) as its decoded-value
+boundary: artifact bytes are JSON-decoded, then parsed into validated
+source-native STIX objects, then normalized through the existing
+ATT&CK-specific ``SourceRecord`` logic. Record identities, canonical
+payloads, content hashes, checkpoints, and batch behavior are unchanged.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +27,10 @@ from agentic_threat_investigator.app.sources import (
 )
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.source import SourceRecord
+from agentic_threat_investigator.infrastructure.datasources.stix21_semantics import (
+    Stix21SemanticError,
+    parse_stix21_bundle,
+)
 
 RECORD_TYPE_TECHNIQUE = "attack_technique"
 RECORD_TYPE_SOFTWARE = "attack_software"
@@ -327,19 +339,24 @@ def normalize_stix_objects(
     return records
 
 
-def _parse_bundle(content: bytes) -> list[Mapping[str, Any]]:
-    """Decode and validate the top-level STIX bundle envelope."""
+def _parse_bundle(content: bytes) -> tuple[Mapping[str, Any], ...]:
+    """Decode and validate the top-level STIX bundle envelope.
+
+    UTF-8/JSON decoding is the serialization boundary; the decoded value is
+    then parsed by the shared STIX 2.1 semantic parser, which validates the
+    bundle envelope and each object identity and preserves extension
+    fields. The returned mutable mappings are thawed copies of the
+    validated immutable semantic objects.
+    """
     try:
         parsed = json.loads(content.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise MitreAttackFormatError("artifact is not valid UTF-8 JSON") from exc
-    bundle = _as_object(parsed, "STIX bundle")
-    if bundle.get("type") != "bundle":
-        raise MitreAttackFormatError("STIX artifact type must be bundle")
-    objects = bundle.get("objects")
-    if not isinstance(objects, list):
-        raise MitreAttackFormatError("STIX bundle objects must be a list")
-    return objects
+    try:
+        objects = parse_stix21_bundle(parsed)
+    except Stix21SemanticError as exc:
+        raise MitreAttackFormatError(str(exc)) from exc
+    return tuple(obj.source_value() for obj in objects)
 
 
 def _checkpoint_index(checkpoint: str | None, total: int) -> int:

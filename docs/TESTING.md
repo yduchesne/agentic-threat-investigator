@@ -382,6 +382,59 @@ matrix IDs D27B-U01..U13, D27B-P01..P15, D27B-V01/V02, D27B-C01, D27B-S01):
   the bounded operational set, so source bodies, Evidence bodies,
   credentials, and tracebacks cannot be persisted by the event schema.
 
+### Datasource acquisition-to-semantic boundary (PR 27C)
+
+PR 27C tests are deterministic, offline, and use real production parsing/
+HTTP paths; only the external Internet endpoint is faked via in-process
+`httpx.MockTransport`:
+
+- cross-cutting contracts (`tests/unit/app/test_datasource_semantics.py`,
+  D27C-U01..U08): exact context identity derived from one
+  `DatasourceDefinition`, timezone-aware UTC retrieval timestamps (naive
+  rejected), credential-free and bounded source references (credential-
+  bearing, blank, non-HTTP, hostless, and over-bound references rejected),
+  success/empty-semantics vs failure result invariants, bounded
+  error-code grammar, and nonnegative retry delays;
+- ThreatFox semantics (`tests/unit/infrastructure/datasources/test_threatfox_semantics.py`,
+  D27C-T01..T20): no-result/empty-data empty successes, typed records in
+  source order, identical-duplicate retention and conflicting-duplicate
+  whole-response failure, unrelated-IOC rejection, malformed
+  timestamp/URL/domain failures, body-encoded `ratelimited` as an
+  operational acquisition failure, canonical `ip:port`/bracketed IPv6:port
+  matching, ambiguous unbracketed IPv6+port rejection, UTC timestamps,
+  parse determinism, and proof that the semantic module has no
+  Evidence/provider import dependency;
+- ThreatFox acquisition path (`tests/unit/infrastructure/datasources/test_threatfox_datasource.py`,
+  D27C-X01..X09): full success (STARTED -> ACQUIRED -> DECODED ->
+  COMPLETED), HTTP/serialization/semantic failures with typed stage-aware
+  bounded codes and no intermediate stages, no-result DECODED item_count=0,
+  deterministic cancellation (CANCELLED recorded, `CancelledError`
+  propagates, never FAILED), distinct per-execution IDs, no UoW held across
+  HTTP or semantic parsing (short committed transactions per append), no
+  CONVERTED event, fail-closed dimension validation before I/O, and
+  header-only Auth-Key with zero context/log leakage;
+- STIX semantics (`tests/unit/infrastructure/datasources/test_stix21_semantics.py`,
+  D27C-S01..S12): typed bundle/object parsing in source order, fail-closed
+  envelope and object-identity validation, preserved `x_mitre_*` extension
+  fields and unknown valid types, deep snapshot isolation from caller
+  mutation, and the serialization boundary (raw bytes must be decoded
+  before the semantic parser);
+- the canonical real-stack vertical slice
+  (`tests/integration/test_datasource_semantic_acquisition.py`): a
+  deterministic local HTTP fixture -> real `ProviderHttpClient` -> real
+  `ThreatFoxDatasource` -> real semantic parser -> real
+  `DatasourceExecutionRecorder` -> real `PostgresUnitOfWork` -> real
+  `ati.append_datasource_log_event` stored function -> real
+  `ati.datasource_log`, asserting one execution ID, the exact
+  STARTED/ACQUIRED/DECODED/COMPLETED and failure/cancellation lifecycles,
+  exact bounded byte/item counts, no Evidence/SourceRecord/Investigation
+  rows, and no raw body or credential in the durable log.
+
+MITRE regressions unchanged: STIX-parser reuse in the batch source keeps
+`SourceRecord` identities, canonical payloads, content hashes, and
+checkpoints identical across the unit source tests, the ATT&CK ingestion
+suite, and the real-format vertical slice.
+
 ### Deterministic vertical-slice provider execution (PR 19B)
 
 `tests/integration/test_provider_execution_pipeline.py` proves the real

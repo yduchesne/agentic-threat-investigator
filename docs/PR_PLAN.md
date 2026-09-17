@@ -1861,8 +1861,8 @@ This document is the detailed roadmap-level decomposition for the datasource arc
 ```text
 PR 26G — GEOINT series closure [DONE]
   -> PR 27A — Datasource model and contracts
-  -> PR 27B — Acquisition execution and correlated logging
-  -> PR 27C — Acquisition-to-semantic boundary
+  -> PR 27B — Acquisition execution and correlated logging [DONE]
+  -> PR 27C — Acquisition-to-semantic boundary [DONE]
   -> PR 27D — semantic_format-driven ToEvidenceConverter
   -> PR 27E — Existing-source migration and series closure
   -> PR 28 — Evaluation and release hardening (formerly PR 27)
@@ -1964,21 +1964,46 @@ Deliver:
 
 Do not introduce a durable execution table merely because an execution concept exists; first determine whether `execution_id` on the existing datasource log is sufficient.
 
-## PR 27C — Acquisition-to-semantic boundary
+## PR 27C — Acquisition-to-semantic boundary [DONE]
 
-Separate source acquisition and serialization from source semantics.
+Established the boundary between decoded external data and ATI-owned
+downstream products; conversion (PR 27D) and existing-source migration
+(PR 27E) remain future work.
 
-Deliver:
+Delivered:
 
-- semantic-format-specific source-object representation/validation;
-- transport/serialization code that yields semantic source objects rather than ATI Evidence on the target path;
-- explicit stage-specific error boundaries;
-- preservation of source identity, observation/retrieval timing, safe source references, and artifact context required for later provenance;
-- deterministic source-format fixtures using real production contracts;
-- no universal mega-schema;
-- no Evidence conversion registry yet unless required as a narrow seam for the next PR.
+- cross-cutting contracts in `app/datasource_semantics.py`:
+  `SemanticSourceContext` (immutable cross-cutting provenance derived from
+  one `DatasourceDefinition`, UTC-normalized retrieval time, credential-free
+  references), `DatasourceStage`/`DatasourceStageError` (typed
+  ACQUISITION/SERIALIZATION/SEMANTIC_VALIDATION failure ownership with
+  bounded safe codes), and the generic `SemanticAcquisitionResult` with
+  success/failure invariants;
+- the extracted ThreatFox semantic parser
+  (`infrastructure/datasources/threatfox_semantics.py`) owning the strict
+  record model, timestamps, URL validation, IOC parsing/matching, envelope/
+  query-status validation, and duplicate-ID rules; the legacy
+  `ThreatFoxProvider` reuses it and keeps only Evidence-specific
+  construction, with public behavior unchanged;
+- the production ThreatFox acquisition-to-semantic reference path
+  (`infrastructure/datasources/threatfox.py`): fail-closed datasource-
+  dimension validation before I/O, `ProviderHttpClient` reuse (Auth-Key
+  header-only), PR 27B `DatasourceExecutionRecorder` integration with
+  STARTED/ACQUIRED/DECODED/terminal, typed stage-aware failure codes, and
+  cancellation propagation as CANCELLED;
+- the STIX 2.1 decoded-value semantic parser
+  (`infrastructure/datasources/stix21_semantics.py`) preserving extension
+  fields (`x_mitre_*`, unknown valid types) as deeply immutable data;
+  `MitreAttackBatchSource` consumes it without changing `SourceRecord`
+  identity/content-hash/checkpoint behavior;
+- deterministic unit matrices (D27C-U01..U08, D27C-T01..T20,
+  D27C-X01..X09, D27C-S01..S12) and the real-stack real-PostgreSQL
+  execution-log vertical slice
+  (`tests/integration/test_datasource_semantic_acquisition.py`).
 
-A source semantic object is still untrusted external data until its semantic contract has been validated.
+No `ToEvidenceConverter`, converter registry, semantic-object persistence,
+migration, new datasource-log event type, or Investigation/API/UI change
+was added.
 
 ## PR 27D — Semantic-format-driven `ToEvidenceConverter`
 

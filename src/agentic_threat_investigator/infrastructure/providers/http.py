@@ -29,6 +29,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from agentic_threat_investigator.app.datasource_semantics import DatasourceStage
 from agentic_threat_investigator.app.providers import ProviderErrorCode
 
 _logger = logging.getLogger(__name__)
@@ -72,7 +73,13 @@ class HttpOutcome:
 
     When the request succeeded ``final_error_code`` is None and
     ``response_json`` carries the parsed body. On failure the error fields
-    carry the classification.
+    carry the classification. ``final_error_stage`` is the typed PR 27C
+    datasource failure stage of a failure outcome (``None`` on success),
+    so acquisition/serialization failures are distinguishable without
+    matching free-form message text: transport and HTTP status failures
+    classify as ACQUISITION, while content-type, content-encoding, and
+    UTF-8/JSON decoding failures classify as SERIALIZATION. Response-size
+    bounding failures classify as ACQUISITION (transport limits).
     """
 
     attempt_count: int
@@ -84,6 +91,7 @@ class HttpOutcome:
     retry_after_seconds: int | None = None
     response_bytes: bytes | None = None
     response_json: Any = None
+    final_error_stage: DatasourceStage | None = None
 
 
 @dataclass(frozen=True)
@@ -884,6 +892,7 @@ class ProviderHttpClient:
                     final_error_message=msg,
                     duration_seconds=duration,
                     retry_after_seconds=retry_after,
+                    final_error_stage=DatasourceStage.ACQUISITION,
                 )
 
         except httpx.TimeoutException:
@@ -894,6 +903,7 @@ class ProviderHttpClient:
                 final_error_code=ProviderErrorCode.TIMEOUT,
                 final_error_message="request timed out",
                 duration_seconds=read_monotonic_clock(self._clock) - start_time,
+                final_error_stage=DatasourceStage.ACQUISITION,
             )
         except httpx.TransportError:
             return HttpOutcome(
@@ -903,6 +913,7 @@ class ProviderHttpClient:
                 final_error_code=ProviderErrorCode.PROVIDER_UNAVAILABLE,
                 final_error_message="provider transport unavailable",
                 duration_seconds=read_monotonic_clock(self._clock) - start_time,
+                final_error_stage=DatasourceStage.ACQUISITION,
             )
 
     async def _handle_accepted_response(
@@ -922,6 +933,7 @@ class ProviderHttpClient:
                 final_error_code=ProviderErrorCode.INVALID_RESPONSE,
                 final_error_message="unsupported response content type",
                 duration_seconds=duration,
+                final_error_stage=DatasourceStage.SERIALIZATION,
             )
 
         try:
@@ -940,6 +952,7 @@ class ProviderHttpClient:
                 final_error_code=ProviderErrorCode.INVALID_RESPONSE,
                 final_error_message="invalid response content encoding",
                 duration_seconds=duration,
+                final_error_stage=DatasourceStage.SERIALIZATION,
             )
         except ValueError as exc:
             # Distinguish malformed size metadata from oversize bodies in the
@@ -951,6 +964,7 @@ class ProviderHttpClient:
                 final_error_code=ProviderErrorCode.INVALID_RESPONSE,
                 final_error_message=str(exc) or "response too large",
                 duration_seconds=duration,
+                final_error_stage=DatasourceStage.ACQUISITION,
             )
 
         try:
@@ -963,6 +977,7 @@ class ProviderHttpClient:
                 final_error_code=ProviderErrorCode.INVALID_RESPONSE,
                 final_error_message="malformed JSON",
                 duration_seconds=duration,
+                final_error_stage=DatasourceStage.SERIALIZATION,
             )
 
         return HttpOutcome(
