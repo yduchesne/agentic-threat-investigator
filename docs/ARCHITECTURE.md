@@ -1206,8 +1206,9 @@ behavior (see also [Data Source Architecture](DATASOURCE_ARCHITECTURE.md)):
   URNs in `domain/identifiers.py`);
 - the typed definitions are exposed through `Settings.datasources` with
   unique datasource IDs and fail-closed unknown values;
-- no dimension is inferred from another; `semantic_format` is the later
-  converter-selection dimension and no converter exists yet (PR 27D).
+- no dimension is inferred from another; `semantic_format` is the
+  converter-selection dimension consumed by the PR 27D
+  `ToEvidenceConverter` registry (PR 27A itself added no converter).
 
 The existing live path (`Investigation -> provider registry ->
 EvidenceProvider -> ProviderResult -> Evidence`) and batch path
@@ -1253,7 +1254,7 @@ DatasourceDefinition
  -> semantic-format-specific parser/validator
  -> typed semantic source objects + bounded provenance context
  ---------------- PR 27D boundary ----------------
- -> ToEvidenceConverter selected by semantic_format (future)
+ -> semantic-format-keyed registry -> ToEvidenceConverter
  -> 0..N Evidence
 ```
 
@@ -1291,11 +1292,64 @@ Delivered in this slice:
 
 Semantic modules construct no ATI Evidence, perform no network/DB/
 persistence I/O, and never infer semantics from provider IDs, protocol,
-serialization, or JSON shape. There is no `ToEvidenceConverter`, no
-converter registry, no semantic-object persistence table, and no new
-datasource-log event type in this slice — conversion is PR 27D, and the
-legacy `EvidenceProvider` contract remains authoritative for Investigation
-execution until PR 27E migrates it.
+serialization, or JSON shape. There is no semantic-object persistence
+table and no new datasource-log event type in this slice — conversion is
+PR 27D, and the legacy `EvidenceProvider` contract remains authoritative
+for Investigation execution until PR 27E migrates it.
+
+### Semantic-format-driven Evidence conversion (PR 27D)
+
+PR 27D introduces the pure semantic-object -> Evidence conversion boundary
+without migrating any runtime source:
+
+```text
+semantic parser
+  -> validated source object
+  -> semantic-format registry (keyed only by SemanticFormatId)
+  -> ToEvidenceConverter
+  -> 0..N Evidence
+```
+
+Delivered in this slice:
+
+- `EvidenceConversionContext` (`app/evidence_conversion.py`): the immutable
+  ATI-side binding required by conversion — exact `investigation_id` and
+  canonical `subject` (``EntityRef``) plus one reused
+  `SemanticSourceContext`. The Acquisition/Investigation split is
+  deliberate: `SemanticSourceContext` remains pure acquisition/source
+  provenance and never carries Investigation identity;
+- `ToEvidenceConverter` (ABC, generic over the validated source-object
+  type): stateless, deterministic, synchronous pure mapping from **one**
+  already-validated semantic source object plus the explicit context to an
+  immutable `tuple[Evidence, ...]` (zero, one, or many);
+- `ToEvidenceConverterRegistry`: immutable, keyed only by
+  `SemanticFormatId`. Duplicate registration fails closed; an unknown
+  format raises a narrow typed `UnknownSemanticFormatError`; there is no
+  default/fallback converter and no provider/protocol/serialization/
+  object-shape selection;
+- `convert_semantic_source_objects`: the smallest flattening seam —
+  bounded semantic tuples through the selected converter in deterministic
+  source-object-then-converter-return order;
+- `DatasourceStage.CONVERSION`: typed conversion-stage failure ownership
+  (bounded durable code `conversion_failed`, never raw exception text);
+- the ThreatFox reference converter
+  (`infrastructure/datasources/threatfox_evidence.py`): one validated
+  `ThreatFoxRecord` -> one immutable `THREAT_INTELLIGENCE` Evidence with
+  exact provenance, sharing the timestamp/match-facts mapping with the
+  legacy `ThreatFoxProvider` (which remains the runtime path until
+  PR 27E);
+- the PR 27D lifecycle runner reusing the PR 27B
+  `DatasourceExecutionRecorder` and `CONVERTED` event: STARTED / ACQUIRED /
+  DECODED / pure conversion / CONVERTED(item_count = Evidence count) /
+  COMPLETED; valid no-results record `CONVERTED(0)` as success; conversion
+  failures record `FAILED(conversion_failed)`; cancellation stays
+  CANCELLED and propagates.
+
+Converters perform no I/O, no persistence, no clock/random reads, no
+secret/config lookup, and never assign persistent Evidence IDs, verdicts,
+relationships, pivots, attribution, or Investigation control flow. No
+Evidence is persisted by the PR 27D slice; PR 27E migrates applicable
+Evidence-producing integrations onto this boundary.
 
 ## Geospatial
 

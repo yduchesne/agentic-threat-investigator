@@ -1368,11 +1368,47 @@ datasource dimensions fail-closed (THREATFOX + HTTPS + JSON + ThreatFox
 semantics), reuses `ProviderHttpClient` and the PR 27B
 `DatasourceExecutionRecorder`, and logs bounded stage-aware terminal codes;
 it constructs no ATI Evidence and persists nothing beyond the safe
-datasource-log events. Evidence conversion belongs to PR 27D.
+datasource-log events.
 
-#### Evidence semantics
+#### Conversion boundary (PR 27D)
 
-A successful search emits:
+`infrastructure/datasources/threatfox_evidence.py` owns the reference
+`ThreatFoxToEvidenceConverter` for the
+`urn:ati:datasource:semanticformat:threatfox` semantic format. It consumes
+**already-validated** `ThreatFoxRecord` objects (never raw JSON; semantic
+validation is never duplicated) plus an explicit
+`EvidenceConversionContext` and maps each record to exactly one immutable
+`THREAT_INTELLIGENCE` Evidence with exact provenance:
+
+- `investigation_id`/`subject`: the conversion context binding (the
+  canonical acquisition entity);
+- `source`: the semantic source URN (`urn:ati:source:threatfox`);
+- `retrieved_at`: the semantic-context retrieval time;
+- `source_url`: the credential-free semantic `source_reference`;
+- `observed_at`: the record's `last_seen` when present, else `first_seen`;
+- `facts = {"matches": [same normalized match facts as the legacy
+  provider]}` and `raw_payload = None`;
+- `source_record_id`: the upstream ThreatFox record identity
+  (`ThreatFoxRecord.id`, a provenance fact, never an ATI ID).
+
+The timestamp formatting and match-facts construction
+(`format_threatfox_fact_timestamp` / `build_threatfox_match_facts`) are
+shared with the legacy `ThreatFoxProvider` — one implementation, never
+duplicated. The converter performs no I/O/persistence and synthesizes no
+verdict, confidence weighting, attribution, or relationship. Source
+confidence remains a source fact.
+
+**Runtime compatibility note:** the legacy `ThreatFoxProvider` remains the
+runtime Evidence path until PR 27E migrates it. PR 27D therefore accepts
+the grouping difference (legacy: N records -> one grouped Evidence;
+converter: one record -> one Evidence) because the converter is not yet
+wired into runtime provider execution. PR 27E must explicitly decide
+whether migration preserves grouping or adopts per-record Evidence after
+reviewing downstream persistence/extraction/API/evaluation compatibility.
+
+#### Evidence semantics (legacy runtime path; PR 27E migrates)
+
+A successful search through the legacy runtime path emits:
 
 - `EvidenceType.THREAT_INTELLIGENCE`
   (`urn:ati:evidence:threat_intelligence`);

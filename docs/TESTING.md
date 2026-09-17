@@ -435,6 +435,63 @@ MITRE regressions unchanged: STIX-parser reuse in the batch source keeps
 checkpoints identical across the unit source tests, the ATT&CK ingestion
 suite, and the real-format vertical slice.
 
+### Semantic-format-driven Evidence conversion (PR 27D)
+
+PR 27D tests are deterministic and offline; only the external Internet
+endpoint is faked via in-process `httpx.MockTransport`:
+
+- generic conversion contracts (`tests/unit/app/test_evidence_conversion.py`,
+  D27D-C01..C10): immutable `EvidenceConversionContext` with exact
+  Investigation/subject/semantic-context preservation, legal zero/one/
+  multiple Evidence cardinality, deterministic flattening of multiple
+  source objects (source-object order then converter-return order),
+  structural repeatability of identical conversions, and deterministic
+  local `ConversionError` failure;
+- converter registry (`tests/unit/app/test_evidence_conversion.py`,
+  D27D-R01..R10): lookup keyed only by `SemanticFormatId`; duplicate
+  registration fails construction; unknown formats raise the typed
+  `UnknownSemanticFormatError`; changed SourceId/protocol/serialization/
+  datasource ID never select; misleading object shapes never fall back;
+  and a wrong object for the selected converter fails closed;
+- ThreatFox converter (`tests/unit/infrastructure/datasources/test_threatfox_evidence.py`,
+  D27D-T01..T20): one validated `ThreatFoxRecord` -> one immutable
+  `THREAT_INTELLIGENCE` Evidence with exact Investigation/subject/source
+  URN/retrieved_at/observed_at/credential-free reference provenance,
+  shared legacy-format match facts (identical to the legacy provider),
+  source-confidence-as-source-fact, preserved tags/reference/nulls,
+  `raw_payload=None`, `source_record_id` = exact upstream record ID,
+  immutability, no credentials, no analytical inference, structural
+  repeatability, and fail-closed wrong-format/wrong-object handling;
+- legacy compatibility (D27D-L01..L08): the existing ThreatFox provider
+  suites (`tests/unit/infrastructure/providers/test_threatfox*.py` and the
+  extraction regression suite) remain green and assert the unchanged
+  grouped-evidence shape, no-result/malformed/rate-limit/unsupported
+  behaviors, and unchanged downstream extraction;
+- conversion lifecycle (`tests/unit/infrastructure/datasources/test_threatfox_evidence.py`,
+  D27D-E01..E06): typed `DatasourceStage.CONVERSION`, runner lifecycles
+  over an in-memory UnitOfWork — success with `CONVERTED(item_count=N)`,
+  valid no-result `CONVERTED(0)` then COMPLETED, converter violation
+  `FAILED(conversion_failed)` with no CONVERTED/COMPLETED and no exception
+  text, bounded durable error code, one execution ID, short committed
+  transactions with no UoW held across HTTP/parsing/conversion, and
+  cancellation (CANCELLED recorded, `CancelledError` propagates);
+- the canonical real-PostgreSQL conversion-lifecycle slice
+  (`tests/integration/test_datasource_evidence_conversion.py`, D27D-I01..I06):
+  deterministic local ThreatFox HTTP fixture -> real `ProviderHttpClient`
+  -> real `ThreatFoxDatasource` -> real semantic parser -> real
+  `SemanticSourceContext` -> real `ToEvidenceConverterRegistry` -> real
+  `ThreatFoxToEvidenceConverter` -> in-memory Evidence -> real
+  `DatasourceExecutionRecorder` -> real `PostgresUnitOfWork` -> real
+  stored function -> real `ati.datasource_log` (only the external Internet
+  endpoint is faked): one-record success (exact provenance,
+  STARTED/ACQUIRED/DECODED/CONVERTED(1)/COMPLETED, one execution ID, no
+  Evidence persisted), valid no-result (`CONVERTED(0)`), two records ->
+  two Evidence in source order, conversion failure (bounded
+  `conversion_failed`, no CONVERTED/COMPLETED, no exception text),
+  cancellation (CANCELLED, propagates), and minimization (Auth-Key, raw
+  body, credential-bearing URL, and exception text absent from durable
+  logs and Evidence).
+
 ### Deterministic vertical-slice provider execution (PR 19B)
 
 `tests/integration/test_provider_execution_pipeline.py` proves the real

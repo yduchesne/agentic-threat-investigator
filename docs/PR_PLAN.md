@@ -1863,7 +1863,7 @@ PR 26G — GEOINT series closure [DONE]
   -> PR 27A — Datasource model and contracts
   -> PR 27B — Acquisition execution and correlated logging [DONE]
   -> PR 27C — Acquisition-to-semantic boundary [DONE]
-  -> PR 27D — semantic_format-driven ToEvidenceConverter
+  -> PR 27D — semantic_format-driven ToEvidenceConverter [DONE]
   -> PR 27E — Existing-source migration and series closure
   -> PR 28 — Evaluation and release hardening (formerly PR 27)
 ```
@@ -2005,30 +2005,59 @@ No `ToEvidenceConverter`, converter registry, semantic-object persistence,
 migration, new datasource-log event type, or Investigation/API/UI change
 was added.
 
-## PR 27D — Semantic-format-driven `ToEvidenceConverter`
+## PR 27D — Semantic-format-driven `ToEvidenceConverter` [DONE]
 
-Introduce the conversion boundary.
+Introduced the conversion boundary without migrating existing providers:
 
-Conceptual contract:
+- `EvidenceConversionContext` (`app/evidence_conversion.py`): immutable
+  ATI-side conversion context — exact Investigation UUID, exact canonical
+  `EntityRef` subject, and one reused `SemanticSourceContext` (which
+  itself never carries Investigation identity);
+- `ToEvidenceConverter` ABC, generic over one validated source-object
+  type, with explicit 0..N cardinality (`tuple[Evidence, ...]`), pure and
+  deterministic, stateless/reusable, no I/O/persistence/clock/random/secret
+  reads, and no Evidence-ID, verdict, relationship, pivot, or Investigation
+  ownership;
+- `ToEvidenceConverterRegistry`: immutable, duplicate registration fails
+  closed, unknown formats raise the typed `UnknownSemanticFormatError`;
+  selection is keyed only by `SemanticFormatId` (never SourceId/provider/
+  protocol/serialization/object shape, no default/fallback, no global or
+  import-time registration);
+- `convert_semantic_source_objects`: deterministic flattening seam
+  preserving source-object order then converter-return order;
+- `DatasourceStage.CONVERSION` typed conversion-stage failure ownership;
+  the PR 27B `DatasourceExecutionRecorder` and the existing `CONVERTED`
+  event are reused — no new lifecycle event, no conversion logger, no
+  second execution identity;
+- `ThreatFoxToEvidenceConverter`
+  (`infrastructure/datasources/threatfox_evidence.py` over validated
+  `ThreatFoxRecord`, semantic format
+  `urn:ati:datasource:semanticformat:threatfox`) mapping one record to one
+  immutable `THREAT_INTELLIGENCE` Evidence with exact provenance
+  (Investigation, subject, semantic source URN, retrieved_at, credential-
+  free source reference, `observed_at = last_seen else first_seen`,
+  `source_record_id = ThreatFoxRecord.id`, `raw_payload=None`); timestamp
+  formatting and match-facts construction are shared with the legacy
+  `ThreatFoxProvider` (one implementation, never duplicated);
+- the PR 27D lifecycle runner (`acquire_and_convert_threatfox_execution`)
+  exercising STARTED/ACQUIRED/DECODED/pure conversion/CONVERTED(item_count
+  = Evidence count)/COMPLETED, `CONVERTED(0)` as valid success,
+  `FAILED(conversion_failed)` as the bounded conversion-failure code (no
+  CONVERTED, no raw exception text), and cancellation preserved as
+  CANCELLED with `CancelledError` propagating;
+- deterministic tests proving zero/one/many cardinality, registry
+  fail-closed selection, ThreatFox provenance/purity, and the real-
+  PostgreSQL acquisition -> semantic -> conversion lifecycle slice
+  (`tests/integration/test_datasource_evidence_conversion.py`);
+- documentation reconciliation (ARCHITECTURE, DATASOURCE_ARCHITECTURE,
+  DATA_SOURCES, OBSERVABILITY, TESTING).
 
-```python
-class ToEvidenceConverter(ABC):
-    def convert(self, source: SourceObject) -> Sequence[Evidence]:
-        ...
-```
-
-Deliver:
-
-- `ToEvidenceConverter` abstraction reconciled with existing ATI ABC conventions;
-- converter selection/registry keyed by `semantic_format`;
-- semantic-format-specific implementations, including a proprietary-format reference implementation such as ThreatFox;
-- explicit zero-, one-, and multiple-Evidence conversion tests;
-- exact Evidence provenance;
-- deterministic conversion with no network I/O;
-- no persistence ownership in converter;
-- no Investigation orchestration/verdict/attribution ownership in converter.
-
-Do not key converter selection on provider, protocol, MIME type, filename, or JSON shape.
+The legacy `ThreatFoxProvider` remains the runtime Evidence path with
+unchanged behavior until PR 27E migrates it; PR 27D persists and migrates
+nothing. One validated record -> one Evidence is the new-converter mapping;
+PR 27E must explicitly decide whether migration preserves the legacy
+N-record -> one-grouped-Evidence shape or adopts per-record Evidence after
+reviewing downstream compatibility.
 
 ## PR 27E — Existing-source migration and closure
 

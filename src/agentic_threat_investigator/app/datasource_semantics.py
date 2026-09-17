@@ -47,14 +47,15 @@ class DatasourceStage(StrEnum):
     """Typed acquisition failure stage on the PR 27C acquisition-to-semantic path.
 
     Distinguishes where a datasource acquisition failed so operational
-    outcomes remain attributable to at least ACQUISITION, SERIALIZATION, or
-    SEMANTIC_VALIDATION. PR 27D later adds CONVERSION. These are error
-    stages, never overloaded lifecycle event types (PR 27B owns those).
+    outcomes remain attributable to ACQUISITION, SERIALIZATION,
+    SEMANTIC_VALIDATION, or CONVERSION (PR 27D). These are error stages,
+    never overloaded lifecycle event types (PR 27B owns those).
     """
 
     ACQUISITION = "acquisition"
     SERIALIZATION = "serialization"
     SEMANTIC_VALIDATION = "semantic_validation"
+    CONVERSION = "conversion"
 
 
 class DatasourceStageError(BaseModel):
