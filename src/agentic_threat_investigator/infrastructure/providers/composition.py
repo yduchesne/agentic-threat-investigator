@@ -21,6 +21,9 @@ from agentic_threat_investigator.app.secrets import (
 )
 from agentic_threat_investigator.config.settings import Settings
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.infrastructure.datasources.threatfox import (
+    ThreatFoxDatasource,
+)
 from agentic_threat_investigator.infrastructure.object_store import (
     FileSystemObjectStore,
     object_store_for_uri,
@@ -46,9 +49,6 @@ from agentic_threat_investigator.infrastructure.providers.ipinfo_lite import (
     IpinfoLiteProvider,
 )
 from agentic_threat_investigator.infrastructure.providers.rdap import RdapProvider
-from agentic_threat_investigator.infrastructure.providers.threatfox import (
-    ThreatFoxProvider,
-)
 from agentic_threat_investigator.infrastructure.providers.urlhaus import UrlhausProvider
 
 
@@ -122,7 +122,7 @@ class ProviderComposition:
         self._rdap: RdapProvider | None = None
         self._ipinfo_lite: IpinfoLiteProvider | None = None
         self._abuseipdb: AbuseIpdbProvider | None = None
-        self._threatfox: ThreatFoxProvider | None = None
+        self._threatfox_datasource: ThreatFoxDatasource | None = None
         self._urlhaus: UrlhausProvider | None = None
         self._dbip_city_lite: DbIpCityLiteProvider | None = None
 
@@ -225,7 +225,7 @@ class ProviderComposition:
             )
 
             # The ThreatFox Auth-Key is resolved during composition through
-            # the same bootstrap contract; the provider receives only the
+            # the same bootstrap contract; the datasource receives only the
             # resolved key and never reads configuration or the environment.
             threatfox_key = resolver.require(settings.threatfox_auth_key_secret)
             http = factory.create(
@@ -239,7 +239,13 @@ class ProviderComposition:
             )
             stack.push_async_callback(http.aclose)
             clients.append(http)
-            composition._threatfox = ThreatFoxProvider(http, auth_key=threatfox_key)
+            # Infrastructure composes the PR 27C ThreatFox acquirer; the
+            # PR 27E datasource-backed provider adapter (which needs the
+            # application UnitOfWork factory and converter registry) is
+            # composed at the operating-mode bootstrap boundary.
+            composition._threatfox_datasource = ThreatFoxDatasource(
+                http, auth_key=threatfox_key
+            )
 
             # The URLhaus Auth-Key is resolved during composition through
             # the same bootstrap contract; the provider receives only the
@@ -304,11 +310,17 @@ class ProviderComposition:
         return self._abuseipdb
 
     @property
-    def threatfox(self) -> ThreatFoxProvider:
-        """ThreatFox provider instance."""
-        if self._threatfox is None:
+    def threatfox_datasource(self) -> ThreatFoxDatasource:
+        """PR 27C ThreatFox acquisition-to-semantic datasource instance.
+
+        The owned acquirer reuses the ThreatFox HTTP client and resolved
+        Auth-Key; the PR 27E datasource-backed provider adapter that wraps
+        it is composed at the operating-mode bootstrap boundary where the
+        UnitOfWork factory and converter registry are available.
+        """
+        if self._threatfox_datasource is None:
             raise RuntimeError("ProviderComposition must be created via create()")
-        return self._threatfox
+        return self._threatfox_datasource
 
     @property
     def urlhaus(self) -> UrlhausProvider:
@@ -332,14 +344,16 @@ class ProviderComposition:
         Only composed providers appear in the mapping; an absent entry is the
         documented not-configured state. The mapping is read-only and keyed by
         enum members, so orchestration resolves a work item's ``SourceId``
-        without string conversion.
+        without string conversion. ThreatFox is deliberately absent: the
+        datasource-backed provider adapter is composed at the operating-mode
+        bootstrap boundary because it requires the application UnitOfWork
+        factory and the semantic-format converter registry.
         """
         registry: dict[SourceId, EvidenceProvider] = {
             SourceId.GOOGLE_PUBLIC_DNS: self.google_dns,
             SourceId.RDAP: self.rdap,
             SourceId.IPINFO_LITE: self.ipinfo_lite,
             SourceId.ABUSEIPDB: self.abuseipdb,
-            SourceId.THREATFOX: self.threatfox,
             SourceId.URLHAUS: self.urlhaus,
         }
         if self._dbip_city_lite is not None:

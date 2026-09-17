@@ -18,13 +18,20 @@ extractor can later derive the canonical ``MALWARE`` entity and the
 queried IOC ``ASSOCIATED_WITH`` malware relationship. A no-result response
 is an empty result, never a benign assessment.
 
-This legacy provider remains the transitional pre-PR27D Evidence path: it
+This legacy provider remains the pre-27E transitional Evidence path: it
 reuses the extracted semantic parser and maps its typed outcome onto
 ``ProviderResult``. Evidence-specific construction (grouped match facts via
 :func:`build_threatfox_match_facts` and
 :func:`format_threatfox_fact_timestamp`) is shared with the PR 27D
 :class:`ThreatFoxToEvidenceConverter` from
 ``infrastructure.datasources.threatfox_evidence`` and is never duplicated.
+
+As of PR 27E the production runtime is the datasource-backed
+:class:`~agentic_threat_investigator.app.datasource_provider.DatasourceProvider`
+adapter over ``ThreatFoxDatasource`` (one validated record -> one Evidence
+with exact ``source_record_id`` provenance); this legacy grouped-Evidence
+provider is no longer composed by the production bootstrap and is retained
+for the pinned legacy contract tests and the documented pre-27E path.
 """
 
 from __future__ import annotations

@@ -30,10 +30,15 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Any
 
+from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.providers import EvidenceProvider
 from agentic_threat_investigator.app.secrets import SecretsResolver
 from agentic_threat_investigator.config.settings import OperatingMode, Settings
+from agentic_threat_investigator.domain.datasource import DatasourceDefinition
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.infrastructure.datasources.threatfox_evidence import (
+    build_threatfox_datasource_provider,
+)
 from agentic_threat_investigator.infrastructure.fake_runtime.catalog import (
     FakeBatchArtifactData,
     FakeWorldCatalog,
@@ -137,25 +142,58 @@ def build_fake_intelligence_sources(
     )
 
 
+def _threatfox_datasource_definition(settings: Settings) -> DatasourceDefinition:
+    """Return the unique configured ThreatFox datasource definition.
+
+    The migrated production provider is built from ``Settings.datasources``;
+    there is no second independent definition. Zero or ambiguous ThreatFox
+    definitions fail closed at bootstrap (the dimension contract itself is
+    validated fail-closed by the acquirer before any I/O).
+    """
+    matches = [
+        definition
+        for definition in settings.datasources
+        if definition.source_id is SourceId.THREATFOX
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "exactly one ThreatFox datasource definition is required for "
+            "the migrated production provider"
+        )
+    return matches[0]
+
+
 async def build_production_intelligence_sources(
     settings: Settings,
     *,
     http_client_factory: HttpClientFactory | None = None,
     secrets: SecretsResolver | None = None,
+    uow_factory: Callable[[], UnitOfWork],
 ) -> IntelligenceSourceComposition:
     """Compose the real configured intelligence sources (production branch).
 
-    This is the pre-23D production provider construction with no semantic
-    changes: the same owned HTTP clients, resolved provider credentials, and
-    the same ordered ``SourceId`` registry.
+    The owned HTTP clients and resolved provider credentials come from the
+    infrastructure ``ProviderComposition``; the same composition also owns
+    the PR 27C ``ThreatFoxDatasource``. The migrated PR 27E datasource-
+    backed ThreatFox provider is composed here, at the operating-mode
+    bootstrap boundary, because it requires the application UnitOfWork
+    factory and the semantic-format converter registry: infrastructure
+    provider composition never owns Evidence-persistence wiring merely
+    because lifecycle recording uses a UnitOfWork.
     """
     composition = await ProviderComposition.create(
         settings,
         http_client_factory=http_client_factory,
         secrets=secrets,
     )
+    registry = dict(composition.provider_registry())
+    registry[SourceId.THREATFOX] = build_threatfox_datasource_provider(
+        definition=_threatfox_datasource_definition(settings),
+        datasource=composition.threatfox_datasource,
+        uow_factory=uow_factory,
+    )
     return IntelligenceSourceComposition(
-        provider_registry=composition.provider_registry(),
+        provider_registry=registry,
         _owned_resources=(composition,),
     )
 
@@ -167,17 +205,25 @@ async def build_intelligence_sources(
     secrets: SecretsResolver | None = None,
     catalog: FakeWorldCatalog | None = None,
     clock: Callable[[], datetime] | None = None,
+    uow_factory: Callable[[], UnitOfWork] | None = None,
 ) -> IntelligenceSourceComposition:
     """Select and build the intelligence-source composition for the mode.
 
     The mode branch lives only at this bootstrap/composition boundary. Both
     branches return the same existing provider-registry contract; there is
-    no silent fallback between modes.
+    no silent fallback between modes. ``uow_factory`` is required for the
+    production branch (it backs the migrated datasource provider's lifecycle
+    recorder) and ignored by the fake branch.
     """
     if settings.operating_mode is OperatingMode.FAKE:
         return build_fake_intelligence_sources(settings, catalog=catalog, clock=clock)
+    if uow_factory is None:
+        raise ValueError(
+            "production intelligence composition requires a UnitOfWork factory"
+        )
     return await build_production_intelligence_sources(
         settings,
         http_client_factory=http_client_factory,
         secrets=secrets,
+        uow_factory=uow_factory,
     )

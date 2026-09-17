@@ -18,6 +18,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.providers import (
     ProviderErrorCode,
 )
@@ -567,12 +568,25 @@ class _SimpleSecretsResolver(SecretsResolver):
         return "synthetic-placeholder"
 
 
+def _no_uow_factory() -> UnitOfWork:
+    """Return a typed UnitOfWork factory that is never invoked.
+
+    The migrated production ThreatFox provider records its lifecycle only
+    while an investigation executes; registry composition itself never opens
+    a transaction, so this stub exists solely to satisfy the required
+    production composition seam.
+    """
+    raise NotImplementedError
+
+
 def test_u19_production_mode_composition_only_real_providers() -> None:
     """Production mode composes the real provider registry, never fakes."""
     settings = Settings(operating_mode=OperatingMode.PRODUCTION)
     sources = asyncio_run(
         build_production_intelligence_sources(
-            settings, secrets=_SimpleSecretsResolver()
+            settings,
+            secrets=_SimpleSecretsResolver(),
+            uow_factory=_no_uow_factory,
         )
     )
     try:
@@ -656,6 +670,7 @@ def test_i13_production_missing_secret_fails_without_fake_fallback() -> None:
             build_production_intelligence_sources(
                 Settings(operating_mode=OperatingMode.PRODUCTION),
                 secrets=_EmptyResolver(),
+                uow_factory=_no_uow_factory,
             )
         )
     # The production failure is typed and never a fake fallback.

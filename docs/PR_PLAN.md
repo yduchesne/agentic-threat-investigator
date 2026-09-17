@@ -1860,11 +1860,11 @@ This document is the detailed roadmap-level decomposition for the datasource arc
 
 ```text
 PR 26G — GEOINT series closure [DONE]
-  -> PR 27A — Datasource model and contracts
+  -> PR 27A — Datasource model and contracts [DONE]
   -> PR 27B — Acquisition execution and correlated logging [DONE]
   -> PR 27C — Acquisition-to-semantic boundary [DONE]
   -> PR 27D — semantic_format-driven ToEvidenceConverter [DONE]
-  -> PR 27E — Existing-source migration and series closure
+  -> PR 27E — Existing-source migration and series closure [DONE]
   -> PR 28 — Evaluation and release hardening (formerly PR 27)
 ```
 
@@ -1967,8 +1967,8 @@ Do not introduce a durable execution table merely because an execution concept e
 ## PR 27C — Acquisition-to-semantic boundary [DONE]
 
 Established the boundary between decoded external data and ATI-owned
-downstream products; conversion (PR 27D) and existing-source migration
-(PR 27E) remain future work.
+downstream products; conversion (PR 27D) landed and existing-source
+migration (PR 27E) landed.
 
 Delivered:
 
@@ -2052,40 +2052,66 @@ Introduced the conversion boundary without migrating existing providers:
 - documentation reconciliation (ARCHITECTURE, DATASOURCE_ARCHITECTURE,
   DATA_SOURCES, OBSERVABILITY, TESTING).
 
-The legacy `ThreatFoxProvider` remains the runtime Evidence path with
-unchanged behavior until PR 27E migrates it; PR 27D persists and migrates
-nothing. One validated record -> one Evidence is the new-converter mapping;
-PR 27E must explicitly decide whether migration preserves the legacy
-N-record -> one-grouped-Evidence shape or adopts per-record Evidence after
-reviewing downstream compatibility.
+The legacy `ThreatFoxProvider` was the runtime Evidence path with
+unchanged behavior until PR 27E migrated it; PR 27D persisted and migrated
+nothing. PR 27E adopted the converter's per-record Evidence shape for the
+migrated runtime (exact `source_record_id` provenance) and stopped
+composing the legacy grouped provider in production.
 
-## PR 27E — Existing-source migration and closure
+## PR 27E — Existing-source migration and closure [DONE]
 
-Migrate the existing Evidence-producing source integrations after the architecture is stable.
+Delivered the ThreatFox production Investigation runtime migration onto the
+PR 27A-D stack and closed the series with an honest source-by-source audit:
 
-For each applicable source, the target path is:
+- `app/datasource_provider.py` (new): the generic datasource-backed
+  `EvidenceProvider` seam — `DatasourceProvider` composes a configured
+  `DatasourceDefinition`, a PR 27C `SemanticAcquirer` (shape-compatible
+  with `ThreatFoxDatasource.acquire`), the PR 27D converter registry
+  (selection by `semantic_format` only), the PR 27B
+  `DatasourceExecutionRecorder`, and a typed legacy error mapper;
+  `DatasourceEvidenceResult` carries a deferred
+  `DatasourceExecutionCompletion` so terminal COMPLETED/FAILED/CANCELLED
+  ownership stays with the Investigation executor;
+- generic executor integration (no provider branch): COMPLETED only after
+  per-Evidence extraction/persistence and the aggregate completion event
+  succeed; runtime failures append bounded FAILED lifecycle codes
+  (`provider_binding_failed`/`extraction_failed`/`persistence_failed`/
+  `timeline_failed`); cancellation appends CANCELLED (best effort) and
+  propagates; later failures never compensate earlier commits;
+- ThreatFox production migration: one validated record -> one Evidence
+  (exact `source_record_id` provenance), composed at the operating-mode
+  bootstrap boundary from `Settings.datasources` + `ThreatFoxDatasource`
+  + converter registry + the application UnitOfWork factory; the legacy
+  grouped-Evidence `ThreatFoxProvider` is no longer composed in
+  production and remains only as the pinned pre-27E contract path;
+- typed datasource failure mapping into `ProviderErrorCode` (timeout /
+  429 / auth / forbidden / malformed / semantic-invalid) with no message-
+  text classification and no raw exception/payload/credential persistence;
+- deterministic unit matrices (D27E-A/E/T/L/U) and real-PostgreSQL
+  vertical slices (D27E-P01..P09) proving per-record provenance, graph/
+  audit/lifecycle invariants, binding failure, later-item persistence
+  failure, extraction failure, and cancellation;
+- batch SourceRecord + checkpoint atomicity regression coverage
+  (D27E-B01..B10) over real PostgreSQL: one atomic UoW per batch, batch-2
+  failure keeps batch-1 durable, restart resumes, conflicts roll back, and
+  no per-batch PR 27 lifecycle multiplication (zero `datasource_log`
+  rows);
+- `docs/PR_27_SOURCE_MIGRATION_AUDIT.md`: ThreatFox = `MIGRATED`; MITRE
+  ATT&CK = `SEMANTIC_BOUNDARY_ONLY` + `NOT_EVIDENCE_SOURCE`; Google Public
+  DNS / RDAP / IPinfo Lite / AbuseIPDB / URLhaus / DB-IP City Lite =
+  `LEGACY_NOT_SEMANTICALLY_MODELED` (source-specific follow-ups; no
+  unapproved semantic formats or STIX-to-Evidence semantics were
+  invented);
+- documentation reconciliation (ARCHITECTURE, DATASOURCE_ARCHITECTURE,
+  DATA_SOURCES, DATABASE, OBSERVABILITY, TESTING) and this PR_PLAN entry
+  updated last;
+- zero database changes: no migrations, stored-function changes, tables,
+  or indexes.
 
-```text
-configured datasource
- -> acquisition execution
- -> transport/local artifact
- -> serialization decode
- -> semantic source object(s)
- -> semantic-format-selected ToEvidenceConverter
- -> 0..N Evidence
- -> existing Evidence persistence/extraction/Investigation behavior
-```
-
-Deliver:
-
-- migration of existing Evidence-producing providers/sources to the target architecture;
-- ThreatFox as a reference proprietary semantic format proving the design is not STIX-centric;
-- preservation of source-specific security/validation behavior;
-- deterministic vertical slices covering execution logging through persisted Evidence and normal Investigation consumption;
-- compatibility/regression tests for existing extraction and persistence behavior;
-- removal of obsolete compatibility seams only after equivalent coverage exists;
-- final source/test compliance audit of 27A-D;
-- documentation reconciliation and series closure.
+PR 27 is closed as an incremental series: the target runtime is proven end
+to end by ThreatFox, and unmigrated live Investigation sources remain
+honestly tracked as follow-up work rather than falsely labelled
+PR27-compliant.
 
 ## PR 28 — Evaluation and release hardening
 

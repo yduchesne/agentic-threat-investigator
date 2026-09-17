@@ -35,7 +35,9 @@ from uuid import UUID
 from agentic_threat_investigator.app.datasource_execution import (
     DatasourceExecutionRecorder,
 )
+from agentic_threat_investigator.app.datasource_provider import DatasourceProvider
 from agentic_threat_investigator.app.datasource_semantics import (
+    DatasourceStageError,
     SemanticAcquisitionResult,
 )
 from agentic_threat_investigator.app.evidence_conversion import (
@@ -46,6 +48,11 @@ from agentic_threat_investigator.app.evidence_conversion import (
     convert_semantic_source_objects,
 )
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
+from agentic_threat_investigator.app.providers import (
+    ProviderErrorCode,
+    ProviderResult,
+    provider_error_result,
+)
 from agentic_threat_investigator.domain.datasource import DatasourceDefinition
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import (
@@ -53,7 +60,10 @@ from agentic_threat_investigator.domain.evidence import (
     Evidence,
     EvidenceType,
 )
-from agentic_threat_investigator.domain.identifiers import SemanticFormatId
+from agentic_threat_investigator.domain.identifiers import (
+    SemanticFormatId,
+    SourceId,
+)
 from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
 )
@@ -66,6 +76,8 @@ __all__ = [
     "build_threatfox_match_facts",
     "format_threatfox_fact_timestamp",
     "acquire_and_convert_threatfox_execution",
+    "map_threatfox_stage_error",
+    "build_threatfox_datasource_provider",
 ]
 
 
@@ -175,6 +187,99 @@ def build_threatfox_conversion_registry() -> ToEvidenceConverterRegistry:
     semantic-format converters are added here as they land.
     """
     return ToEvidenceConverterRegistry(converters=(ThreatFoxToEvidenceConverter(),))
+
+
+_DATASOURCE_STAGE_CODE_TO_PROVIDER_CODE: dict[str, ProviderErrorCode] = {
+    "timeout": ProviderErrorCode.TIMEOUT,
+    "rate_limited": ProviderErrorCode.RATE_LIMITED,
+    "authentication_failed": ProviderErrorCode.AUTHENTICATION_FAILED,
+    "forbidden": ProviderErrorCode.FORBIDDEN,
+    "not_found": ProviderErrorCode.NOT_FOUND,
+    "provider_unavailable": ProviderErrorCode.PROVIDER_UNAVAILABLE,
+    "acquisition_failed": ProviderErrorCode.INVALID_RESPONSE,
+    "serialization_failed": ProviderErrorCode.INVALID_RESPONSE,
+    "semantic_validation_failed": ProviderErrorCode.INVALID_RESPONSE,
+    "unsupported_indicator": ProviderErrorCode.UNSUPPORTED_INDICATOR,
+}
+"""Deterministic ThreatFox datasource-stage failure classification (PR 27E).
+
+    Maps the typed bounded source-stage error codes emitted by the PR 27C
+    ThreatFox acquirer onto the existing legacy ``ProviderErrorCode``
+    vocabulary with no message-text parsing. Acquisition transport/status
+    failures keep their natural codes; serialization, semantic-validation,
+    and unknown acquisition-stage failures map to INVALID_RESPONSE exactly
+    like the legacy provider's malformed-response classification. There is
+    deliberately no "conversion_failed" entry: a conversion violation
+    raises out of the adapter after recording the bounded
+    ``conversion_failed`` lifecycle code and surfaces through the generic
+    provider-error outcome path.
+    """
+
+_THREATFOX_ERROR_MESSAGE_BY_PROVIDER_CODE: dict[ProviderErrorCode, str] = {
+    ProviderErrorCode.TIMEOUT: "ThreatFox request timed out",
+    ProviderErrorCode.RATE_LIMITED: "ThreatFox rate limited",
+    ProviderErrorCode.AUTHENTICATION_FAILED: "ThreatFox authentication failed",
+    ProviderErrorCode.FORBIDDEN: "ThreatFox request forbidden",
+    ProviderErrorCode.NOT_FOUND: "ThreatFox resource not found",
+    ProviderErrorCode.PROVIDER_UNAVAILABLE: "ThreatFox provider unavailable",
+    ProviderErrorCode.INVALID_RESPONSE: "invalid ThreatFox response",
+    ProviderErrorCode.UNSUPPORTED_INDICATOR: "unsupported ThreatFox indicator",
+}
+"""Fixed safe message text per classified error code.
+
+    Messages are constant per code and never interpolate exception text,
+    response bodies, URLs, or credentials. Classification never parses
+    free-form messages.
+    """
+
+
+def map_threatfox_stage_error(stage_error: DatasourceStageError) -> ProviderResult:
+    """Map one typed bounded ThreatFox stage failure onto a legacy error result.
+
+    The mapping is keyed only by the validated ``DatasourceStageError.code``
+    (never by message text); an unknown code fails closed with a
+    ``ValueError`` instead of misclassifying. The returned single-error
+    ``ProviderResult`` carries the code's natural retryability and any
+    provider-directed ``retry_after_seconds``.
+    """
+    provider_code = _DATASOURCE_STAGE_CODE_TO_PROVIDER_CODE.get(stage_error.code)
+    if provider_code is None:
+        raise ValueError(
+            f"unmappable ThreatFox datasource error code: {stage_error.code}"
+        )
+    return provider_error_result(
+        SourceId.THREATFOX.value,
+        provider_code,
+        _THREATFOX_ERROR_MESSAGE_BY_PROVIDER_CODE[provider_code],
+        retry_after_seconds=stage_error.retry_after_seconds,
+    )
+
+
+def build_threatfox_datasource_provider(
+    *,
+    definition: DatasourceDefinition,
+    datasource: ThreatFoxDatasource,
+    uow_factory: Callable[[], UnitOfWork],
+    clock: Callable[[], datetime] | None = None,
+    registry: ToEvidenceConverterRegistry | None = None,
+) -> DatasourceProvider[ThreatFoxRecord]:
+    """Compose the production datasource-backed ThreatFox provider (PR 27E).
+
+    Wraps the configured definition, the owned PR 27C acquirer, and the
+    PR 27D semantic-format converter registry into the generic
+    :class:`DatasourceProvider` adapter with the ThreatFox error mapping.
+    ``uow_factory`` backs the PR 27B recorder's short lifecycle
+    transactions; the adapter itself records no Observation persistence and
+    performs no provider composition.
+    """
+    return DatasourceProvider(
+        definition=definition,
+        acquirer=datasource,
+        registry=registry or build_threatfox_conversion_registry(),
+        uow_factory=uow_factory,
+        error_mapper=map_threatfox_stage_error,
+        clock=clock,
+    )
 
 
 async def _best_effort_terminal(

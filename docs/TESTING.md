@@ -492,6 +492,56 @@ endpoint is faked via in-process `httpx.MockTransport`:
   body, credential-bearing URL, and exception text absent from durable
   logs and Evidence).
 
+### Runtime datasource migration (PR 27E)
+
+PR 27E tests are deterministic and offline; only the external ThreatFox
+endpoint is faked via in-process `httpx.MockTransport`:
+
+- datasource-backed provider matrix (`tests/unit/app/test_datasource_provider.py`,
+  D27E-A01..A10, E01..E10, T01..T10, L01..L06, U01..U07): the real
+  `ThreatFoxDatasource`/`ProviderHttpClient`/converter/recorder over an
+  in-memory UnitOfWork fake and the real `ProviderWorkExecutor` with fake
+  reader/persistence/timeline seams — provider identity, legacy-identical
+  `supports()`, no-I/O for unsupported/malformed inputs, exact
+  Investigation/subject binding and signalled `DatasourceDefinition`,
+  semantic-format-only converter selection (a registry owning an
+  unrelated format fails closed), empty-result success, typed error
+  mapping (timeout/429/auth/forbidden/malformed JSON/semantic invalid),
+  bounded `conversion_failed`, message-independent classification,
+  secret-bearing exceptions never persisted, cancellation stays CANCELLED
+  and propagates, per-record Evidence provenance (exact
+  `source_record_id`, per-record `observed_at`/facts, `raw_payload=None`,
+  no synthesized inference), full/3-Evidence/no-result/conversion-failure/
+  persistence-failure/cancellation lifecycles, and deterministic UoW
+  probes (no UoW across target read/HTTP/conversion/extraction; one
+  distinct persistence call per Evidence in provider order; lifecycle
+  events never multiplied per Evidence; binding failure fails the
+  lifecycle with `provider_binding_failed` and writes nothing);
+- real-PostgreSQL vertical slices (`tests/integration/test_datasource_provider_runtime.py`,
+  D27E-P01..P09): persisted Investigation + Entity -> real
+  `ProviderWorkExecutor` -> migrated datasource-backed ThreatFox provider
+  -> real extractor -> real `ProviderObservationPersistenceService` ->
+  real `PostgresUnitOfWork`/stored functions — one-record (exact
+  provenance, graph/audit rows, one STARTED + one terminal lifecycle),
+  two records (per-record Evidence IDs and RelationshipObservation rows,
+  one CONVERTED(count=2), one COMPLETED), no-result (CONVERTED(0),
+  COMPLETED, nothing persisted), cross-Investigation and subject binding
+  fail-closed (no observation written, FAILED with
+  `provider_binding_failed`), later-item persistence failure (E1 committed,
+  E2 rolled back, FAILED with `persistence_failed`, outcome retains E1),
+  extraction failure (nothing persisted for the failed item), acquisition
+  cancellation (CANCELLED, propagates, no Evidence), and lifecycle DB
+  invariants (one STARTED, one terminal, stable execution/datasource
+  identity, append-after-terminal rejected by the stored function);
+- batch transaction regression (`tests/integration/test_batch_source_transaction_regression.py`,
+  D27E-B01..B10): one batch commits records + checkpoint atomically; two
+  batches commit one UoW per batch; batch-2 failure leaves batch-1 durable
+  and batch-2 fully rolled back; restart resumes from the last committed
+  checkpoint; a completed artifact short-circuits; a conflicting batch
+  rolls back data + checkpoint; and ingestion writes zero
+  `ati.datasource_log` rows. MITRE identity/hash/normalization/checkpoint
+  stability is pinned by the existing MITRE suites (D27E-B09/B10).
+
 ### Deterministic vertical-slice provider execution (PR 19B)
 
 `tests/integration/test_provider_execution_pipeline.py` proves the real

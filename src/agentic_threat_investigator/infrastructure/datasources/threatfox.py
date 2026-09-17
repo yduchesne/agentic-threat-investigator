@@ -168,6 +168,16 @@ class ThreatFoxDatasource:
         if definition.semantic_format is not SemanticFormatId.THREATFOX:
             raise ValueError("definition semantic_format must be THREATFOX")
 
+    def supports(self, entity: Entity) -> bool:
+        """Return deterministic applicability without external I/O.
+
+        Mirrors the legacy ThreatFox provider's supported set (DOMAIN and
+        IP_ADDRESS entity types). Unknown entity types return ``False``
+        and never raise; canonicalization of a supported value is the
+        acquirer's concern.
+        """
+        return entity.type in (EntityType.DOMAIN, EntityType.IP_ADDRESS)
+
     async def acquire(
         self,
         *,

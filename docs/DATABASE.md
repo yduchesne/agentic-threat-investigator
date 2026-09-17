@@ -607,7 +607,7 @@ Normalization version is stored and participates in semantic hashing, so increas
 
 Any adapter that persists a `SourceRecord` must recompute `source_record_content_hash(record)` at the write boundary and reject the write if it does not match the record's `content_hash`.
 
-`ati.ingestion_checkpoint` is mutable internal operational state rather than a versioned domain record. Its identity is `(source_id, artifact_uri, normalization_version)`. The application stores each post-batch opaque checkpoint and completion marker in the same transaction as the corresponding source-record batch, so failed/conflicted batches never advance progress.
+`ati.ingestion_checkpoint` is mutable internal operational state rather than a versioned domain record. Its identity is `(source_id, artifact_uri, normalization_version)`. The application stores each post-batch opaque checkpoint and completion marker in the same transaction as the corresponding source-record batch, so failed/conflicted batches never advance progress. PR 27E regression tests pin this atomicity over real PostgreSQL (one UoW per batch; batch-2 failure rolls back both data and checkpoint while batch-1 stays durable; restart resumes from the last committed checkpoint; the ingestion path writes zero `ati.datasource_log` rows).
 
 ## Datasource execution log (PR 27B)
 
@@ -677,6 +677,33 @@ external I/O. Migration 0030 is additive with no backfill; its downgrade
 drops only the PR 27B function, indexes, constraints, and table in
 dependency-safe order and never touches source records, checkpoints,
 Evidence, or other authoritative rows.
+
+### PR 27E transaction boundaries
+
+PR 27E wires the datasource execution into the Investigation runtime with
+three distinct short-transaction classes (all real bounded PostgreSQL
+transactions, never opened across I/O):
+
+```text
+lifecycle events (PR 27B recorder)   one short UoW per event append
+Evidence observation persistence    one short atomic UoW per Evidence
+SourceRecord batch + checkpoint     one short atomic UoW per SourceBatch
+```
+
+A successful datasource-backed provider execution therefore appends
+STARTED, the acquirer's ACQUIRED/DECODED stages, and CONVERTED(item_count
+= Evidence count) during acquisition/conversion, then each preserved
+Evidence observation persists through the PR 18C boundary in its own
+atomic UoW (Entities + Evidence + RelationshipObservation + audit, or
+none), and finally the COMPLETED terminal append — never before every
+required extraction/persistence step succeeded. A runtime failure appends
+FAILED with a bounded safe code (``provider_binding_failed``/
+``extraction_failed``/``persistence_failed``/``timeline_failed``); later
+failures never compensate earlier commits; cancellation appends CANCELLED
+(best effort) and propagates. Lifecycle events are execution-level and are
+never multiplied per Evidence; ``IngestionService`` writes no datasource-
+log rows at all. PR 27E adds zero migrations, zero stored-function
+changes, zero tables, and zero indexes.
 
 ## Migrations
 

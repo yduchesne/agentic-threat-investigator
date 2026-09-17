@@ -289,6 +289,37 @@ identity exists:
 - cancellation remains `CANCELLED` (never a failure code) and
   `CancelledError` always propagates.
 
+### Execution-level terminal timing (PR 27E)
+
+In the migrated Investigation runtime the datasource execution terminal is
+**deferred until required Evidence runtime processing succeeds** — the
+PR 27B recorder's appends remain execution-level, never per Evidence:
+
+- STARTED, ACQUIRED, and DECODED are appended by the acquisition path in
+  short committed transactions;
+- CONVERTED(item_count = total Evidence count) is appended immediately
+  after the pure conversion step (exactly once per execution — never once
+  per Evidence);
+- COMPLETED is appended only after every returned Evidence was extracted
+  and committed through the existing observation persistence boundary and
+  the aggregate completion processing succeeded;
+- a runtime failure (provider binding, extraction, persistence, timeline)
+  appends FAILED with a bounded safe code
+  (`provider_binding_failed`/`extraction_failed`/`persistence_failed`/
+  `timeline_failed`); earlier committed Evidence remains durable and is
+  never compensated;
+- cancellation observed at any point appends CANCELLED (best effort) and
+  propagates — never FAILED, never COMPLETED afterward;
+- typed acquisition failures (timeout, rate limit, authentication,
+  forbidden, malformed serialization, semantic invalid) appends FAILED
+  with the corresponding bounded source-stage code and never CONVERTED;
+- the batch SourceRecord ingestion path writes no datasource-log rows at
+  all, so no per-batch lifecycle multiplication can occur.
+
+All of these events stay inside the bounded log schema: no source body,
+Evidence body, credential, or raw exception text ever enters the durable
+log.
+
 ## Data minimization
 
 Default telemetry favors identifiers and normalized execution metadata.

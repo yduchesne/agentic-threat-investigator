@@ -633,7 +633,9 @@ def worker_main(argv: list[str] | None = None) -> int:
 
     async def run() -> int:
         try:
-            sources = await build_intelligence_sources(settings)
+            sources = await build_intelligence_sources(
+                settings, uow_factory=uow_factory
+            )
             llm = _compose_llm(settings)
             runner = _compose_runner(
                 settings=settings,
