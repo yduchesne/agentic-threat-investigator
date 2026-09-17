@@ -12,6 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agentic_threat_investigator.config.config_utils import Config, load_config
+from agentic_threat_investigator.domain.datasource import (
+    REPRESENTATIVE_DATASOURCE_DEFINITIONS,
+    DatasourceDefinition,
+)
 
 DOCUMENT_CHUNK_EMBEDDING_DIMENSION = 1536
 
@@ -254,11 +258,18 @@ class Settings(BaseSettings):
     # artifact location, not a secret; it is validated as an authority-free
     # file:// URI without credentials, query, or fragment parts.
     dbip_city_lite_artifact_uri: str = ""
-    # Geo Resolver process policy (PR 26C). Operational, non-secret values:
-    # the worker identity is an ephemeral lease owner marker, never an
-    # authorization identity. A blank worker_id is auto-generated per
-    # process at the entry point. retry_max_seconds must be >=
-    # retry_base_seconds (validated below).
+    # Typed datasource definitions (PR 27A). One canonical typed definition
+    # per configured datasource with explicit, independent classification
+    # dimensions: datasource instance, source/provider, acquisition protocol,
+    # serialization format, and semantic format. Provider-specific
+    # operational settings (concurrency, secret references, lookback
+    # windows) deliberately remain separate and are not migrated here.
+    datasources: tuple[DatasourceDefinition, ...] = Field(
+        default_factory=lambda: REPRESENTATIVE_DATASOURCE_DEFINITIONS
+    )
+    # GEOINT configuration (PR 26): the Geo Resolver process policy. The
+    # worker identity is an ephemeral lease owner marker, never an
+    # authorization identity; retry_max_seconds must be >= retry_base_seconds.
     geo_resolver_enabled: bool = True
     geo_resolver_worker_id: str = ""
     geo_resolver_batch_size: int = Field(default=10, ge=1, le=1000)
@@ -482,6 +493,18 @@ class Settings(BaseSettings):
         if len(stripped) > 200:
             raise ValueError("geo_resolver_worker_id exceeds the maximum length")
         return stripped
+
+    @model_validator(mode="after")
+    def validate_datasource_definitions(self) -> "Settings":
+        """Reject duplicate datasource instance IDs in the configured collection.
+
+        Multiple datasource instances may legally share the same
+        ``SourceId``; only the datasource-instance identity must be unique.
+        """
+        ids = [definition.datasource_id.value for definition in self.datasources]
+        if len(ids) != len(set(ids)):
+            raise ValueError("datasource definitions must have unique datasource IDs")
+        return self
 
     @model_validator(mode="after")
     def validate_geo_resolver_retry_bounds(self) -> "Settings":

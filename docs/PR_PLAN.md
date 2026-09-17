@@ -1886,7 +1886,42 @@ Across PR 27A-E:
 - automated tests remain deterministic/offline and exercise production parsing/conversion paths;
 - the generic evaluation/release-hardening work is PR 28, not PR 27.
 
-## PR 27A — Datasource model and contracts
+## PR 27A — Datasource model and contracts [DONE]
+
+Delivered the typed datasource vocabulary and configuration contract without
+migrating runtime behavior:
+
+- `DatasourceId` (`domain/datasource.py`): typed datasource-instance identity
+  (configuration, not provider or execution), canonical lowercase kebab form,
+  bounded length, fail-closed validation;
+- `DatasourceProtocol` (`domain/datasource.py`): typed acquisition protocol
+  vocabulary (`https`, `file`; TAXII remains a future protocol value, never a
+  semantic format);
+- `SerializationFormat` (`domain/datasource.py`): typed physical serialization
+  vocabulary (`json`; never semantics);
+- `SemanticFormatId` (`domain/identifiers.py`): durable semantic-format URNs
+  `urn:ati:datasource:semanticformat:stix21` and
+  `urn:ati:datasource:semanticformat:threatfox`;
+- `DatasourceDefinition`: one immutable typed five-dimension model
+  (`datasource_id`, `source_id`, `protocol`, `serialization_format`,
+  `semantic_format`) with no cross-dimension inference and fail-closed unknown
+  values;
+- `Settings.datasources: tuple[DatasourceDefinition, ...]` with unique
+  datasource IDs enforced, multiple datasource instances per `SourceId`
+  allowed, and the representative definitions `threatfox-live`
+  (HTTPS + JSON + ThreatFox semantics) and `mitre-attack-enterprise`
+  (FILE + JSON + STIX 2.1 semantics);
+- deterministic offline unit/configuration tests (D27A-01..D27A-13) pinning
+  URNs, `SourceId` compatibility, dimension independence, immutability,
+  fail-closed validation, and the representative definitions;
+- documentation reconciliation (`DATASOURCE_ARCHITECTURE.md`, `ARCHITECTURE.md`,
+  `CONFIGURATION.md`, `TESTING.md`).
+
+Existing `SourceId` values, `EvidenceProvider`, provider registry,
+`BatchSource`, `ArtifactReference`, `SourceRecord`, provider-specific
+settings, MITRE normalization, and ThreatFox Evidence construction are
+unchanged. No `ToEvidenceConverter`, converter registry, execution lifecycle,
+`execution_id`, datasource logging, migration, API, or UI work was added.
 
 Establish the vocabulary and contracts first.
 

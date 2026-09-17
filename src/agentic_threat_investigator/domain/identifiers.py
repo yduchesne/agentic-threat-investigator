@@ -11,7 +11,11 @@ from enum import Enum
 
 
 class SourceId(str, Enum):
-    """Stable ATI source identifier URNs for the v0.1 source set."""
+    """Stable ATI source identifier URNs for the v0.1 source set.
+
+    These values identify the external intelligence source/provider. They are
+    durable and must never be reinterpreted or renamed.
+    """
 
     IPINFO_LITE = "urn:ati:source:ipinfo_lite"
     RDAP = "urn:ati:source:rdap"
@@ -22,3 +26,17 @@ class SourceId(str, Enum):
     URLHAUS = "urn:ati:source:urlhaus"
     MITRE_ATTACK = "urn:ati:source:mitre_attack"
     CISA_KEV = "urn:ati:source:cisa_kev"
+
+
+class SemanticFormatId(str, Enum):
+    """Stable ATI semantic-format identifier URNs.
+
+    A semantic format identifies the meaning/schema of source objects after
+    transport and serialization decoding. Converter selection is based on
+    this value, never on provider, protocol, serialization, or datasource
+    instance. Provider-specific/proprietary semantic models receive their
+    own durable ATI URNs; STIX 2.1 is one shared open semantic model.
+    """
+
+    STIX_21 = "urn:ati:datasource:semanticformat:stix21"
+    THREATFOX = "urn:ati:datasource:semanticformat:threatfox"

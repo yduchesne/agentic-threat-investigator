@@ -1193,6 +1193,28 @@ See also:
 - [Data Source Architecture](DATASOURCE_ARCHITECTURE.md)
 - [Data Sources](DATA_SOURCES.md)
 
+### Datasource architecture foundation (PR 27A)
+
+PR 27A formalized the typed datasource vocabulary without migrating runtime
+behavior (see also [Data Source Architecture](DATASOURCE_ARCHITECTURE.md)):
+
+- a configured datasource is described by one immutable
+  `DatasourceDefinition` (`domain/datasource.py`) with five explicit,
+  independent dimensions: `datasource_id`, `source_id` (the existing durable
+  `SourceId`), `protocol` (`DatasourceProtocol`), `serialization_format`
+  (`SerializationFormat`), and `semantic_format` (`SemanticFormatId`, durable
+  URNs in `domain/identifiers.py`);
+- the typed definitions are exposed through `Settings.datasources` with
+  unique datasource IDs and fail-closed unknown values;
+- no dimension is inferred from another; `semantic_format` is the later
+  converter-selection dimension and no converter exists yet (PR 27D).
+
+The existing live path (`Investigation -> provider registry ->
+EvidenceProvider -> ProviderResult -> Evidence`) and batch path
+(`ArtifactReference -> BatchSource -> SourceBatch -> SourceRecord ->
+IngestionService`) remain unchanged and transitional until the
+corresponding PR 27 slices land.
+
 ## Geospatial
 
 v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are used for map visualization.

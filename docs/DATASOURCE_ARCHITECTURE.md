@@ -4,6 +4,47 @@
 
 This document defines the target datasource architecture for the PR 27 series. It is a forward design contract: existing PR 18/19 provider behavior remains authoritative until the corresponding PR 27 slice lands. PR 27 must migrate incrementally without breaking Investigation execution or Evidence provenance.
 
+### PR 27A landed vocabulary
+
+PR 27A established the typed datasource vocabulary and configuration contract on
+`main` without migrating any runtime behavior:
+
+- `DatasourceId` (`src/agentic_threat_investigator/domain/datasource.py`): typed
+  identity of one configured datasource instance. It identifies configuration,
+  not provider and not execution; multiple datasource instances may share one
+  `SourceId`. Canonical lowercase kebab form, bounded to 64 characters.
+- `DatasourceProtocol`: typed acquisition protocol vocabulary. Current values
+  are `https` and `file` only. **TAXII is a protocol concept, never a semantic
+  format**; a `taxii` protocol value will be added when the first
+  TAXII-capable datasource is introduced.
+- `SerializationFormat`: typed physical serialization vocabulary. Current value
+  is `json` only. **JSON is serialization, never semantics**; STIX, ThreatFox,
+  MISP, and TAXII are never serialization formats.
+- `SemanticFormatId` (`src/agentic_threat_investigator/domain/identifiers.py`):
+  stable durable semantic-format URNs
+  `urn:ati:datasource:semanticformat:stix21` and
+  `urn:ati:datasource:semanticformat:threatfox`. **STIX 2.1 is a semantic
+  format, not a protocol or serialization**; ThreatFox has its own
+  provider-specific semantic format under its own durable URN.
+- `DatasourceDefinition` (`domain/datasource.py`): one immutable typed
+  five-dimension model `(datasource_id, source_id, protocol,
+  serialization_format, semantic_format)`. Every dimension is explicit and
+  independent; none is inferred from another and unknown typed values fail
+  closed.
+- `Settings.datasources` (`config/settings.py`): typed tuple exposing the
+  canonical `DatasourceDefinition` collection, with unique datasource IDs
+  enforced and multiple datasource instances allowed to share one `SourceId`.
+  The repository-owned representative defaults are `threatfox-live`
+  (HTTPS + JSON + ThreatFox semantics) and `mitre-attack-enterprise`
+  (FILE + JSON + STIX 2.1 semantics).
+
+A datasource definition describes configuration, not acquisition execution:
+PR 27A does **not** implement `execution_id`, per-execution datasource logging,
+`ToEvidenceConverter`, a converter registry, or any change to the existing
+`EvidenceProvider`/`BatchSource` runtime paths. `semantic_format` is the later
+converter-selection dimension; the converter itself does not exist yet and is
+owned by PR 27D.
+
 ## Objective
 
 ATI must separate **where/how data is acquired** from **what the acquired data means** and from **how source semantics become ATI Evidence**.
@@ -270,7 +311,14 @@ datasources:
     semantic_format: urn:ati:datasource:semanticformat:threatfox
 ```
 
-This is illustrative, not a binding YAML schema. PR 27A must reconcile the exact configuration model with fresh `main` and preserve existing secret-resolution and profile behavior.
+This is illustrative, not a binding YAML schema. PR 27A reconciled the exact
+configuration model with fresh `main`: the canonical typed collection is
+`Settings.datasources: tuple[DatasourceDefinition, ...]`
+(`config/settings.py`), validated fail-closed through the pydantic boundary,
+with provider-specific operational settings (concurrency, secret references,
+lookback windows, retry policy, endpoints) deliberately left exactly where
+profiles already define them. Existing secret-resolution and profile behavior
+is unchanged.
 
 ## Compatibility and migration
 
