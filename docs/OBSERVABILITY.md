@@ -271,6 +271,24 @@ bounded safe `FAILED` code (`acquisition_failed`, `serialization_failed`,
 event type was added; stage classification is typed at the failure boundary
 and is never inferred by matching free-form error-message text.
 
+### Conversion accounting (PR 27D)
+
+The PR 27D conversion runner reuses the same PR 27B recorder and the
+existing `CONVERTED` event; no conversion logger or second execution
+identity exists:
+
+- `CONVERTED.item_count` is the exact number of immutable `Evidence`
+  observations produced by the pure conversion step (`len(evidence)`),
+  logged in its own short committed transaction;
+- `CONVERTED(0)` is a valid success: it proves conversion ran and that no
+  validated source object carried an ATI-supported assertion (a valid
+  no-result is never benign evidence);
+- a converter contract/programming failure is a conversion-stage failure
+  recorded only as the bounded safe `FAILED` code `conversion_failed` —
+  never `CONVERTED`, never `COMPLETED`, and never raw exception text;
+- cancellation remains `CANCELLED` (never a failure code) and
+  `CancelledError` always propagates.
+
 ## Data minimization
 
 Default telemetry favors identifiers and normalized execution metadata.

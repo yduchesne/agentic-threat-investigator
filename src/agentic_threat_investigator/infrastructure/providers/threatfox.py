@@ -20,9 +20,11 @@ is an empty result, never a benign assessment.
 
 This legacy provider remains the transitional pre-PR27D Evidence path: it
 reuses the extracted semantic parser and maps its typed outcome onto
-``ProviderResult``. Evidence-specific construction (``_build_match_facts``
-and ``format_threatfox_fact_timestamp``) intentionally stays in this
-module, outside the semantic module.
+``ProviderResult``. Evidence-specific construction (grouped match facts via
+:func:`build_threatfox_match_facts` and
+:func:`format_threatfox_fact_timestamp`) is shared with the PR 27D
+:class:`ThreatFoxToEvidenceConverter` from
+``infrastructure.datasources.threatfox_evidence`` and is never duplicated.
 """
 
 from __future__ import annotations
@@ -48,6 +50,10 @@ from agentic_threat_investigator.domain.entities import (
 from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
 from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.infrastructure.datasources.threatfox_evidence import (
+    build_threatfox_match_facts,
+    format_threatfox_fact_timestamp,
+)
 from agentic_threat_investigator.infrastructure.datasources.threatfox_semantics import (
     ThreatFoxRecord,
     parse_source_ip_ioc,
@@ -59,10 +65,11 @@ from agentic_threat_investigator.infrastructure.providers.http import ProviderHt
 _THREATFOX_ENDPOINT = "https://threatfox-api.abuse.ch/api/v1/"
 """Fixed ThreatFox Community API v1 authority; the JSON body carries the query."""
 
-# PR 27C compatibility re-exports: the strict ThreatFox semantic model and
-# matching helpers now live in the format-specific semantic module and are
-# re-exported here so the legacy provider contract (and its tests) remain
-# import-stable. They are the same objects, never duplicated copies.
+# PR 27C/27D compatibility re-exports: the strict ThreatFox semantic model,
+# matching helpers, and the shared Evidence mapping now live in the
+# format-specific semantic/evidence modules and are re-exported here so the
+# legacy provider contract (and its tests) remain import-stable. They are the
+# same objects, never duplicated copies.
 __all__ = [
     "ThreatFoxProvider",
     "ThreatFoxRecord",
@@ -232,7 +239,9 @@ class ThreatFoxProvider(EvidenceProvider):
             ),
             retrieved_at=context.retrieved_at,
             facts={
-                "matches": [_build_match_facts(record) for record in semantic.records]
+                "matches": [
+                    build_threatfox_match_facts(record) for record in semantic.records
+                ]
             },
             raw_payload=None,
         )
@@ -244,42 +253,3 @@ def _malformed_result(provider_id: str, message: str) -> ProviderResult:
     return provider_error_result(
         provider_id, ProviderErrorCode.INVALID_RESPONSE, message
     )
-
-
-def format_threatfox_fact_timestamp(value: datetime) -> str:
-    """Format an already validated timezone-aware UTC datetime as ``...Z``.
-
-    Normalized ThreatFox fact timestamps use the canonical UTC ISO 8601
-    form ending in ``Z``, for example ``2026-08-20T12:00:00Z``.
-    """
-    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _build_match_facts(record: ThreatFoxRecord) -> dict[str, Any]:
-    """Build one normalized match fact object from a validated record.
-
-    Each match contains exactly the approved handoff keys. The malware
-    machine identifier is retained verbatim as the canonical identity
-    input for later deterministic entity discovery; the printable name is
-    display metadata only. Timestamps are normalized to UTC ISO 8601,
-    source order is preserved, and no derived risk labels, verdicts, or
-    confidence weightings are ever synthesized.
-    """
-    return {
-        "threatfox_id": record.id,
-        "ioc": record.ioc,
-        "ioc_type": record.ioc_type,
-        "threat_type": record.threat_type,
-        "threat_type_description": record.threat_type_desc,
-        "malware": record.malware,
-        "malware_printable": record.malware_printable,
-        "confidence_level": record.confidence_level,
-        "first_seen": format_threatfox_fact_timestamp(record.first_seen),
-        "last_seen": (
-            None
-            if record.last_seen is None
-            else format_threatfox_fact_timestamp(record.last_seen)
-        ),
-        "reference": record.reference,
-        "tags": None if record.tags is None else list(record.tags),
-    }

@@ -4,9 +4,10 @@
 
 This document defines the target datasource architecture for the PR 27 series. It is a forward design contract: existing PR 18/19 provider behavior remains authoritative until the corresponding PR 27 slice lands. PR 27 must migrate incrementally without breaking Investigation execution or Evidence provenance.
 
-PR 27A (vocabulary), PR 27B (execution/logging), and PR 27C
-(acquisition-to-semantic boundary) have landed; PR 27D owns
-`ToEvidenceConverter` and PR 27E owns existing-source migration.
+PR 27A (vocabulary), PR 27B (execution/logging), PR 27C
+(acquisition-to-semantic boundary), and PR 27D
+(`ToEvidenceConverter`) have landed; PR 27E owns existing-source
+migration.
 
 ### PR 27A landed vocabulary
 
@@ -45,9 +46,9 @@ PR 27A established the typed datasource vocabulary and configuration contract on
 A datasource definition describes configuration, not acquisition execution:
 PR 27A does **not** implement `execution_id`, per-execution datasource logging,
 `ToEvidenceConverter`, a converter registry, or any change to the existing
-`EvidenceProvider`/`BatchSource` runtime paths. `semantic_format` is the later
-converter-selection dimension; the converter itself does not exist yet and is
-owned by PR 27D.
+`EvidenceProvider`/`BatchSource` runtime paths. `semantic_format` is the
+converter-selection dimension used by the PR 27D `ToEvidenceConverter`;
+PR 27A itself added no converter.
 
 ## Objective
 
@@ -213,7 +214,7 @@ DatasourceDefinition
  -> semantic-format-specific parser/validator
  -> typed semantic source objects + bounded provenance context
  ---------------- PR 27D boundary ----------------
- -> ToEvidenceConverter selected by semantic_format (future)
+ -> semantic-format registry -> ToEvidenceConverter
  -> 0..N Evidence
 ```
 
@@ -226,9 +227,9 @@ Cross-cutting contracts (`src/agentic_threat_investigator/app/datasource_semanti
   no union of source-specific fields, no Investigation/Evidence ID, no
   verdict/risk/relationship, and no credentials or headers.
 - `DatasourceStage` + `DatasourceStageError`: a stage-aware datasource
-  failure contract (ACQUISITION / SERIALIZATION / SEMANTIC_VALIDATION)
-  with bounded safe error codes from the PR 27B grammar. Conversion-stage
-  concepts belong to PR 27D, never here.
+  failure contract (ACQUISITION / SERIALIZATION / SEMANTIC_VALIDATION /
+  CONVERSION) with bounded safe error codes from the PR 27B grammar.
+  Stage values never overload lifecycle event types.
 - `SemanticAcquisitionResult[T]`: a small generic result
   (context + typed objects + optional bounded stage error) whose
   invariant is success/empty-semantics vs failure with no objects.
@@ -262,8 +263,60 @@ Format-specific parsers (`src/agentic_threat_investigator/infrastructure/datasou
 Semantic modules construct no ATI Evidence/`SourceRecord`, perform no
 network/DB/persistence I/O, and never log full source objects. There is no
 universal mega-schema (ThreatFox and STIX objects remain source-native),
-no `ToEvidenceConverter`, no converter registry, no semantic-object
-persistence table, and no migration in this slice.
+no semantic-object persistence table, and no migration in this slice.
+
+## Semantic-format Evidence conversion (PR 27D, delivered)
+
+PR 27D landed the pure semantic-object -> Evidence conversion boundary in
+`app/evidence_conversion.py` and the ThreatFox reference converter in
+`infrastructure/datasources/threatfox_evidence.py`:
+
+- `EvidenceConversionContext`: an immutable dataclass combining the exact
+  ATI Investigation identity, the exact canonical subject binding
+  (``EntityRef``), and one reused `SemanticSourceContext`. It carries no
+  transport objects, secrets, repositories, callbacks, verdicts, or
+  relationships;
+- `ToEvidenceConverter(ABC, Generic[TSource])`: stateless, deterministic,
+  synchronous pure mapping from **one** already-validated source object
+  plus the explicit context to an immutable `tuple[Evidence, ...]`
+  (zero/one/many);
+- `ToEvidenceConverterRegistry`: immutable, keyed only by
+  `SemanticFormatId` — never SourceId/DatasourceId/provider/protocol/
+  serialization/object shape. Duplicate registration fails closed; an
+  unknown format raises the narrow typed `UnknownSemanticFormatError`;
+  there is no default/fallback converter and no global mutable or
+  import-time registration;
+- `convert_semantic_source_objects`: deterministic flattening of bounded
+  semantic tuples in source-object-then-converter-return order;
+- `DatasourceStage.CONVERSION`: typed conversion-stage failure ownership;
+  the durable lifecycle reuses the PR 27B recorder and the existing
+  `CONVERTED` event (no new lifecycle event);
+- `ThreatFoxToEvidenceConverter` (`semantic_format == THREATFOX`,
+  input `ThreatFoxRecord`): one record -> one immutable
+  `THREAT_INTELLIGENCE` Evidence with exact provenance, sharing
+  `build_threatfox_match_facts`/`format_threatfox_fact_timestamp` with
+  the legacy `ThreatFoxProvider` (which remains the runtime path until
+  PR 27E), and a tiny lifecycle runner (`acquire_and_convert_threatfox_execution`)
+  exercising STARTED/ACQUIRED/DECODED/CONVERTED/COMPLETED, `CONVERTED(0)`
+  success, bounded `conversion_failed`, and cancellation semantics.
+
+The two context types are deliberately distinct:
+
+```text
+SemanticSourceContext
+    acquisition/source provenance (datasource, source, semantic format,
+    retrieval time, credential-free reference/artifact)
+
+EvidenceConversionContext
+    ATI Investigation/subject binding + one SemanticSourceContext
+```
+
+Converters construct no Evidence IDs (persistence identity is assigned
+only later), perform no I/O/persistence/clock/random/secret reads, and
+synthesize no verdicts, confidence weights, attribution, relationships,
+pivots, or Investigation control flow. PR 27D persists nothing: the
+runner's Evidence output stays in memory; PR 27E owns migration and
+persisted end-to-end closure.
 
 ## Acquisition boundary
 
@@ -301,7 +354,12 @@ class ToEvidenceConverter(ABC):
         ...
 ```
 
-The exact Python type signatures are determined by the detailed implementation plan and fresh source, but the semantic rules are binding:
+PR 27D landed the concrete contract in `app/evidence_conversion.py`: generic
+over one validated source-object type, driven by an explicit
+`EvidenceConversionContext` (ATI Investigation + subject + one
+`SemanticSourceContext`), returning an immutable `tuple[Evidence, ...]`. The
+exact Python type signatures are binding on PR 27E converters, but the
+semantic rules are authoritative:
 
 1. converter selection is based on `semantic_format`;
 2. conversion is deterministic for a given validated source object and conversion context;
@@ -476,9 +534,19 @@ MITRE batch source without behavior change; deterministic real-format and
 real-PostgreSQL execution-log tests. No `ToEvidenceConverter`, registry,
 converter, new persistence, or migration was added.
 
-### PR 27D — Semantic-format-driven `ToEvidenceConverter`
+### PR 27D — Semantic-format-driven `ToEvidenceConverter` [DONE]
 
-Introduce zero-to-many conversion, registry/selection by `semantic_format`, deterministic provenance-bearing conversion tests, and no acquisition/persistence ownership in converters.
+Delivered the pure semantic-object -> Evidence conversion boundary:
+`EvidenceConversionContext`, `ToEvidenceConverter` (0..N, deterministic,
+no I/O/persistence/verdict/relationship ownership), the
+`SemanticFormatId`-keyed `ToEvidenceConverterRegistry` (duplicate/unknown
+fail closed), the flattening seam, `DatasourceStage.CONVERSION`, the
+ThreatFox reference converter sharing its Evidence mapping with the
+legacy provider (`infrastructure/datasources/threatfox_evidence.py`),
+the lifecycle runner reusing the PR 27B recorder and `CONVERTED` event,
+and unit/real-PostgreSQL conversion-lifecycle tests. No provider was
+migrated, no Evidence is persisted, and no migration/schema change was
+added.
 
 ### PR 27E — Existing-source migration and closure
 

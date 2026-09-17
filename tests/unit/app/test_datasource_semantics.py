@@ -206,11 +206,12 @@ class TestDatasourceStageError:
         assert error.retry_after_seconds == 30
 
     def test_stage_vocabulary_is_closed(self) -> None:
-        """The stage vocabulary is exactly acquisition/serialization/semantic."""
+        """The stage vocabulary is exactly acquisition/serialization/semantic/conversion."""
         assert list(DatasourceStage) == [
             DatasourceStage.ACQUISITION,
             DatasourceStage.SERIALIZATION,
             DatasourceStage.SEMANTIC_VALIDATION,
+            DatasourceStage.CONVERSION,
         ]
 
 
