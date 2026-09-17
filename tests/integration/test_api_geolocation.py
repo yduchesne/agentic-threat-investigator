@@ -2,9 +2,9 @@
 """PR 25A vertical slice: real PostgreSQL + FastAPI geolocation projection.
 
 Proves the canonical delivered read path end to end: persisted Entity +
-persisted ``GEOLOCATION`` Evidence -> ``PostgresInvestigationGeolocationQueryService``
+persisted ``GEOLOCATION`` LegacyEvidence -> ``PostgresInvestigationGeolocationQueryService``
 -> ``QueryServiceBundle`` -> FastAPI route -> public JSON DTO. No MMDB
-lookup or provider execution occurs anywhere: Evidence is seeded through the
+lookup or provider execution occurs anywhere: LegacyEvidence is seeded through the
 normal repositories exactly as the DB-IP producer path would persist it.
 A second slice proves strict Investigation isolation through the HTTP
 boundary.
@@ -19,11 +19,8 @@ from uuid import UUID
 import pytest
 
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from tests.integration.api_helpers import (
     api_client,
     api_settings,
@@ -42,9 +39,9 @@ PASSWORD = "correct horse battery staple"
 
 def _geolocation_evidence(
     investigation_id: UUID, entity_id: UUID, *, facts: dict[str, object] | None = None
-) -> Evidence:
-    """Build one persisted GEOLOCATION Evidence observation."""
-    return Evidence(
+) -> LegacyEvidence:
+    """Build one persisted GEOLOCATION LegacyEvidence observation."""
+    return LegacyEvidence(
         investigation_id=investigation_id,
         type=EvidenceType.GEOLOCATION,
         subject=EntityRef(
@@ -71,7 +68,7 @@ def _geolocation_evidence(
 async def test_v01_canonical_read_projection_slice(
     uow_factory: Any, session_factory: Any
 ) -> None:
-    """A persisted IP + GEOLOCATION Evidence reaches the public JSON DTO."""
+    """A persisted IP + GEOLOCATION LegacyEvidence reaches the public JSON DTO."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(
@@ -80,7 +77,7 @@ async def test_v01_canonical_read_projection_slice(
         record = await uow.evidence.insert(
             _geolocation_evidence(investigation_id, entity_id)
         )
-        # A raw-payload-bearing non-geolocation Evidence must never enter the
+        # A raw-payload-bearing non-geolocation LegacyEvidence must never enter the
         # projection or the response.
         await uow.evidence.insert(
             evidence_factory(investigation_id, entity_id).model_copy(

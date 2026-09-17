@@ -3,7 +3,7 @@
 """Regression tests for the PR 19B provider-work executor HIGH fixes.
 
 Covers provider-output binding (HIGH-2), retention of all committed
-operational IDs when later Evidence processing fails (HIGH-3), bounded
+operational IDs when later LegacyEvidence processing fails (HIGH-3), bounded
 secret-free failure logging (HIGH-4), exact/canonical authoritative target
 binding (fixes 02), and canonical first-seen aggregate ID lists (fixes 04).
 Shared deterministic fakes and builders live in
@@ -45,12 +45,12 @@ from agentic_threat_investigator.app.provider_observation_persistence import (
 )
 from agentic_threat_investigator.app.providers import ProviderResult
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EntityRef, Evidence
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import ProviderExecutionOutcome
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from tests.support.orchestration_fixtures import scenario_investigation_state
 from tests.support.provider_executor_fixtures import (
     DISCOVERED_ONE,
@@ -124,7 +124,7 @@ class TestProviderOutputBinding:
     async def test_evidence_investigation_mismatch_fails_before_persistence(
         self,
     ) -> None:
-        """Evidence for a foreign investigation is never extracted or persisted."""
+        """LegacyEvidence for a foreign investigation is never extracted or persisted."""
         evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
             update={"investigation_id": FOREIGN_INVESTIGATION_ID}
         )
@@ -150,7 +150,7 @@ class TestProviderOutputBinding:
     async def test_evidence_subject_type_mismatch_fails_before_persistence(
         self,
     ) -> None:
-        """Evidence whose subject type differs from the target is rejected."""
+        """LegacyEvidence whose subject type differs from the target is rejected."""
         evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
             update={
                 "subject": EntityRef(
@@ -182,7 +182,7 @@ class TestProviderOutputBinding:
     async def test_evidence_subject_value_mismatch_fails_before_persistence(
         self,
     ) -> None:
-        """Evidence whose subject value differs from the target is rejected."""
+        """LegacyEvidence whose subject value differs from the target is rejected."""
         evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
             update={
                 "subject": EntityRef(
@@ -214,7 +214,7 @@ class TestProviderOutputBinding:
     async def test_evidence_subject_id_conflict_fails_before_persistence(
         self,
     ) -> None:
-        """Evidence carrying a conflicting subject identifier is rejected."""
+        """LegacyEvidence carrying a conflicting subject identifier is rejected."""
         evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
             update={
                 "subject": EntityRef(
@@ -251,7 +251,7 @@ class TestProviderOutputBinding:
         )
         extracted: list[UUID] = []
 
-        def extractor(_evidence: Evidence) -> ExtractionResult:
+        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
             extracted.append(_evidence.id or UUID(int=0))
             return ExtractionResult()
 
@@ -470,7 +470,7 @@ class TestMalformedBindingStopsBeforeExtraction:
         )
         extracted: list[UUID] = []
 
-        def extractor(_evidence: Evidence) -> ExtractionResult:
+        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
             extracted.append(_evidence.id or UUID(int=0))
             return ExtractionResult()
 
@@ -513,7 +513,7 @@ class TestMalformedBindingStopsBeforeExtraction:
         )
         extracted: list[UUID] = []
 
-        def extractor(_evidence: Evidence) -> ExtractionResult:
+        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
             extracted.append(_evidence.id or UUID(int=0))
             return ExtractionResult()
 
@@ -552,7 +552,7 @@ class TestMalformedBindingStopsBeforeExtraction:
         )
         extracted: list[UUID] = []
 
-        def extractor(_evidence: Evidence) -> ExtractionResult:
+        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
             extracted.append(_evidence.id or UUID(int=0))
             return ExtractionResult()
 
@@ -585,7 +585,7 @@ class TestCommittedIdsRetainedOnFailure:
     async def test_second_evidence_extraction_failure_retains_committed_ids(
         self,
     ) -> None:
-        """Extraction failure on Evidence 2 keeps all Evidence 1 committed IDs."""
+        """Extraction failure on LegacyEvidence 2 keeps all LegacyEvidence 1 committed IDs."""
         first = dns_evidence(evidence_id=EVIDENCE_ONE)
         second = dns_evidence(evidence_id=SECOND_EVIDENCE)
         persistence = FakePersistenceService(
@@ -593,7 +593,7 @@ class TestCommittedIdsRetainedOnFailure:
         )
         calls = {"count": 0}
 
-        def extractor(_evidence: Evidence) -> ExtractionResult:
+        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
             calls["count"] += 1
             if calls["count"] == 2:
                 raise EvidenceExtractionError(
@@ -636,14 +636,14 @@ class TestCommittedIdsRetainedOnFailure:
     async def test_second_evidence_persistence_failure_retains_committed_ids(
         self,
     ) -> None:
-        """Persistence failure on Evidence 2 keeps all Evidence 1 committed IDs."""
+        """Persistence failure on LegacyEvidence 2 keeps all LegacyEvidence 1 committed IDs."""
         first = dns_evidence(evidence_id=EVIDENCE_ONE)
         second = dns_evidence(evidence_id=SECOND_EVIDENCE)
         persistence = FakePersistenceService()
         calls = {"count": 0}
 
         async def persist(
-            evidence: Evidence,
+            evidence: LegacyEvidence,
             extraction: ExtractionResult,
             *,
             actor_id: UUID | None = None,
@@ -705,7 +705,7 @@ class TestCommittedIdsRetainedOnFailure:
         calls = {"count": 0}
 
         async def persist(
-            evidence: Evidence,
+            evidence: LegacyEvidence,
             extraction: ExtractionResult,
             *,
             actor_id: UUID | None = None,
@@ -746,11 +746,11 @@ class TestCanonicalAggregateIdLists:
 
     @pytest.mark.asyncio
     async def test_repeated_identity_appears_once_at_first_position(self) -> None:
-        """A repeated Entity/Relationship across Evidence commits stays first-seen."""
+        """A repeated Entity/Relationship across LegacyEvidence commits stays first-seen."""
         first = dns_evidence(evidence_id=EVIDENCE_ONE)
         second = dns_evidence(evidence_id=SECOND_EVIDENCE)
         # Both observations commit the same discovered Entity and Relationship
-        # under different Evidence IDs, as stable PR 18C identities reuse.
+        # under different LegacyEvidence IDs, as stable PR 18C identities reuse.
         persistence = FakePersistenceService(
             [
                 persisted_result(
@@ -767,7 +767,7 @@ class TestCanonicalAggregateIdLists:
         )
         order: list[UUID] = []
 
-        def extractor(evidence: Evidence) -> ExtractionResult:
+        def extractor(evidence: LegacyEvidence) -> ExtractionResult:
             order.append(evidence.id or UUID(int=0))
             return ExtractionResult()
 
@@ -788,7 +788,7 @@ class TestCanonicalAggregateIdLists:
         outcome = await executor.execute(dns_work_item())
         assert order == [EVIDENCE_ONE, SECOND_EVIDENCE]
         assert len(persistence.calls) == 2
-        # Both Evidence IDs are persisted once each, in provider-return order.
+        # Both LegacyEvidence IDs are persisted once each, in provider-return order.
         assert outcome.evidence_ids == (EVIDENCE_ONE, SECOND_EVIDENCE)
         # The repeated Entity and Relationship IDs occur once, at first position.
         assert outcome.discovered_entity_ids == (DISCOVERED_ONE,)
@@ -818,7 +818,7 @@ class TestCanonicalAggregateIdLists:
         )
         calls = {"count": 0}
 
-        def extractor(_evidence: Evidence) -> ExtractionResult:
+        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
             calls["count"] += 1
             if calls["count"] == 2:
                 raise EvidenceExtractionError(

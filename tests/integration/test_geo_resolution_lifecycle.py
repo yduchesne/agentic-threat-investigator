@@ -50,11 +50,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     GeoResolutionVersionConflictError,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     EntityLocationObservation,
@@ -72,6 +68,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.canonical_geography_resolver import (
     PostgresCanonicalGeographyResolver,
 )
@@ -131,7 +128,7 @@ async def seed_geolocation_work(
     evidence_type: EvidenceType = EvidenceType.GEOLOCATION,
     create_resolution: bool = True,
 ) -> tuple[UUID, UUID, UUID | None]:
-    """Create investigation, entity, GEOLOCATION Evidence, and PENDING work.
+    """Create investigation, entity, GEOLOCATION LegacyEvidence, and PENDING work.
 
     Returns ``(entity_id, evidence_id, resolution_id)``; ``resolution_id``
     is ``None`` when ``create_resolution`` is False.
@@ -156,7 +153,7 @@ async def seed_geolocation_work(
     )
     assert entity.id is not None
     evidence = await uow.evidence.insert(
-        Evidence(
+        LegacyEvidence(
             investigation_id=investigation_id,
             type=evidence_type,
             subject=EntityRef(
@@ -956,13 +953,13 @@ async def test_p21_missing_evidence_is_a_full_rollback(
     uow_factory: Callable[[], PostgresUnitOfWork],
     integration_engine: AsyncEngine,
 ) -> None:
-    """G26C-P21 missing Evidence fails the completion with no mutation."""
+    """G26C-P21 missing LegacyEvidence fails the completion with no mutation."""
     entity_id, evidence_id, resolution_id, location_id = await _seed_resolvable(
         uow_factory
     )
     async with integration_engine.begin() as connection:
-        # Evidence is immutable and FK-referenced by the work row; simulate a
-        # missing Evidence row by disabling FK enforcement in this session.
+        # LegacyEvidence is immutable and FK-referenced by the work row; simulate a
+        # missing LegacyEvidence row by disabling FK enforcement in this session.
         await connection.execute(text("SET session_replication_role = replica"))
         await connection.execute(
             text("DELETE FROM ati.evidence WHERE id = :id"),
@@ -988,12 +985,12 @@ async def test_p22_wrong_evidence_type_is_a_full_rollback(
     uow_factory: Callable[[], PostgresUnitOfWork],
     integration_engine: AsyncEngine,
 ) -> None:
-    """G26C-P22 non-GEOLOCATION Evidence fails the completion."""
+    """G26C-P22 non-GEOLOCATION LegacyEvidence fails the completion."""
     entity_id, evidence_id, resolution_id, location_id = await _seed_resolvable(
         uow_factory
     )
-    # The work was created against valid GEOLOCATION Evidence; corrupt the
-    # Evidence type after creation to force the database-authoritative guard.
+    # The work was created against valid GEOLOCATION LegacyEvidence; corrupt the
+    # LegacyEvidence type after creation to force the database-authoritative guard.
     async with integration_engine.begin() as connection:
         await connection.execute(
             text(
@@ -1021,7 +1018,7 @@ async def test_p23_subject_mismatch_is_a_full_rollback(
     uow_factory: Callable[[], PostgresUnitOfWork],
     integration_engine: AsyncEngine,
 ) -> None:
-    """G26C-P23 a subject mismatch between Evidence and work is rejected."""
+    """G26C-P23 a subject mismatch between LegacyEvidence and work is rejected."""
     entity_id, evidence_id, resolution_id, location_id = await _seed_resolvable(
         uow_factory
     )

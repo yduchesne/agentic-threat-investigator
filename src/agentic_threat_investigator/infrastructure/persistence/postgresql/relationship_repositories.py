@@ -16,12 +16,9 @@ from agentic_threat_investigator.app.persistence.repositories import (
     SoftDeletedIdentityError,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.immutable_json import thaw_json
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -55,12 +52,17 @@ def _relationship(row: RelationshipRow) -> Relationship:
 
 
 def _observation(row: RelationshipObservationRow) -> RelationshipObservation:
-    """Map an observation row to its immutable domain model."""
+    """Map an observation row to its immutable domain model.
+
+    PR 28A compatibility: the v0.1 Evidence row *is* the observation, so the
+    row's ``evidence_id`` maps onto the domain ``evidence_observation_id``
+    until PR 28B migrates the schema. The v0.1 correlation column carries no
+    domain field and is not surfaced.
+    """
     return RelationshipObservation(
         id=row.id,
         relationship_id=row.relationship_id,
-        evidence_id=row.evidence_id,
-        investigation_id=row.investigation_id,
+        evidence_observation_id=row.evidence_id,
         observed_at=row.observed_at,
         retrieved_at=row.retrieved_at,
         source=row.source,
@@ -203,10 +205,10 @@ class PostgresRelationshipObservationRepository(RelationshipObservationRepositor
         limit: int = 100,
         offset: int = 0,
     ) -> list[RelationshipObservation]:
-        """Return bounded observations backed by the Investigation's Evidence.
+        """Return bounded observations backed by the Investigation's LegacyEvidence.
 
-        The query joins through the immutable Evidence row so an observation
-        is only returned when its Evidence belongs to the supplied
+        The query joins through the immutable LegacyEvidence row so an observation
+        is only returned when its LegacyEvidence belongs to the supplied
         Investigation, and additionally excludes rows whose own
         investigation correlation contradicts the Investigation. Ordering is
         deterministic: ``retrieved_at``/``observed_at`` descending with a
@@ -250,18 +252,27 @@ class PostgresRelationshipObservationRepository(RelationshipObservationRepositor
         history carrying investigation correlation in the same transaction;
         the adapter performs no Python-side version allocation and exposes no
         update or delete path.
+
+        PR 28A compatibility boundary: the domain observation no longer
+        carries an Investigation correlation (relationships are global per
+        observation), but the v0.1 stored function still requires
+        ``p_investigation_id``. The correlation is derived here from the
+        exact immutable evidence row the observation references — the same
+        value the v0.1 persistence service used to supply — keeping the
+        stored function and schema unchanged until PR 28B.
         """
         await self.session.execute(
             text("""
                 SELECT id, version FROM ati.append_relationship_observation(
-                    :id, :relationship_id, :evidence_id, :investigation_id,
+                    :id, :relationship_id, :evidence_id,
+                    (SELECT e.investigation_id FROM ati.evidence e
+                        WHERE e.id = :evidence_id),
                     :observed_at, :retrieved_at, :source, :confidence)
             """),
             {
                 "id": observation.id,
                 "relationship_id": observation.relationship_id,
-                "evidence_id": observation.evidence_id,
-                "investigation_id": observation.investigation_id,
+                "evidence_id": observation.evidence_observation_id,
                 "observed_at": observation.observed_at,
                 "retrieved_at": observation.retrieved_at,
                 "source": observation.source,
@@ -278,9 +289,9 @@ class PostgresEvidenceRepository(EvidenceRepository):
         self.session = session
 
     @staticmethod
-    def _to_domain(row: EvidenceRow, subject: EntityRow) -> Evidence:
+    def _to_domain(row: EvidenceRow, subject: EntityRow) -> LegacyEvidence:
         """Map an evidence row and its subject entity to the domain model."""
-        return Evidence(
+        return LegacyEvidence(
             id=row.id,
             investigation_id=row.investigation_id,
             type=EvidenceType(row.evidence_type),
@@ -300,11 +311,11 @@ class PostgresEvidenceRepository(EvidenceRepository):
 
     async def insert(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         *,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
-    ) -> Evidence:
+    ) -> LegacyEvidence:
         """Append evidence through the authoritative database write function.
 
         The caller resolves the subject entity first; a duplicate evidence
@@ -355,7 +366,7 @@ class PostgresEvidenceRepository(EvidenceRepository):
             raise
         return evidence.model_copy(update={"id": evidence_id})
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         """Return an evidence observation by its immutable identity."""
         result = await self.session.execute(
             select(EvidenceRow, EntityRow)
@@ -371,7 +382,7 @@ class PostgresEvidenceRepository(EvidenceRepository):
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[Evidence]:
+    ) -> list[LegacyEvidence]:
         """Return bounded observations in deterministic newest-first order."""
         if limit < 0 or offset < 0:
             raise ValueError("limit and offset must be non-negative")

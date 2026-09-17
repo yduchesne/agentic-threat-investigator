@@ -1,20 +1,24 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 27D ThreatFox Evidence converter and conversion-lifecycle tests.
+"""PR 27D + PR 28A ThreatFox Evidence converter and conversion-lifecycle tests.
 
 Matrix IDs D27D-T01..T20 pin the per-record ThreatFox converter mapping:
-validated ``ThreatFoxRecord`` input, exact provenance (Investigation,
-subject, semantic source URN, retrieval time, credential-free reference,
-upstream source record identity, observation time), shared legacy-format
-match facts, source-confidence-as-source-fact, no raw payload, no
-analytical inference, immutability, and fail-closed type/format misuse.
-Matrix IDs D27D-E01..E06 pin the conversion stage vocabulary and the
-acquire -> semantic -> pure-conversion -> CONVERTED lifecycle runner over a
-fake in-memory UnitOfWork with a real ``ProviderHttpClient`` and a
-deterministic local ``httpx.MockTransport`` (only the external Internet
-endpoint is faked). No database and no persistence of Evidence are
-involved; the legacy provider's runtime behavior is covered unchanged by
-the existing provider suites (D27D-L01..L08).
+validated ``ThreatFoxRecord`` input, exact provenance (deterministic global
+Evidence identity, semantic source URN, retrieval time, credential-free
+reference, upstream source record identity, observation time), shared
+legacy-format match facts, source-confidence-as-source-fact, no raw
+payload, no analytical inference, immutability, and fail-closed type/format
+misuse. PR 28A updates: conversion is global and Investigation-independent
+— the emitted ``ConvertedEvidence`` carries no Investigation or subject —
+and the Evidence identity is the deterministic ``evidence_id_for_source_record``
+pinned to the ThreatFox semantic format/source/record identity. Matrix IDs
+D27D-E01..E06 pin the conversion stage vocabulary and the acquire ->
+semantic -> pure-conversion -> CONVERTED lifecycle runner over a fake
+in-memory UnitOfWork with a real ``ProviderHttpClient`` and a deterministic
+local ``httpx.MockTransport`` (only the external Internet endpoint is
+faked). No database and no persistence of Evidence are involved; the legacy
+provider's runtime behavior is covered unchanged by the existing provider
+suites (D27D-L01..L08).
 """
 
 from __future__ import annotations
@@ -51,9 +55,9 @@ from agentic_threat_investigator.domain.datasource import (
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
+    ConvertedEvidence,
     EvidenceType,
+    evidence_id_for_source_record,
 )
 from agentic_threat_investigator.domain.identifiers import (
     SemanticFormatId,
@@ -94,7 +98,6 @@ from tests.support.threatfox_fixtures import (
 pytestmark = pytest.mark.unit
 
 _FIXED_TS = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
-_INVESTIGATION_ID = UUID("11111111-2222-3333-4444-555555555555")
 _ENDPOINT = "https://threatfox-api.abuse.ch/api/v1/"
 
 _DEFINITION = DatasourceDefinition(
@@ -106,8 +109,6 @@ _DEFINITION = DatasourceDefinition(
 )
 _DOMAIN_ENTITY = Entity(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN)
 _IP_ENTITY = Entity(type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP)
-_DOMAIN_SUBJECT = EntityRef(type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN)
-_IP_SUBJECT = EntityRef(type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP)
 
 
 def _semantic_context() -> SemanticSourceContext:
@@ -119,15 +120,9 @@ def _semantic_context() -> SemanticSourceContext:
     )
 
 
-def _conversion_context(
-    subject: EntityRef = _DOMAIN_SUBJECT,
-) -> EvidenceConversionContext:
-    """Build the deterministic PR 27D conversion context."""
-    return EvidenceConversionContext(
-        investigation_id=_INVESTIGATION_ID,
-        subject=subject,
-        semantic_source=_semantic_context(),
-    )
+def _conversion_context() -> EvidenceConversionContext:
+    """Build the deterministic global PR 27D/28A conversion context."""
+    return EvidenceConversionContext(semantic_source=_semantic_context())
 
 
 def _record(**overrides: Any) -> ThreatFoxRecord:
@@ -135,96 +130,119 @@ def _record(**overrides: Any) -> ThreatFoxRecord:
     return ThreatFoxRecord.model_validate(asyncrat_domain_record(**overrides))
 
 
+def _expected_evidence_id(source_record_id: str) -> UUID:
+    """Return the expected deterministic Evidence ID of one ThreatFox record."""
+    return evidence_id_for_source_record(
+        SemanticFormatId.THREATFOX, SourceId.THREATFOX, source_record_id
+    )
+
+
 class TestThreatFoxToEvidenceConverter:
-    """D27D-T01..T20: per-record conversion mapping and provenance."""
+    """D27D-T01..T20 + E28A-70..75: per-record conversion mapping and provenance."""
 
     def test_t01_valid_domain_record_one_threat_intelligence_evidence(
         self,
     ) -> None:
-        """D27D-T01: one valid domain record maps to one TI Evidence."""
+        """E28A-70/D27D-T01: one record maps to exactly one ConvertedEvidence."""
         record = _record()
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             record, _conversion_context()
         )
-        assert evidence.type == EvidenceType.THREAT_INTELLIGENCE
-        assert len(evidence.facts) == 1
-        assert thaw_json(evidence.facts["matches"][0]) == build_threatfox_match_facts(
-            record
+        assert converted.evidence.type == EvidenceType.THREAT_INTELLIGENCE
+        assert len(converted.observation.facts) == 1
+        assert thaw_json(converted.observation.facts["matches"][0]) == (
+            build_threatfox_match_facts(record)
         )
 
     def test_t02_valid_ip_record_one_evidence(self) -> None:
-        """D27D-T02: one valid ip:port record maps to one TI Evidence."""
+        """D27D-T02: one valid ip:port record maps to one TI ConvertedEvidence."""
         record = ThreatFoxRecord.model_validate(asyncrat_ip_port_record())
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
-            record, _conversion_context(subject=_IP_SUBJECT)
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
+            record, _conversion_context()
         )
-        assert evidence.type == EvidenceType.THREAT_INTELLIGENCE
-        assert evidence.subject.type == EntityType.IP_ADDRESS
-        assert evidence.subject.value == CANONICAL_ASYNCRAT_IP
-        match = evidence.facts["matches"][0]
+        assert converted.evidence.type == EvidenceType.THREAT_INTELLIGENCE
+        match = converted.observation.facts["matches"][0]
         assert match["ioc"] == CANONICAL_ASYNCRAT_IP_PORT
         assert match["ioc_type"] == "ip:port"
 
-    def test_t03_investigation_id_exact(self) -> None:
-        """D27D-T03: the Evidence carries the context's exact Investigation ID."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
-            _record(), _conversion_context()
-        )
-        assert evidence.investigation_id == _INVESTIGATION_ID
+    def test_t03_stable_global_identity_exact(self) -> None:
+        """E28A-71/D27D-T03: Evidence carries the deterministic pinned ID.
 
-    def test_t04_subject_exact(self) -> None:
-        """D27D-T04: the Evidence carries the exact canonical subject binding."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        The identity is derived from the ThreatFox semantic format, source
+        namespace and ``source_record_id`` — never an Investigation, subject,
+        retrieval time, or uuid4.
+        """
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             _record(), _conversion_context()
         )
-        assert evidence.subject == _DOMAIN_SUBJECT
-        assert evidence.subject.id is None
+        assert converted.evidence.id == _expected_evidence_id("864201")
+        assert converted.evidence.id.version == 5
+
+    def test_t04_no_investigation_or_subject_binding(self) -> None:
+        """E28A-72/D27D-T04: conversion is global and Investigation-independent.
+
+        Neither the Evidence nor the observation candidate carries an
+        Investigation identity or a subject; re-converting with only a
+        different semantic retrieval time changes nothing.
+        """
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
+            _record(), _conversion_context()
+        )
+        assert not hasattr(converted.evidence, "investigation_id")
+        assert not hasattr(converted.evidence, "subject")
+        assert not hasattr(converted.observation, "investigation_id")
+        assert not hasattr(converted.observation, "subject")
 
     def test_t05_source_exact_semantic_source_urn(self) -> None:
         """D27D-T05: source is the exact semantic-source URN."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             _record(), _conversion_context()
         )
-        assert evidence.source == SourceId.THREATFOX.value
+        assert converted.evidence.source == SourceId.THREATFOX.value
 
     def test_t06_retrieved_at_exact_semantic_context_time(self) -> None:
-        """D27D-T06: retrieved_at is the exact semantic-context time."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        """D27D-T06: candidate retrieved_at is the exact semantic-context time."""
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             _record(), _conversion_context()
         )
-        assert evidence.retrieved_at == _FIXED_TS
-        assert evidence.retrieved_at.utcoffset() == timedelta(0)
+        assert converted.observation.retrieved_at == _FIXED_TS
+        assert converted.observation.retrieved_at.utcoffset() == timedelta(0)
 
     def test_t07_last_seen_present_observed_at_last_seen(self) -> None:
         """D27D-T07: observed_at is last_seen when present."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             _record(), _conversion_context()
         )
-        assert evidence.observed_at == datetime(2026, 8, 21, 12, 0, 0, tzinfo=UTC)
+        assert converted.observation.observed_at == datetime(
+            2026, 8, 21, 12, 0, 0, tzinfo=UTC
+        )
 
     def test_t08_last_seen_absent_observed_at_first_seen(self) -> None:
-        """D27D-T08: observed_at falls back to first_seen without last_seen."""
+        """E28A-73/D27D-T08: observed_at falls back to first_seen without last_seen."""
         record = ThreatFoxRecord.model_validate(asyncrat_ip_port_record(last_seen=None))
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
-            record, _conversion_context(subject=_IP_SUBJECT)
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
+            record, _conversion_context()
         )
-        assert evidence.observed_at == datetime(2026, 8, 20, 12, 0, 0, tzinfo=UTC)
+        assert converted.observation.observed_at == datetime(
+            2026, 8, 20, 12, 0, 0, tzinfo=UTC
+        )
 
     def test_t09_source_reference_approved_safe_url(self) -> None:
-        """D27D-T09: source_url is the approved credential-free reference."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        """D27D-T09: candidate source_url is the approved credential-free reference."""
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             _record(), _conversion_context()
         )
-        assert evidence.source_url == _ENDPOINT
+        assert converted.observation.source_url == _ENDPOINT
 
     def test_t10_match_facts_legacy_keys_and_format(self) -> None:
         """D27D-T10: normalized match facts keep the legacy keys and format."""
         record = _record()
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             record, _conversion_context()
         )
-        assert len(evidence.facts) == 1
-        matches = evidence.facts["matches"]
+        facts = converted.observation.facts
+        assert len(facts) == 1
+        matches = facts["matches"]
         assert len(matches) == 1
         match = matches[0]
         assert set(match) == MATCH_FACT_KEYS
@@ -245,13 +263,13 @@ class TestThreatFoxToEvidenceConverter:
     def test_t11_confidence_source_fact_only(self) -> None:
         """D27D-T11: source confidence stays a source fact, never a weight."""
         record = _record(confidence_level=75)
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             record, _conversion_context()
         )
-        match = evidence.facts["matches"][0]
+        match = converted.observation.facts["matches"][0]
         assert match["confidence_level"] == 75
-        assert set(evidence.facts) == {"matches"}
-        serialized = str(evidence.facts)
+        assert set(converted.observation.facts) == {"matches"}
+        serialized = str(converted.observation.facts)
         for fragment in ("verdict", "risk", "assessment"):
             assert fragment not in serialized
 
@@ -262,10 +280,10 @@ class TestThreatFoxToEvidenceConverter:
             tags=["AsyncRAT", "malware"],
             malware_printable=None,
         )
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             record, _conversion_context()
         )
-        match = evidence.facts["matches"][0]
+        match = converted.observation.facts["matches"][0]
         assert match["reference"] == "https://threatfox.abuse.ch/ioc/864201"
         assert match["tags"] == ("AsyncRAT", "malware")
         assert match["malware_printable"] is None
@@ -273,29 +291,29 @@ class TestThreatFoxToEvidenceConverter:
         sparse = ThreatFoxRecord.model_validate(
             asyncrat_domain_record(reference=None, tags=None)
         )
-        (sparse_evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (sparse_converted,) = ThreatFoxToEvidenceConverter().convert(
             sparse, _conversion_context()
         )
-        sparse_match = sparse_evidence.facts["matches"][0]
+        sparse_match = sparse_converted.observation.facts["matches"][0]
         assert sparse_match["reference"] is None
         assert sparse_match["tags"] is None
 
     def test_t13_raw_payload_none(self) -> None:
-        """D27D-T13: the emitted Evidence never copies a raw payload."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        """D27D-T13: the emitted candidate never copies a raw payload."""
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             _record(), _conversion_context()
         )
-        assert evidence.raw_payload is None
+        assert converted.observation.raw_payload is None
 
     def test_t14_repeated_conversion_equal_output(self) -> None:
-        """D27D-T14: repeated conversion yields structurally equal Evidence."""
+        """D27D-T14: repeated conversion yields structurally equal output."""
         converter = ThreatFoxToEvidenceConverter()
         record = _record()
         context = _conversion_context()
         first = converter.convert(record, context)
         second = converter.convert(record, context)
         assert first == second
-        assert first[0].id is None and second[0].id is None
+        assert first[0].evidence.id == _expected_evidence_id("864201")
 
     def test_t15_wrong_semantic_format_fails_closed(self) -> None:
         """D27D-T15: lookup under a foreign semantic format fails closed."""
@@ -322,50 +340,50 @@ class TestThreatFoxToEvidenceConverter:
         record_snapshot = record.model_dump()
         ThreatFoxToEvidenceConverter().convert(record, context)
         assert record.model_dump() == record_snapshot
-        assert context.investigation_id == _INVESTIGATION_ID
-        assert context.subject == _DOMAIN_SUBJECT
+        assert context.semantic_source.semantic_format is SemanticFormatId.THREATFOX
 
     def test_t18_credentials_absent(self) -> None:
         """D27D-T18: no credential ever reaches Evidence."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             _record(), _conversion_context()
         )
-        serialized = f"{evidence.model_dump()} {evidence.source_url}"
+        serialized = (
+            f"{converted.evidence.model_dump()} "
+            f"{converted.observation.model_dump()}"
+        )
         assert FIXED_KEY not in serialized
         assert "Auth-Key" not in serialized
-        assert "auth" not in str(evidence.source_url).lower()
+        assert "auth" not in str(converted.observation.source_url).lower()
 
     def test_t19_source_record_id_exact_upstream_identity(self) -> None:
         """D27D-T19: source_record_id carries the exact upstream record ID."""
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
             _record(), _conversion_context()
         )
-        assert evidence.source_record_id == "864201"
-        # The ATI persistence identity remains unset.
-        assert evidence.id is None
+        assert converted.evidence.source_record_id == "864201"
+        assert converted.observation.evidence_id == _expected_evidence_id("864201")
 
     def test_t20_no_analytical_inference(self) -> None:
         """D27D-T20: conversion never synthesizes verdict, risk, or relations."""
         record = ThreatFoxRecord.model_validate(asyncrat_ip_port_record())
-        (evidence,) = ThreatFoxToEvidenceConverter().convert(
-            record, _conversion_context(subject=_IP_SUBJECT)
+        (converted,) = ThreatFoxToEvidenceConverter().convert(
+            record, _conversion_context()
         )
-        assert evidence.id is None
-        assert evidence.investigation_id == _INVESTIGATION_ID
-        assert set(evidence.model_dump()) == {
+        assert set(converted.evidence.model_dump()) == {
             "id",
-            "investigation_id",
             "type",
-            "subject",
             "source",
             "source_record_id",
+        }
+        assert set(converted.observation.model_dump()) == {
+            "evidence_id",
             "source_url",
             "observed_at",
             "retrieved_at",
             "facts",
             "raw_payload",
         }
-        serialized = str(evidence.facts)
+        serialized = str(converted.observation.facts)
         for fragment in (
             "verdict",
             "benign",
@@ -395,7 +413,7 @@ class _FailingConverter(ToEvidenceConverter[str]):
 
     def convert(
         self, source: str, context: EvidenceConversionContext
-    ) -> tuple[Evidence, ...]:
+    ) -> tuple[ConvertedEvidence, ...]:
         """Raise the typed deterministic conversion failure."""
         raise ConversionError("deterministic local conversion failure")
 
@@ -542,8 +560,6 @@ class TestConversionLifecycle:
                 datasource=_datasource(client),
                 definition=_DEFINITION,
                 entity=_DOMAIN_ENTITY,
-                investigation_id=_INVESTIGATION_ID,
-                subject=_DOMAIN_SUBJECT,
                 registry=build_threatfox_conversion_registry(),
                 uow_factory=_factory(state),
                 clock=lambda: _FIXED_TS,
@@ -578,8 +594,6 @@ class TestConversionLifecycle:
                 datasource=_datasource(client),
                 definition=_DEFINITION,
                 entity=_DOMAIN_ENTITY,
-                investigation_id=_INVESTIGATION_ID,
-                subject=_DOMAIN_SUBJECT,
                 registry=build_threatfox_conversion_registry(),
                 uow_factory=_factory(state),
                 clock=lambda: _FIXED_TS,
@@ -590,8 +604,9 @@ class TestConversionLifecycle:
         assert len(evidence) == 1
         converted = state.events[3]
         assert converted.item_count == 1
-        assert evidence[0].subject == _DOMAIN_SUBJECT
-        assert evidence[0].source_record_id == "864201"
+        assert evidence[0].evidence.source == SourceId.THREATFOX.value
+        assert evidence[0].evidence.id == _expected_evidence_id("864201")
+        assert evidence[0].evidence.source_record_id == "864201"
         assert state.types == [
             "started",
             "acquired",
@@ -626,15 +641,16 @@ class TestConversionLifecycle:
                 datasource=_datasource(client),
                 definition=_DEFINITION,
                 entity=_IP_ENTITY,
-                investigation_id=_INVESTIGATION_ID,
-                subject=_IP_SUBJECT,
                 registry=build_threatfox_conversion_registry(),
                 uow_factory=_factory(state),
                 clock=lambda: _FIXED_TS,
             )
 
         assert result.error is None
-        assert [item.source_record_id for item in evidence] == ["864202", "864203"]
+        assert [item.evidence.source_record_id for item in evidence] == [
+            "864202",
+            "864203",
+        ]
         assert state.events[3].event_type.value == "converted"
         assert state.events[3].item_count == 2
         assert state.types[-1] == "completed"
@@ -659,8 +675,6 @@ class TestConversionLifecycle:
                     datasource=_datasource(client),
                     definition=_DEFINITION,
                     entity=_DOMAIN_ENTITY,
-                    investigation_id=_INVESTIGATION_ID,
-                    subject=_DOMAIN_SUBJECT,
                     registry=registry,
                     uow_factory=_factory(state),
                     clock=lambda: _FIXED_TS,
@@ -691,8 +705,6 @@ class TestConversionLifecycle:
                     datasource=_datasource(client),
                     definition=_DEFINITION,
                     entity=_DOMAIN_ENTITY,
-                    investigation_id=_INVESTIGATION_ID,
-                    subject=_DOMAIN_SUBJECT,
                     registry=registry,
                     uow_factory=_factory(state),
                     clock=lambda: _FIXED_TS,
@@ -728,8 +740,6 @@ class TestConversionLifecycle:
                     datasource=_datasource(client),
                     definition=_DEFINITION,
                     entity=_DOMAIN_ENTITY,
-                    investigation_id=_INVESTIGATION_ID,
-                    subject=_DOMAIN_SUBJECT,
                     registry=build_threatfox_conversion_registry(),
                     uow_factory=_factory(state),
                     clock=lambda: _FIXED_TS,
@@ -758,8 +768,6 @@ class TestConversionLifecycle:
                 datasource=_datasource(client),
                 definition=_DEFINITION,
                 entity=_DOMAIN_ENTITY,
-                investigation_id=_INVESTIGATION_ID,
-                subject=_DOMAIN_SUBJECT,
                 registry=build_threatfox_conversion_registry(),
                 uow_factory=_factory(state),
                 clock=lambda: _FIXED_TS,

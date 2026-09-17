@@ -7,7 +7,7 @@ created through the *normal* PR 26 pipeline:
 
 ```text
 browser-created Investigation
- -> deterministic normal GEOLOCATION Evidence
+ -> deterministic normal GEOLOCATION LegacyEvidence
  -> GeoResolution
  -> production PR 26 resolver/completion
  -> canonical Location / EntityLocationObservation
@@ -17,7 +17,7 @@ browser-created Investigation
 
 This module is the smallest deterministic real-stack seeding option: a
 test-support CLI that persists ordinary canonical IP Entities and
-immutable ``GEOLOCATION`` Evidence rows (exactly like the PR 25C seeder),
+immutable ``GEOLOCATION`` LegacyEvidence rows (exactly like the PR 25C seeder),
 creates the deterministic ``GeoResolution`` work rows, and then drives the
 **production** :class:`GeoResolutionWorker` with the real
 ``PostgresCanonicalGeographyResolver`` to atomic completion. The
@@ -83,16 +83,13 @@ from agentic_threat_investigator.app.persistence.repositories import (
 from agentic_threat_investigator.config import get_settings
 from agentic_threat_investigator.config.settings import OperatingMode, Settings
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     GeographicClaim,
     GeoResolution,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.composites import (
     register_batch_composites,
 )
@@ -152,7 +149,7 @@ class GeointFixture:
 
     The exact fact vocabulary (``country_code``/``region``/``city``/
     ``precision``) mirrors the PR 26C claim extraction contract so the
-    seeded Evidence resolves canonically. Geography is explicitly
+    seeded LegacyEvidence resolves canonically. Geography is explicitly
     synthetic test data (documentation-reserved IP ranges, the ATI
     reference fixture corpus) and asserts nothing about the real location
     of those addresses.
@@ -269,7 +266,7 @@ def derive_evidence_id(
     *,
     other_investigation_id: UUID | None = None,
 ) -> UUID:
-    """Derive the deterministic immutable Evidence UUID for one fixture row.
+    """Derive the deterministic immutable LegacyEvidence UUID for one fixture row.
 
     The cross-Investigation scenario derives the second row against the
     *other* Investigation so repeated runs reuse the exact same row and
@@ -305,13 +302,13 @@ def derive_resolution_id(
 
 @dataclass(frozen=True)
 class SeedUnit:
-    """One deterministic Entity + GEOLOCATION Evidence + resolution plan."""
+    """One deterministic Entity + GEOLOCATION LegacyEvidence + resolution plan."""
 
     entity_id: UUID
     evidence_id: UUID
     resolution_id: UUID
     entity_value: str
-    evidence: Evidence
+    evidence: LegacyEvidence
 
     @property
     def entity(self) -> Entity:
@@ -362,7 +359,7 @@ def build_seed_units(
             other_investigation_id=other_investigation_id,
         )
         retrieved_at = SEED_RETRIEVED_AT + timedelta(hours=fixture.retrieval_hours)
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             id=evidence_id,
             investigation_id=investigation_id
             if index == 0
@@ -483,7 +480,7 @@ async def apply_seed(
 ) -> SeedReport:
     """Persist evidence, enqueue work, and complete it through the worker.
 
-    Every row is an ordinary canonical IP Entity + ``GEOLOCATION`` Evidence
+    Every row is an ordinary canonical IP Entity + ``GEOLOCATION`` LegacyEvidence
     of the exact Investigation, a deterministic PENDING ``GeoResolution``,
     and the production worker completion (canonical matching + atomic
     stored-function completion creating the ``EntityLocationObservation``)

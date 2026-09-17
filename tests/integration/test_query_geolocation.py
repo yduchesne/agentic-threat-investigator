@@ -2,8 +2,8 @@
 """PR 25A integration: Investigation geolocation projection (G-P01..G-P16).
 
 Every test drives the real ``PostgresInvestigationGeolocationQueryService``
-over real PostgreSQL with Evidence/Entity rows persisted through the normal
-application repositories. Evidence is seeded directly as persisted rows — no
+over real PostgreSQL with LegacyEvidence/Entity rows persisted through the normal
+application repositories. LegacyEvidence is seeded directly as persisted rows — no
 MMDB/provider execution is involved anywhere in the read path.
 
 G-P01..G-P13 are the core projection/bounded-read matrix; G-P14..G-P16 are the
@@ -25,11 +25,8 @@ from agentic_threat_investigator.app.query.geolocation import (
     InvestigationGeolocationResult,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
@@ -70,9 +67,9 @@ def geolocation_evidence(
     facts: dict[str, Any] | None = None,
     source: str = PROVIDER,
     ip_value: str = "203.0.113.10",
-) -> Evidence:
+) -> LegacyEvidence:
     """Build one deterministic immutable GEOLOCATION evidence observation."""
-    return Evidence(
+    return LegacyEvidence(
         investigation_id=investigation_id,
         type=EvidenceType.GEOLOCATION,
         subject=EntityRef(id=entity_id, type=EntityType.IP_ADDRESS, value=ip_value),
@@ -126,7 +123,7 @@ async def test_gp01_empty_investigation(uow_factory: Any) -> None:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_gp02_one_ip_projection(uow_factory: Any) -> None:
-    """One GEOLOCATION Evidence produces exactly one projection item."""
+    """One GEOLOCATION LegacyEvidence produces exactly one projection item."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(
@@ -248,7 +245,7 @@ async def test_gp05_deterministic_tie_breaker(uow_factory: Any) -> None:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_gp06_generic_evidence_excluded(uow_factory: Any) -> None:
-    """REPUTATION/NETWORK/DNS Evidence never enters the projection."""
+    """REPUTATION/NETWORK/DNS LegacyEvidence never enters the projection."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(
@@ -276,12 +273,12 @@ async def test_gp06_generic_evidence_excluded(uow_factory: Any) -> None:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_gp07_non_ip_geolocation_excluded(uow_factory: Any) -> None:
-    """GEOLOCATION Evidence on a non-IP subject is defensively excluded."""
+    """GEOLOCATION LegacyEvidence on a non-IP subject is defensively excluded."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         domain_id = await seed_entity(uow, value="example.com")
         await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 investigation_id=investigation_id,
                 type=EvidenceType.GEOLOCATION,
                 subject=EntityRef(
@@ -301,7 +298,7 @@ async def test_gp07_non_ip_geolocation_excluded(uow_factory: Any) -> None:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_gp08_cross_investigation_isolation(uow_factory: Any) -> None:
-    """A shared Entity never leaks one Investigation's Evidence into another."""
+    """A shared Entity never leaks one Investigation's LegacyEvidence into another."""
     async with uow_factory() as uow:
         investigation_a = await seed_investigation(uow)
         investigation_b = await seed_investigation(uow)
@@ -461,7 +458,7 @@ async def test_gp13_single_bounded_read(uow_factory: Any) -> None:
     decision, no generic statement-count framework was created; the criterion
     is met structurally: the service issues exactly one SELECT on the
     latest-per-entity ranked subquery with a ``max_items + 1`` LIMIT, never
-    per-item Evidence gets or Python-side grouping of historical rows.
+    per-item LegacyEvidence gets or Python-side grouping of historical rows.
     """
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)

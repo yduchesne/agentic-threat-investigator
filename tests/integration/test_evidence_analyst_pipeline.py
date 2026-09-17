@@ -2,7 +2,7 @@
 """Real PostgreSQL + FakeLlmClient vertical slice for PR 20B.
 
 Exercises the full application path against the isolated migrated database:
-seed Investigation/Evidence/Relationship graph, assemble analyst input from
+seed Investigation/LegacyEvidence/Relationship graph, assemble analyst input from
 persisted rows only, run the scripted FakeLlmClient, validate/persist through
 the PR 20A seam, advance the Investigation pointer, and verify accounting.
 No real external model is required.
@@ -48,11 +48,7 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     AnalysisDisposition,
     InvestigationState,
@@ -60,6 +56,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -112,7 +109,7 @@ class Graph:
         )
         await uow.entities.upsert(source)
         await uow.entities.upsert(target)
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             id=self.evidence_id,
             investigation_id=self.investigation_id,
             type=EvidenceType.DNS,
@@ -140,8 +137,7 @@ class Graph:
             observation = RelationshipObservation(
                 id=self.observation_id,
                 relationship_id=self.relationship_id,
-                evidence_id=self.evidence_id,
-                investigation_id=self.investigation_id,
+                evidence_observation_id=self.evidence_id,
                 retrieved_at=_RETRIEVED_AT,
                 source="urn:ati:source:google_public_dns",
                 confidence=0.8,
@@ -176,7 +172,7 @@ class Graph:
         return EvidenceAnalystDecision(
             verdict=verdict,
             confidence=AssessmentConfidence.MEDIUM,
-            summary="Evidence supports the verdict.",
+            summary="LegacyEvidence supports the verdict.",
             findings=(
                 (
                     AnalyticalFinding(
@@ -368,7 +364,7 @@ async def test_evidence_only_pipeline(
     uow_factory: Callable[[], PostgresUnitOfWork],
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """A direct Evidence finding persists an Assessment and moves the pointer."""
+    """A direct LegacyEvidence finding persists an Assessment and moves the pointer."""
     async with uow_factory() as uow:
         graph = Graph()
         await graph.seed(uow, with_observation=False)
@@ -459,7 +455,7 @@ async def test_invalid_evidence_citation_rejected(
     uow_factory: Callable[[], PostgresUnitOfWork],
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """An invented Evidence citation produces no Assessment and no pointer."""
+    """An invented LegacyEvidence citation produces no Assessment and no pointer."""
     async with uow_factory() as uow:
         graph = Graph()
         await graph.seed(uow, with_observation=False)
@@ -481,7 +477,7 @@ async def test_cross_investigation_evidence_rejected(
     uow_factory: Callable[[], PostgresUnitOfWork],
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """A Finding citing another Investigation's Evidence is rejected."""
+    """A Finding citing another Investigation's LegacyEvidence is rejected."""
     async with uow_factory() as uow:
         graph = Graph()
         other = Graph(subject=f"other-{uuid4().hex[:8]}.com")
@@ -830,7 +826,7 @@ async def test_input_loader_excludes_raw_payload(
     uow_factory: Callable[[], PostgresUnitOfWork],
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Evidence raw_payload never reaches the model prompts."""
+    """LegacyEvidence raw_payload never reaches the model prompts."""
     async with uow_factory() as uow:
         graph = Graph()
         await graph.seed(uow, with_observation=False)

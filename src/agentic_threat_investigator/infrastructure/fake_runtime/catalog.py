@@ -48,9 +48,12 @@ from agentic_threat_investigator.app.providers import (
     ProviderErrorCode,
 )
 from agentic_threat_investigator.domain.entities import EntityType, canonicalize
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 FAKE_WORLD_SCHEMA_VERSION = 1
 """Supported synthetic-world schema version (PR 23D)."""
@@ -491,14 +494,14 @@ class FakeWorldCatalog:
     def _validate_evidence_contracts(self, world: FakeWorldData) -> None:
         """Prove every observation is extractable through the real contracts.
 
-        Each observation is built into an ``Evidence`` with a synthetic ID
+        Each observation is built into an ``LegacyEvidence`` with a synthetic ID
         and dispatched through the production extraction dispatcher; a
         contract violation fails loading instead of surfacing mid-investigation.
         """
         retrieved_at = datetime(2026, 1, 1, tzinfo=UTC)
         for result in world.provider_results:
             for observation in result.observations:
-                evidence = Evidence(
+                evidence = LegacyEvidence(
                     id=uuid4(),
                     investigation_id=uuid4(),
                     type=observation.evidence_type,

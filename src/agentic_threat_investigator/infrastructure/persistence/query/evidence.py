@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PostgreSQL Evidence read queries (PR 23A).
+"""PostgreSQL LegacyEvidence read queries (PR 23A).
 
 Canonical ordering preserves the persisted execution semantics
 (``retrieved_at DESC, id ASC``) backed by the existing
@@ -26,18 +26,15 @@ from agentic_threat_investigator.app.query.pagination import (
     require_cursor_for_query,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 from ..postgresql.models import EntityRow, EvidenceRow
 
 
-def _evidence_from_row(row: EvidenceRow, subject: EntityRow) -> Evidence:
+def _evidence_from_row(row: EvidenceRow, subject: EntityRow) -> LegacyEvidence:
     """Map an evidence row and its subject entity to the immutable domain model."""
-    return Evidence(
+    return LegacyEvidence(
         id=row.id,
         investigation_id=row.investigation_id,
         type=EvidenceType(row.evidence_type),
@@ -57,15 +54,15 @@ def _evidence_from_row(row: EvidenceRow, subject: EntityRow) -> Evidence:
 
 
 class PostgresEvidenceQueryService(EvidenceQueryService):
-    """Bounded keyset Evidence listing over one active session."""
+    """Bounded keyset LegacyEvidence listing over one active session."""
 
     def __init__(self, session: AsyncSession, limits: QueryLimits) -> None:
         """Bind the read session and the configured page-size limits."""
         self._session = session
         self._limits = limits
 
-    async def list(self, query: EvidenceListQuery) -> QueryPage[Evidence]:
-        """Return one bounded page of immutable Evidence observations.
+    async def list(self, query: EvidenceListQuery) -> QueryPage[LegacyEvidence]:
+        """Return one bounded page of immutable LegacyEvidence observations.
 
         The Investigation scope is mandatory; optional source, subject,
         evidence-type, and retrieved-time filters are bounded typed fields.
@@ -123,8 +120,8 @@ class PostgresEvidenceQueryService(EvidenceQueryService):
             )
         return QueryPage(items=items, next_cursor=next_cursor)
 
-    async def get(self, investigation_id: UUID, evidence_id: UUID) -> Evidence | None:
-        """Return one Evidence observation bound to the Investigation, if any.
+    async def get(self, investigation_id: UUID, evidence_id: UUID) -> LegacyEvidence | None:
+        """Return one LegacyEvidence observation bound to the Investigation, if any.
 
         The binding predicate makes a cross-Investigation lookup fail closed
         with ``None``; raw provider payloads are never returned by the read

@@ -55,17 +55,14 @@ from agentic_threat_investigator.domain.audit import (
     AuditOutcome,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -189,20 +186,20 @@ class FakeInvestigationRepository(InvestigationRepository):
 
 
 class FakeEvidenceRepository(EvidenceRepository):
-    """Evidence repository serving the configured provenance rows."""
+    """LegacyEvidence repository serving the configured provenance rows."""
 
-    def __init__(self, rows: dict[UUID, Evidence]) -> None:
+    def __init__(self, rows: dict[UUID, LegacyEvidence]) -> None:
         self.rows = rows
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         return self.rows.get(evidence_id)
 
-    async def insert(self, evidence: Evidence, **_: object) -> Evidence:
+    async def insert(self, evidence: LegacyEvidence, **_: object) -> LegacyEvidence:
         raise NotImplementedError
 
     async def list_for_investigation(
         self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
-    ) -> list[Evidence]:
+    ) -> list[LegacyEvidence]:
         return [
             row
             for row in self.rows.values()
@@ -444,7 +441,7 @@ class World:
         self.target = Entity(
             id=self.target_id, type=EntityType.IP_ADDRESS, value="192.0.2.1"
         )
-        self.evidence = Evidence(
+        self.evidence = LegacyEvidence(
             id=self.evidence_id,
             investigation_id=self.investigation_id,
             type=EvidenceType.DNS,
@@ -463,8 +460,7 @@ class World:
         self.observation = RelationshipObservation(
             id=self.observation_id,
             relationship_id=self.relationship_id,
-            evidence_id=self.evidence_id,
-            investigation_id=self.investigation_id,
+            evidence_observation_id=self.evidence_id,
             retrieved_at=_RETRIEVED_AT,
             source="urn:ai:source:google_public_dns",
         )
@@ -472,7 +468,7 @@ class World:
             investigation_id=self.investigation_id,
             verdict=Verdict.SUSPICIOUS,
             confidence=AssessmentConfidence.MEDIUM,
-            summary="Evidence supports the verdict.",
+            summary="LegacyEvidence supports the verdict.",
             analyzed_evidence_ids=(self.evidence_id,),
             findings=(
                 AnalyticalFinding(

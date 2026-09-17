@@ -9,7 +9,7 @@ Connects one deterministic PR 19A work item to the existing ATI seams:
            before any provider I/O)
         -> validate provider applicability
         -> call the existing EvidenceProvider (outside all transactions)
-        -> per normalized Evidence, in provider-return order:
+        -> per normalized LegacyEvidence, in provider-return order:
                PR 18B deterministic extraction (outside transactions)
                PR 18C atomic provider-observation persistence
         -> persisted analyst-facing timeline events
@@ -21,8 +21,8 @@ No pivot policy, scheduling of discovered entities, LLM behavior, budget
 enforcement, or stopping policy lives here.
 
 Every provider result is bound to the selected work before any extraction
-or persistence: the returned provider identity, each Evidence's owning
-investigation, and each Evidence subject must match the selected provider,
+or persistence: the returned provider identity, each LegacyEvidence's owning
+investigation, and each LegacyEvidence subject must match the selected provider,
 the selected work item, and the authoritative persisted target. A binding
 violation fails the work deterministically with a safe stable code and
 writes no observation.
@@ -32,15 +32,15 @@ errors (``ProviderResult`` validates the two collections independently,
 e.g. after independent RR-type lookups). Under the approved PR 19B
 outcome-status contract, a mixed result is a valid partial provider result:
 valid evidence is processed and persisted in provider-return order; when at
-least one Evidence observation committed and no extraction, persistence, or
+least one LegacyEvidence observation committed and no extraction, persistence, or
 timeline failure followed, the status is ``SUCCEEDED`` and only the first
 provider error (provider-return order) is retained — its stable code and
 retryability, never its free-form message. The retained code is carried on
 the ``PROVIDER_WORK_COMPLETED`` event's ``error_code`` so the timeline
 accurately exposes the partial result. If extraction, persistence, or
-timeline processing fails after Evidence commits, ``FAILED`` takes precedence
+timeline processing fails after LegacyEvidence commits, ``FAILED`` takes precedence
 and all previously committed IDs remain in the outcome. Errors without
-Evidence remain ``FAILED``; an all-empty result remains ``SUCCEEDED``. No
+LegacyEvidence remain ``FAILED``; an all-empty result remains ``SUCCEEDED``. No
 PARTIAL execution status exists in PR 19B.
 
 Failed work outcomes always retain every ID from observations that already
@@ -81,7 +81,6 @@ from agentic_threat_investigator.app.provider_observation_persistence import (
 )
 from agentic_threat_investigator.app.providers import EvidenceProvider, ProviderResult
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     InvestigationError,
@@ -93,6 +92,7 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ def _append_unique(target: list[UUID], candidate: UUID) -> None:
     failed partial outcome, the aggregate ``PROVIDER_WORK_COMPLETED`` event,
     and the merged state all carry the same canonical ID lists. Deduplication
     happens while accumulating operational summaries only; provider-returned
-    Evidence is still processed exactly once in provider-return order.
+    LegacyEvidence is still processed exactly once in provider-return order.
     """
     if candidate not in target:
         target.append(candidate)
@@ -251,7 +251,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
     """Execute one approved provider work item through the real ATI seams.
 
     Bound to exactly one ``ProviderExecutionContext.investigation_id``: every
-    provider call, Evidence validation/persistence, and timeline event uses
+    provider call, LegacyEvidence validation/persistence, and timeline event uses
     that identity. Exposing it as :class:`InvestigationBoundWorkExecutor` lets
     the generic graph builder adopt it automatically as the graph binding so
     direct composition cannot bypass investigation isolation.
@@ -268,7 +268,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
         *,
         entity_reader: EntityReader,
         provider_registry: Mapping[SourceId, EvidenceProvider],
-        extractor: Callable[[Evidence], ExtractionResult],
+        extractor: Callable[[LegacyEvidence], ExtractionResult],
         persistence_service: ProviderObservationPersistenceService,
         timeline_service: InvestigationTimelineSink | None,
         context: ProviderExecutionContext,
@@ -379,12 +379,12 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
         (identifier equality and an already-canonical value) before any provider
         invocation; it is authoritative and immutable for the remainder of the
         call. The result must declare the selected provider, and every returned
-        Evidence must belong to the selected provider, the owning investigation,
-        and the authoritative target. Each Evidence subject must be already
+        LegacyEvidence must belong to the selected provider, the owning investigation,
+        and the authoritative target. Each LegacyEvidence subject must be already
         canonical and equal the persisted target's canonical value exactly —
         canonical equivalence after normalization is not accepted — and carry
         the target identifier when present. The complete tuple is validated
-        before any Evidence identity is assigned or extracted, so one invalid
+        before any LegacyEvidence identity is assigned or extracted, so one invalid
         item never lets an earlier item commit. Canonicalization failures return
         ``ERROR_PROVIDER_BINDING``; they never escape and no source values,
         subject values, exception text, or payload content can reach the
@@ -454,10 +454,10 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
     ) -> ProviderExecutionOutcome:
         """Process one provider result deterministically in provider-return order.
 
-        The accumulated ID lists and per-Evidence working variables are the
+        The accumulated ID lists and per-LegacyEvidence working variables are the
         intrinsic cost of deterministic per-observation sequencing; the narrow
         disable follows repository convention. For a datasource-backed result
-        the execution terminal stays open until every returned Evidence
+        the execution terminal stays open until every returned LegacyEvidence
         committed: a runtime failure appends the bounded FAILED lifecycle
         code below, and COMPLETED is appended only after the required
         processing (including the aggregate timeline event) succeeded.
@@ -586,7 +586,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
         if completion is not None:
             # The datasource execution is COMPLETED only after all required
-            # Evidence runtime processing (extraction, observation
+            # LegacyEvidence runtime processing (extraction, observation
             # persistence, and the aggregate completion event) succeeded; a
             # failed terminal append turns the already-committed partial
             # outcome FAILED with committed IDs retained.
@@ -633,7 +633,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
     ) -> ProviderExecutionOutcome:
         """Fail the work, retaining every committed operational identifier.
 
-        All three committed-ID snapshots (Evidence, discovered Entity, and
+        All three committed-ID snapshots (LegacyEvidence, discovered Entity, and
         Relationship IDs) survive whether the safe failure event appends or
         the append itself fails and the surfaced error becomes
         ``timeline_error``. IDs from an observation whose PR 18C call never

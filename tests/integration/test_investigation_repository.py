@@ -24,11 +24,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 from agentic_threat_investigator.domain.audit import AuditAction, AuditEvent
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvalidInvestigationStatusTransitionError,
     InvestigationBudget,
@@ -39,6 +35,7 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     PivotRequest,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.audit_repositories import (
     PostgresAuditEventRepository,
 )
@@ -514,7 +511,7 @@ async def test_service_evidence_audit_failure_rolls_back_evidence(
         entity_id = entity.id
         await uow.investigations.create(state)
 
-    evidence = Evidence(
+    evidence = LegacyEvidence(
         investigation_id=state.investigation_id,
         type=EvidenceType.DNS,
         subject=EntityRef(id=entity_id, type=EntityType.DOMAIN, value="example.com"),

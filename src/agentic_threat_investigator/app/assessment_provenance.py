@@ -8,11 +8,11 @@ without any provider, network, dispatcher, or LLM call.
 
 Provenance semantics:
 
-- Direct source-fact claims cite one immutable Evidence that was analyzed by
-  the Assessment and belongs to the same Investigation. Evidence may
+- Direct source-fact claims cite one immutable LegacyEvidence that was analyzed by
+  the Assessment and belongs to the same Investigation. LegacyEvidence may
   validly support zero RelationshipObservations.
 - Graph-backed claims cite exactly one RelationshipObservation; the cited
-  observation resolves to the exact Evidence and stable Relationship it
+  observation resolves to the exact LegacyEvidence and stable Relationship it
   recorded at observation time, so another observation of the same
   Relationship can never substitute.
 - The context's ``relationships``/``entities`` maps hold only eligible
@@ -36,8 +36,8 @@ from agentic_threat_investigator.domain.assessment import (
     support_key,
 )
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.investigation import InvestigationState
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -53,7 +53,7 @@ class AssessmentInvestigationMismatchError(AssessmentValidationError):
 
 
 class AssessmentEvidenceReferenceError(AssessmentValidationError):
-    """An Evidence reference is missing, unanalyzed, or malformed."""
+    """An LegacyEvidence reference is missing, unanalyzed, or malformed."""
 
 
 class AssessmentRelationshipObservationReferenceError(AssessmentValidationError):
@@ -80,7 +80,7 @@ class AssessmentProvenanceContext:
     """
 
     investigation: InvestigationState | None
-    evidence: Mapping[UUID, Evidence] = field(default_factory=dict)
+    evidence: Mapping[UUID, LegacyEvidence] = field(default_factory=dict)
     relationship_observations: Mapping[UUID, RelationshipObservation] = field(
         default_factory=dict
     )
@@ -139,7 +139,7 @@ class AssessmentProvenanceValidator:
     def _validate_analyzed_evidence(
         assessment: Assessment, context: AssessmentProvenanceContext
     ) -> None:
-        """Require every analyzed Evidence ID to exist and belong to the Investigation.
+        """Require every analyzed LegacyEvidence ID to exist and belong to the Investigation.
 
         An empty analyzed set is approved only for an INCONCLUSIVE Assessment
         with no material Findings.
@@ -228,27 +228,24 @@ def _validate_relationship_support(
             f"finding cites missing relationship observation: "
             f"{support.relationship_observation_id}"
         )
-    if (
-        observation.investigation_id is not None
-        and observation.investigation_id != assessment.investigation_id
-    ):
-        raise AssessmentInvestigationMismatchError(
-            f"finding cites an observation from another investigation: "
-            f"{support.relationship_observation_id}"
-        )
-    evidence = context.evidence.get(observation.evidence_id)
+    # PR 28A: the domain observation carries no Investigation correlation.
+    # Isolation holds through the exact supporting evidence below, whose
+    # Investigation membership is validated immediately after lookup.
+    evidence = context.evidence.get(observation.evidence_observation_id)
     if evidence is None:
         raise AssessmentEvidenceReferenceError(
-            f"observation references missing evidence: {observation.evidence_id}"
+            f"observation references missing evidence: "
+            f"{observation.evidence_observation_id}"
         )
     if evidence.investigation_id != assessment.investigation_id:
         raise AssessmentInvestigationMismatchError(
             f"observation evidence belongs to another investigation: "
-            f"{observation.evidence_id}"
+            f"{observation.evidence_observation_id}"
         )
-    if observation.evidence_id not in assessment.analyzed_evidence_ids:
+    if observation.evidence_observation_id not in assessment.analyzed_evidence_ids:
         raise AssessmentEvidenceReferenceError(
-            f"observation evidence is outside the analyzed set: {observation.evidence_id}"
+            f"observation evidence is outside the analyzed set: "
+            f"{observation.evidence_observation_id}"
         )
     relationship = context.relationships.get(observation.relationship_id)
     if relationship is None:

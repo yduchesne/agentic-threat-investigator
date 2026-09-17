@@ -9,7 +9,7 @@ normalized shape of every supported answer record. Malformed or internally
 inconsistent facts must raise ``EvidenceExtractionError`` and never yield
 partial output.
 
-# The evidence-builder helpers intentionally share the normalized Evidence
+# The evidence-builder helpers intentionally share the normalized LegacyEvidence
 # construction shape with the other extraction test modules; the duplication
 # is test-only and accepted.
 """
@@ -25,12 +25,9 @@ from agentic_threat_investigator.app.extraction import (
     extract_dns,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from tests.support.extraction_fixtures import (
     CANONICAL_ASYNCRAT_DOMAIN,
     CANONICAL_ASYNCRAT_IP,
@@ -46,9 +43,9 @@ def raw_dns_evidence(
     *,
     subject_type: EntityType = EntityType.DOMAIN,
     subject_value: str = CANONICAL_ASYNCRAT_DOMAIN,
-) -> Evidence:
+) -> LegacyEvidence:
     """Build one normalized DNS evidence observation from a raw fact mapping."""
-    return Evidence(
+    return LegacyEvidence(
         id=uuid4(),
         investigation_id=uuid4(),
         type=EvidenceType.DNS,
@@ -60,7 +57,7 @@ def raw_dns_evidence(
     )
 
 
-def assert_malformed(evidence: Evidence) -> None:
+def assert_malformed(evidence: LegacyEvidence) -> None:
     """Assert the evidence raises a malformed-facts contract failure."""
     with pytest.raises(EvidenceExtractionError) as excinfo:
         extract_dns(evidence)

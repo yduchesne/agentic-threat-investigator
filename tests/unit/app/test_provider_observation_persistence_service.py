@@ -45,17 +45,14 @@ from agentic_threat_investigator.app.provider_observation_persistence import (
 )
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -75,8 +72,8 @@ def entity_builder(
 
 
 def dns_extraction(evidence_id: UUID | None) -> ExtractionResult:
-    """Build the canonical DNS extraction for the fixture Evidence."""
-    assert evidence_id is not None  # callers build persisted Evidence
+    """Build the canonical DNS extraction for the fixture LegacyEvidence."""
+    assert evidence_id is not None  # callers build persisted LegacyEvidence
     return ExtractionResult(
         entities=(entity_builder(EntityType.IP_ADDRESS, _IP_VALUE),),
         relationships=(
@@ -90,8 +87,8 @@ def dns_extraction(evidence_id: UUID | None) -> ExtractionResult:
     )
 
 
-def evidence_builder(**overrides: object) -> Evidence:
-    """Build a deterministic canonical Evidence observation."""
+def evidence_builder(**overrides: object) -> LegacyEvidence:
+    """Build a deterministic canonical LegacyEvidence observation."""
     values: dict[str, object] = {
         "id": uuid4(),
         "investigation_id": uuid4(),
@@ -104,11 +101,11 @@ def evidence_builder(**overrides: object) -> Evidence:
         "raw_payload": None,
     }
     values.update(overrides)
-    return Evidence(**values)  # type: ignore[arg-type]
+    return LegacyEvidence(**values)  # type: ignore[arg-type]
 
 
-def require_id(evidence: Evidence) -> UUID:
-    """Narrow the optional Evidence identity for assertion construction."""
+def require_id(evidence: LegacyEvidence) -> UUID:
+    """Narrow the optional LegacyEvidence identity for assertion construction."""
     assert evidence.id is not None  # builders always set one
     return evidence.id
 
@@ -262,17 +259,17 @@ class FakeEvidenceRepository(EvidenceRepository):
 
     def __init__(self) -> None:
         self.existing_ids: set[UUID] = set()
-        self.inserted: list[Evidence] = []
+        self.inserted: list[LegacyEvidence] = []
         self.calls: list[tuple[UUID | None, UUID | None]] = []
         self.fail = False
 
     async def insert(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         *,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
-    ) -> Evidence:
+    ) -> LegacyEvidence:
         assert evidence.id is not None  # preflight guarantees it
         self.calls.append((actor_id, request_id))
         if self.fail:
@@ -283,12 +280,12 @@ class FakeEvidenceRepository(EvidenceRepository):
         self.inserted.append(evidence)
         return evidence
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         return next((e for e in self.inserted if e.id == evidence_id), None)
 
     async def list_for_investigation(
         self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
-    ) -> list[Evidence]:
+    ) -> list[LegacyEvidence]:
         return [e for e in self.inserted if e.investigation_id == investigation_id]
 
 
@@ -616,9 +613,8 @@ async def test_new_observation_persists_the_complete_graph_once() -> None:
     ]
     assert len(result.relationships) == 1
     assert len(result.observations) == 1
-    assert result.observations[0].evidence_id == evidence.id
+    assert result.observations[0].evidence_observation_id == evidence.id
     assert result.observations[0].relationship_id == result.relationships[0].id
-    assert result.observations[0].investigation_id == evidence.investigation_id
     assert result.observations[0].source == evidence.source
     assert len(parts.audit.events) == 1
     assert parts.audit.events[0].object_id == evidence.id
@@ -704,7 +700,7 @@ async def test_supplied_display_metadata_follows_extraction() -> None:
 
 @pytest.mark.asyncio
 async def test_empty_extraction_persists_evidence_only() -> None:
-    """An empty extraction still persists the Evidence and its audit event."""
+    """An empty extraction still persists the LegacyEvidence and its audit event."""
     evidence = evidence_builder()
     parts = FakeParts.build(evidence.investigation_id)
     service = ProviderObservationPersistenceService(parts.factory())
@@ -737,7 +733,7 @@ async def test_existing_relationship_is_reused_with_new_observation() -> None:
 
     assert second.relationships[0].id == first.relationships[0].id
     assert len(relationships.upsert_calls) == 1
-    assert second.observations[0].evidence_id == second_evidence.id
+    assert second.observations[0].evidence_observation_id == second_evidence.id
     assert second.observations[0].relationship_id == first.relationships[0].id
 
 
@@ -792,7 +788,7 @@ def _entity_id(
 
 @pytest.mark.asyncio
 async def test_duplicate_evidence_conflicts_and_rolls_back() -> None:
-    """A replayed Evidence ID is a typed conflict with full rollback."""
+    """A replayed LegacyEvidence ID is a typed conflict with full rollback."""
     evidence = evidence_builder()
     parts = FakeParts.build(evidence.investigation_id)
     service = ProviderObservationPersistenceService(parts.factory())
@@ -808,7 +804,7 @@ async def test_duplicate_evidence_conflicts_and_rolls_back() -> None:
     # No new observation may be appended by the replay, and the original
     # observation from the first successful persist remains intact.
     assert len(observations.rows) == 1
-    assert observations.rows[0].evidence_id == evidence.id
+    assert observations.rows[0].evidence_observation_id == evidence.id
     inserted_with_replay_id = [e for e in parts.evidence.inserted if e.id == replay.id]
     assert len(inserted_with_replay_id) == 1
 

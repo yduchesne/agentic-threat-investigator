@@ -19,12 +19,9 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geolocation import GeoLocation, GeoPrecision
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -45,9 +42,9 @@ def test_entity_defaults() -> None:
 
 
 def test_evidence_requires_core_observation_fields() -> None:
-    """Evidence requires its type, subject, source, and retrieval time."""
+    """LegacyEvidence requires its type, subject, source, and retrieval time."""
 
-    evidence = Evidence(
+    evidence = LegacyEvidence(
         investigation_id=uuid4(),
         type=EvidenceType.DNS,
         subject=EntityRef(type=EntityType.DOMAIN, value="example.com"),
@@ -64,7 +61,7 @@ def test_evidence_requires_core_observation_fields() -> None:
 def test_evidence_is_deeply_immutable() -> None:
     """Nested evidence data and its subject cannot be modified in place."""
     facts = {"answer": {"addresses": ["192.0.2.1"]}}
-    evidence = Evidence(
+    evidence = LegacyEvidence(
         investigation_id=uuid4(),
         type=EvidenceType.DNS,
         subject=EntityRef(type=EntityType.DOMAIN, value="example.com"),
@@ -83,10 +80,10 @@ def test_evidence_is_deeply_immutable() -> None:
 
 
 def test_evidence_rejects_missing_subject() -> None:
-    """Evidence without a subject is invalid."""
+    """LegacyEvidence without a subject is invalid."""
 
     with pytest.raises(ValidationError):
-        Evidence(
+        LegacyEvidence(
             investigation_id=uuid4(),
             type=EvidenceType.DNS,
             source="urn:ati:source:google_public_dns",
@@ -120,12 +117,11 @@ def test_relationship_observation_is_historical() -> None:
     observation = RelationshipObservation(
         id=uuid4(),
         relationship_id=uuid4(),
-        evidence_id=uuid4(),
+        evidence_observation_id=uuid4(),
         retrieved_at=_RETRIEVED_AT,
         source="urn:ati:source:google_public_dns",
     )
 
-    assert observation.investigation_id is None
     assert observation.observed_at is None
     assert observation.confidence is None
 
@@ -160,7 +156,7 @@ def test_assessment_rejects_missing_analyzed_evidence() -> None:
 
 
 def test_assessment_rejects_duplicate_analyzed_evidence() -> None:
-    """Duplicate analyzed Evidence identities are contract violations."""
+    """Duplicate analyzed LegacyEvidence identities are contract violations."""
 
     evidence_id = uuid4()
     with pytest.raises(ValidationError, match="duplicates"):
@@ -195,7 +191,7 @@ def test_assessment_sequences_are_immutable_tuples() -> None:
 
 
 def test_evidence_support_identifies_exactly_one_evidence() -> None:
-    """EvidenceSupport carries the exact analyzed Evidence identity."""
+    """EvidenceSupport carries the exact analyzed LegacyEvidence identity."""
 
     support = EvidenceSupport(kind="evidence", evidence_id=uuid4())
 

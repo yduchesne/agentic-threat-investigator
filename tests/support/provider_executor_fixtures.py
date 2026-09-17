@@ -40,16 +40,13 @@ from agentic_threat_investigator.app.providers import (
     ProviderResult,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import ProviderWorkItem
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipType,
@@ -81,9 +78,9 @@ def domain_entity(*, entity_id: UUID | None = DOMAIN_ENTITY_ID) -> Entity:
 
 def dns_evidence(
     *, evidence_id: UUID | None = None, subject_id: UUID | None = DOMAIN_ENTITY_ID
-) -> Evidence:
+) -> LegacyEvidence:
     """Build normalized DNS evidence with an A answer."""
-    return Evidence(
+    return LegacyEvidence(
         id=evidence_id,
         investigation_id=INVESTIGATION_ID,
         type=EvidenceType.DNS,
@@ -164,7 +161,7 @@ class FakeEvidenceProvider(EvidenceProvider):
 
 
 class FakePersistenceService(ProviderObservationPersistenceService):
-    """Persistence fake recording per-Evidence invocations."""
+    """Persistence fake recording per-LegacyEvidence invocations."""
 
     def __init__(
         self,
@@ -175,11 +172,11 @@ class FakePersistenceService(ProviderObservationPersistenceService):
         super().__init__(uow_factory=null_uow_factory)
         self._results = results or []
         self._raises = raises
-        self.calls: list[tuple[Evidence, ExtractionResult]] = []
+        self.calls: list[tuple[LegacyEvidence, ExtractionResult]] = []
 
     async def persist(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         extraction: ExtractionResult,
         *,
         actor_id: UUID | None = None,
@@ -220,7 +217,7 @@ class FakeTimelineSink(InvestigationTimelineSink):
 
 
 def persisted_result(
-    evidence: Evidence,
+    evidence: LegacyEvidence,
     *,
     entity_ids: tuple[UUID, ...] = (),
     relationship_ids: tuple[UUID, ...] = (),
@@ -249,9 +246,9 @@ def persisted_result(
 
 
 def committed_first_observation(
-    evidence: Evidence,
+    evidence: LegacyEvidence,
 ) -> ProviderObservationPersistenceResult:
-    """Build one committed observation with Evidence, Entity, and Relationship IDs."""
+    """Build one committed observation with LegacyEvidence, Entity, and Relationship IDs."""
     return persisted_result(
         evidence,
         entity_ids=(DISCOVERED_ONE,),
@@ -265,7 +262,7 @@ def build_executor(
     *,
     persistence: FakePersistenceService | None = None,
     timeline: FakeTimelineSink | None = None,
-    extractor: Callable[[Evidence], ExtractionResult] | None = None,
+    extractor: Callable[[LegacyEvidence], ExtractionResult] | None = None,
 ) -> ProviderWorkExecutor:
     """Compose one executor from deterministic fakes."""
     if provider is None:

@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Exact GEOLOCATION Evidence -> geographic claim extraction (PR 26C).
+"""Exact GEOLOCATION LegacyEvidence -> geographic claim extraction (PR 26C).
 
-The worker seam converts one immutable ``GEOLOCATION`` Evidence observation
+The worker seam converts one immutable ``GEOLOCATION`` LegacyEvidence observation
 into the bounded :class:`GeographicClaim` consumed by PR 26C's
 :class:`LocationResolver`. The conversion is pure: no external I/O, no
 Location creation, no persistence. Only the already-observed facts
@@ -13,7 +13,7 @@ source actually supplied (coordinates never upgrade precision).
 
 Malformed or unsupported payloads fail closed with a typed bounded error:
 
-- non-``GEOLOCATION`` Evidence raises :class:`GeoEvidenceTypeError`;
+- non-``GEOLOCATION`` LegacyEvidence raises :class:`GeoEvidenceTypeError`;
 - payloads with no geographic facts, non-finite/out-of-range coordinates,
   or a precision vocabulary the claim contract rejects raise
   :class:`InvalidGeographicClaimError`.
@@ -31,11 +31,12 @@ from agentic_threat_investigator.app.persistence.repositories import (
     GeoEvidenceTypeError,
     InvalidGeographicClaimError,
 )
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import (
     GeographicClaim,
     LocationPrecision,
 )
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 # Persisted facts precision vocabulary (mirrors the DB-IP City Lite
 # normalization output consumed by the PR 25A projection): the claim keeps
@@ -112,10 +113,10 @@ def _derived_precision(facts: dict[str, Any]) -> LocationPrecision:
     return LocationPrecision.COUNTRY
 
 
-def geographic_claim_from_evidence(evidence: Evidence) -> GeographicClaim:
-    """Build the bounded claim from the exact GEOLOCATION Evidence facts.
+def geographic_claim_from_evidence(evidence: LegacyEvidence) -> GeographicClaim:
+    """Build the bounded claim from the exact GEOLOCATION LegacyEvidence facts.
 
-    Requires ``GEOLOCATION`` Evidence; maps only the existing
+    Requires ``GEOLOCATION`` LegacyEvidence; maps only the existing
     country/admin/admin-code/city/lat/lon facts and preserves the source's
     semantic precision (a declared source precision is kept, otherwise the
     minimal supported precision is derived). The :class:`GeographicClaim`

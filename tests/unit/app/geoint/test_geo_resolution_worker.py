@@ -35,11 +35,7 @@ from agentic_threat_investigator.app.geoint.worker import (
 )
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     EntityLocationObservation,
@@ -52,6 +48,7 @@ from agentic_threat_investigator.domain.geoint import (
     LocationType,
     observation_uuid_for_resolution,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
@@ -111,9 +108,9 @@ def geolocation_evidence(
     evidence_id: UUID | None = None,
     facts: dict[str, object] | None = None,
     type_: EvidenceType = EvidenceType.GEOLOCATION,
-) -> Evidence:
-    """Return one deterministic GEOLOCATION Evidence fixture."""
-    return Evidence(
+) -> LegacyEvidence:
+    """Return one deterministic GEOLOCATION LegacyEvidence fixture."""
+    return LegacyEvidence(
         id=evidence_id or uuid4(),
         investigation_id=uuid4(),
         type=type_,
@@ -267,14 +264,14 @@ class FakeGeoResolutionsRepository:
 
 
 class FakeEvidenceRepository:
-    """In-memory immutable Evidence repository."""
+    """In-memory immutable LegacyEvidence repository."""
 
-    def __init__(self, evidence_rows: list[Evidence]) -> None:
-        """Index the bound Evidence rows by identity."""
+    def __init__(self, evidence_rows: list[LegacyEvidence]) -> None:
+        """Index the bound LegacyEvidence rows by identity."""
         self.rows = {row.id: row for row in evidence_rows}
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
-        """Return the bound Evidence row, if any."""
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
+        """Return the bound LegacyEvidence row, if any."""
         return self.rows.get(evidence_id)
 
 
@@ -283,7 +280,7 @@ class FakeUnitOfWorkFactory:
 
     def __init__(
         self,
-        evidence_rows: list[Evidence],
+        evidence_rows: list[LegacyEvidence],
         claimed: list[GeoResolution],
     ) -> None:
         """Bind the evidence index and the claimed batch."""
@@ -445,10 +442,10 @@ def test_g26c_w03_ambiguous_is_unresolvable_and_never_guessed() -> None:
 
 
 def test_g26c_w04_malformed_evidence_is_terminal_failed() -> None:
-    """G26C-W04 malformed Evidence persists a terminal non-retryable failure."""
+    """G26C-W04 malformed LegacyEvidence persists a terminal non-retryable failure."""
 
     async def scenario() -> None:
-        # A non-GEOLOCATION Evidence row fails the type guard.
+        # A non-GEOLOCATION LegacyEvidence row fails the type guard.
         evidence = geolocation_evidence(type_=EvidenceType.DNS)
         res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
         factory = FakeUnitOfWorkFactory([evidence], [res])
@@ -465,7 +462,7 @@ def test_g26c_w04_malformed_evidence_is_terminal_failed() -> None:
 
 
 def test_g26c_w04b_missing_evidence_is_terminal_failed() -> None:
-    """G26C-W04/missing a missing Evidence row is a terminal failure."""
+    """G26C-W04/missing a missing LegacyEvidence row is a terminal failure."""
 
     async def scenario() -> None:
         res = claimed_resolution()

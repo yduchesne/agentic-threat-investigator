@@ -30,17 +30,14 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -88,7 +85,6 @@ class Chain:
         self.observation = self.make_observation(
             evidence_id=self.evidence_id,
             relationship_id=self.relationship_id,
-            investigation=self.investigation_id,
         )
 
     def _investigation(self) -> InvestigationState:
@@ -105,9 +101,9 @@ class Chain:
 
     def make_evidence(
         self, *, evidence_id: UUID | None = None, subject: str = "example.com"
-    ) -> Evidence:
+    ) -> LegacyEvidence:
         """Build one immutable evidence observation."""
-        return Evidence(
+        return LegacyEvidence(
             id=evidence_id or uuid4(),
             investigation_id=self.investigation_id,
             type=EvidenceType.DNS,
@@ -122,14 +118,17 @@ class Chain:
         observation_id: UUID | None = None,
         evidence_id: UUID,
         relationship_id: UUID,
-        investigation: UUID,
     ) -> RelationshipObservation:
-        """Build one immutable relationship observation."""
+        """Build one immutable relationship observation.
+
+        PR 28A: the domain observation carries no Investigation correlation;
+        Investigation membership of the cited observation flows through its
+        exact supporting evidence.
+        """
         return RelationshipObservation(
             id=observation_id or uuid4(),
             relationship_id=relationship_id,
-            evidence_id=evidence_id,
-            investigation_id=investigation,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT,
             source="urn:ati:source:google_public_dns",
         )
@@ -137,7 +136,7 @@ class Chain:
     def context(
         self,
         *,
-        evidence: dict[UUID, Evidence] | None = None,
+        evidence: dict[UUID, LegacyEvidence] | None = None,
         observations: dict[UUID, RelationshipObservation] | None = None,
         relationships: dict[UUID, Relationship] | None = None,
         entities: dict[UUID, Entity] | None = None,
@@ -199,7 +198,7 @@ def assessment_factory(
         investigation_id=chain.investigation_id,
         verdict=verdict,
         confidence=confidence,
-        summary="Evidence supports the verdict.",
+        summary="LegacyEvidence supports the verdict.",
         analyzed_evidence_ids=((chain.evidence_id,) if analyzed is None else analyzed),
         findings=findings,
     )
@@ -211,7 +210,7 @@ def validate(candidate: Assessment, ctx: AssessmentProvenanceContext) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Evidence cases 1-5
+# LegacyEvidence cases 1-5
 # ---------------------------------------------------------------------------
 
 
@@ -236,7 +235,7 @@ def test_evidence_from_another_investigation_is_rejected() -> None:
     """Cross-investigation evidence never satisfies an Assessment."""
     chain = Chain()
     foreign = chain.make_evidence()
-    foreign = Evidence(
+    foreign = LegacyEvidence(
         id=foreign.id or uuid4(),
         investigation_id=uuid4(),
         type=EvidenceType.REPUTATION,
@@ -358,36 +357,10 @@ def test_nonexistent_observation_is_rejected() -> None:
         validate(candidate, chain.context())
 
 
-def test_observation_from_wrong_investigation_is_rejected() -> None:
-    """An observation bound to another Investigation cannot be cited."""
-    chain = Chain()
-    observation = chain.make_observation(
-        evidence_id=chain.evidence_id,
-        relationship_id=chain.relationship_id,
-        investigation=uuid4(),
-    )
-    ctx = chain.context(observations={observation.id: observation})
-    candidate = assessment_factory(
-        chain,
-        findings=(
-            finding_factory(
-                support=(
-                    RelationshipSupport(
-                        kind="relationship_observation",
-                        relationship_observation_id=observation.id,
-                    ),
-                )
-            ),
-        ),
-    )
-    with pytest.raises(AssessmentInvestigationMismatchError):
-        validate(candidate, ctx)
-
-
 def test_observation_evidence_from_wrong_investigation_is_rejected() -> None:
-    """The observation's Evidence must belong to the Assessment Investigation."""
+    """The observation's LegacyEvidence must belong to the Assessment Investigation."""
     chain = Chain()
-    foreign = Evidence(
+    foreign = LegacyEvidence(
         id=uuid4(),
         investigation_id=uuid4(),
         type=EvidenceType.REPUTATION,
@@ -400,7 +373,6 @@ def test_observation_evidence_from_wrong_investigation_is_rejected() -> None:
     observation = chain.make_observation(
         evidence_id=foreign.id,
         relationship_id=chain.relationship_id,
-        investigation=chain.investigation_id,
     )
     ctx = chain.context(
         observations={observation.id: observation},
@@ -424,9 +396,9 @@ def test_observation_evidence_from_wrong_investigation_is_rejected() -> None:
 
 
 def test_observation_evidence_absent_from_analyzed_set_is_rejected() -> None:
-    """The observation's exact Evidence must be part of the analyzed set."""
+    """The observation's exact LegacyEvidence must be part of the analyzed set."""
     chain = Chain()
-    unanalyzed = Evidence(
+    unanalyzed = LegacyEvidence(
         id=uuid4(),
         investigation_id=chain.investigation_id,
         type=EvidenceType.DNS,
@@ -439,7 +411,6 @@ def test_observation_evidence_absent_from_analyzed_set_is_rejected() -> None:
     observation = chain.make_observation(
         evidence_id=unanalyzed.id,
         relationship_id=chain.relationship_id,
-        investigation=chain.investigation_id,
     )
     ctx = chain.context(
         observations={observation.id: observation},
@@ -547,7 +518,7 @@ def test_missing_target_entity_is_rejected() -> None:
 
 
 def test_one_evidence_can_support_multiple_observations() -> None:
-    """One Evidence observation may back several graph claims."""
+    """One LegacyEvidence observation may back several graph claims."""
     chain = Chain()
     second_target = Entity(id=uuid4(), type=EntityType.IP_ADDRESS, value="198.51.100.7")
     if second_target.id is None:  # pragma: no cover - fixture invariant
@@ -561,7 +532,6 @@ def test_one_evidence_can_support_multiple_observations() -> None:
     second_observation = chain.make_observation(
         evidence_id=chain.evidence_id,
         relationship_id=second_relationship.id,
-        investigation=chain.investigation_id,
     )
     ctx = chain.context(
         observations={
@@ -602,7 +572,7 @@ def test_one_evidence_can_support_multiple_observations() -> None:
 def test_one_relationship_can_have_multiple_observations() -> None:
     """Repeated observations of the stable edge are all individually citable."""
     chain = Chain()
-    later = Evidence(
+    later = LegacyEvidence(
         id=uuid4(),
         investigation_id=chain.investigation_id,
         type=EvidenceType.REPUTATION,
@@ -615,7 +585,6 @@ def test_one_relationship_can_have_multiple_observations() -> None:
     later_observation = chain.make_observation(
         evidence_id=later.id,
         relationship_id=chain.relationship_id,
-        investigation=chain.investigation_id,
     )
     ctx = chain.context(
         evidence={chain.evidence_id: chain.evidence, later.id: later},
@@ -646,9 +615,9 @@ def test_one_relationship_can_have_multiple_observations() -> None:
 
 
 def test_exact_observation_resolves_exact_evidence() -> None:
-    """The cited observation resolves to exactly the analyzed Evidence."""
+    """The cited observation resolves to exactly the analyzed LegacyEvidence."""
     chain = Chain()
-    other = Evidence(
+    other = LegacyEvidence(
         id=uuid4(),
         investigation_id=chain.investigation_id,
         type=EvidenceType.DNS,
@@ -673,7 +642,7 @@ def test_exact_observation_resolves_exact_evidence() -> None:
             ),
         ),
     )
-    # The observation's exact Evidence is not analyzed, so the citation fails.
+    # The observation's exact LegacyEvidence is not analyzed, so the citation fails.
     with pytest.raises(AssessmentEvidenceReferenceError):
         validate(candidate, ctx)
     exact = candidate.model_copy(update={"analyzed_evidence_ids": (chain.evidence_id,)})
@@ -683,7 +652,7 @@ def test_exact_observation_resolves_exact_evidence() -> None:
 def test_another_observation_of_same_relationship_cannot_substitute() -> None:
     """A different observation of the same edge never substitutes."""
     chain = Chain()
-    later = Evidence(
+    later = LegacyEvidence(
         id=uuid4(),
         investigation_id=chain.investigation_id,
         type=EvidenceType.REPUTATION,
@@ -696,7 +665,6 @@ def test_another_observation_of_same_relationship_cannot_substitute() -> None:
     other_observation = chain.make_observation(
         evidence_id=later.id,
         relationship_id=chain.relationship_id,
-        investigation=chain.investigation_id,
     )
     ctx = chain.context(
         evidence={chain.evidence_id: chain.evidence, later.id: later},
@@ -758,7 +726,7 @@ def test_bare_relationship_id_cannot_parse_as_graph_support() -> None:
 
 
 def test_mixed_support_is_valid() -> None:
-    """A Finding may cite both direct Evidence and an observation."""
+    """A Finding may cite both direct LegacyEvidence and an observation."""
     chain = Chain()
     candidate = assessment_factory(
         chain,
@@ -841,7 +809,7 @@ def test_errors_expose_safe_identifiers_only() -> None:
     assert str(phantom_id) in message
     # Candidate payload/summary text never leaks into the error.
     assert "Deterministic analytical claim" not in message
-    assert "Evidence supports the verdict." not in message
+    assert "LegacyEvidence supports the verdict." not in message
     assert "facts" not in message
 
 
@@ -854,7 +822,7 @@ def test_context_investigation_mismatch_is_rejected() -> None:
         investigation_id=chain.investigation_id,
         verdict=Verdict.SUSPICIOUS,
         confidence=AssessmentConfidence.MEDIUM,
-        summary="Evidence supports the verdict.",
+        summary="LegacyEvidence supports the verdict.",
         analyzed_evidence_ids=(chain.evidence_id,),
     )
     context = AssessmentProvenanceContext(
@@ -875,7 +843,7 @@ def test_context_mappings_are_immutable_snapshots() -> None:
     """Context maps reject mutation and never alias the loader's dictionaries."""
 
     chain = Chain()
-    source_evidence: dict[UUID, Evidence] = {chain.evidence_id: chain.evidence}
+    source_evidence: dict[UUID, LegacyEvidence] = {chain.evidence_id: chain.evidence}
     source_entities: dict[UUID, Entity] = {
         chain.source_id: chain.source_entity,
         chain.target_id: chain.target_entity,

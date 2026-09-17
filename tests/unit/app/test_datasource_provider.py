@@ -70,9 +70,11 @@ from agentic_threat_investigator.domain.datasource import (
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
+    ConvertedEvidence,
     Evidence,
+    EvidenceObservationCandidate,
     EvidenceType,
+    evidence_id_for_source_record,
 )
 from agentic_threat_investigator.domain.identifiers import (
     SemanticFormatId,
@@ -85,6 +87,7 @@ from agentic_threat_investigator.domain.investigation import (
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
 )
@@ -280,7 +283,7 @@ def _adapter(
     )
 
 
-def _persisted_result(evidence: Evidence) -> ProviderObservationPersistenceResult:
+def _persisted_result(evidence: LegacyEvidence) -> ProviderObservationPersistenceResult:
     """Build one deterministic committed observation result."""
     recorded = evidence.model_copy(update={"id": evidence.id or uuid4()})
     return ProviderObservationPersistenceResult(
@@ -308,13 +311,13 @@ class _ProbePersistenceService(ProviderObservationPersistenceService):
         """Initialize the probe with the shared state and optional failure seams."""
         super().__init__(uow_factory=lambda: _Uow(state))
         self.state = state
-        self.calls: list[tuple[Evidence, ExtractionResult]] = []
+        self.calls: list[tuple[LegacyEvidence, ExtractionResult]] = []
         self._fail_on_call = fail_on_call
         self._cancelled_on_call = cancelled_on_call
 
     async def persist(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         extraction: ExtractionResult,
         *,
         actor_id: UUID | None = None,
@@ -438,7 +441,7 @@ class TestDatasourceProviderBinding:
         """D27E-A06..A10: exact investigation, subject, definition, converter.
 
         A successful acquisition converts through the semantic-format-selected
-        converter into per-record Evidence bound to the exact persisted
+        converter into per-record LegacyEvidence bound to the exact persisted
         target; an empty acquisition is an empty successful result.
         """
         state = _State()
@@ -509,7 +512,7 @@ class TestDatasourceProviderBinding:
                 self,
                 source: Any,
                 context: EvidenceConversionContext,
-            ) -> tuple[Evidence, ...]:
+            ) -> tuple[ConvertedEvidence, ...]:
                 """Never invoked."""
                 raise AssertionError("unrelated converter must never run")
 
@@ -627,7 +630,7 @@ class TestDatasourceProviderErrorMapping:
                 self,
                 source: Any,
                 context: EvidenceConversionContext,
-            ) -> tuple[Evidence, ...]:
+            ) -> tuple[ConvertedEvidence, ...]:
                 """Raise the typed deterministic conversion violation."""
                 raise ConversionError("deterministic local conversion failure")
 
@@ -721,11 +724,11 @@ class TestDatasourceProviderErrorMapping:
 
 
 class TestDatasourceProviderRepresentation:
-    """D27E-T01..T10: per-record Evidence provenance through the adapter."""
+    """D27E-T01..T10: per-record LegacyEvidence provenance through the adapter."""
 
     @pytest.mark.asyncio
     async def test_t01_t02_t03_one_and_two_records_in_order(self) -> None:
-        """D27E-T01/T02/T03: one/two records yield one/two Evidence in order."""
+        """D27E-T01/T02/T03: one/two records yield one/two LegacyEvidence in order."""
         state = _State()
         payload = threatfox_search_response(
             asyncrat_domain_record(),
@@ -764,7 +767,7 @@ class TestDatasourceProviderRepresentation:
         assert item.retrieved_at == _OCCURRED_AT
         # T05: observed_at is the record's last seen.
         assert item.observed_at == datetime(2026, 8, 21, 12, 0, 0, tzinfo=UTC)
-        # T07/T08: exactly one match fact per Evidence and no raw payload.
+        # T07/T08: exactly one match fact per LegacyEvidence and no raw payload.
         matches = item.facts["matches"]
         assert len(matches) == 1
         assert matches[0]["threatfox_id"] == "864201"
@@ -778,7 +781,7 @@ class TestDatasourceProviderRepresentation:
 
     @pytest.mark.asyncio
     async def test_t02_ip_record_per_record_evidence(self) -> None:
-        """D27E-T02: an ip:port record yields one per-record IP Evidence."""
+        """D27E-T02: an ip:port record yields one per-record IP LegacyEvidence."""
         state = _State()
         ip_entity = Entity(
             id=_ENTITY_ID, type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP
@@ -813,7 +816,7 @@ class _ProbeConverter(ThreatFoxToEvidenceConverter):
 
     def convert(
         self, source: ThreatFoxRecord, context: EvidenceConversionContext
-    ) -> tuple[Evidence, ...]:
+    ) -> tuple[ConvertedEvidence, ...]:
         """Assert conversion runs with no transaction open, then delegate."""
         assert self.state.active == 0
         return super().convert(source, context)
@@ -848,13 +851,13 @@ class TestDatasourceProviderLifecycle:
             "completed",
         ]
         # Exactly the lifecycle appends committed (plus the executor's short
-        # target-read transaction); no per-Evidence lifecycle transaction
+        # target-read transaction); no per-LegacyEvidence lifecycle transaction
         # exists.
         assert state.commits == len(state.events) + 1
 
     @pytest.mark.asyncio
     async def test_l02_three_evidence_one_converted_count(self) -> None:
-        """D27E-L02: three Evidence report one CONVERTED(count=3)."""
+        """D27E-L02: three LegacyEvidence report one CONVERTED(count=3)."""
         state = _State()
         payload = threatfox_search_response(
             asyncrat_domain_record(),
@@ -925,7 +928,7 @@ class TestDatasourceProviderLifecycle:
     async def test_l05_persistence_failure_failed_no_completed(self) -> None:
         """D27E-L05: persistence failure is FAILED and never COMPLETED.
 
-        The first Evidence commits, the second persistence call fails, the
+        The first LegacyEvidence commits, the second persistence call fails, the
         datasource execution is FAILED with the bounded code, and the
         outcome retains the first committed ID.
         """
@@ -997,7 +1000,7 @@ class _FailingConversionConverter(ToEvidenceConverter[Any]):
         self,
         source: Any,
         context: EvidenceConversionContext,
-    ) -> tuple[Evidence, ...]:
+    ) -> tuple[ConvertedEvidence, ...]:
         """Raise the typed deterministic conversion violation."""
         raise ConversionError("deterministic local conversion failure")
 
@@ -1028,7 +1031,7 @@ class TestDatasourceProviderTransactionBoundaries:
                     """Start empty."""
                     self.calls = 0
 
-                def __call__(self, evidence: Evidence) -> ExtractionResult:
+                def __call__(self, evidence: LegacyEvidence) -> ExtractionResult:
                     """Assert no UoW is open during deterministic extraction."""
                     assert state.active == 0
                     self.calls += 1
@@ -1062,9 +1065,9 @@ class TestDatasourceProviderTransactionBoundaries:
     async def test_u05_u06_each_evidence_observed_in_distinct_persistence_calls(
         self,
     ) -> None:
-        """D27E-U05/U06: per-Evidence atomic persistence in provider order.
+        """D27E-U05/U06: per-LegacyEvidence atomic persistence in provider order.
 
-        Each Evidence is persisted through a distinct call with no lifecycle
+        Each LegacyEvidence is persisted through a distinct call with no lifecycle
         UoW open, in provider-return order, and the lifecycle transaction
         count stays at exactly the lifecycle appends (no multiplication).
         """
@@ -1083,7 +1086,7 @@ class TestDatasourceProviderTransactionBoundaries:
         assert [call[0].id for call in persistence.calls] == list(outcome.evidence_ids)
         assert len(persistence.calls) == 2
         assert outcome.evidence_ids[0] != outcome.evidence_ids[1]
-        # U07: lifecycle events are execution-level, never per Evidence.
+        # U07: lifecycle events are execution-level, never per LegacyEvidence.
         assert state.types.count("converted") == 1
         assert state.types.count("completed") == 1
         assert state.commits == len(state.events) + 1
@@ -1092,17 +1095,20 @@ class TestDatasourceProviderTransactionBoundaries:
     async def test_u07_binding_failure_fails_lifecycle_not_per_evidence(
         self,
     ) -> None:
-        """D27E-U07/P04: cross-Investigation binding fails closed.
+        """D27E-U07/P04: source binding failure fails closed.
 
-        A result whose Evidence targets another Investigation is rejected
+        PR 28A: conversion is global, so a converter can no longer mis-bind
+        an Investigation (the adapter always binds the executor's own
+        investigation and subject). The remaining binding surface is the
+        emitted global Evidence's ``source``: a converter whose Evidence
+        claims a different source than the selected work item is rejected
         before any persistence, the datasource execution is FAILED with the
         bounded binding code, and no observation is ever written.
         """
         state = _State()
-        foreign = UUID("99999999-8888-7777-6666-555555555555")
 
-        class _ForeignConverter(ToEvidenceConverter[Any]):
-            """Converter that mis-binds the Evidence to another investigation."""
+        class _ForeignSourceConverter(ToEvidenceConverter[Any]):
+            """Converter emitting Evidence whose source mismatches the work item."""
 
             @property
             def semantic_format(self) -> SemanticFormatId:
@@ -1113,24 +1119,35 @@ class TestDatasourceProviderTransactionBoundaries:
                 self,
                 source: Any,
                 context: EvidenceConversionContext,
-            ) -> tuple[Evidence, ...]:
-                """Return Evidence bound to the foreign Investigation."""
+            ) -> tuple[ConvertedEvidence, ...]:
+                """Return ConvertedEvidence claiming the wrong source URN."""
                 del source
+                evidence_id = evidence_id_for_source_record(
+                    SemanticFormatId.THREATFOX,
+                    context.semantic_source.source_id,
+                    "864201",
+                )
+                evidence = Evidence(
+                    id=evidence_id,
+                    type=EvidenceType.THREAT_INTELLIGENCE,
+                    source=SourceId.URLHAUS.value,
+                    source_record_id="864201",
+                )
                 return (
-                    Evidence(
-                        investigation_id=foreign,
-                        type=EvidenceType.THREAT_INTELLIGENCE,
-                        subject=context.subject,
-                        source=context.semantic_source.source_id.value,
-                        source_record_id="864201",
-                        retrieved_at=context.semantic_source.retrieved_at,
-                        facts={"matches": []},
-                        raw_payload=None,
+                    ConvertedEvidence(
+                        evidence=evidence,
+                        observation=EvidenceObservationCandidate(
+                            evidence_id=evidence_id,
+                            source_url=context.semantic_source.source_reference,
+                            retrieved_at=context.semantic_source.retrieved_at,
+                            facts={"matches": []},
+                            raw_payload=None,
+                        ),
                     ),
                 )
 
         persistence = _ProbePersistenceService(state)
-        registry = ToEvidenceConverterRegistry(converters=(_ForeignConverter(),))
+        registry = ToEvidenceConverterRegistry(converters=(_ForeignSourceConverter(),))
         async with _client(
             lambda _: _json_response(
                 threatfox_search_response(asyncrat_domain_record())

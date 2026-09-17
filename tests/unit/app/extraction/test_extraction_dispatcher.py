@@ -3,7 +3,7 @@
 """Unit tests for the extraction dispatcher and empty policy extractors."""
 
 # The evidence-builder helpers in extraction test modules intentionally
-# share the normalized Evidence construction shape (see the established
+# share the normalized LegacyEvidence construction shape (see the established
 # provider fixture family); the duplication is test-only and accepted.
 
 from datetime import UTC, datetime
@@ -18,19 +18,16 @@ from agentic_threat_investigator.app.extraction import (
 )
 from agentic_threat_investigator.app.extraction.models import ExtractionResult
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 RETRIEVED_AT = datetime(2026, 1, 15, tzinfo=UTC)
 
 
-def dbip_geolocation_evidence() -> Evidence:
+def dbip_geolocation_evidence() -> LegacyEvidence:
     """Build realistic DB-IP City Lite geolocation evidence."""
-    return Evidence(
+    return LegacyEvidence(
         id=uuid4(),
         investigation_id=uuid4(),
         type=EvidenceType.GEOLOCATION,
@@ -51,9 +48,9 @@ def dbip_geolocation_evidence() -> Evidence:
     )
 
 
-def abuseipdb_reputation_evidence() -> Evidence:
+def abuseipdb_reputation_evidence() -> LegacyEvidence:
     """Build realistic AbuseIPDB reputation evidence."""
-    return Evidence(
+    return LegacyEvidence(
         id=uuid4(),
         investigation_id=uuid4(),
         type=EvidenceType.REPUTATION,

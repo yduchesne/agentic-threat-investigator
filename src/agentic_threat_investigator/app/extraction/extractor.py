@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Deterministic extraction dispatcher.
 
-Dispatches one normalized, persisted :class:`Evidence` observation to the
+Dispatches one normalized, persisted :class:`LegacyEvidence` observation to the
 extractor registered for its ``(source, evidence type)`` combination. The
 dispatcher is pure and synchronous: it performs no I/O, no persistence, no
 provider calls, and no database access.
@@ -28,14 +28,15 @@ from agentic_threat_investigator.app.extraction.models import (
 from agentic_threat_investigator.app.extraction.rdap import extract_rdap
 from agentic_threat_investigator.app.extraction.threatfox import extract_threatfox
 from agentic_threat_investigator.app.extraction.urlhaus import extract_urlhaus
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
-Extractor = Callable[[Evidence], ExtractionResult]
+Extractor = Callable[[LegacyEvidence], ExtractionResult]
 """A pure, synchronous per-source extraction function."""
 
 
-def extract_empty(_evidence: Evidence) -> ExtractionResult:
+def extract_empty(_evidence: LegacyEvidence) -> ExtractionResult:
     """Return an empty result for fact-only contextual evidence.
 
     DB-IP City Lite geolocation and AbuseIPDB reputation remain contextual or
@@ -60,8 +61,8 @@ _EVIDENCE_EXTRACTORS: dict[tuple[str, EvidenceType], Extractor] = {
 _EVIDENCE_SOURCES = frozenset(source for source, _ in _EVIDENCE_EXTRACTORS)
 
 
-def extract(evidence: Evidence) -> ExtractionResult:
-    """Extract deterministic entities and assertions from one Evidence.
+def extract(evidence: LegacyEvidence) -> ExtractionResult:
+    """Extract deterministic entities and assertions from one LegacyEvidence.
 
     Unknown sources return an empty result by documented policy; a known
     source paired with an evidence type it never produces is a contract

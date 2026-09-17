@@ -54,11 +54,7 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     InvestigationStatus,
@@ -66,6 +62,7 @@ from agentic_threat_investigator.domain.investigation import (
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
@@ -82,10 +79,10 @@ _FIXED_TS = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class _ScriptedDnsProvider(EvidenceProvider):
-    """Deterministic provider returning one DNS Evidence observation.
+    """Deterministic provider returning one DNS LegacyEvidence observation.
 
     The provider exercises the production provider-execution path: the
-    coordinator plans the work, the executor persists the Evidence and
+    coordinator plans the work, the executor persists the LegacyEvidence and
     updates the Investigation's operational evidence list, then the analysis
     node runs against real persistence.
     """
@@ -109,7 +106,7 @@ class _ScriptedDnsProvider(EvidenceProvider):
         """Return one normalized A-record observation for the domain."""
         self.calls.append((investigation_id, entity))
         assert entity.id is not None
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=investigation_id,
             type=EvidenceType.DNS,
             subject=EntityRef(id=entity.id, type=entity.type, value=entity.value),

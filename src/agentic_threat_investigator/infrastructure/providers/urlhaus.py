@@ -60,9 +60,12 @@ from agentic_threat_investigator.domain.entities import (
     canonicalize_url,
     validate_dns_name,
 )
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import ProviderHttpClient
 
 _URLHAUS_URL_ENDPOINT = "https://urlhaus-api.abuse.ch/v1/url/"
@@ -532,7 +535,7 @@ class UrlhausProvider(EvidenceProvider):
         the provider never reads configuration or the environment and the
         value is used only in the ``Auth-Key`` header, never in URLs,
         bodies, facts, errors, or logs. The UTC wall clock is used only
-        for Evidence ``retrieved_at`` timestamps; tests may inject a
+        for LegacyEvidence ``retrieved_at`` timestamps; tests may inject a
         deterministic replacement, otherwise ``datetime.now(UTC)`` is
         used.
         """
@@ -850,7 +853,7 @@ class UrlhausProvider(EvidenceProvider):
             return _malformed_result(
                 self.id, "URLhaus response carries no source timestamp"
             )
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             type=EvidenceType.THREAT_INTELLIGENCE,
             investigation_id=context.investigation_id,
             subject=subject,

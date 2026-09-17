@@ -15,7 +15,7 @@ real isolation PostgreSQL:
       -> real ProviderObservationPersistenceService
       -> real PostgresUnitOfWork / stored functions
 
-Assertions cover exact per-record Evidence provenance, graph/audit rows,
+Assertions cover exact per-record LegacyEvidence provenance, graph/audit rows,
 execution lifecycle (one STARTED, exactly one terminal, stable
 execution/datasource identity), SUCCEEDED/FAILED/CANCELLED outcomes,
 cross-Investigation and subject binding fail-closed behavior, later-item
@@ -45,6 +45,9 @@ from agentic_threat_investigator.app.evidence_conversion import (
     ToEvidenceConverterRegistry,
 )
 from agentic_threat_investigator.app.extraction.extractor import extract
+from agentic_threat_investigator.app.extraction.models import (
+    ExtractionResult,
+)
 from agentic_threat_investigator.app.investigation_timeline import (
     UnitOfWorkInvestigationTimelineSink,
 )
@@ -54,6 +57,7 @@ from agentic_threat_investigator.app.orchestration.provider_executor import (
     UowEntityReader,
 )
 from agentic_threat_investigator.app.provider_observation_persistence import (
+    ProviderObservationPersistenceResult,
     ProviderObservationPersistenceService,
 )
 from agentic_threat_investigator.domain.datasource import (
@@ -64,9 +68,11 @@ from agentic_threat_investigator.domain.datasource import (
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
+    ConvertedEvidence,
     Evidence,
+    EvidenceObservationCandidate,
     EvidenceType,
+    evidence_id_for_source_record,
 )
 from agentic_threat_investigator.domain.identifiers import (
     SemanticFormatId,
@@ -80,6 +86,7 @@ from agentic_threat_investigator.domain.investigation import (
     ProviderWorkItem,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
 )
@@ -265,7 +272,7 @@ async def test_p01_one_record_persisted_vertical_slice(
     assert len(outcome.evidence_ids) == 1
     evidence_id = outcome.evidence_ids[0]
 
-    # Exact per-record provenance on the durable Evidence row.
+    # Exact per-record provenance on the durable LegacyEvidence row.
     row = await _row(
         integration_engine,
         "SELECT investigation_id, evidence_type, subject_entity_id, source, "
@@ -333,9 +340,9 @@ async def test_p02_two_records_two_evidence_and_graph_semantics(
     uow_factory: Callable[[], PostgresUnitOfWork],
     integration_engine: AsyncEngine,
 ) -> None:
-    """D27E-P02: two per-record Evidence, one CONVERTED(count=2), one COMPLETED.
+    """D27E-P02: two per-record LegacyEvidence, one CONVERTED(count=2), one COMPLETED.
 
-    Multiple Evidence IDs and RelationshipObservation rows are expected
+    Multiple LegacyEvidence IDs and RelationshipObservation rows are expected
     because provenance is now per record; graph semantics stay canonical.
     """
     investigation_id, root = await _seed_investigation(uow_factory)
@@ -361,7 +368,7 @@ async def test_p02_two_records_two_evidence_and_graph_semantics(
     )
     assert list(records) == ["864201", "864299"]
     # Deterministic per-record graph semantics: one shared edge, two
-    # historical observations (one per Evidence).
+    # historical observations (one per LegacyEvidence).
     assert (
         await _count(
             integration_engine,
@@ -371,8 +378,8 @@ async def test_p02_two_records_two_evidence_and_graph_semantics(
         == 1
     )
     assert await _count(integration_engine, "relationship_observation") == 2
-    # Exactly one CONVERTED reporting the total Evidence count and one
-    # COMPLETED — never multiplied per Evidence.
+    # Exactly one CONVERTED reporting the total LegacyEvidence count and one
+    # COMPLETED — never multiplied per LegacyEvidence.
     execution_id = await _scalar(
         integration_engine,
         "SELECT DISTINCT execution_id FROM ati.datasource_log",
@@ -419,12 +426,8 @@ async def test_p03_no_result_converted_zero_completed(
     assert [row for row in rows if row[3] == "converted"][0][4] == 0
 
 
-class _ForeignInvestigationConverter(ToEvidenceConverter[Any]):
-    """Converter mis-binding Evidence to a foreign investigation."""
-
-    def __init__(self, foreign_investigation_id: UUID) -> None:
-        """Bind the mis-targeted investigation identity."""
-        self._foreign = foreign_investigation_id
+class _ForeignSourceConverter(ToEvidenceConverter[Any]):
+    """Converter emitting global Evidence claiming a different source URN."""
 
     @property
     def semantic_format(self) -> SemanticFormatId:
@@ -435,52 +438,35 @@ class _ForeignInvestigationConverter(ToEvidenceConverter[Any]):
         self,
         source: Any,
         context: EvidenceConversionContext,
-    ) -> tuple[Evidence, ...]:
-        """Return one Evidence bound to the foreign investigation."""
+    ) -> tuple[ConvertedEvidence, ...]:
+        """Return one ConvertedEvidence whose Evidence source mismatches the work item.
+
+        PR 28A: conversion is global, so a converter can no longer mis-bind
+        an Investigation or subject (the adapter always binds the executor's
+        own investigation and subject); the remaining converter binding
+        surface is the emitted Evidence's ``source``.
+        """
         del source
-        return (
-            Evidence(
-                investigation_id=self._foreign,
-                type=EvidenceType.THREAT_INTELLIGENCE,
-                subject=context.subject,
-                source=context.semantic_source.source_id.value,
-                source_record_id="864201",
-                retrieved_at=context.semantic_source.retrieved_at,
-                facts={"matches": [{"threatfox_id": "864201"}]},
-                raw_payload=None,
-            ),
+        evidence_id = evidence_id_for_source_record(
+            SemanticFormatId.THREATFOX,
+            context.semantic_source.source_id,
+            "864201",
         )
-
-
-class _WrongSubjectConverter(ToEvidenceConverter[Any]):
-    """Converter substituting a different canonical subject."""
-
-    @property
-    def semantic_format(self) -> SemanticFormatId:
-        """Claim the ThreatFox semantic format."""
-        return SemanticFormatId.THREATFOX
-
-    def convert(
-        self,
-        source: Any,
-        context: EvidenceConversionContext,
-    ) -> tuple[Evidence, ...]:
-        """Return one Evidence whose subject is not the persisted target."""
-        del source
         return (
-            Evidence(
-                investigation_id=context.investigation_id,
-                type=EvidenceType.THREAT_INTELLIGENCE,
-                subject=EntityRef(
-                    id=context.subject.id,
-                    type=context.subject.type,
-                    value="substituted.test",
+            ConvertedEvidence(
+                evidence=Evidence(
+                    id=evidence_id,
+                    type=EvidenceType.THREAT_INTELLIGENCE,
+                    source=SourceId.URLHAUS.value,
+                    source_record_id="864201",
                 ),
-                source=context.semantic_source.source_id.value,
-                source_record_id="864201",
-                retrieved_at=context.semantic_source.retrieved_at,
-                facts={"matches": [{"threatfox_id": "864201"}]},
-                raw_payload=None,
+                observation=EvidenceObservationCandidate(
+                    evidence_id=evidence_id,
+                    source_url=context.semantic_source.source_reference,
+                    retrieved_at=context.semantic_source.retrieved_at,
+                    facts={"matches": [{"threatfox_id": "864201"}]},
+                    raw_payload=None,
+                ),
             ),
         )
 
@@ -501,28 +487,72 @@ class _ExtractionFailureConverter(ToEvidenceConverter[Any]):
         self,
         source: ThreatFoxRecord,
         context: EvidenceConversionContext,
-    ) -> tuple[Evidence, ...]:
+    ) -> tuple[ConvertedEvidence, ...]:
         """Convert then empty the second record's match facts."""
         converted = self._inner.convert(source, context)
         if source.id != "864201":
             return tuple(
-                item.model_copy(update={"facts": {"matches": []}}) for item in converted
+                item.model_copy(
+                    update={
+                        "observation": item.observation.model_copy(
+                            update={"facts": {"matches": []}}
+                        )
+                    }
+                )
+                for item in converted
             )
         return converted
 
 
+class _FailingSecondPersistenceService(ProviderObservationPersistenceService):
+    """Real persistence service failing deterministically on the second call.
+
+    Injects a bounded persistence failure for the second item of one
+    execution so the real atomic persistence boundary is still exercised for
+    the first item; mirrors the unit-level probe seam at the runtime slice.
+    """
+
+    def __init__(self, uow_factory: Callable[[], PostgresUnitOfWork]) -> None:
+        """Bind the real service and reset the call counter."""
+        super().__init__(uow_factory)
+        self.calls = 0
+
+    async def persist(
+        self,
+        evidence: LegacyEvidence,
+        extraction: ExtractionResult,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+    ) -> ProviderObservationPersistenceResult:
+        """Fail the second call, then delegate to the real atomic service."""
+        self.calls += 1
+        if self.calls == 2:
+            raise RuntimeError("injected deterministic persistence failure")
+        return await super().persist(
+            evidence,
+            extraction,
+            actor_id=actor_id,
+            request_id=request_id,
+        )
+
+
 @pytest.mark.asyncio
-async def test_p04_cross_investigation_binding_fails_closed(
+async def test_p04_wrong_source_binding_fails_closed(
     uow_factory: Callable[[], PostgresUnitOfWork],
     integration_engine: AsyncEngine,
 ) -> None:
-    """D27E-P04: cross-Investigation Evidence is rejected with no writes."""
+    """D27E-P04: a converter source mismatch is rejected with no writes.
+
+    PR 28A: conversion is global, so a converter can no longer mis-bind an
+    Investigation or subject (the adapter binds the executor's own
+    investigation and subject). The remaining binding surface is the emitted
+    global Evidence's ``source``; a mismatch fails the execution with the
+    bounded binding code and persists nothing.
+    """
     investigation_id, root = await _seed_investigation(uow_factory)
     assert root.id is not None
-    foreign = uuid4()
-    registry = ToEvidenceConverterRegistry(
-        converters=(_ForeignInvestigationConverter(foreign),)
-    )
+    registry = ToEvidenceConverterRegistry(converters=(_ForeignSourceConverter(),))
     async with _client(
         lambda _: _json_response(threatfox_search_response(asyncrat_domain_record()))
     ) as client:
@@ -547,109 +577,47 @@ async def test_p04_cross_investigation_binding_fails_closed(
 
 
 @pytest.mark.asyncio
-async def test_p05_subject_binding_fails_closed(
-    uow_factory: Callable[[], PostgresUnitOfWork],
-    integration_engine: AsyncEngine,
-) -> None:
-    """D27E-P05: a substituted subject is rejected before persistence."""
-    investigation_id, root = await _seed_investigation(uow_factory)
-    assert root.id is not None
-    registry = ToEvidenceConverterRegistry(converters=(_WrongSubjectConverter(),))
-    async with _client(
-        lambda _: _json_response(threatfox_search_response(asyncrat_domain_record()))
-    ) as client:
-        provider = _provider(client, uow_factory, registry=registry)
-        executor = await _executor(uow_factory, provider, investigation_id)
-        outcome = await executor.execute(
-            ProviderWorkItem(provider=SourceId.THREATFOX, entity_id=root.id, depth=0)
-        )
-
-    assert outcome.status is ProviderExecutionStatus.FAILED
-    assert outcome.evidence_ids == ()
-    assert await _count(integration_engine, "evidence") == 0
-    assert await _count(integration_engine, "relationship_observation") == 0
-    execution_id = await _scalar(
-        integration_engine,
-        "SELECT DISTINCT execution_id FROM ati.datasource_log",
-    )
-    rows = await _log_rows(integration_engine, UUID(str(execution_id)))
-    assert rows[-1][3] == "failed"
-    assert rows[-1][6] == "provider_binding_failed"
-
-
-class _FixedSecondEvidenceIdConverter(ThreatFoxToEvidenceConverter):
-    """The real converter assigning one collision-bound Evidence ID."""
-
-    def __init__(self, second_evidence_id: UUID) -> None:
-        """Bind the pre-inserted Evidence identity of the second record."""
-        self._second_id = second_evidence_id
-
-    def convert(
-        self,
-        source: ThreatFoxRecord,
-        context: EvidenceConversionContext,
-    ) -> tuple[Evidence, ...]:
-        """Convert normally, then pin the second record's Evidence identity."""
-        converted = super().convert(source, context)
-        if source.id == "864299":
-            return tuple(
-                item.model_copy(update={"id": self._second_id}) for item in converted
-            )
-        return converted
-
-
-@pytest.mark.asyncio
 async def test_p06_second_persistence_failure_preserves_first_commit(
     uow_factory: Callable[[], PostgresUnitOfWork],
     integration_engine: AsyncEngine,
 ) -> None:
-    """D27E-P06: E1 commits, E2 rolls back, datasource FAILED, no compensation.
+    """D27E-P06: E1 commits, E2 persists nothing, datasource FAILED.
 
-    The second Evidence identity is pre-inserted as a durable replay
-    conflict; the observation transaction for E2 rolls back atomically
-    while E1 (the same execution's earlier Evidence) stays durable.
+    PR 28A: the v0.1 runtime assigns fresh per-observation Evidence IDs via
+    the adapter (the deterministic global identity is authoritative on the
+    domain model only), so a durable replay conflict cannot be pre-seeded
+    through the converter anymore. A probe persistence seam fails the second
+    item deterministically; the first item stays durably committed and the
+    execution terminates FAILED with ``persistence_failed`` without
+    compensation.
     """
     investigation_id, root = await _seed_investigation(uow_factory)
     assert root.id is not None
-    second_id = uuid4()
-    # A pre-existing immutable Evidence row with the collision identity.
-    async with uow_factory() as uow:
-        await uow.evidence.insert(
-            Evidence(
-                id=second_id,
-                investigation_id=investigation_id,
-                type=EvidenceType.THREAT_INTELLIGENCE,
-                subject=EntityRef(
-                    id=root.id, type=EntityType.DOMAIN, value=CANONICAL_ASYNCRAT_DOMAIN
-                ),
-                source=SourceId.THREATFOX.value,
-                source_record_id="pre-seeded",
-                retrieved_at=_OCCURRED_AT,
-            ),
-            actor_id=None,
-            request_id=None,
-        )
-        await uow.commit()
-
-    registry = ToEvidenceConverterRegistry(
-        converters=(_FixedSecondEvidenceIdConverter(second_id),)
-    )
     payload = threatfox_search_response(
         asyncrat_domain_record(),
         asyncrat_domain_record(id="864299", last_seen=None),
     )
     async with _client(lambda _: _json_response(payload)) as client:
-        provider = _provider(client, uow_factory, registry=registry)
-        executor = await _executor(uow_factory, provider, investigation_id)
+        provider = _provider(client, uow_factory)
+        executor = ProviderWorkExecutor(
+            entity_reader=UowEntityReader(uow_factory),
+            provider_registry={SourceId.THREATFOX: provider},
+            extractor=extract,
+            persistence_service=_FailingSecondPersistenceService(uow_factory),
+            timeline_service=UnitOfWorkInvestigationTimelineSink(uow_factory),
+            context=ProviderExecutionContext(
+                investigation_id=investigation_id, clock=lambda: _OCCURRED_AT
+            ),
+        )
         outcome = await executor.execute(
             ProviderWorkItem(provider=SourceId.THREATFOX, entity_id=root.id, depth=0)
         )
 
     assert outcome.status is ProviderExecutionStatus.FAILED
     assert len(outcome.evidence_ids) == 1
-    # E1 (the first record's Evidence) remains committed; only E2 rolled back.
-    assert await _count(integration_engine, "evidence") == 2  # pre-seeded + E1
-    assert outcome.evidence_ids[0] != second_id
+    # E1 (the first record's Evidence) remains durably committed; E2 never
+    # reached the atomic persistence boundary.
+    assert await _count(integration_engine, "evidence") == 1
     execution_id = await _scalar(
         integration_engine,
         "SELECT DISTINCT execution_id FROM ati.datasource_log",

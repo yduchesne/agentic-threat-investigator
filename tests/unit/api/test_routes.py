@@ -28,16 +28,13 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipType,
@@ -212,7 +209,7 @@ def test_r09_invalid_cursor_returns_stable_400() -> None:
 
 
 def test_r10_evidence_filters_map_exactly() -> None:
-    """Evidence source/entity/type/range filters map to the 23A DTO."""
+    """LegacyEvidence source/entity/type/range filters map to the 23A DTO."""
     bundle = FakeQueryBundle()
     subject = uuid4()
     with build_test_app(bundle=bundle) as client:
@@ -494,7 +491,7 @@ def test_r16_cross_investigation_detail_returns_404() -> None:
 def test_evidence_detail_never_exposes_raw_payload() -> None:
     """Detail responses exclude raw provider payloads entirely."""
     bundle = FakeQueryBundle()
-    evidence = Evidence(
+    evidence = LegacyEvidence(
         id=uuid4(),
         investigation_id=INVESTIGATION,
         type=EvidenceType.DNS,

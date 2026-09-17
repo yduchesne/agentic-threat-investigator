@@ -17,8 +17,11 @@ from agentic_threat_investigator.app.providers import (
     validate_investigation_entity,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from tests.support.providers import FakeEvidenceProvider
 
 
@@ -150,9 +153,9 @@ class TestProviderResult:
         assert result.errors == ()
 
     def test_evidence_provider_mismatch_rejected(self) -> None:
-        """Evidence with a different source than the result provider is rejected."""
+        """LegacyEvidence with a different source than the result provider is rejected."""
         inv_id = uuid4()
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=inv_id,
             type=EvidenceType.DNS,
             subject=EvidenceEntityRef(type=EntityType.DOMAIN, value="example.com"),
@@ -191,7 +194,7 @@ class TestProviderResult:
     def test_valid_mixed_result_with_evidence_and_errors(self) -> None:
         """A result containing both evidence and errors from the same provider is valid."""
         inv_id = uuid4()
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=inv_id,
             type=EvidenceType.DNS,
             subject=EvidenceEntityRef(type=EntityType.DOMAIN, value="example.com"),
@@ -218,9 +221,9 @@ class TestFakeEvidenceProviderContract:
     """The fake must honor the behavioral contract of the ABC."""
 
     @staticmethod
-    def _canned_evidence() -> Evidence:
-        """Build one Evidence record attributed to the fake provider."""
-        return Evidence(
+    def _canned_evidence() -> LegacyEvidence:
+        """Build one LegacyEvidence record attributed to the fake provider."""
+        return LegacyEvidence(
             investigation_id=uuid4(),
             type=EvidenceType.DNS,
             subject=EvidenceEntityRef(type=EntityType.DOMAIN, value="example.com"),
@@ -352,7 +355,7 @@ class TestSharedDomainValidationOrdering:
         result = ProviderResult(
             provider=FakeEvidenceProvider.SOURCE_URN,
             evidence=(
-                Evidence(
+                LegacyEvidence(
                     investigation_id=uuid4(),
                     type=EvidenceType.DNS,
                     subject=EvidenceEntityRef(

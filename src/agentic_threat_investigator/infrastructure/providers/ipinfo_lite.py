@@ -35,9 +35,12 @@ from agentic_threat_investigator.domain.entities import (
     canonicalize_ip_address,
     validate_dns_name,
 )
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
     validate_entity_url_path,
@@ -479,7 +482,7 @@ class IpinfoLiteProvider(EvidenceProvider):
         token already resolved during composition/bootstrap; the provider
         never reads configuration or the environment and the value is used
         only in the Authorization header, never in URLs or logs. The UTC wall
-        clock is used only for Evidence ``retrieved_at`` timestamps; tests
+        clock is used only for LegacyEvidence ``retrieved_at`` timestamps; tests
         may inject a deterministic replacement, otherwise
         ``datetime.now(UTC)`` is used.
         """
@@ -568,7 +571,7 @@ class IpinfoLiteProvider(EvidenceProvider):
                 "Lite response identity does not match the queried IP"
             )
 
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             investigation_id=investigation_id,
             type=EvidenceType.NETWORK,
             subject=EvidenceEntityRef(

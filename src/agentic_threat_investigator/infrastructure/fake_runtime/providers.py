@@ -4,7 +4,7 @@
 Each fake provider implements the existing :class:`EvidenceProvider` ABC,
 preserves the exact production ``SourceId`` identity, mirrors the real
 provider's ``supports(Entity)`` applicability, and returns existing
-``ProviderResult``/``Evidence`` contracts built from the shared
+``ProviderResult``/``LegacyEvidence`` contracts built from the shared
 :class:`~agentic_threat_investigator.infrastructure.fake_runtime.catalog.FakeWorldCatalog`.
 
 Fake providers:
@@ -34,9 +34,11 @@ from agentic_threat_investigator.app.providers import (
     validate_investigation_entity,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EntityRef as EvidenceEntityRef
-from agentic_threat_investigator.domain.evidence import Evidence
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import (
+    EntityRef as EvidenceEntityRef,
+)
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.fake_runtime.catalog import (
     FakeWorldCatalog,
 )
@@ -129,10 +131,10 @@ class FakeWorldEvidenceProvider(EvidenceProvider):
                 provider=self.id,
                 errors=(response.error,),
             )
-        evidence_list: list[Evidence] = []
+        evidence_list: list[LegacyEvidence] = []
         for observation in response.observations:
             evidence_list.append(
-                Evidence(
+                LegacyEvidence(
                     investigation_id=investigation_id,
                     type=observation.evidence_type,
                     subject=EvidenceEntityRef(

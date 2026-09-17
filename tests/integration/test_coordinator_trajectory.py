@@ -68,11 +68,7 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     AnalysisDisposition,
@@ -92,6 +88,7 @@ from agentic_threat_investigator.domain.investigation import (
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.evaluation.coordinator import (
     CoordinatorTrajectoryEvaluator,
     load_coordinator_scenarios_directory,
@@ -189,9 +186,9 @@ class _ThreatFoxIpProvider(EvidenceProvider):
     async def investigate(
         self, investigation_id: UUID, entity: Entity
     ) -> ProviderResult:
-        """Return one ThreatFox Evidence discovering the malware family."""
+        """Return one ThreatFox LegacyEvidence discovering the malware family."""
         self.calls.append((investigation_id, entity))
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             id=uuid4(),
             investigation_id=investigation_id,
             type=EvidenceType.THREAT_INTELLIGENCE,

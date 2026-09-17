@@ -2,9 +2,9 @@
 """Real-PostgreSQL integration coverage for the Evidence Analyst observation read.
 
 Covers the narrow investigation-scoped observation listing added for PR 20B:
-scoping through the observation's Evidence, deterministic ordering, mismatch
+scoping through the observation's LegacyEvidence, deterministic ordering, mismatch
 exclusion, and paging. The seeded graph mirrors the provider-pipeline shape:
-Investigation -> Evidence -> Relationship -> RelationshipObservation rows.
+Investigation -> LegacyEvidence -> Relationship -> RelationshipObservation rows.
 """
 
 from collections.abc import Callable
@@ -12,19 +12,17 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import text
 
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -60,7 +58,7 @@ async def seed_graph(
         Entity(type=EntityType.IP_ADDRESS, value="192.0.2.1")
     )
     assert source.id is not None and target.id is not None
-    evidence = Evidence(
+    evidence = LegacyEvidence(
         investigation_id=investigation_id,
         type=EvidenceType.DNS,
         subject=EntityRef(id=source.id, type=EntityType.DOMAIN, value=source.value),
@@ -85,17 +83,19 @@ def observation_factory(
     *,
     relationship_id: UUID,
     evidence_id: UUID,
-    investigation_id: UUID | None = None,
     retrieved_at: datetime | None = None,
 ) -> tuple[RelationshipObservation, UUID]:
-    """Build an observation and its deterministic identity for append."""
+    """Build an observation and its deterministic identity for append.
+
+    PR 28A: the domain observation carries no Investigation correlation; the
+    v0.1 adapter derives the stored correlation from the exact evidence row.
+    """
     observation_id = uuid4()
     return (
         RelationshipObservation(
             id=observation_id,
             relationship_id=relationship_id,
-            evidence_id=evidence_id,
-            investigation_id=investigation_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=retrieved_at or _RETRIEVED_AT,
             source="urn:ati:source:google_public_dns",
             confidence=0.9,
@@ -109,19 +109,17 @@ def observation_factory(
 async def test_list_for_investigation_is_scoped_and_deterministic(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """The listing returns only observations backed by the Investigation's Evidence."""
+    """The listing returns only observations backed by the Investigation's LegacyEvidence."""
     async with uow_factory() as uow:
         investigation_id, evidence_id, relationship_id = await seed_graph(uow)
         older, older_id = observation_factory(
             relationship_id=relationship_id,
             evidence_id=evidence_id,
-            investigation_id=investigation_id,
             retrieved_at=_RETRIEVED_AT - timedelta(minutes=10),
         )
         newer, newer_id = observation_factory(
             relationship_id=relationship_id,
             evidence_id=evidence_id,
-            investigation_id=investigation_id,
             retrieved_at=_RETRIEVED_AT,
         )
         await uow.relationship_observations.append(older)
@@ -132,8 +130,7 @@ async def test_list_for_investigation_is_scoped_and_deterministic(
         )
 
     assert [row.id for row in listed] == [newer_id, older_id]
-    assert all(row.investigation_id == investigation_id for row in listed)
-    assert all(row.evidence_id == evidence_id for row in listed)
+    assert all(row.evidence_observation_id == evidence_id for row in listed)
 
 
 @pytest.mark.asyncio
@@ -141,7 +138,7 @@ async def test_list_for_investigation_is_scoped_and_deterministic(
 async def test_listing_excludes_other_investigation_evidence(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Observations backed by another Investigation's Evidence are excluded."""
+    """Observations backed by another Investigation's LegacyEvidence are excluded."""
     async with uow_factory() as uow:
         investigation_id, evidence_id, relationship_id = await seed_graph(uow)
         other_investigation_id, other_evidence_id, _ = await seed_graph(uow)
@@ -149,7 +146,6 @@ async def test_listing_excludes_other_investigation_evidence(
             observation_factory(
                 relationship_id=relationship_id,
                 evidence_id=evidence_id,
-                investigation_id=None,
                 retrieved_at=_RETRIEVED_AT,
             )[0]
         )
@@ -157,7 +153,6 @@ async def test_listing_excludes_other_investigation_evidence(
             observation_factory(
                 relationship_id=relationship_id,
                 evidence_id=other_evidence_id,
-                investigation_id=other_investigation_id,
                 retrieved_at=_RETRIEVED_AT + timedelta(minutes=1),
             )[0]
         )
@@ -167,31 +162,48 @@ async def test_listing_excludes_other_investigation_evidence(
         )
 
     assert len(listed) == 1
-    assert listed[0].evidence_id == evidence_id
+    assert listed[0].evidence_observation_id == evidence_id
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_listing_excludes_contradictory_correlation(
+async def test_excludes_observations_of_other_investigation_evidence(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """An observation correlated to a different Investigation is excluded."""
+    """Observations follow their exact evidence's Investigation (PR 28A).
+
+    The domain observation carries no Investigation correlation of its own,
+    so listing is scoped by the supporting evidence row; an observation
+    appended against another Investigation's evidence is invisible under
+    the first Investigation and the v0.1 correlation column is derived
+    from that exact evidence row.
+    """
     async with uow_factory() as uow:
         investigation_id, evidence_id, relationship_id = await seed_graph(uow)
-        await uow.relationship_observations.append(
-            observation_factory(
-                relationship_id=relationship_id,
-                evidence_id=evidence_id,
-                investigation_id=uuid4(),
-                retrieved_at=_RETRIEVED_AT,
-            )[0]
+        other_investigation_id, other_evidence_id, _ = await seed_graph(uow)
+        observation, observation_id = observation_factory(
+            relationship_id=relationship_id,
+            evidence_id=other_evidence_id,
+            retrieved_at=_RETRIEVED_AT,
         )
+        await uow.relationship_observations.append(observation)
 
         listed = await uow.relationship_observations.list_for_investigation(
             investigation_id
         )
 
+        # The v0.1 adapter wrote the correlation derived from the evidence row.
+        assert uow.session is not None
+        correlation = await uow.session.scalar(
+            text(
+                "SELECT investigation_id FROM ati.relationship_observation "
+                "WHERE id = :observation_id"
+            ),
+            {"observation_id": observation_id},
+        )
+
     assert listed == []
+    assert correlation == other_investigation_id
 
 
 @pytest.mark.asyncio
@@ -207,7 +219,6 @@ async def test_listing_honors_limit_and_offset(
             _observation, observation_id = observation_factory(
                 relationship_id=relationship_id,
                 evidence_id=evidence_id,
-                investigation_id=investigation_id,
                 retrieved_at=_RETRIEVED_AT + timedelta(minutes=index),
             )
             ids.append(observation_id)
@@ -261,7 +272,6 @@ async def test_probe_limit_of_1001_is_not_silently_reduced(
             observation, _observation_id = observation_factory(
                 relationship_id=relationship_id,
                 evidence_id=evidence_id,
-                investigation_id=investigation_id,
                 retrieved_at=_RETRIEVED_AT + timedelta(minutes=index),
             )
             rows.append(observation)
@@ -302,13 +312,11 @@ async def test_deterministic_uuid_tie_breaker_on_equal_timestamps(
         first, first_id = observation_factory(
             relationship_id=relationship_id,
             evidence_id=evidence_id,
-            investigation_id=investigation_id,
             retrieved_at=_RETRIEVED_AT,
         )
         second, second_id = observation_factory(
             relationship_id=relationship_id,
             evidence_id=evidence_id,
-            investigation_id=investigation_id,
             retrieved_at=_RETRIEVED_AT,
         )
         assert first_id != second_id
@@ -333,7 +341,6 @@ async def seed_many_observations(
         observation, _observation_id = observation_factory(
             relationship_id=relationship_id,
             evidence_id=evidence_id,
-            investigation_id=investigation_id,
             retrieved_at=_RETRIEVED_AT + timedelta(minutes=index),
         )
         await uow.relationship_observations.append(observation)

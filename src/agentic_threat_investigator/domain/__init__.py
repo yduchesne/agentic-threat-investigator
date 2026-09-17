@@ -9,7 +9,23 @@ from .documents import (
     document_content_hash,
 )
 from .entities import Entity, EntityType
-from .evidence import EntityRef, Evidence, EvidenceType
+from .evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceMaterialState,
+    EvidenceObservation,
+    EvidenceObservationCandidate,
+    EvidenceObservationEntity,
+    EvidenceTransition,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+    decide_evidence_transition,
+    evidence_id_for_source_record,
+    material_state_diff,
+)
+from .legacy_evidence import EntityRef, LegacyEvidence
 from .relationships import Relationship, RelationshipObservation, RelationshipType
 from .research import (
     ResearchCitation,
@@ -30,8 +46,21 @@ __all__ = [
     "Entity",
     "EntityRef",
     "EntityType",
+    "ConvertedEvidence",
     "Evidence",
+    "EvidenceMaterialState",
+    "EvidenceObservation",
+    "EvidenceObservationCandidate",
+    "EvidenceObservationEntity",
+    "EvidenceTransition",
     "EvidenceType",
+    "InvestigationEvidence",
+    "InvestigationEvidenceActor",
+    "InvestigationEvidenceReason",
+    "LegacyEvidence",
+    "decide_evidence_transition",
+    "evidence_id_for_source_record",
+    "material_state_diff",
     "Relationship",
     "RelationshipObservation",
     "RelationshipType",

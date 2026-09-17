@@ -231,16 +231,26 @@ class RelationshipObservationItem(BaseModel):
         cls,
         observation: RelationshipObservation,
         *,
+        investigation_id: UUID | None = None,
         relationship_source_entity_id: UUID | None,
         relationship_target_entity_id: UUID | None,
         relationship_type: RelationshipType | None,
     ) -> "RelationshipObservationItem":
-        """Build the joined read item from one observation and its edge."""
+        """Build the joined read item from one observation and its edge.
+
+        ``investigation_id`` is the Investigation scope of the read that
+        returned the observation (``None`` for relationship-scoped browse):
+        since PR 28A the domain observation carries no Investigation
+        correlation of its own (relationships are global per observation,
+        and Investigation membership is expressed through exact admission),
+        while the PR 23A/24E read contract still exposes the scoped
+        Investigation on the projection.
+        """
         return cls(
             id=observation.id,
             relationship_id=observation.relationship_id,
-            evidence_id=observation.evidence_id,
-            investigation_id=observation.investigation_id,
+            evidence_id=observation.evidence_observation_id,
+            investigation_id=investigation_id,
             observed_at=observation.observed_at,
             retrieved_at=observation.retrieved_at,
             source=observation.source,

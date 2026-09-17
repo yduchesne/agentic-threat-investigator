@@ -25,7 +25,7 @@ from agentic_threat_investigator.domain.entities import (
     canonicalize,
     validate_dns_name,
 )
-from agentic_threat_investigator.domain.evidence import Evidence
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 
 class ProviderErrorCode(str, Enum):
@@ -108,21 +108,21 @@ class ProviderResult(BaseModel):
     valid miss is both lists empty; it is not a benign assessment.
 
     Execution-status contract (approved for PR 19B orchestration): a mixed
-    Evidence-plus-errors result is a valid partial provider result. The
-    provider executor persists valid Evidence in provider-return order and
-    returns ``SUCCEEDED`` when at least one Evidence observation committed
+    LegacyEvidence-plus-errors result is a valid partial provider result. The
+    provider executor persists valid LegacyEvidence in provider-return order and
+    returns ``SUCCEEDED`` when at least one LegacyEvidence observation committed
     and no extraction, persistence, or timeline failure subsequently
     occurred; only the first provider error, in provider-return order, is
     retained (its stable code and retryability, never the free-form
     message), and the ``PROVIDER_WORK_COMPLETED`` timeline event exposes the
-    retained code. Errors without Evidence fail the work; an all-empty
+    retained code. Errors without LegacyEvidence fail the work; an all-empty
     result succeeds. No PARTIAL execution status exists in PR 19B.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     provider: str
-    evidence: tuple[Evidence, ...] = Field(default_factory=tuple)
+    evidence: tuple[LegacyEvidence, ...] = Field(default_factory=tuple)
     errors: tuple[ProviderError, ...] = Field(default_factory=tuple)
 
     @field_validator("provider")
@@ -138,8 +138,8 @@ class ProviderResult(BaseModel):
     @field_validator("evidence")
     @classmethod
     def _evidence_consistent_provider(
-        cls, value: tuple[Evidence, ...], info: ValidationInfo
-    ) -> tuple[Evidence, ...]:
+        cls, value: tuple[LegacyEvidence, ...], info: ValidationInfo
+    ) -> tuple[LegacyEvidence, ...]:
         """Reject evidence with a different source than the result provider."""
         provider = info.data.get("provider")
         if provider is not None:
@@ -172,7 +172,7 @@ class EvidenceProvider(ABC):
     """Abstract live evidence provider.
 
     Providers retrieve external information and normalize it into ATI
-    ``Evidence``. They do not persist, assess maliciousness, infer
+    ``LegacyEvidence``. They do not persist, assess maliciousness, infer
     relationships, or decide pivots.
     """
 

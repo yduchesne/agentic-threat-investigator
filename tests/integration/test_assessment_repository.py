@@ -49,17 +49,14 @@ from agentic_threat_investigator.domain.audit import (
     AuditOutcome,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -121,7 +118,7 @@ class Graph:
         await uow.entities.upsert(source)
         await uow.entities.upsert(target)
         await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 id=self.evidence_id,
                 investigation_id=self.investigation_id,
                 type=EvidenceType.DNS,
@@ -146,8 +143,7 @@ class Graph:
                 RelationshipObservation(
                     id=self.observation_id,
                     relationship_id=persisted_relationship.id,
-                    evidence_id=self.evidence_id,
-                    investigation_id=self.investigation_id,
+                    evidence_observation_id=self.evidence_id,
                     retrieved_at=_RETRIEVED_AT,
                     source="urn:ati:source:google_public_dns",
                 )
@@ -187,7 +183,7 @@ def assessment_factory(
 
 
 def direct_finding(graph: Graph) -> AnalyticalFinding:
-    """Build one direct Evidence-backed Finding."""
+    """Build one direct LegacyEvidence-backed Finding."""
     return AnalyticalFinding(
         category=FindingCategory.REPUTATION,
         disposition=FindingDisposition.SUPPORTING,
@@ -287,7 +283,7 @@ async def test_relationship_support_round_trip(
 async def test_evidence_with_zero_relationships_is_valid_direct_support(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Direct claims need no graph; Evidence with zero observations persists."""
+    """Direct claims need no graph; LegacyEvidence with zero observations persists."""
     graph = Graph()
     async with uow_factory() as uow:
         await graph.seed(uow, with_observation=False)
@@ -311,7 +307,7 @@ async def test_evidence_with_zero_relationships_is_valid_direct_support(
 async def test_mixed_support_and_multiple_observations_round_trip(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Mixed Evidence + observation support and multiple observations persist."""
+    """Mixed LegacyEvidence + observation support and multiple observations persist."""
     graph = Graph()
     second_target_id = uuid4()
     async with uow_factory() as uow:
@@ -337,8 +333,7 @@ async def test_mixed_support_and_multiple_observations_round_trip(
             RelationshipObservation(
                 id=second_observation_id,
                 relationship_id=persisted_second.id,
-                evidence_id=graph.evidence_id,
-                investigation_id=graph.investigation_id,
+                evidence_observation_id=graph.evidence_id,
                 retrieved_at=_RETRIEVED_AT,
                 source="urn:ati:source:google_public_dns",
             )
@@ -401,7 +396,7 @@ async def test_cross_investigation_evidence_is_rejected_and_rolls_back(
             )
         )
         await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 id=other_evidence_id,
                 investigation_id=other_investigation_id,
                 type=EvidenceType.REPUTATION,
@@ -533,9 +528,9 @@ async def test_one_relationship_with_many_observations_round_trip(
             graph.target_entity_id,
         )
         assert edge is not None
-        # A second Evidence observes the same stable relationship.
+        # A second LegacyEvidence observes the same stable relationship.
         await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 id=second_evidence_id,
                 investigation_id=graph.investigation_id,
                 type=EvidenceType.REPUTATION,
@@ -552,8 +547,7 @@ async def test_one_relationship_with_many_observations_round_trip(
             RelationshipObservation(
                 id=second_observation_id,
                 relationship_id=edge.id,
-                evidence_id=second_evidence_id,
-                investigation_id=graph.investigation_id,
+                evidence_observation_id=second_evidence_id,
                 retrieved_at=_RETRIEVED_AT,
                 source="urn:ati:source:urlhaus",
             )
@@ -1091,7 +1085,7 @@ async def _insert_candidate(
 async def test_database_rejects_uncited_nonexistent_analyzed_evidence(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """A nonexistent analyzed Evidence ID fails even when no Finding cites it."""
+    """A nonexistent analyzed LegacyEvidence ID fails even when no Finding cites it."""
     graph = Graph()
     async with uow_factory() as uow:
         await graph.seed(uow)
@@ -1114,7 +1108,7 @@ async def test_database_rejects_uncited_nonexistent_analyzed_evidence(
 async def test_database_rejects_cross_investigation_uncited_analyzed_evidence(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """A cross-Investigation analyzed Evidence ID fails even when uncited."""
+    """A cross-Investigation analyzed LegacyEvidence ID fails even when uncited."""
     graph = Graph()
     async with uow_factory() as uow:
         await graph.seed(uow)
@@ -1361,7 +1355,7 @@ async def test_database_rejects_substitute_observation_of_same_relationship(
         second_evidence_id = uuid4()
         second_observation_id = uuid4()
         await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 id=second_evidence_id,
                 investigation_id=graph.investigation_id,
                 type=EvidenceType.REPUTATION,
@@ -1378,14 +1372,13 @@ async def test_database_rejects_substitute_observation_of_same_relationship(
             RelationshipObservation(
                 id=second_observation_id,
                 relationship_id=edge.id,
-                evidence_id=second_evidence_id,
-                investigation_id=graph.investigation_id,
+                evidence_observation_id=second_evidence_id,
                 retrieved_at=_RETRIEVED_AT,
                 source="urn:ati:source:urlhaus",
             )
         )
-    # Citing the substitute observation while only the exact Evidence is
-    # analyzed fails, because the observation's own Evidence must be analyzed.
+    # Citing the substitute observation while only the exact LegacyEvidence is
+    # analyzed fails, because the observation's own LegacyEvidence must be analyzed.
     substitute = _candidate_with_findings(
         graph,
         analyzed=(graph.evidence_id,),
@@ -1683,7 +1676,7 @@ def _candidate_with_findings(
 async def _foreign_evidence_id(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> UUID:
-    """Persist one Evidence row belonging to a different investigation."""
+    """Persist one LegacyEvidence row belonging to a different investigation."""
     other = Graph()
     async with uow_factory() as uow:
         await other.seed(uow, with_observation=False)
@@ -1693,11 +1686,11 @@ async def _foreign_evidence_id(
 async def _second_evidence_id(
     uow_factory: Callable[[], PostgresUnitOfWork], graph: Graph
 ) -> UUID:
-    """Persist one more Evidence row in the graph's investigation."""
+    """Persist one more LegacyEvidence row in the graph's investigation."""
     second = uuid4()
     async with uow_factory() as uow:
         await uow.evidence.insert(
-            Evidence(
+            LegacyEvidence(
                 id=second,
                 investigation_id=graph.investigation_id,
                 type=EvidenceType.DNS,

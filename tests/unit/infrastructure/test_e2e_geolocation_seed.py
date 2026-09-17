@@ -29,9 +29,10 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 from agentic_threat_investigator.config.settings import OperatingMode, Settings
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import Evidence, EvidenceType
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geolocation import GeoPrecision
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from tests.e2e_support.seed_geolocation import (
     E2E_SEEDING_ENABLE_ENV,
     PROVIDER,
@@ -107,19 +108,19 @@ class FakeEvidence(EvidenceRepository):
     """In-memory immutable evidence store with deterministic identities."""
 
     def __init__(self) -> None:
-        self.rows: dict[UUID, Evidence] = {}
+        self.rows: dict[UUID, LegacyEvidence] = {}
 
-    async def get_by_id(self, evidence_id: UUID) -> Evidence | None:
+    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
         """Return the stored evidence row, if any."""
         return self.rows.get(evidence_id)
 
     async def insert(
         self,
-        evidence: Evidence,
+        evidence: LegacyEvidence,
         *,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
-    ) -> Evidence:
+    ) -> LegacyEvidence:
         """Store the row and return it with its identity."""
         assert evidence.id is not None
         self.rows[evidence.id] = evidence
@@ -131,7 +132,7 @@ class FakeEvidence(EvidenceRepository):
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[Evidence]:
+    ) -> list[LegacyEvidence]:
         """Unused in-memory stub."""
         raise NotImplementedError
 
@@ -375,7 +376,7 @@ def test_cs05_valid_single_mappable_construction() -> None:
 
 
 def test_cs06_distinct_multi_ioc_identities() -> None:
-    """C-S06: multi-IOC fixtures keep distinct Entity/Evidence identities."""
+    """C-S06: multi-IOC fixtures keep distinct Entity/LegacyEvidence identities."""
     first, second = build_seed_units(INVESTIGATION_ID, "multi_ioc")
     assert first.ip == "203.0.113.10" and second.ip == "203.0.113.20"
     assert first.entity_id != second.entity_id
@@ -385,7 +386,7 @@ def test_cs06_distinct_multi_ioc_identities() -> None:
 
 
 def test_cs07_same_coordinate_identities_remain_distinct() -> None:
-    """C-S07: identical coordinates never collide Entity/Evidence identity."""
+    """C-S07: identical coordinates never collide Entity/LegacyEvidence identity."""
     first, second = build_seed_units(INVESTIGATION_ID, "same_location")
     assert first.ip == "203.0.113.10" and second.ip == "198.51.100.30"
     assert _facts(first)["latitude"] == _facts(second)["latitude"]

@@ -3,12 +3,12 @@
 """Harness-only deterministic geolocation seeding seam (PR 25C).
 
 The PR 23D fake world composes no DB-IP provider, so a completed fake-world
-Investigation persists no ``GEOLOCATION`` Evidence and the PR 25A projection
+Investigation persists no ``GEOLOCATION`` LegacyEvidence and the PR 25A projection
 is honestly empty. The PR 25B E24 browser workflow cannot assert a real
 marker against that empty state. This module is the smallest deterministic
 real-stack seeding option agreed by the PR 25B STOP report: a test-support
 CLI that persists ordinary canonical IP Entities and immutable
-``GEOLOCATION`` Evidence rows into the isolated throwaway E2E database
+``GEOLOCATION`` LegacyEvidence rows into the isolated throwaway E2E database
 through the normal application persistence seam.
 
 Non-negotiable seam properties (PR 25C §16-§24):
@@ -68,13 +68,10 @@ from agentic_threat_investigator.app.persistence.repositories import (
 from agentic_threat_investigator.config import get_settings
 from agentic_threat_investigator.config.settings import OperatingMode, Settings
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import (
-    EntityRef,
-    Evidence,
-    EvidenceType,
-)
+from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.geolocation import GeoPrecision
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.composites import (
     register_batch_composites,
 )
@@ -210,7 +207,7 @@ def derive_entity_id(ip: str) -> UUID:
 def derive_evidence_id(
     investigation_id: UUID, scenario: str, index: int, ip: str
 ) -> UUID:
-    """Derive the deterministic immutable Evidence UUID for one fixture row."""
+    """Derive the deterministic immutable LegacyEvidence UUID for one fixture row."""
     return uuid5(
         _SEED_NAMESPACE,
         f"sgeo-evidence:{scenario}:{investigation_id}:{index}:{ip}",
@@ -219,12 +216,12 @@ def derive_evidence_id(
 
 @dataclass(frozen=True)
 class SeedEvidenceUnit:
-    """One deterministic Entity + GEOLOCATION Evidence pair to persist."""
+    """One deterministic Entity + GEOLOCATION LegacyEvidence pair to persist."""
 
     entity_id: UUID
     evidence_id: UUID
     ip: str
-    evidence: Evidence
+    evidence: LegacyEvidence
 
     @property
     def entity(self) -> Entity:
@@ -266,7 +263,7 @@ def build_seed_units(
     for index, fixture in enumerate(scenario_fixtures(scenario)):
         entity_id = derive_entity_id(fixture.ip)
         evidence_id = derive_evidence_id(investigation_id, scenario, index, fixture.ip)
-        evidence = Evidence(
+        evidence = LegacyEvidence(
             id=evidence_id,
             investigation_id=investigation_id,
             type=EvidenceType.GEOLOCATION,
@@ -378,10 +375,10 @@ async def apply_seed(
     """Persist one allowlisted scenario through the normal UoW/repositories.
 
     Every row is an ordinary PR 25A-readable IP Entity + ``GEOLOCATION``
-    Evidence of the exact Investigation. The Evidence subject always binds
+    LegacyEvidence of the exact Investigation. The LegacyEvidence subject always binds
     to the persisted canonical Entity id (never to the deterministic input
     UUID when a pre-existing canonical row owns a different identity).
-    Idempotency is bounded by the deterministic Evidence UUID: an existing
+    Idempotency is bounded by the deterministic LegacyEvidence UUID: an existing
     row is reused, never re-inserted or duplicated (C-S10).
     """
     scenario_fixtures(scenario)  # validate allowlist before any persistence
