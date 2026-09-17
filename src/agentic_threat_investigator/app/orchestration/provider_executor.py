@@ -60,6 +60,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from agentic_threat_investigator.app.datasource_provider import (
+    DatasourceEvidenceResult,
+    DatasourceExecutionCompletion,
+)
 from agentic_threat_investigator.app.extraction.models import (
     EvidenceExtractionError,
     ExtractionResult,
@@ -101,6 +105,15 @@ ERROR_PERSISTENCE_ERROR = "persistence_error"
 ERROR_TIMELINE_ERROR = "timeline_error"
 ERROR_PROVIDER_BINDING = "provider_binding"
 
+# Bounded safe terminal codes of a datasource-backed provider execution
+# (PR 27E). They follow the PR 27B datasource-log error-code grammar and are
+# recorded on the execution's FAILED lifecycle event when runtime processing
+# fails; the Investigation outcome keeps its existing error vocabulary.
+DATASOURCE_ERROR_PROVIDER_BINDING = "provider_binding_failed"
+DATASOURCE_ERROR_EXTRACTION = "extraction_failed"
+DATASOURCE_ERROR_PERSISTENCE = "persistence_failed"
+DATASOURCE_ERROR_TIMELINE = "timeline_failed"
+
 
 def _append_unique(target: list[UUID], candidate: UUID) -> None:
     """Append ``candidate`` to ``target`` only when not already present.
@@ -113,6 +126,48 @@ def _append_unique(target: list[UUID], candidate: UUID) -> None:
     """
     if candidate not in target:
         target.append(candidate)
+
+
+def _datasource_completion(
+    result: ProviderResult,
+) -> DatasourceExecutionCompletion | None:
+    """Return the deferred datasource execution completion of a result, if any.
+
+    The executor remains source-agnostic: it recognizes only the generic
+    lifecycle-aware result type, never a provider identity, so legacy
+    providers (plain ``ProviderResult``) are completely unaffected.
+    """
+    if isinstance(result, DatasourceEvidenceResult):
+        return result.completion
+    return None
+
+
+async def _best_effort_datasource_terminal(
+    completion: DatasourceExecutionCompletion | None,
+    *,
+    fail_code: str | None = None,
+    cancelled: bool = False,
+) -> None:
+    """Append one datasource-execution terminal outcome best effort.
+
+    A ``None`` completion (legacy provider result) is a no-op. The terminal
+    recording must never mask the governing outcome: cancellation appends
+    CANCELLED, any other terminal appends FAILED with the bounded safe
+    code, and a database failure during the append is ignored.
+    ``asyncio.CancelledError`` is never swallowed.
+    """
+    if completion is None:
+        return
+    try:
+        if cancelled:
+            await completion.cancel()
+        else:
+            assert fail_code is not None
+            await completion.fail(code=fail_code)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - best-effort terminal recording must not mask the governing outcome
+        return
 
 
 def _canonicalize_or_none(entity_type: EntityType, value: str) -> str | None:
@@ -289,9 +344,25 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             self._context.investigation_id,
         )
         if binding_error is not None:
+            await _best_effort_datasource_terminal(
+                _datasource_completion(result),
+                fail_code=DATASOURCE_ERROR_PROVIDER_BINDING,
+            )
             return await self._fail_work(work_item, binding_error)
 
-        return await self._process_result(work_item, result)
+        try:
+            return await self._process_result(work_item, result)
+        except asyncio.CancelledError:
+            # Cancellation observed after acquisition/conversion: the
+            # datasource execution terminal is CANCELLED (best effort) and
+            # the cancellation still propagates; earlier committed
+            # observations remain durable and the execution is never
+            # FAILED or COMPLETED afterward.
+            await _best_effort_datasource_terminal(
+                _datasource_completion(result),
+                cancelled=True,
+            )
+            raise
 
     @staticmethod
     def _binding_violation(
@@ -385,8 +456,13 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
         The accumulated ID lists and per-Evidence working variables are the
         intrinsic cost of deterministic per-observation sequencing; the narrow
-        disable follows repository convention.
+        disable follows repository convention. For a datasource-backed result
+        the execution terminal stays open until every returned Evidence
+        committed: a runtime failure appends the bounded FAILED lifecycle
+        code below, and COMPLETED is appended only after the required
+        processing (including the aggregate timeline event) succeeded.
         """
+        completion = _datasource_completion(result)
         evidence_ids: list[UUID] = []
         relationship_ids: list[UUID] = []
         discovered: list[UUID] = []
@@ -404,6 +480,9 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                 LOGGER.warning(
                     "extraction failed for evidence from %s",
                     work_item.provider.value,
+                )
+                await _best_effort_datasource_terminal(
+                    completion, fail_code=DATASOURCE_ERROR_EXTRACTION
                 )
                 return await self._fail_work(
                     work_item,
@@ -426,6 +505,9 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                     source_id=work_item.provider.value,
                     target_entity_id=work_item.entity_id,
                 )
+                await _best_effort_datasource_terminal(
+                    completion, fail_code=DATASOURCE_ERROR_PERSISTENCE
+                )
                 return await self._fail_work(
                     work_item,
                     ERROR_PERSISTENCE_ERROR,
@@ -447,6 +529,9 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                 self._evidence_persisted_event(work_item, persisted)
             )
             if timeline_error is not None:
+                await _best_effort_datasource_terminal(
+                    completion, fail_code=DATASOURCE_ERROR_TIMELINE
+                )
                 return self._failed_outcome(
                     work_item,
                     timeline_error,
@@ -488,6 +573,9 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             )
         )
         if timeline_error is not None:
+            await _best_effort_datasource_terminal(
+                completion, fail_code=DATASOURCE_ERROR_TIMELINE
+            )
             return self._failed_outcome(
                 work_item,
                 timeline_error,
@@ -495,6 +583,34 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                 discovered=tuple(discovered),
                 relationship_ids=relationship_ids,
             )
+
+        if completion is not None:
+            # The datasource execution is COMPLETED only after all required
+            # Evidence runtime processing (extraction, observation
+            # persistence, and the aggregate completion event) succeeded; a
+            # failed terminal append turns the already-committed partial
+            # outcome FAILED with committed IDs retained.
+            try:
+                await completion.complete()
+            except asyncio.CancelledError:
+                await _best_effort_datasource_terminal(completion, cancelled=True)
+                raise
+            except Exception:  # noqa: BLE001 - lifecycle terminal persistence becomes a bounded failure
+                self._log_bounded_failure(
+                    ERROR_PERSISTENCE_ERROR,
+                    source_id=work_item.provider.value,
+                    target_entity_id=work_item.entity_id,
+                )
+                await _best_effort_datasource_terminal(
+                    completion, fail_code=DATASOURCE_ERROR_PERSISTENCE
+                )
+                return await self._fail_work(
+                    work_item,
+                    ERROR_PERSISTENCE_ERROR,
+                    evidence_ids=evidence_ids,
+                    discovered=discovered,
+                    relationship_ids=relationship_ids,
+                )
 
         return ProviderExecutionOutcome(
             work_item=work_item,
