@@ -1272,7 +1272,8 @@ Delivered in this slice:
   duplicate-ID rules) is extracted into
   `infrastructure/datasources/threatfox_semantics.py` and is reused, not
   duplicated, by the legacy `ThreatFoxProvider` (whose transitional
-  Evidence mapping remains unchanged until PR 27E);
+  Evidence mapping stayed unchanged until PR 27E migrated the production
+  runtime);
 - a narrow production ThreatFox acquisition-to-semantic reference path
   (`infrastructure/datasources/threatfox.py`) validates explicit datasource
   dimensions before I/O, reuses `ProviderHttpClient` and
@@ -1294,8 +1295,8 @@ Semantic modules construct no ATI Evidence, perform no network/DB/
 persistence I/O, and never infer semantics from provider IDs, protocol,
 serialization, or JSON shape. There is no semantic-object persistence
 table and no new datasource-log event type in this slice — conversion is
-PR 27D, and the legacy `EvidenceProvider` contract remains authoritative
-for Investigation execution until PR 27E migrates it.
+PR 27D, and the legacy `EvidenceProvider` contract remained authoritative
+for Investigation execution until PR 27E migrated the ThreatFox runtime.
 
 ### Semantic-format-driven Evidence conversion (PR 27D)
 
@@ -1336,8 +1337,8 @@ Delivered in this slice:
   (`infrastructure/datasources/threatfox_evidence.py`): one validated
   `ThreatFoxRecord` -> one immutable `THREAT_INTELLIGENCE` Evidence with
   exact provenance, sharing the timestamp/match-facts mapping with the
-  legacy `ThreatFoxProvider` (which remains the runtime path until
-  PR 27E);
+  legacy `ThreatFoxProvider` (no longer composed by production bootstrap
+  as of PR 27E);
 - the PR 27D lifecycle runner reusing the PR 27B
   `DatasourceExecutionRecorder` and `CONVERTED` event: STARTED / ACQUIRED /
   DECODED / pure conversion / CONVERTED(item_count = Evidence count) /
@@ -1348,8 +1349,63 @@ Delivered in this slice:
 Converters perform no I/O, no persistence, no clock/random reads, no
 secret/config lookup, and never assign persistent Evidence IDs, verdicts,
 relationships, pivots, attribution, or Investigation control flow. No
-Evidence is persisted by the PR 27D slice; PR 27E migrates applicable
-Evidence-producing integrations onto this boundary.
+Evidence is persisted by the PR 27D slice; PR 27E migrated applicable
+Evidence-producing integrations onto this boundary (only ThreatFox; see
+`PR_27_SOURCE_MIGRATION_AUDIT.md`).
+
+### Runtime datasource migration (PR 27E)
+
+PR 27E connects the PR 27A-D datasource stack to the existing Investigation
+runtime without redesigning the mature ``EvidenceProvider``/executor/
+persistence architecture:
+
+```text
+DatasourceDefinition (Settings.datasources)
+ -> DatasourceProvider (EvidenceProvider adapter, app/datasource_provider.py)
+ -> semantic datasource acquisition (ThreatFoxDatasource)
+ -> SemanticAcquisitionResult[ThreatFoxRecord]
+ -> EvidenceConversionContext
+ -> ToEvidenceConverterRegistry (selected by semantic_format only)
+ -> per-record Evidence
+ -> existing ProviderWorkExecutor extraction/persistence
+ -> ProviderObservationPersistenceService (one atomic UoW per observation)
+ -> ProviderExecutionOutcome + execution lifecycle terminal
+```
+
+ThreatFox is the migrated production reference: the runtime emits **one
+Evidence per source record** (adopting the PR 27D converter contract) so
+exact upstream ``source_record_id`` provenance survives persistence; no
+legacy grouping shim re-aggregates converted Evidence. The migrated
+ThreatFox provider is composed at the operating-mode bootstrap boundary
+from ``Settings.datasources`` (never a second definition), the PR 27C
+``ThreatFoxDatasource`` (owned by ``ProviderComposition``), the converter
+registry, and the application UnitOfWork factory. The legacy
+``ThreatFoxProvider`` remains importable for the pinned pre-27E contract
+tests but is no longer composed by production bootstrap.
+
+The execution archetype is: acquisition/conversion owns STARTED through
+the stage appends (ACQUIRED/DECODED/CONVERTED) while the **terminal
+outcome stays open** until the Investigation executor finishes required
+Evidence processing:
+
+```text
+TX-L1 STARTED
+HTTP/decode/semantic parse                       no TX
+TX-L2 ACQUIRED
+TX-L3 DECODED
+conversion                                       no TX
+TX-L4 CONVERTED(item_count=N)
+for each Evidence: extract (no TX), persist (one observation UoW each)
+TX-L5 COMPLETED   (only after every required extraction/persistence step)
+```
+
+Cancellation appends CANCELLED (best effort) and propagates; a runtime
+failure (binding, extraction, persistence, timeline) appends FAILED with a
+bounded safe code (``provider_binding_failed``/``extraction_failed``/
+``persistence_failed``/``timeline_failed``) while earlier committed
+observations remain durable — later failures never compensate earlier
+commits. No UoW ever spans acquisition/parse/conversion/extraction, and
+lifecycle events are execution-level, never per Evidence.
 
 ## Geospatial
 

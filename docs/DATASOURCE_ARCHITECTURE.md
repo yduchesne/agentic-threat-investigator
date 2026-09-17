@@ -5,9 +5,11 @@
 This document defines the target datasource architecture for the PR 27 series. It is a forward design contract: existing PR 18/19 provider behavior remains authoritative until the corresponding PR 27 slice lands. PR 27 must migrate incrementally without breaking Investigation execution or Evidence provenance.
 
 PR 27A (vocabulary), PR 27B (execution/logging), PR 27C
-(acquisition-to-semantic boundary), and PR 27D
-(`ToEvidenceConverter`) have landed; PR 27E owns existing-source
-migration.
+(acquisition-to-semantic boundary), PR 27D
+(`ToEvidenceConverter`), and PR 27E (existing-source migration
+and series closure) have landed. PR 27E migrated the ThreatFox
+production Investigation runtime onto the PR 27A-D stack and closed
+the series with a source-by-source migration audit.
 
 ### PR 27A landed vocabulary
 
@@ -196,8 +198,9 @@ durable execution table. The landed contract:
 
 Later PR 27C–27E reuse this execution identity and append lifecycle events
 at the actual acquisition/decoding boundaries. They must not create a second
-execution/logging concept. Existing providers remain on the transitional
-pre-27C path until PR 27E.
+execution/logging concept. Existing providers remained on the transitional
+pre-27C path until PR 27E (ThreatFox now runs the migrated datasource path;
+see `PR_27_SOURCE_MIGRATION_AUDIT.md`).
 
 ## Acquisition-to-semantic boundary (PR 27C, delivered)
 
@@ -295,8 +298,8 @@ PR 27D landed the pure semantic-object -> Evidence conversion boundary in
   input `ThreatFoxRecord`): one record -> one immutable
   `THREAT_INTELLIGENCE` Evidence with exact provenance, sharing
   `build_threatfox_match_facts`/`format_threatfox_fact_timestamp` with
-  the legacy `ThreatFoxProvider` (which remains the runtime path until
-  PR 27E), and a tiny lifecycle runner (`acquire_and_convert_threatfox_execution`)
+  the legacy `ThreatFoxProvider` (no longer composed by production
+  bootstrap as of PR 27E), and a tiny lifecycle runner (`acquire_and_convert_threatfox_execution`)
   exercising STARTED/ACQUIRED/DECODED/CONVERTED/COMPLETED, `CONVERTED(0)`
   success, bounded `conversion_failed`, and cancellation semantics.
 
@@ -317,6 +320,79 @@ synthesize no verdicts, confidence weights, attribution, relationships,
 pivots, or Investigation control flow. PR 27D persists nothing: the
 runner's Evidence output stays in memory; PR 27E owns migration and
 persisted end-to-end closure.
+
+## Runtime datasource migration (PR 27E, delivered)
+
+PR 27E connects the PR 27A-D stack to the existing Investigation runtime
+without redesigning the mature executor/persistence architecture. The
+migrated production path is:
+
+```text
+EvidenceProvider compatibility (app/datasource_provider.py)
+ -> DatasourceDefinition (from Settings.datasources)
+ -> semantic datasource acquisition (SemanticAcquirer protocol)
+ -> SemanticAcquisitionResult[T]
+ -> EvidenceConversionContext
+ -> ToEvidenceConverterRegistry (selected by semantic_format only)
+ -> ProviderResult
+ -> existing ProviderWorkExecutor binding/extraction/persistence
+```
+
+Delivered:
+
+- `DatasourceProvider` (generic adapter over a definition, a PR 27C
+  ``SemanticAcquirer``, the converter registry, and the UnitOfWork-
+  backed PR 27B recorder): owns STARTED + stage appends + CONVERTED
+  (exact Evidence count), returns a lifecycle-aware
+  ``DatasourceEvidenceResult`` whose terminal outcome stays open until
+  the executor finishes required Evidence processing;
+- typed legacy error mapping (timeout/429/auth/forbidden/malformed/
+  semantic-invalid -> ``ProviderErrorCode``) with no message-text
+  classification and no raw exception/payload/credential persistence;
+- generic executor integration in ``ProviderWorkExecutor`` (no provider
+  branch): COMPLETED only after per-Evidence extraction/persistence and
+  the aggregate completion event succeed; FAILED with bounded
+  ``provider_binding_failed``/``extraction_failed``/``persistence_failed``/
+  ``timeline_failed`` on runtime failure; CANCELLED (best effort) with
+  ``CancelledError`` propagation on cancellation;
+- ThreatFox production migration: one validated record -> one Evidence
+  (exact ``source_record_id`` provenance retained; the legacy grouped
+  shape is superseded), reusing ``ThreatFoxDatasource``/the parser/the
+  ``ThreatFoxToEvidenceConverter``/the existing extractor and
+  ``ProviderObservationPersistenceService``;
+- deterministic transaction-boundary unit tests and real-PostgreSQL
+  vertical slices (one-record/two-record/no-result, cross-Investigation
+  and subject binding, later-item persistence failure preserving earlier
+  commits, extraction failure, acquisition cancellation, lifecycle DB
+  invariants);
+- batch SourceRecord + checkpoint atomicity regression tests proving the
+  ingestion path still commits exactly one UoW per batch with no PR 27
+  lifecycle multiplication;
+- `docs/PR_27_SOURCE_MIGRATION_AUDIT.md` recording the honest
+  source-by-source status: only ThreatFox is MIGRATED; MITRE ATT&CK is a
+  SEMANTIC_BOUNDARY_ONLY / NOT_EVIDENCE_SOURCE corpus path; the remaining
+  live Investigation Evidence sources remain
+  LEGACY_NOT_SEMANTICALLY_MODELED until source-specific follow-ups.
+
+Dominant lifecycle invariants:
+
+```text
+TX-L1 STARTED
+HTTP/decode/semantic parse                       no TX
+TX-L2 ACQUIRED
+TX-L3 DECODED
+conversion                                       no TX
+TX-L4 CONVERTED(item_count=N)
+extract E1 / persist E1 (observation UoW)  ...  per Evidence
+TX-L5 COMPLETED
+```
+
+One UoW = one real bounded PostgreSQL transaction. No UoW spans
+acquisition, parsing, conversion, extraction, retry sleep, or a whole
+execution; ``datasource_log`` remains operational lifecycle (never a
+checkpoint/outbox/dedup state); the batch SourceRecord + checkpoint
+advance stays one atomic UoW per bounded batch; and cancellation stays
+cancellation.
 
 ## Acquisition boundary
 
@@ -497,7 +573,7 @@ is unchanged.
 
 PR 27 is an incremental migration. Until a datasource is migrated, existing `EvidenceProvider` behavior remains supported.
 
-The end state should avoid two permanent competing ingestion architectures. PR 27E removes obsolete compatibility seams only after all currently supported Evidence-producing sources have equivalent deterministic coverage on the new path.
+The end state should avoid two permanent competing ingestion architectures. PR 27E removed obsolete ThreatFox compatibility composition only after the migrated runtime gained equivalent deterministic coverage; the legacy grouped-Evidence `ThreatFoxProvider` remains importable for the pinned pre-27E contract tests but is no longer composed by production bootstrap. The remaining live Investigation Evidence sources stay on the legacy direct-to-Evidence path until their source-specific semantic follow-ups land (see `PR_27_SOURCE_MIGRATION_AUDIT.md`).
 
 Security and semantic behavior already documented for individual sources remain requirements during migration. PR 27 changes ownership boundaries; it does not authorize looser upstream validation.
 
@@ -534,7 +610,7 @@ MITRE batch source without behavior change; deterministic real-format and
 real-PostgreSQL execution-log tests. No `ToEvidenceConverter`, registry,
 converter, new persistence, or migration was added.
 
-### PR 27D — Semantic-format-driven `ToEvidenceConverter` [DONE]
+### PR 27D — Semantic-format-driven `ToEvidenceConverter` [DONE] [DONE]
 
 Delivered the pure semantic-object -> Evidence conversion boundary:
 `EvidenceConversionContext`, `ToEvidenceConverter` (0..N, deterministic,
@@ -548,21 +624,23 @@ and unit/real-PostgreSQL conversion-lifecycle tests. No provider was
 migrated, no Evidence is persisted, and no migration/schema change was
 added.
 
-### PR 27E — Existing-source migration and closure
+### PR 27E — Existing-source migration and closure [DONE]
 
-Migrate existing Evidence-producing sources to the new path, remove obsolete compatibility seams, and prove an end-to-end path:
-
-```text
-source fixture
- -> acquisition execution/logging
- -> serialization
- -> semantic object
- -> semantic-format-selected converter
- -> 0..N Evidence
- -> existing persistence/extraction/Investigation behavior
-```
-
-ThreatFox should be used as an important proprietary-semantic reference slice so the architecture is demonstrably not STIX-centric.
+Delivered: the generic datasource-backed ``EvidenceProvider`` seam
+(``app/datasource_provider.py``), the ThreatFox production runtime
+migration (per-record Evidence through ``ThreatFoxDatasource`` +
+``ThreatFoxToEvidenceConverter`` + the existing executor/persistence
+paths with deferred terminal ownership), deterministic unit matrices and
+real-PostgreSQL vertical slices (D27E-P01..P09), batch
+SourceRecord/checkpoint transaction regression coverage, removal of
+obsolete ThreatFox production composition with equivalent coverage, the
+honest source-by-source migration audit
+(``docs/PR_27_SOURCE_MIGRATION_AUDIT.md``), and architecture/
+documentation reconciliation. ThreatFox is the migrated proprietary-
+semantic reference slice proving the design is not STIX-centric;
+unmigrated Investigation sources are tracked as
+LEGACY_NOT_SEMANTICALLY_MODELED follow-up work rather than falsely
+labelled PR27-compliant.
 
 ## Testing requirements
 

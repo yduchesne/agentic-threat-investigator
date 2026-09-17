@@ -1301,7 +1301,9 @@ to PR 18C. The provider performs no persistence of any kind.
 #### Response validation matrix
 
 One successful search with at least one validated matching record yields
-exactly one immutable `Evidence` (`EvidenceType.THREAT_INTELLIGENCE`).
+immutable `Evidence` (`EvidenceType.THREAT_INTELLIGENCE`): exactly one
+grouped concatenation on the legacy `ThreatFoxProvider` path, and one
+per retained source record on the migrated PR 27E datasource path.
 One malformed response — including one malformed or unrelated record —
 yields one typed `ProviderError` and no evidence; the provider never
 emits a partly normalized observation.
@@ -1398,15 +1400,25 @@ duplicated. The converter performs no I/O/persistence and synthesizes no
 verdict, confidence weighting, attribution, or relationship. Source
 confidence remains a source fact.
 
-**Runtime compatibility note:** the legacy `ThreatFoxProvider` remains the
-runtime Evidence path until PR 27E migrates it. PR 27D therefore accepts
-the grouping difference (legacy: N records -> one grouped Evidence;
-converter: one record -> one Evidence) because the converter is not yet
-wired into runtime provider execution. PR 27E must explicitly decide
-whether migration preserves grouping or adopts per-record Evidence after
-reviewing downstream persistence/extraction/API/evaluation compatibility.
+**Runtime migration (PR 27E):** the production ThreatFox runtime is now the
+datasource-backed provider (``app/datasource_provider.py`` and
+``build_threatfox_datasource_provider``): ``Settings.datasources`` definition
+-> ``ThreatFoxDatasource`` -> ThreatFox semantic parser -> semantic-format-
+selected ``ThreatFoxToEvidenceConverter`` -> **one Evidence per retained
+source record** (the PR 27D converter contract, adopted by the migrated
+runtime so exact ``source_record_id`` provenance survives persistence) ->
+existing ``ProviderWorkExecutor`` binding/extraction -> existing
+``ProviderObservationPersistenceService`` atomic observation persistence ->
+execution lifecycle terminal (COMPLETED only after required Evidence
+runtime processing; FAILED with bounded codes on binding/extraction/
+persistence/timeline failure; CANCELLED on cancellation with propagation).
+No UoW spans acquisition/parse/conversion/extraction; lifecycle events are
+execution-level, never per Evidence. The legacy grouped-Evidence
+``ThreatFoxProvider`` remains importable for its pinned pre-27E contract
+tests but is **no longer composed by production bootstrap**
+(``infrastructure/providers/threatfox.py`` documents this status).
 
-#### Evidence semantics (legacy runtime path; PR 27E migrates)
+#### Evidence semantics (legacy runtime path; superseded by PR 27E)
 
 A successful search through the legacy runtime path emits:
 
