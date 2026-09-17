@@ -4,6 +4,10 @@
 
 This document defines the target datasource architecture for the PR 27 series. It is a forward design contract: existing PR 18/19 provider behavior remains authoritative until the corresponding PR 27 slice lands. PR 27 must migrate incrementally without breaking Investigation execution or Evidence provenance.
 
+PR 27A (vocabulary), PR 27B (execution/logging), and PR 27C
+(acquisition-to-semantic boundary) have landed; PR 27D owns
+`ToEvidenceConverter` and PR 27E owns existing-source migration.
+
 ### PR 27A landed vocabulary
 
 PR 27A established the typed datasource vocabulary and configuration contract on
@@ -193,6 +197,73 @@ Later PR 27C–27E reuse this execution identity and append lifecycle events
 at the actual acquisition/decoding boundaries. They must not create a second
 execution/logging concept. Existing providers remain on the transitional
 pre-27C path until PR 27E.
+
+## Acquisition-to-semantic boundary (PR 27C, delivered)
+
+PR 27C landed the boundary between decoded external data and ATI-owned
+downstream products, without implementing conversion (PR 27D) or migrating
+existing sources (PR 27E):
+
+```text
+DatasourceDefinition
+ -> acquisition execution (PR 27B recorder)
+ -> protocol transport / local artifact read
+ -> serialization decode
+ -> decoded external value
+ -> semantic-format-specific parser/validator
+ -> typed semantic source objects + bounded provenance context
+ ---------------- PR 27D boundary ----------------
+ -> ToEvidenceConverter selected by semantic_format (future)
+ -> 0..N Evidence
+```
+
+Cross-cutting contracts (`src/agentic_threat_investigator/app/datasource_semantics.py`):
+
+- `SemanticSourceContext`: an immutable cross-cutting provenance context
+  whose datasource/source/semantic-format identities are derived from one
+  `DatasourceDefinition`, with timezone-aware UTC-normalized retrieval
+  time and optional credential-free source/artifact references. It carries
+  no union of source-specific fields, no Investigation/Evidence ID, no
+  verdict/risk/relationship, and no credentials or headers.
+- `DatasourceStage` + `DatasourceStageError`: a stage-aware datasource
+  failure contract (ACQUISITION / SERIALIZATION / SEMANTIC_VALIDATION)
+  with bounded safe error codes from the PR 27B grammar. Conversion-stage
+  concepts belong to PR 27D, never here.
+- `SemanticAcquisitionResult[T]`: a small generic result
+  (context + typed objects + optional bounded stage error) whose
+  invariant is success/empty-semantics vs failure with no objects.
+
+Format-specific parsers (`src/agentic_threat_investigator/infrastructure/datasources/`):
+
+- `threatfox_semantics.py` owns the ThreatFox semantic contract (strict
+  record model, official UTC timestamp form, URL validation, IOC
+  parsing/matching, response-envelope/query-status validation, duplicate-ID
+  rules, unrelated-record rejection) and `parse_threatfox_response` for
+  decoded values. The legacy `ThreatFoxProvider` reuses this parser and
+  keeps only Evidence-specific construction (`_build_match_facts`) locally;
+  its public behavior is unchanged.
+- `stix21_semantics.py` owns a narrow STIX 2.1 decoded-value parser
+  (`parse_stix21_bundle` -> `Stix21Object`): mapping bundle, nonblank
+  `type`/`id`, optional string `spec_version`, and deeply immutable
+  snapshots that preserve every extension field (`x_mitre_*`, unknown valid
+  types) as data. It is independent of MITRE ATT&CK `SourceRecord`
+  normalization and deliberately does not reimplement the full STIX 2.1
+  standard. `MitreAttackBatchSource` consumes it as its decoded-value
+  boundary with `SourceRecord` identity, content-hash, checkpoint, batch,
+  and ingestion behavior unchanged.
+- `threatfox.py` is the narrow production ThreatFox acquisition-to-semantic
+  reference path (`ThreatFoxDatasource` + tiny runner): it validates the
+  explicit datasource dimensions (THREATFOX + HTTPS + JSON + THREATFOX)
+  fail-closed before any I/O, reuses `ProviderHttpClient` (Auth-Key stays
+  header-only) and the PR 27B `DatasourceExecutionRecorder`, classifies
+  failures by typed stage (never by matching free-form message text), and
+  persists only bounded safe terminal codes.
+
+Semantic modules construct no ATI Evidence/`SourceRecord`, perform no
+network/DB/persistence I/O, and never log full source objects. There is no
+universal mega-schema (ThreatFox and STIX objects remain source-native),
+no `ToEvidenceConverter`, no converter registry, no semantic-object
+persistence table, and no migration in this slice.
 
 ## Acquisition boundary
 
@@ -393,9 +464,17 @@ append-only log was added rather than a durable execution table; lifecycle
 and concurrency invariants are database-owned. No provider or batch path
 was changed.
 
-### PR 27C — Acquisition-to-semantic boundary
+### PR 27C — Acquisition-to-semantic boundary [DONE]
 
-Separate acquisition/serialization from semantic source objects. Establish semantic-format-specific parsing/validation contracts without yet requiring all source semantics to become ATI Evidence.
+Delivered: the cross-cutting `SemanticSourceContext`/`DatasourceStage`/
+`DatasourceStageError`/`SemanticAcquisitionResult` contracts
+(`app/datasource_semantics.py`); the extracted ThreatFox semantic parser
+and the production ThreatFox acquisition-to-semantic reference path
+(`infrastructure/datasources/threatfox.py`) reusing `ProviderHttpClient`
+and the PR 27B recorder; the STIX 2.1 semantic parser consumed by the
+MITRE batch source without behavior change; deterministic real-format and
+real-PostgreSQL execution-log tests. No `ToEvidenceConverter`, registry,
+converter, new persistence, or migration was added.
 
 ### PR 27D — Semantic-format-driven `ToEvidenceConverter`
 
