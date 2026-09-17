@@ -20,6 +20,7 @@
 - [Process consistency](#process-consistency)
 - [Task dispatch configuration](#task-dispatch-configuration)
 - [Operating mode (PR 23D)](#operating-mode-pr-23d)
+- [Datasource definitions (PR 27A)](#datasource-definitions-pr-27a)
 - [GEOINT configuration (planned PR 26)](#geoint-configuration-planned-pr-26)
 - [Authentication settings](#authentication-settings)
 - [Provider settings](#provider-settings)
@@ -454,6 +455,20 @@ The `fake` mode fakes the external intelligence world, not ATI's application arc
 Fake batch data is initialized only through the explicit idempotent `ati-fake-data-bootstrap` command. API startup, worker startup, and module import never ingest fake batch data. Production deployments must never run the fake-data bootstrap.
 
 Automated PR 23D tests are different from runtime mode semantics: they inject `FakeLlmClient` independently of operating mode and never require live LLM or network access.
+
+## Datasource definitions (PR 27A)
+
+PR 27A exposes the typed datasource vocabulary through `Settings.datasources`, a tuple of immutable `DatasourceDefinition` models. Each definition carries five explicit, independent classification dimensions:
+
+| Dimension | Type | Meaning |
+|---|---|---|
+| `datasource_id` | `DatasourceId` | one configured datasource instance identity (not provider, not execution) |
+| `source_id` | `SourceId` | the existing durable external source/provider identity URN |
+| `protocol` | `DatasourceProtocol` | acquisition protocol (`https`, `file`); never semantics |
+| `serialization_format` | `SerializationFormat` | physical encoding (`json`); never semantics |
+| `semantic_format` | `SemanticFormatId` | semantic model URN (`urn:ati:datasource:semanticformat:stix21`, `urn:ati:datasource:semanticformat:threatfox`); the later converter-selection dimension |
+
+No dimension is inferred from another: the same `SourceId` may appear on multiple datasource instances, and the same serialization may carry different semantic formats. Fail-closed validation at the Settings boundary rejects unknown typed values and duplicate `datasource_id` values; profiles may override the whole collection by supplying a list of definitions, but provider-specific operational settings (concurrency, secret references, lookback windows, retry policy, endpoints) remain exactly where `CONFIGURATION.md` already defines them and are never migrated into datasource definitions. Secret-resolution and profile behavior are unchanged.
 
 ## GEOINT configuration (PR 26)
 

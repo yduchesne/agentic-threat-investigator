@@ -315,6 +315,31 @@ Priority unit-test areas include:
   event, Relationship, RelationshipObservation, or state mutation for either
   investigation) using exploding transports.
 
+### Datasource vocabulary and definition contracts (PR 27A)
+
+`tests/unit/domain/test_datasource.py` and
+`tests/unit/config/test_datasource_settings.py` pin the typed datasource
+vocabulary deterministically and offline (stable matrix IDs D27A-01..D27A-13):
+
+- exact durable semantic-format URNs
+  (`urn:ati:datasource:semanticformat:stix21` and
+  `urn:ati:datasource:semanticformat:threatfox`);
+- every existing durable `SourceId` serialized value remains exact;
+- one immutable `DatasourceDefinition` requires all five dimensions with
+  exact independent values for the ThreatFox (HTTPS + JSON + ThreatFox
+  semantics) and MITRE ATT&CK (FILE + JSON + STIX 2.1 semantics)
+  representative definitions;
+- datasource-instance ID validation rejects blank, whitespace-only, padded,
+  malformed, and over-bound values;
+- unknown protocol, serialization, and semantic-format values fail closed;
+- duplicate datasource IDs are rejected in any `Settings`/profile collection
+  while two datasource instances sharing one `SourceId` remain legal;
+- no-inference tests prove provider, protocol, and serialization never select
+  semantics (JSON definitions carry distinct semantic formats; unusual
+  provider/protocol combinations construct unchanged).
+
+These tests never touch the network or the database.
+
 ### Deterministic vertical-slice provider execution (PR 19B)
 
 `tests/integration/test_provider_execution_pipeline.py` proves the real
