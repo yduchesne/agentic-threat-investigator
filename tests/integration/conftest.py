@@ -84,6 +84,7 @@ async def reset_application_data(
         "entity_location_observation",
         "geo_resolution",
         "location",
+        "datasource_log",
     )
     async with integration_engine.begin() as connection:
         await connection.execute(

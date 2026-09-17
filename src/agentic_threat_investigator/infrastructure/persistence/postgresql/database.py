@@ -25,6 +25,7 @@ from agentic_threat_investigator.config import Settings
 from .assessment_repositories import PostgresAssessmentRepository
 from .audit_repositories import PostgresAuditEventRepository
 from .composites import register_batch_composites
+from .datasource_log_repositories import PostgresDatasourceLogRepository
 from .geoint_repositories import (
     PostgresEntityLocationObservationRepository,
     PostgresEntityLocationRepository,
@@ -97,6 +98,7 @@ class PostgresUnitOfWork(UnitOfWork):
             PostgresEntityLocationObservationRepository, None
         )
         self.geo_resolutions = cast(PostgresGeoResolutionRepository, None)
+        self.datasource_logs = cast(PostgresDatasourceLogRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -141,6 +143,7 @@ class PostgresUnitOfWork(UnitOfWork):
             self.session
         )
         self.geo_resolutions = PostgresGeoResolutionRepository(self.session)
+        self.datasource_logs = PostgresDatasourceLogRepository(self.session)
         return self
 
     async def __aexit__(
@@ -191,6 +194,7 @@ class PostgresUnitOfWork(UnitOfWork):
                 PostgresEntityLocationObservationRepository, None
             )
             self.geo_resolutions = cast(PostgresGeoResolutionRepository, None)
+            self.datasource_logs = cast(PostgresDatasourceLogRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

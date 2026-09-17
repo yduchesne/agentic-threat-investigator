@@ -125,11 +125,14 @@ These combinations are all valid:
 
 Therefore ATI must not infer semantic conversion from provider, protocol, filename extension, MIME type, or JSON shape alone.
 
-## Acquisition execution
+## Acquisition execution (PR 27B, delivered)
 
-Every datasource acquisition execution receives a new `execution_id` UUID.
+Every datasource acquisition execution receives a new `execution_id` UUID,
+generated once at the application execution boundary and passed unchanged to
+every operational event of that execution.
 
-All operational log events belonging to that execution carry the same `execution_id`.
+All operational log events belonging to that execution carry the same
+`execution_id` and the same `datasource_id`.
 
 Conceptually:
 
@@ -150,9 +153,46 @@ execution_id = Y
   failed
 ```
 
-`execution_id` correlates one execution; it is not datasource identity, Investigation identity, Evidence identity, or artifact identity.
+or:
 
-The PR 27 implementation must determine from fresh `main` whether `execution_id` plus the existing datasource log is sufficient or whether an explicit persisted execution record is justified. Do not introduce a second durable execution model merely for symmetry.
+```text
+execution_id = Z
+  started
+  cancelled
+```
+
+`execution_id` correlates one execution; it is not datasource identity,
+Investigation identity, Evidence identity, source-record identity, artifact
+identity, or a durable execution entity.
+
+PR 27B delivered the smallest durable append-only datasource log
+(`ati.datasource_log`, SQL API v0025, migration 0030) rather than a separate
+durable execution table. The landed contract:
+
+- the closed lifecycle vocabulary is `STARTED`, `ACQUIRED`, `DECODED`,
+  `CONVERTED`, `COMPLETED`, `FAILED`, `CANCELLED`, with terminal outcomes
+  exactly `COMPLETED`/`FAILED`/`CANCELLED`;
+- STARTED is first and unique per execution; at most one terminal outcome
+  exists; no event may follow a terminal outcome; all events of one
+  execution share one `datasource_id`; omitted intermediate stages are legal;
+- lifecycle/concurrency invariants are owned by the versioned stored
+  function (`ati.append_datasource_log_event`) under a per-execution
+  transaction-scoped advisory lock, with partial unique indexes as the
+  STARTED/terminal backstop;
+- durable events carry only bounded operational metadata: stage-local
+  non-negative `item_count`/`byte_count` and a bounded safe `error_code`
+  bound to `FAILED`; source bodies, decoded objects, Evidence bodies,
+  credentials, tokens, and raw exception text are excluded by the schema;
+- `DatasourceExecutionRecorder` (`app/datasource_execution.py`) centralizes
+  event creation and one execution identity, appending each event in a short
+  committed UnitOfWork transaction so no database transaction is held across
+  acquisition/decode/conversion work; cancellation stays cancellation
+  (`CancelledError` propagates after a best-effort CANCELLED append).
+
+Later PR 27C–27E reuse this execution identity and append lifecycle events
+at the actual acquisition/decoding boundaries. They must not create a second
+execution/logging concept. Existing providers remain on the transitional
+pre-27C path until PR 27E.
 
 ## Acquisition boundary
 
@@ -285,16 +325,20 @@ Cancellation propagates unchanged through asynchronous boundaries.
 
 ## Observability
 
-Datasource operational logging should be structured around:
+PR 27B delivered the durable datasource operational event log (`ati.datasource_log`),
+which is structured around:
 
 - datasource identity;
 - `execution_id`;
 - stage/event;
-- bounded counts where useful (objects decoded, converted, Evidence emitted, rejected/skipped);
+- bounded counts where useful (objects decoded, converted, Evidence emitted);
 - safe error code/classification;
-- timestamps/duration where already supported by ATI observability conventions.
+- occurred/created timestamps.
 
-Logs must not contain source bodies, secrets, unsafe URLs, or unbounded record content.
+The durable log is a distinct operational layer: it is not the investigation
+timeline, not Evidence, and not a replacement for application logs or traces
+(see `OBSERVABILITY.md`). Its events never contain source bodies, secrets,
+unsafe URLs, unbounded record content, or raw exception text.
 
 ## Configuration
 
@@ -336,7 +380,18 @@ Formalize datasource/provider/protocol/serialization/semantic-format vocabulary,
 
 ### PR 27B — Acquisition execution and correlated logging
 
-Introduce execution lifecycle correlation using `execution_id`; make acquisition-stage operational outcomes explicit; preserve safe logging and bounded execution. Add persistence only where fresh-main analysis proves it necessary.
+PR 27B delivered the acquisition-execution seam without migrating runtime
+sources: one fresh `execution_id` UUID per acquisition execution, the closed
+lifecycle vocabulary (`STARTED`/`ACQUIRED`/`DECODED`/`CONVERTED`/`COMPLETED`/
+`FAILED`/`CANCELLED` with terminal outcomes exactly
+`COMPLETED`/`FAILED`/`CANCELLED`), the immutable `DatasourceLogEvent` model,
+the append-only `DatasourceLogRepository` port, the
+`DatasourceExecutionRecorder` application helper, and the durable
+append-only `ati.datasource_log` (SQL API v0025, migration 0030).
+Fresh-main analysis confirmed no datasource log existed, so the smallest
+append-only log was added rather than a durable execution table; lifecycle
+and concurrency invariants are database-owned. No provider or batch path
+was changed.
 
 ### PR 27C — Acquisition-to-semantic boundary
 

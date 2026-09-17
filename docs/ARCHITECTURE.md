@@ -1215,6 +1215,30 @@ EvidenceProvider -> ProviderResult -> Evidence`) and batch path
 IngestionService`) remain unchanged and transitional until the
 corresponding PR 27 slices land.
 
+### Datasource execution logging (PR 27B)
+
+PR 27B adds the operational acquisition-execution seam without migrating any
+runtime source: one fresh UUID `execution_id` per acquisition execution, a
+closed lifecycle vocabulary (`STARTED`/`ACQUIRED`/`DECODED`/`CONVERTED`/
+`COMPLETED`/`FAILED`/`CANCELLED` with terminal outcomes exactly
+`COMPLETED`/`FAILED`/`CANCELLED`), the immutable `DatasourceLogEvent` domain
+model, the narrow append-only `DatasourceLogRepository` port, the
+`DatasourceExecutionRecorder` application helper, and the durable
+append-only `ati.datasource_log` persistence (SQL API v0025, migration
+0030). Every event of one execution carries the same `execution_id` and
+`datasource_id`; the stored function owns lifecycle/concurrency enforcement
+under a per-execution advisory lock. No durable `datasource_execution`
+table exists.
+
+The short-transaction rule is a hard invariant: each event append opens and
+commits its own short UnitOfWork, and no database transaction is ever held
+across acquisition, decoding, or conversion work. Cancellation is not
+failure: `CancelledError` propagates after a best-effort CANCELLED append.
+Durable events carry only bounded counts and safe error codes — never
+source bodies, Evidence bodies, credentials, or raw exception text.
+Existing providers, batch normalization, Evidence construction, and
+Investigation behavior are unchanged; PR 27C–27E will reuse this substrate.
+
 ## Geospatial
 
 v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are used for map visualization.

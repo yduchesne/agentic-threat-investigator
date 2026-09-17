@@ -12,6 +12,7 @@
 - [Task dispatch](#task-dispatch)
 - [LLM telemetry](#llm-telemetry)
 - [RAG telemetry](#rag-telemetry)
+- [Datasource operational log](#datasource-operational-log)
 - [Data minimization](#data-minimization)
 - [Structured logging](#structured-logging)
 - [Metrics vocabulary](#metrics-vocabulary)
@@ -234,6 +235,29 @@ Record:
 - ranking/similarity metadata where useful;
 - latency;
 - synthesis validation/citation outcome.
+
+## Datasource operational log (PR 27B)
+
+PR 27B adds a distinct durable operational layer: `ati.datasource_log`
+records one acquisition execution's lifecycle events, each carrying the
+same `execution_id` and `datasource_id` (`STARTED`/`ACQUIRED`/`DECODED`/
+`CONVERTED`/`COMPLETED`/`FAILED`/`CANCELLED`; terminal outcomes exactly
+`COMPLETED`/`FAILED`/`CANCELLED`). It is deliberately separate from:
+
+- application logs/traces: the datasource log is not a replacement for
+  structured logging or LangSmith tracing and never carries prompts,
+  durations, or per-call diagnostics beyond its bounded fields;
+- the investigation timeline and audit log: datasource events are
+  operational acquisition history, not analyst-facing workflow or
+  security/governance history;
+- Evidence/provenance: datasource log events are not Evidence, never enter
+  Evidence persistence, and carry no facts, payloads, or Evidence content.
+
+The log persists only bounded operational metadata (stage-local non-negative
+`item_count`/`byte_count`, a safe bounded `error_code` bound to `FAILED`)
+plus identities and timestamps. Cancellation is recorded as `CANCELLED` and
+never as a failure code; raw exception text, tracebacks, source bodies,
+credentials, and unsafe URLs never enter the log.
 
 ## Data minimization
 

@@ -19,6 +19,9 @@ from uuid import UUID
 
 from agentic_threat_investigator.domain.assessment import Assessment
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
+from agentic_threat_investigator.domain.datasource import (
+    DatasourceLogEvent,
+)
 from agentic_threat_investigator.domain.documents import Document, DocumentChunk
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import Evidence
@@ -853,6 +856,97 @@ class DocumentChunkBatchResult:
     chunk_id: UUID
     version: int
     outcome: BatchOutcome
+
+
+class DatasourceLogInvalidInputError(ValueError):
+    """Raised when the database rejects malformed datasource-log input.
+
+    The database owns bounded canonical validation (SQLSTATE ``U27B1``); a
+    bypassed Python model cannot smuggle invalid counts, error codes, or
+    event types into the durable log.
+    """
+
+
+class DatasourceLogFirstEventError(ValueError):
+    """Raised when an execution's first persisted event is not STARTED.
+
+    The database enforces that STARTED is first (SQLSTATE ``U27B2``); an
+    execution identity only exists after its STARTED event.
+    """
+
+    def __init__(self, execution_id: UUID) -> None:
+        """Record the execution whose first event was not STARTED."""
+        super().__init__(
+            f"first datasource log event must be STARTED for execution {execution_id}"
+        )
+        self.execution_id = execution_id
+
+
+class DatasourceLogDatasourceMismatchError(ValueError):
+    """Raised when one execution carries two different datasource IDs.
+
+    The database rejects a mismatched datasource identity (SQLSTATE
+    ``U27B3``): all events of one execution share one datasource.
+    """
+
+    def __init__(self, execution_id: UUID, datasource_id: str | None = None) -> None:
+        """Record the rejected execution and the offending datasource ID."""
+        super().__init__(
+            f"datasource identity mismatch for execution {execution_id}"
+            + (f": {datasource_id}" if datasource_id is not None else "")
+        )
+        self.execution_id = execution_id
+        self.datasource_id = datasource_id
+
+
+class DatasourceLogDuplicateStartedError(ValueError):
+    """Raised when a second STARTED event is appended for one execution.
+
+    The database enforces one STARTED per execution (SQLSTATE ``U27B4``,
+    backed by a partial unique index).
+    """
+
+    def __init__(self, execution_id: UUID) -> None:
+        """Record the execution with a duplicate STARTED attempt."""
+        super().__init__(f"duplicate STARTED event for execution {execution_id}")
+        self.execution_id = execution_id
+
+
+class DatasourceLogAppendAfterTerminalError(ValueError):
+    """Raised when an event is appended after a terminal outcome.
+
+    The database rejects any append after COMPLETED/FAILED/CANCELLED
+    (SQLSTATE ``U27B5``, backed by the partial terminal unique index for
+    terminal-vs-terminal races).
+    """
+
+    def __init__(self, execution_id: UUID) -> None:
+        """Record the terminal execution that received a late append."""
+        super().__init__(
+            f"cannot append datasource log event after terminal outcome for "
+            f"execution {execution_id}"
+        )
+        self.execution_id = execution_id
+
+
+class DatasourceLogRepository(ABC):  # pragma: no cover
+    """Append-only repository for immutable datasource-log events.
+
+    One acquisition execution is correlated by its ``execution_id``; the
+    database owns every lifecycle invariant (STARTED first and unique,
+    datasource identity stability, at most one terminal, no append after
+    terminal). There is deliberately no update, delete, search, pagination,
+    or execution-CRUD operation: mutation is append-only.
+    """
+
+    @abstractmethod
+    async def append(self, event: DatasourceLogEvent) -> None:
+        """Append one event in the caller's transaction without committing.
+
+        The stored function validates the event against the execution's
+        durable lifecycle and rejects violations with typed errors; the
+        caller's UnitOfWork remains the commit boundary.
+        """
 
 
 class DocumentRepository(ABC):
@@ -1735,6 +1829,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     entity_locations: EntityLocationRepository
     entity_location_observations: EntityLocationObservationRepository
     geo_resolutions: GeoResolutionRepository
+    datasource_logs: DatasourceLogRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:
