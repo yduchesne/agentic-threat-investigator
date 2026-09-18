@@ -542,6 +542,53 @@ endpoint is faked via in-process `httpx.MockTransport`:
   `ati.datasource_log` rows. MITRE identity/hash/normalization/checkpoint
   stability is pinned by the existing MITRE suites (D27E-B09/B10).
 
+### Evidence message wire contract (PR 28C)
+
+PR 28C tests are deterministic, offline, and involve no database, network,
+broker, or UnitOfWork. `tests/unit/app/test_evidence_message.py` pins the
+E28C matrix:
+
+- identity (E28C-I01..I10): deterministic UUIDv5 `message_id` over
+  execution + flattened sequence + Evidence identity, deterministic
+  `observation_candidate_id` derived from the message identity,
+  tuple-reactive identity changes, retrieval-time independence, no broker
+  metadata dependence, Evidence identity free of schema representation,
+  and negative-sequence rejection;
+- builder/binding (E28C-B01..B16): exact V1 mapping from
+  `ConvertedEvidence` + `SemanticSourceContext` + execution ID + sequence,
+  fail-closed Evidence/candidate/source cross-binding, empty record
+  identity and empty source URL rejection, naive timestamp rejection,
+  nullable `observed_at`/`raw_payload`, empty facts, deterministic
+  flattened 0..N-1 sequences, and boolean `schema_version` rejection;
+- round trips (E28C-R01..R06): message -> bytes -> message and
+  `ConvertedEvidence` -> message -> `ConvertedEvidence` equality, exact
+  nested JSON, UTF-8 Unicode, microsecond precision, and non-UTC aware
+  timestamp canonicalization;
+- canonical encoding (E28C-S01..S09): byte-identical repeated encoding,
+  facts/raw-payload insertion-order independence, canonical lowercase
+  UUID strings, stable enum URNs, pinned JSON nulls, and NaN/Infinity/
+  arbitrary-object rejection;
+- strict decode (E28C-D01..D18): malformed JSON/UTF-8 -> decode error,
+  missing/non-integer/zero/bool/string/float/version-2 schema handling
+  (unsupported-version vs validation error), extra-field rejection,
+  malformed UUID/timestamp rejection, identity-mismatch rejection,
+  facts-array/raw-payload-scalar rejection, missing-provenance rejection,
+  non-standard JSON constants rejected as malformed, non-string
+  `datasource_id` rejection, and bounded error text that never echoes the
+  raw payload;
+- contract boundary (E28C-P01..P08): no Investigation/subject/graph/
+  broker/generic-metadata state, reconstructed candidate carries no
+  Observation version/diff, and material-state equality under retrieval-
+  time-only change;
+- ThreatFox vertical slices (E28C-V01..V03): production
+  `ThreatFoxToEvidenceConverter` -> builder -> canonical encode -> strict
+  decode -> reconstruction with the canonical synthetic AsyncRAT fixture
+  (stable Evidence identity, exact source record, bounded provenance,
+  no DB/network); deterministic slot replay; and a later unchanged
+  acquisition keeping Evidence identity with distinct message/candidate
+  identities and equal `EvidenceMaterialState` (no DB behavior is tested
+  here — that stays PR 28E).
+
 ### Deterministic vertical-slice provider execution (PR 19B)
 
 `tests/integration/test_provider_execution_pipeline.py` proves the real

@@ -1,12 +1,15 @@
 # ATI — v0.2 Global Evidence and Distributed Ingestion Architecture
 
-> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered.**
+> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered.**
 >
 > This document records the architectural decisions that govern the PR 28 series. `ROADMAP_V02.md` defines the delivery sequence. Delivered v0.1 behavior remains authoritative until the corresponding PR 28 slice lands.
 >
 > **PR 28A delivered scope:** the Python/domain contracts below — stable global `Evidence`, immutable `EvidenceObservation` with per-Evidence versions and material-state transitions, `EvidenceObservationEntity`, global `RelationshipObservation` provenance, exact `InvestigationEvidence` admission, deterministic semantic-format/source-record Evidence identity, and the Investigation-independent `ToEvidenceConverter` boundary producing `ConvertedEvidence` (global Evidence + observation candidate).
 >
-> **PR 28B delivered scope:** PostgreSQL tables/migrations for `Evidence`/`EvidenceObservation`/`EvidenceObservationEntity`/`InvestigationEvidence` (SQL API v0026, migration 0031), DB-owned race-safe per-Evidence version allocation with material no-op detection and canonical diffs, exact `RelationshipObservation`→`EvidenceObservation` provenance, exact Investigation admission, Investigation-scoped Evidence/Relationship/Analyst/GEOINT reads through admission, GEOINT provenance on `EvidenceObservation`, the synchronous datasource (ThreatFox) write path on the global model without any `LegacyEvidence` rebind, and exact-observation Assessment/report/coordinator/timeline provenance. The distributed log, `EvidenceMessage`, and consumer processing remain PR 28C–28H.
+> **PR 28B delivered scope:** PostgreSQL tables/migrations for `Evidence`/`EvidenceObservation`/`EvidenceObservationEntity`/`InvestigationEvidence` (SQL API v0026, migration 0031), DB-owned race-safe per-Evidence version allocation with material no-op detection and canonical diffs, exact `RelationshipObservation`→`EvidenceObservation` provenance, exact Investigation admission, Investigation-scoped Evidence/Relationship/Analyst/GEOINT reads through admission, GEOINT provenance on `EvidenceObservation`, the synchronous datasource (ThreatFox) write path on the global model without any `LegacyEvidence` rebind, and exact-observation Assessment/report/coordinator/timeline provenance. The
+`EvidenceMessage` wire contract is delivered in PR 28C below; the
+distributed log publisher/consumer abstraction and consumer processing
+remain PR 28D–28H.
 
 ## PR 28B persistence and Investigation-scoped reads
 
@@ -29,6 +32,97 @@ exact admission (including discovered-from validation), and
 `domain_object_history`; the observation row is authoritative intelligence
 history. Newer global observations never leak into an Investigation:
 scope comes exclusively from `ati.investigation_evidence`.
+
+## PR 28C EvidenceMessage wire contract (delivered)
+
+PR 28C defines the explicit, versioned, broker-independent `EvidenceMessage`
+wire contract between semantic conversion and the future distributed-log
+boundary (`src/agentic_threat_investigator/app/evidence_message.py`). It
+publishes nothing, consumes nothing, opens no UnitOfWork, and leaves the
+synchronous datasource runtime behaviorally unchanged. The wire form is
+**never** a direct serialization of `ConvertedEvidence`, `Evidence`,
+`EvidenceObservation`, `EvidenceObservationCandidate`, or
+`SemanticSourceContext`.
+
+```text
+ConvertedEvidence + SemanticSourceContext
+  + datasource_execution_id + sequence
+  -> EvidenceMessage v1          (evidence_message_from_converted)
+  -> canonical UTF-8 JSON bytes  (encode_evidence_message)
+  -> strict decode               (decode_evidence_message)
+  -> ConvertedEvidence           (converted_evidence_from_message)
+```
+
+### V1 fields (exact)
+
+| Field | Type | Semantics |
+|---|---|---|
+| `schema_version` | int = 1 | explicit wire version; exactly `1` |
+| `message_id` | UUID | producer-side replay-stable UUIDv5 identity |
+| `observation_candidate_id` | UUID | proposed/replay candidate identity |
+| `datasource_execution_id` | UUID | one producer acquisition execution |
+| `datasource_id` | `DatasourceId` | bounded datasource-instance identity |
+| `source_id` | `SourceId` | source namespace URN |
+| `semantic_format` | `SemanticFormatId` | semantic-format URN |
+| `sequence` | int >= 0 | zero-based flattened `ConvertedEvidence` order |
+| `evidence_id` | UUID | existing global Evidence identity |
+| `evidence_type` | `EvidenceType` | stable evidence-type URN |
+| `source_record_id` | non-empty str | exact upstream record identity (never normalized) |
+| `retrieved_at` | aware UTC datetime | acquisition provenance (operational only) |
+| `observed_at` | aware UTC datetime or null | material state |
+| `source_url` | str or null | material state (credential-free source reference) |
+| `facts` | JSON object | material state |
+| `raw_payload` | JSON object or null | material state (source intelligence payload only) |
+
+### Identity distinctions
+
+- `evidence_id` reuses `evidence_id_for_source_record(semantic_format,
+  source_id, source_record_id)`; it is recomputed and validated on every
+  construction and decode. Schema representation and producer slot never
+  participate.
+- `message_id` is an ATI-owned UUIDv5 over the exact
+  `(datasource_execution_id, sequence, evidence_id)` producer execution
+  slot. It is replay-stable per slot: a new datasource execution is a new
+  acquisition event and may carry a new `message_id` even when the semantic
+  state is unchanged. Retrieval time, broker metadata, Investigation/Entity
+  identity, Python hash, and `uuid4` never participate.
+- `observation_candidate_id` is an ATI-owned UUIDv5 derived from
+  `message_id`. It is the producer/replay identity of the **proposed**
+  material state — explicitly **not** the committed `EvidenceObservation.id`
+  and not proof that a new observation exists. A future CREATED/APPENDED
+  consumer may propose this ID to PostgreSQL; for an UNCHANGED outcome
+  PostgreSQL returns the existing observation ID and the candidate ID is
+  unused.
+- The producer never allocates `EvidenceObservation.version` or `diff`;
+  PostgreSQL owns create/no-change/append, version, and diff (PR 28B).
+
+### Bounded provenance and exclusions
+
+Provenance is bounded to the datasource execution, datasource/source/
+semantic-format identities, and the candidate's source/retrieval
+provenance. Absent by construction: Investigation ownership, subject
+Entity, pivot/work-item state, reports, agent state, derived
+Entity/Relationship/GEOINT/Assessment state, broker topic/partition/offset/
+group/delivery metadata, and any generic `metadata`/`headers`/`config`/
+`credentials`/`extra` dictionary. No credentials, auth headers, cookies,
+secret references, or exception text enter the contract.
+
+### Canonical JSON and versioning
+
+The codec is explicitly owned (never `model_dump_json()`): canonical UTF-8
+JSON with sorted keys, compact fixed separators, `allow_nan=False`,
+canonical lowercase UUID strings, stable enum URN values, and `Z`-pinned
+UTC timestamps with fixed microseconds — structurally equal messages encode
+to byte-identical output. `decode_evidence_message` fails closed with typed
+bounded errors: malformed UTF-8/JSON is a decode error, any version other
+than `1` is an unsupported-version error, and unknown fields, malformed
+values, negative sequences, empty record identities, NaN/Infinity, and
+identity mismatches are validation errors. V1 accepts exactly
+`schema_version == 1`; future versions must explicitly define reader
+compatibility, writer selection, migration/default rules, and identity
+stability. PR 28D defines the publisher/consumer/log abstraction over this
+contract and PR 28F publishes messages from datasource executions; until
+then production remains synchronous.
 
 ## Domain model
 
