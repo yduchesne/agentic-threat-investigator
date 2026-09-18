@@ -33,11 +33,21 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.database 
 
 
 def api_settings() -> Settings:
-    """Build the settings the API process uses against the test database."""
+    """Build the settings the API process uses against the test database.
+
+    Mirrors ``tests/integration/conftest._database_url``: the isolated
+    database is provisioned by Alembic with ``SET search_path TO ati, public``
+    (see ``migrations/env.py``), and its PostGIS objects live in the ``ati``
+    schema, so the API engine's connections carry the identical search path
+    via the DSN ``options`` parameter.
+    """
     url = os.environ.get("DATABASE_URL")
     if not url:
         pytest.fail("DATABASE_URL must point at the isolated integration database")
     ensure_test_database_safe(url)
+    if "search_path" not in url:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}options=-csearch_path=ati,public"
     return Settings(
         database_url=url,
         public_base_url="http://testserver",

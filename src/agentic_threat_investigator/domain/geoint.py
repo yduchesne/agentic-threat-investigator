@@ -230,10 +230,10 @@ class EntityLocationObservation(BaseModel):
     """An immutable historical geographic observation with exact provenance.
 
     One persisted row is one immutable historical observation. The exact
-    ``entity_id``, ``location_id``, and ``evidence_id`` are stored explicitly;
-    historical observations never derive their Location through mutable
-    current ``EntityLocation`` state. There is no update, delete, or
-    soft-delete path.
+    ``entity_id``, ``location_id``, and ``evidence_observation_id`` (the exact
+    PR 28B EvidenceObservation) are stored explicitly; historical
+    observations never derive their Location through mutable current
+    ``EntityLocation`` state. There is no update, delete, or soft-delete path.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -241,7 +241,7 @@ class EntityLocationObservation(BaseModel):
     id: UUID
     entity_id: UUID
     location_id: UUID
-    evidence_id: UUID
+    evidence_observation_id: UUID
     precision: LocationPrecision
     observed_at: datetime | None = None
     retrieved_at: datetime
@@ -315,18 +315,19 @@ def observation_uuid_for_resolution(resolution_id: UUID) -> UUID:
 
 
 class GeoResolution(BaseModel):
-    """Durable operational geographic-enrichment work for one Entity/Evidence pair.
+    """Durable work for one Entity/EvidenceObservation pair (PR 26A + PR 28B).
 
     Pending/processing/failure state belongs here, never on Evidence or on
     EntityLocationObservation. PR 26A persists initial PENDING work and reads
-    only; claim/lease/retry/completion semantics belong to PR 26C.
+    only; claim/lease/retry/completion semantics belong to PR 26C. The pair
+    binds the exact EvidenceObservation provenance (PR 28B).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id: UUID | None = None
     entity_id: UUID
-    evidence_id: UUID
+    evidence_observation_id: UUID
     status: GeoResolutionStatus = GeoResolutionStatus.PENDING
     attempt_count: int = 0
     next_attempt_at: datetime | None = None

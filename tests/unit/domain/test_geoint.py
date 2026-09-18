@@ -39,7 +39,7 @@ def _observation(**overrides: object) -> EntityLocationObservation:
         "id": uuid4(),
         "entity_id": uuid4(),
         "location_id": uuid4(),
-        "evidence_id": uuid4(),
+        "evidence_observation_id": uuid4(),
         "precision": LocationPrecision.COUNTRY,
         "observed_at": now,
         "retrieved_at": now,
@@ -70,7 +70,7 @@ def _resolution(**overrides: object) -> GeoResolution:
     values: dict[str, object] = {
         "id": uuid4(),
         "entity_id": uuid4(),
-        "evidence_id": uuid4(),
+        "evidence_observation_id": uuid4(),
     }
     values.update(overrides)
     return GeoResolution.model_validate(values)

@@ -88,20 +88,25 @@ def _empty_facts() -> FrozenDict:
 
 
 class AnalystEvidenceItem(BaseModel):
-    """The minimized, normalized Evidence view shown to the model.
+    """The minimized, normalized Evidence view shown to the model (PR 28B).
 
-    ``facts`` are the normalized evidence facts: provider-specific scores stay
-    normalized facts and analytical confidence belongs to the Assessment.
-    ``raw_payload`` and HTTP headers are never included. ``source_url`` is
-    omitted for PR 20B: normalized facts and stable source metadata are
-    sufficient to reason and cite.
+    ``evidence_observation_id`` is the exact immutable EvidenceObservation
+    identity (never the stable Evidence ID): the analyst reasons about and
+    cites exact admitted observations. The v0.1 privileged ``subject`` is
+    replaced by the deterministic bounded tuple of ``entities`` associated
+    with the exact observation — there is no role or privileged Entity.
+    ``facts`` are the normalized evidence facts: provider-specific scores
+    stay normalized facts and analytical confidence belongs to the
+    Assessment. ``raw_payload`` and HTTP headers are never included;
+    ``source_url`` is omitted for PR 20B: normalized facts and stable source
+    metadata are sufficient to reason and cite.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    evidence_id: UUID
+    evidence_observation_id: UUID
     type: EvidenceType
-    subject: AnalystEntity
+    entities: tuple[AnalystEntity, ...] = ()
     source: str
     source_record_id: str | None = None
     observed_at: datetime | None = None
@@ -121,12 +126,15 @@ class AnalystRelationshipObservation(BaseModel):
     The observation identity is the exact identity the model must cite for a
     graph-backed Finding. A bare Relationship is never citable, so the DTO
     always resolves the stable Relationship and its endpoint entities.
+    ``evidence_observation_id`` is the exact backing EvidenceObservation
+    (PR 28B): every visible observation is backed by an observation in the
+    exact admitted analyst Evidence set.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     relationship_observation_id: UUID
-    evidence_id: UUID
+    evidence_observation_id: UUID
     relationship_id: UUID
     relationship_type: RelationshipType
     source_entity: AnalystEntity
@@ -198,18 +206,19 @@ class AnalystGeointObservation(BaseModel):
     """One immutable geographic observation with exact provenance (PR 26F).
 
     ``observation_id`` is the exact ``EntityLocationObservation`` identity
-    and ``evidence_id`` the exact immutable Evidence that produced it; the
-    model must cite them as an exact pair. ``observed_at`` is the
-    source-semantic observation time when present, ``retrieved_at`` the
-    collection time, and ``resolved_at`` the ATI resolution time; a missing
-    ``observed_at`` is never replaced with an invented time.
+    and ``evidence_observation_id`` the exact EvidenceObservation that
+    produced it (PR 28B); the model must cite them as an exact pair.
+    ``observed_at`` is the source-semantic observation time when present,
+    ``retrieved_at`` the collection time, and ``resolved_at`` the ATI
+    resolution time; a missing ``observed_at`` is never replaced with an
+    invented time.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     observation_id: UUID
     entity_id: UUID
-    evidence_id: UUID
+    evidence_observation_id: UUID
     location: AnalystGeointLocation
     precision: LocationPrecision
     resolution_method: str
@@ -436,10 +445,11 @@ class GeographicTemporalInterpretation(str, Enum):
 class GeographicFinding(BaseModel):
     """One structured, validated geographic analytical claim (PR 26F).
 
-    ``observation_ids`` and ``evidence_ids`` are parallel lists: the
-    Evidence at each index is the exact Evidence of the observation at the
-    same index. Every referenced identity must be one of the exact
-    observation/Evidence pairs supplied to this invocation; the
+    ``observation_ids`` and ``evidence_observation_ids`` are parallel lists:
+    the EvidenceObservation at each index is the exact provenance of the
+    observation at the same index (PR 28B). Every referenced identity must
+    be one of the exact observation/EvidenceObservation pairs supplied to
+    this invocation; the
     :class:`~agentic_threat_investigator.app.evidence_analyst.geoint_validation.GeointFindingValidator`
     rejects unknown, substituted, or cross-scope references before
     persistence. ``limitations`` carries bounded honesty statements rather
@@ -451,7 +461,7 @@ class GeographicFinding(BaseModel):
     kind: GeographicFindingKind
     statement: str
     observation_ids: tuple[UUID, ...]
-    evidence_ids: tuple[UUID, ...]
+    evidence_observation_ids: tuple[UUID, ...]
     entity_ids: tuple[UUID, ...]
     location_ids: tuple[UUID, ...]
     temporal_interpretation: GeographicTemporalInterpretation = (
@@ -468,7 +478,11 @@ class GeographicFinding(BaseModel):
         return value
 
     @field_validator(
-        "observation_ids", "evidence_ids", "entity_ids", "location_ids", mode="after"
+        "observation_ids",
+        "evidence_observation_ids",
+        "entity_ids",
+        "location_ids",
+        mode="after",
     )
     @classmethod
     def collections_bounded_and_unique(
@@ -498,11 +512,11 @@ class GeographicFinding(BaseModel):
 
     @model_validator(mode="after")
     def _validate_parallel_evidence(self) -> "GeographicFinding":
-        """Require the observation and Evidence lists to be parallel."""
-        if len(self.observation_ids) != len(self.evidence_ids):
+        """Require the observation and EvidenceObservation lists to be parallel."""
+        if len(self.observation_ids) != len(self.evidence_observation_ids):
             raise ValueError(
-                "observation_ids and evidence_ids must be parallel lists with "
-                "equal length"
+                "observation_ids and evidence_observation_ids must be parallel "
+                "lists with equal length"
             )
         return self
 

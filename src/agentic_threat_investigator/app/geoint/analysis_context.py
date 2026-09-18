@@ -76,7 +76,8 @@ def _eligible_entity_ids(analyst_input: EvidenceAnalystInput) -> list[UUID]:
     for entity in analyst_input.root_entities:
         add(entity.entity_id)
     for item in analyst_input.evidence:
-        add(item.subject.entity_id)
+        for entity in item.entities:
+            add(entity.entity_id)
     for observation in analyst_input.relationship_observations:
         add(observation.source_entity.entity_id)
         add(observation.target_entity.entity_id)
@@ -101,7 +102,7 @@ def _analyst_observation(item: GeointObservationItem) -> AnalystGeointObservatio
     return AnalystGeointObservation(
         observation_id=item.observation_id,
         entity_id=item.entity_id,
-        evidence_id=item.evidence_id,
+        evidence_observation_id=item.evidence_observation_id,
         location=_analyst_location(item.location),
         precision=item.precision,
         resolution_method=item.resolution_method,
@@ -218,7 +219,9 @@ class GeointAnalysisContextPolicy:
                 _BOUND_ENTITIES, self._max_entities, len(eligible)
             )
 
-        evidence_ids = {item.evidence_id for item in analyst_input.evidence}
+        evidence_observation_ids = {
+            item.evidence_observation_id for item in analyst_input.evidence
+        }
         entity_contexts: list[AnalystEntityGeointContext] = []
         total_observations = 0
         for entity_id in eligible:
@@ -231,7 +234,7 @@ class GeointAnalysisContextPolicy:
                 limit=self._max_observations_per_entity,
             )
             observations = self._observations_for_entity(
-                current, history_result.items, evidence_ids
+                current, history_result.items, evidence_observation_ids
             )
             current_observation, history = observations
             total_observations += 1 + len(history)
@@ -273,7 +276,7 @@ class GeointAnalysisContextPolicy:
     def _observations_for_entity(
         current: GeointEntityLocationItem,
         history_items: tuple[GeointObservationItem, ...],
-        evidence_ids: set[UUID],
+        evidence_observation_ids: set[UUID],
     ) -> tuple[AnalystGeointObservation, tuple[AnalystGeointObservation, ...]]:
         """Return the current observation and its strictly-older history DTOs.
 
@@ -282,7 +285,8 @@ class GeointAnalysisContextPolicy:
         containing the current observation in normal operation). The returned
         history excludes the current observation so the model-visible context
         never duplicates an observation, and every returned observation fails
-        closed when its Evidence is missing from the analyst input.
+        closed when its backing EvidenceObservation is absent from the
+        analyst input (PR 28B admission restriction).
         """
         current_dto = _analyst_observation(current.current_observation)
         history: list[AnalystGeointObservation] = []
@@ -296,9 +300,10 @@ class GeointAnalysisContextPolicy:
             seen.add(item.observation_id)
             history.append(_analyst_observation(item))
         for observation in (*history, current_dto):
-            if observation.evidence_id not in evidence_ids:
+            if observation.evidence_observation_id not in evidence_observation_ids:
                 raise GeointObservationEvidenceError(
-                    observation.observation_id, observation.evidence_id
+                    observation.observation_id,
+                    observation.evidence_observation_id,
                 )
         return current_dto, tuple(history)
 

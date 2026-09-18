@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Deterministic provider contract tests for the AbuseIPDB provider.
 
 Covers lookup behavior, request shape, typed error mapping, and the
@@ -9,6 +7,8 @@ contacts the real AbuseIPDB service.
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 import asyncio
 from datetime import UTC, datetime
 from typing import Any
@@ -18,7 +18,8 @@ import pytest
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.abuseipdb import (
     _ABUSEIPDB_ENDPOINT,
     AbuseIpdbProvider,
@@ -161,7 +162,7 @@ class TestAbuseIpdbProviderContract:
 
         assert result.errors == ()
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type == EvidenceType.REPUTATION
         assert evidence.investigation_id == FIXED_UUID
         assert evidence.source == provider.id
@@ -218,7 +219,7 @@ class TestAbuseIpdbProviderContract:
             )
         assert result.errors == ()
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type == EvidenceType.REPUTATION
         # All approved keys remain present, with documented null/empty values.
         assert set(evidence.facts) == _APPROVED_FACT_KEYS
@@ -243,7 +244,7 @@ class TestAbuseIpdbProviderContract:
                     FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value=SYNTHETIC_IPV4)
                 )
             assert result.errors == ()
-            assert result.evidence[0].facts["is_whitelisted"] is value
+            assert _legacy(result.evidence[0]).facts["is_whitelisted"] is value
 
     async def test_canonical_ipv6_lookup(self) -> None:
         """An IPv6 lookup queries the canonical form and checks family 6."""
@@ -262,7 +263,7 @@ class TestAbuseIpdbProviderContract:
             )
         assert result.errors == ()
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.subject.value == SYNTHETIC_IPV6
         assert set(evidence.facts) == _APPROVED_FACT_KEYS
         assert evidence.facts["ip_address"] == SYNTHETIC_IPV6
@@ -281,7 +282,7 @@ class TestAbuseIpdbProviderContract:
                 FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value=SYNTHETIC_IPV4)
             )
         assert result.errors == ()
-        assert result.evidence[0].facts["max_age_in_days"] == 90
+        assert _legacy(result.evidence[0]).facts["max_age_in_days"] == 90
 
     async def test_textual_variant_identity_accepted(self) -> None:
         """A canonical response IP matching the canonical query is valid."""
@@ -293,7 +294,7 @@ class TestAbuseIpdbProviderContract:
                 Entity(type=EntityType.IP_ADDRESS, value=f"  {SYNTHETIC_IPV4}  "),
             )
         assert result.errors == ()
-        assert result.evidence[0].facts["ip_address"] == SYNTHETIC_IPV4
+        assert _legacy(result.evidence[0]).facts["ip_address"] == SYNTHETIC_IPV4
 
     async def test_wrong_identity_rejected(self) -> None:
         """A response about a different IP is rejected as INVALID_RESPONSE."""
@@ -408,7 +409,7 @@ class TestAbuseIpdbProviderContract:
             result = await build_provider(client).investigate(
                 FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value=SYNTHETIC_IPV4)
             )
-        reports = result.evidence[0].facts["reports"]
+        reports = _legacy(result.evidence[0]).facts["reports"]
         assert list(reports[0]["categories"]) == [99, 14, 14]
 
     async def test_report_order_preserved(self) -> None:
@@ -424,7 +425,7 @@ class TestAbuseIpdbProviderContract:
             result = await build_provider(client).investigate(
                 FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value=SYNTHETIC_IPV4)
             )
-        reports_fact = result.evidence[0].facts["reports"]
+        reports_fact = _legacy(result.evidence[0]).facts["reports"]
         assert [r["reported_at"] for r in reports_fact] == [
             "2026-01-15T11:00:00+00:00",
             "2026-01-15T12:00:00+00:00",
@@ -440,7 +441,7 @@ class TestAbuseIpdbProviderContract:
                 FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value=SYNTHETIC_IPV4)
             )
         assert result.errors == ()
-        facts = result.evidence[0].facts
+        facts = _legacy(result.evidence[0]).facts
         assert not facts["reports"]
         assert facts["last_reported_at"] is None
         assert facts["max_age_in_days"] == 30
@@ -566,7 +567,7 @@ class TestAbuseIpdbProviderFailures:
             result = await build_provider(client).investigate(
                 FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value=SYNTHETIC_IPV4)
             )
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         with pytest.raises(TypeError):
             evidence.facts["ip_address"] = "changed"
         with pytest.raises(TypeError):
@@ -628,8 +629,22 @@ class TestAbuseIpdbProviderFailures:
             result = await build_provider(client).investigate(
                 FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value=SYNTHETIC_IPV4)
             )
-        assert result.evidence[0].subject.id is None
+        assert _legacy(result.evidence[0]).subject.id is None
         # The evidence carries exactly one REPUTATION observation and no
         # relationship, pivot, or persistence artifact of any kind.
         assert len(result.evidence) == 1
-        assert result.evidence[0].type == EvidenceType.REPUTATION
+        assert _legacy(result.evidence[0]).type == EvidenceType.REPUTATION
+
+
+def _legacy(
+    item: ConvertedEvidence | LegacyEvidence,
+) -> LegacyEvidence:
+    """Narrow one provider-output item to its transitional LegacyEvidence shape.
+
+    These provider contract tests exercise the unmigrated legacy providers,
+    which emit ``LegacyEvidence``; ``ProviderResult.evidence`` is typed as the
+    PR 28B compatibility union so the approved legacy test seam narrows
+    explicitly. No identity is invented and no global persistence is involved.
+    """
+    assert isinstance(item, LegacyEvidence)  # legacy provider contract
+    return item

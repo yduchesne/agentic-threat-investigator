@@ -27,6 +27,16 @@ from uuid import UUID, uuid5
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.query.geoint import effective_observation_time
 from agentic_threat_investigator.domain.entities import Entity
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    EvidenceObservationCandidate,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
+from agentic_threat_investigator.domain.evidence import (
+    Evidence as StableEvidence,
+)
 from agentic_threat_investigator.domain.geoint import (
     GeoResolution,
     Location,
@@ -37,7 +47,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.evaluation.geoint.models import (
     GeointCurrentState,
     GeointFixture,
@@ -169,7 +178,6 @@ class GeointScenarioMaterializer:
 
         evidence_ids: dict[str, UUID] = {}
         for evidence in fixture.evidence:
-            subject = _entity_by_label(fixture, evidence.subject)
             if evidence.other_investigation:
                 if other_id is None:  # pragma: no cover
                     raise ValueError(
@@ -179,24 +187,41 @@ class GeointScenarioMaterializer:
                 scope_id = other_id
             else:
                 scope_id = investigation_id
-            persisted_evidence = await uow.evidence.insert(
-                LegacyEvidence(
-                    id=self._planned(scenario, "evidence", evidence.label),
-                    investigation_id=scope_id,
-                    type=evidence.type,
-                    subject=EntityRef(
-                        id=entity_ids[evidence.subject],
-                        type=subject.type,
-                        value=subject.value,
+            _ = _entity_by_label(fixture, evidence.subject)
+            planned_evidence = self._planned(scenario, "evidence", evidence.label)
+            persisted_evidence = await uow.evidence.persist(
+                ConvertedEvidence(
+                    evidence=StableEvidence(
+                        id=planned_evidence,
+                        type=evidence.type,
+                        source=evidence.source,
+                        source_record_id=f"scenario:{scenario.id}:{evidence.label}",
                     ),
-                    source=evidence.source,
-                    observed_at=evidence.observed_at,
-                    retrieved_at=evidence.retrieved_at or _FIXED_TIMESTAMP,
-                    facts=dict(evidence.facts),
+                    observation=EvidenceObservationCandidate(
+                        evidence_id=planned_evidence,
+                        observed_at=evidence.observed_at,
+                        retrieved_at=evidence.retrieved_at or _FIXED_TIMESTAMP,
+                        facts=dict(evidence.facts),
+                    ),
+                ),
+                observation_id=self._planned(
+                    scenario, "evidence_observation", evidence.label
+                ),
+            )
+            await uow.evidence_observation_entities.associate(
+                persisted_evidence.observation.id, entity_ids[evidence.subject]
+            )
+            await uow.investigation_evidence.admit(
+                InvestigationEvidence(
+                    investigation_id=scope_id,
+                    evidence_observation_id=persisted_evidence.observation.id,
+                    inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                    added_at=persisted_evidence.observation.retrieved_at,
+                    added_by=InvestigationEvidenceActor.SYSTEM,
                 )
             )
             evidence_ids[evidence.label] = _persisted_id(
-                persisted_evidence, "evidence", evidence.label
+                persisted_evidence.observation, "evidence_observation", evidence.label
             )
 
         resolution_ids: dict[str, UUID] = {}
@@ -206,7 +231,7 @@ class GeointScenarioMaterializer:
                 GeoResolution(
                     id=resolution_id,
                     entity_id=entity_ids[resolution.entity],
-                    evidence_id=evidence_ids[resolution.evidence],
+                    evidence_observation_id=evidence_ids[resolution.evidence],
                 )
             )
             resolution_ids[resolution.label] = resolution_id
@@ -240,7 +265,9 @@ class GeointScenarioMaterializer:
             rows = await uow.entity_location_observations.list_for_entity(
                 entity_id, limit=100
             )
-            matched = [row for row in rows if row.evidence_id == evidence_id]
+            matched = [
+                row for row in rows if row.evidence_observation_id == evidence_id
+            ]
             if matched:
                 observation_ids[fixture_resolution.label] = matched[0].id
         return resolution.model_copy(update={"observation_ids": observation_ids})
@@ -271,7 +298,9 @@ class GeointScenarioMaterializer:
             rows = await uow.entity_location_observations.list_for_entity(
                 entity_id, limit=100
             )
-            matched = [row for row in rows if row.evidence_id == evidence_id]
+            matched = [
+                row for row in rows if row.evidence_observation_id == evidence_id
+            ]
             if matched:
                 row = matched[0]
                 resolution_states.append(
@@ -289,7 +318,7 @@ class GeointScenarioMaterializer:
                             observation_id=row.id,
                             entity_id=row.entity_id,
                             location_id=row.location_id,
-                            evidence_id=row.evidence_id,
+                            evidence_observation_id=row.evidence_observation_id,
                             precision=row.precision,
                             observed_at=row.observed_at,
                             retrieved_at=row.retrieved_at,
@@ -312,17 +341,30 @@ class GeointScenarioMaterializer:
     async def _evidence_scopes(
         uow: UnitOfWork, resolution: GeointScenarioResolution
     ) -> dict[UUID, UUID]:
-        """Return the Investigation of every scenario LegacyEvidence row.
+        """Return the Investigation of every scenario observation.
 
-        The authoritative scope is read from the persisted LegacyEvidence rows;
-        cross-Investigation fixtures attach some rows to the deterministic
-        second Investigation.
+        The authoritative scope is read from the exact InvestigationEvidence
+        admissions; cross-Investigation fixtures attach some observations to
+        the deterministic second Investigation.
         """
         scopes: dict[UUID, UUID] = {}
-        for evidence_id in resolution.evidence_ids.values():
-            evidence = await uow.evidence.get_by_id(evidence_id)
-            if evidence is not None and evidence.investigation_id is not None:
-                scopes[evidence_id] = evidence.investigation_id
+        for observation_id in resolution.evidence_ids.values():
+            for admission in await uow.investigation_evidence.list_for_investigation(
+                resolution.investigation_id
+            ):
+                if admission.evidence_observation_id == observation_id:
+                    scopes[observation_id] = resolution.investigation_id
+            if (
+                resolution.other_investigation_id is not None
+                and observation_id not in scopes
+            ):
+                for (
+                    admission
+                ) in await uow.investigation_evidence.list_for_investigation(
+                    resolution.other_investigation_id
+                ):
+                    if admission.evidence_observation_id == observation_id:
+                        scopes[observation_id] = resolution.other_investigation_id
         return scopes
 
     @staticmethod

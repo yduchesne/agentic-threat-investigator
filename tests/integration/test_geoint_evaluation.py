@@ -280,7 +280,8 @@ def _shared_location_decision(
     )
     by_id = {item.observation_id: item for item in state.observations}
     evidence_ids = tuple(
-        by_id[observation_id].evidence_id for observation_id in observation_ids
+        by_id[observation_id].evidence_observation_id
+        for observation_id in observation_ids
     )
     entity_ids = tuple(
         sorted({by_id[observation_id].entity_id for observation_id in observation_ids})
@@ -295,7 +296,7 @@ def _shared_location_decision(
         statement="The observations resolve to one shared canonical location.",
         temporal_interpretation=GeographicTemporalInterpretation.NONE,
         observation_ids=observation_ids,
-        evidence_ids=evidence_ids,
+        evidence_observation_ids=evidence_ids,
         entity_ids=entity_ids,
         location_ids=location_ids,
     )
@@ -330,7 +331,9 @@ def _history_decision(
         ),
         temporal_interpretation=GeographicTemporalInterpretation.LOCATION_CHANGE_OBSERVED,
         observation_ids=observation_ids,
-        evidence_ids=tuple(by_id[item].evidence_id for item in observation_ids),
+        evidence_observation_ids=tuple(
+            by_id[item].evidence_observation_id for item in observation_ids
+        ),
         entity_ids=tuple({by_id[item].entity_id for item in observation_ids}),
         location_ids=tuple(
             sorted({by_id[item].location_id for item in observation_ids})
@@ -358,7 +361,7 @@ def _independent_support_decision(
         statement="The IP was observed in Seattle; geography is context only.",
         temporal_interpretation=GeographicTemporalInterpretation.NONE,
         observation_ids=(observation_id,),
-        evidence_ids=(observation.evidence_id,),
+        evidence_observation_ids=(observation.evidence_observation_id,),
         entity_ids=(observation.entity_id,),
         location_ids=(observation.location_id,),
     )
@@ -398,7 +401,10 @@ def _overstatement_decision(
         statement="Both entities are effectively colocated.",
         temporal_interpretation=GeographicTemporalInterpretation.NONE,
         observation_ids=(a_obs, b_obs),
-        evidence_ids=(by_id[a_obs].evidence_id, by_id[b_obs].evidence_id),
+        evidence_observation_ids=(
+            by_id[a_obs].evidence_observation_id,
+            by_id[b_obs].evidence_observation_id,
+        ),
         entity_ids=(by_id[a_obs].entity_id, by_id[b_obs].entity_id),
         location_ids=(by_id[a_obs].location_id, by_id[b_obs].location_id),
     )

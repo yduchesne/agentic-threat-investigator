@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for the DB-IP City Lite provider and record normalization.
 
 All records are synthetic dictionaries or the ATI-authored synthetic MMDB
@@ -8,6 +6,8 @@ fixture; no DB-IP network access, download, or real dataset is involved.
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -16,8 +16,9 @@ import pytest
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
 from agentic_threat_investigator.domain.geolocation import GeoPrecision
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.dbip_city_lite import (
     CityLiteDatabase,
     CityLiteMmdb,
@@ -565,7 +566,7 @@ class TestDbIpCityLiteProviderContract:
         )
         assert result.errors == ()
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type is EvidenceType.GEOLOCATION
         assert evidence.source == _PROVIDER_ID
         assert evidence.subject.type is EntityType.IP_ADDRESS
@@ -589,7 +590,7 @@ class TestDbIpCityLiteProviderContract:
         entity = _ip_entity("192.0.2.10")
         database = _FakeDatabase({"192.0.2.10": _city_record()})
         result = await _provider(database).investigate(_FIXED_UUID, entity)
-        assert result.evidence[0].subject.id == entity.id
+        assert _legacy(result.evidence[0]).subject.id == entity.id
 
     @pytest.mark.asyncio
     async def test_malformed_record_is_invalid_response(self) -> None:
@@ -673,4 +674,18 @@ class TestDbIpCityLiteProviderContract:
             _FIXED_UUID, _ip_entity("2001:0DB8:0000:0000:0000:0000:0000:0001")
         )
         assert database.lookups == ["2001:db8::1"]
-        assert result.evidence[0].subject.value == "2001:db8::1"
+        assert _legacy(result.evidence[0]).subject.value == "2001:db8::1"
+
+
+def _legacy(
+    item: ConvertedEvidence | LegacyEvidence,
+) -> LegacyEvidence:
+    """Narrow one provider-output item to its transitional LegacyEvidence shape.
+
+    These provider contract tests exercise the unmigrated legacy providers,
+    which emit ``LegacyEvidence``; ``ProviderResult.evidence`` is typed as the
+    PR 28B compatibility union so the approved legacy test seam narrows
+    explicitly. No identity is invented and no global persistence is involved.
+    """
+    assert isinstance(item, LegacyEvidence)  # legacy provider contract
+    return item

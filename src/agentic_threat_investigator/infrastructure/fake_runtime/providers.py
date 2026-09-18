@@ -1,11 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Deterministic fake live evidence providers (PR 23D).
+"""Deterministic fake live evidence providers (PR 23D + PR 28B).
 
 Each fake provider implements the existing :class:`EvidenceProvider` ABC,
 preserves the exact production ``SourceId`` identity, mirrors the real
-provider's ``supports(Entity)`` applicability, and returns existing
-``ProviderResult``/``LegacyEvidence`` contracts built from the shared
+provider's ``supports(Entity)`` applicability, and returns the PR 28B
+global :class:`ConvertedEvidence` contract built from the shared
 :class:`~agentic_threat_investigator.infrastructure.fake_runtime.catalog.FakeWorldCatalog`.
+
+The fake observation identity is a deterministic **test-seam identity
+namespace** derived from ``(source, entity identity, observation ordinal)``
+so replay of the packaged fake world is deterministic and idempotent. This
+is deliberately NOT an approved product semantic-format contract: product
+sources derive their stable Evidence identity through approved
+semantic-format converters (only ThreatFox is migrated on main), and the
+fake world never claims one. ``source_record_id`` therefore carries the
+fake identity name, never an invented product record identity.
 
 Fake providers:
 
@@ -25,7 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from agentic_threat_investigator.app.providers import (
     EvidenceProvider,
@@ -34,14 +44,30 @@ from agentic_threat_investigator.app.providers import (
     validate_investigation_entity,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import (
-    EntityRef as EvidenceEntityRef,
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
+from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.infrastructure.fake_runtime.catalog import (
     FakeWorldCatalog,
 )
+
+_ATI_ROOT_NAMESPACE = UUID("00000000-0000-0000-0000-0000000000ca")
+"""Stable ATI-owned UUIDv5 root namespace (shared with evaluation fixtures)."""
+
+_FAKE_EVIDENCE_IDENTITY_NAMESPACE = uuid5(
+    _ATI_ROOT_NAMESPACE, "ATI fake-runtime Evidence identity (test seam)"
+)
+"""Deterministic identity namespace of the packaged fake world (PR 28B).
+
+This is a documented test-seam namespace, not an approved product
+semantic-format identity contract. Product Evidence identity comes from
+approved converters; the fake world uses this namespace only so replay of
+the packaged synthetic world is deterministic and idempotent on the PR 28B
+runtime. The value is stable and must never change.
+"""
 
 # Real-provider applicability mirrored exactly (PR 23D Step 3.2): fake
 # providers must not support every entity merely to maximize demo output.
@@ -67,6 +93,18 @@ def fake_provider_supported_types(source: SourceId) -> frozenset[EntityType]:
         raise ValueError(
             f"no fake provider contract for source {source.value}"
         ) from exc
+
+
+def _fake_source_record_id(
+    source: SourceId, entity: Entity, canonical_value: str, ordinal: int
+) -> str:
+    """Return the deterministic fake source-record identity of one observation.
+
+    The identity name is a test-seam namespace value, never an invented
+    product record identity; the stable Evidence UUID is
+    ``uuid5(_FAKE_EVIDENCE_IDENTITY_NAMESPACE, name)``.
+    """
+    return f"{source.value}|{entity.type.value}|{canonical_value}|{ordinal}"
 
 
 class FakeWorldEvidenceProvider(EvidenceProvider):
@@ -105,7 +143,7 @@ class FakeWorldEvidenceProvider(EvidenceProvider):
         return entity.type in fake_provider_supported_types(self._source)
 
     async def investigate(
-        self, investigation_id: UUID, entity: Entity
+        self, _investigation_id: UUID, entity: Entity
     ) -> ProviderResult:
         """Retrieve and normalize deterministic world evidence for one entity.
 
@@ -114,6 +152,8 @@ class FakeWorldEvidenceProvider(EvidenceProvider):
         production providers; an unknown world entity is a deterministic
         no-result (a valid miss, never a benign assessment); a configured
         fixture error uses the existing typed ``ProviderError`` semantics.
+        The returned global ``ConvertedEvidence`` values carry deterministic
+        test-seam Evidence identity (stable per source/entity/ordinal).
         """
         validation = validate_investigation_entity(self, entity)
         rejection = validation[1]
@@ -131,25 +171,28 @@ class FakeWorldEvidenceProvider(EvidenceProvider):
                 provider=self.id,
                 errors=(response.error,),
             )
-        evidence_list: list[LegacyEvidence] = []
-        for observation in response.observations:
-            evidence_list.append(
-                LegacyEvidence(
-                    investigation_id=investigation_id,
-                    type=observation.evidence_type,
-                    subject=EvidenceEntityRef(
-                        id=entity.id,
-                        type=entity.type,
-                        value=canonical_value,
-                    ),
-                    source=self.id,
-                    observed_at=observation.observed_at,
-                    retrieved_at=retrieved_at,
-                    facts=observation.facts,
-                    raw_payload={
-                        "synthetic_world": "fake_world_v1",
-                        "provider": self.id,
-                    },
-                )
+        converted_list: list[ConvertedEvidence] = []
+        for ordinal, observation in enumerate(response.observations, start=1):
+            source_record_id = _fake_source_record_id(
+                self._source, entity, canonical_value, ordinal
             )
-        return ProviderResult(provider=self.id, evidence=tuple(evidence_list))
+            evidence = Evidence(
+                id=uuid5(_FAKE_EVIDENCE_IDENTITY_NAMESPACE, source_record_id),
+                type=observation.evidence_type,
+                source=self.id,
+                source_record_id=source_record_id,
+            )
+            candidate = EvidenceObservationCandidate(
+                evidence_id=evidence.id,
+                observed_at=observation.observed_at,
+                retrieved_at=retrieved_at,
+                facts=observation.facts,
+                raw_payload={
+                    "synthetic_world": "fake_world_v1",
+                    "provider": self.id,
+                },
+            )
+            converted_list.append(
+                ConvertedEvidence(evidence=evidence, observation=candidate)
+            )
+        return ProviderResult(provider=self.id, evidence=tuple(converted_list))

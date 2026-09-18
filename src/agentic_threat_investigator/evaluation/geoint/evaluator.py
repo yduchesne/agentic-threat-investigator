@@ -250,7 +250,8 @@ class GeointDeterministicEvaluator:
         matches = [
             item
             for item in state.observations
-            if item.entity_id == entity_id and item.evidence_id == evidence_id
+            if item.entity_id == entity_id
+            and item.evidence_observation_id == evidence_id
         ]
         if len(matches) > 1:
             failures.append(
@@ -349,7 +350,7 @@ class GeointDeterministicEvaluator:
         """Verify every persisted observation closes to scenario Evidence."""
         scenario_evidence = set(resolution.evidence_ids.values())
         for observation in state.observations:
-            if observation.evidence_id not in scenario_evidence:
+            if observation.evidence_observation_id not in scenario_evidence:
                 failures.append(
                     GeointEvaluationFailure(
                         code=GeointEvaluationFailureCode.WRONG_INVESTIGATION_PROVENANCE,
@@ -544,7 +545,9 @@ class GeointDeterministicEvaluator:
         """
         if agent.assessment is None:
             return
-        observation_evidence = {item.evidence_id for item in state.observations}
+        observation_evidence = {
+            item.evidence_observation_id for item in state.observations
+        }
         for finding in agent.assessment.findings:
             if finding.category is not FindingCategory.GEOLOCATION:
                 continue
@@ -642,11 +645,16 @@ class GeointDeterministicEvaluator:
             for observation in state.observations
             if observation.observation_id in finding.observation_ids
         }
-        for observation_id, evidence_id in zip(
-            finding.observation_ids, finding.evidence_ids, strict=True
+        for observation_id, evidence_observation_id in zip(
+            finding.observation_ids,
+            finding.evidence_observation_ids,
+            strict=True,
         ):
             observation = observation_by_id.get(observation_id)
-            if observation is None or observation.evidence_id != evidence_id:
+            if (
+                observation is None
+                or observation.evidence_observation_id != evidence_observation_id
+            ):
                 failures.append(
                     GeointEvaluationFailure(
                         code=GeointEvaluationFailureCode.SUBSTITUTED_EVIDENCE,
@@ -806,7 +814,9 @@ class GeointDeterministicEvaluator:
         decision = agent.decision
         if decision is None:
             return
-        geographic_evidence = {item.evidence_id for item in state.observations}
+        geographic_evidence = {
+            item.evidence_observation_id for item in state.observations
+        }
         material_findings = [
             finding
             for finding in decision.findings
@@ -991,7 +1001,9 @@ def _finding_satisfies(
     ):
         return False
     if not _labels_satisfied(
-        expectation.evidence_labels, finding.evidence_ids, resolution.evidence_ids
+        expectation.evidence_labels,
+        finding.evidence_observation_ids,
+        resolution.evidence_ids,
     ):
         return False
     if not _labels_satisfied(

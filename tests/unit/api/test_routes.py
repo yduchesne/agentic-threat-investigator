@@ -18,6 +18,7 @@ from agentic_threat_investigator.app.investigation_submission import (
     IdempotencyConflictError,
     IdempotencyKeyRequiredError,
 )
+from agentic_threat_investigator.app.query.evidence import EvidenceReadItem
 from agentic_threat_investigator.app.query.models import QueryPage
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationItem,
@@ -27,14 +28,19 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     Verdict,
 )
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservation,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipType,
@@ -51,6 +57,42 @@ from .conftest import (
 )
 
 INVESTIGATION = UUID("11111111-1111-1111-1111-111111111111")
+
+
+def evidence_read_item(
+    *,
+    observation_id: UUID | None = None,
+) -> EvidenceReadItem:
+    """Build one admitted-observation read item for HTTP contract tests."""
+    identity = observation_id or uuid4()
+    observation = EvidenceObservation(
+        id=identity,
+        evidence_id=identity,
+        version=1,
+        source_url=None,
+        retrieved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        facts={},
+        raw_payload={"http_response": {"status": 200}},
+    )
+    evidence = Evidence(
+        id=identity,
+        type=EvidenceType.DNS,
+        source="urn:ati:source:google_public_dns",
+        source_record_id="api-world",
+    )
+    admission = InvestigationEvidence(
+        investigation_id=INVESTIGATION,
+        evidence_observation_id=identity,
+        inclusion_reason=InvestigationEvidenceReason.PROVIDER_RESULT,
+        added_at=datetime(2026, 1, 1, tzinfo=UTC),
+        added_by=InvestigationEvidenceActor.SYSTEM,
+    )
+    return EvidenceReadItem(
+        observation=observation,
+        evidence=evidence,
+        entities=(),
+        admission=admission,
+    )
 
 
 def test_r05_create_accepted_returns_location_without_runner() -> None:
@@ -228,7 +270,7 @@ def test_r10_evidence_filters_map_exactly() -> None:
     query = bundle.evidence.queries[0]
     assert query.investigation_id == INVESTIGATION
     assert query.source == "urn:ati:source:rdap"
-    assert query.subject_entity_id == subject
+    assert query.entity_id == subject
     assert query.evidence_type is EvidenceType.REGISTRATION
     assert query.retrieved_from == datetime(2026, 1, 1, tzinfo=UTC)
     assert query.retrieved_to == datetime(2026, 2, 1, tzinfo=UTC)
@@ -266,7 +308,7 @@ def _observation_item(
     return RelationshipObservationItem(
         id=observation_id or uuid4(),
         relationship_id=uuid4(),
-        evidence_id=uuid4(),
+        evidence_observation_id=uuid4(),
         investigation_id=investigation_id or INVESTIGATION,
         observed_at=datetime(2026, 1, 1, tzinfo=UTC),
         retrieved_at=datetime(2026, 1, 2, tzinfo=UTC),
@@ -293,7 +335,7 @@ def test_r18_exact_observation_returns_public_projection() -> None:
     body = response.json()
     assert body["id"] == str(item.id)
     assert body["relationship_id"] == str(item.relationship_id)
-    assert body["evidence_id"] == str(item.evidence_id)
+    assert body["evidence_id"] == str(item.evidence_observation_id)
     assert body["source"] == "urn:ati:source:google_public_dns"
     assert body["observed_at"] == "2026-01-01T00:00:00Z"
     assert body["retrieved_at"] == "2026-01-02T00:00:00Z"
@@ -491,21 +533,12 @@ def test_r16_cross_investigation_detail_returns_404() -> None:
 def test_evidence_detail_never_exposes_raw_payload() -> None:
     """Detail responses exclude raw provider payloads entirely."""
     bundle = FakeQueryBundle()
-    evidence = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=INVESTIGATION,
-        type=EvidenceType.DNS,
-        subject=EntityRef(id=uuid4(), type=EntityType.DOMAIN, value="example.com"),
-        source="urn:ati:source:google_public_dns",
-        retrieved_at=datetime(2026, 1, 1, tzinfo=UTC),
-        facts={},
-        raw_payload={"http_response": {"status": 200}},
-    )
-    bundle.evidence.gets[(INVESTIGATION, evidence.id)] = evidence
+    item = evidence_read_item()
+    bundle.evidence.gets[(INVESTIGATION, item.observation.id)] = item
     with build_test_app(bundle=bundle) as client:
         login_client(client)
         response = client.get(
-            f"/api/v1/investigations/{INVESTIGATION}/evidence/{evidence.id}"
+            f"/api/v1/investigations/{INVESTIGATION}/evidence/{item.observation.id}"
         )
 
     assert response.status_code == 200

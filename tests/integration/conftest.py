@@ -29,17 +29,40 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.database 
 
 
 def _database_url() -> str:
-    """Return the guarded URL supplied by the integration harness."""
+    """Return the guarded URL supplied by the integration harness.
+
+    The isolated database is provisioned by Alembic, whose env.py prepares
+    ``SET search_path TO ati, public`` on every migration connection (see
+    ``migrations/env.py``). The migrated objects (including the PostGIS
+    extension functions) live under the ``ati`` schema, so every test
+    connection carries the identical per-connection search path via the DSN
+    ``options`` parameter; otherwise unqualified function/type resolution
+    (e.g. ``ST_AsEWKT``/``ST_Y`` over ``ati.geometry``) would fail against
+    an otherwise correctly migrated database.
+    """
     url = os.environ.get("DATABASE_URL")
     if not url:
         pytest.fail("DATABASE_URL must point at the isolated integration database")
     ensure_test_database_safe(url)
-    return url.replace("postgresql+psycopg://", "postgresql+psycopg_async://", 1)
+    url = url.replace("postgresql+psycopg://", "postgresql+psycopg_async://", 1)
+    separator = "&" if "?" in url else "?"
+    if "search_path" not in url:
+        url = f"{url}{separator}options=-csearch_path=ati,public"
+    return url
 
 
 @pytest_asyncio.fixture(scope="session")
 async def integration_engine() -> AsyncIterator[AsyncEngine]:
-    """Create one async engine for the isolated migrated database."""
+    """Create one async engine for the isolated migrated database.
+
+    The isolated database is provisioned by Alembic, whose env.py prepares
+    ``SET search_path TO ati, public`` on every migration connection (see
+    ``migrations/env.py``). The migrated objects (including the PostGIS
+    extension schema) live under ``ati``, so every test session mirrors the
+    same per-connection search path contract; otherwise unqualified
+    schema-qualified object resolutions (e.g. ``ati.geometry`` reads)
+    would fail against an otherwise correctly migrated database.
+    """
     engine = create_async_engine(_database_url())
     try:
         yield engine
@@ -74,6 +97,9 @@ async def reset_application_data(
         "investigation_job",
         "api_idempotency",
         "evidence",
+        "evidence_observation",
+        "evidence_observation_entity",
+        "investigation_evidence",
         "relationship_observation",
         "relationship",
         "entity",
@@ -87,11 +113,56 @@ async def reset_application_data(
         "datasource_log",
     )
     async with integration_engine.begin() as connection:
-        await connection.execute(
-            text(
-                "TRUNCATE " + ", ".join(f"ati.{table}" for table in tables) + " CASCADE"
+        # Migration round-trip tests (test_migration) downgrade the schema
+        # mid-suite, so the reset must only truncate tables that currently
+        # exist; never fail setup over a deliberately downgraded revision.
+        present = {
+            row[0]
+            for row in await connection.execute(
+                text(
+                    "SELECT tablename FROM pg_catalog.pg_tables "
+                    "WHERE schemaname = 'ati'"
+                )
             )
+        }
+        tables = (
+            "ingestion_checkpoint",
+            "source_record",
+            "session",
+            "credential",
+            '"user"',
+            "assessment_finding_support",
+            "assessment_finding",
+            "assessment",
+            "investigation_report",
+            "investigation",
+            "investigation_job",
+            "api_idempotency",
+            "evidence",
+            "evidence_observation",
+            "evidence_observation_entity",
+            "investigation_evidence",
+            "relationship_observation",
+            "relationship",
+            "entity",
+            "domain_object_history",
+            "investigation_timeline_event",
+            "research_result",
+            "entity_location",
+            "entity_location_observation",
+            "geo_resolution",
+            "location",
+            "datasource_log",
         )
+        existing = tuple(name for name in tables if name.strip('"') in present)
+        if existing:
+            await connection.execute(
+                text(
+                    "TRUNCATE "
+                    + ", ".join(f"ati.{name}" for name in existing)
+                    + " CASCADE"
+                )
+            )
     yield
 
 

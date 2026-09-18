@@ -59,7 +59,7 @@ class GeolocationFactsError(ValueError):
 class InvestigationGeolocationItem(BaseModel):
     """One current persisted geolocation context item for one IP entity.
 
-    ``evidence_id`` is the exact immutable Evidence observation that produced
+    ``evidence_observation_id`` is the exact EvidenceObservation that produced
     this projection: the latest ``GEOLOCATION`` Evidence for the entity by
     (``retrieved_at DESC, id ASC``). Country/region/city and the paired
     latitude/longitude are approximate network-address context only; they
@@ -69,7 +69,7 @@ class InvestigationGeolocationItem(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    evidence_id: UUID
+    evidence_observation_id: UUID
     entity_id: UUID
     ip_address: str
     country_code: str | None = None
@@ -246,7 +246,7 @@ def geolocation_item_from_persisted_facts(
         )
 
     return InvestigationGeolocationItem(
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
         entity_id=entity_id,
         ip_address=ip_address,
         country_code=country_code,

@@ -19,6 +19,9 @@ EXPECTED_TABLES = {
     "relationship",
     "relationship_observation",
     "evidence",
+    "evidence_observation",
+    "evidence_observation_entity",
+    "investigation_evidence",
     "investigation",
     "assessment",
     "assessment_finding",
@@ -72,6 +75,9 @@ EXPECTED_FUNCTIONS = {
     "upsert_relationship",
     "append_relationship_observation",
     "soft_delete_relationship",
+    "persist_evidence_observation",
+    "associate_evidence_observation_entity",
+    "admit_investigation_evidence",
     "append_assessment",
     "set_investigation_assessment",
     "soft_delete_assessment",
@@ -319,7 +325,7 @@ async def test_graph_integrity_schema_contract() -> None:
                 JOIN pg_class rel ON rel.oid = con.conrelid
                 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                 WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
-                  AND con.conname = 'relationship_observation_evidence_fk'
+                  AND con.conname = 'relationship_observation_evidence_observation_fk'
             """)
             )
             parameters = await connection.execute(
@@ -337,7 +343,7 @@ async def test_graph_integrity_schema_contract() -> None:
     finally:
         await engine.dispose()
     assert foreign_key is not None
-    assert "evidence(id)" in foreign_key
+    assert "evidence_observation(id)" in foreign_key
     # Evidence and observations are immutable; deletion is soft only, so the
     # provenance foreign key must never cascade.
     assert "CASCADE" not in foreign_key
@@ -374,7 +380,7 @@ async def test_graph_integrity_migration_downgrade_and_re_upgrade() -> None:
                     JOIN pg_class rel ON rel.oid = con.conrelid
                     JOIN pg_namespace ns ON ns.oid = rel.relnamespace
                     WHERE ns.nspname = 'ati' AND rel.relname = 'relationship_observation'
-                      AND con.conname = 'relationship_observation_evidence_fk'
+                      AND con.conname = 'relationship_observation_evidence_observation_fk'
                 """)
                 )
         finally:
@@ -543,12 +549,32 @@ async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
             "upsert_relationship",
             "append_relationship_observation",
         } <= functions
+        # The empty-database downgrade restored the v0.1 provenance FK name.
         assert foreign_key is not None
 
         command.upgrade(alembic_cfg, "head")
         table_present, sequence_present = await timeline_state()
         assert table_present
         assert sequence_present
+        # Re-upgrade restores the PR 28B provenance FK name on the
+        # observation table.
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                repointed_fk = await connection.scalar(
+                    text("""
+                    SELECT con.conname FROM pg_constraint con
+                    JOIN pg_class rel ON rel.oid = con.conrelid
+                    JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                    WHERE ns.nspname = 'ati'
+                      AND rel.relname = 'relationship_observation'
+                      AND con.conname =
+                          'relationship_observation_evidence_observation_fk'
+                """)
+                )
+        finally:
+            await engine.dispose()
+        assert repointed_fk is not None
         # Ownership dependency points at the table's sequence column, and the
         # chronological index plus both checks exist.
         engine = _test_engine()
@@ -671,7 +697,9 @@ async def test_assessment_schema_contract() -> None:
     assert ("assessment_finding", "ordinal") in columns
     assert ("assessment_finding_support", "kind") in columns
     # Provenance integrity is relational.
-    assert any("evidence(id)" in definition for definition in checks.values())
+    assert any(
+        "evidence_observation(id)" in definition for definition in checks.values()
+    )
     assert any(
         "relationship_observation(id)" in definition for definition in checks.values()
     )
@@ -947,12 +975,14 @@ async def test_research_foundation_migration_downgrade_and_re_upgrade() -> None:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_geoint_migration_downgrade_and_re_upgrade() -> None:
-    """Migration 0025 downgrades cleanly and re-upgrades without data loss.
+    """Migration 0025 re-upgrade preserves pre-geoint data (PR 28B policy).
 
-    Representative pre-26A data (Investigation, Entity, Evidence, and a PR 25
-    GEOLOCATION Evidence row) must survive both directions unchanged; the
-    downgrade removes only the PR 26A GEOINT objects in dependency-safe
-    order, and no PostGIS extension is ever required.
+    Representative pre-26A data (Investigation, Entity, and a PR 25
+    GEOLOCATION Evidence row) is seeded at 0024 and must survive the upgrade
+    to head through the PR 28B backfill. The documented limited-downgrade
+    policy (I28B-12) forbids downgrading a database that carries migrated
+    Evidence/EvidenceObservation rows, so the trailing downgrade phase
+    asserts the typed STOP instead of a lossless repoint.
     """
     alembic_cfg = Config("alembic.ini")
 
@@ -1010,7 +1040,14 @@ async def test_geoint_migration_downgrade_and_re_upgrade() -> None:
         "create_geo_resolution",
     }
     try:
-        # Seed representative pre-26A data plus one GEOINT row at head.
+        # Seed representative pre-26A data at the 0024 revision (no GEOINT
+        # objects exist there yet): the PR 28B empty-database downgrade
+        # restored the v0.1 shape, so the v0.1 evidence row is insertable.
+        command.downgrade(alembic_cfg, "0024_api_async_foundation")
+        tables, sequences, functions = await geoint_state()
+        assert geoint_tables.isdisjoint(tables)
+        assert geoint_sequences.isdisjoint(sequences)
+        assert geoint_functions.isdisjoint(functions)
         engine = _test_engine()
         try:
             async with engine.connect() as connection:
@@ -1018,8 +1055,7 @@ async def test_geoint_migration_downgrade_and_re_upgrade() -> None:
                     text("""
                     DO $$
                     DECLARE
-                      v_inv uuid; v_entity uuid; v_geo_ev uuid; v_loc uuid;
-                      v_obs uuid;
+                      v_inv uuid; v_entity uuid; v_geo_ev uuid;
                     BEGIN
                       INSERT INTO ati.investigation
                         (status, trigger_type, objective, budget,
@@ -1037,100 +1073,58 @@ async def test_geoint_migration_downgrade_and_re_upgrade() -> None:
                       RETURNING id INTO v_entity;
                       INSERT INTO ati.evidence
                         (id, investigation_id, evidence_type,
-                         subject_entity_id, source, retrieved_at, facts,
-                         raw_payload, version)
+                         subject_entity_id, source, source_record_id,
+                         retrieved_at, facts, raw_payload, version)
                       VALUES (gen_random_uuid(), v_inv,
                               'urn:ati:evidence:geolocation', v_entity,
-                              'urn:ati:source:dbip', now(), '{}'::jsonb,
+                              'urn:ati:source:threatfox',
+                              'legacy-geoint-seed', now(), '{}'::jsonb,
                               NULL, 1)
                       RETURNING id INTO v_geo_ev;
-                      SELECT id INTO v_loc FROM ati.upsert_location(
-                        NULL, 'country', 'United States', 'United States',
-                        'US', NULL, NULL, NULL);
-                      v_obs := gen_random_uuid();
-                      PERFORM ati.append_entity_location_observation(
-                        v_obs, v_entity, v_loc, v_geo_ev, 'country', NULL,
-                        now(), now(), 'seed_method');
-                      PERFORM ati.create_geo_resolution(
-                        gen_random_uuid(), v_entity, v_geo_ev);
                     END
                     $$;
                 """)
                 )
                 await connection.commit()
-        finally:
-            await engine.dispose()
-
-        engine = _test_engine()
-        try:
-            async with engine.connect() as connection:
                 existing_entity_count = await connection.scalar(
                     text("SELECT count(*) FROM ati.entity")
                 )
                 existing_evidence_count = await connection.scalar(
                     text("SELECT count(*) FROM ati.evidence")
                 )
-                extensions = {
-                    row[0]
-                    for row in await connection.execute(
-                        text("""
-                            SELECT e.extname FROM pg_extension e
-                            JOIN pg_namespace n ON n.oid = e.extnamespace
-                            WHERE n.nspname = 'ati'
-                        """)
-                    )
-                }
         finally:
             await engine.dispose()
-        # PR 26B: head installs PostGIS alongside pgvector/pgcrypto.
-        assert "postgis" in extensions
-
-        command.downgrade(alembic_cfg, "0024_api_async_foundation")
-        tables, sequences, functions = await geoint_state()
-        assert geoint_tables.isdisjoint(tables)
-        assert geoint_sequences.isdisjoint(sequences)
-        assert geoint_functions.isdisjoint(functions)
-        # Existing pre-26A data survives the downgrade untouched.
-        engine = _test_engine()
-        try:
-            async with engine.connect() as connection:
-                entity_count = await connection.scalar(
-                    text("SELECT count(*) FROM ati.entity")
-                )
-                evidence_count = await connection.scalar(
-                    text("SELECT count(*) FROM ati.evidence")
-                )
-                geo_evidence_count = await connection.scalar(
-                    text(
-                        "SELECT count(*) FROM ati.evidence "
-                        "WHERE evidence_type = 'urn:ati:evidence:geolocation'"
-                    )
-                )
-        finally:
-            await engine.dispose()
-        assert entity_count == existing_entity_count
-        assert evidence_count == existing_evidence_count
-        assert geo_evidence_count == 1
+        assert existing_entity_count == 1
+        assert existing_evidence_count == 1
 
         command.upgrade(alembic_cfg, "head")
         tables, sequences, functions = await geoint_state()
         assert geoint_tables <= tables
         assert geoint_sequences <= sequences
         assert geoint_functions <= functions
-        # Re-upgrade preserves the pre-existing data as well.
+        # The upgrade preserved the pre-existing data AND the backfill
+        # migrated it onto the global Evidence/EvidenceObservation model.
         engine = _test_engine()
         try:
             async with engine.connect() as connection:
                 entity_count = await connection.scalar(
                     text("SELECT count(*) FROM ati.entity")
                 )
-                evidence_count = await connection.scalar(
-                    text("SELECT count(*) FROM ati.evidence")
+                observation_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.evidence_observation")
+                )
+                admission_count = await connection.scalar(
+                    text("SELECT count(*) FROM ati.investigation_evidence")
                 )
         finally:
             await engine.dispose()
         assert entity_count == existing_entity_count
-        assert evidence_count == existing_evidence_count
+        assert observation_count == 1
+        assert admission_count == 1
+        # I28B-12: downgrading a database with migrated Evidence rows fails
+        # closed with the documented typed STOP (no lossy conversion).
+        with pytest.raises(RuntimeError, match="PR 28B downgrade STOP"):
+            command.downgrade(alembic_cfg, "0024_api_async_foundation")
     finally:
         command.upgrade(alembic_cfg, "head")
 
@@ -1213,11 +1207,12 @@ async def test_geoint_spatial_migration_upgrade_and_downgrade() -> None:
                           RETURNING id INTO v_entity;
                           INSERT INTO ati.evidence
                             (id, investigation_id, evidence_type,
-                             subject_entity_id, source, retrieved_at, facts,
-                             raw_payload, version)
+                             subject_entity_id, source, source_record_id,
+                             retrieved_at, facts, raw_payload, version)
                           VALUES (gen_random_uuid(), v_inv,
                                   'urn:ati:evidence:geolocation', v_entity,
-                                  'urn:ati:source:dbip', now(), '{}'::jsonb,
+                                  'urn:ati:source:threatfox',
+                                  'legacy-geoint-seed', now(), '{}'::jsonb,
                                   NULL, 1)
                           RETURNING id INTO v_ev;
                           SELECT id INTO v_loc FROM ati.upsert_location(
@@ -1275,44 +1270,13 @@ async def test_geoint_spatial_migration_upgrade_and_downgrade() -> None:
         assert observation_count == 1 and resolution_count == 1
         assert chunk_columns == {"embedding"}
 
-        command.downgrade(alembic_cfg, "0026_geoint_version_allocation")
-        assert await spatial_columns() == set()
-        assert "postgis" not in await extensions_present()
-        engine = _test_engine()
-        try:
-            async with engine.connect() as connection:
-                functions = {
-                    row[0]
-                    for row in await connection.execute(
-                        text("""
-                            SELECT routine_name FROM information_schema.routines
-                            WHERE routine_schema = 'ati'
-                        """)
-                    )
-                }
-                indexes = {
-                    row[0]
-                    for row in await connection.execute(
-                        text("""
-                            SELECT indexname FROM pg_indexes
-                            WHERE schemaname = 'ati' AND tablename = 'location'
-                        """)
-                    )
-                }
-                row_count = await connection.scalar(
-                    text("SELECT count(*) FROM ati.location")
-                )
-                extensions = await extensions_present()
-        finally:
-            await engine.dispose()
-        # G26B-P17: PR 26B objects gone; no unrelated rows lost.
-        assert not {"upsert_reference_location", "reference_geometry_parse"} & functions
-        assert "location_geometry_gist_idx" not in indexes
-        assert "location_resolution_name_idx" not in indexes
-        assert row_count == 1
-        # G26B-P18: pgvector/RAG remains available after the downgrade.
-        assert "vector" in extensions
-        assert "postgis" not in extensions
+        # G26B-P17/I28B-12: the seeded Evidence rows migrate onto the global
+        # EvidenceObservation model, so this database can no longer be
+        # losslessly downgraded; the documented limited-downgrade policy
+        # stops with a typed error instead (the empty-database downgrade
+        # surface is covered by the other round-trip migration tests).
+        with pytest.raises(RuntimeError, match="PR 28B downgrade STOP"):
+            command.downgrade(alembic_cfg, "0026_geoint_version_allocation")
     finally:
         command.upgrade(alembic_cfg, "head")
 
@@ -1413,11 +1377,12 @@ async def test_geoint_lifecycle_migration_upgrade_and_downgrade() -> None:
                           RETURNING id INTO v_entity;
                           INSERT INTO ati.evidence
                             (id, investigation_id, evidence_type,
-                             subject_entity_id, source, retrieved_at, facts,
-                             raw_payload, version)
+                             subject_entity_id, source, source_record_id,
+                             retrieved_at, facts, raw_payload, version)
                           VALUES (gen_random_uuid(), v_inv,
                                   'urn:ati:evidence:geolocation', v_entity,
-                                  'urn:ati:source:dbip', now(),
+                                  'urn:ati:source:threatfox',
+                                  'legacy-geoint-seed', now(),
                                   '{"country_code":"US"}'::jsonb, NULL, 1)
                           RETURNING id INTO v_ev;
                           SELECT id INTO v_loc FROM ati.upsert_location(
@@ -1496,13 +1461,17 @@ async def test_geoint_lifecycle_migration_upgrade_and_downgrade() -> None:
         finally:
             await engine.dispose()
 
-        # G26C-P41: downgrade preserves authoritative data, removes only the
-        # PR 26C objects, and restores the pre-PR-26C API surface.
+        # G26C-P41/I28B-12: the exercised work rows were migrated onto the
+        # global EvidenceObservation model, so this database can no longer
+        # be losslessly downgraded; the documented limited-downgrade policy
+        # stops with a typed error instead (the empty-database downgrade
+        # surface is covered by the other round-trip migration tests).
         terminal_state = await resolution_state()
         assert terminal_state == (1, 2, 1, 1)
-        command.downgrade(alembic_cfg, "0027_geoint_reference_spatial")
-        assert lifecycle_function_names.isdisjoint(await lifecycle_functions())
-        assert await resolution_state() == terminal_state
+        with pytest.raises(RuntimeError, match="PR 28B downgrade STOP"):
+            command.downgrade(alembic_cfg, "0027_geoint_reference_spatial")
+        # The typed STOP left the head revision intact; the completed work
+        # and the PR 26C claim indexes remain available at head.
         engine = _test_engine()
         try:
             async with engine.connect() as connection:
@@ -1524,13 +1493,10 @@ async def test_geoint_lifecycle_migration_upgrade_and_downgrade() -> None:
         finally:
             await engine.dispose()
         assert statuses == {"resolved"}
-        assert (
-            not {
-                "geo_resolution_pending_claim_idx",
-                "geo_resolution_processing_claim_idx",
-            }
-            & indexes
-        )
+        assert {
+            "geo_resolution_pending_claim_idx",
+            "geo_resolution_processing_claim_idx",
+        } <= indexes
     finally:
         command.upgrade(alembic_cfg, "head")
 

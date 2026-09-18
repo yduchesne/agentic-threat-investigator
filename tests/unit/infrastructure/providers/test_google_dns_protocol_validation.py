@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Provider contract tests for DNS protocol semantics and RR-set consistency.
 
 Covers answer ownership/CNAME-chain attribution, protocol-root names,
@@ -9,6 +7,8 @@ for ``GooglePublicDnsProvider`` per the authoritative DNS validation matrix.
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -20,6 +20,8 @@ from httpx import MockTransport
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode, ProviderResult
 from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.google_dns import (
     GooglePublicDnsProvider,
 )
@@ -110,7 +112,7 @@ class TestAnswerOwnershipAndChains:
         )
         assert len(result.evidence) == 1
         assert result.errors == ()
-        answer = result.evidence[0].facts["answers"][0]
+        answer = _legacy(result.evidence[0]).facts["answers"][0]
         assert answer["record_type"] == "A"
         assert answer["name"] == "example.com"
         assert answer["value"] == "192.0.2.1"
@@ -132,7 +134,7 @@ class TestAnswerOwnershipAndChains:
             ],
         )
         assert len(result.evidence) == 1
-        answers = result.evidence[0].facts["answers"]
+        answers = _legacy(result.evidence[0]).facts["answers"]
         assert [answer["record_type"] for answer in answers] == ["CNAME", "A"]
 
     async def test_cname_only_chain_rooted_at_query_accepted(self) -> None:
@@ -141,7 +143,7 @@ class TestAnswerOwnershipAndChains:
             "A", [_record("example.com.", "CNAME", "alias.example.com.")]
         )
         assert len(result.evidence) == 1
-        assert result.evidence[0].facts["answers"][0]["record_type"] == "CNAME"
+        assert _legacy(result.evidence[0]).facts["answers"][0]["record_type"] == "CNAME"
 
     async def test_lone_cname_with_unrelated_owner_rejected(self) -> None:
         """A CNAME owned by an unrelated name cannot become A-query evidence."""
@@ -217,7 +219,7 @@ class TestAnswerOwnershipAndChains:
             ],
         )
         assert len(result.evidence) == 1
-        answers = result.evidence[0].facts["answers"]
+        answers = _legacy(result.evidence[0]).facts["answers"]
         assert answers[0]["record_type"] == "CNAME"
         assert answers[1]["record_type"] == "SOA"
         assert answers[1]["mname"] == "ns1.example"
@@ -246,13 +248,13 @@ class TestProtocolNamesAndEscapes:
             "CNAME", [_record("example.com.", "CNAME", ".")]
         )
         assert len(result.evidence) == 1
-        assert result.evidence[0].facts["answers"][0]["value"] == "."
+        assert _legacy(result.evidence[0]).facts["answers"][0]["value"] == "."
 
     async def test_root_ns_target_retained_as_sentinel_fact(self) -> None:
         """A root NS target normalizes to ``.`` as a non-entity fact."""
         result = await _investigate_domain("NS", [_record("example.com.", "NS", ".")])
         assert len(result.evidence) == 1
-        assert result.evidence[0].facts["answers"][0]["value"] == "."
+        assert _legacy(result.evidence[0]).facts["answers"][0]["value"] == "."
 
     async def test_root_ptr_target_retained_as_sentinel_fact(self) -> None:
         """A root PTR target normalizes to ``.`` as a non-entity fact."""
@@ -262,7 +264,7 @@ class TestProtocolNamesAndEscapes:
             entity,
         )
         assert len(result.evidence) == 1
-        assert result.evidence[0].facts["answers"][0]["value"] == "."
+        assert _legacy(result.evidence[0]).facts["answers"][0]["value"] == "."
 
     async def test_root_is_invalid_as_investigated_domain_without_io(self) -> None:
         """The DNS root is not an ATI domain entity and never reaches HTTP."""
@@ -279,7 +281,7 @@ class TestProtocolNamesAndEscapes:
         result = await _investigate_domain(
             "CNAME", [_record("example.com.", "CNAME", "Bücher.Example.")]
         )
-        assert result.evidence[0].facts["answers"][0]["value"] == (
+        assert _legacy(result.evidence[0]).facts["answers"][0]["value"] == (
             "xn--bcher-kva.example"
         )
 
@@ -288,14 +290,14 @@ class TestProtocolNamesAndEscapes:
         result = await _investigate_domain(
             "NS", [_record("example.com.", "NS", r"a\-b.example.")]
         )
-        assert result.evidence[0].facts["answers"][0]["value"] == "a-b.example"
+        assert _legacy(result.evidence[0]).facts["answers"][0]["value"] == "a-b.example"
 
     async def test_decimal_escape_normalizes(self) -> None:
         """A three-digit decimal escape decodes one printable ASCII octet."""
         result = await _investigate_domain(
             "CNAME", [_record("example.com.", "CNAME", r"ns\049.example.")]
         )
-        assert result.evidence[0].facts["answers"][0]["value"] == "ns1.example"
+        assert _legacy(result.evidence[0]).facts["answers"][0]["value"] == "ns1.example"
 
     @pytest.mark.parametrize(
         "data",
@@ -330,7 +332,7 @@ class TestProtocolNamesAndEscapes:
                 )
             ],
         )
-        answers = result.evidence[0].facts["answers"]
+        answers = _legacy(result.evidence[0]).facts["answers"]
         assert answers[0]["mname"] == "ns1.example"
         assert answers[0]["rname"] == "admin.example"
 
@@ -347,7 +349,7 @@ class TestProtocolNamesAndEscapes:
             ],
         )
         assert len(result.evidence) == 1
-        assert result.evidence[0].facts["answers"][0]["serial"] == 1
+        assert _legacy(result.evidence[0]).facts["answers"][0]["serial"] == 1
 
     async def test_soa_escaped_whitespace_rejected(self) -> None:
         """Escaped whitespace inside an SOA name cannot become a valid label."""
@@ -388,7 +390,7 @@ class TestNullMxAndSetConsistency:
         """A single ``0 .`` answer is valid null-MX evidence."""
         result = await _investigate_domain("MX", [_record("example.com.", "MX", "0 .")])
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert not result.errors
         answer = evidence.facts["answers"][0]
         assert answer["record_type"] == "MX"
@@ -434,7 +436,7 @@ class TestNullMxAndSetConsistency:
             "MX", [_record("example.com.", "MX", "0 mail.example.")]
         )
         assert len(result.evidence) == 1
-        answer = result.evidence[0].facts["answers"][0]
+        answer = _legacy(result.evidence[0]).facts["answers"][0]
         assert answer["preference"] == 0
         assert answer["exchange"] == "mail.example"
 
@@ -448,14 +450,14 @@ class TestNullMxAndSetConsistency:
             ],
         )
         assert len(result.evidence) == 1
-        answers = result.evidence[0].facts["answers"]
+        answers = _legacy(result.evidence[0]).facts["answers"]
         assert [answer["record_type"] for answer in answers] == ["CNAME", "MX"]
         assert answers[1]["exchange"] == "."
 
     async def test_null_mx_sentinel_is_not_a_domain_value(self) -> None:
         """The root exchange is retained only as a provider fact."""
         result = await _investigate_domain("MX", [_record("example.com.", "MX", "0 .")])
-        answer = result.evidence[0].facts["answers"][0]
+        answer = _legacy(result.evidence[0]).facts["answers"][0]
         assert answer["exchange"] == "."
         # The provider emits facts only; the sentinel must never look like a
         # discoverable domain entity value in the evidence shape.
@@ -466,3 +468,9 @@ class TestNullMxAndSetConsistency:
             "preference",
             "exchange",
         }
+
+
+def _legacy(item: ConvertedEvidence | LegacyEvidence) -> LegacyEvidence:
+    """Narrow one legacy-provider output item to its transitional shape."""
+    assert isinstance(item, LegacyEvidence)
+    return item

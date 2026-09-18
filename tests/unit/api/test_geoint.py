@@ -67,7 +67,7 @@ def observation_item() -> GeointObservationItem:
         observation_id=OBSERVATION,
         entity_id=ENTITY,
         location=location_ref(),
-        evidence_id=EVIDENCE,
+        evidence_observation_id=EVIDENCE,
         precision=LocationPrecision.CITY,
         resolution_method="canonical_geography_v1",
         observed_at=None,
@@ -432,7 +432,7 @@ def test_a15_pr25_geolocations_unchanged() -> None:
     bundle.geolocations.result = InvestigationGeolocationResult(
         items=(
             InvestigationGeolocationItem(
-                evidence_id=EVIDENCE,
+                evidence_observation_id=EVIDENCE,
                 entity_id=ENTITY,
                 ip_address="203.0.113.10",
                 country_code="US",

@@ -64,7 +64,7 @@ async def test_sg01_single_mappable_read_through_service(
     assert len(result.items) == 1
     item = result.items[0]
     assert item.entity_id == derive_entity_id("203.0.113.10")
-    assert item.evidence_id == derive_evidence_id(
+    assert item.evidence_observation_id == derive_evidence_id(
         investigation_id, "single_mappable", 0, "203.0.113.10"
     )
     assert item.ip_address == "203.0.113.10"
@@ -93,7 +93,7 @@ async def test_sg02_multi_ioc_distinct_identity_and_order(
         "203.0.113.20",
     ]
     assert len({item.entity_id for item in result.items}) == 2
-    assert len({item.evidence_id for item in result.items}) == 2
+    assert len({item.evidence_observation_id for item in result.items}) == 2
 
 
 @pytest.mark.asyncio
@@ -115,7 +115,7 @@ async def test_sg03_same_coordinate_items_remain_distinct(
     assert first.latitude == second.latitude == 47.6062
     assert first.longitude == second.longitude == -122.3321
     assert first.entity_id != second.entity_id
-    assert first.evidence_id != second.evidence_id
+    assert first.evidence_observation_id != second.evidence_observation_id
 
 
 @pytest.mark.asyncio

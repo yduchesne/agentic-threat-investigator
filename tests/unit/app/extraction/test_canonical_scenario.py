@@ -24,8 +24,6 @@ from tests.support.extraction_fixtures import (
     CANONICAL_ASYNCRAT_IP,
     CANONICAL_ASYNCRAT_MALWARE,
     CANONICAL_ASYNCRAT_PRINTABLE,
-    CANONICAL_DNS_EVIDENCE_ID,
-    CANONICAL_THREATFOX_EVIDENCE_ID,
     canonical_dns_evidence,
     canonical_threatfox_evidence,
 )
@@ -44,7 +42,6 @@ def test_canonical_dns_evidence_resolves_the_scenario_domain() -> None:
     assert edge.source.value == CANONICAL_ASYNCRAT_DOMAIN
     assert edge.type is RelationshipType.RESOLVES_TO
     assert edge.target.value == CANONICAL_ASYNCRAT_IP
-    assert edge.evidence_id == CANONICAL_DNS_EVIDENCE_ID
 
 
 def test_canonical_threatfox_evidence_associates_the_scenario_ip_with_asyncrat() -> (
@@ -65,4 +62,3 @@ def test_canonical_threatfox_evidence_associates_the_scenario_ip_with_asyncrat()
     assert edge.type is RelationshipType.ASSOCIATED_WITH
     assert edge.target.type is EntityType.MALWARE
     assert edge.target.value == CANONICAL_ASYNCRAT_MALWARE
-    assert edge.evidence_id == CANONICAL_THREATFOX_EVIDENCE_ID

@@ -18,6 +18,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import text
 
 from agentic_threat_investigator.app.orchestration.runner import (
     LocalInvestigationRunner,
@@ -102,12 +103,32 @@ async def _run_investigation(
 async def _evidence_rows(
     uow_factory: Callable[[], Any], investigation_id: UUID
 ) -> list[Any]:
-    """Return persisted Evidence rows for one investigation."""
+    """Return persisted admitted EvidenceObservation rows for one investigation.
+
+    The read layer's Evidence admission projection joins the stable Evidence,
+    so the returned rows expose ``source``, ``facts``, ``observed_at``, and
+    ``retrieved_at`` (PR 28B: source lives on the stable Evidence, not on the
+    observation).
+    """
     async with uow_factory() as uow:
-        rows: list[Any] = await uow.evidence.list_for_investigation(
-            investigation_id, limit=100
+        assert uow.session is not None
+        result = await uow.session.execute(
+            text(
+                """
+                SELECT e.source, eo.facts, eo.observed_at, eo.retrieved_at,
+                       eo.id AS evidence_observation_id
+                  FROM ati.evidence_observation eo
+                  JOIN ati.investigation_evidence ie
+                    ON ie.evidence_observation_id = eo.id
+                  JOIN ati.evidence e ON e.id = eo.evidence_id
+                 WHERE ie.investigation_id = :investigation_id
+                 ORDER BY eo.retrieved_at DESC, eo.id ASC
+                 LIMIT 100
+                """
+            ),
+            {"investigation_id": investigation_id},
         )
-        return rows
+        return list(result.all())
 
 
 async def test_f03_repeated_observations_and_later_counterparty(

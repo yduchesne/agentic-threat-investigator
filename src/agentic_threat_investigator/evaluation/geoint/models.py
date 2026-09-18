@@ -865,7 +865,7 @@ class PersistedGeointObservation(BaseModel):
     observation_id: UUID
     entity_id: UUID
     location_id: UUID
-    evidence_id: UUID
+    evidence_observation_id: UUID
     precision: LocationPrecision
     observed_at: datetime | None = None
     retrieved_at: datetime

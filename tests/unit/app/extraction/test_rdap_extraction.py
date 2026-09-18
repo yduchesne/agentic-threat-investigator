@@ -16,11 +16,17 @@ from agentic_threat_investigator.app.extraction import (
     ExtractionErrorReason,
     extract_rdap,
 )
-from agentic_threat_investigator.app.extraction.models import ExtractionResult
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.app.extraction.models import (
+    EvidenceExtractionView,
+    ExtractionResult,
+)
+from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 SOURCE = SourceId.RDAP.value
@@ -33,17 +39,24 @@ def rdap_evidence(
     subject_value: str = "198.51.100.42",
     evidence_type: EvidenceType = EvidenceType.NETWORK,
     evidence_id: UUID | None = None,
-) -> LegacyEvidence:
-    """Build one normalized RDAP evidence observation with the given facts."""
-    return LegacyEvidence(
-        id=evidence_id if evidence_id is not None else uuid4(),
-        investigation_id=uuid4(),
+) -> EvidenceExtractionView:
+    """Build one normalized RDAP extraction view with the given facts."""
+    identity = evidence_id if evidence_id is not None else uuid4()
+    evidence = Evidence(
+        id=identity,
         type=evidence_type,
-        subject=EntityRef(type=subject_type, value=subject_value),
         source=SOURCE,
+        source_record_id=f"fixture:{identity}",
+    )
+    candidate = EvidenceObservationCandidate(
+        evidence_id=identity,
         retrieved_at=datetime(2026, 1, 15, tzinfo=UTC),
         facts=facts,
-        raw_payload=None,
+    )
+    return EvidenceExtractionView(
+        evidence=evidence,
+        observation=candidate,
+        invocation_entity=Entity(type=subject_type, value=subject_value),
     )
 
 
@@ -75,7 +88,6 @@ def test_ipv4_cidr0_discovers_prefix_and_belongsto() -> None:
     assert edge.source.value == "198.51.100.42"
     assert edge.type is RelationshipType.BELONGS_TO
     assert edge.target.value == "198.51.100.0/24"
-    assert edge.evidence_id is not None
 
 
 def test_ipv6_cidr0_discovers_prefix_and_belongsto() -> None:
@@ -213,7 +225,11 @@ def test_registration_evidence_returns_empty() -> None:
 def test_unsupported_rdap_evidence_type_fails() -> None:
     """An RDAP evidence type that RDAP never produces is a contract failure."""
     evidence = rdap_evidence(network_facts()).model_copy(
-        update={"type": EvidenceType.DNS}
+        update={
+            "evidence": rdap_evidence(network_facts()).evidence.model_copy(
+                update={"type": EvidenceType.DNS}
+            )
+        }
     )
 
     with pytest.raises(EvidenceExtractionError) as excinfo:
@@ -225,24 +241,15 @@ def test_unsupported_rdap_evidence_type_fails() -> None:
 def test_network_evidence_without_ip_subject_fails() -> None:
     """RDAP network evidence always has an IP subject."""
     evidence = rdap_evidence(network_facts()).model_copy(
-        update={"subject": EntityRef(type=EntityType.DOMAIN, value="example.test")}
+        update={
+            "invocation_entity": Entity(type=EntityType.DOMAIN, value="example.test")
+        }
     )
 
     with pytest.raises(EvidenceExtractionError) as excinfo:
         extract_rdap(evidence)
 
     assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
-
-
-def test_missing_persisted_evidence_id_fails() -> None:
-    """RDAP network extraction requires a persisted LegacyEvidence ID."""
-    evidence = rdap_evidence(network_facts())
-    unpersisted = evidence.model_copy(update={"id": None})
-
-    with pytest.raises(EvidenceExtractionError) as excinfo:
-        extract_rdap(unpersisted)
-
-    assert excinfo.value.reason is ExtractionErrorReason.MISSING_EVIDENCE_ID
 
 
 @pytest.mark.parametrize(
@@ -278,7 +285,13 @@ def test_unexpected_object_class_fails() -> None:
 
 def test_wrong_source_is_a_contract_failure() -> None:
     """RDAP extraction rejects evidence from any other source contract."""
-    evidence = rdap_evidence(network_facts()).model_copy(update={"source": "other"})
+    evidence = rdap_evidence(network_facts()).model_copy(
+        update={
+            "evidence": rdap_evidence(network_facts()).evidence.model_copy(
+                update={"source": "other"}
+            )
+        }
+    )
 
     with pytest.raises(EvidenceExtractionError) as excinfo:
         extract_rdap(evidence)
@@ -368,25 +381,6 @@ def test_invalid_registration_envelope_fails(
     assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
 
 
-def test_registration_requires_persisted_evidence_id() -> None:
-    """Both RDAP branches follow the same persisted-LegacyEvidence ID policy."""
-    evidence = rdap_evidence(
-        {
-            "object_class_name": "domain",
-            "ldh_name": "example.test",
-        },
-        subject_type=EntityType.DOMAIN,
-        subject_value="example.test",
-        evidence_type=EvidenceType.REGISTRATION,
-    )
-    unpersisted = evidence.model_copy(update={"id": None})
-
-    with pytest.raises(EvidenceExtractionError) as excinfo:
-        extract_rdap(unpersisted)
-
-    assert excinfo.value.reason is ExtractionErrorReason.MISSING_EVIDENCE_ID
-
-
 def test_valid_registration_pairings_return_empty() -> None:
     """Valid DOMAIN/domain and ASN/autnum registrations yield empty results."""
     domain_result = extract_rdap(
@@ -408,3 +402,19 @@ def test_valid_registration_pairings_return_empty() -> None:
 
     assert domain_result == ExtractionResult()
     assert asn_result == ExtractionResult()
+
+
+def _with_facts(
+    view: EvidenceExtractionView, facts: dict[object, object]
+) -> EvidenceExtractionView:
+    """Return a copy of the view whose observation carries the given facts."""
+    return view.model_copy(
+        update={"observation": view.observation.model_copy(update={"facts": facts})}
+    )
+
+
+def _with_id(view: EvidenceExtractionView, identity: object) -> EvidenceExtractionView:
+    """Return a copy of the view whose stable Evidence carries the given id."""
+    return view.model_copy(
+        update={"evidence": view.evidence.model_copy(update={"id": identity})}
+    )

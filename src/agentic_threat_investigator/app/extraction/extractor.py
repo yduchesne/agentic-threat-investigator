@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Deterministic extraction dispatcher.
 
-Dispatches one normalized, persisted :class:`LegacyEvidence` observation to the
-extractor registered for its ``(source, evidence type)`` combination. The
-dispatcher is pure and synchronous: it performs no I/O, no persistence, no
-provider calls, and no database access.
+Dispatches one provider observation to the extractor registered for its
+``(source, evidence type)`` combination. The dispatcher is pure and
+synchronous: it performs no I/O, no persistence, no provider calls, and no
+database access.
 
 Dispatch policy:
 
@@ -22,6 +22,7 @@ from agentic_threat_investigator.app.extraction.dns import extract_dns
 from agentic_threat_investigator.app.extraction.ipinfo import extract_ipinfo
 from agentic_threat_investigator.app.extraction.models import (
     EvidenceExtractionError,
+    EvidenceExtractionView,
     ExtractionErrorReason,
     ExtractionResult,
 )
@@ -30,13 +31,12 @@ from agentic_threat_investigator.app.extraction.threatfox import extract_threatf
 from agentic_threat_investigator.app.extraction.urlhaus import extract_urlhaus
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
-Extractor = Callable[[LegacyEvidence], ExtractionResult]
+Extractor = Callable[[EvidenceExtractionView], ExtractionResult]
 """A pure, synchronous per-source extraction function."""
 
 
-def extract_empty(_evidence: LegacyEvidence) -> ExtractionResult:
+def extract_empty(_view: EvidenceExtractionView) -> ExtractionResult:
     """Return an empty result for fact-only contextual evidence.
 
     DB-IP City Lite geolocation and AbuseIPDB reputation remain contextual or
@@ -61,21 +61,21 @@ _EVIDENCE_EXTRACTORS: dict[tuple[str, EvidenceType], Extractor] = {
 _EVIDENCE_SOURCES = frozenset(source for source, _ in _EVIDENCE_EXTRACTORS)
 
 
-def extract(evidence: LegacyEvidence) -> ExtractionResult:
-    """Extract deterministic entities and assertions from one LegacyEvidence.
+def extract(view: EvidenceExtractionView) -> ExtractionResult:
+    """Extract deterministic entities and assertions from one observation.
 
     Unknown sources return an empty result by documented policy; a known
     source paired with an evidence type it never produces is a contract
     failure.
     """
-    extractor = _EVIDENCE_EXTRACTORS.get((evidence.source, evidence.type))
+    extractor = _EVIDENCE_EXTRACTORS.get((view.evidence.source, view.evidence.type))
     if extractor is not None:
-        return extractor(evidence)
-    if evidence.source in _EVIDENCE_SOURCES:
+        return extractor(view)
+    if view.evidence.source in _EVIDENCE_SOURCES:
         raise EvidenceExtractionError(
-            evidence.source,
+            view.evidence.source,
             ExtractionErrorReason.UNSUPPORTED_EVIDENCE_TYPE,
             "the evidence type is impossible for the registered source",
-            evidence_id=evidence.id,
+            evidence_id=view.evidence.id,
         )
     return ExtractionResult()

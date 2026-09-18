@@ -25,6 +25,7 @@ from uuid import UUID
 from agentic_threat_investigator.app.extraction.models import (
     EntityIdentity,
     EvidenceExtractionError,
+    EvidenceExtractionView,
     ExtractedEntity,
     ExtractionResult,
     deduplicate_entities,
@@ -40,19 +41,19 @@ from agentic_threat_investigator.domain.entities import (
 )
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 
-def extract_urlhaus(evidence: LegacyEvidence) -> ExtractionResult:
-    """Extract the documented URLhaus identities from one LegacyEvidence."""
-    evidence_id = validate_extractor_input(
-        evidence,
+def extract_urlhaus(view: EvidenceExtractionView) -> ExtractionResult:
+    """Extract the documented URLhaus identities from one observation."""
+    evidence_id = view.evidence.id
+    validate_extractor_input(
+        view,
         source=SourceId.URLHAUS.value,
         evidence_type=EvidenceType.THREAT_INTELLIGENCE,
         subject_types=(EntityType.URL, EntityType.DOMAIN, EntityType.IP_ADDRESS),
     )
-    _validate_subject(evidence, evidence_id)
-    matches = evidence.facts.get("matches")
+    _validate_subject(view, evidence_id)
+    matches = view.observation.facts.get("matches")
     if not isinstance(matches, (list, tuple)) or not matches:
         raise _malformed(evidence_id, "URLhaus evidence must carry validated matches")
 
@@ -67,13 +68,15 @@ def _malformed(evidence_id: UUID, message: str) -> EvidenceExtractionError:
     return malformed_facts(SourceId.URLHAUS.value, message, evidence_id=evidence_id)
 
 
-def _validate_subject(evidence: LegacyEvidence, evidence_id: UUID) -> None:
+def _validate_subject(view: EvidenceExtractionView, evidence_id: UUID) -> None:
     """Require the canonical LegacyEvidence subject promised by the provider."""
     try:
-        canonical = canonicalize(evidence.subject.type, evidence.subject.value)
+        canonical = canonicalize(
+            view.invocation_entity.type, view.invocation_entity.value
+        )
     except ValueError as exc:
         raise _malformed(evidence_id, "URLhaus subject is malformed") from exc
-    if canonical != evidence.subject.value:
+    if canonical != view.invocation_entity.value:
         raise _malformed(evidence_id, "URLhaus subject is not in canonical form")
 
 

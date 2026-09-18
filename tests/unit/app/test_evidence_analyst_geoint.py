@@ -175,7 +175,7 @@ async def test_substitute_evidence_rejected() -> None:
     harness = Harness(world)
     harness.llm.set_default(
         world.geoint_decision(
-            evidence_ids=(world.geoint_evidence_id, world.evidence_id)
+            evidence_observation_ids=(world.geoint_evidence_id, world.evidence_id)
         )
     )
 
@@ -195,7 +195,7 @@ async def test_cross_scope_reference_rejected() -> None:
     harness.llm.set_default(
         world.geoint_decision(
             observation_ids=(other.geoint_obs_seattle_id, world.geoint_obs_dallas_id),
-            evidence_ids=(other.evidence_id, world.geoint_evidence_id),
+            evidence_observation_ids=(other.evidence_id, world.geoint_evidence_id),
         )
     )
 

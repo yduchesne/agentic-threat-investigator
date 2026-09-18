@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Real-PostgreSQL coverage for atomic provider-observation graph persistence.
 
-Every scenario persists synthetic, deterministic LegacyEvidence plus PR 18B
-extraction output through the PR 18C service against the isolated migrated
-database, asserting atomicity, stable-identity reuse, immutable observations,
-history/version invariants, and the documented soft-deleted identity policy.
+Every scenario persists synthetic, deterministic global ``ConvertedEvidence``
+plus PR 18B extraction output through the PR 28B persistence service against
+the isolated migrated database, asserting atomicity, stable-identity reuse,
+immutable exact observations, version invalidation/no-op/append semantics,
+admission, and the documented soft-deleted identity policy.
 """
 
 import asyncio
@@ -26,22 +27,28 @@ from agentic_threat_investigator.app.extraction.models import (
     RelationshipAssertion,
 )
 from agentic_threat_investigator.app.persistence.repositories import (
-    EvidenceDuplicateIdentityError,
+    EvidenceMetadataConflictError,
     InvestigationNotFoundError,
+    RelationshipObservationProvenanceError,
     SoftDeletedIdentityError,
 )
 from agentic_threat_investigator.app.provider_observation_persistence import (
+    ProviderObservationPersistenceResult,
     ProviderObservationPersistenceService,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     RelationshipObservation,
     RelationshipType,
@@ -85,25 +92,36 @@ async def seed_investigation(uow: PostgresUnitOfWork) -> UUID:
     return investigation_id
 
 
-def dns_evidence(
-    investigation_id: UUID, evidence_id: UUID | None = None
-) -> LegacyEvidence:
-    """Build deterministic DNS LegacyEvidence with a canonical domain subject."""
-    return LegacyEvidence(
-        id=evidence_id or uuid4(),
-        investigation_id=investigation_id,
-        type=EvidenceType.DNS,
-        subject=EntityRef(type=EntityType.DOMAIN, value=_DOMAIN),
-        source=_DNS_SOURCE,
-        observed_at=None,
-        retrieved_at=_RETRIEVED_AT,
-        facts={"answers": [_IP], "status": 0},
-        raw_payload=None,
+def dns_converted(
+    *,
+    source_record_id: str | None = None,
+    facts: dict[str, object] | None = None,
+) -> ConvertedEvidence:
+    """Build deterministic DNS global ConvertedEvidence with a domain invocation."""
+    evidence_id = uuid4()
+    return ConvertedEvidence(
+        evidence=Evidence(
+            id=evidence_id,
+            type=EvidenceType.DNS,
+            source=_DNS_SOURCE,
+            source_record_id=(
+                source_record_id
+                if source_record_id is not None
+                else f"dns-{evidence_id}"
+            ),
+        ),
+        observation=EvidenceObservationCandidate(
+            evidence_id=evidence_id,
+            observed_at=None,
+            retrieved_at=_RETRIEVED_AT,
+            facts=facts if facts is not None else {"answers": [_IP], "status": 0},
+            raw_payload=None,
+        ),
     )
 
 
-def dns_extraction(evidence_id: UUID) -> ExtractionResult:
-    """Build the deterministic DNS extraction for the DNS LegacyEvidence fixture."""
+def dns_extraction() -> ExtractionResult:
+    """Build the deterministic DNS extraction for the DNS fixture."""
     return ExtractionResult(
         entities=(ExtractedEntity(type=EntityType.IP_ADDRESS, value=_IP),),
         relationships=(
@@ -111,13 +129,12 @@ def dns_extraction(evidence_id: UUID) -> ExtractionResult:
                 source=EntityIdentity(type=EntityType.DOMAIN, value=_DOMAIN),
                 type=RelationshipType.RESOLVES_TO,
                 target=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP),
-                evidence_id=evidence_id,
             ),
         ),
     )
 
 
-def threatfox_extraction(evidence_id: UUID, subject: str = _IP) -> ExtractionResult:
+def threatfox_extraction(subject: str = _IP) -> ExtractionResult:
     """Build the deterministic ThreatFox extraction asserting the malware edge."""
     return ExtractionResult(
         entities=(
@@ -130,35 +147,70 @@ def threatfox_extraction(evidence_id: UUID, subject: str = _IP) -> ExtractionRes
                 source=EntityIdentity(type=EntityType.IP_ADDRESS, value=subject),
                 type=RelationshipType.ASSOCIATED_WITH,
                 target=EntityIdentity(type=EntityType.MALWARE, value=_MALWARE),
-                evidence_id=evidence_id,
             ),
         ),
     )
 
 
-def threatfox_evidence(investigation_id: UUID) -> LegacyEvidence:
-    """Build deterministic ThreatFox LegacyEvidence with the IP as subject."""
-    return LegacyEvidence(
-        id=uuid4(),
-        investigation_id=investigation_id,
-        type=EvidenceType.THREAT_INTELLIGENCE,
-        subject=EntityRef(type=EntityType.IP_ADDRESS, value=_IP),
-        source=_THREATFOX_SOURCE,
-        observed_at=None,
-        retrieved_at=_RETRIEVED_AT,
-        facts={
-            "matches": [
-                {"ioc": _IP, "malware": _MALWARE, "malware_printable": "AsyncRAT"}
-            ]
-        },
-        raw_payload=None,
+def threatfox_converted() -> ConvertedEvidence:
+    """Build deterministic ThreatFox global ConvertedEvidence with the IP target."""
+    evidence_id = uuid4()
+    return ConvertedEvidence(
+        evidence=Evidence(
+            id=evidence_id,
+            type=EvidenceType.THREAT_INTELLIGENCE,
+            source=_THREATFOX_SOURCE,
+            source_record_id=f"tf-{evidence_id}",
+        ),
+        observation=EvidenceObservationCandidate(
+            evidence_id=evidence_id,
+            observed_at=None,
+            retrieved_at=_RETRIEVED_AT,
+            facts={
+                "matches": [
+                    {"ioc": _IP, "malware": _MALWARE, "malware_printable": "AsyncRAT"}
+                ]
+            },
+            raw_payload=None,
+        ),
     )
 
 
-def require_id(evidence: LegacyEvidence) -> UUID:
-    """Narrow the optional LegacyEvidence identity for extraction construction."""
-    assert evidence.id is not None  # fixtures always set one
-    return evidence.id
+def invocation_entity_domain() -> Entity:
+    """Build the authoritative domain invocation target."""
+    return Entity(type=EntityType.DOMAIN, value=_DOMAIN)
+
+
+def invocation_entity_ip() -> Entity:
+    """Build the authoritative IP invocation target."""
+    return Entity(type=EntityType.IP_ADDRESS, value=_IP)
+
+
+def fact_only_converted(
+    investigation_id: UUID,
+    *,
+    source: str,
+    evidence_type: EvidenceType,
+    facts: dict[str, object],
+) -> ConvertedEvidence:
+    """Build one global ConvertedEvidence with no extracted edges."""
+    evidence_id = uuid4()
+    del investigation_id
+    return ConvertedEvidence(
+        evidence=Evidence(
+            id=evidence_id,
+            type=evidence_type,
+            source=source,
+            source_record_id=f"{source}-{evidence_id}",
+        ),
+        observation=EvidenceObservationCandidate(
+            evidence_id=evidence_id,
+            observed_at=None,
+            retrieved_at=_RETRIEVED_AT,
+            facts=facts,
+            raw_payload=None,
+        ),
+    )
 
 
 async def count(uow: PostgresUnitOfWork, query: str) -> int:
@@ -207,12 +259,12 @@ async def _history_count(
 
 
 async def _audit_count(uow: PostgresUnitOfWork, object_id: UUID) -> int:
-    """Count audit events recorded for one evidence identity."""
+    """Count audit events recorded for one evidence-observation identity."""
     assert uow.session is not None  # the UoW is active
     result = await uow.session.execute(
         text(
             "SELECT count(*) FROM ati.audit_event "
-            "WHERE object_type = 'evidence' AND object_id = :object_id"
+            "WHERE object_type = 'evidence_observation' AND object_id = :object_id"
         ),
         {"object_id": object_id},
     )
@@ -235,7 +287,7 @@ async def snapshot_counts(uow: PostgresUnitOfWork) -> dict[str, int]:
         "domain_entities": await entity_count(uow, "domain"),
         "relationships": await table_count(uow, "relationship"),
         "observations": await table_count(uow, "relationship_observation"),
-        "evidence": await table_count(uow, "evidence"),
+        "evidence_observations": await table_count(uow, "evidence_observation"),
         "history": await table_count(uow, "domain_object_history"),
         "audit_events": await table_count(uow, "audit_event"),
     }
@@ -248,19 +300,42 @@ def extraction_service(
     return ProviderObservationPersistenceService(uow_factory)
 
 
+async def _persist(
+    service: ProviderObservationPersistenceService,
+    converted: ConvertedEvidence,
+    investigation_id: UUID,
+    extraction: ExtractionResult,
+    invocation_entity: Entity,
+) -> ProviderObservationPersistenceResult:
+    """Persist one global observation through the service."""
+    return await service.persist(
+        converted,
+        invocation_entity,
+        extraction,
+        investigation_id=investigation_id,
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_dns_scenario_persists_the_canonical_graph(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """E1 persists one DOMAIN, one IP, one stable edge, one observation, history."""
+    """E1 persists one DOMAIN, one IP, one stable edge, one observation."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
-    evidence = dns_evidence(investigation_id)
+    converted = dns_converted()
     service = extraction_service(uow_factory)
-    result = await service.persist(evidence, dns_extraction(evidence.id))  # type: ignore[arg-type]
+    result = await _persist(
+        service,
+        converted,
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
 
-    assert result.evidence.id == evidence.id
+    assert isinstance(result.entities, tuple)
+    assert isinstance(result.observation, object)
     domain = next(e for e in result.entities if e.type is EntityType.DOMAIN)
     address = next(e for e in result.entities if e.type is EntityType.IP_ADDRESS)
     assert domain.value == _DOMAIN and address.value == _IP
@@ -268,22 +343,22 @@ async def test_dns_scenario_persists_the_canonical_graph(
     assert result.relationships[0].type is RelationshipType.RESOLVES_TO
     assert result.relationships[0].source_entity_id == domain.id
     assert result.relationships[0].target_entity_id == address.id
+    assert result.observation.evidence_id == converted.evidence.id
 
     async with uow_factory() as uow:
         assert await entity_count(uow, "domain") == 1
         assert await entity_count(uow, "ip_address") == 1
-        assert await table_count(uow, "evidence") == 1
+        assert await table_count(uow, "evidence_observation") == 1
         assert await table_count(uow, "relationship") == 1
         assert await table_count(uow, "relationship_observation") == 1
         assert await _history_count(uow, "entity", domain.id) == 1
         assert await _history_count(uow, "entity", address.id) == 1
-        assert await _history_count(uow, "evidence", evidence.id) == 1
+        # Evidence/EvidenceObservation never use generic history.
+        assert await _history_count(uow, "evidence") == 0
+        assert await _history_count(uow, "evidence_observation") == 0
         assert await _history_count(uow, "relationship") == 1
-        # RelationshipObservation is itself the historical record: appending
-        # one observation creates one observation row and no history rows.
         assert await _history_count(uow, "relationship_observation") == 0
-        assert evidence.id is not None  # the service persists it
-        assert await _audit_count(uow, evidence.id) == 1
+        assert await _audit_count(uow, result.observation.id) == 1
 
 
 @pytest.mark.asyncio
@@ -291,18 +366,26 @@ async def test_dns_scenario_persists_the_canonical_graph(
 async def test_threatfox_reuses_the_ip_and_creates_malware(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """E2 reuses the discovered IP, creates the MALWARE entity, and asserts the edge."""
+    """E2 reuses the discovered IP, creates the MALWARE entity, and admits both."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    first = dns_evidence(investigation_id)
-    dns_result = await service.persist(first, dns_extraction(first.id))  # type: ignore[arg-type]
+    dns_result = await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
     address = next(e for e in dns_result.entities if e.type is EntityType.IP_ADDRESS)
 
-    second = threatfox_evidence(investigation_id)
-    assert second.id is not None  # built with a fixed identity
-    threat_result = await service.persist(second, threatfox_extraction(second.id))
-
+    threat_result = await _persist(
+        service,
+        threatfox_converted(),
+        investigation_id,
+        threatfox_extraction(),
+        invocation_entity_ip(),
+    )
     reused_ip = next(
         e for e in threat_result.entities if e.type is EntityType.IP_ADDRESS
     )
@@ -316,10 +399,9 @@ async def test_threatfox_reuses_the_ip_and_creates_malware(
     async with uow_factory() as uow:
         assert await entity_count(uow, "malware") == 1
         assert await entity_count(uow, "ip_address") == 1
-        assert await table_count(uow, "evidence") == 2
+        assert await table_count(uow, "evidence_observation") == 2
         assert await table_count(uow, "relationship") == 2
         assert await table_count(uow, "relationship_observation") == 2
-        # The observation row is the history; no duplicate history is written.
         assert (
             await _history_count(
                 uow, "relationship_observation", threat_result.observations[0].id
@@ -330,27 +412,34 @@ async def test_threatfox_reuses_the_ip_and_creates_malware(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_new_evidence_same_edge_appends_observation(
+async def test_new_observation_same_edge_appends_one_observation(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """A new LegacyEvidence ID on the same semantic edge appends only an observation."""
+    """A new observation on the same semantic edge appends without versions bumping."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    first = dns_evidence(investigation_id)
-    await service.persist(first, dns_extraction(first.id))  # type: ignore[arg-type]
-
-    second = dns_evidence(investigation_id)
-    await service.persist(second, dns_extraction(second.id))  # type: ignore[arg-type]
+    await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
+    await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
 
     async with uow_factory() as uow:
         assert await entity_count(uow, "domain") == 1
         assert await entity_count(uow, "ip_address") == 1
         assert await table_count(uow, "relationship") == 1
-        assert await table_count(uow, "evidence") == 2
+        assert await table_count(uow, "evidence_observation") == 2
         assert await table_count(uow, "relationship_observation") == 2
-        # Reuse must not spurious-bump versions: one history entry each, and
-        # the stored version equals the version in that single history entry.
         assert await _history_count(uow, "relationship") == 1
         domain_version, domain_history_version = await _single_row(
             uow,
@@ -363,23 +452,70 @@ async def test_new_evidence_same_edge_appends_observation(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_same_evidence_replay_conflicts_and_rolls_back(
+async def test_unchanged_replay_is_a_noop_rollback_safe(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Replaying one LegacyEvidence ID is a typed conflict with unchanged graph state."""
+    """Replaying the same observation material state is a no-op (P28B-02)."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    evidence = dns_evidence(investigation_id)
-    await service.persist(evidence, dns_extraction(evidence.id))  # type: ignore[arg-type]
+    converted = dns_converted()
+    first = await _persist(
+        service,
+        converted,
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
+    second = await _persist(
+        service,
+        converted,
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
 
+    assert second.observation.id == first.observation.id
+    async with uow_factory() as uow:
+        assert await table_count(uow, "evidence_observation") == 1
+        assert await table_count(uow, "relationship_observation") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_conflicting_stable_metadata_rolls_back(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Conflicting stable metadata under one Evidence ID is a typed conflict."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+    converted = dns_converted()
+    service = extraction_service(uow_factory)
+    await _persist(
+        service,
+        converted,
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
+
+    conflicting = converted.model_copy(
+        update={
+            "evidence": converted.evidence.model_copy(
+                update={"source_record_id": "different-record"}
+            )
+        }
+    )
     async with uow_factory() as uow:
         before = await snapshot_counts(uow)
-
-    with pytest.raises(EvidenceDuplicateIdentityError):
-        replay = dns_evidence(investigation_id, evidence_id=evidence.id)
-        await service.persist(replay, dns_extraction(replay.id))  # type: ignore[arg-type]
-
+    with pytest.raises(EvidenceMetadataConflictError):
+        await _persist(
+            service,
+            conflicting,
+            investigation_id,
+            dns_extraction(),
+            invocation_entity_domain(),
+        )
     async with uow_factory() as uow:
         after = await snapshot_counts(uow)
     assert after == before
@@ -387,39 +523,74 @@ async def test_same_evidence_replay_conflicts_and_rolls_back(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_empty_extraction_persists_evidence_only(
+async def test_material_change_appends_next_version(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Empty extraction persists LegacyEvidence and audit; prior graph history stays."""
+    """A material change appends the next observation version (P28B-04)."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    dns = dns_evidence(investigation_id)
-    await service.persist(dns, dns_extraction(dns.id))  # type: ignore[arg-type]
+    converted = dns_converted()
+    first = await _persist(
+        service,
+        converted,
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
+    changed = converted.model_copy(
+        update={
+            "observation": converted.observation.model_copy(
+                update={"facts": {"answers": [_IP], "status": 0, "changed": True}}
+            )
+        }
+    )
+    second = await _persist(
+        service, changed, investigation_id, dns_extraction(), invocation_entity_domain()
+    )
+    assert second.outcome.value == "APPENDED"
+    assert second.observation.version == 2
+    assert second.observation.id != first.observation.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_empty_extraction_persists_observation_only(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """Empty extraction persists the observation and admission only."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+    service = extraction_service(uow_factory)
+    await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
     async with uow_factory() as uow:
         before = await snapshot_counts(uow)
 
-    geolocation = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=investigation_id,
-        type=EvidenceType.GEOLOCATION,
-        subject=EntityRef(type=EntityType.IP_ADDRESS, value=_IP),
+    converted = fact_only_converted(
+        investigation_id,
         source=_GEOLOCATION_SOURCE,
-        observed_at=None,
-        retrieved_at=_RETRIEVED_AT,
+        evidence_type=EvidenceType.GEOLOCATION,
         facts={"country_code": "US", "city": "Springfield"},
-        raw_payload=None,
     )
-    result = await service.persist(geolocation, ExtractionResult())
-
-    assert len(result.entities) == 1  # only the subject identity
+    result = await _persist(
+        service, converted, investigation_id, ExtractionResult(), invocation_entity_ip()
+    )
+    assert len(result.entities) == 1  # only the invocation target
     assert result.relationships == ()
     async with uow_factory() as uow:
         after = await snapshot_counts(uow)
-    assert after["evidence"] == before["evidence"] + 1
-    assert after["history"] == before["history"] + 1  # evidence CREATE only
-    assert after["relationships"] == before["relationships"]
-    assert after["observations"] == before["observations"]
+        assert after["evidence_observations"] == before["evidence_observations"] + 1
+        assert after["relationships"] == before["relationships"]
+        assert after["observations"] == before["observations"]
+        # No generic Evidence history is written (P28B no generic history).
+        assert await _history_count(uow, "evidence") == 0
+        assert await _history_count(uow, "evidence_observation") == 0
 
 
 @pytest.mark.asyncio
@@ -427,35 +598,39 @@ async def test_empty_extraction_persists_evidence_only(
 async def test_fact_only_and_urlhaus_entities_do_not_invent_edges(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """DB-IP/AbuseIPDB persist evidence only; URLhaus persists entities without edges."""
+    """DB-IP/AbuseIPDB persist observations only; URLhaus persists entities without edges."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
 
-    reputation = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=investigation_id,
-        type=EvidenceType.REPUTATION,
-        subject=EntityRef(type=EntityType.IP_ADDRESS, value=_IP),
+    reputation = fact_only_converted(
+        investigation_id,
         source=_ABUSEIPDB_SOURCE,
-        observed_at=None,
-        retrieved_at=_RETRIEVED_AT,
+        evidence_type=EvidenceType.REPUTATION,
         facts={"abuse_confidence_score": 85},
-        raw_payload=None,
     )
-    abuse_result = await service.persist(reputation, ExtractionResult())
+    abuse_result = await _persist(
+        service,
+        reputation,
+        investigation_id,
+        ExtractionResult(),
+        invocation_entity_ip(),
+    )
     assert abuse_result.relationships == ()
 
-    urlhaus = LegacyEvidence(
+    urlhaus_evidence = Evidence(
         id=uuid4(),
-        investigation_id=investigation_id,
         type=EvidenceType.THREAT_INTELLIGENCE,
-        subject=EntityRef(type=EntityType.DOMAIN, value=_DOMAIN),
         source=_URLHAUS_SOURCE,
-        observed_at=None,
-        retrieved_at=_RETRIEVED_AT,
-        facts={"matches": [{"url": f"http://{_DOMAIN}/payload.exe"}]},
-        raw_payload=None,
+        source_record_id="urlhaus-1",
+    )
+    urlhaus = ConvertedEvidence(
+        evidence=urlhaus_evidence,
+        observation=EvidenceObservationCandidate(
+            evidence_id=urlhaus_evidence.id,
+            retrieved_at=_RETRIEVED_AT,
+            facts={"matches": [{"url": f"http://{_DOMAIN}/payload.exe"}]},
+        ),
     )
     urlhaus_extraction = ExtractionResult(
         entities=(
@@ -463,15 +638,20 @@ async def test_fact_only_and_urlhaus_entities_do_not_invent_edges(
         ),
         relationships=(),
     )
-    urlhaus_result = await service.persist(urlhaus, urlhaus_extraction)
+    urlhaus_result = await _persist(
+        service,
+        urlhaus,
+        investigation_id,
+        urlhaus_extraction,
+        invocation_entity_domain(),
+    )
     assert urlhaus_result.relationships == ()
     assert len(urlhaus_result.entities) == 2
 
     async with uow_factory() as uow:
-        # No URL-host relationship is invented; only the two entities exist.
         assert await table_count(uow, "relationship") == 0
         assert await table_count(uow, "relationship_observation") == 0
-        assert await table_count(uow, "evidence") == 2
+        assert await table_count(uow, "evidence_observation") == 2
 
 
 @pytest.mark.asyncio
@@ -481,13 +661,17 @@ async def test_missing_investigation_is_a_typed_error(
 ) -> None:
     """A missing parent investigation is a typed error with zero graph mutation."""
     service = extraction_service(uow_factory)
-    evidence = dns_evidence(uuid4())
     with pytest.raises(InvestigationNotFoundError):
-        await service.persist(evidence, dns_extraction(evidence.id))  # type: ignore[arg-type]
-
+        await _persist(
+            service,
+            dns_converted(),
+            uuid4(),
+            dns_extraction(),
+            invocation_entity_domain(),
+        )
     async with uow_factory() as uow:
         assert await table_count(uow, "entity") == 0
-        assert await table_count(uow, "evidence") == 0
+        assert await table_count(uow, "evidence_observation") == 0
         assert await table_count(uow, "relationship") == 0
 
 
@@ -510,48 +694,21 @@ async def test_mid_transaction_observation_failure_rolls_back_everything(
         exploding_append,
     )
     service = extraction_service(uow_factory)
-    evidence = dns_evidence(investigation_id)
     with pytest.raises(RuntimeError, match="injected"):
-        await service.persist(evidence, dns_extraction(evidence.id))  # type: ignore[arg-type]
-
+        await _persist(
+            service,
+            dns_converted(),
+            investigation_id,
+            dns_extraction(),
+            invocation_entity_domain(),
+        )
     async with uow_factory() as uow:
         assert await table_count(uow, "entity") == 0
-        assert await table_count(uow, "evidence") == 0
+        assert await table_count(uow, "evidence_observation") == 0
         assert await table_count(uow, "relationship") == 0
         assert await table_count(uow, "relationship_observation") == 0
-        # Only the seeded investigation's own history remains; the rolled-back
-        # transaction contributed no history of any kind.
         assert await table_count(uow, "domain_object_history") == 1
         assert await _history_count(uow, "investigation") == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_concurrent_writers_share_one_canonical_identity(
-    uow_factory: Callable[[], PostgresUnitOfWork],
-) -> None:
-    """Two concurrent writers discover the same absent edge without raw failures."""
-    async with uow_factory() as uow:
-        investigation_id = await seed_investigation(uow)
-    service = extraction_service(uow_factory)
-
-    async def writer() -> LegacyEvidence:
-        evidence = dns_evidence(investigation_id)
-        await service.persist(evidence, dns_extraction(evidence.id))  # type: ignore[arg-type]
-        return evidence
-
-    evidence_ids = await asyncio.gather(
-        asyncio.wait_for(writer(), 20),
-        asyncio.wait_for(writer(), 20),
-    )
-    assert len(evidence_ids) == 2
-
-    async with uow_factory() as uow:
-        assert await entity_count(uow, "domain") == 1
-        assert await entity_count(uow, "ip_address") == 1
-        assert await table_count(uow, "relationship") == 1
-        assert await table_count(uow, "evidence") == 2
-        assert await table_count(uow, "relationship_observation") == 2
 
 
 @pytest.mark.asyncio
@@ -563,31 +720,36 @@ async def test_soft_deleted_entity_rediscovery_fails_closed(
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    first = dns_evidence(investigation_id)
-    result = await service.persist(first, dns_extraction(first.id))  # type: ignore[arg-type]
+    result = await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
     address = next(e for e in result.entities if e.type is EntityType.IP_ADDRESS)
 
     async with uow_factory() as uow:
         assert address.id is not None  # persisted above
         await uow.entities.soft_delete(address.id)
 
-    reputation = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=investigation_id,
-        type=EvidenceType.REPUTATION,
-        subject=EntityRef(type=EntityType.IP_ADDRESS, value=_IP),
+    reputation = fact_only_converted(
+        investigation_id,
         source=_ABUSEIPDB_SOURCE,
-        observed_at=None,
-        retrieved_at=_RETRIEVED_AT,
+        evidence_type=EvidenceType.REPUTATION,
         facts={},
-        raw_payload=None,
     )
     with pytest.raises(SoftDeletedIdentityError):
-        await service.persist(reputation, ExtractionResult())
-
+        await _persist(
+            service,
+            reputation,
+            investigation_id,
+            ExtractionResult(),
+            invocation_entity_ip(),
+        )
     async with uow_factory() as uow:
         assert await entity_count(uow, "ip_address") == 1
-        assert await table_count(uow, "evidence") == 1
+        assert await table_count(uow, "evidence_observation") == 1
         deleted_row = await count(
             uow,
             "SELECT deleted_at IS NOT NULL FROM ati.entity WHERE entity_type = 'ip_address'",
@@ -604,20 +766,29 @@ async def test_soft_deleted_relationship_rediscovery_fails_closed(
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    first = dns_evidence(investigation_id)
-    result = await service.persist(first, dns_extraction(first.id))  # type: ignore[arg-type]
+    result = await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
 
     async with uow_factory() as uow:
         await uow.relationships.soft_delete(result.relationships[0].id)
 
-    second = dns_evidence(investigation_id)
     with pytest.raises(SoftDeletedIdentityError):
-        await service.persist(second, dns_extraction(second.id))  # type: ignore[arg-type]
-
+        await _persist(
+            service,
+            dns_converted(),
+            investigation_id,
+            dns_extraction(),
+            invocation_entity_domain(),
+        )
     async with uow_factory() as uow:
         assert await table_count(uow, "relationship") == 1
         assert await table_count(uow, "relationship_observation") == 1
-        assert await table_count(uow, "evidence") == 1
+        assert await table_count(uow, "evidence_observation") == 1
 
 
 @pytest.mark.asyncio
@@ -629,11 +800,20 @@ async def test_canonical_graph_is_reconstructed_from_durable_rows(
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    dns = dns_evidence(investigation_id)
-    await service.persist(dns, dns_extraction(dns.id))  # type: ignore[arg-type]
-    threat = threatfox_evidence(investigation_id)
-    await service.persist(threat, threatfox_extraction(threat.id))  # type: ignore[arg-type]
-
+    await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
+    await _persist(
+        service,
+        threatfox_converted(),
+        investigation_id,
+        threatfox_extraction(),
+        invocation_entity_ip(),
+    )
     async with uow_factory() as uow:
         assert uow.session is not None
         rows = (
@@ -792,12 +972,17 @@ async def test_concurrent_entity_soft_deletion_is_rejected_under_the_row_lock(
             session_factory, paused_identity, read_done, delete_committed
         )
 
-    evidence = dns_evidence(investigation_id)
     service = extraction_service(racing_factory)
 
     async def writer() -> object:
         try:
-            await service.persist(evidence, dns_extraction(require_id(evidence)))
+            await _persist(
+                service,
+                dns_converted(),
+                investigation_id,
+                dns_extraction(),
+                invocation_entity_domain(),
+            )
             return None
         except SoftDeletedIdentityError as error:
             return error
@@ -815,7 +1000,6 @@ async def test_concurrent_entity_soft_deletion_is_rejected_under_the_row_lock(
     assert outcome.object_id == subject.id
 
     async with uow_factory() as uow:
-        # Exactly one canonical row remains and it stays soft-deleted.
         assert await entity_count(uow, "domain") == 1
         deleted_only = await count(
             uow,
@@ -823,13 +1007,10 @@ async def test_concurrent_entity_soft_deletion_is_rejected_under_the_row_lock(
             "WHERE entity_type = 'domain' AND deleted_at IS NOT NULL",
         )
         assert deleted_only == 1
-        assert await table_count(uow, "evidence") == 0
+        assert await table_count(uow, "evidence_observation") == 0
         assert await table_count(uow, "relationship") == 0
         assert await table_count(uow, "relationship_observation") == 0
         assert not await uow.evidence.list_for_investigation(investigation_id)
-        # No same-transaction history: only the seed history and the
-        # independent soft-deletion history exist.
-        assert await _history_count(uow, "evidence") == 0
         assert await _history_count(uow, "relationship") == 0
         assert await _history_count(uow, "relationship_observation") == 0
 
@@ -844,8 +1025,13 @@ async def test_canonical_race_recovery_rejects_a_soft_deleted_row(
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    first = dns_evidence(investigation_id)
-    dns_result = await service.persist(first, dns_extraction(require_id(first)))
+    dns_result = await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
     address = next(e for e in dns_result.entities if e.type is EntityType.IP_ADDRESS)
 
     async with uow_factory() as uow:
@@ -857,23 +1043,23 @@ async def test_canonical_race_recovery_rejects_a_soft_deleted_row(
     def racing_factory() -> _SimulatedRaceUow:
         return _SimulatedRaceUow(session_factory, race_identity)
 
-    reputation = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=investigation_id,
-        type=EvidenceType.REPUTATION,
-        subject=EntityRef(type=EntityType.IP_ADDRESS, value=_IP),
+    reputation = fact_only_converted(
+        investigation_id,
         source=_ABUSEIPDB_SOURCE,
-        observed_at=None,
-        retrieved_at=_RETRIEVED_AT,
+        evidence_type=EvidenceType.REPUTATION,
         facts={},
-        raw_payload=None,
     )
     with pytest.raises(SoftDeletedIdentityError):
-        await extraction_service(racing_factory).persist(reputation, ExtractionResult())
-
+        await _persist(
+            extraction_service(racing_factory),
+            reputation,
+            investigation_id,
+            ExtractionResult(),
+            invocation_entity_ip(),
+        )
     async with uow_factory() as uow:
         assert await entity_count(uow, "ip_address") == 1
-        assert await table_count(uow, "evidence") == 1
+        assert await table_count(uow, "evidence_observation") == 1
 
 
 @pytest.mark.asyncio
@@ -893,7 +1079,6 @@ async def test_soft_deleted_entity_write_is_database_enforced(
         with pytest.raises(SoftDeletedIdentityError) as error:
             await uow.entities.upsert(Entity(type=EntityType.DOMAIN, value=_DOMAIN))
         assert error.value.object_id == written.id
-        # No second canonical row was created.
         assert await entity_count(uow, "domain") == 1
 
 
@@ -906,8 +1091,13 @@ async def test_relationship_soft_delete_uses_database_version_and_history(
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    evidence = dns_evidence(investigation_id)
-    result = await service.persist(evidence, dns_extraction(require_id(evidence)))
+    result = await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
     relationship = result.relationships[0]
 
     async with uow_factory() as uow:
@@ -953,7 +1143,6 @@ async def test_relationship_soft_delete_uses_database_version_and_history(
         delete_diff = history[-1][1]
         assert delete_diff["deleted_at"]["old"] is None
         assert delete_diff["deleted_at"]["new"] is not None
-        # Exactly two history rows total: CREATE and DELETE.
         assert await _history_count(uow, "relationship") == 2
 
     async with uow_factory() as uow:
@@ -982,8 +1171,13 @@ async def test_relationship_soft_delete_rejects_stale_missing_and_repeat(
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    evidence = dns_evidence(investigation_id)
-    result = await service.persist(evidence, dns_extraction(require_id(evidence)))
+    result = await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
     relationship = result.relationships[0]
 
     async with uow_factory() as uow:
@@ -1002,25 +1196,19 @@ async def test_relationship_soft_delete_rejects_stale_missing_and_repeat(
         ).scalar_one()
         before_history = await _history_count(uow, "relationship")
 
-    # Stale expected version: typed error, no mutation.
     async with uow_factory() as uow:
         with pytest.raises(ValueError, match="stale"):
             await uow.relationships.soft_delete(
                 relationship.id, expected_version=int(row_version) + 999
             )
-
-    # Missing relationship: typed error, no mutation.
     async with uow_factory() as uow:
         with pytest.raises(LookupError):
             await uow.relationships.soft_delete(uuid4())
-
-    # Successful deletion, then a repeat delete: typed error, no extra history.
     async with uow_factory() as uow:
         await uow.relationships.soft_delete(relationship.id)
     async with uow_factory() as uow:
         with pytest.raises(LookupError):
             await uow.relationships.soft_delete(relationship.id)
-
     async with uow_factory() as uow:
         after_history = await _history_count(uow, "relationship")
     assert after_history == before_history + 1  # only the successful DELETE
@@ -1031,30 +1219,33 @@ async def test_relationship_soft_delete_rejects_stale_missing_and_repeat(
 async def test_observation_evidence_provenance_is_relationally_enforced(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """A dangling LegacyEvidence reference is rejected and leaves no partial rows."""
+    """A dangling EvidenceObservation reference is rejected and leaves no partial rows."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
     service = extraction_service(uow_factory)
-    evidence = dns_evidence(investigation_id)
-    result = await service.persist(evidence, dns_extraction(require_id(evidence)))
+    result = await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
     relationship = result.relationships[0]
 
     async with uow_factory() as uow:
         dangling = RelationshipObservation(
             id=uuid4(),
             relationship_id=relationship.id,
-            evidence_observation_id=uuid4(),  # no such LegacyEvidence row exists
+            evidence_observation_id=uuid4(),  # no such observation row exists
             observed_at=None,
             retrieved_at=_RETRIEVED_AT,
-            source=evidence.source,
+            source=_DNS_SOURCE,
         )
-        with pytest.raises(IntegrityError):
+        with pytest.raises(RelationshipObservationProvenanceError):
             await uow.relationship_observations.append(dangling)
 
     async with uow_factory() as uow:
         assert await table_count(uow, "relationship_observation") == 1
-        # The dangling append rolled back completely: the surviving observation
-        # row is the only one, and it carries no history row.
         assert await _history_count(uow, "relationship_observation") == 0
         assert await table_count(uow, "relationship") == 1
-        assert await table_count(uow, "evidence") == 1
+        assert await table_count(uow, "evidence_observation") == 1

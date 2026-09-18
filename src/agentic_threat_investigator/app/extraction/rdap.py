@@ -30,6 +30,7 @@ from uuid import UUID
 from agentic_threat_investigator.app.extraction.models import (
     EntityIdentity,
     EvidenceExtractionError,
+    EvidenceExtractionView,
     ExtractedEntity,
     ExtractionResult,
     RelationshipAssertion,
@@ -48,7 +49,6 @@ from agentic_threat_investigator.domain.entities import (
 )
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 _NETWORK_OBJECT_CLASS = "ip network"
@@ -56,7 +56,7 @@ _DOMAIN_OBJECT_CLASS = "domain"
 _AUTNUM_OBJECT_CLASS = "autnum"
 
 
-def extract_rdap(evidence: LegacyEvidence) -> ExtractionResult:
+def extract_rdap(view: EvidenceExtractionView) -> ExtractionResult:
     """Extract the documented conservative RDAP output from one LegacyEvidence.
 
     Both registered RDAP branches require a persisted LegacyEvidence ID, a
@@ -65,68 +65,70 @@ def extract_rdap(evidence: LegacyEvidence) -> ExtractionResult:
     result for ``REGISTRATION`` (domain and ASN objects) and explicit-prefix
     ``BELONGS_TO`` extraction for IP-network evidence.
     """
-    if evidence.source != SourceId.RDAP.value:
+    if view.evidence.source != SourceId.RDAP.value:
         raise unsupported_evidence_type(
-            evidence.source,
+            view.evidence.source,
             "evidence source/type does not match the extractor contract",
-            evidence_id=evidence.id,
+            evidence_id=view.evidence.id,
         )
-    if evidence.type is EvidenceType.REGISTRATION:
-        return _validated_registration(evidence)
-    if evidence.type is not EvidenceType.NETWORK:
+    if view.evidence.type is EvidenceType.REGISTRATION:
+        return _validated_registration(view)
+    if view.evidence.type is not EvidenceType.NETWORK:
         raise unsupported_evidence_type(
-            evidence.source,
+            view.evidence.source,
             "RDAP extraction supports only network and registration evidence",
-            evidence_id=evidence.id,
+            evidence_id=view.evidence.id,
         )
-    evidence_id = validate_extractor_input(
-        evidence,
+    evidence_id = view.evidence.id
+    validate_extractor_input(
+        view,
         source=SourceId.RDAP.value,
         evidence_type=EvidenceType.NETWORK,
         subject_types=(EntityType.IP_ADDRESS,),
     )
-    return _extract_ip_network(evidence, evidence_id)
+    return _extract_ip_network(view, evidence_id)
 
 
-def _validated_registration(evidence: LegacyEvidence) -> ExtractionResult:
+def _validated_registration(view: EvidenceExtractionView) -> ExtractionResult:
     """Validate the registration envelope and return an empty result.
 
     Only canonical DOMAIN and ASN subjects with their promised object-class
     pairing are accepted; nothing from nameservers, handles, entities, roles,
     or display names is inspected for graph output.
     """
-    if evidence.subject.type not in (EntityType.DOMAIN, EntityType.ASN):
+    if view.invocation_entity.type not in (EntityType.DOMAIN, EntityType.ASN):
         raise _malformed(
-            evidence.id,
+            view.evidence.id,
             "RDAP registration evidence requires a DOMAIN or ASN subject",
         )
-    if evidence.subject.type is EntityType.DOMAIN:
+    if view.invocation_entity.type is EntityType.DOMAIN:
         try:
-            canonical_subject = validate_dns_name(evidence.subject.value)
+            canonical_subject = validate_dns_name(view.invocation_entity.value)
         except (ValueError, UnicodeError) as exc:
             raise _malformed(
-                evidence.id, "RDAP registration subject is malformed"
+                view.evidence.id, "RDAP registration subject is malformed"
             ) from exc
         expected_object_class = _DOMAIN_OBJECT_CLASS
     else:
         try:
-            canonical_subject = canonicalize_asn(evidence.subject.value)
+            canonical_subject = canonicalize_asn(view.invocation_entity.value)
         except ValueError as exc:
             raise _malformed(
-                evidence.id, "RDAP registration subject is malformed"
+                view.evidence.id, "RDAP registration subject is malformed"
             ) from exc
         expected_object_class = _AUTNUM_OBJECT_CLASS
-    if canonical_subject != evidence.subject.value:
+    if canonical_subject != view.invocation_entity.value:
         raise _malformed(
-            evidence.id, "RDAP registration subject is not in canonical form"
+            view.evidence.id, "RDAP registration subject is not in canonical form"
         )
-    object_class = evidence.facts.get("object_class_name")
+    object_class = view.observation.facts.get("object_class_name")
     if object_class != expected_object_class:
         raise _malformed(
-            evidence.id, "RDAP registration evidence carries an unexpected object class"
+            view.evidence.id,
+            "RDAP registration evidence carries an unexpected object class",
         )
-    _ = validate_extractor_input(
-        evidence,
+    validate_extractor_input(
+        view,
         source=SourceId.RDAP.value,
         evidence_type=EvidenceType.REGISTRATION,
     )
@@ -134,26 +136,26 @@ def _validated_registration(evidence: LegacyEvidence) -> ExtractionResult:
 
 
 def _extract_ip_network(
-    evidence: LegacyEvidence, evidence_id: UUID
+    view: EvidenceExtractionView, evidence_id: UUID
 ) -> ExtractionResult:
     """Extract explicit CIDR0 prefixes for a validated IP-network observation.
 
     The canonical subject identity is validated first — even when no CIDR0
     facts exist — so an impossible subject can never pass silently.
     """
-    object_class = evidence.facts.get("object_class_name")
+    object_class = view.observation.facts.get("object_class_name")
     if object_class != _NETWORK_OBJECT_CLASS:
         raise _malformed(
             evidence_id, "RDAP network evidence carries an unexpected object class"
         )
     try:
-        canonical_subject = canonicalize_ip_address(evidence.subject.value)
+        canonical_subject = canonicalize_ip_address(view.invocation_entity.value)
     except ValueError as exc:
         raise _malformed(evidence_id, "RDAP subject address is malformed") from exc
-    if canonical_subject != evidence.subject.value:
+    if canonical_subject != view.invocation_entity.value:
         raise _malformed(evidence_id, "RDAP subject address is not in canonical form")
 
-    cidrs = evidence.facts.get("cidr0_cidrs")
+    cidrs = view.observation.facts.get("cidr0_cidrs")
     if cidrs is None:
         return ExtractionResult()
     if not isinstance(cidrs, (list, tuple)):
@@ -188,7 +190,6 @@ def _extract_ip_network(
                 source=subject,
                 type=RelationshipType.BELONGS_TO,
                 target=prefix_identity,
-                evidence_id=evidence_id,
             )
         )
     return ExtractionResult(
@@ -224,10 +225,9 @@ def _validated_prefix(entry: Any, evidence_id: UUID) -> str:
     return canonical
 
 
-def _malformed(evidence_id: UUID | None, message: str) -> EvidenceExtractionError:
+def _malformed(_evidence_id: UUID | None, message: str) -> EvidenceExtractionError:
     """Build the RDAP extraction error with the bounded safe context."""
     return malformed_facts(
         SourceId.RDAP.value,
         message,
-        evidence_id=evidence_id,
     )

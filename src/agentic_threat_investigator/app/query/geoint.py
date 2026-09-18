@@ -321,9 +321,9 @@ class GeointObservationItem(BaseModel):
     """One immutable geographic observation with exact provenance.
 
     ``observation_id`` is the exact ``EntityLocationObservation`` identity
-    and ``evidence_id`` is the exact immutable Evidence that produced it;
-    observation -> Evidence drill-down is exact through the existing
-    Evidence detail contract.
+    and ``evidence_observation_id`` is the exact immutable
+    EvidenceObservation that produced it (PR 28B); observation -> Evidence
+    drill-down is exact through the existing Evidence detail contract.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -331,7 +331,7 @@ class GeointObservationItem(BaseModel):
     observation_id: UUID
     entity_id: UUID
     location: GeointLocationRef
-    evidence_id: UUID
+    evidence_observation_id: UUID
     precision: LocationPrecision
     resolution_method: str
     observed_at: datetime | None = None
@@ -636,7 +636,9 @@ def geoint_observation_item_from_row(row: object) -> GeointObservationItem:
             observation_id=_require_uuid("observation_id", data.get("observation_id")),
             entity_id=_require_uuid("entity_id", data.get("entity_id")),
             location=geoint_location_ref_from_row(row),
-            evidence_id=_require_uuid("evidence_id", data.get("evidence_id")),
+            evidence_observation_id=_require_uuid(
+                "evidence_observation_id", data.get("evidence_observation_id")
+            ),
             precision=_require_enum(  # type: ignore[arg-type]
                 "precision", LocationPrecision, data.get("precision")
             ),

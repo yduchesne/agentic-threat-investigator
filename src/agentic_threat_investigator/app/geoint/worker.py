@@ -48,13 +48,13 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvalidGeographicClaimError,
     UnitOfWork,
 )
+from agentic_threat_investigator.domain.evidence import Evidence, EvidenceObservation
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolutionStatus,
     EntityLocationObservation,
     GeoResolution,
     observation_uuid_for_resolution,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -187,20 +187,21 @@ class GeoResolutionWorker:
         resolution_id, expected_version, claimed_by = self._work_identity(resolution)
 
         try:
-            evidence = await self._load_evidence(resolution)
+            loaded = await self._load_evidence(resolution)
         except EvidenceLoadError:
             await self._persist_failure(
                 resolution, code=FAILURE_EVIDENCE_LOAD, retryable=True
             )
             return
-        if evidence is None:
+        if loaded is None:
             await self._persist_failure(
                 resolution, code=FAILURE_MISSING_EVIDENCE, retryable=False
             )
             return
+        evidence_stable, evidence = loaded
 
         try:
-            claim = geographic_claim_from_evidence(evidence)
+            claim = geographic_claim_from_evidence(evidence_stable, evidence)
         except GeoEvidenceTypeError:
             await self._persist_failure(
                 resolution, code=FAILURE_EVIDENCE_TYPE, retryable=False
@@ -243,7 +244,7 @@ class GeoResolutionWorker:
                 id=observation_uuid_for_resolution(resolution_id),
                 entity_id=resolution.entity_id,
                 location_id=outcome.location.id,
-                evidence_id=resolution.evidence_id,
+                evidence_observation_id=resolution.evidence_observation_id,
                 precision=claim.precision,
                 observed_at=evidence.observed_at,
                 retrieved_at=evidence.retrieved_at,
@@ -273,17 +274,27 @@ class GeoResolutionWorker:
             raise RuntimeError("claimed geo resolution lacks work identity")
         return resolution_id, expected_version, claimed_by
 
-    async def _load_evidence(self, resolution: GeoResolution) -> LegacyEvidence | None:
-        """Load the exact immutable LegacyEvidence for one claimed item.
+    async def _load_evidence(
+        self, resolution: GeoResolution
+    ) -> tuple[Evidence, EvidenceObservation] | None:
+        """Load the exact Immutable EvidenceObservation and its stable Evidence.
 
         A transient load failure (database availability) raises
         :class:`EvidenceLoadError` so the caller persists a retryable bounded
-        failure; ``None`` means the LegacyEvidence row is genuinely absent (a
+        failure; ``None`` means the observation row is genuinely absent (a
         terminal, non-retryable condition).
         """
         try:
             async with self._uow_factory() as uow:
-                return await uow.evidence.get_by_id(resolution.evidence_id)
+                observation = await uow.evidence.get_observation(
+                    resolution.evidence_observation_id
+                )
+                if observation is None:
+                    return None
+                stable = await uow.evidence.get_stable_evidence(observation.evidence_id)
+                if stable is None:  # pragma: no cover - FK invariant
+                    return None
+                return stable, observation
         except asyncio.CancelledError:
             raise
         except Exception as error:

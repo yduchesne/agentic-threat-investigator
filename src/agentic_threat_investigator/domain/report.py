@@ -370,7 +370,7 @@ class ReportWriterInput(BaseModel):
         cls, value: tuple[AnalystEvidenceItem, ...]
     ) -> tuple[AnalystEvidenceItem, ...]:
         """Reject duplicate evidence identities."""
-        ids = [item.evidence_id for item in value]
+        ids = [item.evidence_observation_id for item in value]
         if len(ids) != len(set(ids)):
             raise ValueError("report input evidence must not contain duplicates")
         return value

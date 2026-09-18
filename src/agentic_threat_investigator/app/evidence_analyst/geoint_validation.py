@@ -144,13 +144,16 @@ class GeointFindingValidator:
                 )
             known.append(observation)
 
-        for observation_id, evidence_id in zip(
-            finding.observation_ids, finding.evidence_ids, strict=True
+        for observation_id, evidence_observation_id in zip(
+            finding.observation_ids,
+            finding.evidence_observation_ids,
+            strict=True,
         ):
             observation = self._context.observation(observation_id)
             if (
                 observation is None
-                or observation.observation.evidence_id != evidence_id
+                or observation.observation.evidence_observation_id
+                != evidence_observation_id
             ):
                 raise GeographicFindingValidationError(
                     f"geographic finding evidence does not match the cited "
@@ -311,8 +314,8 @@ def map_geographic_findings(
             statement=finding.statement,
             confidence=_mapped_confidence(decision.confidence),
             support=tuple(
-                EvidenceSupport(kind="evidence", evidence_id=evidence_id)
-                for evidence_id in finding.evidence_ids
+                EvidenceSupport(kind="evidence", evidence_id=evidence_observation_id)
+                for evidence_observation_id in finding.evidence_observation_ids
             ),
         )
         for finding in decision.geographic_findings

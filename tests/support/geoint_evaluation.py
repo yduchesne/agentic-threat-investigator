@@ -345,7 +345,7 @@ def accepted_decision(
 def shared_location_finding(
     *,
     observation_ids: tuple[UUID, ...],
-    evidence_ids: tuple[UUID, ...],
+    evidence_observation_ids: tuple[UUID, ...],
     entity_ids: tuple[UUID, ...],
     location_ids: tuple[UUID, ...],
 ) -> GeographicFinding:
@@ -355,7 +355,7 @@ def shared_location_finding(
         statement="The entities were observed in the same city.",
         temporal_interpretation=GeographicTemporalInterpretation.NONE,
         observation_ids=observation_ids,
-        evidence_ids=evidence_ids,
+        evidence_observation_ids=evidence_observation_ids,
         entity_ids=entity_ids,
         location_ids=location_ids,
     )

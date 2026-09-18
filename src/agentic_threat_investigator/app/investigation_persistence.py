@@ -18,6 +18,7 @@ from collections.abc import Callable
 from uuid import UUID
 
 from agentic_threat_investigator.app.persistence.repositories import (
+    EvidencePersistenceResult,
     InvestigationNotFoundError,
     InvestigationWriteResult,
     UnitOfWork,
@@ -27,12 +28,17 @@ from agentic_threat_investigator.domain.audit import (
     AuditEvent,
     AuditOutcome,
 )
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     require_status_transition,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 # Explicit actor/request/expected-version arguments are intentional.
 
@@ -40,7 +46,7 @@ from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 LOGGER = logging.getLogger(__name__)
 
 INVESTIGATION_OBJECT_TYPE = "investigation"
-EVIDENCE_OBJECT_TYPE = "evidence"
+EVIDENCE_OBJECT_TYPE = "evidence_observation"
 
 
 class InvestigationPersistenceService:
@@ -131,22 +137,31 @@ class InvestigationPersistenceService:
 
     async def record_evidence(
         self,
-        evidence: LegacyEvidence,
+        converted: ConvertedEvidence,
         *,
+        investigation_id: UUID,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
-    ) -> LegacyEvidence:
-        """Record one immutable evidence observation with its audit event.
+    ) -> EvidencePersistenceResult:
+        """Record one global EvidenceObservation with its exact admission.
 
-        The observation is appended for an existing, visible investigation;
-        the investigation reference and audit event commit together with the
-        evidence row.
+        The PR 28B global observation is persisted (created/reused/appended)
+        and exactly admitted to the existing, visible investigation; the
+        admission and the minimized audit event commit together with the
+        observation row in one short UnitOfWork.
         """
         async with self._uow_factory() as uow:
-            if await uow.investigations.get_by_id(evidence.investigation_id) is None:
-                raise InvestigationNotFoundError(str(evidence.investigation_id))
-            recorded = await uow.evidence.insert(
-                evidence, actor_id=actor_id, request_id=request_id
+            if await uow.investigations.get_by_id(investigation_id) is None:
+                raise InvestigationNotFoundError(str(investigation_id))
+            recorded = await uow.evidence.persist(converted)
+            await uow.investigation_evidence.admit(
+                InvestigationEvidence(
+                    investigation_id=investigation_id,
+                    evidence_observation_id=recorded.observation.id,
+                    inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                    added_at=recorded.observation.retrieved_at,
+                    added_by=InvestigationEvidenceActor.SYSTEM,
+                )
             )
             await uow.audit_events.append(
                 AuditEvent(
@@ -154,14 +169,19 @@ class InvestigationPersistenceService:
                     outcome=AuditOutcome.SUCCESS,
                     actor_id=actor_id,
                     object_type=EVIDENCE_OBJECT_TYPE,
-                    object_id=recorded.id,
+                    object_id=recorded.observation.id,
                     request_id=request_id,
                     metadata={
-                        "investigation_id": str(evidence.investigation_id),
+                        "investigation_id": str(investigation_id),
+                        "outcome": recorded.outcome.value,
                     },
                 )
             )
-        LOGGER.debug("recorded evidence %s", recorded.id)
+        LOGGER.debug(
+            "recorded evidence observation %s (outcome %s)",
+            recorded.observation.id,
+            recorded.outcome.value,
+        )
         return recorded
 
     async def delete_investigation(

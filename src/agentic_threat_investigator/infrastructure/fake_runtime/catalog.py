@@ -43,17 +43,18 @@ from pydantic import (
 )
 
 from agentic_threat_investigator.app.extraction.extractor import extract
+from agentic_threat_investigator.app.extraction.models import EvidenceExtractionView
 from agentic_threat_investigator.app.providers import (
     ProviderError,
     ProviderErrorCode,
 )
-from agentic_threat_investigator.domain.entities import EntityType, canonicalize
-from agentic_threat_investigator.domain.evidence import EvidenceType
-from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import (
-    EntityRef as EvidenceEntityRef,
+from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
+from agentic_threat_investigator.domain.identifiers import SourceId
 
 FAKE_WORLD_SCHEMA_VERSION = 1
 """Supported synthetic-world schema version (PR 23D)."""
@@ -494,27 +495,38 @@ class FakeWorldCatalog:
     def _validate_evidence_contracts(self, world: FakeWorldData) -> None:
         """Prove every observation is extractable through the real contracts.
 
-        Each observation is built into an ``LegacyEvidence`` with a synthetic ID
-        and dispatched through the production extraction dispatcher; a
-        contract violation fails loading instead of surfacing mid-investigation.
+        Each observation is built into a PR 28B extraction view (stable
+        Evidence + observation candidate + canonical invocation Entity with a
+        synthetic test-seam identity) and dispatched through the production
+        extraction dispatcher; a contract violation fails loading instead of
+        surfacing mid-investigation.
         """
         retrieved_at = datetime(2026, 1, 1, tzinfo=UTC)
         for result in world.provider_results:
             for observation in result.observations:
-                evidence = LegacyEvidence(
+                canonical_entity = Entity(
+                    type=result.entity_type, value=result.entity_value
+                )
+                evidence = Evidence(
                     id=uuid4(),
-                    investigation_id=uuid4(),
                     type=observation.evidence_type,
-                    subject=EvidenceEntityRef(
-                        type=result.entity_type, value=result.entity_value
-                    ),
                     source=result.provider_id,
+                    source_record_id=f"fake-validation|{result.entity_value}",
+                )
+                candidate = EvidenceObservationCandidate(
+                    evidence_id=evidence.id,
                     observed_at=observation.observed_at,
                     retrieved_at=retrieved_at,
                     facts=observation.facts,
                 )
                 try:
-                    extract(evidence)
+                    extract(
+                        EvidenceExtractionView(
+                            evidence=evidence,
+                            observation=candidate,
+                            invocation_entity=canonical_entity,
+                        )
+                    )
                 except Exception as exc:
                     raise FakeWorldValidationError(
                         "fake observation violates the provider extraction contract"

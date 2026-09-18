@@ -11,7 +11,7 @@ durable current pointers, history redaction, and deterministic Markdown.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,7 +22,10 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
@@ -38,6 +41,7 @@ from tests.integration.api_helpers import (
 from tests.support.query_fixtures import (
     evidence_factory,
     seed_entity,
+    seed_evidence_observation,
     seed_investigation,
     seed_observation,
     seed_relationship,
@@ -85,19 +89,20 @@ async def _seed_complete_investigation(uow: Any) -> UUID:
         uow, entity_type=EntityType.IP_ADDRESS, value="192.0.2.1"
     )
 
-    evidence = await uow.evidence.insert(
-        evidence_factory(investigation_id, domain_entity, retrieved_at=FIXED)
+    evidence = await seed_evidence_observation(
+        uow,
+        investigation_id=investigation_id,
+        entity_id=domain_entity,
+        retrieved_at=FIXED,
     )
-    later_evidence = await uow.evidence.insert(
-        evidence_factory(
-            investigation_id,
-            domain_entity,
-            source="urn:ati:source:rdap",
-            evidence_type=EvidenceType.REGISTRATION,
-            retrieved_at=datetime(2026, 1, 2, tzinfo=UTC),
-        )
+    await seed_evidence_observation(
+        uow,
+        investigation_id=investigation_id,
+        entity_id=domain_entity,
+        source="urn:ati:source:rdap",
+        evidence_type=EvidenceType.REGISTRATION,
+        retrieved_at=datetime(2026, 1, 2, tzinfo=UTC),
     )
-    assert evidence.id is not None and later_evidence.id is not None
 
     relationship = await seed_relationship(
         uow,
@@ -109,7 +114,7 @@ async def _seed_complete_investigation(uow: Any) -> UUID:
         uow,
         investigation_id=investigation_id,
         relationship=relationship,
-        evidence=evidence,
+        evidence_observation_id=evidence,
         retrieved_at=FIXED,
         observed_at=FIXED,
     )
@@ -211,10 +216,30 @@ async def test_i07_no_raw_evidence_payload(
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity = await seed_entity(uow, value="example.com")
-        evidence = await uow.evidence.insert(
-            evidence_with_raw_payload(investigation_id, entity)
+        evidence = await seed_evidence_observation(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=entity,
+            source="urn:ati:source:google_public_dns",
+            evidence_type=EvidenceType.DNS,
         )
-        assert evidence.id is not None
+        converted = cast(
+            ConvertedEvidence, evidence_with_raw_payload(investigation_id, entity)
+        )
+        await uow.evidence.persist(
+            converted.model_copy(
+                update={
+                    "observation": converted.observation.model_copy(
+                        update={
+                            "raw_payload": {
+                                "http_response": {"status": 200, "body": "secret"}
+                            }
+                        }
+                    )
+                }
+            )
+        )
+        assert evidence is not None
     await seed_user(session_factory)
 
     with api_client(api_settings()) as client:
@@ -224,7 +249,7 @@ async def test_i07_no_raw_evidence_payload(
         )
         listed = client.get(f"/api/v1/investigations/{investigation_id}/evidence")
         detail = client.get(
-            f"/api/v1/investigations/{investigation_id}/evidence/{evidence.id}"
+            f"/api/v1/investigations/{investigation_id}/evidence/{evidence}"
         )
 
     assert listed.status_code == 200
@@ -238,13 +263,20 @@ async def test_i07_no_raw_evidence_payload(
 
 def evidence_with_raw_payload(investigation_id: UUID, entity_id: UUID) -> object:
     """Build one evidence observation carrying a raw provider payload."""
-    return evidence_factory(
+    converted = evidence_factory(
         investigation_id,
         entity_id,
         source="urn:ati:source:google_public_dns",
         evidence_type=EvidenceType.DNS,
-    ).model_copy(
-        update={"raw_payload": {"http_response": {"status": 200, "body": "secret"}}}
+    )
+    return converted.model_copy(
+        update={
+            "observation": converted.observation.model_copy(
+                update={
+                    "raw_payload": {"http_response": {"status": 200, "body": "secret"}}
+                }
+            )
+        }
     )
 
 

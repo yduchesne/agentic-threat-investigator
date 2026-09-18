@@ -62,16 +62,25 @@ from sqlalchemy.ext.asyncio import (
 
 from agentic_threat_investigator.app.persistence.repositories import (
     EntityRepository,
+    EvidenceObservationEntityRepository,
     EvidenceRepository,
+    InvestigationEvidenceRepository,
     InvestigationRepository,
 )
 from agentic_threat_investigator.config import get_settings
 from agentic_threat_investigator.config.settings import OperatingMode, Settings
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.geolocation import GeoPrecision
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.composites import (
     register_batch_composites,
 )
@@ -207,21 +216,27 @@ def derive_entity_id(ip: str) -> UUID:
 def derive_evidence_id(
     investigation_id: UUID, scenario: str, index: int, ip: str
 ) -> UUID:
-    """Derive the deterministic immutable LegacyEvidence UUID for one fixture row."""
+    """Derive the deterministic EvidenceObservation UUID for one fixture row."""
     return uuid5(
         _SEED_NAMESPACE,
-        f"sgeo-evidence:{scenario}:{investigation_id}:{index}:{ip}",
+        f"sgeo-observation:{scenario}:{investigation_id}:{index}:{ip}",
     )
 
 
 @dataclass(frozen=True)
 class SeedEvidenceUnit:
-    """One deterministic Entity + GEOLOCATION LegacyEvidence pair to persist."""
+    """One deterministic Entity + global GEOLOCATION Evidence pair to persist.
+
+    PR 28B: the unit persists a global ``ConvertedEvidence`` (stable
+    Evidence + observation candidate) with the deterministic observation
+    identity ``evidence_id``; the seeder admits it and associates the
+    canonical Entity.
+    """
 
     entity_id: UUID
     evidence_id: UUID
     ip: str
-    evidence: LegacyEvidence
+    converted: ConvertedEvidence
 
     @property
     def entity(self) -> Entity:
@@ -263,27 +278,32 @@ def build_seed_units(
     for index, fixture in enumerate(scenario_fixtures(scenario)):
         entity_id = derive_entity_id(fixture.ip)
         evidence_id = derive_evidence_id(investigation_id, scenario, index, fixture.ip)
-        evidence = LegacyEvidence(
-            id=evidence_id,
-            investigation_id=investigation_id,
-            type=EvidenceType.GEOLOCATION,
-            subject=EntityRef(
-                id=entity_id, type=EntityType.IP_ADDRESS, value=fixture.ip
+        stable_evidence = Evidence(
+            id=uuid5(
+                _SEED_NAMESPACE,
+                f"sgeo-evidence-stable:{scenario}:{index}:{fixture.ip}",
             ),
+            type=EvidenceType.GEOLOCATION,
             source=PROVIDER,
-            source_record_id=None,
-            source_url=None,
-            observed_at=None,
-            retrieved_at=SEED_RETRIEVED_AT,
-            facts=_fixture_facts(fixture),
-            raw_payload=None,
+            source_record_id=f"sgeo:{scenario}:{index}:{fixture.ip}",
+        )
+        converted = ConvertedEvidence(
+            evidence=stable_evidence,
+            observation=EvidenceObservationCandidate(
+                evidence_id=stable_evidence.id,
+                source_url=None,
+                observed_at=None,
+                retrieved_at=SEED_RETRIEVED_AT,
+                facts=_fixture_facts(fixture),
+                raw_payload=None,
+            ),
         )
         units.append(
             SeedEvidenceUnit(
                 entity_id=entity_id,
                 evidence_id=evidence_id,
                 ip=fixture.ip,
-                evidence=evidence,
+                converted=converted,
             )
         )
     return tuple(units)
@@ -351,6 +371,8 @@ class SeedUnitOfWork(Protocol):
     investigations: InvestigationRepository
     entities: EntityRepository
     evidence: EvidenceRepository
+    evidence_observation_entities: EvidenceObservationEntityRepository
+    investigation_evidence: InvestigationEvidenceRepository
 
     async def __aenter__(self) -> Self:
         """Enter the transaction boundary."""
@@ -396,21 +418,26 @@ async def apply_seed(
             if entity.id is None:  # pragma: no cover - persisted rows have IDs
                 raise RuntimeError("seeded entity persisted without an id")
             entity_ids.append(entity.id)
-            existing = await uow.evidence.get_by_id(unit.evidence_id)
+            existing = await uow.evidence.get_observation(unit.evidence_id)
             if existing is not None:
                 reused.append(unit.evidence_id)
                 continue
-            bound = unit.evidence.model_copy(
-                update={
-                    "subject": EntityRef(
-                        id=entity.id, type=EntityType.IP_ADDRESS, value=unit.ip
-                    )
-                }
+            persisted = await uow.evidence.persist(
+                unit.converted, observation_id=unit.evidence_id
             )
-            inserted = await uow.evidence.insert(bound)
-            if inserted.id is None:  # pragma: no cover
-                raise RuntimeError("seeded evidence persisted without an id")
-            created.append(inserted.id)
+            await uow.evidence_observation_entities.associate(
+                persisted.observation.id, entity.id
+            )
+            await uow.investigation_evidence.admit(
+                InvestigationEvidence(
+                    investigation_id=investigation_id,
+                    evidence_observation_id=persisted.observation.id,
+                    inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                    added_at=SEED_RETRIEVED_AT,
+                    added_by=InvestigationEvidenceActor.SYSTEM,
+                )
+            )
+            created.append(persisted.observation.id)
         return SeedReport(
             scenario=scenario,
             investigation_id=investigation_id,

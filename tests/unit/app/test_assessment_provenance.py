@@ -1,9 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Unit tests for the deterministic Assessment provenance validator.
+"""Unit tests for the Assessment provenance validator (PR 20A + PR 28B).
 
-The synthetic chain factories intentionally mirror the other persistence
-service fixtures; the shared shape is conventional in this suite.
+Assessment provenance identities are exact EvidenceObservation values
+(PR 28B), and Investigation membership comes exclusively from
+``InvestigationEvidence`` admission: a global observation that is not
+admitted to the Assessment's Investigation fails closed exactly like the
+old cross-Investigation LegacyEvidence check.
 """
+
+from __future__ import annotations
 
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -30,61 +36,55 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    EvidenceObservation,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
     RelationshipType,
 )
 
-_RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 _STARTED_AT = datetime(2026, 1, 1, tzinfo=UTC)
-
-
-def investigation_id() -> UUID:
-    """Return a fresh investigation identity for one test."""
-    return uuid4()
+_RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
 
 class Chain:
-    """A complete, eligible provenance chain with concrete stable identities.
+    """One deterministic exact-observation provenance chain."""
 
-    The count of terminal UUID attributes is intentional: every identity is
-    concrete so strict Mypy never sees the domain's optional persistence
-    predicates as keys into the context maps.
-    """
-
-    def __init__(self, investigation: UUID | None = None) -> None:
-        self.investigation_id = investigation or investigation_id()
+    def __init__(self) -> None:
+        """Bind the fixed identities and the authoritative observation."""
+        self.investigation_id = uuid4()
+        self.observation_id = uuid4()
         self.source_id = uuid4()
         self.target_id = uuid4()
-        self.evidence_id = uuid4()
         self.relationship_id = uuid4()
-        self.observation_id = uuid4()
-        self.investigation = self._investigation()
         self.source_entity = Entity(
             id=self.source_id, type=EntityType.DOMAIN, value="example.com"
         )
         self.target_entity = Entity(
-            id=self.target_id, type=EntityType.IP_ADDRESS, value="192.0.2.1"
+            id=self.target_id,
+            type=EntityType.IP_ADDRESS,
+            value="203.0.113.42",
         )
-        self.evidence = self.make_evidence()
         self.relationship = Relationship(
             id=self.relationship_id,
             source_entity_id=self.source_id,
             target_entity_id=self.target_id,
             type=RelationshipType.RESOLVES_TO,
         )
+        self.evidence = self.make_evidence(observation_id=self.observation_id)
+        self.evidence_id = self.observation_id
         self.observation = self.make_observation(
-            evidence_id=self.evidence_id,
+            evidence_observation_id=self.evidence_id,
             relationship_id=self.relationship_id,
+            observation_id=uuid4(),
         )
 
     def _investigation(self) -> InvestigationState:
@@ -99,53 +99,68 @@ class Chain:
             started_at=_STARTED_AT,
         )
 
+    @property
+    def investigation(self) -> InvestigationState:
+        """Return the visible Investigation."""
+        return self._investigation()
+
     def make_evidence(
-        self, *, evidence_id: UUID | None = None, subject: str = "example.com"
-    ) -> LegacyEvidence:
-        """Build one immutable evidence observation."""
-        return LegacyEvidence(
-            id=evidence_id or uuid4(),
-            investigation_id=self.investigation_id,
-            type=EvidenceType.DNS,
-            subject=EntityRef(type=EntityType.DOMAIN, value=subject),
-            source="urn:ati:source:google_public_dns",
+        self, *, observation_id: UUID | None = None
+    ) -> EvidenceObservation:
+        """Build one immutable global EvidenceObservation."""
+        identity = observation_id if observation_id is not None else uuid4()
+        return EvidenceObservation(
+            id=identity,
+            evidence_id=uuid4(),
+            version=1,
             retrieved_at=_RETRIEVED_AT,
+            facts={},
         )
 
     def make_observation(
         self,
         *,
         observation_id: UUID | None = None,
-        evidence_id: UUID,
+        evidence_observation_id: UUID,
         relationship_id: UUID,
     ) -> RelationshipObservation:
         """Build one immutable relationship observation.
 
-        PR 28A: the domain observation carries no Investigation correlation;
+        PR 28B: the domain observation carries no Investigation correlation;
         Investigation membership of the cited observation flows through its
-        exact supporting evidence.
+        exact backing EvidenceObservation admission.
         """
         return RelationshipObservation(
             id=observation_id or uuid4(),
             relationship_id=relationship_id,
-            evidence_observation_id=evidence_id,
+            evidence_observation_id=evidence_observation_id,
             retrieved_at=_RETRIEVED_AT,
-            source="urn:ati:source:google_public_dns",
+            source="urn:ati:source:threatfox",
         )
 
     def context(
         self,
         *,
-        evidence: dict[UUID, LegacyEvidence] | None = None,
+        evidence: dict[UUID, EvidenceObservation] | None = None,
         observations: dict[UUID, RelationshipObservation] | None = None,
         relationships: dict[UUID, Relationship] | None = None,
         entities: dict[UUID, Entity] | None = None,
+        admitted: set[UUID] | None = None,
     ) -> AssessmentProvenanceContext:
-        """Build an immutable validation context over this chain."""
+        """Build an immutable validation context over this chain.
+
+        Admission is explicit: contexts default to admitting exactly the
+        supplied evidence-observation map, and tests pass ``admitted`` to
+        model unadmitted global observations (PR 28B fail closed).
+        """
+        evidence_map: dict[UUID, EvidenceObservation] = (
+            {self.evidence_id: self.evidence} if evidence is None else evidence
+        )
         return AssessmentProvenanceContext(
             investigation=self.investigation,
-            evidence=(
-                {self.evidence_id: self.evidence} if evidence is None else evidence
+            evidence=evidence_map,
+            admitted_observation_ids=frozenset(
+                admitted if admitted is not None else set(evidence_map)
             ),
             relationship_observations=(
                 {self.observation_id: self.observation}
@@ -198,7 +213,7 @@ def assessment_factory(
         investigation_id=chain.investigation_id,
         verdict=verdict,
         confidence=confidence,
-        summary="LegacyEvidence supports the verdict.",
+        summary="The exact observations support the verdict.",
         analyzed_evidence_ids=((chain.evidence_id,) if analyzed is None else analyzed),
         findings=findings,
     )
@@ -210,12 +225,12 @@ def validate(candidate: Assessment, ctx: AssessmentProvenanceContext) -> None:
 
 
 # ---------------------------------------------------------------------------
-# LegacyEvidence cases 1-5
+# Evidence cases 1-4
 # ---------------------------------------------------------------------------
 
 
 def test_valid_evidence_support() -> None:
-    """A cited analyzed evidence of the same investigation is valid."""
+    """A cited analyzed admitted observation is valid."""
     chain = Chain()
     candidate = assessment_factory(
         chain,
@@ -231,38 +246,8 @@ def test_valid_evidence_support() -> None:
     validate(candidate, chain.context())
 
 
-def test_evidence_from_another_investigation_is_rejected() -> None:
-    """Cross-investigation evidence never satisfies an Assessment."""
-    chain = Chain()
-    foreign = chain.make_evidence()
-    foreign = LegacyEvidence(
-        id=foreign.id or uuid4(),
-        investigation_id=uuid4(),
-        type=EvidenceType.REPUTATION,
-        subject=EntityRef(type=EntityType.DOMAIN, value="elsewhere.example"),
-        source="urn:ati:source:threatfox",
-        retrieved_at=_RETRIEVED_AT,
-    )
-    if foreign.id is None:  # pragma: no cover - fixture invariant
-        raise AssertionError("fixture evidence has no identity")
-    ctx = chain.context(
-        evidence={foreign.id: foreign, chain.evidence_id: chain.evidence}
-    )
-    candidate = assessment_factory(
-        chain,
-        analyzed=(foreign.id,),
-        findings=(
-            finding_factory(
-                support=(EvidenceSupport(kind="evidence", evidence_id=foreign.id),)
-            ),
-        ),
-    )
-    with pytest.raises(AssessmentInvestigationMismatchError):
-        validate(candidate, ctx)
-
-
 def test_evidence_absent_from_analyzed_set_is_rejected() -> None:
-    """Support may cite only evidence the analyst explicitly analyzed."""
+    """Support may cite only observations the analyst explicitly analyzed."""
     chain = Chain()
     candidate = assessment_factory(
         chain,
@@ -280,7 +265,7 @@ def test_evidence_absent_from_analyzed_set_is_rejected() -> None:
 
 
 def test_nonexistent_evidence_is_rejected() -> None:
-    """Citing evidence outside the persisted snapshot is invalid."""
+    """Citing an observation outside the persisted snapshot is invalid."""
     chain = Chain()
     phantom_id = uuid4()
     candidate = assessment_factory(
@@ -311,6 +296,69 @@ def test_evidence_with_zero_relationship_observations_is_valid() -> None:
         ),
     )
     validate(candidate, chain.context())
+
+
+# ---------------------------------------------------------------------------
+# Admission cases (PR 28B)
+# ---------------------------------------------------------------------------
+
+
+def test_unadmitted_analyzed_observation_is_rejected() -> None:
+    """B2-A02: a global observation not admitted to the Investigation fails closed."""
+    chain = Chain()
+    global_observation = chain.make_evidence()
+    ctx = chain.context(
+        evidence={
+            chain.evidence_id: chain.evidence,
+            global_observation.id: global_observation,
+        },
+        admitted={chain.evidence_id},
+    )
+    candidate = assessment_factory(
+        chain,
+        analyzed=(global_observation.id,),
+    )
+    with pytest.raises(AssessmentInvestigationMismatchError):
+        validate(candidate, ctx)
+
+
+def test_unadmitted_support_observation_is_rejected() -> None:
+    """B2-A02: support citing an unadmitted observation fails closed."""
+    chain = Chain()
+    global_observation = chain.make_evidence()
+    ctx = chain.context(
+        evidence={
+            chain.evidence_id: chain.evidence,
+            global_observation.id: global_observation,
+        },
+        admitted={chain.evidence_id},
+    )
+    candidate = assessment_factory(
+        chain,
+        analyzed=(chain.evidence_id, global_observation.id),
+        findings=(
+            finding_factory(
+                support=(
+                    EvidenceSupport(kind="evidence", evidence_id=global_observation.id),
+                )
+            ),
+        ),
+    )
+    with pytest.raises(AssessmentInvestigationMismatchError):
+        validate(candidate, ctx)
+
+
+def test_a04_stable_evidence_id_where_observation_required_is_rejected() -> None:
+    """B2-A04: a stable Evidence ID is not an admissible observation identity."""
+    chain = Chain()
+    stable_id = uuid4()  # a stable Evidence id, never an observation id
+    candidate = assessment_factory(
+        chain,
+        analyzed=(stable_id,),
+    )
+    # No observation carries the stable id, so the analyzed set is unresolvable.
+    with pytest.raises(AssessmentEvidenceReferenceError):
+        validate(candidate, chain.context())
 
 
 # ---------------------------------------------------------------------------
@@ -357,26 +405,18 @@ def test_nonexistent_observation_is_rejected() -> None:
         validate(candidate, chain.context())
 
 
-def test_observation_evidence_from_wrong_investigation_is_rejected() -> None:
-    """The observation's LegacyEvidence must belong to the Assessment Investigation."""
+def test_unadmitted_observation_evidence_is_rejected() -> None:
+    """B2-A02: the observation's backing observation must be admitted."""
     chain = Chain()
-    foreign = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=uuid4(),
-        type=EvidenceType.REPUTATION,
-        subject=EntityRef(type=EntityType.DOMAIN, value="other.example"),
-        source="urn:ati:src:threatfox",
-        retrieved_at=_RETRIEVED_AT,
-    )
-    if foreign.id is None:  # pragma: no cover - fixture invariant
-        raise AssertionError("fixture evidence has no identity")
+    unadmitted = chain.make_evidence()
     observation = chain.make_observation(
-        evidence_id=foreign.id,
+        evidence_observation_id=unadmitted.id,
         relationship_id=chain.relationship_id,
     )
     ctx = chain.context(
         observations={observation.id: observation},
-        evidence={foreign.id: foreign, chain.evidence_id: chain.evidence},
+        evidence={chain.evidence_id: chain.evidence, unadmitted.id: unadmitted},
+        admitted={chain.evidence_id},
     )
     candidate = assessment_factory(
         chain,
@@ -396,20 +436,11 @@ def test_observation_evidence_from_wrong_investigation_is_rejected() -> None:
 
 
 def test_observation_evidence_absent_from_analyzed_set_is_rejected() -> None:
-    """The observation's exact LegacyEvidence must be part of the analyzed set."""
+    """The observation's exact EvidenceObservation must be analyzed."""
     chain = Chain()
-    unanalyzed = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=chain.investigation_id,
-        type=EvidenceType.DNS,
-        subject=EntityRef(type=EntityType.DOMAIN, value="unanalyzed.example"),
-        source="urn:ati:source:google_public_dns",
-        retrieved_at=_RETRIEVED_AT,
-    )
-    if unanalyzed.id is None:  # pragma: no cover - fixture invariant
-        raise AssertionError("fixture evidence has no identity")
+    unanalyzed = chain.make_evidence()
     observation = chain.make_observation(
-        evidence_id=unanalyzed.id,
+        evidence_observation_id=unanalyzed.id,
         relationship_id=chain.relationship_id,
     )
     ctx = chain.context(
@@ -517,8 +548,8 @@ def test_missing_target_entity_is_rejected() -> None:
         validate(candidate, ctx)
 
 
-def test_one_evidence_can_support_multiple_observations() -> None:
-    """One LegacyEvidence observation may back several graph claims."""
+def test_one_observation_can_support_multiple_observations() -> None:
+    """One exact observation may back several graph claims."""
     chain = Chain()
     second_target = Entity(id=uuid4(), type=EntityType.IP_ADDRESS, value="198.51.100.7")
     if second_target.id is None:  # pragma: no cover - fixture invariant
@@ -530,7 +561,7 @@ def test_one_evidence_can_support_multiple_observations() -> None:
         type=RelationshipType.USES_NAME_SERVER,
     )
     second_observation = chain.make_observation(
-        evidence_id=chain.evidence_id,
+        evidence_observation_id=chain.evidence_id,
         relationship_id=second_relationship.id,
     )
     ctx = chain.context(
@@ -572,18 +603,9 @@ def test_one_evidence_can_support_multiple_observations() -> None:
 def test_one_relationship_can_have_multiple_observations() -> None:
     """Repeated observations of the stable edge are all individually citable."""
     chain = Chain()
-    later = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=chain.investigation_id,
-        type=EvidenceType.REPUTATION,
-        subject=EntityRef(type=EntityType.DOMAIN, value="later.example"),
-        source="urn:ati:src:urlhaus",
-        retrieved_at=_RETRIEVED_AT,
-    )
-    if later.id is None:  # pragma: no cover - fixture invariant
-        raise AssertionError("fixture evidence has no identity")
+    later = chain.make_evidence()
     later_observation = chain.make_observation(
-        evidence_id=later.id,
+        evidence_observation_id=later.id,
         relationship_id=chain.relationship_id,
     )
     ctx = chain.context(
@@ -615,18 +637,9 @@ def test_one_relationship_can_have_multiple_observations() -> None:
 
 
 def test_exact_observation_resolves_exact_evidence() -> None:
-    """The cited observation resolves to exactly the analyzed LegacyEvidence."""
+    """The cited observation resolves to exactly the analyzed observation."""
     chain = Chain()
-    other = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=chain.investigation_id,
-        type=EvidenceType.DNS,
-        subject=EntityRef(type=EntityType.DOMAIN, value="other.example"),
-        source="urn:ati:test:source",
-        retrieved_at=_RETRIEVED_AT,
-    )
-    if other.id is None:  # pragma: no cover - fixture invariant
-        raise AssertionError("fixture evidence has no identity")
+    other = chain.make_evidence()
     ctx = chain.context(evidence={chain.evidence_id: chain.evidence, other.id: other})
     candidate = assessment_factory(
         chain,
@@ -642,7 +655,7 @@ def test_exact_observation_resolves_exact_evidence() -> None:
             ),
         ),
     )
-    # The observation's exact LegacyEvidence is not analyzed, so the citation fails.
+    # The observation's exact backing observation is not analyzed.
     with pytest.raises(AssessmentEvidenceReferenceError):
         validate(candidate, ctx)
     exact = candidate.model_copy(update={"analyzed_evidence_ids": (chain.evidence_id,)})
@@ -652,18 +665,9 @@ def test_exact_observation_resolves_exact_evidence() -> None:
 def test_another_observation_of_same_relationship_cannot_substitute() -> None:
     """A different observation of the same edge never substitutes."""
     chain = Chain()
-    later = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=chain.investigation_id,
-        type=EvidenceType.REPUTATION,
-        subject=EntityRef(type=EntityType.DOMAIN, value="later.example"),
-        source="urn:ati:test:urlhaus",
-        retrieved_at=_RETRIEVED_AT,
-    )
-    if later.id is None:  # pragma: no cover - fixture invariant
-        raise AssertionError("fixture evidence has no identity")
+    later = chain.make_evidence()
     other_observation = chain.make_observation(
-        evidence_id=later.id,
+        evidence_observation_id=later.id,
         relationship_id=chain.relationship_id,
     )
     ctx = chain.context(
@@ -726,7 +730,7 @@ def test_bare_relationship_id_cannot_parse_as_graph_support() -> None:
 
 
 def test_mixed_support_is_valid() -> None:
-    """A Finding may cite both direct LegacyEvidence and an observation."""
+    """A Finding may cite both direct observation support and an observation."""
     chain = Chain()
     candidate = assessment_factory(
         chain,
@@ -809,58 +813,25 @@ def test_errors_expose_safe_identifiers_only() -> None:
     assert str(phantom_id) in message
     # Candidate payload/summary text never leaks into the error.
     assert "Deterministic analytical claim" not in message
-    assert "LegacyEvidence supports the verdict." not in message
+    assert "The exact observations support the verdict." not in message
     assert "facts" not in message
 
 
 def test_context_investigation_mismatch_is_rejected() -> None:
     """A visible but different context Investigation is a typed failure."""
-
     chain = Chain()
     other = Chain()
     assessment = Assessment(
         investigation_id=chain.investigation_id,
         verdict=Verdict.SUSPICIOUS,
         confidence=AssessmentConfidence.MEDIUM,
-        summary="LegacyEvidence supports the verdict.",
+        summary="The exact observations support the verdict.",
         analyzed_evidence_ids=(chain.evidence_id,),
     )
     context = AssessmentProvenanceContext(
         investigation=other.investigation,
         evidence={chain.evidence_id: chain.evidence},
-        relationship_observations={chain.observation_id: chain.observation},
-        relationships={chain.relationship_id: chain.relationship},
-        entities={
-            chain.source_id: chain.source_entity,
-            chain.target_id: chain.target_entity,
-        },
+        admitted_observation_ids=frozenset({chain.evidence_id}),
     )
-    with pytest.raises(AssessmentInvestigationMismatchError, match="does not match"):
+    with pytest.raises(AssessmentInvestigationMismatchError):
         validate(assessment, context)
-
-
-def test_context_mappings_are_immutable_snapshots() -> None:
-    """Context maps reject mutation and never alias the loader's dictionaries."""
-
-    chain = Chain()
-    source_evidence: dict[UUID, LegacyEvidence] = {chain.evidence_id: chain.evidence}
-    source_entities: dict[UUID, Entity] = {
-        chain.source_id: chain.source_entity,
-        chain.target_id: chain.target_entity,
-    }
-    context = AssessmentProvenanceContext(
-        investigation=chain.investigation,
-        evidence=source_evidence,
-        relationship_observations={},
-        relationships={chain.relationship_id: chain.relationship},
-        entities=source_entities,
-    )
-    with pytest.raises(TypeError):
-        context.evidence[uuid4()] = chain.evidence  # type: ignore[index]
-    with pytest.raises(TypeError):
-        context.entities[uuid4()] = chain.source_entity  # type: ignore[index]
-    # Mutating the original loader dictionaries does not alter the snapshot.
-    source_evidence[uuid4()] = chain.evidence
-    source_entities.pop(chain.source_id)
-    assert chain.evidence_id in context.evidence
-    assert chain.source_id in context.entities

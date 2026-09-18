@@ -16,10 +16,14 @@ from agentic_threat_investigator.app.extraction import (
     ExtractionErrorReason,
     extract_urlhaus,
 )
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.app.extraction.models import EvidenceExtractionView
+from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from tests.support.extraction_fixtures import (
     CANONICAL_ASYNCRAT_DOMAIN,
     CANONICAL_ASYNCRAT_IP,
@@ -35,17 +39,24 @@ def urlhaus_evidence(
     subject_type: EntityType = EntityType.DOMAIN,
     subject_value: str = CANONICAL_ASYNCRAT_DOMAIN,
     evidence_id: UUID | None = None,
-) -> LegacyEvidence:
-    """Build one normalized URLhaus evidence observation with the given matches."""
-    return LegacyEvidence(
-        id=evidence_id if evidence_id is not None else uuid4(),
-        investigation_id=uuid4(),
+) -> EvidenceExtractionView:
+    """Build one normalized URLhaus extraction view with the given matches."""
+    identity = evidence_id if evidence_id is not None else uuid4()
+    evidence = Evidence(
+        id=identity,
         type=EvidenceType.THREAT_INTELLIGENCE,
-        subject=EntityRef(type=subject_type, value=subject_value),
         source=SOURCE,
+        source_record_id=f"fixture:{identity}",
+    )
+    candidate = EvidenceObservationCandidate(
+        evidence_id=identity,
         retrieved_at=datetime(2026, 1, 15, tzinfo=UTC),
         facts={"matches": matches},
-        raw_payload=None,
+    )
+    return EvidenceExtractionView(
+        evidence=evidence,
+        observation=candidate,
+        invocation_entity=Entity(type=subject_type, value=subject_value),
     )
 
 
@@ -136,7 +147,7 @@ def test_direct_url_match_with_ipv4_host() -> None:
 def test_host_lookup_record_with_null_host_discovers_url_only() -> None:
     """Host-response records carry host=null and never synthesize queried_host."""
     evidence = urlhaus_evidence([host_record_match()])
-    assert evidence.facts["matches"][0]["host"] is None
+    assert evidence.observation.facts["matches"][0]["host"] is None
     result = extract_urlhaus(evidence)
 
     assert [entity.type for entity in result.entities] == [EntityType.URL]
@@ -232,21 +243,10 @@ def test_missing_matches_fail() -> None:
     """Missing or empty match collections are contract failures."""
     fact_shapes: tuple[dict[str, object], ...] = ({}, {"matches": []})
     for facts in fact_shapes:
-        evidence = urlhaus_evidence([]).model_copy(update={"facts": facts})
+        evidence = _with_facts(urlhaus_evidence([]), facts)
         with pytest.raises(EvidenceExtractionError) as excinfo:
             extract_urlhaus(evidence)
         assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
-
-
-def test_missing_persisted_evidence_id_fails() -> None:
-    """URLhaus entity discovery requires a persisted LegacyEvidence ID."""
-    evidence = urlhaus_evidence([direct_url_match()])
-    unpersisted = evidence.model_copy(update={"id": None})
-
-    with pytest.raises(EvidenceExtractionError) as excinfo:
-        extract_urlhaus(unpersisted)
-
-    assert excinfo.value.reason is ExtractionErrorReason.MISSING_EVIDENCE_ID
 
 
 def test_mixed_record_shapes_never_emit_relationships() -> None:
@@ -290,8 +290,9 @@ def test_malformed_url_subject_fails() -> None:
 
 def test_non_object_match_fails() -> None:
     """A match entry that is not an object is a contract failure."""
-    evidence = urlhaus_evidence([]).model_copy(
-        update={"facts": {"matches": ("not-an-object",)}}
+    evidence = _with_facts(
+        urlhaus_evidence([]),
+        {"matches": ("not-an-object",)},
     )
 
     with pytest.raises(EvidenceExtractionError) as excinfo:
@@ -319,3 +320,19 @@ def test_noncanonical_ip_host_form_fails() -> None:
         extract_urlhaus(evidence)
 
     assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+def _with_facts(
+    view: EvidenceExtractionView, facts: dict[str, object]
+) -> EvidenceExtractionView:
+    """Return a copy of the view whose observation carries the given facts."""
+    return view.model_copy(
+        update={"observation": view.observation.model_copy(update={"facts": facts})}
+    )
+
+
+def _with_id(view: EvidenceExtractionView, identity: object) -> EvidenceExtractionView:
+    """Return a copy of the view whose stable Evidence carries the given id."""
+    return view.model_copy(
+        update={"evidence": view.evidence.model_copy(update={"id": identity})}
+    )

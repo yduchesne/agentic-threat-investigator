@@ -1,5 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Real-PostgreSQL integration coverage for immutable evidence persistence."""
+"""Real-PostgreSQL coverage for the PR 28B global Evidence repository.
+
+Every scenario persists synthetic, deterministic global ``ConvertedEvidence``
+through the exact ``EvidenceRepository`` against the isolated migrated
+database, asserting atomic Evidence + observation v1 creation, DB-owned
+race-safe versions, material no-op/append semantics, exact observation
+reads, line-item admission, deterministic listing, typed conflicts, and
+the absence of any generic Evidence history.
+"""
 
 import asyncio
 from collections.abc import Callable
@@ -13,32 +22,40 @@ from agentic_threat_investigator.app.investigation_persistence import (
     InvestigationPersistenceService,
 )
 from agentic_threat_investigator.app.persistence.repositories import (
-    EvidenceDuplicateIdentityError,
+    EvidenceMetadataConflictError,
+    EvidencePersistenceOutcome,
     InvestigationNotFoundError,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservation,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
-from agentic_threat_investigator.infrastructure.persistence.postgresql.relationship_repositories import (
+from agentic_threat_investigator.infrastructure.persistence.postgresql.evidence_repositories import (
     PostgresEvidenceRepository,
 )
 
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+_SOURCE = "urn:ati:source:threatfox"
 
 
-async def seed_investigation(
-    uow: PostgresUnitOfWork,
-) -> tuple[UUID, UUID]:
-    """Create one visible investigation and one canonical subject entity."""
+async def seed_investigation(uow: PostgresUnitOfWork) -> tuple[UUID, UUID]:
+    """Create one visible investigation and its canonical domain entity."""
     investigation_id = uuid4()
     await uow.investigations.create(
         InvestigationState(
@@ -52,93 +69,120 @@ async def seed_investigation(
         )
     )
     entity = await uow.entities.upsert(
-        Entity(type=EntityType.DOMAIN, value="Example.COM.")
+        Entity(type=EntityType.DOMAIN, value="example.com")
     )
     assert entity.id is not None
     return investigation_id, entity.id
 
 
-def evidence_factory(
-    investigation_id: UUID, entity_id: UUID, **overrides: object
-) -> LegacyEvidence:
-    """Build a deterministic valid evidence observation."""
-    values: dict[str, object] = {
-        "investigation_id": investigation_id,
-        "type": EvidenceType.DNS,
-        "subject": EntityRef(id=entity_id, type=EntityType.DOMAIN, value="example.com"),
-        "source": "urn:ati:source:google_public_dns",
-        "observed_at": None,
-        "retrieved_at": _RETRIEVED_AT,
-        "facts": {"answers": ["192.0.2.1", "192.0.2.2"], "status": 0},
-        "raw_payload": None,
-        "source_record_id": None,
-    }
-    values.update(overrides)
-    return LegacyEvidence(**values)  # type: ignore[arg-type]
+def converted_factory(
+    *,
+    source_record_id: str | None = None,
+    observed_at: datetime | None = None,
+    retrieved_at: datetime | None = None,
+    raw_payload: dict[str, object] | None = None,
+    facts: dict[str, object] | None = None,
+) -> ConvertedEvidence:
+    """Build a deterministic valid global ConvertedEvidence."""
+    evidence_id = uuid4()
+    return ConvertedEvidence(
+        evidence=Evidence(
+            id=evidence_id,
+            type=EvidenceType.DNS,
+            source=_SOURCE,
+            source_record_id=(
+                source_record_id
+                if source_record_id is not None
+                else f"rec-{evidence_id}"
+            ),
+        ),
+        observation=EvidenceObservationCandidate(
+            evidence_id=evidence_id,
+            observed_at=observed_at,
+            retrieved_at=(retrieved_at if retrieved_at is not None else _RETRIEVED_AT),
+            facts=facts
+            if facts is not None
+            else {"answers": ["192.0.2.1", "192.0.2.2"], "status": 0},
+            raw_payload=raw_payload,
+        ),
+    )
+
+
+async def admit(
+    uow: PostgresUnitOfWork,
+    investigation_id: UUID,
+    observation_id: UUID,
+) -> None:
+    """Admit one exact observation into the Investigation."""
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
+            investigation_id=investigation_id,
+            evidence_observation_id=observation_id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=_RETRIEVED_AT,
+            added_by=InvestigationEvidenceActor.SYSTEM,
+        )
+    )
+
+
+async def observation_row_count(uow: PostgresUnitOfWork) -> int:
+    """Count all evidence-observation rows."""
+    assert uow.session is not None
+    result = await uow.session.execute(
+        text("SELECT count(*) FROM ati.evidence_observation")
+    )
+    return int(result.scalar_one())
 
 
 async def evidence_history_rows(
-    uow: PostgresUnitOfWork, evidence_id: UUID
+    uow: PostgresUnitOfWork, observation_id: UUID
 ) -> list[tuple[int, str]]:
-    """Return bounded (version, operation) history rows for one observation."""
+    """Return bounded (version, operation) generic-history rows for one observation."""
     assert uow.session is not None
     result = await uow.session.execute(
         text("""
             SELECT version, operation FROM ati.domain_object_history
-            WHERE object_type = 'evidence' AND object_id = :id
+            WHERE object_type = 'evidence_observation' AND object_id = :id
             ORDER BY version
         """),
-        {"id": evidence_id},
+        {"id": observation_id},
     )
     return [(row[0], row[1]) for row in result.fetchall()]
 
 
-async def evidence_row_count(uow: PostgresUnitOfWork) -> int:
-    """Count all evidence rows."""
-    assert uow.session is not None
-    result = await uow.session.execute(text("SELECT count(*) FROM ati.evidence"))
-    return int(result.scalar_one())
-
-
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_evidence_insert_read_round_trip(
+async def test_evidence_persist_read_round_trip(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Insert persists the observation exactly as normalized at the boundary."""
+    """Persist creates the observation exactly as normalized at the boundary."""
     async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-        evidence = evidence_factory(
-            investigation_id,
-            entity_id,
+        investigation_id, _entity_id = await seed_investigation(uow)
+        converted = converted_factory(
             source_record_id="synthetic-record-1",
             observed_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
             raw_payload={"status": 0, "comment": "synthetic"},
         )
+        recorded = await uow.evidence.persist(converted)
+        assert recorded.outcome is EvidencePersistenceOutcome.CREATED
+        assert recorded.observation.version == 1
+        await admit(uow, investigation_id, recorded.observation.id)
 
-        recorded = await uow.evidence.insert(
-            evidence, actor_id=uuid4(), request_id=uuid4()
-        )
-        assert recorded.id is not None
-
-        stored = await uow.evidence.get_by_id(recorded.id)
+        stored = await uow.evidence.get_observation(recorded.observation.id)
         assert stored is not None
-        assert stored.id == recorded.id
-        assert stored.investigation_id == investigation_id
-        assert stored.type is EvidenceType.DNS
-        # The subject is rebuilt from the canonical entity identity.
-        assert stored.subject.id == entity_id
-        assert stored.subject.type is EntityType.DOMAIN
-        assert stored.subject.value == "example.com"
-        assert stored.source == "urn:ati:source:google_public_dns"
-        assert stored.source_record_id == "synthetic-record-1"
+        assert stored.id == recorded.observation.id
+        assert stored.evidence_id == converted.evidence.id
         assert stored.observed_at == datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         assert stored.retrieved_at == _RETRIEVED_AT
-        # Facts round trip through JSONB without reinterpretation.
         assert stored.facts["answers"] == ("192.0.2.1", "192.0.2.2")
         assert stored.facts["status"] == 0
         assert stored.raw_payload is not None
         assert stored.raw_payload["comment"] == "synthetic"
+        # The stable Evidence identity round-trips through the repository.
+        stable = await uow.evidence.get_stable_evidence(converted.evidence.id)
+        assert stable is not None
+        assert stable.source == _SOURCE
+        assert stable.source_record_id == "synthetic-record-1"
 
 
 @pytest.mark.asyncio
@@ -148,121 +192,116 @@ async def test_evidence_null_fields_round_trip(
 ) -> None:
     """Nullable provenance fields and an absent raw payload round trip as NULL."""
     async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-        recorded = await uow.evidence.insert(
-            evidence_factory(investigation_id, entity_id)
-        )
-        assert recorded.id is not None
-
-        stored = await uow.evidence.get_by_id(recorded.id)
+        converted = converted_factory(source_record_id=None)
+        recorded = await uow.evidence.persist(converted)
+        stored = await uow.evidence.get_observation(recorded.observation.id)
         assert stored is not None
-        assert stored.source_record_id is None
         assert stored.source_url is None
         assert stored.observed_at is None
         assert stored.raw_payload is None
+        assert stored.diff is None  # the first observation carries no diff
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_evidence_write_writes_create_history(
+async def test_evidence_observation_writes_no_generic_history(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Immutable evidence receives exactly one CREATE history entry."""
+    """EvidenceObservation is authoritative history; no generic rows are written."""
     async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-        recorded = await uow.evidence.insert(
-            evidence_factory(investigation_id, entity_id)
-        )
-        assert recorded.id is not None
-        assert await evidence_history_rows(uow, recorded.id) == [(1, "CREATE")]
+        recorded = await uow.evidence.persist(converted_factory())
+        assert await evidence_history_rows(uow, recorded.observation.id) == []
+        assert await evidence_history_rows(uow, recorded.evidence.id) == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_second_retrieval_creates_distinct_observation(
+async def test_material_change_appends_distinct_observation(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Separate retrievals create separate immutable observations."""
+    """A material change appends the next immutable observation version."""
     async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-        first = await uow.evidence.insert(
-            evidence_factory(
-                investigation_id,
-                entity_id,
-                retrieved_at=_RETRIEVED_AT,
-                facts={"answers": ["192.0.2.1"]},
-            )
+        converted = converted_factory(facts={"answers": ["192.0.2.1"]})
+        first = await uow.evidence.persist(converted)
+        changed = converted.model_copy(
+            update={
+                "observation": converted.observation.model_copy(
+                    update={"facts": {"answers": ["192.0.2.1", "192.0.2.9"]}}
+                )
+            }
         )
-        second = await uow.evidence.insert(
-            evidence_factory(
-                investigation_id,
-                entity_id,
-                retrieved_at=_RETRIEVED_AT + timedelta(minutes=5),
-                facts={"answers": ["192.0.2.1", "192.0.2.9"]},
-            )
-        )
-        assert first.id != second.id
-        assert first.id is not None and second.id is not None
-        stored_first = await uow.evidence.get_by_id(first.id)
-        stored_second = await uow.evidence.get_by_id(second.id)
+        second = await uow.evidence.persist(changed)
+        assert second.outcome is EvidencePersistenceOutcome.APPENDED
+        assert second.observation.version == 2
+        assert first.observation.id != second.observation.id
+        assert second.observation.diff is not None
+        stored_first = await uow.evidence.get_observation(first.observation.id)
+        stored_second = await uow.evidence.get_observation(second.observation.id)
         assert stored_first is not None and stored_second is not None
         assert stored_first.facts["answers"] == ("192.0.2.1",)
         assert stored_second.facts["answers"] == ("192.0.2.1", "192.0.2.9")
-        assert await evidence_row_count(uow) == 2
+        assert await observation_row_count(uow) == 2
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_duplicate_evidence_identity_never_mutates(
+async def test_unchanged_replay_is_a_noop(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """A duplicate evidence identity is a conflict, never an update."""
+    """Replaying the same material state creates no observation (P28B-02)."""
     async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-        evidence = evidence_factory(investigation_id, entity_id)
-        first = await uow.evidence.insert(evidence)
-        assert first.id is not None
+        converted = converted_factory()
+        first = await uow.evidence.persist(converted)
+        second = await uow.evidence.persist(converted)
+        assert second.outcome is EvidencePersistenceOutcome.UNCHANGED
+        assert second.observation.id == first.observation.id
+        assert await observation_row_count(uow) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_conflicting_stable_metadata_never_mutates(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A conflicting stable-metadata replay is a typed conflict, never an update."""
+    async with uow_factory() as uow:
+        converted = converted_factory()
+        first = await uow.evidence.persist(converted)
+        assert first.observation.id is not None
 
     async with uow_factory() as uow:
-        # The stored function raises a typed conflict; the caller rolls back
-        # the surrounding unit of work.
-        with pytest.raises(EvidenceDuplicateIdentityError):
-            await uow.evidence.insert(
-                evidence.model_copy(
-                    update={"facts": {"answers": ["mutated"]}, "id": first.id}
+        with pytest.raises(EvidenceMetadataConflictError):
+            await uow.evidence.persist(
+                converted.model_copy(
+                    update={
+                        "evidence": converted.evidence.model_copy(
+                            update={"source_record_id": "mutated"}
+                        )
+                    }
                 )
             )
 
     async with uow_factory() as uow:
-        # The prior observation and its history remain untouched.
-        assert first.id is not None
-        original = await uow.evidence.get_by_id(first.id)
+        original = await uow.evidence.get_observation(first.observation.id)
         assert original is not None
         assert original.facts["answers"] == ("192.0.2.1", "192.0.2.2")
-        assert await evidence_history_rows(uow, first.id) == [(1, "CREATE")]
-        assert await evidence_row_count(uow) == 1
+        assert await observation_row_count(uow) == 1
+        assert await evidence_history_rows(uow, first.observation.id) == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_evidence_requires_existing_investigation(
+async def test_evidence_requires_existing_investigation_at_admission(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """LegacyEvidence for an unknown investigation is rejected via the service."""
+    """Admission of a global observation requires a visible Investigation."""
     service = InvestigationPersistenceService(uow_factory)
-    async with uow_factory() as uow:
-        entity = await uow.entities.upsert(
-            Entity(type=EntityType.DOMAIN, value="example.com")
-        )
-        assert entity.id is not None
-        entity_id = entity.id
-
-    evidence = evidence_factory(uuid4(), entity_id)
+    converted = converted_factory()
     with pytest.raises(InvestigationNotFoundError):
-        await service.record_evidence(evidence, actor_id=uuid4())
+        await service.record_evidence(converted, investigation_id=uuid4())
 
     async with uow_factory() as uow:
-        assert await evidence_row_count(uow) == 0
+        assert await observation_row_count(uow) == 0
 
 
 @pytest.mark.asyncio
@@ -270,43 +309,37 @@ async def test_evidence_requires_existing_investigation(
 async def test_list_for_investigation_is_deterministic(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """The listing contract is deterministic and newest-first."""
+    """The admitted listing contract is deterministic and newest-first."""
     async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-        older = await uow.evidence.insert(
-            evidence_factory(
-                investigation_id,
-                entity_id,
+        investigation_id, _ = await seed_investigation(uow)
+        # Strictly distinct retrieval times make the newest-first ordering
+        # deterministic (the identical-timestamp UUID tie-break path is
+        # covered by the geolocation projection tests).
+        older = await uow.evidence.persist(
+            converted_factory(
+                facts={"answers": ["192.0.2.2"]},
                 retrieved_at=_RETRIEVED_AT,
             )
         )
-        newer = await uow.evidence.insert(
-            evidence_factory(
-                investigation_id,
-                entity_id,
-                retrieved_at=_RETRIEVED_AT + timedelta(minutes=5),
+        newer = await uow.evidence.persist(
+            converted_factory(
+                facts={"answers": ["192.0.2.1"]},
+                retrieved_at=_RETRIEVED_AT + timedelta(seconds=1),
             )
         )
-        assert older.id is not None and newer.id is not None
+        await admit(uow, investigation_id, older.observation.id)
+        await admit(uow, investigation_id, newer.observation.id)
 
         observations = await uow.evidence.list_for_investigation(investigation_id)
         assert [observation.id for observation in observations] == [
-            newer.id,
-            older.id,
+            newer.observation.id,
+            older.observation.id,
         ]
-
         paged = await uow.evidence.list_for_investigation(
             investigation_id, limit=1, offset=1
         )
-        assert [observation.id for observation in paged] == [older.id]
-
-        # Repeated queries return identical deterministic results.
-        repeated = await uow.evidence.list_for_investigation(investigation_id)
-        assert [observation.id for observation in repeated] == [
-            newer.id,
-            older.id,
-        ]
-        # Observations of another investigation never appear.
+        assert [observation.id for observation in paged] == [older.observation.id]
+        # Observations not admitted never appear.
         assert await uow.evidence.list_for_investigation(uuid4()) == []
 
 
@@ -330,150 +363,55 @@ async def test_evidence_repository_has_no_mutation_surface(
 async def test_evidence_rollback_leaves_no_row(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """An uncommitted evidence insert disappears after rollback."""
+    """An uncommitted observation disappears after rollback."""
     async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-        evidence = evidence_factory(investigation_id, entity_id)
+        converted = converted_factory()
 
     with pytest.raises(RuntimeError, match="injected failure"):
         async with uow_factory() as uow:
-            await uow.evidence.insert(evidence)
+            await uow.evidence.persist(converted)
             raise RuntimeError("injected failure")
 
     async with uow_factory() as uow:
-        assert await evidence_row_count(uow) == 0
-        stored = await uow.evidence.get_by_id(evidence.id or uuid4())
-        assert stored is None
+        assert await observation_row_count(uow) == 0
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_evidence_rejects_missing_investigation_parent(
+async def test_concurrent_first_persist_creates_one_observation(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Direct repository insertion requires an existing visible parent."""
+    """Concurrent identical first-state writers create one Evidence and one v1."""
     async with uow_factory() as uow:
-        entity = await uow.entities.upsert(
-            Entity(type=EntityType.DOMAIN, value="example.com")
+        converted = converted_factory()
+
+    async def writer() -> EvidenceObservation:
+        async with uow_factory() as uow:
+            recorded = await uow.evidence.persist(converted)
+            await uow.commit()
+            return recorded.observation
+
+    observations = await asyncio.gather(
+        asyncio.wait_for(writer(), 10),
+        asyncio.wait_for(writer(), 10),
+    )
+    assert len({observation.id for observation in observations}) == 1
+
+    async with uow_factory() as uow:
+        assert await observation_row_count(uow) == 1
+        stable_rows = await uow.session.execute(  # type: ignore[union-attr]
+            text("SELECT count(*) FROM ati.evidence WHERE id = :id"),
+            {"id": converted.evidence.id},
         )
-        assert entity.id is not None
-        entity_id = entity.id
-
-    evidence = evidence_factory(uuid4(), entity_id)
-    with pytest.raises(InvestigationNotFoundError):
-        async with uow_factory() as uow:
-            await uow.evidence.insert(evidence)
-
-    async with uow_factory() as uow:
-        assert await evidence_row_count(uow) == 0
-        assert await evidence_history_rows(uow, evidence.id or uuid4()) == []
+        assert stable_rows.scalar_one() == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_evidence_rejects_soft_deleted_investigation_parent(
+async def test_evidence_observation_listing_indexes_exist(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Direct repository insertion rejects an already deleted parent."""
-    async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-    async with uow_factory() as uow:
-        await uow.investigations.soft_delete(investigation_id)
-
-    evidence = evidence_factory(investigation_id, entity_id)
-    with pytest.raises(InvestigationNotFoundError):
-        async with uow_factory() as uow:
-            await uow.evidence.insert(evidence)
-
-    async with uow_factory() as uow:
-        assert await evidence_row_count(uow) == 0
-        assert await evidence_history_rows(uow, evidence.id or uuid4()) == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_evidence_cannot_follow_concurrent_parent_soft_deletion(
-    uow_factory: Callable[[], PostgresUnitOfWork],
-) -> None:
-    """LegacyEvidence insertion fails when the parent is deleted in the gap."""
-    async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-    evidence = evidence_factory(investigation_id, entity_id)
-
-    deleter_locked = asyncio.Event()
-    insert_attempted = asyncio.Event()
-
-    async def deleting_writer() -> None:
-        async with uow_factory() as uow:
-            await uow.investigations.soft_delete(investigation_id)
-            deleter_locked.set()
-            await insert_attempted.wait()
-            # Exiting the unit of work commits the soft deletion.
-
-    deleter_task = asyncio.create_task(deleting_writer())
-    await asyncio.wait_for(deleter_locked.wait(), 5)
-
-    insert_attempted.set()
-    with pytest.raises(InvestigationNotFoundError):
-        async with uow_factory() as uow:
-            # The insert blocks on the locked parent row and re-evaluates the
-            # visibility predicate once the soft deletion commits.
-            await uow.evidence.insert(evidence)
-
-    await asyncio.wait_for(deleter_task, 5)
-
-    async with uow_factory() as uow:
-        assert await evidence_row_count(uow) == 0
-        assert await evidence_history_rows(uow, evidence.id or uuid4()) == []
-        assert (
-            await uow.investigations.get_by_id(investigation_id, include_deleted=True)
-        ) is not None
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_concurrent_duplicate_evidence_identity_is_typed(
-    uow_factory: Callable[[], PostgresUnitOfWork],
-) -> None:
-    """A concurrent duplicate evidence identity produces the typed error."""
-    async with uow_factory() as uow:
-        investigation_id, entity_id = await seed_investigation(uow)
-    # Both writers submit the same explicit identity.
-    evidence = evidence_factory(investigation_id, entity_id).model_copy(
-        update={"id": uuid4()}
-    )
-
-    async def insert_writer() -> object:
-        async with uow_factory() as uow:
-            try:
-                return await uow.evidence.insert(evidence)
-            except EvidenceDuplicateIdentityError as error:
-                return error
-
-    outcomes = await asyncio.gather(
-        asyncio.wait_for(insert_writer(), 10),
-        asyncio.wait_for(insert_writer(), 10),
-    )
-    winners = [o for o in outcomes if isinstance(o, LegacyEvidence)]
-    losers = [o for o in outcomes if isinstance(o, EvidenceDuplicateIdentityError)]
-    assert len(winners) == 1 and len(losers) == 1
-    assert winners[0].id is not None
-
-    async with uow_factory() as uow:
-        assert await evidence_row_count(uow) == 1
-        assert winners[0].id is not None
-        assert await evidence_history_rows(uow, winners[0].id) == [(1, "CREATE")]
-        stored = await uow.evidence.get_by_id(winners[0].id)
-        assert stored is not None
-        assert stored.facts["answers"] == ("192.0.2.1", "192.0.2.2")
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_evidence_listing_index_exists_with_deterministic_order(
-    uow_factory: Callable[[], PostgresUnitOfWork],
-) -> None:
-    """The listing query path has its matching deterministic-order index."""
+    """The new listing/join access paths have their deterministic-order indexes."""
     async with uow_factory() as uow:
         assert uow.session is not None
         index_definitions = (
@@ -482,8 +420,8 @@ async def test_evidence_listing_index_exists_with_deterministic_order(
                     text("""
                     SELECT indexdef FROM pg_indexes
                     WHERE schemaname = 'ati'
-                      AND tablename = 'evidence'
-                      AND indexname = 'evidence_investigation_listing_idx'
+                      AND tablename = 'investigation_evidence'
+                      AND indexname = 'investigation_evidence_observation_idx'
                 """)
                 )
             )
@@ -491,6 +429,4 @@ async def test_evidence_listing_index_exists_with_deterministic_order(
             .all()
         )
         assert len(index_definitions) == 1
-        definition = index_definitions[0].replace('"', "")
-        # ASC is the default order and may be omitted by pg_get_indexdef.
-        assert "investigation_id, retrieved_at DESC, id" in definition
+        assert "evidence_observation_id" in index_definitions[0]

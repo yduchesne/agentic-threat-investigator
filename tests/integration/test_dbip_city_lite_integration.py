@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Integration tests for the local DB-IP City Lite geolocation source.
 
 Exercises the real ``DbIpCityLiteProvider`` over real artifact-URI
@@ -10,6 +8,8 @@ API key, external HTTP, download, or persistence occurs.
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 import datetime
 import pathlib
 import uuid
@@ -22,7 +22,8 @@ from agentic_threat_investigator.app.providers import ProviderErrorCode, Provide
 from agentic_threat_investigator.app.secrets import SecretsResolver
 from agentic_threat_investigator.config import settings_from_config
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.object_store import (
     ArtifactNotFoundError,
     FileSystemObjectStore,
@@ -96,7 +97,7 @@ class TestDbIpCityLiteIntegration:
         assert result.provider == _PROVIDER_ID
         assert result.errors == ()
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type is EvidenceType.GEOLOCATION
         assert evidence.source == _PROVIDER_ID
         assert evidence.subject.type is EntityType.IP_ADDRESS
@@ -117,7 +118,7 @@ class TestDbIpCityLiteIntegration:
             result = await _lookup(comp, CITY_IPV6)
         assert result.errors == ()
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.subject.value == CITY_IPV6
         assert evidence.facts["city"] == "Example V6 City"
         assert evidence.facts["precision"] == "city"
@@ -128,9 +129,9 @@ class TestDbIpCityLiteIntegration:
         async with await _composed(tmp_path, build_synthetic_city_lite_mmdb()) as comp:
             result = await _lookup(comp, REGION_IPV4)
         assert result.errors == ()
-        assert result.evidence[0].facts["region"] == "New South Wales"
-        assert result.evidence[0].facts["city"] is None
-        assert result.evidence[0].facts["precision"] == "region"
+        assert _legacy(result.evidence[0]).facts["region"] == "New South Wales"
+        assert _legacy(result.evidence[0]).facts["city"] is None
+        assert _legacy(result.evidence[0]).facts["precision"] == "region"
 
     @pytest.mark.asyncio
     async def test_country_precision_hit(self, tmp_path: pathlib.Path) -> None:
@@ -138,8 +139,8 @@ class TestDbIpCityLiteIntegration:
         async with await _composed(tmp_path, build_synthetic_city_lite_mmdb()) as comp:
             result = await _lookup(comp, COUNTRY_IPV4)
         assert result.errors == ()
-        assert result.evidence[0].facts["country_code"] == "AU"
-        assert result.evidence[0].facts["precision"] == "country"
+        assert _legacy(result.evidence[0]).facts["country_code"] == "AU"
+        assert _legacy(result.evidence[0]).facts["precision"] == "country"
 
     @pytest.mark.asyncio
     async def test_lookup_miss_is_valid_empty_result(
@@ -187,7 +188,7 @@ class TestDbIpCityLiteIntegration:
         async with await _composed(tmp_path, build_synthetic_city_lite_mmdb()) as comp:
             result = await _lookup(comp, CITY_IPV4)
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.source_url is None
         assert evidence.raw_payload is None
         assert evidence.observed_at is None
@@ -250,3 +251,17 @@ class TestDbIpCityLiteIntegration:
         async with integration_engine.begin() as connection:
             count = await connection.scalar(text("SELECT count(*) FROM ati.evidence"))
         assert count == 0
+
+
+def _legacy(
+    item: ConvertedEvidence | LegacyEvidence,
+) -> LegacyEvidence:
+    """Narrow one provider-output item to its transitional LegacyEvidence shape.
+
+    These provider contract tests exercise the unmigrated legacy providers,
+    which emit ``LegacyEvidence``; ``ProviderResult.evidence`` is typed as the
+    PR 28B compatibility union so the approved legacy test seam narrows
+    explicitly. No identity is invented and no global persistence is involved.
+    """
+    assert isinstance(item, LegacyEvidence)  # legacy provider contract
+    return item

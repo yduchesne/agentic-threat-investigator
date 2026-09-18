@@ -17,6 +17,7 @@ from uuid import UUID
 
 from agentic_threat_investigator.app.extraction.models import (
     EvidenceExtractionError,
+    EvidenceExtractionView,
     ExtractedEntity,
     ExtractionResult,
     malformed_facts,
@@ -29,19 +30,19 @@ from agentic_threat_investigator.domain.entities import (
 )
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 
-def extract_ipinfo(evidence: LegacyEvidence) -> ExtractionResult:
-    """Extract the documented IPinfo Lite output from one LegacyEvidence."""
-    evidence_id = validate_extractor_input(
-        evidence,
+def extract_ipinfo(view: EvidenceExtractionView) -> ExtractionResult:
+    """Extract the documented IPinfo Lite output from one observation."""
+    evidence_id = view.evidence.id
+    validate_extractor_input(
+        view,
         source=SourceId.IPINFO_LITE.value,
         evidence_type=EvidenceType.NETWORK,
         subject_types=(EntityType.IP_ADDRESS,),
     )
-    _validate_canonical_subject(evidence, evidence_id)
-    asn = evidence.facts.get("asn")
+    _validate_canonical_subject(view, evidence_id)
+    asn = view.observation.facts.get("asn")
     if asn is None:
         return ExtractionResult()
     if not isinstance(asn, str):
@@ -57,13 +58,15 @@ def extract_ipinfo(evidence: LegacyEvidence) -> ExtractionResult:
     )
 
 
-def _validate_canonical_subject(evidence: LegacyEvidence, evidence_id: UUID) -> None:
+def _validate_canonical_subject(
+    view: EvidenceExtractionView, evidence_id: UUID
+) -> None:
     """Require a canonical IP subject before any ASN-presence decision."""
     try:
-        canonical = canonicalize_ip_address(evidence.subject.value)
+        canonical = canonicalize_ip_address(view.invocation_entity.value)
     except ValueError as exc:
         raise _malformed(evidence_id, "IPinfo subject address is malformed") from exc
-    if canonical != evidence.subject.value:
+    if canonical != view.invocation_entity.value:
         raise _malformed(evidence_id, "IPinfo subject address is not in canonical form")
 
 

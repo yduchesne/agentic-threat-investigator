@@ -26,13 +26,20 @@ from uuid import UUID, uuid5
 
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.domain.entities import Entity
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -128,25 +135,44 @@ class AnalystScenarioMaterializer:
 
         evidence_ids: dict[str, UUID] = {}
         for evidence in fixture.evidence:
-            subject = _entity_by_label(fixture.entities, evidence.subject)
-            persisted_evidence = await uow.evidence.insert(
-                LegacyEvidence(
-                    id=self._planned(scenario, "evidence", evidence.label),
-                    investigation_id=investigation_id,
-                    type=evidence.type,
-                    subject=EntityRef(
-                        id=entity_ids[evidence.subject],
-                        type=subject.type,
-                        value=subject.value,
+            persisted = await uow.evidence.persist(
+                ConvertedEvidence(
+                    evidence=Evidence(
+                        id=self._planned(scenario, "evidence", evidence.label),
+                        type=evidence.type,
+                        source=evidence.source,
+                        source_record_id=f"scenario:{scenario.id}:{evidence.label}",
                     ),
-                    source=evidence.source,
-                    observed_at=evidence.observed_at,
-                    retrieved_at=evidence.retrieved_at or _FIXED_TIMESTAMP,
-                    facts=dict(evidence.facts),
+                    observation=EvidenceObservationCandidate(
+                        evidence_id=self._planned(scenario, "evidence", evidence.label),
+                        observed_at=evidence.observed_at,
+                        retrieved_at=evidence.retrieved_at or _FIXED_TIMESTAMP,
+                        facts=dict(evidence.facts),
+                    ),
+                ),
+                observation_id=self._planned(
+                    scenario, "evidence_observation", evidence.label
+                ),
+            )
+            # The fixture subject is associated with the exact observation as
+            # ordinary observation-level provenance (no privileged subject)
+            # and the observation is exactly admitted to the scenario
+            # Investigation.
+            _ = _entity_by_label(fixture.entities, evidence.subject)
+            await uow.evidence_observation_entities.associate(
+                persisted.observation.id, entity_ids[evidence.subject]
+            )
+            await uow.investigation_evidence.admit(
+                InvestigationEvidence(
+                    investigation_id=investigation_id,
+                    evidence_observation_id=persisted.observation.id,
+                    inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                    added_at=persisted.observation.retrieved_at,
+                    added_by=InvestigationEvidenceActor.SYSTEM,
                 )
             )
             evidence_ids[evidence.label] = _persisted_id(
-                persisted_evidence, "evidence", evidence.label
+                persisted.observation, "evidence_observation", evidence.label
             )
 
         relationship_ids: dict[str, UUID] = {}

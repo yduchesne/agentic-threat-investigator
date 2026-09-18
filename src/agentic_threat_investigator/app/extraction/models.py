@@ -2,14 +2,21 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Immutable deterministic extraction output and the extraction error contract.
 
-Extraction converts one normalized, persisted :class:`LegacyEvidence` observation
-into canonical discovered entity identities and evidence-backed relationship
-assertions without any I/O, persistence, provider calls, or database access.
+Extraction converts one provider observation into canonical discovered
+entity identities and evidence-backed relationship assertions without any
+I/O, persistence, provider calls, or database access. The extraction input
+is the smallest immutable execution view that combines the stable
+:class:`Evidence`, the material observation candidate, and the authoritative
+provider invocation target Entity (PR 28B): this is execution context, never
+persisted Evidence ownership, and ``Evidence.subject`` is deliberately not
+restored.
 
 The output models are deliberately small, frozen, and independent of the
 persisted ``Relationship`` contract: persistence (PR 18C) allocates database
-entity/relationship identifiers, so extraction never fabricates UUIDs. Every
-assertion carries the supporting persisted ``LegacyEvidence`` ID directly.
+entity/relationship identifiers, so extraction never fabricates UUIDs.
+Relationship assertions carry no persisted observation identity — the
+persistence boundary stamps the exact authoritative
+``evidence_observation_id``.
 """
 
 from collections.abc import Iterable
@@ -18,9 +25,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
+from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 
@@ -53,12 +63,29 @@ class EntityIdentity(BaseModel):
     value: str
 
 
+class EvidenceExtractionView(BaseModel):
+    """Smallest immutable extraction input for one provider observation (PR 28B).
+
+    Combines the stable global ``Evidence``, the material observation
+    candidate, and the authoritative persisted provider invocation target
+    Entity. This is execution context only: it is never persisted as
+    Evidence ownership, and the v0.1 privileged ``subject`` is not restored.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    evidence: Evidence
+    observation: EvidenceObservationCandidate
+    invocation_entity: Entity
+
+
 class RelationshipAssertion(BaseModel):
-    """A source-semantic relationship assertion backed by one persisted LegacyEvidence.
+    """A source-semantic relationship assertion backed by one exact observation.
 
     Assertions are candidate semantic edges justified by the documented
-    semantics of the source that produced the evidence; they are not yet
-    persisted relationships and carry no database identifiers.
+    semantics of the source that produced the evidence; they carry no
+    persisted observation/relationship identifiers — the persistence
+    boundary stamps the exact authoritative ``evidence_observation_id``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -66,15 +93,14 @@ class RelationshipAssertion(BaseModel):
     source: EntityIdentity
     type: RelationshipType
     target: EntityIdentity
-    evidence_id: UUID
 
 
 class ExtractionResult(BaseModel):
-    """Deterministic, deduplicated extraction output for one LegacyEvidence.
+    """Deterministic, deduplicated extraction output for one observation.
 
     Entities and relationships are already collapsed by canonical identity
     and preserve first-seen source order; extraction is all-or-nothing per
-    LegacyEvidence, so a result is either complete or replaced by a typed error.
+    observation, so a result is either complete or replaced by a typed error.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -92,14 +118,14 @@ class ExtractionErrorReason(str, Enum):
 
 
 class EvidenceExtractionError(Exception):
-    """Raised when normalized LegacyEvidence cannot be extracted deterministically.
+    """Raised when an observation cannot be extracted deterministically.
 
     Context is deliberately restricted to safe values: the source identifier,
-    a bounded reason category, and the LegacyEvidence ID when known. Messages are
-    static strings authored by ATI and never include raw payloads,
-    credentials, or uncontrolled third-party response bodies. Extraction is
-    all-or-nothing per LegacyEvidence: callers must treat this error as discarding
-    the whole result rather than a partial one.
+    a bounded reason category, and the stable Evidence ID when known.
+    Messages are static strings authored by ATI and never include raw
+    payloads, credentials, or uncontrolled third-party response bodies.
+    Extraction is all-or-nothing per observation: callers must treat this
+    error as discarding the whole result rather than a partial one.
     """
 
     def __init__(
@@ -118,41 +144,33 @@ class EvidenceExtractionError(Exception):
 
 
 def validate_extractor_input(
-    evidence: LegacyEvidence,
+    view: EvidenceExtractionView,
     *,
     source: str,
     evidence_type: EvidenceType,
     subject_types: tuple[EntityType, ...] = (),
-) -> UUID:
-    """Validate the per-extractor LegacyEvidence contract and return the LegacyEvidence ID.
+) -> None:
+    """Validate the per-extractor contract and reject malformed observations.
 
-    Every non-empty extractor requires a persisted LegacyEvidence (a database-assigned
-    ID) because every relationship assertion must carry that provenance, a
-    source/type combination matching the documented contract, and — when the
-    contract restricts them — a subject entity type the source actually
-    produces. Violations are contract failures, never silent repairs.
+    Every non-empty extractor requires a source/type combination matching the
+    documented contract and — when the contract restricts them — an
+    invocation target Entity type the source actually produces. Violations
+    are contract failures, never silent repairs.
     """
 
-    if evidence.source != source or evidence.type is not evidence_type:
+    if view.evidence.source != source or view.evidence.type is not evidence_type:
         raise unsupported_evidence_type(
-            evidence.source,
+            view.evidence.source,
             "evidence source/type does not match the extractor contract",
-            evidence_id=evidence.id,
+            evidence_id=view.evidence.id,
         )
-    if evidence.id is None:
-        raise EvidenceExtractionError(
-            source,
-            ExtractionErrorReason.MISSING_EVIDENCE_ID,
-            "extraction requires a persisted LegacyEvidence identifier",
-        )
-    if subject_types and evidence.subject.type not in subject_types:
+    if subject_types and view.invocation_entity.type not in subject_types:
         raise EvidenceExtractionError(
             source,
             ExtractionErrorReason.MALFORMED_FACTS,
             "evidence subject type is inconsistent with the source contract",
-            evidence_id=evidence.id,
+            evidence_id=view.evidence.id,
         )
-    return evidence.id
 
 
 def unsupported_evidence_type(
@@ -224,13 +242,13 @@ def deduplicate_assertions(
     """Collapse duplicate relationship assertions deterministically.
 
     The key is ``(source type, source value, relationship type, target
-    type, target value, evidence id)``. First-seen source order is
-    preserved; duplicate semantic output within one LegacyEvidence is emitted once.
+    type, target value)``. First-seen source order is preserved; duplicate
+    semantic output within one observation is emitted once.
     """
-    seen: set[tuple[EntityType, str, RelationshipType, EntityType, str, UUID]] = set()
+    seen: set[tuple[EntityType, str, RelationshipType, EntityType, str]] = set()
     ordered: list[RelationshipAssertion] = []
     for assertion in assertions:
-        key = (*assertion_order_key(assertion), assertion.evidence_id)
+        key = assertion_order_key(assertion)
         if key in seen:
             continue
         seen.add(key)

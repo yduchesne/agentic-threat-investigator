@@ -13,7 +13,10 @@ from agentic_threat_investigator.app.extraction import (
     ExtractionErrorReason,
     extract_dns,
 )
-from agentic_threat_investigator.app.extraction.models import ExtractionResult
+from agentic_threat_investigator.app.extraction.models import (
+    EvidenceExtractionView,
+    ExtractionResult,
+)
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
@@ -21,7 +24,6 @@ from agentic_threat_investigator.domain.relationships import RelationshipType
 from tests.support.extraction_fixtures import (
     CANONICAL_ASYNCRAT_DOMAIN,
     CANONICAL_ASYNCRAT_IP,
-    CANONICAL_DNS_EVIDENCE_ID,
     a_answer,
     dns_evidence,
 )
@@ -43,16 +45,6 @@ def test_a_record_resolves_and_discovers_address() -> None:
     assert edge.type is RelationshipType.RESOLVES_TO
     assert edge.target.type is EntityType.IP_ADDRESS
     assert edge.target.value == CANONICAL_ASYNCRAT_IP
-    assert edge.evidence_id is not None
-
-
-def test_canonical_scenario_evidence_id_is_carried_on_assertions() -> None:
-    """Assertions carry the persisted canonical-scenario Evidence ID."""
-    result = extract_dns(
-        dns_evidence([a_answer()], evidence_id=CANONICAL_DNS_EVIDENCE_ID)
-    )
-
-    assert result.relationships[0].evidence_id == CANONICAL_DNS_EVIDENCE_ID
 
 
 def test_aaaa_record_discovers_ipv6_address() -> None:
@@ -398,22 +390,21 @@ def test_txt_and_soa_produce_nothing() -> None:
     assert soa_result == ExtractionResult()
 
 
-def test_missing_persisted_evidence_id_fails() -> None:
-    """Unpersisted evidence cannot back assertions and fails explicitly."""
-    evidence = dns_evidence([a_answer()])
-    unpersisted = evidence.model_copy(update={"id": None})
-
-    with pytest.raises(EvidenceExtractionError) as excinfo:
-        extract_dns(unpersisted)
-
-    assert excinfo.value.reason is ExtractionErrorReason.MISSING_EVIDENCE_ID
-
-
 def test_wrong_source_or_type_is_a_contract_failure() -> None:
     """DNS extraction rejects evidence from any other source/type contract."""
-    wrong_source = dns_evidence([a_answer()]).model_copy(update={"source": "other"})
+    wrong_source = dns_evidence([a_answer()]).model_copy(
+        update={
+            "evidence": dns_evidence([a_answer()]).evidence.model_copy(
+                update={"source": "other"}
+            )
+        }
+    )
     wrong_type = dns_evidence([a_answer()]).model_copy(
-        update={"type": EvidenceType.REPUTATION}
+        update={
+            "evidence": dns_evidence([a_answer()]).evidence.model_copy(
+                update={"type": EvidenceType.REPUTATION}
+            )
+        }
     )
 
     for evidence in (wrong_source, wrong_type):
@@ -597,3 +588,19 @@ def test_additional_malformed_answer_shapes_fail(answers: list[object]) -> None:
         extract_dns(dns_evidence(answers))
 
     assert excinfo.value.reason is ExtractionErrorReason.MALFORMED_FACTS
+
+
+def _with_facts(
+    view: EvidenceExtractionView, facts: dict[object, object]
+) -> EvidenceExtractionView:
+    """Return a copy of the view whose observation carries the given facts."""
+    return view.model_copy(
+        update={"observation": view.observation.model_copy(update={"facts": facts})}
+    )
+
+
+def _with_id(view: EvidenceExtractionView, identity: object) -> EvidenceExtractionView:
+    """Return a copy of the view whose stable Evidence carries the given id."""
+    return view.model_copy(
+        update={"evidence": view.evidence.model_copy(update={"id": identity})}
+    )

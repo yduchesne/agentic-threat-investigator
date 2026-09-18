@@ -1,24 +1,17 @@
 """PostgreSQL adapters for relationships, observations, and evidence."""
 
-import json
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.persistence.repositories import (
-    EvidenceDuplicateIdentityError,
-    EvidenceRepository,
-    InvestigationNotFoundError,
+    RelationshipObservationProvenanceError,
     RelationshipObservationRepository,
     RelationshipRepository,
     SoftDeletedIdentityError,
 )
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
-from agentic_threat_investigator.domain.immutable_json import thaw_json
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -26,14 +19,20 @@ from agentic_threat_investigator.domain.relationships import (
 )
 
 from .errors import (
-    SQLSTATE_EVIDENCE_DUPLICATE,
-    SQLSTATE_INVESTIGATION_NOT_FOUND,
     SQLSTATE_RELATIONSHIP_NOT_FOUND,
+    SQLSTATE_RELATIONSHIP_OBSERVATION_PROVENANCE_INVALID,
     SQLSTATE_RELATIONSHIP_SOFT_DELETED,
     SQLSTATE_VERSION_CONFLICT,
     sqlstate,
 )
-from .models import EntityRow, EvidenceRow, RelationshipObservationRow, RelationshipRow
+from .evidence_repositories import (
+    PostgresEvidenceRepository,  # noqa: F401  (compat re-export)
+)
+from .models import (
+    InvestigationEvidenceRow,
+    RelationshipObservationRow,
+    RelationshipRow,
+)
 
 # One above the Evidence Analyst's accepted observation maximum (1000), so the
 # loader's overflow probe (max + 1) is never silently clamped by the
@@ -52,17 +51,11 @@ def _relationship(row: RelationshipRow) -> Relationship:
 
 
 def _observation(row: RelationshipObservationRow) -> RelationshipObservation:
-    """Map an observation row to its immutable domain model.
-
-    PR 28A compatibility: the v0.1 Evidence row *is* the observation, so the
-    row's ``evidence_id`` maps onto the domain ``evidence_observation_id``
-    until PR 28B migrates the schema. The v0.1 correlation column carries no
-    domain field and is not surfaced.
-    """
+    """Map an observation row to its immutable domain model."""
     return RelationshipObservation(
         id=row.id,
         relationship_id=row.relationship_id,
-        evidence_observation_id=row.evidence_id,
+        evidence_observation_id=row.evidence_observation_id,
         observed_at=row.observed_at,
         retrieved_at=row.retrieved_at,
         source=row.source,
@@ -205,12 +198,13 @@ class PostgresRelationshipObservationRepository(RelationshipObservationRepositor
         limit: int = 100,
         offset: int = 0,
     ) -> list[RelationshipObservation]:
-        """Return bounded observations backed by the Investigation's LegacyEvidence.
+        """Return bounded observations backed by admitted EvidenceObservations.
 
-        The query joins through the immutable LegacyEvidence row so an observation
-        is only returned when its LegacyEvidence belongs to the supplied
-        Investigation, and additionally excludes rows whose own
-        investigation correlation contradicts the Investigation. Ordering is
+        The query traverses
+        ``relationship_observation.evidence_observation_id ->
+        investigation_evidence.evidence_observation_id -> investigation_id``,
+        so an observation is returned only when its backing observation is
+        exactly admitted to the supplied Investigation. Ordering is
         deterministic: ``retrieved_at``/``observed_at`` descending with a
         stable UUID tie-breaker, matching the documented analyst input order.
 
@@ -225,14 +219,11 @@ class PostgresRelationshipObservationRepository(RelationshipObservationRepositor
         result = await self.session.execute(
             select(RelationshipObservationRow)
             .join(
-                EvidenceRow,
-                EvidenceRow.id == RelationshipObservationRow.evidence_id,
+                InvestigationEvidenceRow,
+                InvestigationEvidenceRow.evidence_observation_id
+                == RelationshipObservationRow.evidence_observation_id,
             )
-            .where(EvidenceRow.investigation_id == investigation_id)
-            .where(
-                (RelationshipObservationRow.investigation_id.is_(None))
-                | (RelationshipObservationRow.investigation_id == investigation_id)
-            )
+            .where(InvestigationEvidenceRow.investigation_id == investigation_id)
             .order_by(
                 RelationshipObservationRow.retrieved_at.desc(),
                 RelationshipObservationRow.observed_at.desc().nulls_last(),
@@ -246,153 +237,38 @@ class PostgresRelationshipObservationRepository(RelationshipObservationRepositor
     async def append(
         self, observation: RelationshipObservation
     ) -> RelationshipObservation:
-        """Append one immutable observation through the authoritative function.
+        """Append one immutable observation with exact EvidenceObservation provenance.
 
-        The database allocates the version and writes the immutable CREATE
-        history carrying investigation correlation in the same transaction;
-        the adapter performs no Python-side version allocation and exposes no
-        update or delete path.
-
-        PR 28A compatibility boundary: the domain observation no longer
-        carries an Investigation correlation (relationships are global per
-        observation), but the v0.1 stored function still requires
-        ``p_investigation_id``. The correlation is derived here from the
-        exact immutable evidence row the observation references — the same
-        value the v0.1 persistence service used to supply — keeping the
-        stored function and schema unchanged until PR 28B.
+        The database allocates the version and rejects a missing backing
+        observation or relationship; this adapter performs no Python-side
+        version allocation and exposes no update or delete path.
         """
-        await self.session.execute(
-            text("""
-                SELECT id, version FROM ati.append_relationship_observation(
-                    :id, :relationship_id, :evidence_id,
-                    (SELECT e.investigation_id FROM ati.evidence e
-                        WHERE e.id = :evidence_id),
-                    :observed_at, :retrieved_at, :source, :confidence)
-            """),
-            {
-                "id": observation.id,
-                "relationship_id": observation.relationship_id,
-                "evidence_id": observation.evidence_observation_id,
-                "observed_at": observation.observed_at,
-                "retrieved_at": observation.retrieved_at,
-                "source": observation.source,
-                "confidence": observation.confidence,
-            },
-        )
-        return observation
-
-
-class PostgresEvidenceRepository(EvidenceRepository):
-    """Append and read immutable evidence rows in the caller's transaction."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
-
-    @staticmethod
-    def _to_domain(row: EvidenceRow, subject: EntityRow) -> LegacyEvidence:
-        """Map an evidence row and its subject entity to the domain model."""
-        return LegacyEvidence(
-            id=row.id,
-            investigation_id=row.investigation_id,
-            type=EvidenceType(row.evidence_type),
-            subject=EntityRef(
-                id=subject.id,
-                type=EntityType(subject.entity_type),
-                value=subject.canonical_value,
-            ),
-            source=row.source,
-            source_record_id=row.source_record_id,
-            source_url=row.source_url,
-            observed_at=row.observed_at,
-            retrieved_at=row.retrieved_at,
-            facts=row.facts,
-            raw_payload=row.raw_payload,
-        )
-
-    async def insert(
-        self,
-        evidence: LegacyEvidence,
-        *,
-        actor_id: UUID | None = None,
-        request_id: UUID | None = None,
-    ) -> LegacyEvidence:
-        """Append evidence through the authoritative database write function.
-
-        The caller resolves the subject entity first; a duplicate evidence
-        identity is a typed conflict and never mutates a prior observation.
-        """
-        if evidence.subject.id is None:
-            raise ValueError("evidence subject id is required")
-        evidence_id = evidence.id or uuid4()
         try:
             await self.session.execute(
                 text("""
-                    SELECT id, version FROM ati.append_evidence(
-                        :id, :investigation_id, :evidence_type, :subject_entity_id,
-                        :source, :source_record_id, :source_url, :observed_at,
-                        :retrieved_at, CAST(:facts AS jsonb),
-                        CAST(:raw_payload AS jsonb), :actor_id, :request_id)
+                    SELECT id, version FROM ati.append_relationship_observation(
+                        :id, :relationship_id, :evidence_observation_id,
+                        :observed_at, :retrieved_at, :source, :confidence)
                 """),
                 {
-                    "id": evidence_id,
-                    "investigation_id": evidence.investigation_id,
-                    "evidence_type": evidence.type.value,
-                    "subject_entity_id": evidence.subject.id,
-                    "source": evidence.source,
-                    "source_record_id": evidence.source_record_id,
-                    "source_url": evidence.source_url,
-                    "observed_at": evidence.observed_at,
-                    "retrieved_at": evidence.retrieved_at,
-                    "facts": json.dumps(thaw_json(evidence.facts)),
-                    "raw_payload": (
-                        None
-                        if evidence.raw_payload is None
-                        else json.dumps(thaw_json(evidence.raw_payload))
-                    ),
-                    "actor_id": actor_id,
-                    "request_id": request_id,
+                    "id": observation.id,
+                    "relationship_id": observation.relationship_id,
+                    "evidence_observation_id": observation.evidence_observation_id,
+                    "observed_at": observation.observed_at,
+                    "retrieved_at": observation.retrieved_at,
+                    "source": observation.source,
+                    "confidence": observation.confidence,
                 },
             )
         except DBAPIError as error:
             state = sqlstate(error)
-            if state == SQLSTATE_EVIDENCE_DUPLICATE:
-                raise EvidenceDuplicateIdentityError(evidence_id) from error
-            if state == SQLSTATE_INVESTIGATION_NOT_FOUND:
-                # The database rejected a missing or soft-deleted parent
-                # Investigation; surface the established typed error.
-                raise InvestigationNotFoundError(
-                    str(evidence.investigation_id)
+            if state == SQLSTATE_RELATIONSHIP_OBSERVATION_PROVENANCE_INVALID:
+                raise RelationshipObservationProvenanceError(
+                    observation.evidence_observation_id
+                ) from error
+            if state == SQLSTATE_RELATIONSHIP_NOT_FOUND:
+                raise LookupError(
+                    f"relationship not found: {observation.relationship_id}"
                 ) from error
             raise
-        return evidence.model_copy(update={"id": evidence_id})
-
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
-        """Return an evidence observation by its immutable identity."""
-        result = await self.session.execute(
-            select(EvidenceRow, EntityRow)
-            .join(EntityRow, EntityRow.id == EvidenceRow.subject_entity_id)
-            .where(EvidenceRow.id == evidence_id)
-        )
-        row = result.first()
-        return None if row is None else self._to_domain(row[0], row[1])
-
-    async def list_for_investigation(
-        self,
-        investigation_id: UUID,
-        *,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[LegacyEvidence]:
-        """Return bounded observations in deterministic newest-first order."""
-        if limit < 0 or offset < 0:
-            raise ValueError("limit and offset must be non-negative")
-        limit = min(limit, 1000)
-        result = await self.session.execute(
-            select(EvidenceRow, EntityRow)
-            .join(EntityRow, EntityRow.id == EvidenceRow.subject_entity_id)
-            .where(EvidenceRow.investigation_id == investigation_id)
-            .order_by(EvidenceRow.retrieved_at.desc(), EvidenceRow.id.asc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return [self._to_domain(row[0], row[1]) for row in result.fetchall()]
+        return observation

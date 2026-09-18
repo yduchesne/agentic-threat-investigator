@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """URLhaus provider unit tests.
 
 # The provider/test modules deliberately mirror the established
@@ -17,6 +15,8 @@ returned URL, or downloads any payload.
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 from datetime import UTC, datetime
 from typing import Any
 
@@ -29,7 +29,8 @@ from agentic_threat_investigator.app.providers import (
     ProviderResult,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import ProviderHttpClient
 from agentic_threat_investigator.infrastructure.providers.urlhaus import UrlhausProvider
 from tests.support.provider_http import failing_io_client
@@ -163,7 +164,7 @@ class TestUrlLookupEvidence:
         assert result.errors == ()
         assert result.provider == "urn:ati:source:urlhaus"
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type == EvidenceType.THREAT_INTELLIGENCE
         assert evidence.investigation_id == FIXED_UUID
         assert evidence.subject.type == EntityType.URL
@@ -216,7 +217,7 @@ class TestUrlLookupEvidence:
             httpx.Response(200, json=urlhaus_url_response()),
             entity=_URL_ENTITY,
         )
-        assert set(result.evidence[0].facts) == {"matches"}
+        assert set(_legacy(result.evidence[0]).facts) == {"matches"}
 
     async def test_mismatched_returned_url_invalidates_response(self) -> None:
         """A returned URL that canonicalizes differently is INVALID_RESPONSE."""
@@ -273,7 +274,7 @@ class TestHostLookupEvidence:
             clock=lambda: FIXED_TS,
         )
         assert result.errors == ()
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.subject.type == EntityType.DOMAIN
         assert evidence.subject.value == CANONICAL_URLHAUS_DOMAIN
         assert evidence.source_url == _HOST_ENDPOINT
@@ -297,7 +298,7 @@ class TestHostLookupEvidence:
             entity=_IPV4_ENTITY,
         )
         assert result.errors == ()
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.subject.type == EntityType.IP_ADDRESS
         assert evidence.subject.value == CANONICAL_URLHAUS_IPV4
         assert evidence.facts["matches"][0]["url"] == "http://203.0.113.42/payload.bin"
@@ -346,7 +347,7 @@ class TestHostLookupEvidence:
             entity=_DOMAIN_ENTITY,
         )
         assert result.errors == ()
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert len(matches) == 1
         assert matches[0]["urlhaus_id"] == "556677"
 
@@ -388,7 +389,7 @@ class TestHostLookupEvidence:
             entity=_DOMAIN_ENTITY,
         )
         assert result.errors == ()
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert len(matches) == 1
 
     async def test_distinct_ids_with_same_url_both_remain_in_order(self) -> None:
@@ -404,7 +405,7 @@ class TestHostLookupEvidence:
             ),
             entity=_DOMAIN_ENTITY,
         )
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert [m["urlhaus_id"] for m in matches] == ["556677", "556678"]
 
 
@@ -540,7 +541,7 @@ class TestStrictRecordSchema:
         """The documented null last_online value is retained as a null."""
         record = urlhaus_url_record(last_online=None)
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["last_online"] is None
 
     async def test_null_tags_and_payloads_are_rejected(self) -> None:
@@ -579,7 +580,7 @@ class TestStrictRecordSchema:
         """observed_at is the latest source observation including last_online."""
         record = urlhaus_url_record(last_online="2026-08-21 09:30:00 UTC")
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.observed_at == datetime(2026, 8, 21, 9, 30, 0, tzinfo=UTC)
         match = evidence.facts["matches"][0]
         assert match["last_online"] == "2026-08-21T09:30:00Z"
@@ -595,7 +596,7 @@ class TestStrictRecordSchema:
             ]
         )
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
-        payload = result.evidence[0].facts["matches"][0]["payloads"][0]
+        payload = _legacy(result.evidence[0]).facts["matches"][0]["payloads"][0]
         assert payload["response_md5"] == SYNTHETIC_MD5
         assert payload["response_sha256"] == SYNTHETIC_SHA256
 
@@ -625,7 +626,7 @@ class TestStrictRecordSchema:
         """An explicitly empty payloads array is a valid empty fact list."""
         record = urlhaus_url_record(payloads=[])
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["payloads"] == ()
 
     async def test_multiple_payloads_retained_in_order(self) -> None:
@@ -637,14 +638,14 @@ class TestStrictRecordSchema:
             ]
         )
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
-        payloads = result.evidence[0].facts["matches"][0]["payloads"]
+        payloads = _legacy(result.evidence[0]).facts["matches"][0]["payloads"]
         assert [p["filename"] for p in payloads] == ["payload.bin", "second.bin"]
 
     async def test_integer_response_size_accepted(self) -> None:
         """A strict integer response_size is also accepted per the contract."""
         record = urlhaus_url_record(payloads=[urlhaus_payload(response_size=4096)])
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
-        payload = result.evidence[0].facts["matches"][0]["payloads"][0]
+        payload = _legacy(result.evidence[0]).facts["matches"][0]["payloads"][0]
         assert payload["response_size"] == 4096
 
 
@@ -670,18 +671,18 @@ class TestSemanticsAndSafety:
         """An offline url_status is a source fact, never an ATI verdict."""
         record = urlhaus_url_record(url_status="offline")
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["url_status"] == "offline"
 
     async def test_payload_metadata_is_not_maliciousness(self) -> None:
         """Payload/signature facts carry no derived maliciousness label."""
         record = urlhaus_url_record(payloads=[urlhaus_payload(signature="Heodo")])
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
-        payload = result.evidence[0].facts["matches"][0]["payloads"][0]
+        payload = _legacy(result.evidence[0]).facts["matches"][0]["payloads"][0]
         assert payload["signature"] == "Heodo"
         # No verdict, confidence, or assessment keys exist anywhere.
-        assert "verdict" not in str(result.evidence[0].facts)
-        assert "confidence" not in str(result.evidence[0].facts)
+        assert "verdict" not in str(_legacy(result.evidence[0]).facts)
+        assert "confidence" not in str(_legacy(result.evidence[0]).facts)
 
     async def test_no_entity_relationship_or_persistence_objects(self) -> None:
         """The result carries evidence only: no discovered entities or edges."""
@@ -691,7 +692,7 @@ class TestSemanticsAndSafety:
         assert set(result.model_dump()) == {"provider", "evidence", "errors"}
         assert isinstance(result, ProviderResult)
         assert result.errors == ()
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type is EvidenceType.THREAT_INTELLIGENCE
         for fragment in ("relationship", "associated_with", "discovery", "resolves_to"):
             assert fragment not in str(evidence.facts)
@@ -823,7 +824,7 @@ class TestHostEnvelopeValidation:
             httpx.Response(200, json=payload), entity=_DOMAIN_ENTITY
         )
         assert result.errors == ()
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.facts["queried_host"] == CANONICAL_URLHAUS_DOMAIN
         assert evidence.facts["first_seen"] == "2026-08-19T08:00:00Z"
         assert evidence.facts["url_count"] == 1
@@ -835,7 +836,7 @@ class TestHostEnvelopeValidation:
             entity=_DOMAIN_ENTITY,
             clock=lambda: FIXED_TS,
         )
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.facts["queried_host"] == CANONICAL_URLHAUS_DOMAIN
         assert evidence.facts["first_seen"] == "2026-08-19T08:00:00Z"
         assert evidence.facts["url_count"] == 1
@@ -851,7 +852,7 @@ class TestHostEnvelopeValidation:
         result = await investigate(
             httpx.Response(200, json=later_firstseen), entity=_DOMAIN_ENTITY
         )
-        assert result.evidence[0].observed_at == datetime(
+        assert _legacy(result.evidence[0]).observed_at == datetime(
             2026, 8, 25, 0, 0, 0, tzinfo=UTC
         )
 
@@ -863,7 +864,7 @@ class TestHostEnvelopeValidation:
         result = await investigate(
             httpx.Response(200, json=earlier_firstseen), entity=_DOMAIN_ENTITY
         )
-        assert result.evidence[0].observed_at == datetime(
+        assert _legacy(result.evidence[0]).observed_at == datetime(
             2026, 8, 22, 9, 0, 0, tzinfo=UTC
         )
 
@@ -883,7 +884,7 @@ class TestDirectRecordCrossFieldHost:
         record = urlhaus_url_record(host="MALICIOUS-domain.test")
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
         assert result.errors == ()
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["host"] == "malicious-domain.test"
         assert match["url"] == CANONICAL_URLHAUS_URL
 
@@ -892,7 +893,7 @@ class TestDirectRecordCrossFieldHost:
         record = urlhaus_url_record(host="malicious-domain.test.")
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
         assert result.errors == ()
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["host"] == "malicious-domain.test"
 
     async def test_canonical_equivalent_ipv6_host_normalized(self) -> None:
@@ -912,7 +913,7 @@ class TestDirectRecordCrossFieldHost:
             ),
         )
         assert result.errors == ()
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["url"] == "http://[2001:db8::1]/payload.bin"
         assert match["host"] == "2001:db8::1"
 
@@ -959,7 +960,7 @@ class TestEndpointSpecificRecords:
             entity=_DOMAIN_ENTITY,
         )
         assert result.errors == ()
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["host"] is None
         assert match["last_online"] is None
         assert match["payloads"] is None
@@ -985,3 +986,17 @@ class TestEndpointSpecificRecords:
         record = urlhaus_url_record(threat=bad_threat)
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
         _assert_invalid_response(result)
+
+
+def _legacy(
+    item: ConvertedEvidence | LegacyEvidence,
+) -> LegacyEvidence:
+    """Narrow one provider-output item to its transitional LegacyEvidence shape.
+
+    These provider contract tests exercise the unmigrated legacy providers,
+    which emit ``LegacyEvidence``; ``ProviderResult.evidence`` is typed as the
+    PR 28B compatibility union so the approved legacy test seam narrows
+    explicitly. No identity is invented and no global persistence is involved.
+    """
+    assert isinstance(item, LegacyEvidence)  # legacy provider contract
+    return item

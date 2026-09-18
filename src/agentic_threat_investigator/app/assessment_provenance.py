@@ -6,15 +6,14 @@ assemble an immutable :class:`AssessmentProvenanceContext` from repository
 reads, then a :class:`AssessmentProvenanceValidator` decides eligibility
 without any provider, network, dispatcher, or LLM call.
 
-Provenance semantics:
+Provenance semantics (PR 28B):
 
-- Direct source-fact claims cite one immutable LegacyEvidence that was analyzed by
-  the Assessment and belongs to the same Investigation. LegacyEvidence may
-  validly support zero RelationshipObservations.
+- Direct source-fact claims cite one exact EvidenceObservation that was
+  analyzed by the Assessment and is admitted to the same Investigation.
 - Graph-backed claims cite exactly one RelationshipObservation; the cited
-  observation resolves to the exact LegacyEvidence and stable Relationship it
-  recorded at observation time, so another observation of the same
-  Relationship can never substitute.
+  observation resolves to the exact EvidenceObservation and stable
+  Relationship it recorded at observation time, so another observation of
+  the same Relationship can never substitute.
 - The context's ``relationships``/``entities`` maps hold only eligible
   (non-deleted) rows; a citation that resolves outside those maps is
   missing or ineligible and is rejected.
@@ -36,8 +35,8 @@ from agentic_threat_investigator.domain.assessment import (
     support_key,
 )
 from agentic_threat_investigator.domain.entities import Entity
+from agentic_threat_investigator.domain.evidence import EvidenceObservation
 from agentic_threat_investigator.domain.investigation import InvestigationState
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -53,7 +52,7 @@ class AssessmentInvestigationMismatchError(AssessmentValidationError):
 
 
 class AssessmentEvidenceReferenceError(AssessmentValidationError):
-    """An LegacyEvidence reference is missing, unanalyzed, or malformed."""
+    """An EvidenceObservation reference is missing, unanalyzed, or malformed."""
 
 
 class AssessmentRelationshipObservationReferenceError(AssessmentValidationError):
@@ -80,7 +79,8 @@ class AssessmentProvenanceContext:
     """
 
     investigation: InvestigationState | None
-    evidence: Mapping[UUID, LegacyEvidence] = field(default_factory=dict)
+    evidence: Mapping[UUID, EvidenceObservation] = field(default_factory=dict)
+    admitted_observation_ids: frozenset[UUID] = frozenset()
     relationship_observations: Mapping[UUID, RelationshipObservation] = field(
         default_factory=dict
     )
@@ -139,10 +139,12 @@ class AssessmentProvenanceValidator:
     def _validate_analyzed_evidence(
         assessment: Assessment, context: AssessmentProvenanceContext
     ) -> None:
-        """Require every analyzed LegacyEvidence ID to exist and belong to the Investigation.
+        """Require every analyzed EvidenceObservation to exist and be admitted.
 
-        An empty analyzed set is approved only for an INCONCLUSIVE Assessment
-        with no material Findings.
+        Analyzed identities are exact EvidenceObservation values (PR 28B)
+        admitted to the Assessment's Investigation. An empty analyzed set is
+        approved only for an INCONCLUSIVE Assessment with no material
+        Findings.
         """
         analyzed = assessment.analyzed_evidence_ids
         if len(analyzed) != len(set(analyzed)):
@@ -165,9 +167,10 @@ class AssessmentProvenanceValidator:
                 raise AssessmentEvidenceReferenceError(
                     f"analyzed evidence does not exist: {evidence_id}"
                 )
-            if evidence.investigation_id != assessment.investigation_id:
+            if evidence_id not in context.admitted_observation_ids:
                 raise AssessmentInvestigationMismatchError(
-                    f"analyzed evidence belongs to another investigation: {evidence_id}"
+                    f"analyzed evidence is not admitted to the investigation: "
+                    f"{evidence_id}"
                 )
 
     @staticmethod
@@ -204,9 +207,10 @@ def _validate_evidence_support(
         raise AssessmentEvidenceReferenceError(
             f"finding cites unknown evidence: {support.evidence_id}"
         )
-    if evidence.investigation_id != assessment.investigation_id:
+    if support.evidence_id not in context.admitted_observation_ids:
         raise AssessmentInvestigationMismatchError(
-            f"finding cites evidence from another investigation: {support.evidence_id}"
+            f"finding cites evidence not admitted to the investigation: "
+            f"{support.evidence_id}"
         )
     if support.evidence_id not in assessment.analyzed_evidence_ids:
         raise AssessmentEvidenceReferenceError(
@@ -237,9 +241,9 @@ def _validate_relationship_support(
             f"observation references missing evidence: "
             f"{observation.evidence_observation_id}"
         )
-    if evidence.investigation_id != assessment.investigation_id:
+    if observation.evidence_observation_id not in context.admitted_observation_ids:
         raise AssessmentInvestigationMismatchError(
-            f"observation evidence belongs to another investigation: "
+            f"observation evidence is not admitted to the investigation: "
             f"{observation.evidence_observation_id}"
         )
     if observation.evidence_observation_id not in assessment.analyzed_evidence_ids:

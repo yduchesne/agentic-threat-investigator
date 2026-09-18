@@ -1,9 +1,9 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Provider contract tests for RdapProvider, bootstrap discovery, and caching."""
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 import asyncio
 import logging
 from datetime import UTC, datetime
@@ -17,7 +17,8 @@ from httpx import MockTransport
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode, ProviderResult
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers import rdap_bootstrap
 from agentic_threat_investigator.infrastructure.providers.http import ProviderHttpClient
 from agentic_threat_investigator.infrastructure.providers.rdap import (
@@ -121,7 +122,7 @@ class TestRdapContract:
 
         assert bootstrap_paths == ["/rdap/dns.json"]
         assert len(result.evidence) == 1
-        ev = result.evidence[0]
+        ev = _legacy(result.evidence[0])
         assert ev.type == EvidenceType.REGISTRATION
         assert ev.subject.value == "com"
         assert ev.source_record_id == "DOM-TLD"
@@ -163,7 +164,7 @@ class TestRdapContract:
 
             assert result.provider == "urn:ati:source:rdap"
             assert len(result.evidence) == 1
-            ev = result.evidence[0]
+            ev = _legacy(result.evidence[0])
             assert ev.type == EvidenceType.REGISTRATION
             assert ev.investigation_id == _FIXED_UUID
             assert ev.subject.value == "example.com"
@@ -212,8 +213,8 @@ class TestRdapContract:
             entity = Entity(type=EntityType.IP_ADDRESS, value="198.51.100.42")
             result = await provider.investigate(_FIXED_UUID, entity)
             assert len(result.evidence) == 1
-            assert result.evidence[0].facts["handle"] == "NET-SPECIFIC"
-            assert list(result.evidence[0].facts["cidr0_cidrs"]) == [
+            assert _legacy(result.evidence[0]).facts["handle"] == "NET-SPECIFIC"
+            assert list(_legacy(result.evidence[0]).facts["cidr0_cidrs"]) == [
                 {"prefix": "198.51.100.0", "length": 24}
             ]
             assert not any("broad.rir.test" in url for url in called_urls)
@@ -247,7 +248,7 @@ class TestRdapContract:
             entity = Entity(type=EntityType.IP_ADDRESS, value="2001:db8::1")
             result = await provider.investigate(_FIXED_UUID, entity)
             assert len(result.evidence) == 1
-            assert result.evidence[0].facts["ip_version"] == "v6"
+            assert _legacy(result.evidence[0]).facts["ip_version"] == "v6"
 
     async def test_asn_range_selection_and_as_prefix_removal(self) -> None:
         """ASN lookup strips AS prefix, tests boundary, and queries decimal path."""
@@ -280,8 +281,8 @@ class TestRdapContract:
             entity = Entity(type=EntityType.ASN, value="as500")
             result = await provider.investigate(_FIXED_UUID, entity)
             assert len(result.evidence) == 1
-            assert result.evidence[0].facts["start_autnum"] == 500
-            assert result.evidence[0].source_record_id == "AS500"
+            assert _legacy(result.evidence[0]).facts["start_autnum"] == 500
+            assert _legacy(result.evidence[0]).source_record_id == "AS500"
 
     async def test_ambiguous_ip_prefix_returns_invalid_response(self) -> None:
         """Overlapping IP prefixes of equal specificity return INVALID_RESPONSE."""
@@ -596,7 +597,10 @@ class TestRdapContract:
             entity = Entity(type=EntityType.IP_ADDRESS, value="198.51.100.1")
             result = await provider.investigate(_FIXED_UUID, entity)
             assert len(result.evidence) == 1
-            assert result.evidence[0].source_record_id == "198.51.100.0-198.51.100.255"
+            assert (
+                _legacy(result.evidence[0]).source_record_id
+                == "198.51.100.0-198.51.100.255"
+            )
 
     async def test_cache_hit_and_expiry_refresh(self) -> None:
         """Cache serves memory hits until expiry, then triggers a new refresh."""
@@ -922,7 +926,10 @@ class TestRdapAuthorityCanonicalization:
             ),
         )
         assert len(result.evidence) == 1
-        assert result.evidence[0].source_url == "https://rir-a.test/ip/198.51.100.1"
+        assert (
+            _legacy(result.evidence[0]).source_url
+            == "https://rir-a.test/ip/198.51.100.1"
+        )
         assert contacted == ["rir-a.test"]
 
     async def test_asn_equivalent_authority_spellings_not_ambiguous(self) -> None:
@@ -941,7 +948,8 @@ class TestRdapAuthorityCanonicalization:
         )
         assert len(result.evidence) == 1
         assert (
-            result.evidence[0].source_url == "https://asn-registry.test:8443/autnum/150"
+            _legacy(result.evidence[0]).source_url
+            == "https://asn-registry.test:8443/autnum/150"
         )
         assert contacted == ["asn-registry.test"]
 
@@ -985,8 +993,25 @@ class TestRdapAuthorityCanonicalization:
                 ),
             )
         assert len(result.evidence) == 1
-        assert result.evidence[0].source_url == "https://rir-b.test/ip/198.51.100.1"
+        assert (
+            _legacy(result.evidence[0]).source_url
+            == "https://rir-b.test/ip/198.51.100.1"
+        )
         assert contacted == ["rir-b.test"]
         assert "TOPSECRET" not in caplog.text
         assert "QUERYSECRET" not in caplog.text
         assert all("TOPSECRET" not in e.message for e in result.errors)
+
+
+def _legacy(
+    item: ConvertedEvidence | LegacyEvidence,
+) -> LegacyEvidence:
+    """Narrow one provider-output item to its transitional LegacyEvidence shape.
+
+    These provider contract tests exercise the unmigrated legacy providers,
+    which emit ``LegacyEvidence``; ``ProviderResult.evidence`` is typed as the
+    PR 28B compatibility union so the approved legacy test seam narrows
+    explicitly. No identity is invented and no global persistence is involved.
+    """
+    assert isinstance(item, LegacyEvidence)  # legacy provider contract
+    return item

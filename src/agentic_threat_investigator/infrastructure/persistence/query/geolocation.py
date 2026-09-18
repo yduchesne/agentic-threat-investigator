@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PostgreSQL Investigation geolocation read query (PR 25A).
+"""PostgreSQL Investigation geolocation read query (PR 25A + PR 28B).
 
 The projection is one bounded SQL read: PostgreSQL selects the single latest
-``GEOLOCATION`` Evidence row per subject entity with ``row_number() OVER
-(PARTITION BY subject_entity_id ORDER BY retrieved_at DESC, id ASC)``,
-restricts the driving scope to one Investigation and to IP-address subjects,
-then applies the canonical deterministic transport ordering and a
-``max_items + 1`` bound so truncation is detected without a second query.
-No per-item Evidence reads occur; the application never loads every
-historical geolocation row.
+admitted ``GEOLOCATION`` observation per associated IP Entity with
+``row_number() OVER (PARTITION BY entity_id ORDER BY retrieved_at DESC, id
+ASC)``. The driving scope is exclusively the ``ati.investigation_evidence``
+admission, the stable Evidence type, and IP-address associated Entities;
+then the canonical deterministic transport ordering and a ``max_items + 1``
+bound so truncation is detected without a second query. No per-item
+Evidence reads occur; the application never loads every historical
+geolocation row. The projection's ``evidence_id`` is the exact
+EvidenceObservation identity (PR 28B) while the public field spelling is
+retained for wire compatibility.
 """
 
 from __future__ import annotations
@@ -28,7 +31,13 @@ from agentic_threat_investigator.app.query.geolocation import (
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
 
-from ..postgresql.models import EntityRow, EvidenceRow
+from ..postgresql.models import (
+    EntityRow,
+    EvidenceObservationEntityRow,
+    EvidenceObservationRow,
+    EvidenceRow,
+    InvestigationEvidenceRow,
+)
 
 
 class PostgresInvestigationGeolocationQueryService(
@@ -61,33 +70,44 @@ class PostgresInvestigationGeolocationQueryService(
         max_items = self._max_items
         ranked = (
             select(
-                EvidenceRow.id.label("evidence_id"),
-                EvidenceRow.investigation_id.label("investigation_id"),
-                EvidenceRow.evidence_type.label("evidence_type"),
-                EvidenceRow.subject_entity_id.label("subject_entity_id"),
-                EvidenceRow.source.label("source"),
-                EvidenceRow.source_record_id.label("source_record_id"),
-                EvidenceRow.source_url.label("source_url"),
-                EvidenceRow.observed_at.label("observed_at"),
-                EvidenceRow.retrieved_at.label("retrieved_at"),
-                EvidenceRow.facts.label("facts"),
+                EvidenceObservationRow.id.label("observation_id"),
+                EvidenceObservationRow.evidence_id.label("evidence_id"),
+                EvidenceObservationRow.source_url.label("source_url"),
+                EvidenceObservationRow.observed_at.label("observed_at"),
+                EvidenceObservationRow.retrieved_at.label("retrieved_at"),
+                EvidenceObservationRow.facts.label("facts"),
                 EntityRow.id.label("entity_id"),
                 EntityRow.canonical_value.label("canonical_value"),
                 func.row_number()
                 .over(
-                    partition_by=EvidenceRow.subject_entity_id,
+                    partition_by=EntityRow.id,
                     order_by=(
-                        EvidenceRow.retrieved_at.desc(),
-                        EvidenceRow.id.asc(),
+                        EvidenceObservationRow.retrieved_at.desc(),
+                        EvidenceObservationRow.id.asc(),
                     ),
                 )
                 .label("_rank"),
             )
-            .join(EntityRow, EntityRow.id == EvidenceRow.subject_entity_id)
+            .join(
+                InvestigationEvidenceRow,
+                InvestigationEvidenceRow.evidence_observation_id
+                == EvidenceObservationRow.id,
+            )
+            .join(
+                EvidenceRow,
+                EvidenceRow.id == EvidenceObservationRow.evidence_id,
+            )
+            .join(
+                EvidenceObservationEntityRow,
+                EvidenceObservationEntityRow.evidence_observation_id
+                == EvidenceObservationRow.id,
+            )
+            .join(EntityRow, EntityRow.id == EvidenceObservationEntityRow.entity_id)
             .where(
-                EvidenceRow.investigation_id == investigation_id,
+                InvestigationEvidenceRow.investigation_id == investigation_id,
                 EvidenceRow.evidence_type == EvidenceType.GEOLOCATION.value,
                 EntityRow.entity_type == EntityType.IP_ADDRESS.value,
+                EntityRow.deleted_at.is_(None),
             )
             .subquery()
         )
@@ -116,7 +136,7 @@ class PostgresInvestigationGeolocationQueryService(
         mapper; this wrapper only supplies the row's persisted values.
         """
         return geolocation_item_from_persisted_facts(
-            evidence_id=row["evidence_id"],
+            evidence_id=row["observation_id"],
             entity_id=row["entity_id"],
             ip_address=row["canonical_value"],
             facts=row["facts"],

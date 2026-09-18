@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Integration tests for live providers through an in-process ASGI boundary.
 
 Every provider request traverses a real ``httpx.AsyncClient`` over
@@ -12,6 +10,8 @@ ASGI application handles the request.
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -27,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.abuseipdb import (
     AbuseIpdbProvider,
 )
@@ -452,9 +453,15 @@ class TestDnsIntegration:
 
             assert result.provider == "urn:ati:source:google_public_dns"
             assert len(result.evidence) == 2
-            a_ev = next(e for e in result.evidence if e.facts["query_type"] == "A")
+            a_ev = next(
+                _legacy(e)
+                for e in result.evidence
+                if _legacy(e).facts["query_type"] == "A"
+            )
             aaaa_ev = next(
-                e for e in result.evidence if e.facts["query_type"] == "AAAA"
+                _legacy(e)
+                for e in result.evidence
+                if _legacy(e).facts["query_type"] == "AAAA"
             )
 
             for ev in (a_ev, aaaa_ev):
@@ -500,8 +507,11 @@ class TestDnsIntegration:
             assert dns_request.query_params["name"] == "1.2.0.192.in-addr.arpa"
             assert dns_request.query_params["type"] == "PTR"
             assert len(result.evidence) == 1
-            assert result.evidence[0].facts["query_type"] == "PTR"
-            assert result.evidence[0].facts["answers"][0]["value"] == "host.example.com"
+            assert _legacy(result.evidence[0]).facts["query_type"] == "PTR"
+            assert (
+                _legacy(result.evidence[0]).facts["answers"][0]["value"]
+                == "host.example.com"
+            )
 
     async def test_nxdomain_returns_valid_miss(self) -> None:
         """NXDOMAIN short-circuits remaining queries without emitting errors."""
@@ -552,7 +562,7 @@ class TestRdapIntegration:
 
             assert outcome.provider == "urn:ati:source:rdap"
             assert len(outcome.evidence) == 1
-            observed_ev = outcome.evidence[0]
+            observed_ev = _legacy(outcome.evidence[0])
             assert observed_ev.type == EvidenceType.REGISTRATION
             assert (
                 observed_ev.source_url
@@ -618,7 +628,7 @@ class TestRdapIntegration:
                 _FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value="198.51.100.42")
             )
             assert len(res_v4.evidence) == 1
-            assert res_v4.evidence[0].facts["handle"] == "NET-SPECIFIC-V4"
+            assert _legacy(res_v4.evidence[0]).facts["handle"] == "NET-SPECIFIC-V4"
             assert all(
                 request.url.hostname != "generic-v4.rir.test"
                 for request in app.state.rdap_requests
@@ -628,14 +638,14 @@ class TestRdapIntegration:
                 _FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value="2001:db8:100::1")
             )
             assert len(res_v6.evidence) == 1
-            assert res_v6.evidence[0].facts["handle"] == "NET-SPECIFIC-V6"
+            assert _legacy(res_v6.evidence[0]).facts["handle"] == "NET-SPECIFIC-V6"
             assert all(
                 request.url.hostname != "generic-v6.rir.test"
                 for request in app.state.rdap_requests
             )
             # The provider emitted the exact percent-encoded IPv6 request URL.
             assert (
-                res_v6.evidence[0].source_url
+                _legacy(res_v6.evidence[0]).source_url
                 == f"https://specific-v6.rir.test/ip/{quote('2001:db8:100::1', safe='')}"
             )
             # The decoded path reached the correct ASGI route on the
@@ -674,7 +684,7 @@ class TestRdapIntegration:
             result = await provider.investigate(_FIXED_UUID, entity)
 
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.facts["start_autnum"] == 100
             assert evidence.facts["end_autnum"] == 200
 
@@ -802,7 +812,7 @@ class TestIpinfoLiteIntegration:
 
             assert result.provider == "urn:ati:source:ipinfo_lite"
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.type == EvidenceType.NETWORK
             assert evidence.investigation_id == _FIXED_UUID
             assert evidence.subject.value == "8.8.8.8"
@@ -849,7 +859,7 @@ class TestIpinfoLiteIntegration:
             assert request.url.path == "/lite/2001:db8::1"
 
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.subject.value == "2001:db8::1"
             assert evidence.facts["ip"] == "2001:db8::1"
             assert evidence.facts["asn"] == "AS123"
@@ -950,7 +960,7 @@ class TestAbuseIpdbIntegration:
 
             assert result.provider == "urn:ati:source:abuseipdb"
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.type == EvidenceType.REPUTATION
             assert evidence.investigation_id == _FIXED_UUID
             assert evidence.subject.value == _SYNTHETIC_IPV4
@@ -1030,7 +1040,7 @@ class TestAbuseIpdbIntegration:
             assert request.query_params["ipAddress"] == "2001:db8::1"
 
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.type == EvidenceType.REPUTATION
             assert evidence.subject.value == "2001:db8::1"
             facts = evidence.facts
@@ -1335,7 +1345,7 @@ class TestThreatFoxIntegration:
 
             assert result.provider == "urn:ati:source:threatfox"
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.type == EvidenceType.THREAT_INTELLIGENCE
             assert evidence.investigation_id == _FIXED_UUID
             assert evidence.subject.type == EntityType.DOMAIN
@@ -1374,7 +1384,7 @@ class TestThreatFoxIntegration:
             assert result.errors == ()
             assert len(app.state.threatfox_requests) == 1
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.subject.type == EntityType.IP_ADDRESS
             assert evidence.subject.value == CANONICAL_ASYNCRAT_IP
             matches = evidence.facts["matches"]
@@ -1434,7 +1444,7 @@ class TestThreatFoxIntegration:
                 Entity(type=EntityType.IP_ADDRESS, value=CANONICAL_ASYNCRAT_IP),
             )
 
-            matches = result.evidence[0].facts["matches"]
+            matches = _legacy(result.evidence[0]).facts["matches"]
             assert len(matches) == 2
             assert {m["threatfox_id"] for m in matches} == {"864202", "864203"}
             assert {m["malware"] for m in matches} == {"win.asyncrat"}
@@ -1467,8 +1477,8 @@ class TestThreatFoxIntegration:
             assert len(app.state.threatfox_requests) == 1
             assert result.errors == ()
             assert len(result.evidence) == 1
-            assert result.evidence[0].type == EvidenceType.THREAT_INTELLIGENCE
-            matches = result.evidence[0].facts["matches"]
+            assert _legacy(result.evidence[0]).type == EvidenceType.THREAT_INTELLIGENCE
+            matches = _legacy(result.evidence[0]).facts["matches"]
             assert len(matches) == 1
             # The first occurrence remains authoritative.
             assert matches[0]["threatfox_id"] == "864202"
@@ -1783,8 +1793,8 @@ class TestNoPersistenceSideEffect:
             result = await provider.investigate(_FIXED_UUID, entity)
 
             assert len(result.evidence) == 1
-            assert result.evidence[0].id is None
-            assert result.evidence[0].investigation_id == _FIXED_UUID
+            assert _legacy(result.evidence[0]).id is None
+            assert _legacy(result.evidence[0]).investigation_id == _FIXED_UUID
 
             async with integration_engine.connect() as conn:
                 count_after = (
@@ -1819,8 +1829,8 @@ class TestNoPersistenceSideEffect:
             result = await provider.investigate(_FIXED_UUID, entity)
 
             assert len(result.evidence) == 1
-            assert result.evidence[0].id is None
-            assert result.evidence[0].investigation_id == _FIXED_UUID
+            assert _legacy(result.evidence[0]).id is None
+            assert _legacy(result.evidence[0]).investigation_id == _FIXED_UUID
 
             async with integration_engine.connect() as conn:
                 count_after = (
@@ -1855,8 +1865,8 @@ class TestNoPersistenceSideEffect:
             result = await provider.investigate(_FIXED_UUID, entity)
 
             assert len(result.evidence) == 1
-            assert result.evidence[0].id is None
-            assert result.evidence[0].investigation_id == _FIXED_UUID
+            assert _legacy(result.evidence[0]).id is None
+            assert _legacy(result.evidence[0]).investigation_id == _FIXED_UUID
 
             async with integration_engine.connect() as conn:
                 count_after = (
@@ -1903,8 +1913,8 @@ class TestNoPersistenceSideEffect:
             result = await provider.investigate(_FIXED_UUID, entity)
 
             assert len(result.evidence) == 1
-            assert result.evidence[0].id is None
-            assert result.evidence[0].investigation_id == _FIXED_UUID
+            assert _legacy(result.evidence[0]).id is None
+            assert _legacy(result.evidence[0]).investigation_id == _FIXED_UUID
 
             async with integration_engine.connect() as conn:
                 counts_after = {
@@ -1958,7 +1968,7 @@ class TestUrlhausIntegration:
 
             assert result.provider == "urn:ati:source:urlhaus"
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.type == EvidenceType.THREAT_INTELLIGENCE
             assert evidence.investigation_id == _FIXED_UUID
             assert evidence.subject.type == EntityType.URL
@@ -2004,7 +2014,7 @@ class TestUrlhausIntegration:
 
             assert result.errors == ()
             assert len(result.evidence) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.subject.type == EntityType.DOMAIN
             assert evidence.subject.value == CANONICAL_URLHAUS_DOMAIN
             assert evidence.source_url == "https://urlhaus-api.abuse.ch/v1/host/"
@@ -2037,7 +2047,7 @@ class TestUrlhausIntegration:
 
             assert result.errors == ()
             assert len(app.state.urlhaus_requests) == 1
-            evidence = result.evidence[0]
+            evidence = _legacy(result.evidence[0])
             assert evidence.subject.type == EntityType.IP_ADDRESS
             assert evidence.subject.value == "203.0.113.42"
             assert (
@@ -2411,13 +2421,13 @@ class TestUrlhausIntegration:
             assert len(app.state.urlhaus_requests) == 1
             assert result.errors == ()
             assert len(result.evidence) == 1
-            matches = result.evidence[0].facts["matches"]
+            matches = _legacy(result.evidence[0]).facts["matches"]
             assert len(matches) == 1
             assert matches[0]["urlhaus_id"] == "556677"
             assert matches[0]["url"] == CANONICAL_URLHAUS_URL
             # No credential appears in the URL, body, or evidence facts.
             assert _FAKE_URLHAUS_KEY not in str(app.state.urlhaus_requests[0].url)
-            assert _FAKE_URLHAUS_KEY not in str(result.evidence[0].facts)
+            assert _FAKE_URLHAUS_KEY not in str(_legacy(result.evidence[0]).facts)
 
     async def test_malformed_host_record_url_is_typed_error(self) -> None:
         """A host record URL outside the URL identity contract is INVALID_RESPONSE."""
@@ -2524,8 +2534,8 @@ class TestUrlhausIntegration:
             result = await provider.investigate(_FIXED_UUID, entity)
 
             assert len(result.evidence) == 1
-            assert result.evidence[0].id is None
-            assert result.evidence[0].investigation_id == _FIXED_UUID
+            assert _legacy(result.evidence[0]).id is None
+            assert _legacy(result.evidence[0]).investigation_id == _FIXED_UUID
 
             async with integration_engine.connect() as conn:
                 counts_after = {
@@ -2543,3 +2553,17 @@ class TestUrlhausIntegration:
             # Provider invocation alone writes no evidence, entity,
             # relationship, or relationship-observation rows.
             assert counts_after == counts_before
+
+
+def _legacy(
+    item: ConvertedEvidence | LegacyEvidence,
+) -> LegacyEvidence:
+    """Narrow one provider-output item to its transitional LegacyEvidence shape.
+
+    These provider contract tests exercise the unmigrated legacy providers,
+    which emit ``LegacyEvidence``; ``ProviderResult.evidence`` is typed as the
+    PR 28B compatibility union so the approved legacy test seam narrows
+    explicitly. No identity is invented and no global persistence is involved.
+    """
+    assert isinstance(item, LegacyEvidence)  # legacy provider contract
+    return item

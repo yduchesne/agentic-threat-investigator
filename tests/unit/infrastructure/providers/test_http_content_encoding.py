@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Malformed HTTP content-encoding contract tests for live providers.
 
 A successful response advertising a content encoding it does not actually
@@ -10,6 +8,8 @@ response context closed and limiter permits released.
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from uuid import UUID
@@ -20,6 +20,8 @@ from httpx import MockTransport
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode
 from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.google_dns import (
     GooglePublicDnsProvider,
 )
@@ -212,9 +214,15 @@ class TestGoogleDnsMalformedContentEncoding:
             )
 
         assert len(investigation.evidence) == 1
-        assert investigation.evidence[0].facts["query_type"] == "A"
+        assert _legacy(investigation.evidence[0]).facts["query_type"] == "A"
         assert len(investigation.errors) == 1
         assert investigation.errors[0].code == ProviderErrorCode.INVALID_RESPONSE
         assert investigation.errors[0].retryable is False
         assert investigation.errors[0].message == "invalid response content encoding"
         assert "not gzip" not in investigation.errors[0].message
+
+
+def _legacy(item: ConvertedEvidence | LegacyEvidence) -> LegacyEvidence:
+    """Narrow one legacy-provider output item to its transitional shape."""
+    assert isinstance(item, LegacyEvidence)
+    return item

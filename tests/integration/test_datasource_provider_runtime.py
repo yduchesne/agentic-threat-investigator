@@ -37,7 +37,8 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from agentic_threat_investigator.app.evidence_conversion import (
     EvidenceConversionContext,
@@ -86,7 +87,6 @@ from agentic_threat_investigator.domain.investigation import (
     ProviderWorkItem,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
 )
@@ -226,18 +226,37 @@ async def _log_rows(
 
 
 async def _scalar(integration_engine: AsyncEngine, query: str, **params: object) -> Any:
-    """Run one bounded scalar verification query."""
-    async with integration_engine.connect() as connection:
-        return await connection.scalar(text(query), params)
+    """Run one bounded scalar verification query on a fresh engine.
+
+    The vertical slices write through the shared pool and then verify with
+    the same pooled connections; a fresh engine isolates the read transaction
+    so the verification deterministically observes the committed write.
+    """
+    engine = create_async_engine(
+        integration_engine.url.render_as_string(hide_password=False),
+        poolclass=NullPool,
+    )
+    try:
+        async with engine.connect() as connection:
+            return await connection.scalar(text(query), params)
+    finally:
+        await engine.dispose()
 
 
 async def _row(
     integration_engine: AsyncEngine, query: str, **params: object
 ) -> tuple[Any, ...] | None:
-    """Run one bounded single-row verification query."""
-    async with integration_engine.connect() as connection:
-        result = await connection.execute(text(query), params)
-        fetched = result.fetchone()
+    """Run one bounded single-row verification query on a fresh engine."""
+    engine = create_async_engine(
+        integration_engine.url.render_as_string(hide_password=False),
+        poolclass=NullPool,
+    )
+    try:
+        async with engine.connect() as connection:
+            result = await connection.execute(text(query), params)
+            fetched = result.fetchone()
+    finally:
+        await engine.dispose()
     return None if fetched is None else tuple(fetched)
 
 
@@ -272,21 +291,29 @@ async def test_p01_one_record_persisted_vertical_slice(
     assert len(outcome.evidence_ids) == 1
     evidence_id = outcome.evidence_ids[0]
 
-    # Exact per-record provenance on the durable LegacyEvidence row.
+    # Exact per-record provenance on the durable global observation:
+    # the stable Evidence carries type/source/record identity, the
+    # EvidenceObservation carries source_url, and the Investigation scope
+    # comes from the exact admission.
     row = await _row(
         integration_engine,
-        "SELECT investigation_id, evidence_type, subject_entity_id, source, "
-        "source_record_id, source_url, raw_payload FROM ati.evidence WHERE id=:id",
+        "SELECT ie.investigation_id, ev.evidence_type, ev.source, "
+        "ev.source_record_id, eo.source_url, eo.raw_payload, eo.id "
+        "FROM ati.evidence_observation eo "
+        "JOIN ati.evidence ev ON ev.id = eo.evidence_id "
+        "JOIN ati.investigation_evidence ie "
+        "  ON ie.evidence_observation_id = eo.id "
+        "WHERE eo.id = :id",
         id=evidence_id,
     )
     assert row is not None
     assert str(row[0]) == str(investigation_id)
     assert row[1] == EvidenceType.THREAT_INTELLIGENCE.value
-    assert str(row[2]) == str(root.id)
-    assert row[3] == SourceId.THREATFOX.value
-    assert row[4] == "864201"
-    assert row[5] == _ENDPOINT
-    assert row[6] is None
+    assert row[2] == SourceId.THREATFOX.value
+    assert row[3] == "864201"
+    assert row[4] == _ENDPOINT
+    assert row[5] is None
+    assert str(row[6]) == str(evidence_id)
 
     # The canonical graph: one MALWARE entity and one ASSOCIATED_WITH edge
     # with one historical observation.
@@ -311,7 +338,7 @@ async def test_p01_one_record_persisted_vertical_slice(
         await _scalar(
             integration_engine,
             "SELECT count(*) FROM ati.audit_event "
-            "WHERE object_type = 'evidence' AND object_id = :id",
+            "WHERE object_type = 'evidence_observation' AND object_id = :id",
             id=evidence_id,
         )
         == 1
@@ -519,9 +546,11 @@ class _FailingSecondPersistenceService(ProviderObservationPersistenceService):
 
     async def persist(
         self,
-        evidence: LegacyEvidence,
+        converted: ConvertedEvidence,
+        invocation_entity: Entity,
         extraction: ExtractionResult,
         *,
+        investigation_id: UUID,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
     ) -> ProviderObservationPersistenceResult:
@@ -530,8 +559,10 @@ class _FailingSecondPersistenceService(ProviderObservationPersistenceService):
         if self.calls == 2:
             raise RuntimeError("injected deterministic persistence failure")
         return await super().persist(
-            evidence,
+            converted,
+            invocation_entity,
             extraction,
+            investigation_id=investigation_id,
             actor_id=actor_id,
             request_id=request_id,
         )

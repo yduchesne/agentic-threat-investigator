@@ -37,7 +37,15 @@ from agentic_threat_investigator.app.persistence.repositories import (
     LocationIdentityConflictError,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.geoint import (
     EntityLocationObservation,
     GeoResolution,
@@ -52,7 +60,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
@@ -113,20 +120,35 @@ async def seed_geolocation_evidence(
         Entity(type=EntityType.DOMAIN, value="example.com")
     )
     assert ip_entity.id is not None and domain_entity.id is not None
-    evidence = await uow.evidence.insert(
-        LegacyEvidence(
-            investigation_id=investigation_id,
-            type=EvidenceType.GEOLOCATION,
-            subject=EntityRef(
-                id=ip_entity.id, type=EntityType.IP_ADDRESS, value="203.0.113.7"
+    evidence_id = uuid4()
+    persisted = await uow.evidence.persist(
+        ConvertedEvidence(
+            evidence=Evidence(
+                id=evidence_id,
+                type=EvidenceType.GEOLOCATION,
+                source="urn:ati:source:dbip",
+                source_record_id=f"gp-{evidence_id}",
             ),
-            source="urn:ati:source:dbip",
-            retrieved_at=_RETRIEVED_AT,
-            facts={"country_code": "US", "city": "Example City"},
+            observation=EvidenceObservationCandidate(
+                evidence_id=evidence_id,
+                retrieved_at=_RETRIEVED_AT,
+                facts={"country_code": "US", "city": "Example City"},
+            ),
         )
     )
-    assert evidence.id is not None
-    return investigation_id, ip_entity.id, domain_entity.id, evidence.id
+    await uow.evidence_observation_entities.associate(
+        persisted.observation.id, ip_entity.id
+    )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
+            investigation_id=investigation_id,
+            evidence_observation_id=persisted.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=_RETRIEVED_AT,
+            added_by=InvestigationEvidenceActor.SYSTEM,
+        )
+    )
+    return investigation_id, ip_entity.id, domain_entity.id, persisted.observation.id
 
 
 def observation_factory(
@@ -134,7 +156,7 @@ def observation_factory(
     id: UUID | None = None,
     entity_id: UUID,
     location_id: UUID,
-    evidence_id: UUID,
+    evidence_observation_id: UUID,
     precision: LocationPrecision = LocationPrecision.COUNTRY,
     retrieved_at: datetime = _RETRIEVED_AT,
     observed_at: datetime | None = None,
@@ -145,7 +167,7 @@ def observation_factory(
         id=id or uuid4(),
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_observation_id,
         precision=precision,
         observed_at=observed_at,
         retrieved_at=retrieved_at,
@@ -410,7 +432,9 @@ async def test_gp09_first_observation_creates_entity_location_atomically(
         country = await uow.locations.upsert(location_factory())
         assert country.id is not None
         observation = observation_factory(
-            entity_id=entity_id, location_id=country.id, evidence_id=evidence_id
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_observation_id=evidence_id,
         )
         persisted = await uow.entity_location_observations.append(observation)
         assert persisted.version is not None
@@ -437,7 +461,7 @@ async def test_gp10_observation_stores_exact_provenance(
         observation = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             precision=LocationPrecision.COUNTRY,
             observed_at=observed_at,
         )
@@ -446,7 +470,7 @@ async def test_gp10_observation_stores_exact_provenance(
         assert fetched is not None
         assert fetched.entity_id == entity_id
         assert fetched.location_id == country.id
-        assert fetched.evidence_id == evidence_id
+        assert fetched.evidence_observation_id == evidence_id
         assert fetched.precision is LocationPrecision.COUNTRY
         assert fetched.observed_at == observed_at
         assert fetched.retrieved_at == _RETRIEVED_AT
@@ -477,18 +501,22 @@ async def test_gp11_observation_requires_geolocation_evidence(
             Entity(type=EntityType.DOMAIN, value="example.org")
         )
         assert domain.id is not None
-        dns_evidence = await uow.evidence.insert(
-            LegacyEvidence(
-                investigation_id=investigation_id,
-                type=EvidenceType.DNS,
-                subject=EntityRef(
-                    id=domain.id, type=EntityType.DOMAIN, value="example.org"
+        dns_evidence_id = uuid4()
+        dns_evidence_out = await uow.evidence.persist(
+            ConvertedEvidence(
+                evidence=Evidence(
+                    id=dns_evidence_id,
+                    type=EvidenceType.DNS,
+                    source="urn:ati:source:google_public_dns",
+                    source_record_id=f"dns_evidence-{dns_evidence_id}",
                 ),
-                source="urn:ati:source:google_public_dns",
-                retrieved_at=_RETRIEVED_AT,
+                observation=EvidenceObservationCandidate(
+                    evidence_id=dns_evidence_id,
+                    retrieved_at=_RETRIEVED_AT,
+                ),
             )
         )
-        assert dns_evidence.id is not None
+        assert dns_evidence_out.observation.id is not None
         country = await uow.locations.upsert(location_factory())
         assert country.id is not None
         with pytest.raises(GeoEvidenceTypeError):
@@ -496,7 +524,7 @@ async def test_gp11_observation_requires_geolocation_evidence(
                 observation_factory(
                     entity_id=domain.id,
                     location_id=country.id,
-                    evidence_id=dns_evidence.id,
+                    evidence_observation_id=dns_evidence_out.observation.id,
                 )
             )
 
@@ -519,7 +547,7 @@ async def test_gp12_evidence_subject_mismatch_rejected(
                 observation_factory(
                     entity_id=domain_entity_id,
                     location_id=country.id,
-                    evidence_id=evidence_id,
+                    evidence_observation_id=evidence_id,
                 )
             )
 
@@ -539,7 +567,7 @@ async def test_gp13_missing_entity_location_evidence_rejected(
                 observation_factory(
                     entity_id=uuid4(),
                     location_id=country.id,
-                    evidence_id=evidence_id,
+                    evidence_observation_id=evidence_id,
                 )
             )
     async with uow_factory() as uow:
@@ -548,7 +576,7 @@ async def test_gp13_missing_entity_location_evidence_rejected(
                 observation_factory(
                     entity_id=entity_id,
                     location_id=uuid4(),
-                    evidence_id=evidence_id,
+                    evidence_observation_id=evidence_id,
                 )
             )
     async with uow_factory() as uow:
@@ -557,7 +585,7 @@ async def test_gp13_missing_entity_location_evidence_rejected(
                 observation_factory(
                     entity_id=entity_id,
                     location_id=country.id,
-                    evidence_id=uuid4(),
+                    evidence_observation_id=uuid4(),
                 )
             )
 
@@ -572,7 +600,9 @@ async def test_gp14_duplicate_observation_rejected_without_current_state_mutatio
         country = await uow.locations.upsert(location_factory())
         assert country.id is not None
         observation = observation_factory(
-            entity_id=entity_id, location_id=country.id, evidence_id=evidence_id
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_observation_id=evidence_id,
         )
         await uow.entity_location_observations.append(observation)
         current_before = await uow.entity_locations.get_by_entity_id(entity_id)
@@ -602,14 +632,14 @@ async def test_gp15_later_observation_updates_current_state(
         first = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT,
         )
         await uow.entity_location_observations.append(first)
         later = observation_factory(
             entity_id=entity_id,
             location_id=other.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT + timedelta(days=2),
         )
         await uow.entity_location_observations.append(later)
@@ -637,14 +667,14 @@ async def test_gp16_older_observation_does_not_rewind_current_state(
         later = observation_factory(
             entity_id=entity_id,
             location_id=other.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT + timedelta(days=2),
         )
         await uow.entity_location_observations.append(later)
         older = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT,
             observed_at=_RETRIEVED_AT - timedelta(days=5),
         )
@@ -680,7 +710,7 @@ async def test_gp17_equal_effective_timestamps_use_uuid_tie_break(
                 id=lower_id,
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 retrieved_at=_RETRIEVED_AT,
             )
         )
@@ -689,7 +719,7 @@ async def test_gp17_equal_effective_timestamps_use_uuid_tie_break(
                 id=higher_id,
                 entity_id=entity_id,
                 location_id=other.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 retrieved_at=_RETRIEVED_AT,
             )
         )
@@ -714,7 +744,7 @@ async def test_gp18_first_observed_time_remains_earliest_across_out_of_order(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 retrieved_at=middle,
             )
         )
@@ -722,7 +752,7 @@ async def test_gp18_first_observed_time_remains_earliest_across_out_of_order(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 retrieved_at=earliest,
             )
         )
@@ -730,7 +760,7 @@ async def test_gp18_first_observed_time_remains_earliest_across_out_of_order(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 retrieved_at=_RETRIEVED_AT,
             )
         )
@@ -756,7 +786,7 @@ async def test_gp19_last_observed_reflects_deterministic_latest(
         newer = observation_factory(
             entity_id=entity_id,
             location_id=other.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT + timedelta(days=7),
         )
         await uow.entity_location_observations.append(newer)
@@ -781,7 +811,7 @@ async def test_gp20_observation_produces_no_domain_object_history(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
             )
         )
         assert uow.session is not None
@@ -808,7 +838,7 @@ async def test_gp21_rollback_leaves_no_observation_or_partial_state(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
             )
         )
         await uow.rollback()
@@ -844,7 +874,9 @@ async def test_gp23_geolocation_evidence_creates_pending_work(
     async with uow_factory() as uow:
         _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
         resolution = await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            GeoResolution(
+                id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+            )
         )
         assert resolution.id is not None
         assert resolution.status is GeoResolutionStatus.PENDING
@@ -867,10 +899,14 @@ async def test_gp24_duplicate_pair_is_idempotent_single_row(
     async with uow_factory() as uow:
         _, entity_id, _, evidence_id = await seed_geolocation_evidence(uow)
         first = await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            GeoResolution(
+                id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+            )
         )
         second = await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            GeoResolution(
+                id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+            )
         )
         assert first.id == second.id
         assert first.version == second.version
@@ -889,7 +925,9 @@ async def test_gp25_concurrent_duplicate_creation_creates_one_row(
         """Create pending work in an independent committed UoW."""
         async with uow_factory() as uow:
             return await uow.geo_resolutions.create_pending(
-                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+                GeoResolution(
+                    id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+                )
             )
 
     created_a, created_b = await asyncio.gather(_create(), _create())
@@ -921,22 +959,28 @@ async def test_gp26_non_geolocation_evidence_rejected(
             Entity(type=EntityType.DOMAIN, value="example.net")
         )
         assert domain.id is not None
-        dns_evidence = await uow.evidence.insert(
-            LegacyEvidence(
-                investigation_id=investigation_id,
-                type=EvidenceType.DNS,
-                subject=EntityRef(
-                    id=domain.id, type=EntityType.DOMAIN, value="example.net"
+        dns_evidence_id = uuid4()
+        dns_evidence_out = await uow.evidence.persist(
+            ConvertedEvidence(
+                evidence=Evidence(
+                    id=dns_evidence_id,
+                    type=EvidenceType.DNS,
+                    source="urn:ati:source:google_public_dns",
+                    source_record_id=f"dns_evidence-{dns_evidence_id}",
                 ),
-                source="urn:ati:source:google_public_dns",
-                retrieved_at=_RETRIEVED_AT,
+                observation=EvidenceObservationCandidate(
+                    evidence_id=dns_evidence_id,
+                    retrieved_at=_RETRIEVED_AT,
+                ),
             )
         )
-        assert dns_evidence.id is not None
+        assert dns_evidence_out.observation.id is not None
         with pytest.raises(GeoEvidenceTypeError):
             await uow.geo_resolutions.create_pending(
                 GeoResolution(
-                    id=uuid4(), entity_id=domain.id, evidence_id=dns_evidence.id
+                    id=uuid4(),
+                    entity_id=domain.id,
+                    evidence_observation_id=dns_evidence_out.observation.id,
                 )
             )
 
@@ -953,7 +997,9 @@ async def test_gp27_resolution_evidence_subject_mismatch_rejected(
         with pytest.raises(GeoEvidenceSubjectMismatchError):
             await uow.geo_resolutions.create_pending(
                 GeoResolution(
-                    id=uuid4(), entity_id=domain_entity_id, evidence_id=evidence_id
+                    id=uuid4(),
+                    entity_id=domain_entity_id,
+                    evidence_observation_id=evidence_id,
                 )
             )
 
@@ -968,12 +1014,16 @@ async def test_gp28_missing_or_invisible_entity_evidence_rejected(
     async with uow_factory() as uow:
         with pytest.raises(GeoEntityNotFoundError):
             await uow.geo_resolutions.create_pending(
-                GeoResolution(id=uuid4(), entity_id=uuid4(), evidence_id=evidence_id)
+                GeoResolution(
+                    id=uuid4(), entity_id=uuid4(), evidence_observation_id=evidence_id
+                )
             )
     async with uow_factory() as uow:
         with pytest.raises(GeoEvidenceNotFoundError):
             await uow.geo_resolutions.create_pending(
-                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=uuid4())
+                GeoResolution(
+                    id=uuid4(), entity_id=entity_id, evidence_observation_id=uuid4()
+                )
             )
     # A soft-deleted Entity is invisible to the resolution path.
     async with uow_factory() as uow:
@@ -982,7 +1032,9 @@ async def test_gp28_missing_or_invisible_entity_evidence_rejected(
     async with uow_factory() as uow:
         with pytest.raises(GeoEntityNotFoundError):
             await uow.geo_resolutions.create_pending(
-                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+                GeoResolution(
+                    id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+                )
             )
 
 
@@ -1056,11 +1108,15 @@ async def test_gp31_geoint_repositories_participate_in_normal_uow(
         country = await uow.locations.upsert(location_factory())
         assert country.id is not None
         observation = observation_factory(
-            entity_id=entity_id, location_id=country.id, evidence_id=evidence_id
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_observation_id=evidence_id,
         )
         await uow.entity_location_observations.append(observation)
         await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            GeoResolution(
+                id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+            )
         )
         # Everything is visible inside the same open transaction.
         assert await table_count(uow, "location") == 1
@@ -1083,11 +1139,13 @@ async def test_gp32_exception_rolls_back_all_geoint_mutations(
                 observation_factory(
                     entity_id=entity_id,
                     location_id=country.id,
-                    evidence_id=evidence_id,
+                    evidence_observation_id=evidence_id,
                 )
             )
             await uow.geo_resolutions.create_pending(
-                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+                GeoResolution(
+                    id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+                )
             )
             raise RuntimeError("injected failure")
     async with uow_factory() as uow:
@@ -1110,7 +1168,7 @@ async def test_gp33_repositories_never_commit_independently(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
             )
         )
         # Discard the transaction without committing: nothing may persist.
@@ -1130,7 +1188,9 @@ async def test_gp34_database_assigned_versions_returned_authoritatively(
         country = await uow.locations.upsert(location_factory())
         assert country.id is not None and country.version is not None
         observation = observation_factory(
-            entity_id=entity_id, location_id=country.id, evidence_id=evidence_id
+            entity_id=entity_id,
+            location_id=country.id,
+            evidence_observation_id=evidence_id,
         )
         persisted_observation = await uow.entity_location_observations.append(
             observation
@@ -1140,7 +1200,9 @@ async def test_gp34_database_assigned_versions_returned_authoritatively(
         assert current is not None and current.version is not None
         before = current.version
         resolution = await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            GeoResolution(
+                id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+            )
         )
         assert resolution.version is not None
         # A second observation advances only the reconciled current state.
@@ -1148,7 +1210,7 @@ async def test_gp34_database_assigned_versions_returned_authoritatively(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 retrieved_at=_RETRIEVED_AT + timedelta(days=1),
             )
         )
@@ -1199,7 +1261,7 @@ async def test_g26a2_p01_initial_version_is_sequence_issued(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
             )
         )
         current = await uow.entity_locations.get_by_entity_id(entity_id)
@@ -1227,7 +1289,7 @@ async def test_g26a2_p02_later_current_mutation_proves_sequence_provenance(
         first = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
         )
         await uow.entity_location_observations.append(first)
         current = await uow.entity_locations.get_by_entity_id(entity_id)
@@ -1249,7 +1311,7 @@ async def test_g26a2_p02_later_current_mutation_proves_sequence_provenance(
         later = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT + timedelta(days=1),
         )
         await uow.entity_location_observations.append(later)
@@ -1289,7 +1351,7 @@ async def test_g26a2_p03_earliest_time_only_mutation_gets_new_token(
         later = observation_factory(
             entity_id=entity_id,
             location_id=other.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT + timedelta(days=2),
         )
         await uow.entity_location_observations.append(later)
@@ -1308,7 +1370,7 @@ async def test_g26a2_p03_earliest_time_only_mutation_gets_new_token(
         older = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             observed_at=_RETRIEVED_AT - timedelta(days=5),
         )
         await uow.entity_location_observations.append(older)
@@ -1351,14 +1413,14 @@ async def test_g26a2_p04_true_historical_noop_leaves_version_unchanged(
         later = observation_factory(
             entity_id=entity_id,
             location_id=other.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT + timedelta(days=2),
         )
         await uow.entity_location_observations.append(later)
         earliest = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT,
         )
         await uow.entity_location_observations.append(earliest)
@@ -1377,7 +1439,7 @@ async def test_g26a2_p04_true_historical_noop_leaves_version_unchanged(
         middle = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT + timedelta(days=1),
         )
         await uow.entity_location_observations.append(middle)
@@ -1414,7 +1476,7 @@ async def test_g26a2_p05_rollback_preserves_prior_persisted_version(
         first = observation_factory(
             entity_id=entity_id,
             location_id=country.id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=_RETRIEVED_AT,
         )
         await uow.entity_location_observations.append(first)
@@ -1430,7 +1492,7 @@ async def test_g26a2_p05_rollback_preserves_prior_persisted_version(
             observation_factory(
                 entity_id=entity_id,
                 location_id=country.id,
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 retrieved_at=_RETRIEVED_AT + timedelta(days=1),
             )
         )

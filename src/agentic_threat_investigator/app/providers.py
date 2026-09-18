@@ -25,6 +25,7 @@ from agentic_threat_investigator.domain.entities import (
     canonicalize,
     validate_dns_name,
 )
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 
@@ -107,22 +108,33 @@ class ProviderResult(BaseModel):
     Google Public DNS aggregates independent per-RR-type query outcomes). A
     valid miss is both lists empty; it is not a benign assessment.
 
+    Evidence shape (PR 28B transitional seam): the migrated datasource path
+    emits global :class:`ConvertedEvidence` values (stable Evidence plus
+    immutable observation candidate). The v0.1 provider suite that is not
+    yet migrated to an approved semantic-format identity contract still
+    emits the transitional :class:`LegacyEvidence` shape; the PR 28B
+    runtime binding validation fails those items closed with a deterministic
+    stable code, so no identity is ever invented for them. PR 28B does not
+    persist LegacyEvidence.
+
     Execution-status contract (approved for PR 19B orchestration): a mixed
-    LegacyEvidence-plus-errors result is a valid partial provider result. The
-    provider executor persists valid LegacyEvidence in provider-return order and
-    returns ``SUCCEEDED`` when at least one LegacyEvidence observation committed
+    evidence-plus-errors result is a valid partial provider result. The
+    provider executor persists valid ConvertedEvidence in provider-return
+    order and returns ``SUCCEEDED`` when at least one observation committed
     and no extraction, persistence, or timeline failure subsequently
     occurred; only the first provider error, in provider-return order, is
     retained (its stable code and retryability, never the free-form
     message), and the ``PROVIDER_WORK_COMPLETED`` timeline event exposes the
-    retained code. Errors without LegacyEvidence fail the work; an all-empty
+    retained code. Errors without evidence fail the work; an all-empty
     result succeeds. No PARTIAL execution status exists in PR 19B.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     provider: str
-    evidence: tuple[LegacyEvidence, ...] = Field(default_factory=tuple)
+    evidence: tuple[ConvertedEvidence | LegacyEvidence, ...] = Field(
+        default_factory=tuple
+    )
     errors: tuple[ProviderError, ...] = Field(default_factory=tuple)
 
     @field_validator("provider")
@@ -138,15 +150,22 @@ class ProviderResult(BaseModel):
     @field_validator("evidence")
     @classmethod
     def _evidence_consistent_provider(
-        cls, value: tuple[LegacyEvidence, ...], info: ValidationInfo
-    ) -> tuple[LegacyEvidence, ...]:
+        cls,
+        value: tuple[ConvertedEvidence | LegacyEvidence, ...],
+        info: ValidationInfo,
+    ) -> tuple[ConvertedEvidence | LegacyEvidence, ...]:
         """Reject evidence with a different source than the result provider."""
         provider = info.data.get("provider")
         if provider is not None:
-            for ev in value:
-                if ev.source != provider:
+            for item in value:
+                source = (
+                    item.evidence.source
+                    if isinstance(item, ConvertedEvidence)
+                    else item.source
+                )
+                if source != provider:
                     raise ValueError(
-                        f"evidence source {ev.source!r} does not match "
+                        f"evidence source {source!r} does not match "
                         f"result provider {provider!r}"
                     )
         return value
@@ -171,9 +190,9 @@ class ProviderResult(BaseModel):
 class EvidenceProvider(ABC):
     """Abstract live evidence provider.
 
-    Providers retrieve external information and normalize it into ATI
-    ``LegacyEvidence``. They do not persist, assess maliciousness, infer
-    relationships, or decide pivots.
+    Providers retrieve external information and normalize it into global
+    ATI ``ConvertedEvidence`` values. They do not persist, assess
+    maliciousness, infer relationships, or decide pivots.
     """
 
     @property

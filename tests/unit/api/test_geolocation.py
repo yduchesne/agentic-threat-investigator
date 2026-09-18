@@ -41,7 +41,7 @@ PROVIDER = "urn:ati:source:dbip_city_lite"
 def _city_item(*, city: str = "Seattle") -> InvestigationGeolocationItem:
     """Build one fully mappable projection item fixture."""
     return InvestigationGeolocationItem(
-        evidence_id=uuid4(),
+        evidence_observation_id=uuid4(),
         entity_id=uuid4(),
         ip_address="203.0.113.10",
         country_code="US",
@@ -123,7 +123,7 @@ def test_ga05_exact_response_dto() -> None:
         "observed_at",
         "retrieved_at",
     }
-    assert item["evidence_id"] == str(marker.evidence_id)
+    assert item["evidence_id"] == str(marker.evidence_observation_id)
     assert item["entity_id"] == str(marker.entity_id)
     assert item["ip_address"] == "203.0.113.10"
     assert item["country_code"] == "US"

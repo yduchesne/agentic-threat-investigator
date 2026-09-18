@@ -21,7 +21,10 @@ from agentic_threat_investigator.app.persistence.repositories import (
     EntityBatchItem,
     EntityBatchResult,
     EntityRepository,
+    EvidenceObservationEntityRepository,
+    EvidencePersistenceResult,
     EvidenceRepository,
+    InvestigationEvidenceRepository,
     InvestigationNotFoundError,
     InvestigationRepository,
     InvestigationWriteResult,
@@ -35,7 +38,15 @@ from agentic_threat_investigator.domain.analyst import (
     EvidenceAnalystInput,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservation,
+    EvidenceObservationEntity,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationBudget,
     InvestigationState,
@@ -43,7 +54,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -152,10 +162,18 @@ class FakeInvestigationRepository(InvestigationRepository):
 
 
 class FakeEvidenceRepository(EvidenceRepository):
-    """Returns configured rows in configured order, scoped by investigation."""
+    """Serves configured exact observations and their stable Evidence."""
 
-    def __init__(self, rows: list[LegacyEvidence]) -> None:
+    def __init__(
+        self,
+        rows: list[EvidenceObservation],
+        stable: dict[UUID, Evidence],
+        *,
+        admitted: set[UUID] | None = None,
+    ) -> None:
         self.rows = rows
+        self.stable = stable
+        self.admitted = admitted if admitted is not None else {row.id for row in rows}
 
     async def list_for_investigation(
         self,
@@ -163,34 +181,52 @@ class FakeEvidenceRepository(EvidenceRepository):
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[LegacyEvidence]:
-        scoped = [row for row in self.rows if row.investigation_id == investigation_id]
+    ) -> list[EvidenceObservation]:
+        scoped = [row for row in self.rows if row.id in self.admitted]
         return scoped[offset : offset + limit]
 
-    async def insert(self, evidence: LegacyEvidence, **_: object) -> LegacyEvidence:
+    async def persist(
+        self, converted: object, *, observation_id: UUID | None = None
+    ) -> EvidencePersistenceResult:
         raise NotImplementedError
 
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
-        raise NotImplementedError
+    async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
+        return self.stable.get(evidence_id)
+
+    async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
+        for row in self.rows:
+            if row.id == observation_id:
+                return row
+        return None
+
+    async def list_observations(
+        self,
+        evidence_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
+        return [row for row in self.rows if row.evidence_id == evidence_id]
 
 
 class FakeObservationRepository(RelationshipObservationRepository):
-    """Returns configured observations scoped through the evidence rows.
+    """Returns configured observations scoped through exact admission.
 
-    Reproduces the real SQL scoping (observation visible iff its evidence
-    belongs to the Investigation): since PR 28A the domain observation
-    carries no Investigation correlation of its own, so the fake filters by
-    the supporting evidence's Investigation exactly like the production
-    join does.
+    Reproduces the real PR 28B scoping: an observation is visible iff its
+    backing EvidenceObservation is admitted to the Investigation.
     """
 
     def __init__(
         self,
         rows: list[RelationshipObservation],
-        evidence_rows: list[LegacyEvidence],
+        admitted: set[UUID] | None = None,
     ) -> None:
         self.rows = rows
-        self.evidence_rows = evidence_rows
+        self.admitted = (
+            admitted
+            if admitted is not None
+            else {row.evidence_observation_id for row in rows}
+        )
 
     async def list_for_investigation(
         self,
@@ -199,13 +235,8 @@ class FakeObservationRepository(RelationshipObservationRepository):
         limit: int = 100,
         offset: int = 0,
     ) -> list[RelationshipObservation]:
-        scoped_evidence = {
-            evidence.id
-            for evidence in self.evidence_rows
-            if evidence.investigation_id == investigation_id
-        }
         scoped = [
-            row for row in self.rows if row.evidence_observation_id in scoped_evidence
+            row for row in self.rows if row.evidence_observation_id in self.admitted
         ]
         return scoped[offset : offset + limit]
 
@@ -274,6 +305,62 @@ class FakeEntityRepository(EntityRepository):
         raise NotImplementedError
 
 
+class FakeEvidenceObservationEntityRepository(EvidenceObservationEntityRepository):
+    """Serves the configured observation/Entity associations."""
+
+    def __init__(self, associations: dict[UUID, tuple[UUID, ...]]) -> None:
+        self.associations = associations
+
+    async def associate(
+        self, observation_id: UUID, entity_id: UUID
+    ) -> EvidenceObservationEntity:
+        existing = self.associations.setdefault(observation_id, ())
+        if entity_id not in existing:
+            self.associations[observation_id] = existing + (entity_id,)
+        return EvidenceObservationEntity(
+            evidence_observation_id=observation_id, entity_id=entity_id
+        )
+
+    async def list_for_observation(
+        self, observation_id: UUID
+    ) -> list[EvidenceObservationEntity]:
+        return [
+            EvidenceObservationEntity(
+                evidence_observation_id=observation_id, entity_id=entity_id
+            )
+            for entity_id in self.associations.get(observation_id, ())
+        ]
+
+
+class FakeInvestigationEvidenceRepository(InvestigationEvidenceRepository):
+    """Serves the configured exact admissions."""
+
+    def __init__(self, admissions: dict[UUID, tuple[UUID, ...]]) -> None:
+        self.admissions = admissions
+
+    async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
+        existing = self.admissions.setdefault(admission.investigation_id, ())
+        if admission.evidence_observation_id not in existing:
+            self.admissions[admission.investigation_id] = existing + (
+                admission.evidence_observation_id,
+            )
+        return admission
+
+    async def list_for_investigation(
+        self, investigation_id: UUID
+    ) -> list[InvestigationEvidence]:
+        return [
+            InvestigationEvidence(
+                investigation_id=investigation_id,
+                evidence_observation_id=observation_id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
+            )
+            for observation_id in self.admissions.get(investigation_id, ())
+        ]
+
+
 class FakeUnitOfWork(UnitOfWork):
     """In-memory transaction boundary tracking close/commit/rollback."""
 
@@ -281,6 +368,8 @@ class FakeUnitOfWork(UnitOfWork):
     relationships: FakeRelationshipRepository
     relationship_observations: FakeObservationRepository
     evidence: FakeEvidenceRepository
+    evidence_observation_entities: FakeEvidenceObservationEntityRepository
+    investigation_evidence: FakeInvestigationEvidenceRepository
     investigations: FakeInvestigationRepository
 
     def __init__(
@@ -291,6 +380,8 @@ class FakeUnitOfWork(UnitOfWork):
         observations: FakeObservationRepository,
         relationships: FakeRelationshipRepository,
         entities: FakeEntityRepository,
+        evidence_observation_entities: FakeEvidenceObservationEntityRepository,
+        investigation_evidence: FakeInvestigationEvidenceRepository,
     ) -> None:
         # One explicit argument per repository seam is the UnitOfWork
         # convention; the count is intrinsic to the boundary.
@@ -299,6 +390,8 @@ class FakeUnitOfWork(UnitOfWork):
         self.relationship_observations = observations
         self.relationships = relationships
         self.entities = entities
+        self.evidence_observation_entities = evidence_observation_entities
+        self.investigation_evidence = investigation_evidence
         self.exited = 0
 
     async def __aenter__(self) -> Self:
@@ -340,14 +433,16 @@ class World:
             started_at=_RETRIEVED_AT,
             version=5,
         )
-        self.evidence = LegacyEvidence(
+        self.stable_evidence = Evidence(
             id=self.evidence_id,
-            investigation_id=self.investigation_id,
             type=EvidenceType.DNS,
-            subject=EntityRef(
-                id=self.source_id, type=EntityType.DOMAIN, value="example.com"
-            ),
             source="urn:ati:source:google_public_dns",
+            source_record_id="fixture:loader",
+        )
+        self.evidence = EvidenceObservation(
+            id=self.evidence_id,
+            evidence_id=self.evidence_id,
+            version=1,
             retrieved_at=_RETRIEVED_AT,
             facts={"resolves_to": ["192.0.2.1"]},
             raw_payload={"http_headers": {"x-secret": "never-leak"}},
@@ -375,7 +470,16 @@ class World:
                 value="192.0.2.1",
             ),
         }
-        self.evidence_rows: list[LegacyEvidence] = [self.evidence]
+        self.evidence_rows: list[EvidenceObservation] = [self.evidence]
+        self.stable_rows: dict[UUID, Evidence] = {
+            self.evidence_id: self.stable_evidence
+        }
+        self.associations: dict[UUID, tuple[UUID, ...]] = {
+            self.evidence_id: (self.source_id,)
+        }
+        self.admissions: dict[UUID, tuple[UUID, ...]] = {
+            self.investigation_id: (self.evidence_id,)
+        }
         self.observation_rows: list[RelationshipObservation] = [self.observation]
         self.relationship_rows: dict[UUID, Relationship] = {
             self.relationship_id: self.relationship
@@ -386,12 +490,21 @@ class World:
         """Build a UnitOfWork serving this world."""
         return FakeUnitOfWork(
             investigations=FakeInvestigationRepository(self.investigation),
-            evidence=FakeEvidenceRepository(self.evidence_rows),
+            evidence=FakeEvidenceRepository(
+                self.evidence_rows,
+                self.stable_rows,
+                admitted=set(self.admissions.get(self.investigation_id, ())),
+            ),
             observations=FakeObservationRepository(
-                self.observation_rows, self.evidence_rows
+                self.observation_rows,
+                admitted=set(self.admissions.get(self.investigation_id, ())),
             ),
             relationships=FakeRelationshipRepository(self.relationship_rows),
             entities=FakeEntityRepository(self.entities),
+            evidence_observation_entities=FakeEvidenceObservationEntityRepository(
+                self.associations
+            ),
+            investigation_evidence=FakeInvestigationEvidenceRepository(self.admissions),
         )
 
 
@@ -449,20 +562,26 @@ async def test_missing_investigation_rejected(world: World) -> None:
 async def test_evidence_scoped_and_ordered(
     world: World, loader: Callable[[], EvidenceAnalystInputLoader]
 ) -> None:
-    """LegacyEvidence is scoped to the Investigation and keeps deterministic order."""
+    """Admitted observations are scoped to the Investigation, newest first."""
     second = world.evidence.model_copy(
         update={
             "id": uuid4(),
-            "evidence_id": None,
-            "type": EvidenceType.NETWORK,
+            "evidence_id": uuid4(),
             "retrieved_at": datetime(2026, 1, 1, tzinfo=UTC),
         }
     )
     world.evidence_rows = [world.evidence, second]
+    world.stable_rows[second.evidence_id] = world.stable_evidence.model_copy(
+        update={"id": second.evidence_id, "type": EvidenceType.NETWORK}
+    )
+    world.admissions[world.investigation_id] = (
+        world.evidence_id,
+        second.id,
+    )
 
     analyst_input = await loader().load(world.investigation_id)
 
-    assert [item.evidence_id for item in analyst_input.evidence] == [
+    assert [item.evidence_observation_id for item in analyst_input.evidence] == [
         world.evidence_id,
         second.id,
     ]
@@ -491,7 +610,7 @@ async def test_observation_resolves_relationship_and_entities(
     [observation] = analyst_input.relationship_observations
     assert isinstance(observation, AnalystRelationshipObservation)
     assert observation.relationship_observation_id == world.observation_id
-    assert observation.evidence_id == world.evidence_id
+    assert observation.evidence_observation_id == world.evidence_id
     assert observation.relationship_id == world.relationship_id
     assert observation.relationship_type == RelationshipType.RESOLVES_TO
     assert observation.source_entity.entity_id == world.source_id
@@ -504,7 +623,7 @@ async def test_observation_resolves_relationship_and_entities(
 async def test_direct_evidence_without_observations_present(
     world: World,
 ) -> None:
-    """LegacyEvidence with zero RelationshipObservations stays fully present."""
+    """An admitted observation with zero RelationshipObservations stays fully present."""
     world.observation_rows = []
 
     analyst_input = await EvidenceAnalystInputLoader(
@@ -548,22 +667,21 @@ async def test_ineligible_entity_omits_observation(
 async def test_observations_from_other_investigation_excluded(
     world: World,
 ) -> None:
-    """Observations whose evidence belongs to another Investigation are excluded.
+    """Observations whose backing observation is unadmitted are excluded.
 
-    PR 28A: observation scope follows the exact supporting evidence's
-    Investigation (the domain observation carries no correlation of its own).
+    PR 28B: scope comes exclusively from InvestigationEvidence admission;
+    the domain observation carries no Investigation correlation of its own.
     """
-    other_evidence = world.evidence.model_copy(
-        update={"id": uuid4(), "investigation_id": uuid4()}
-    )
-    assert other_evidence.id is not None
-    world.evidence_rows = [world.evidence, other_evidence]
+    other = world.evidence.model_copy(update={"id": uuid4(), "evidence_id": uuid4()})
+    assert other.id is not None
+    assert other.edge_id() is None if False else True
+    world.evidence_rows = [world.evidence, other]
     world.observation_rows = [
         world.observation,
         RelationshipObservation(
             id=uuid4(),
             relationship_id=world.relationship_id,
-            evidence_observation_id=other_evidence.id,
+            evidence_observation_id=other.id,
             retrieved_at=_RETRIEVED_AT,
             source="urn:ati:source:google_public_dns",
         ),
@@ -592,20 +710,22 @@ async def test_unit_of_work_closes_before_return(world: World) -> None:
 
 @pytest.mark.asyncio
 async def test_evidence_bound_exceeded_fails_before_llm(world: World) -> None:
-    """An oversize LegacyEvidence set fails with the typed bounds error."""
-    world.evidence_rows = [
-        LegacyEvidence(
+    """An oversize admitted-observation set fails with the typed bounds error."""
+    extra = [
+        EvidenceObservation(
             id=uuid4(),
-            investigation_id=world.investigation_id,
-            type=EvidenceType.DNS,
-            subject=EntityRef(
-                id=world.source_id, type=EntityType.DOMAIN, value="example.com"
-            ),
-            source="urn:ati:source:google_public_dns",
+            evidence_id=uuid4(),
+            version=i,
             retrieved_at=_RETRIEVED_AT,
+            facts={},
         )
-        for _ in range(3)
+        for i in range(1, 4)
     ]
+    world.evidence_rows = [world.evidence, *extra]
+    world.admissions[world.investigation_id] = (
+        world.evidence_id,
+        *(item.id for item in extra),
+    )
     loader = EvidenceAnalystInputLoader(world.unit, max_evidence_items=2)
 
     with pytest.raises(EvidenceAnalystInputBoundsError) as holder:

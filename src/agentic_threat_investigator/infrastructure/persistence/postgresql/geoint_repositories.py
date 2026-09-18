@@ -128,7 +128,7 @@ def _observation(row: EntityLocationObservationRow) -> EntityLocationObservation
         id=row.id,
         entity_id=row.entity_id,
         location_id=row.location_id,
-        evidence_id=row.evidence_id,
+        evidence_observation_id=row.evidence_observation_id,
         precision=LocationPrecision(row.precision),
         observed_at=row.observed_at,
         retrieved_at=row.retrieved_at,
@@ -164,7 +164,7 @@ def _resolution(row: Any) -> GeoResolution:
     return GeoResolution(
         id=row.id,
         entity_id=row.entity_id,
-        evidence_id=row.evidence_id,
+        evidence_observation_id=row.evidence_observation_id,
         status=GeoResolutionStatus(row.status),
         attempt_count=row.attempt_count,
         next_attempt_at=row.next_attempt_at,
@@ -434,7 +434,8 @@ class PostgresEntityLocationObservationRepository(EntityLocationObservationRepos
             await self.session.execute(
                 text("""
                     SELECT id, version FROM ati.append_entity_location_observation(
-                        :id, :entity_id, :location_id, :evidence_id, :precision,
+                        :id, :entity_id, :location_id, :evidence_observation_id,
+                        :precision,
                         :observed_at, :retrieved_at, :resolved_at,
                         :resolution_method)
                 """),
@@ -442,7 +443,7 @@ class PostgresEntityLocationObservationRepository(EntityLocationObservationRepos
                     "id": observation.id,
                     "entity_id": observation.entity_id,
                     "location_id": observation.location_id,
-                    "evidence_id": observation.evidence_id,
+                    "evidence_observation_id": observation.evidence_observation_id,
                     "precision": observation.precision.value,
                     "observed_at": observation.observed_at,
                     "retrieved_at": observation.retrieved_at,
@@ -457,12 +458,16 @@ class PostgresEntityLocationObservationRepository(EntityLocationObservationRepos
             if state == SQLSTATE_GEOLOCATION_LOCATION_NOT_FOUND:
                 raise GeoLocationNotFoundError(observation.location_id) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_NOT_FOUND:
-                raise GeoEvidenceNotFoundError(observation.evidence_id) from error
+                raise GeoEvidenceNotFoundError(
+                    observation.evidence_observation_id
+                ) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_TYPE_INVALID:
-                raise GeoEvidenceTypeError(observation.evidence_id) from error
+                raise GeoEvidenceTypeError(
+                    observation.evidence_observation_id
+                ) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_SUBJECT_MISMATCH:
                 raise GeoEvidenceSubjectMismatchError(
-                    observation.evidence_id, observation.entity_id
+                    observation.evidence_observation_id, observation.entity_id
                 ) from error
             if state == SQLSTATE_GEOLOCATION_OBSERVATION_DUPLICATE:
                 raise EntityLocationObservationDuplicateError(observation.id) from error
@@ -496,13 +501,13 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         return None if row is None else _resolution(row)
 
     async def get_by_entity_evidence(
-        self, entity_id: UUID, evidence_id: UUID
+        self, entity_id: UUID, evidence_observation_id: UUID
     ) -> GeoResolution | None:
-        """Return the GeoResolution for one Entity/Evidence pair, if any."""
+        """Return the GeoResolution for one Entity/EvidenceObservation pair."""
         result = await self.session.execute(
             select(GeoResolutionRow).where(
                 GeoResolutionRow.entity_id == entity_id,
-                GeoResolutionRow.evidence_id == evidence_id,
+                GeoResolutionRow.evidence_observation_id == evidence_observation_id,
             )
         )
         row = result.scalar_one_or_none()
@@ -519,12 +524,12 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
             result = await self.session.execute(
                 text("""
                     SELECT id, version, created FROM ati.create_geo_resolution(
-                        :id, :entity_id, :evidence_id)
+                        :id, :entity_id, :evidence_observation_id)
                 """),
                 {
                     "id": resolution.id,
                     "entity_id": resolution.entity_id,
-                    "evidence_id": resolution.evidence_id,
+                    "evidence_observation_id": resolution.evidence_observation_id,
                 },
             )
         except DBAPIError as error:
@@ -532,16 +537,20 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
             if state == SQLSTATE_GEOLOCATION_ENTITY_NOT_FOUND:
                 raise GeoEntityNotFoundError(resolution.entity_id) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_NOT_FOUND:
-                raise GeoEvidenceNotFoundError(resolution.evidence_id) from error
+                raise GeoEvidenceNotFoundError(
+                    resolution.evidence_observation_id
+                ) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_TYPE_INVALID:
-                raise GeoEvidenceTypeError(resolution.evidence_id) from error
+                raise GeoEvidenceTypeError(
+                    resolution.evidence_observation_id
+                ) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_SUBJECT_MISMATCH:
                 raise GeoEvidenceSubjectMismatchError(
-                    resolution.evidence_id, resolution.entity_id
+                    resolution.evidence_observation_id, resolution.entity_id
                 ) from error
             if state == SQLSTATE_GEOLOCATION_RESOLUTION_DUPLICATE_STATE:
                 raise GeoResolutionDuplicateStateError(
-                    resolution.entity_id, resolution.evidence_id
+                    resolution.entity_id, resolution.evidence_observation_id
                 ) from error
             raise
         written_id, _version, _created = result.one()
@@ -573,7 +582,8 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         """
         result = await self.session.execute(
             text("""
-                SELECT id, entity_id, evidence_id, status, attempt_count,
+                SELECT id, entity_id, evidence_observation_id, status,
+                       attempt_count,
                        next_attempt_at, claimed_by, lease_expires_at,
                        resolved_location_id, last_error_code, version,
                        created_at, updated_at
@@ -609,7 +619,8 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         try:
             result = await self.session.execute(
                 text("""
-                    SELECT id, entity_id, evidence_id, status, attempt_count,
+                    SELECT id, entity_id, evidence_observation_id, status,
+                           attempt_count,
                            next_attempt_at, claimed_by, lease_expires_at,
                            resolved_location_id, last_error_code, version,
                            created_at, updated_at
@@ -639,12 +650,16 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
             if state == SQLSTATE_GEOLOCATION_LOCATION_NOT_FOUND:
                 raise GeoLocationNotFoundError(observation.location_id) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_NOT_FOUND:
-                raise GeoEvidenceNotFoundError(observation.evidence_id) from error
+                raise GeoEvidenceNotFoundError(
+                    observation.evidence_observation_id
+                ) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_TYPE_INVALID:
-                raise GeoEvidenceTypeError(observation.evidence_id) from error
+                raise GeoEvidenceTypeError(
+                    observation.evidence_observation_id
+                ) from error
             if state == SQLSTATE_GEOLOCATION_EVIDENCE_SUBJECT_MISMATCH:
                 raise GeoEvidenceSubjectMismatchError(
-                    observation.evidence_id, observation.entity_id
+                    observation.evidence_observation_id, observation.entity_id
                 ) from error
             if state == SQLSTATE_GEOLOCATION_OBSERVATION_DUPLICATE:
                 raise EntityLocationObservationDuplicateError(observation.id) from error
@@ -671,7 +686,8 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         try:
             result = await self.session.execute(
                 text("""
-                    SELECT id, entity_id, evidence_id, status, attempt_count,
+                    SELECT id, entity_id, evidence_observation_id, status,
+                           attempt_count,
                            next_attempt_at, claimed_by, lease_expires_at,
                            resolved_location_id, last_error_code, version,
                            created_at, updated_at
@@ -715,7 +731,8 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         try:
             result = await self.session.execute(
                 text("""
-                    SELECT id, entity_id, evidence_id, status, attempt_count,
+                    SELECT id, entity_id, evidence_observation_id, status,
+                           attempt_count,
                            next_attempt_at, claimed_by, lease_expires_at,
                            resolved_location_id, last_error_code, version,
                            created_at, updated_at

@@ -21,10 +21,12 @@ from agentic_threat_investigator.app.persistence.repositories import (
     GeoEvidenceTypeError,
     InvalidGeographicClaimError,
 )
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservation,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.geoint import LocationPrecision
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
@@ -33,23 +35,28 @@ def evidence_factory(
     *,
     type_: EvidenceType = EvidenceType.GEOLOCATION,
     facts: dict[str, object] | None = None,
-) -> LegacyEvidence:
-    """Build a deterministic immutable LegacyEvidence observation fixture."""
-    return LegacyEvidence(
+) -> tuple[Evidence, EvidenceObservation]:
+    """Build a deterministic stable Evidence + observation fixture (PR 28B)."""
+    evidence = Evidence(
         id=uuid4(),
-        investigation_id=uuid4(),
         type=type_,
-        subject=EntityRef(id=uuid4(), type=EntityType.IP_ADDRESS, value="203.0.113.7"),
         source="urn:ati:source:test",
+        source_record_id="fixture:geo",
+    )
+    observation = EvidenceObservation(
+        id=uuid4(),
+        evidence_id=evidence.id,
+        version=1,
         retrieved_at=_RETRIEVED_AT,
         facts=facts if facts is not None else {"country_code": "US"},
     )
+    return evidence, observation
 
 
 def test_g26c_d01_valid_geolocation_evidence_yields_exact_claim() -> None:
     """G26C-D01 a valid GEOLOCATION LegacyEvidence maps to the exact claim facts."""
     claim = geographic_claim_from_evidence(
-        evidence_factory(
+        *evidence_factory(
             facts={
                 "country_code": "US",
                 "region": "California",
@@ -71,7 +78,7 @@ def test_g26c_d01_valid_geolocation_evidence_yields_exact_claim() -> None:
 def test_g26c_d02_coordinates_do_not_upgrade_semantic_precision() -> None:
     """G26C-D02 coordinates without semantic detail never upgrade precision."""
     claim = geographic_claim_from_evidence(
-        evidence_factory(
+        *evidence_factory(
             facts={
                 "country_code": "FR",
                 "latitude": 48.8566,
@@ -89,23 +96,23 @@ def test_g26c_d02_coordinates_do_not_upgrade_semantic_precision() -> None:
 def test_g26c_d03_non_geolocation_evidence_is_a_typed_error() -> None:
     """G26C-D03 non-GEOLOCATION LegacyEvidence fails closed with the typed error."""
     with pytest.raises(GeoEvidenceTypeError):
-        geographic_claim_from_evidence(evidence_factory(type_=EvidenceType.DNS))
+        geographic_claim_from_evidence(*evidence_factory(type_=EvidenceType.DNS))
 
 
 def test_g26c_d04_malformed_geo_payload_is_a_typed_error() -> None:
     """G26C-D04 malformed geo payloads fail closed with a typed error."""
     # No geographic facts at all.
     with pytest.raises(InvalidGeographicClaimError):
-        geographic_claim_from_evidence(evidence_factory(facts={"provider": "x"}))
+        geographic_claim_from_evidence(*evidence_factory(facts={"provider": "x"}))
     # A declared region precision without a region field.
     with pytest.raises(InvalidGeographicClaimError):
         geographic_claim_from_evidence(
-            evidence_factory(facts={"country_code": "US", "precision": "region"})
+            *evidence_factory(facts={"country_code": "US", "precision": "region"})
         )
     # A partial coordinate pair.
     with pytest.raises(InvalidGeographicClaimError):
         geographic_claim_from_evidence(
-            evidence_factory(facts={"country_code": "US", "latitude": 1.0})
+            *evidence_factory(facts={"country_code": "US", "latitude": 1.0})
         )
 
 
@@ -114,7 +121,7 @@ def test_g26c_d04b_region_fact_maps_to_administrative_area_and_derived_precision
 ):
     """A region fact without explicit precision derives administrative_area."""
     claim = geographic_claim_from_evidence(
-        evidence_factory(facts={"country_code": "GB", "region": "England"})
+        *evidence_factory(facts={"country_code": "GB", "region": "England"})
     )
     assert claim.administrative_area == "England"
     assert claim.precision is LocationPrecision.ADMINISTRATIVE_AREA
@@ -124,7 +131,7 @@ def test_g26c_d04c_unknown_precision_vocabulary_fails_closed() -> None:
     """An unsupported declared precision vocabulary is a typed error."""
     with pytest.raises(InvalidGeographicClaimError):
         geographic_claim_from_evidence(
-            evidence_factory(
+            *evidence_factory(
                 facts={
                     "country_code": "US",
                     "city": "Springfield",

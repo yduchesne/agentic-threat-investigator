@@ -42,7 +42,10 @@ from agentic_threat_investigator.app.persistence.repositories import (
     EntityBatchItem,
     EntityBatchResult,
     EntityRepository,
+    EvidenceObservationEntityRepository,
+    EvidencePersistenceResult,
     EvidenceRepository,
+    InvestigationEvidenceRepository,
     InvestigationRepository,
     InvestigationVersionConflictError,
     InvestigationWriteResult,
@@ -78,7 +81,15 @@ from agentic_threat_investigator.domain.assessment import (
 )
 from agentic_threat_investigator.domain.audit import AuditEvent
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservation,
+    EvidenceObservationEntity,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.geoint import (
     LocationPrecision,
     LocationType,
@@ -91,7 +102,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -133,14 +143,10 @@ class AnalysisWorld:
             started_at=_RETRIEVED_AT,
             version=5,
         )
-        self.evidence = LegacyEvidence(
+        self.evidence = EvidenceObservation(
             id=self.evidence_id,
-            investigation_id=self.investigation_id,
-            type=EvidenceType.DNS,
-            subject=EntityRef(
-                id=self.source_id, type=EntityType.DOMAIN, value="example.com"
-            ),
-            source="urn:ati:source:google_public_dns",
+            evidence_id=self.evidence_id,
+            version=1,
             retrieved_at=_RETRIEVED_AT,
             facts={"a_records": ["192.0.2.1"]},
         )
@@ -173,7 +179,7 @@ class AnalysisWorld:
         self,
         *,
         observation_id: UUID,
-        evidence_id: UUID,
+        evidence_observation_id: UUID,
         location_id: UUID,
         canonical_name: str,
         retrieved_at: datetime,
@@ -182,7 +188,7 @@ class AnalysisWorld:
         return AnalystGeointObservation(
             observation_id=observation_id,
             entity_id=self.source_id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_observation_id,
             location=AnalystGeointLocation(
                 location_id=location_id,
                 location_type=LocationType.CITY,
@@ -201,14 +207,14 @@ class AnalysisWorld:
         """Build the deterministic model-visible GEOINT context."""
         seattle = self.geoint_observation(
             observation_id=self.geoint_obs_seattle_id,
-            evidence_id=self.evidence_id,
+            evidence_observation_id=self.evidence_id,
             location_id=self.geoint_loc_seattle_id,
             canonical_name="Seattle",
             retrieved_at=_RETRIEVED_AT,
         )
         dallas = self.geoint_observation(
             observation_id=self.geoint_obs_dallas_id,
-            evidence_id=self.geoint_evidence_id,
+            evidence_observation_id=self.geoint_evidence_id,
             location_id=self.geoint_loc_dallas_id,
             canonical_name="Dallas",
             retrieved_at=datetime(2026, 1, 3, 3, 4, 5, tzinfo=UTC),
@@ -244,7 +250,7 @@ class AnalysisWorld:
         verdict: Verdict = Verdict.INCONCLUSIVE,
         independent: bool = False,
         observation_ids: tuple[UUID, ...] | None = None,
-        evidence_ids: tuple[UUID, ...] | None = None,
+        evidence_observation_ids: tuple[UUID, ...] | None = None,
         entity_ids: tuple[UUID, ...] | None = None,
         location_ids: tuple[UUID, ...] | None = None,
     ) -> EvidenceAnalystDecision:
@@ -272,7 +278,7 @@ class AnalysisWorld:
                 temporal_interpretation=GeographicTemporalInterpretation.LOCATION_CHANGE_OBSERVED,
                 observation_ids=observation_ids
                 or (self.geoint_obs_seattle_id, self.geoint_obs_dallas_id),
-                evidence_ids=evidence_ids
+                evidence_observation_ids=evidence_observation_ids
                 or (self.evidence_id, self.geoint_evidence_id),
                 entity_ids=entity_ids or (self.source_id,),
                 location_ids=location_ids
@@ -282,7 +288,7 @@ class AnalysisWorld:
         return EvidenceAnalystDecision(
             verdict=verdict,
             confidence=AssessmentConfidence.MEDIUM,
-            summary="LegacyEvidence supports the verdict.",
+            summary="The exact observations support the verdict.",
             findings=findings,
             geographic_findings=geographic,
             disposition=AnalysisDisposition.SUFFICIENT,
@@ -294,12 +300,14 @@ class AnalysisWorld:
         """Build the deterministic analyst input served by the fake loader."""
         evidence_items: tuple[AnalystEvidenceItem, ...] = (
             AnalystEvidenceItem(
-                evidence_id=self.evidence_id,
+                evidence_observation_id=self.evidence_id,
                 type=EvidenceType.DNS,
-                subject=AnalystEntity(
-                    entity_id=self.source_id,
-                    entity_type=EntityType.DOMAIN,
-                    value="example.com",
+                entities=(
+                    AnalystEntity(
+                        entity_id=self.source_id,
+                        entity_type=EntityType.DOMAIN,
+                        value="example.com",
+                    ),
                 ),
                 source="urn:ati:source:google_public_dns",
                 retrieved_at=_RETRIEVED_AT,
@@ -309,12 +317,14 @@ class AnalysisWorld:
         if self.with_geoint:
             evidence_items = evidence_items + (
                 AnalystEvidenceItem(
-                    evidence_id=self.geoint_evidence_id,
+                    evidence_observation_id=self.geoint_evidence_id,
                     type=EvidenceType.GEOLOCATION,
-                    subject=AnalystEntity(
-                        entity_id=self.source_id,
-                        entity_type=EntityType.DOMAIN,
-                        value="example.com",
+                    entities=(
+                        AnalystEntity(
+                            entity_id=self.source_id,
+                            entity_type=EntityType.DOMAIN,
+                            value="example.com",
+                        ),
                     ),
                     source="urn:ati:source:test",
                     retrieved_at=_RETRIEVED_AT,
@@ -326,7 +336,7 @@ class AnalysisWorld:
             observations = (
                 AnalystRelationshipObservation(
                     relationship_observation_id=self.observation_id,
-                    evidence_id=self.evidence_id,
+                    evidence_observation_id=self.evidence_id,
                     relationship_id=self.relationship_id,
                     relationship_type=RelationshipType.RESOLVES_TO,
                     source_entity=AnalystEntity(
@@ -398,7 +408,7 @@ class AnalysisWorld:
         return EvidenceAnalystDecision(
             verdict=verdict,
             confidence=AssessmentConfidence.MEDIUM,
-            summary="LegacyEvidence supports the verdict.",
+            summary="The exact observations support the verdict.",
             findings=findings if support else (),
             disposition=AnalysisDisposition.SUFFICIENT,
         )
@@ -407,6 +417,65 @@ class AnalysisWorld:
 # ---------------------------------------------------------------------------
 # Persistence fakes (same authoritative-world shape as the PR 20A suite)
 # ---------------------------------------------------------------------------
+
+
+class FakeEvidenceObservationEntityRepository(EvidenceObservationEntityRepository):
+    """Record observation/Entity associations."""
+
+    def __init__(self, associations: dict[UUID, tuple[UUID, ...]]) -> None:
+        self.associations = associations
+
+    async def list_for_observation(
+        self, observation_id: UUID
+    ) -> list[EvidenceObservationEntity]:
+        return [
+            EvidenceObservationEntity(
+                evidence_observation_id=observation_id, entity_id=entity_id
+            )
+            for entity_id in self.associations.get(observation_id, ())
+        ]
+
+    async def associate(
+        self, observation_id: UUID, entity_id: UUID
+    ) -> EvidenceObservationEntity:
+        self.associations.setdefault(observation_id, ())
+        if entity_id not in self.associations[observation_id]:
+            self.associations[observation_id] = self.associations[observation_id] + (
+                entity_id,
+            )
+        return EvidenceObservationEntity(
+            evidence_observation_id=observation_id, entity_id=entity_id
+        )
+
+
+class FakeInvestigationEvidenceRepository(InvestigationEvidenceRepository):
+    """Serve the configured exact admissions."""
+
+    def __init__(self, admissions: dict[UUID, tuple[UUID, ...]]) -> None:
+        self.admissions = admissions
+
+    async def list_for_investigation(
+        self, investigation_id: UUID
+    ) -> list[InvestigationEvidence]:
+        return [
+            InvestigationEvidence(
+                investigation_id=investigation_id,
+                evidence_observation_id=observation_id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
+            )
+            for observation_id in self.admissions.get(investigation_id, ())
+        ]
+
+    async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
+        """Record one admission."""
+        existing = self.admissions.setdefault(admission.investigation_id, ())
+        if admission.evidence_observation_id not in existing:
+            self.admissions[admission.investigation_id] = existing + (
+                admission.evidence_observation_id,
+            )
+        return admission
 
 
 class FakeInvestigationRepository(InvestigationRepository):
@@ -507,22 +576,41 @@ class FakeInvestigationRepository(InvestigationRepository):
 
 
 class FakeEvidenceRepository(EvidenceRepository):
-    """Serves the configured evidence rows."""
+    """Serves the configured exact observations and stable Evidence."""
 
-    def __init__(self, rows: dict[UUID, LegacyEvidence]) -> None:
+    def __init__(
+        self,
+        rows: dict[UUID, EvidenceObservation],
+        stable: dict[UUID, Evidence],
+    ) -> None:
         self.rows = rows
-
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
-        return self.rows.get(evidence_id)
-
-    async def insert(self, evidence: LegacyEvidence, **_: object) -> LegacyEvidence:
-        raise NotImplementedError
+        self.stable = stable
 
     async def list_for_investigation(
         self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
-    ) -> list[LegacyEvidence]:
+    ) -> list[EvidenceObservation]:
         del investigation_id, offset
         return list(self.rows.values())[:limit]
+
+    async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
+        return self.rows.get(observation_id)
+
+    async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
+        return self.stable.get(evidence_id)
+
+    async def list_observations(
+        self,
+        evidence_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
+        return list(self.rows.values())[offset : offset + limit]
+
+    async def persist(
+        self, converted: object, *, observation_id: UUID | None = None
+    ) -> EvidencePersistenceResult:
+        raise NotImplementedError
 
 
 class FakeObservationRepository(RelationshipObservationRepository):
@@ -680,19 +768,35 @@ class FakePersistenceUnitOfWork(UnitOfWork):
         # One explicit argument per dependency is the UnitOfWork convention.
         self.investigations = investigations
         evidence_rows = {world.evidence_id: world.evidence}
+        stable_rows = {
+            world.evidence_id: Evidence(
+                id=world.evidence_id,
+                type=EvidenceType.DNS,
+                source="urn:ati:source:google_public_dns",
+                source_record_id="analyst-world",
+            )
+        }
         if world.with_geoint:
-            evidence_rows[world.geoint_evidence_id] = LegacyEvidence(
+            evidence_rows[world.geoint_evidence_id] = EvidenceObservation(
                 id=world.geoint_evidence_id,
-                investigation_id=world.investigation_id,
-                type=EvidenceType.GEOLOCATION,
-                subject=EntityRef(
-                    id=world.source_id, type=EntityType.DOMAIN, value="example.com"
-                ),
-                source="urn:ati:source:test",
+                evidence_id=world.geoint_evidence_id,
+                version=1,
                 retrieved_at=_RETRIEVED_AT,
                 facts={"country_code": "US", "precision": "city"},
             )
-        self.evidence = FakeEvidenceRepository(evidence_rows)
+            stable_rows[world.geoint_evidence_id] = Evidence(
+                id=world.geoint_evidence_id,
+                type=EvidenceType.GEOLOCATION,
+                source="urn:ati:source:test",
+                source_record_id="analyst-geoint",
+            )
+        self.evidence = FakeEvidenceRepository(evidence_rows, stable_rows)
+        self.evidence_observation_entities = FakeEvidenceObservationEntityRepository(
+            dict.fromkeys(evidence_rows, (world.source_id,))
+        )
+        self.investigation_evidence = FakeInvestigationEvidenceRepository(
+            {world.investigation_id: tuple(evidence_rows)}
+        )
         self.relationship_observations = FakeObservationRepository(
             {world.observation_id: world.observation} if world.with_observation else {}
         )

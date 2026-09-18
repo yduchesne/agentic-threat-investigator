@@ -46,12 +46,14 @@ def analyst_input() -> EvidenceAnalystInput:
         ),
         evidence=(
             AnalystEvidenceItem(
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 type=EvidenceType.DNS,
-                subject=AnalystEntity(
-                    entity_id=source_id,
-                    entity_type=EntityType.DOMAIN,
-                    value="example.com",
+                entities=(
+                    AnalystEntity(
+                        entity_id=source_id,
+                        entity_type=EntityType.DOMAIN,
+                        value="example.com",
+                    ),
                 ),
                 source="urn:ati:source:google_public_dns",
                 retrieved_at=_RETRIEVED_AT,
@@ -61,7 +63,7 @@ def analyst_input() -> EvidenceAnalystInput:
         relationship_observations=(
             AnalystRelationshipObservation(
                 relationship_observation_id=uuid4(),
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 relationship_id=uuid4(),
                 relationship_type=RelationshipType.RESOLVES_TO,
                 source_entity=AnalystEntity(
@@ -111,7 +113,7 @@ def test_user_prompt_carries_analytical_content() -> None:
     assert "example.com" in user_prompt
     assert "192.0.2.1" in user_prompt
     assert '"a_records"' in user_prompt
-    assert "evidence_id:" in user_prompt
+    assert "evidence_observation_id:" in user_prompt
     assert "relationship_observation_id:" in user_prompt
     # raw payloads never appear: the input DTO has already excluded them
     assert "raw_payload" not in user_prompt
@@ -150,7 +152,7 @@ def geoint_input() -> EvidenceAnalystInput:
     observation = AnalystGeointObservation(
         observation_id=observation_id,
         entity_id=source_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
         location=AnalystGeointLocation(
             location_id=location_id,
             location_type=LocationType.CITY,
@@ -215,7 +217,7 @@ def test_geoint_section_renders_exact_ids_and_precision() -> None:
     assert "</geographic_context>" in user_prompt
     assert "observation_id:" in user_prompt
     assert str(current.observation_id) in user_prompt
-    assert str(current.evidence_id) in user_prompt
+    assert str(current.evidence_observation_id) in user_prompt
     assert "Seattle" in user_prompt
     assert "precision: city" in user_prompt
     assert "canonical_geography_v1" in user_prompt

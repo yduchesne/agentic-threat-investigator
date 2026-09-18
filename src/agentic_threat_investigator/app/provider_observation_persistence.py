@@ -2,24 +2,31 @@
 """Atomic persistence of normalized provider observations and extracted graph data.
 
 This service is the PR 18C application seam between deterministic extraction
-(PR 18B) and durable graph state. Provider I/O and extraction always happen
-before this boundary; one short UnitOfWork transaction then persists the
-complete observation — canonical entities, immutable evidence, stable
-relationships, immutable relationship observations, and the required audit
-event — or nothing at all.
+and durable global graph state on the PR 28B model. Provider I/O and
+extraction always happen before this boundary; one short UnitOfWork
+transaction then persists the complete observation — exact global
+EvidenceObservation (created/reused), canonical entities, observation-level
+Entity associations, stable relationships and immutable relationship
+observations (only for a new/appended observation), exact Investigation
+admission, and the minimized audit event — or nothing at all.
 
 Approved policy decisions implemented here:
 
-- Preflight performs no database work; it validates the LegacyEvidence identity,
-  canonical identities, assertion LegacyEvidence-ID equality, endpoint coverage,
-  and the deterministic duplicate policy before BEGIN.
-- Repeated semantic edges under a new LegacyEvidence ID reuse the stable Entity and
-  Relationship identities and append a new RelationshipObservation.
-- Replay of the same LegacyEvidence ID is a typed conflict; the UnitOfWork rolls
-  back every earlier mutation in the transaction.
+- Preflight performs no database work; it validates the canonical identities,
+  assertion endpoint coverage, and the deterministic duplicate policy before
+  BEGIN.
+- ``ati.persist_evidence_observation`` owns stable Evidence identity
+  validation, atomic Evidence + v1 creation, race-safe per-Evidence version
+  allocation, material no-op detection, and canonical diffs; an unchanged
+  retrieval creates no observation and no duplicate RelationshipObservation.
+- Repeated semantic edges under a new observation reuse the stable Entity
+  and Relationship identities and append a new RelationshipObservation.
 - Rediscovery of a soft-deleted Entity or Relationship is a fail-closed typed
   error: no second canonical row, no silent restore, and no new observation
   attached to a deleted graph object.
+- Exact Investigation admission is append-only/idempotent; the invocation
+  target Entity is associated with the exact observation as ordinary
+  observation-level provenance (no privileged Evidence subject).
 """
 
 from __future__ import annotations
@@ -35,6 +42,8 @@ from agentic_threat_investigator.app.extraction.models import (
     assertion_order_key,
 )
 from agentic_threat_investigator.app.persistence.repositories import (
+    EvidencePersistenceOutcome,
+    EvidencePersistenceResult,
     InvestigationNotFoundError,
     SoftDeletedIdentityError,
     UnitOfWork,
@@ -45,7 +54,14 @@ from agentic_threat_investigator.domain.audit import (
     AuditOutcome,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservation,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -58,26 +74,36 @@ EntityIdentityKey = tuple[EntityType, str]
 class ProviderObservationPersistenceResult:
     """Objects written by one atomic provider-observation transaction."""
 
-    evidence: LegacyEvidence
+    evidence: Evidence
+    observation: EvidenceObservation
+    outcome: EvidencePersistenceOutcome
     entities: tuple[Entity, ...]
     relationships: tuple[Relationship, ...]
     observations: tuple[RelationshipObservation, ...]
 
 
 def _evidence_audit_event(
-    evidence: LegacyEvidence,
+    result: EvidencePersistenceResult,
     actor_id: UUID | None,
     request_id: UUID | None,
 ) -> AuditEvent:
-    """Build the minimized audit record for a provider observation."""
+    """Build the minimized audit record for one provider observation.
+
+    The audit carries only bounded identities and the material outcome —
+    never facts, raw payload, source bodies, or derived graph content.
+    """
     return AuditEvent(
         action=AuditAction.EVIDENCE_RECORD,
         outcome=AuditOutcome.SUCCESS,
         actor_id=actor_id,
-        object_type="evidence",
-        object_id=evidence.id,
+        object_type="evidence_observation",
+        object_id=result.observation.id,
         request_id=request_id,
-        metadata={"investigation_id": str(evidence.investigation_id)},
+        metadata={
+            "evidence_id": str(result.evidence.id),
+            "outcome": result.outcome.value,
+            "version": result.version,
+        },
     )
 
 
@@ -94,43 +120,84 @@ class ProviderObservationPersistenceService:
 
     async def persist(
         self,
-        evidence: LegacyEvidence,
+        converted: ConvertedEvidence,
+        invocation_entity: Entity,
         extraction: ExtractionResult,
         *,
+        investigation_id: UUID,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
     ) -> ProviderObservationPersistenceResult:
         """Validate outside the transaction, then persist the complete observation."""
-        self._validate(evidence, extraction)
-        entity_specs = self._ordered_entities(evidence, extraction)
+        self._validate(invocation_entity, extraction)
+        entity_specs = self._ordered_entities(invocation_entity, extraction)
         assertions = self._ordered_assertions(extraction)
 
         async with self._uow_factory() as uow:
             # Validate the parent investigation before any graph mutation so a
             # missing or soft-deleted parent never leaves partial graph work
             # even transiently inside the transaction.
-            if await uow.investigations.get_by_id(evidence.investigation_id) is None:
-                raise InvestigationNotFoundError(str(evidence.investigation_id))
+            if await uow.investigations.get_by_id(investigation_id) is None:
+                raise InvestigationNotFoundError(str(investigation_id))
+
+            # PostgreSQL owns the authoritative global persist/reuse decision:
+            # CREATED (Evidence + v1), UNCHANGED (existing exact observation),
+            # or APPENDED (next version with canonical diff).
+            persisted = await uow.evidence.persist(converted)
 
             identity_map, persisted_entities = await self._resolve_entities(
                 uow, entity_specs
             )
-            recorded = await self._insert_evidence(
-                uow, evidence, identity_map, actor_id, request_id
-            )
-            (
-                persisted_relationships,
-                observations,
-            ) = await self._resolve_relationships(
-                uow, assertions, identity_map, recorded
+            # Observation-level Entity associations: every canonical Entity
+            # materially represented in the exact observation. Idempotent.
+            for entity in persisted_entities:
+                if entity.id is None:  # pragma: no cover - repository invariant
+                    raise RuntimeError(
+                        "entity repository returned an entity without an ID"
+                    )
+                await uow.evidence_observation_entities.associate(
+                    persisted.observation.id, entity.id
+                )
+
+            relationships: list[Relationship] = []
+            observations: list[RelationshipObservation] = []
+            if persisted.outcome is not EvidencePersistenceOutcome.UNCHANGED:
+                # Derived global graph provenance is persisted only for a
+                # new/appended observation; an unchanged retrieval reuses the
+                # latest exact observation without duplicating
+                # RelationshipObservations.
+                (
+                    relationships,
+                    observations,
+                ) = await self._resolve_relationships(
+                    uow,
+                    assertions,
+                    identity_map,
+                    persisted.observation,
+                    persisted.evidence.source,
+                )
+
+            # Exact admission of the observation into this Investigation is
+            # append-only/idempotent; a newer global observation never
+            # silently enters an Investigation.
+            await uow.investigation_evidence.admit(
+                InvestigationEvidence(
+                    investigation_id=investigation_id,
+                    evidence_observation_id=persisted.observation.id,
+                    inclusion_reason=InvestigationEvidenceReason.PROVIDER_RESULT,
+                    added_at=persisted.observation.retrieved_at,
+                    added_by=InvestigationEvidenceActor.SYSTEM,
+                )
             )
             await uow.audit_events.append(
-                _evidence_audit_event(recorded, actor_id, request_id)
+                _evidence_audit_event(persisted, actor_id, request_id)
             )
         return ProviderObservationPersistenceResult(
-            evidence=recorded,
+            evidence=persisted.evidence,
+            observation=persisted.observation,
+            outcome=persisted.outcome,
             entities=tuple(persisted_entities),
-            relationships=tuple(persisted_relationships),
+            relationships=tuple(relationships),
             observations=tuple(observations),
         )
 
@@ -174,69 +241,52 @@ class ProviderObservationPersistenceService:
         return identity_map, persisted_entities
 
     @staticmethod
-    async def _insert_evidence(
-        uow: UnitOfWork,
-        evidence: LegacyEvidence,
-        identity_map: dict[EntityIdentityKey, Entity],
-        actor_id: UUID | None,
-        request_id: UUID | None,
-    ) -> LegacyEvidence:
-        """Insert the immutable LegacyEvidence observation with its resolved subject."""
-        subject = identity_map[(evidence.subject.type, evidence.subject.value)]
-        if subject.id is None:  # pragma: no cover - repository invariant
-            raise RuntimeError("entity repository returned an entity without an ID")
-        recorded = await uow.evidence.insert(
-            evidence.model_copy(
-                update={
-                    "subject": evidence.subject.model_copy(update={"id": subject.id})
-                }
-            ),
-            actor_id=actor_id,
-            request_id=request_id,
-        )
-        if recorded.id != evidence.id:  # pragma: no cover - repository invariant
-            raise RuntimeError("evidence repository replaced the supplied identity")
-        return recorded
-
-    @staticmethod
     async def _resolve_relationships(
         uow: UnitOfWork,
         assertions: tuple[RelationshipAssertion, ...],
         identity_map: dict[EntityIdentityKey, Entity],
-        recorded: LegacyEvidence,
+        observation: EvidenceObservation,
+        source: str,
     ) -> tuple[list[Relationship], list[RelationshipObservation]]:
-        """Resolve each stable edge and append exactly one observation per edge."""
-        if recorded.id is None:  # pragma: no cover - repository invariant
-            raise RuntimeError("evidence repository returned no ID")
+        """Resolve each stable edge and append exactly one observation per edge.
+
+        RelationshipObservations reference the exact persisted
+        ``EvidenceObservation``; the database validates that provenance.
+        """
         persisted_relationships: list[Relationship] = []
         observations: list[RelationshipObservation] = []
         for assertion in assertions:
-            source = identity_map[(assertion.source.type, assertion.source.value)]
-            target = identity_map[(assertion.target.type, assertion.target.value)]
-            if source.id is None or target.id is None:  # pragma: no cover
+            source_entity = identity_map[
+                (assertion.source.type, assertion.source.value)
+            ]
+            target_entity = identity_map[
+                (assertion.target.type, assertion.target.value)
+            ]
+            if source_entity.id is None or target_entity.id is None:
+                # pragma: no cover - repository invariant
                 raise RuntimeError("entity repository returned an entity without an ID")
             relationship = await uow.relationships.upsert(
                 Relationship(
                     id=uuid4(),
-                    source_entity_id=source.id,
-                    target_entity_id=target.id,
+                    source_entity_id=source_entity.id,
+                    target_entity_id=target_entity.id,
                     type=assertion.type,
                 )
             )
             persisted_relationships.append(relationship)
-            observation = RelationshipObservation(
+            obs = RelationshipObservation(
                 id=uuid4(),
                 relationship_id=relationship.id,
-                evidence_observation_id=recorded.id,
-                observed_at=recorded.observed_at,
-                retrieved_at=recorded.retrieved_at,
-                source=recorded.source,
+                evidence_observation_id=observation.id,
+                observed_at=observation.observed_at,
+                retrieved_at=observation.retrieved_at,
+                source=source,
             )
-            observations.append(await uow.relationship_observations.append(observation))
+            observations.append(await uow.relationship_observations.append(obs))
         return persisted_relationships, observations
 
     @staticmethod
-    def _validate(evidence: LegacyEvidence, extraction: ExtractionResult) -> None:
+    def _validate(invocation_entity: Entity, extraction: ExtractionResult) -> None:
         """Perform all deterministic preflight validation without database work.
 
         Duplicate entities and duplicate assertions are rejected outright:
@@ -244,14 +294,12 @@ class ProviderObservationPersistenceService:
         this boundary is a contract violation rather than something the
         persistence layer silently repairs or merges.
         """
-        if evidence.id is None:
-            raise ValueError("evidence id is required before persistence")
-        if canonicalize(evidence.subject.type, evidence.subject.value) != (
-            evidence.subject.value
+        if canonicalize(invocation_entity.type, invocation_entity.value) != (
+            invocation_entity.value
         ):
-            raise ValueError("evidence subject value is not canonical")
+            raise ValueError("invocation entity value is not canonical")
         identities: set[EntityIdentityKey] = {
-            (evidence.subject.type, evidence.subject.value)
+            (invocation_entity.type, invocation_entity.value)
         }
         seen_entities: set[EntityIdentityKey] = set()
         for entity in extraction.entities:
@@ -263,10 +311,6 @@ class ProviderObservationPersistenceService:
             seen_entities.add(key)
             identities.add(key)
         for assertion in extraction.relationships:
-            if assertion.evidence_id != evidence.id:
-                raise ValueError(
-                    "relationship assertion LegacyEvidence ID does not match"
-                )
             for endpoint in (assertion.source, assertion.target):
                 if canonicalize(endpoint.type, endpoint.value) != endpoint.value:
                     raise ValueError("relationship endpoint is not canonical")
@@ -283,21 +327,20 @@ class ProviderObservationPersistenceService:
 
     @staticmethod
     def _ordered_entities(
-        evidence: LegacyEvidence, extraction: ExtractionResult
+        invocation_entity: Entity, extraction: ExtractionResult
     ) -> tuple[ExtractedEntity, ...]:
-        """Return subject and discoveries in stable identity order.
+        """Return invocation target and discoveries in stable identity order.
 
-        When the subject and a discovered entity describe the same identity,
-        the discovered specification wins so its display metadata is never
-        lost; the subject contributes no display metadata of its own.
+        The invocation target contributes no display metadata of its own; a
+        discovery of the same identity wins so its display metadata is never
+        lost.
         """
         by_identity: dict[EntityIdentityKey, ExtractedEntity] = {
             (entity.type, entity.value): entity for entity in extraction.entities
         }
-        subject_key = (evidence.subject.type, evidence.subject.value)
         by_identity.setdefault(
-            subject_key,
-            ExtractedEntity(type=evidence.subject.type, value=evidence.subject.value),
+            (invocation_entity.type, invocation_entity.value),
+            ExtractedEntity(type=invocation_entity.type, value=invocation_entity.value),
         )
         return tuple(
             by_identity[key]

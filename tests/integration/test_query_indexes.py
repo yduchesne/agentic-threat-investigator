@@ -32,10 +32,6 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
-from agentic_threat_investigator.domain.legacy_evidence import (
-    EntityRef as EvidenceEntityRef,
-)
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import RelationshipType
 from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
@@ -43,8 +39,8 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.database 
 )
 from tests.support.query_fixtures import (
     FIXED_TIME,
-    evidence_factory,
     seed_entity,
+    seed_evidence_observation,
     seed_investigation,
     seed_observation,
     seed_relationship,
@@ -87,11 +83,14 @@ async def _assert_uses_index(
     uow: PostgresUnitOfWork,
     statement: str,
     params: Mapping[str, object],
-    index: str,
+    index: str | tuple[str, ...],
 ) -> None:
-    """Assert the representative query plan can use the intended index."""
+    """Assert the representative query plan can use the intended index(es)."""
     found = await _plan_indexes(uow, statement, params)
-    assert index in found, f"expected {index} in plan, found {sorted(found)}"
+    expected = (index,) if isinstance(index, str) else index
+    assert any(item in found for item in expected), (
+        f"expected one of {expected} in plan, found {sorted(found)}"
+    )
 
 
 @pytest.mark.asyncio
@@ -115,44 +114,46 @@ async def test_p01_investigation_status_time_index(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_p02_evidence_investigation_retrieved_index(
+async def test_p02_evidence_entity_association_index(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Investigation LegacyEvidence listing uses the existing listing index."""
+    """Entity-scoped Evidence listing drives the association composite."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(uow)
-        await uow.evidence.insert(evidence_factory(investigation_id, entity_id))
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=entity_id
+        )
         await _assert_uses_index(
             uow,
-            "SELECT id FROM ati.evidence "
-            "WHERE investigation_id = :investigation_id "
-            "ORDER BY retrieved_at DESC, id ASC LIMIT 50",
-            {"investigation_id": investigation_id},
-            "evidence_investigation_listing_idx",
+            "SELECT eo.id FROM ati.evidence_observation eo "
+            "JOIN ati.evidence_observation_entity eoe "
+            "  ON eoe.evidence_observation_id = eo.id "
+            "WHERE eoe.entity_id = :entity_id "
+            "ORDER BY eo.retrieved_at DESC, eo.id ASC LIMIT 50",
+            {"entity_id": entity_id},
+            "evidence_observation_entity_entity_idx",
         )
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_p03_evidence_source_listing_index(
+async def test_p03_admission_dependency_index(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """Investigation+source LegacyEvidence listing uses the source composite."""
+    """Admission dependency probes drive the observation-led composite."""
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(uow)
-        await uow.evidence.insert(evidence_factory(investigation_id, entity_id))
+        observation_id = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=entity_id
+        )
         await _assert_uses_index(
             uow,
-            "SELECT id FROM ati.evidence "
-            "WHERE investigation_id = :investigation_id AND source = :source "
-            "ORDER BY retrieved_at DESC, id ASC LIMIT 50",
-            {
-                "investigation_id": investigation_id,
-                "source": "urn:ati:source:google_public_dns",
-            },
-            "evidence_investigation_source_listing_idx",
+            "SELECT evidence_observation_id FROM ati.investigation_evidence "
+            "WHERE evidence_observation_id = :observation_id",
+            {"observation_id": observation_id},
+            "investigation_evidence_observation_idx",
         )
 
 
@@ -274,12 +275,14 @@ async def test_p05_observation_relationship_retrieved_index(
         edge = await seed_relationship(
             uow, source_entity_id=source, target_entity_id=target
         )
-        evidence = await uow.evidence.insert(evidence_factory(investigation_id, source))
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
         await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=evidence,
+            evidence_observation_id=evidence,
         )
         await _assert_uses_index(
             uow,
@@ -304,12 +307,14 @@ async def test_p06_observation_relationship_observed_index(
         edge = await seed_relationship(
             uow, source_entity_id=source, target_entity_id=target
         )
-        evidence = await uow.evidence.insert(evidence_factory(investigation_id, source))
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
         await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=evidence,
+            evidence_observation_id=evidence,
             observed_at=FIXED_TIME,
         )
         await _assert_uses_index(
@@ -491,59 +496,46 @@ def _timeline_event(investigation_id: UUID) -> InvestigationTimelineEvent:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_p13_geolocation_projection_drives_existing_type_index(
+async def test_p13_geolocation_projection_drives_entity_association_index(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """PR 25A geolocation projection uses the existing evidence indexes.
+    """PR 25A geolocation projection drives the global entity association.
 
-    The latest-per-entity projection drives through the established
-    investigation-prefixed evidence listing composites (the planner may
-    choose the type composite or the subject composite); the window
-    function only reorders the filtered rows, so no new index is required
-    at v0.1 and no migration is introduced (plan 28).
+    The latest-per-entity projection filters through
+    ``ati.evidence_observation_entity`` and the stable ``ati.evidence`` type
+    column; the plan is served by the entity-led association composite with
+    no structural migration at v0.1 (plan 28).
     """
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(
             uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
         )
-        await uow.evidence.insert(
-            LegacyEvidence(
-                investigation_id=investigation_id,
-                type=EvidenceType.GEOLOCATION,
-                subject=EvidenceEntityRef(
-                    id=entity_id,
-                    type=EntityType.IP_ADDRESS,
-                    value="203.0.113.10",
-                ),
-                source="urn:ati:source:dbip_city_lite",
-                retrieved_at=FIXED_TIME,
-                facts={
-                    "country_code": "US",
-                    "provider": "urn:ati:source:dbip_city_lite",
-                    "precision": "city",
-                },
-            )
+        await seed_evidence_observation(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=entity_id,
+            source="urn:ati:source:dbip_city_lite",
+            evidence_type=EvidenceType.GEOLOCATION,
         )
         found = await _plan_indexes(
             uow,
-            "SELECT e.id FROM ati.evidence e "
-            "JOIN ati.entity ent ON ent.id = e.subject_entity_id "
-            "WHERE e.investigation_id = :investigation_id "
+            "SELECT eo.id FROM ati.evidence_observation eo "
+            "JOIN ati.evidence e ON e.id = eo.evidence_id "
+            "JOIN ati.evidence_observation_entity eoe "
+            "  ON eoe.evidence_observation_id = eo.id "
+            "WHERE eoe.entity_id = :entity_id "
             "AND e.evidence_type = :evidence_type "
-            "AND ent.entity_type = :entity_type",
+            "ORDER BY eo.retrieved_at DESC, eo.id ASC LIMIT 50",
             {
-                "investigation_id": investigation_id,
+                "entity_id": entity_id,
                 "evidence_type": EvidenceType.GEOLOCATION.value,
-                "entity_type": EntityType.IP_ADDRESS.value,
             },
         )
         assert found & {
-            "evidence_investigation_listing_idx",
-            "evidence_investigation_source_listing_idx",
-            "evidence_investigation_subject_listing_idx",
-            "evidence_investigation_type_listing_idx",
-        }, f"plan used none of the existing evidence listing indexes: {sorted(found)}"
+            "evidence_observation_entity_entity_idx",
+            "evidence_observation_entity_pkey",
+        }, f"plan used none of the entity association indexes: {sorted(found)}"
 
 
 @pytest.mark.asyncio
@@ -566,22 +558,24 @@ async def test_p12_observation_entity_join_uses_investigation_retrieved_index(
         edge = await seed_relationship(
             uow, source_entity_id=source, target_entity_id=target
         )
-        evidence = await uow.evidence.insert(evidence_factory(investigation_id, source))
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
         await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=evidence,
+            evidence_observation_id=evidence,
             observed_at=FIXED_TIME,
         )
         assert uow.session is not None
         await _assert_uses_index(
             uow,
             "SELECT ro.id FROM ati.relationship_observation ro "
-            "JOIN ati.relationship r ON r.id = ro.relationship_id "
-            "WHERE ro.investigation_id = :investigation_id "
-            "AND (r.source_entity_id = :entity_id OR r.target_entity_id = :entity_id) "
+            "JOIN ati.evidence_observation_entity eoe "
+            "  ON eoe.evidence_observation_id = ro.evidence_observation_id "
+            "WHERE eoe.entity_id = :entity_id AND ro.relationship_id = :relationship_id "
             "ORDER BY ro.retrieved_at DESC, ro.id ASC LIMIT 50",
-            {"investigation_id": investigation_id, "entity_id": source},
-            "relationship_observation_investigation_retrieved_idx",
+            {"entity_id": source, "relationship_id": edge.id},
+            ("evidence_observation_entity_entity_idx",),
         )

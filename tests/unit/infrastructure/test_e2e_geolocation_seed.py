@@ -16,7 +16,7 @@ from datetime import UTC
 from pathlib import Path
 from types import TracebackType
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -24,15 +24,25 @@ from agentic_threat_investigator.app.persistence.repositories import (
     EntityBatchItem,
     EntityBatchResult,
     EntityRepository,
+    EvidenceObservationEntityRepository,
+    EvidencePersistenceOutcome,
+    EvidencePersistenceResult,
     EvidenceRepository,
+    InvestigationEvidenceRepository,
     InvestigationRepository,
 )
 from agentic_threat_investigator.config.settings import OperatingMode, Settings
 from agentic_threat_investigator.domain.entities import Entity
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservation,
+    EvidenceObservationEntity,
+    EvidenceType,
+    InvestigationEvidence,
+)
 from agentic_threat_investigator.domain.geolocation import GeoPrecision
 from agentic_threat_investigator.domain.identifiers import SourceId
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from tests.e2e_support.seed_geolocation import (
     E2E_SEEDING_ENABLE_ENV,
     PROVIDER,
@@ -105,36 +115,71 @@ class FakeEntities(EntityRepository):
 
 
 class FakeEvidence(EvidenceRepository):
-    """In-memory immutable evidence store with deterministic identities."""
+    """In-memory exact-observation store with deterministic identities."""
 
     def __init__(self) -> None:
-        self.rows: dict[UUID, LegacyEvidence] = {}
+        self.rows: dict[UUID, EvidenceObservation] = {}
+        self.stable: dict[UUID, Evidence] = {}
 
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
-        """Return the stored evidence row, if any."""
+    async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
+        """Return the stored observation row, if any."""
+        return self.rows.get(observation_id)
+
+    async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
+        """Return the stored stable Evidence, if any."""
+        return self.stable.get(evidence_id)
+
+    async def persist(
+        self, converted: ConvertedEvidence, *, observation_id: UUID | None = None
+    ) -> EvidencePersistenceResult:
+        """Store the exact observation with its deterministic identity."""
+        candidate = converted.observation
+        identity = observation_id if observation_id is not None else uuid4()
+        observation = EvidenceObservation(
+            id=identity,
+            evidence_id=converted.evidence.id,
+            version=1,
+            source_url=candidate.source_url,
+            observed_at=candidate.observed_at,
+            retrieved_at=candidate.retrieved_at,
+            facts=candidate.facts,
+            raw_payload=candidate.raw_payload,
+            diff=None,
+        )
+        self.rows[identity] = observation
+        self.stable[converted.evidence.id] = converted.evidence
+        return EvidencePersistenceResult(
+            evidence=converted.evidence,
+            observation=observation,
+            outcome=EvidencePersistenceOutcome.CREATED,
+            version=1,
+        )
+
+    async def get_observation_by_id(
+        self, evidence_id: UUID
+    ) -> EvidenceObservation | None:
+        """Alias for the idempotency probe."""
         return self.rows.get(evidence_id)
 
-    async def insert(
+    async def list_observations(
         self,
-        evidence: LegacyEvidence,
+        evidence_id: UUID,
         *,
-        actor_id: UUID | None = None,
-        request_id: UUID | None = None,
-    ) -> LegacyEvidence:
-        """Store the row and return it with its identity."""
-        assert evidence.id is not None
-        self.rows[evidence.id] = evidence
-        return evidence
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
+        """Return stored observations for one stable Evidence."""
+        return [row for row in self.rows.values() if row.evidence_id == evidence_id]
 
-    async def list_for_investigation(  # pragma: no cover - unused stub
+    async def list_for_investigation(
         self,
         investigation_id: UUID,
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[LegacyEvidence]:
-        """Unused in-memory stub."""
-        raise NotImplementedError
+    ) -> list[EvidenceObservation]:
+        """Return all stored observations."""
+        return list(self.rows.values())
 
 
 class FakeInvestigations(InvestigationRepository):
@@ -247,6 +292,55 @@ class FakeInvestigations(InvestigationRepository):
         raise NotImplementedError
 
 
+class FakeObservationEntityRepository(EvidenceObservationEntityRepository):
+    """Records observation/Entity associations."""
+
+    def __init__(self) -> None:
+        self.pairs: list[EvidenceObservationEntity] = []
+
+    async def associate(
+        self, observation_id: UUID, entity_id: UUID
+    ) -> EvidenceObservationEntity:
+        """Record one pair."""
+        pair = EvidenceObservationEntity(
+            evidence_observation_id=observation_id, entity_id=entity_id
+        )
+        self.pairs.append(pair)
+        return pair
+
+    async def list_for_observation(
+        self, observation_id: UUID
+    ) -> list[EvidenceObservationEntity]:
+        """Return the recorded pairs."""
+        return [
+            pair
+            for pair in self.pairs
+            if pair.evidence_observation_id == observation_id
+        ]
+
+
+class FakeInvestigationEvidenceRepository(InvestigationEvidenceRepository):
+    """Records exact admissions."""
+
+    def __init__(self) -> None:
+        self.admissions: list[InvestigationEvidence] = []
+
+    async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
+        """Record one admission."""
+        self.admissions.append(admission)
+        return admission
+
+    async def list_for_investigation(
+        self, investigation_id: UUID
+    ) -> list[InvestigationEvidence]:
+        """Return the recorded admissions."""
+        return [
+            admission
+            for admission in self.admissions
+            if admission.investigation_id == investigation_id
+        ]
+
+
 class FakeUnitOfWork:
     """In-memory seam satisfying the seeder's ``SeedUnitOfWork``.
 
@@ -259,6 +353,8 @@ class FakeUnitOfWork:
     investigations: InvestigationRepository
     entities: EntityRepository
     evidence: EvidenceRepository
+    evidence_observation_entities: EvidenceObservationEntityRepository
+    investigation_evidence: InvestigationEvidenceRepository
     # Concrete in-memory views for test assertions (the ABC-typed members
     # above keep the seam identical to the production UoW's typing).
     entity_store: FakeEntities
@@ -276,6 +372,8 @@ class FakeUnitOfWork:
         self.investigations = FakeInvestigations(known_investigations)
         self.entities = entity_store
         self.evidence = evidence_store
+        self.evidence_observation_entities = FakeObservationEntityRepository()
+        self.investigation_evidence = FakeInvestigationEvidenceRepository()
         self.entity_store = entity_store
         self.evidence_store = evidence_store
 
@@ -299,8 +397,8 @@ def _settings(*, mode: OperatingMode) -> Settings:
 
 def _facts(unit: SeedEvidenceUnit) -> dict[str, object]:
     """Return the frozen facts of one seed unit as a plain dictionary."""
-    assert isinstance(unit.evidence.facts, dict)
-    return dict(unit.evidence.facts)
+    assert isinstance(unit.converted.observation.facts, dict)
+    return dict(unit.converted.observation.facts)
 
 
 def test_cs01_unknown_scenario_rejected() -> None:
@@ -365,9 +463,10 @@ def test_cs05_valid_single_mappable_construction() -> None:
     assert unit.evidence_id == derive_evidence_id(
         INVESTIGATION_ID, "single_mappable", 0, "203.0.113.10"
     )
-    assert unit.evidence.type is EvidenceType.GEOLOCATION
-    assert unit.evidence.investigation_id == INVESTIGATION_ID
-    assert unit.evidence.subject.value == "203.0.113.10"
+    assert unit.converted.evidence.type is EvidenceType.GEOLOCATION
+    assert unit.converted.evidence.source == SourceId.DBIP_CITY_LITE.value
+    # No Investigation/subject is bound to the global ConvertedEvidence.
+    assert unit.converted.observation.facts["provider"] == PROVIDER
     facts = _facts(unit)
     assert facts["provider"] == PROVIDER == SourceId.DBIP_CITY_LITE.value
     assert facts["precision"] == GeoPrecision.CITY.value
@@ -381,8 +480,7 @@ def test_cs06_distinct_multi_ioc_identities() -> None:
     assert first.ip == "203.0.113.10" and second.ip == "203.0.113.20"
     assert first.entity_id != second.entity_id
     assert first.evidence_id != second.evidence_id
-    assert first.evidence.subject.id == first.entity_id
-    assert second.evidence.subject.id == second.entity_id
+    assert first.entity_id != second.entity_id
 
 
 def test_cs07_same_coordinate_identities_remain_distinct() -> None:
@@ -415,14 +513,14 @@ def test_cs09_deterministic_timestamps_and_values() -> None:
         assert left.entity_id == right.entity_id
         assert left.evidence_id == right.evidence_id
         assert (
-            left.evidence.retrieved_at
-            == right.evidence.retrieved_at
+            left.converted.observation.retrieved_at
+            == right.converted.observation.retrieved_at
             == SEED_RETRIEVED_AT
         )
-        assert left.evidence.retrieved_at.tzinfo == UTC
+        assert left.converted.observation.retrieved_at.tzinfo == UTC
         assert _facts(left) == _facts(right)
-        assert left.evidence.source_record_id is None
-        assert left.evidence.observed_at is None
+        assert left.converted.evidence.source_record_id.startswith("sgeo:")
+        assert left.converted.observation.observed_at is None
 
 
 @pytest.mark.asyncio
@@ -453,9 +551,9 @@ def test_cs11_no_raw_payload_or_secrets_required() -> None:
     """C-S11: seed units carry no raw payload and no secret-bearing values."""
     for scenario in ("single_mappable", "multi_ioc", "non_mappable", "same_location"):
         for unit in build_seed_units(INVESTIGATION_ID, scenario):
-            assert unit.evidence.raw_payload is None
-            assert unit.evidence.source_url is None
-            rendered = f"{unit.evidence.model_dump(mode='json')} {unit.entity.model_dump(mode='json')}"
+            assert unit.converted.observation.raw_payload is None
+            assert unit.converted.observation.source_url is None
+            rendered = f"{unit.converted.model_dump(mode='json')} {unit.entity.model_dump(mode='json')}"
             for secret_marker in ("password", "api_key", "token", "secret"):
                 assert secret_marker not in rendered.lower()
 

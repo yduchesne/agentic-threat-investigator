@@ -12,17 +12,14 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import text
 
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -31,6 +28,7 @@ from agentic_threat_investigator.domain.relationships import (
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
+from tests.support.query_fixtures import seed_evidence_observation
 
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
@@ -58,16 +56,13 @@ async def seed_graph(
         Entity(type=EntityType.IP_ADDRESS, value="192.0.2.1")
     )
     assert source.id is not None and target.id is not None
-    evidence = LegacyEvidence(
+    evidence_id = await seed_evidence_observation(
+        uow,
         investigation_id=investigation_id,
-        type=EvidenceType.DNS,
-        subject=EntityRef(id=source.id, type=EntityType.DOMAIN, value=source.value),
+        entity_id=source.id,
         source="urn:ati:source:google_public_dns",
         retrieved_at=_RETRIEVED_AT,
     )
-    evidence = await uow.evidence.insert(evidence)
-    assert evidence.id is not None
-    evidence_id = evidence.id
     relationship = await uow.relationships.upsert(
         Relationship(
             id=uuid4(),
@@ -192,18 +187,15 @@ async def test_excludes_observations_of_other_investigation_evidence(
             investigation_id
         )
 
-        # The v0.1 adapter wrote the correlation derived from the evidence row.
-        assert uow.session is not None
-        correlation = await uow.session.scalar(
-            text(
-                "SELECT investigation_id FROM ati.relationship_observation "
-                "WHERE id = :observation_id"
-            ),
-            {"observation_id": observation_id},
+        # PR 28B: scope comes exclusively from ati.investigation_evidence
+        # admission, so the observation is invisible under the first
+        # Investigation and visible under its own evidence's admission.
+        listed_other = await uow.relationship_observations.list_for_investigation(
+            other_investigation_id
         )
 
     assert listed == []
-    assert correlation == other_investigation_id
+    assert [row.id for row in listed_other] == [observation_id]
 
 
 @pytest.mark.asyncio

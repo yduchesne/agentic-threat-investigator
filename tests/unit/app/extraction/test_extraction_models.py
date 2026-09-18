@@ -29,7 +29,6 @@ def _assertion(suffix: str) -> RelationshipAssertion:
         source=EntityIdentity(type=EntityType.DOMAIN, value="example.test"),
         type=RelationshipType.RESOLVES_TO,
         target=EntityIdentity(type=EntityType.IP_ADDRESS, value=suffix),
-        evidence_id=EVIDENCE_ID,
     )
 
 
@@ -54,7 +53,7 @@ def test_relationship_assertion_is_frozen() -> None:
     assertion = _assertion("203.0.113.42")
 
     with pytest.raises(pydantic.ValidationError):
-        assertion.evidence_id = None  # type: ignore[assignment]
+        assertion.target = None  # type: ignore[assignment]
 
 
 def test_extraction_result_is_frozen_and_defaults_to_empty() -> None:
@@ -102,18 +101,6 @@ def test_deduplicate_assertions_collapses_semantic_duplicates() -> None:
     result = deduplicate_assertions([first, duplicate, other, duplicate])
 
     assert result == (first, other)
-
-
-def test_deduplicate_assertions_keeps_distinct_evidence_provenance() -> None:
-    """The same semantic edge for a different Evidence stays distinct."""
-    first = _assertion("203.0.113.42")
-    other_evidence = first.model_copy(
-        update={"evidence_id": UUID("44444444-4444-4444-8444-444444444444")}
-    )
-
-    result = deduplicate_assertions([first, other_evidence])
-
-    assert result == (first, other_evidence)
 
 
 def test_extraction_error_carries_only_safe_context() -> None:

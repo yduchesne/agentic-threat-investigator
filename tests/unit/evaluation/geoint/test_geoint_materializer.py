@@ -17,8 +17,21 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
+from agentic_threat_investigator.app.persistence.repositories import (
+    EvidencePersistenceOutcome,
+    EvidencePersistenceResult,
+    UnitOfWork,
+)
 from agentic_threat_investigator.domain.entities import Entity
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservation,
+    EvidenceObservationEntity,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.geoint import (
     EntityLocationObservation,
     GeoResolution,
@@ -27,7 +40,6 @@ from agentic_threat_investigator.domain.geoint import (
     LocationType,
 )
 from agentic_threat_investigator.domain.investigation import InvestigationState
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.evaluation.geoint.materializer import (
     GeointScenarioMaterializer,
     other_investigation_id,
@@ -104,20 +116,69 @@ class MemoryInvestigationRepository:
 
 
 class MemoryEvidenceRepository:
-    """Records evidence inserts, optionally substituting a repository ID."""
+    """Records global Evidence persists (PR 28B)."""
 
     def __init__(self) -> None:
-        """Initialize the persisted list."""
-        self.persisted: list[LegacyEvidence] = []
+        """Initialize the persisted observation list."""
+        self.persisted: list[EvidenceObservation] = []
+        self.stable: dict[UUID, Evidence] = {}
 
-    async def insert(self, evidence: LegacyEvidence) -> LegacyEvidence:
-        """Record and return the evidence."""
-        self.persisted.append(evidence)
-        return evidence
+    async def persist(
+        self, converted: ConvertedEvidence, *, observation_id: UUID | None = None
+    ) -> EvidencePersistenceResult:
+        """Record and return the exact observation."""
+        identity = observation_id if observation_id is not None else uuid4()
+        observation = EvidenceObservation(
+            id=identity,
+            evidence_id=converted.evidence.id,
+            version=1,
+            source_url=converted.observation.source_url,
+            observed_at=converted.observation.observed_at,
+            retrieved_at=converted.observation.retrieved_at,
+            facts=converted.observation.facts,
+            raw_payload=converted.observation.raw_payload,
+            diff=None,
+        )
+        self.persisted.append(observation)
+        self.stable[converted.evidence.id] = converted.evidence
+        return EvidencePersistenceResult(
+            evidence=converted.evidence,
+            observation=observation,
+            outcome=EvidencePersistenceOutcome.CREATED,
+            version=1,
+        )
 
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
-        """Return one persisted evidence row by identity."""
-        return next((item for item in self.persisted if item.id == evidence_id), None)
+    async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
+        """Return one persisted observation by identity."""
+        return next(
+            (item for item in self.persisted if item.id == observation_id), None
+        )
+
+    async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
+        """Return the stable Evidence of one identity."""
+        return self.stable.get(evidence_id)
+
+    async def list_observations(
+        self,
+        evidence_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
+        """Return observations of one stable Evidence."""
+        return [item for item in self.persisted if item.evidence_id == evidence_id][
+            offset : offset + limit
+        ]
+
+    async def list_for_investigation(
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
+        """Return every persisted observation."""
+        return self.persisted[offset : offset + limit]
 
 
 class MemoryGeoResolutionRepository:
@@ -151,6 +212,64 @@ class MemoryObservationRepository:
         return self.rows.get(entity_id, [])[:limit]
 
 
+class MemoryEvidenceObservationEntityRepository:
+    """Records observation/Entity associations."""
+
+    def __init__(self) -> None:
+        """Initialize the pair list."""
+        self.pairs: list[EvidenceObservationEntity] = []
+
+    async def associate(
+        self, observation_id: UUID, entity_id: UUID
+    ) -> EvidenceObservationEntity:
+        """Record one pair."""
+        pair = EvidenceObservationEntity(
+            evidence_observation_id=observation_id, entity_id=entity_id
+        )
+        self.pairs.append(pair)
+        return pair
+
+    async def list_for_observation(
+        self, observation_id: UUID
+    ) -> list[EvidenceObservationEntity]:
+        """Return the recorded pairs."""
+        return [
+            pair
+            for pair in self.pairs
+            if pair.evidence_observation_id == observation_id
+        ]
+
+
+class MemoryInvestigationEvidenceRepository:
+    """Serve exact admissions by Investigation."""
+
+    def __init__(self) -> None:
+        """Initialize the admission map."""
+        self.admissions: dict[UUID, set[UUID]] = {}
+
+    async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
+        """Record one admission."""
+        self.admissions.setdefault(admission.investigation_id, set()).add(
+            admission.evidence_observation_id
+        )
+        return admission
+
+    async def list_for_investigation(
+        self, investigation_id: UUID
+    ) -> list[InvestigationEvidence]:
+        """Return the admissions of one Investigation."""
+        return [
+            InvestigationEvidence(
+                investigation_id=investigation_id,
+                evidence_observation_id=observation_id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_FIXED,
+                added_by=InvestigationEvidenceActor.SYSTEM,
+            )
+            for observation_id in self.admissions.get(investigation_id, ())
+        ]
+
+
 class MemoryUnitOfWork:
     """In-memory UnitOfWork satisfying the materializer's narrow seam."""
 
@@ -160,6 +279,8 @@ class MemoryUnitOfWork:
         self.entities = MemoryEntityRepository()
         self.investigations = MemoryInvestigationRepository()
         self.evidence = MemoryEvidenceRepository()
+        self.evidence_observation_entities = MemoryEvidenceObservationEntityRepository()
+        self.investigation_evidence = MemoryInvestigationEvidenceRepository()
         self.geo_resolutions = MemoryGeoResolutionRepository()
         self.entity_location_observations = MemoryObservationRepository()
         self.entity_locations = None  # unused by the materializer state builder
@@ -170,7 +291,7 @@ def _observation(
     observation_id: UUID,
     entity_id: UUID,
     location_id: UUID,
-    evidence_id: UUID,
+    evidence_observation_id: UUID,
     precision: LocationPrecision = LocationPrecision.CITY,
     retrieved_at: datetime = _FIXED,
 ) -> EntityLocationObservation:
@@ -179,7 +300,7 @@ def _observation(
         id=observation_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_observation_id,
         precision=precision,
         observed_at=retrieved_at,
         retrieved_at=retrieved_at,
@@ -212,14 +333,21 @@ def test_materialize_persists_in_deterministic_order() -> None:
         0
     ].investigation_id == scenario_investigation_id(scenario)
     assert len(memory.evidence.persisted) == 1
-    assert memory.evidence.persisted[0].investigation_id == scenario_investigation_id(
-        scenario
+    # PR 28B: the materialized observation is exact global provenance; the
+    # Investigation scope comes from the exact admission.
+    admitted = set(
+        memory.investigation_evidence.admissions.get(
+            scenario_investigation_id(scenario), set()
+        )
     )
+    assert memory.evidence.persisted[0].id in admitted
     assert len(memory.geo_resolutions.persisted) == 1
     pending = memory.geo_resolutions.persisted[0]
     assert pending.id == resolution.resolution_ids["seattle_obs"]
     assert pending.entity_id == resolution.entity_ids["target_ip"]
-    assert pending.evidence_id == resolution.evidence_ids["seattle_evidence"]
+    assert (
+        pending.evidence_observation_id == resolution.evidence_ids["seattle_evidence"]
+    )
     assert resolution.investigation_id == scenario_investigation_id(scenario)
     assert resolution.other_investigation_id is None
 
@@ -302,7 +430,11 @@ def test_cross_investigation_evidence_attaches_to_other_investigation() -> None:
     assert resolution.other_investigation_id == other_investigation_id(scenario)
     assert len(memory.investigations.created) == 2
     scopes = {
-        evidence.id: evidence.investigation_id for evidence in memory.evidence.persisted
+        observation_id: investigation_id
+        for investigation_id, observation_ids in (
+            memory.investigation_evidence.admissions.items()
+        )
+        for observation_id in observation_ids
     }
     assert (
         scopes[resolution.evidence_ids["seattle_evidence"]]
@@ -328,7 +460,7 @@ def test_read_observations_records_resolved_observations() -> None:
                 observation_id=observation_id,
                 entity_id=resolution.entity_ids["target_ip"],
                 location_id=resolution.geography_ids["seattle"],
-                evidence_id=resolution.evidence_ids["seattle_evidence"],
+                evidence_observation_id=resolution.evidence_ids["seattle_evidence"],
             )
         ],
     )
@@ -376,13 +508,13 @@ def test_build_geographic_state_scopes_to_investigation() -> None:
                 observation_id=seattle_obs,
                 entity_id=resolution.entity_ids["target_ip"],
                 location_id=resolution.geography_ids["seattle"],
-                evidence_id=resolution.evidence_ids["seattle_evidence"],
+                evidence_observation_id=resolution.evidence_ids["seattle_evidence"],
             ),
             _observation(
                 observation_id=dallas_obs,
                 entity_id=resolution.entity_ids["target_ip"],
                 location_id=resolution.geography_ids["dallas"],
-                evidence_id=resolution.evidence_ids["dallas_evidence"],
+                evidence_observation_id=resolution.evidence_ids["dallas_evidence"],
             ),
         ],
     )

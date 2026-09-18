@@ -50,7 +50,15 @@ from agentic_threat_investigator.app.persistence.repositories import (
     GeoResolutionVersionConflictError,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     EntityLocationObservation,
@@ -68,7 +76,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.canonical_geography_resolver import (
     PostgresCanonicalGeographyResolver,
 )
@@ -152,26 +159,44 @@ async def seed_geolocation_work(
         )
     )
     assert entity.id is not None
-    evidence = await uow.evidence.insert(
-        LegacyEvidence(
-            investigation_id=investigation_id,
-            type=evidence_type,
-            subject=EntityRef(
-                id=entity.id, type=EntityType.IP_ADDRESS, value="203.0.113.7"
+    evidence_id = uuid4()
+    evidence_out = await uow.evidence.persist(
+        ConvertedEvidence(
+            evidence=Evidence(
+                id=evidence_id,
+                type=evidence_type,
+                source="urn:ati:source:test",
+                source_record_id=f"grc-{evidence_id}",
             ),
-            source="urn:ati:source:test",
-            retrieved_at=_RETRIEVED_AT,
-            facts={"country_code": country_code, "precision": precision},
+            observation=EvidenceObservationCandidate(
+                evidence_id=evidence_id,
+                retrieved_at=_RETRIEVED_AT,
+                facts={"country_code": country_code, "precision": precision},
+            ),
         )
     )
-    assert evidence.id is not None
+    await uow.evidence_observation_entities.associate(
+        evidence_out.observation.id, entity.id
+    )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
+            investigation_id=investigation_id,
+            evidence_observation_id=evidence_out.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=_RETRIEVED_AT,
+            added_by=InvestigationEvidenceActor.SYSTEM,
+        )
+    )
     if not create_resolution:
-        return entity.id, evidence.id, None
+        return entity.id, evidence_out.observation.id, None
     resolution = await uow.geo_resolutions.create_pending(
-        GeoResolution(entity_id=entity.id, evidence_id=evidence.id)
+        GeoResolution(
+            entity_id=entity.id,
+            evidence_observation_id=evidence_out.observation.id,
+        )
     )
     assert resolution.id is not None
-    return entity.id, evidence.id, resolution.id
+    return entity.id, evidence_out.observation.id, resolution.id
 
 
 async def claim(
@@ -218,7 +243,7 @@ async def direct_insert_resolution(
     integration_engine: AsyncEngine,
     *,
     entity_id: UUID,
-    evidence_id: UUID,
+    evidence_observation_id: UUID,
     status: str = "pending",
     attempt_count: int = 0,
     next_attempt_at: datetime | None = None,
@@ -233,10 +258,10 @@ async def direct_insert_resolution(
         await connection.execute(
             text(
                 "INSERT INTO ati.geo_resolution ("
-                "id, entity_id, evidence_id, status, attempt_count,"
+                "id, entity_id, evidence_observation_id, status, attempt_count,"
                 "next_attempt_at, claimed_by, lease_expires_at,"
                 "resolved_location_id, last_error_code, version) "
-                "VALUES (:id, :entity_id, :evidence_id, :status,"
+                "VALUES (:id, :entity_id, :evidence_observation_id, :status,"
                 ":attempt_count, :next_attempt_at, :claimed_by,"
                 ":lease_expires_at, :resolved_location_id,"
                 ":last_error_code, 1)"
@@ -244,7 +269,7 @@ async def direct_insert_resolution(
             {
                 "id": resolution_id,
                 "entity_id": entity_id,
-                "evidence_id": evidence_id,
+                "evidence_observation_id": evidence_observation_id,
                 "status": status,
                 "attempt_count": attempt_count,
                 "next_attempt_at": next_attempt_at,
@@ -332,7 +357,7 @@ def observation_for(
     resolution_id: UUID,
     entity_id: UUID,
     location_id: UUID,
-    evidence_id: UUID,
+    evidence_observation_id: UUID,
     precision: LocationPrecision = LocationPrecision.COUNTRY,
     observed_at: datetime | None = None,
     retrieved_at: datetime = _RETRIEVED_AT,
@@ -343,7 +368,7 @@ def observation_for(
         id=observation_uuid_for_resolution(resolution_id),
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_observation_id,
         precision=precision,
         observed_at=observed_at,
         retrieved_at=retrieved_at,
@@ -423,7 +448,7 @@ async def test_p02_future_scheduled_pending_is_not_claimed(
     await direct_insert_resolution(
         integration_engine,
         entity_id=other_entity,
-        evidence_id=other_evidence,
+        evidence_observation_id=other_evidence,
         status="pending",
         next_attempt_at=_FUTURE,
     )
@@ -446,7 +471,7 @@ async def test_p03_unexpired_processing_is_not_claimed(
     await direct_insert_resolution(
         integration_engine,
         entity_id=other_entity,
-        evidence_id=other_evidence,
+        evidence_observation_id=other_evidence,
         status="processing",
         attempt_count=1,
         claimed_by="worker-x",
@@ -471,7 +496,7 @@ async def test_p04_expired_processing_is_reclaimed(
     expired_id = await direct_insert_resolution(
         integration_engine,
         entity_id=other_entity,
-        evidence_id=other_evidence,
+        evidence_observation_id=other_evidence,
         status="processing",
         attempt_count=1,
         claimed_by="worker-x",
@@ -515,15 +540,15 @@ async def test_p05_terminal_rows_are_never_claimed(
             await connection.execute(
                 text(
                     "INSERT INTO ati.geo_resolution ("
-                    "id, entity_id, evidence_id, status, attempt_count, "
+                    "id, entity_id, evidence_observation_id, status, attempt_count, "
                     "resolved_location_id, last_error_code, version) "
-                    "VALUES (:id, :entity_id, :evidence_id, :status, 1, "
+                    "VALUES (:id, :entity_id, :evidence_observation_id, :status, 1, "
                     ":loc, :code, 1)"
                 ),
                 {
                     "id": row_id,
                     "entity_id": pair_entity,
-                    "evidence_id": pair_evidence,
+                    "evidence_observation_id": pair_evidence,
                     "status": status,
                     "loc": resolved_location.id if status == "resolved" else None,
                     "code": "x" if status != "resolved" else None,
@@ -638,7 +663,7 @@ async def test_p11_expired_at_max_attempts_fails_not_reclaimed(
     exhausted_id = await direct_insert_resolution(
         integration_engine,
         entity_id=entity_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
         status="processing",
         attempt_count=3,
         claimed_by="worker-x",
@@ -710,7 +735,7 @@ async def test_p13_correct_owner_version_lease_accepted(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     completed = await complete_resolved_observation(uow_factory, claimed, observation)
     assert completed.status is GeoResolutionStatus.RESOLVED
@@ -737,7 +762,7 @@ async def test_p14_wrong_owner_is_a_typed_conflict(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoResolutionClaimantMismatchError):
         async with uow_factory() as uow:
@@ -768,7 +793,7 @@ async def test_p15_stale_version_is_a_typed_conflict(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoResolutionVersionConflictError):
         async with uow_factory() as uow:
@@ -798,7 +823,7 @@ async def test_p16_expired_lease_is_rejected(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoResolutionLeaseExpiredError):
         async with uow_factory() as uow:
@@ -833,7 +858,7 @@ async def test_p17_stale_worker_after_reclaim_is_rejected(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     # A completes with its (now stale) version: rejected, no mutation.
     with pytest.raises(GeoResolutionVersionConflictError):
@@ -871,7 +896,7 @@ async def test_p18_reclaim_owner_completes(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     completed = await complete_resolved_observation(
         uow_factory, worker_b, observation_b
@@ -902,7 +927,7 @@ async def test_p19_valid_success_is_atomic(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     completed = await complete_resolved_observation(uow_factory, claimed, observation)
     assert completed.status is GeoResolutionStatus.RESOLVED
@@ -911,7 +936,7 @@ async def test_p19_valid_success_is_atomic(
         current = await uow.entity_locations.get_by_entity_id(entity_id)
     assert len(obs_rows) == 1
     assert obs_rows[0].id == observation.id
-    assert obs_rows[0].evidence_id == evidence_id
+    assert obs_rows[0].evidence_observation_id == evidence_id
     assert obs_rows[0].location_id == location_id
     assert obs_rows[0].observed_at is None
     assert obs_rows[0].retrieved_at == _RETRIEVED_AT
@@ -940,7 +965,7 @@ async def test_p20_missing_entity_is_a_full_rollback(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoEntityNotFoundError):
         await complete_resolved_observation(uow_factory, claimed, observation)
@@ -958,11 +983,12 @@ async def test_p21_missing_evidence_is_a_full_rollback(
         uow_factory
     )
     async with integration_engine.begin() as connection:
-        # LegacyEvidence is immutable and FK-referenced by the work row; simulate a
-        # missing LegacyEvidence row by disabling FK enforcement in this session.
+        # The provenanc e observation row is FK-referenced by the work row;
+        # simulate a missing observation by disabling FK enforcement in this
+        # session and removing the exact row.
         await connection.execute(text("SET session_replication_role = replica"))
         await connection.execute(
-            text("DELETE FROM ati.evidence WHERE id = :id"),
+            text("DELETE FROM ati.evidence_observation WHERE id = :id"),
             {"id": evidence_id},
         )
         await connection.execute(text("SET session_replication_role = origin"))
@@ -973,7 +999,7 @@ async def test_p21_missing_evidence_is_a_full_rollback(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoEvidenceNotFoundError):
         await complete_resolved_observation(uow_factory, claimed, observation)
@@ -995,7 +1021,8 @@ async def test_p22_wrong_evidence_type_is_a_full_rollback(
         await connection.execute(
             text(
                 "UPDATE ati.evidence SET evidence_type = 'urn:ati:evidence:dns' "
-                "WHERE id = :id"
+                "WHERE id = (SELECT evidence_id FROM ati.evidence_observation "
+                "WHERE id = :id)"
             ),
             {"id": evidence_id},
         )
@@ -1006,7 +1033,7 @@ async def test_p22_wrong_evidence_type_is_a_full_rollback(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoEvidenceTypeError):
         await complete_resolved_observation(uow_factory, claimed, observation)
@@ -1028,10 +1055,16 @@ async def test_p23_subject_mismatch_is_a_full_rollback(
         )
         assert other_entity.id is not None
         other = other_entity.id
+        # Remove the work Entity association from the exact observation so the
+        # completion's subject/provenance guard rejects the pair.
+        await uow.evidence_observation_entities.associate(evidence_id, other)
     async with integration_engine.begin() as connection:
         await connection.execute(
-            text("UPDATE ati.evidence SET subject_entity_id = :other WHERE id = :id"),
-            {"other": other, "id": evidence_id},
+            text(
+                "DELETE FROM ati.evidence_observation_entity "
+                "WHERE evidence_observation_id = :id AND entity_id = :entity_id"
+            ),
+            {"entity_id": entity_id, "id": evidence_id},
         )
     claimed = await _claim_single(
         uow_factory, integration_engine, resolution_id, claimed_by="worker-a"
@@ -1040,7 +1073,7 @@ async def test_p23_subject_mismatch_is_a_full_rollback(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoEvidenceSubjectMismatchError):
         await complete_resolved_observation(uow_factory, claimed, observation)
@@ -1064,7 +1097,7 @@ async def test_p24_missing_location_is_a_full_rollback(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=ghost_location,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoLocationNotFoundError):
         await complete_resolved_observation(uow_factory, claimed, observation)
@@ -1087,7 +1120,7 @@ async def test_p25_exact_replay_does_not_duplicate(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     completed = await complete_resolved_observation(uow_factory, claimed, observation)
     assert completed.status is GeoResolutionStatus.RESOLVED
@@ -1115,7 +1148,7 @@ async def test_p26_conflicting_replay_is_a_typed_conflict(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     await complete_resolved_observation(uow_factory, claimed, observation)
     async with uow_factory() as uow:
@@ -1126,7 +1159,7 @@ async def test_p26_conflicting_replay_is_a_typed_conflict(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=other_location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoResolutionTerminalReplayConflictError):
         await complete_resolved_observation(uow_factory, claimed, conflicting)
@@ -1150,7 +1183,7 @@ async def test_p27_existing_current_state_is_reconciled(
             resolution_id=uuid4(),
             entity_id=entity_id,
             location_id=us_location,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=previous_retrieved,
             resolved_at=previous_retrieved,
         )
@@ -1162,7 +1195,7 @@ async def test_p27_existing_current_state_is_reconciled(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=ca.id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     await complete_resolved_observation(uow_factory, claimed, observation)
     async with uow_factory() as uow:
@@ -1192,7 +1225,7 @@ async def test_p28_earlier_observed_at_keeps_first_observed(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
         observed_at=_EPOCH,
     )
     await complete_resolved_observation(uow_factory, claimed, observation)
@@ -1219,7 +1252,7 @@ async def test_p29_newer_observation_advances_current_state(
             resolution_id=uuid4(),
             entity_id=entity_id,
             location_id=location_id,
-            evidence_id=evidence_id,
+            evidence_observation_id=evidence_id,
             retrieved_at=older_at,
             resolved_at=older_at,
         )
@@ -1231,7 +1264,7 @@ async def test_p29_newer_observation_advances_current_state(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     await complete_resolved_observation(uow_factory, claimed, observation)
     async with uow_factory() as uow:
@@ -1258,7 +1291,7 @@ async def test_p30_injected_rollback_after_append_commits_nothing(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     try:
         async with uow_factory() as uow:
@@ -1287,7 +1320,7 @@ async def test_p30b_completion_of_unknown_resolution_is_not_found(
         resolution_id=ghost,
         entity_id=uuid4(),
         location_id=uuid4(),
-        evidence_id=uuid4(),
+        evidence_observation_id=uuid4(),
     )
     with pytest.raises(GeoResolutionNotFoundError):
         async with uow_factory() as uow:
@@ -1312,7 +1345,7 @@ async def test_p30c_completion_of_pending_row_is_an_invalid_transition(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoResolutionInvalidTransitionError):
         async with uow_factory() as uow:
@@ -1351,23 +1384,23 @@ async def test_p30d_deterministic_identity_bound_elsewhere_is_a_duplicate(
         await connection.execute(
             text(
                 "INSERT INTO ati.entity_location_observation ("
-                'id, entity_id, location_id, evidence_id, "precision", '
+                'id, entity_id, location_id, evidence_observation_id, "precision", '
                 "retrieved_at, resolved_at, resolution_method, version) "
-                "VALUES (:id, :entity_id, :location_id, :evidence_id, "
+                "VALUES (:id, :entity_id, :location_id, :evidence_observation_id, "
                 "'country', now(), now(), 'x', 1)"
             ),
             {
                 "id": observation_uuid_for_resolution(resolution_id),
                 "entity_id": entity_id,
                 "location_id": squat_location,
-                "evidence_id": evidence_id,
+                "evidence_observation_id": evidence_id,
             },
         )
     observation = observation_for(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(EntityLocationObservationDuplicateError):
         await complete_resolved_observation(uow_factory, claimed, observation)
@@ -1843,7 +1876,7 @@ async def test_vs_crash_recovery(
         resolution_id=resolution_id,
         entity_id=entity_id,
         location_id=location_id,
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
     )
     with pytest.raises(GeoResolutionVersionConflictError):
         await complete_resolved_observation(uow_factory, claimed_a[0], observation_a)

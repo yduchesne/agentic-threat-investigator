@@ -220,7 +220,7 @@
       },
       "EvidenceResponse": {
         "additionalProperties": false,
-        "description": "One immutable Evidence observation, normalized facts only.",
+        "description": "One exact admitted EvidenceObservation, normalized facts only (PR 28B).\n\n``id`` is the exact EvidenceObservation identity, never the stable\nEvidence ID. The legacy ``subject_*`` field names are retained for wire\ncompatibility: they resolve to the observation's first associated Entity\nin deterministic order (or ``None`` when the observation has none). They\nare presentation compatibility only; there is no privileged Evidence\nsubject and no role semantics.",
         "properties": {
           "facts": {
             "additionalProperties": true,
@@ -276,16 +276,37 @@
             "title": "Source Url"
           },
           "subject_entity_id": {
-            "format": "uuid",
-            "title": "Subject Entity Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Entity Id"
           },
           "subject_type": {
-            "$ref": "#/components/schemas/EntityType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityType"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "subject_value": {
-            "title": "Subject Value",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Value"
           },
           "type": {
             "$ref": "#/components/schemas/EvidenceType"
@@ -294,9 +315,6 @@
         "required": [
           "id",
           "type",
-          "subject_entity_id",
-          "subject_type",
-          "subject_value",
           "source",
           "source_record_id",
           "source_url",
@@ -3375,7 +3393,7 @@
     },
     "/api/v1/investigations/{investigation_id}/evidence": {
       "get": {
-        "description": "List Evidence observations of one Investigation (PR 23A contract).",
+        "description": "List Evidence observations of one Investigation (PR 23A/28B contract).\n\n``subject_entity_id`` is the retained public filter name; it implements\nPR 28B association semantics (the exact observation is associated with\nthe Entity) \u2014 there is no privileged subject.",
         "operationId": "list_evidence",
         "parameters": [
           {
