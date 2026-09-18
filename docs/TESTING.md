@@ -589,6 +589,64 @@ E28C matrix:
   identities and equal `EvidenceMaterialState` (no DB behavior is tested
   here — that stays PR 28E).
 
+### Distributed-log contracts and in-memory log (PR 28D)
+
+PR 28D tests are deterministic, offline, and involve no database, network,
+broker, sleep, random failure, or UnitOfWork. `tests/unit/app/
+test_evidence_log.py` drives the real PR 28C `EvidenceMessage` builder and
+pins the E28D matrix plus the D28D vertical slices:
+
+- contract/value (E28D-C01..08): negative positions rejected, immutable
+  comparable positions, blank and oversized consumer identities rejected,
+  records carrying exact PR 28C messages, immutable batch tuples, in-memory
+  handles conforming to the `EvidencePublisher`/`EvidenceConsumer` ABCs,
+  and no Kafka/topic/partition/offset/group fields anywhere;
+- publication (E28D-P01..P09): first position 0, contiguous ordered
+  multi-message runs, position continuation, empty publish as a documented
+  no-op, fail-next-publish as a typed error with no append or gap, retry
+  from the original next position, the same message published twice
+  creating two records (the log never deduplicates), concurrent publishes
+  keeping unique contiguous positions with per-call order, and
+  non-`EvidenceMessage` element rejection;
+- poll/redelivery (E28D-R01..R13): empty poll, bounded prefixes, larger
+  bounds, poll never advancing the cursor, repeat-before-commit returning
+  the identical batch, zero/negative bounds rejected without mutation,
+  exact commit advance, poll-after-commit, final commit, append after
+  catch-up, handle recreation after commit resuming the cursor, and
+  handle recreation after an uncommitted poll redelivering the batch;
+- commit validation (E28D-K01..K11): empty-batch no-op, foreign-consumer
+  rejection, skipped positions rejected, strict stale/repeat policy
+  (an exact already-committed batch is rejected with the documented
+  error), non-contiguous and reversed batches rejected, a forged record at
+  a valid position rejected, a contiguous position beyond the log
+  rejected, cursor unchanged after every failed validation, and the
+  prefix-commit policy (committing a strict prefix of a larger poll is a
+  valid whole-batch commit that advances exactly past the batch's final
+  record; the remaining record stays redeliverable with no partial-ack
+  state);
+- consumer independence (E28D-G01..G05): shared initial prefix, A's
+  commit never moving B's cursor and vice versa, two handles with the
+  same identity sharing one cursor, and different identities keeping
+  independent cursors;
+- failure injection (E28D-F01..F09): one-shot `fail_next_publish` raising
+  `EvidencePublishError` with no append/no gap and a clean retry,
+  `fail_next_poll` raising `EvidencePollError` with the cursor unchanged,
+  `fail_next_commit` raising `EvidenceCommitError` with the cursor
+  unchanged so the next poll redelivers the identical batch, retry after
+  each fault, consumer-targeted faults leaving other consumers unaffected,
+  and cancellation propagating unchanged with the log state still valid;
+- vertical slices (D28D-V01..V05): deterministic ordered
+  publish/poll/commit with exact message values and positions; the
+  crash/redelivery model (an uncommitted poll redelivers to a recreated
+  handle); commit-failure redelivery (the seam PR 28E depends on);
+  independent consumers; and PR 28C message/evidence/candidate identity
+  surviving transport with the log position never appearing inside the
+  message or its canonical wire.
+
+No PostgreSQL integration test is required for PR 28D: the slice is pure
+application state with no database boundary, and consumer-side PostgreSQL
+processing is owned by PR 28E.
+
 ### Deterministic vertical-slice provider execution (PR 19B)
 
 `tests/integration/test_provider_execution_pipeline.py` proves the real

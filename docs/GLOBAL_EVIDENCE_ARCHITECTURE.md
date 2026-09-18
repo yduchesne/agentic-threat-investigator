@@ -1,6 +1,6 @@
 # ATI — v0.2 Global Evidence and Distributed Ingestion Architecture
 
-> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered.**
+> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered, PR 28D publisher/consumer contracts and deterministic in-memory log delivered.**
 >
 > This document records the architectural decisions that govern the PR 28 series. `ROADMAP_V02.md` defines the delivery sequence. Delivered v0.1 behavior remains authoritative until the corresponding PR 28 slice lands.
 >
@@ -8,8 +8,9 @@
 >
 > **PR 28B delivered scope:** PostgreSQL tables/migrations for `Evidence`/`EvidenceObservation`/`EvidenceObservationEntity`/`InvestigationEvidence` (SQL API v0026, migration 0031), DB-owned race-safe per-Evidence version allocation with material no-op detection and canonical diffs, exact `RelationshipObservation`→`EvidenceObservation` provenance, exact Investigation admission, Investigation-scoped Evidence/Relationship/Analyst/GEOINT reads through admission, GEOINT provenance on `EvidenceObservation`, the synchronous datasource (ThreatFox) write path on the global model without any `LegacyEvidence` rebind, and exact-observation Assessment/report/coordinator/timeline provenance. The
 `EvidenceMessage` wire contract is delivered in PR 28C below; the
-distributed log publisher/consumer abstraction and consumer processing
-remain PR 28D–28H.
+distributed log publisher/consumer contracts and deterministic in-memory
+log are delivered in PR 28D below; PostgreSQL-backed consumer persistence
+processing remains PR 28E–28H.
 
 ## PR 28B persistence and Investigation-scoped reads
 
@@ -120,9 +121,53 @@ values, negative sequences, empty record identities, NaN/Infinity, and
 identity mismatches are validation errors. V1 accepts exactly
 `schema_version == 1`; future versions must explicitly define reader
 compatibility, writer selection, migration/default rules, and identity
-stability. PR 28D defines the publisher/consumer/log abstraction over this
-contract and PR 28F publishes messages from datasource executions; until
-then production remains synchronous.
+stability.
+
+## PR 28D distributed-log contracts and in-memory log (delivered)
+
+PR 28D delivers the broker-neutral application log seam over PR 28C
+(`src/agentic_threat_investigator/app/evidence_log.py`):
+`EvidencePublisher`, `EvidenceConsumer`, immutable log position/record/
+batch contracts, and the deterministic append-only `InMemoryEvidenceLog`
+with independent per-consumer committed cursors. The log carries exactly
+PR 28C `EvidenceMessage` values; it carries no `ConvertedEvidence`,
+semantic source objects, committed `EvidenceObservation` rows, graph
+state, Investigation work, or arbitrary bytes.
+
+Invariants pinning this seam:
+
+- **Append-only, non-destructive polling.** Records remain present for the
+  entire log-instance lifetime — even after every consumer commits them —
+  and `poll(max_messages)` never removes or acknowledges them. An
+  uncommitted batch is always redeliverable.
+- **Explicit commit.** Polling never advances anything; only
+  `commit(batch)` advances one consumer's committed cursor, and only for
+  an exact, contiguous, ordered batch starting at that cursor. Foreign,
+  forged, skipped, reversed, or stale/stale-repeat batches fail closed;
+  a failed commit changes no cursor and the next poll naturally redelivers.
+- **At-least-once and independent cursors.** Each `EvidenceConsumerId`
+  owns one committed cursor; different consumers are fully independent and
+  the same identity resumes its cursor within one log instance. Duplicate
+  `EvidenceMessage` publication creates distinct records — the log never
+  deduplicates.
+- **Transport-only positions.** `EvidenceLogPosition` is a per-instance
+  ordering index, never an Evidence ID, message ID, observation-candidate
+  ID, or PostgreSQL idempotency key, and never appears inside a message.
+- **Deterministic one-shot faults.** `fail_next_publish()` /
+  `fail_next_poll()` / `fail_next_commit()` simulate the next
+  publish/poll/commit failure (optionally per consumer) with no random
+  probabilities or sleeps; publish faults use no position, poll faults
+  change no cursor, and commit faults leave redelivery intact.
+- **In-process, non-durable.** The in-memory log models restart only
+  within one log instance (handle recreation with the same identity
+  resumes the cursor); it provides no durability across process restart
+  and no cross-process guarantees. Kafka/Redpanda behind the same
+  contracts remain PR 28G.
+
+PR 28E builds bounded PostgreSQL consumer persistence on this seam; PR 28F
+migrates datasource producers to publish through `EvidencePublisher`; until
+28F the production datasource runtime remains synchronous and is not
+routed through the log.
 
 ## Domain model
 
@@ -254,7 +299,12 @@ No database UnitOfWork spans network acquisition, semantic parsing, conversion, 
 
 ## Broker abstraction and local implementation
 
-Application code targets publisher/consumer contracts rather than Kafka APIs. Before Kafka/Redpanda is introduced, ATI uses an owned deterministic `InMemoryEvidenceLog` implementation. It is an append-only/replayable log abstraction rather than a destructive `asyncio.Queue` contract: records and committed consumer position are separate so tests can model redelivery after a failed/uncommitted batch.
+Application code targets publisher/consumer contracts rather than Kafka APIs.
+Before Kafka/Redpanda is introduced, ATI uses an owned deterministic
+`InMemoryEvidenceLog` implementation (PR 28D, delivered). It is an
+append-only/replayable log abstraction rather than a destructive
+`asyncio.Queue` contract: records and committed consumer position are
+separate so tests can model redelivery after a failed/uncommitted batch.
 
 The in-memory implementation may use Python standard-library concurrency primitives and supports deterministic failure/replay injection. It is for local development, architecture validation, and tests; it is not durable across process restart and is not a production substitute for Kafka/Redpanda.
 
