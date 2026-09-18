@@ -118,7 +118,7 @@ Broker offsets are transport topology, not Evidence identity or domain idempoten
 
 ## Evidence message contract
 
-The distributed boundary uses an explicit, stable, versioned `EvidenceMessage` contract. It must not be a direct serialization of an internal Pydantic/domain model. Producer-assigned stable `message_id`, `evidence_id`, and observation identity/provenance must support replay and future schema evolution. Exact wire fields are finalized in PR 28C after the global Evidence model is implemented.
+The distributed boundary uses an explicit, stable, versioned `EvidenceMessage` contract. It must not be a direct serialization of an internal Pydantic/domain model. Producer-assigned stable `message_id`, `evidence_id`, and observation identity/provenance must support replay and future schema evolution. PR 28C defines the exact V1 wire fields, identities, canonical JSON codec, and fail-closed validation **(delivered)**; PR 28D+ builds the publisher/consumer/log abstraction over that contract.
 
 ## Distributed-log abstraction
 
@@ -145,8 +145,8 @@ Reference-corpus ingestion remains distinct. Sources such as MITRE ATT&CK that f
 | PR | Scope | Principal result |
 |---|---|---|
 | **28A** | Global Evidence domain model | Stable global `Evidence`; immutable versioned `EvidenceObservation`; observation-level Entity, Relationship and Investigation provenance **(delivered)** |
-| **28B** | Persistence and query migration | PostgreSQL schema/functions/repositories plus migration of Investigation-scoped reads to the new observation model |
-| **28C** | Evidence wire contract | Explicit versioned `EvidenceMessage` with stable producer-side identity and replay-safe provenance |
+| **28B** | Persistence and query migration | PostgreSQL schema/functions/repositories plus migration of Investigation-scoped reads to the new observation model **(delivered)** |
+| **28C** | Evidence wire contract | Explicit versioned `EvidenceMessage` with stable producer-side identity and replay-safe provenance **(delivered)** |
 | **28D** | Distributed-log abstraction | `EvidencePublisher`/consumer contracts plus deterministic `InMemoryEvidenceLog` |
 | **28E** | Batch Evidence consumer | At-least-once/idempotent bounded-batch extraction and PostgreSQL persistence; offsets committed only after DB commit |
 | **28F** | Datasource producer migration | Appropriate Evidence-producing datasource pipelines publish converted Evidence through the log boundary |
@@ -163,9 +163,11 @@ Define the domain contracts and invariants above without absorbing broker infras
 
 Make the new model authoritative in PostgreSQL using versioned stored-function APIs and thin repositories. Migrate existing Evidence and relationship-observation persistence, remove Evidence from generic domain-object history, preserve referential integrity, and update Investigation-scoped reads to traverse admitted EvidenceObservations. Audit GEOINT, reports, RAG/analysis, API and UI consumers for reproducibility. Split into a corrective/sub-PR if fresh-main analysis shows this is too broad for one reviewable change.
 
-### PR 28C — Evidence message contract
+### PR 28C — Evidence message contract **`[DONE]`**
 
 Define the durable, versioned wire contract and stable producer-assigned message/Evidence/observation identities. Pin serialization, compatibility, validation, provenance, and deterministic replay semantics. No broker-specific API should leak into the contract.
+
+**Delivered:** immutable V1 `EvidenceMessage` in `app/evidence_message.py` with explicit wire mapping (never an internal-model dump); deterministic producer-side `message_id` (UUIDv5 over datasource-execution + flattened sequence + Evidence identity) and `observation_candidate_id` (UUIDv5 over the message identity, explicitly not a committed Observation identity); reuse and validation of the PR 28A global Evidence identity; bounded datasource/source/format/retrieval provenance; pure builder/reconstruction between `ConvertedEvidence` and the message; canonical byte-deterministic UTF-8 JSON codec with pinned UTC timestamps; strict typed fail-closed decode (malformed JSON/UTF-8, unsupported versions, extra fields, malformed values, identity mismatches); and deterministic ThreatFox/replay/later-unchanged-acquisition slices. No publisher, consumer, log, broker infrastructure, DB migration, lifecycle event, or datasource runtime reroute was added; production remains synchronous until PR 28F.
 
 ### PR 28D — Distributed-log abstraction
 

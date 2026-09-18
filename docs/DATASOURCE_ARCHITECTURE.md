@@ -9,7 +9,10 @@ PR 27A (vocabulary), PR 27B (execution/logging), PR 27C
 (`ToEvidenceConverter`), and PR 27E (existing-source migration
 and series closure) have landed. PR 27E migrated the ThreatFox
 production Investigation runtime onto the PR 27A-D stack and closed
-the series with a source-by-source migration audit.
+the series with a source-by-source migration audit. PR 28C later
+delivered the pure `EvidenceMessage` v1 wire contract between
+conversion and the future distributed-log boundary without any
+runtime reroute (production remains synchronous until PR 28F).
 
 ### PR 27A landed vocabulary
 
@@ -327,8 +330,48 @@ synthesize no verdicts, confidence weights, attribution, relationships,
 pivots, or Investigation control flow. Since PR 28B the runtime carries
 the `ConvertedEvidence` values unchanged — there is no `LegacyEvidence`
 rebind at the runtime/persistence boundary; PostgreSQL owns observation
-identity, versioning, and material no-op detection. This document makes no
-claim of `EvidenceMessage`/log publication, which stays PR 28C+.
+identity, versioning, and material no-op detection. The pure
+`EvidenceMessage` v1 wire contract is delivered in PR 28C below
+(`ToEvidenceConverter` -> `ConvertedEvidence` -> `EvidenceMessage` v1);
+this document still makes no claim of `EvidenceMessage`/log
+publication — that stays PR 28D+ and the datasource producer migration
+stays PR 28F.
+
+## Evidence wire boundary (PR 28C, delivered)
+
+PR 28C defines the versioned, broker-independent `EvidenceMessage`
+wire contract in `src/agentic_threat_investigator/app/evidence_message.py`
+— the durable representation of **one** producer-side
+`ConvertedEvidence` candidate plus bounded acquisition provenance:
+
+```text
+DatasourceDefinition
+ -> acquisition -> serialization -> semantic parsing
+ -> SemanticSourceContext
+ -> ToEvidenceConverter selected by semantic_format
+ -> ConvertedEvidence (global Evidence + observation candidate)
+ -> EvidenceMessage v1   (builder + canonical JSON codec, PR 28C)
+ -> EvidencePublisher -> distributed log   (PR 28D+, not delivered)
+```
+
+The boundary reuses without modification the PR 28A global Evidence
+identity (`evidence_id_for_source_record`) and the PR 27C
+`SemanticSourceContext` provenance; it adds deterministic producer-side
+`message_id` (UUIDv5 over execution + sequence + Evidence identity) and
+`observation_candidate_id` (UUIDv5 over the message identity, explicitly
+not a committed `EvidenceObservation.id`) identities. The producer never
+allocates an Observation version or diff, and the message carries no
+Investigation/subject/graph/broker state and no generic metadata
+dictionary. Canonical UTF-8 JSON serialization is byte-deterministic and
+deserialization fails closed with typed errors; all codec/builder
+operations are pure (no DB/network/UnitOfWork).
+
+Production remains synchronous and behaviorally unchanged: the
+datasource runtime (provider executor, observation persistence,
+`DatasourceProvider`) is not rerouted, nothing is published, and no
+`PUBLISHED` lifecycle event exists. PR 28F will migrate appropriate
+datasource executions to publish messages through the PR 28D
+publisher/consumer/log abstraction.
 
 ## Runtime datasource migration (PR 27E, delivered)
 
