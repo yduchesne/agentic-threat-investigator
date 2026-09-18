@@ -46,7 +46,15 @@ from agentic_threat_investigator.app.query.geoint import (
 )
 from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     EntityLocationObservation,
@@ -62,7 +70,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.canonical_geography_resolver import (
     PostgresCanonicalGeographyResolver,
 )
@@ -293,39 +300,56 @@ async def seed_observation(
     """Create, persist, and observe one Entity at one Location in scope.
 
     Writes through the normal repositories exactly like the production
-    resolution path: canonical Entity, immutable GEOLOCATION LegacyEvidence with
-    the exact subject binding, then the versioned append.
+    resolution path: canonical Entity, global GEOLOCATION ConvertedEvidence,
+    exact admission/association, then the versioned GEOINT append.
     """
     entity_id = await seed_entity(uow, value=entity_value)
-    evidence = await uow.evidence.insert(
-        LegacyEvidence(
-            investigation_id=investigation_id,
-            type=EvidenceType.GEOLOCATION,
-            subject=EntityRef(
-                id=entity_id, type=EntityType.IP_ADDRESS, value=entity_value
+    evidence_id = observation_id if observation_id is not None else uuid4()
+    stable = Evidence(
+        id=evidence_id,
+        type=EvidenceType.GEOLOCATION,
+        source="urn:ati:source:test",
+        source_record_id=f"geo-{evidence_id}",
+    )
+    persisted_evidence = await uow.evidence.persist(
+        ConvertedEvidence(
+            evidence=stable,
+            observation=EvidenceObservationCandidate(
+                evidence_id=stable.id,
+                observed_at=observed_at,
+                retrieved_at=retrieved_at,
+                facts=facts
+                or {
+                    "country_code": "US",
+                    "provider": "urn:ati:source:test",
+                    "precision": {
+                        LocationPrecision.COUNTRY: "country",
+                        LocationPrecision.ADMINISTRATIVE_AREA: "region",
+                        LocationPrecision.CITY: "city",
+                    }[precision],
+                },
             ),
-            source="urn:ati:source:test",
-            observed_at=observed_at,
-            retrieved_at=retrieved_at,
-            facts=facts
-            or {
-                "country_code": "US",
-                "provider": "urn:ati:source:test",
-                "precision": {
-                    LocationPrecision.COUNTRY: "country",
-                    LocationPrecision.ADMINISTRATIVE_AREA: "region",
-                    LocationPrecision.CITY: "city",
-                }[precision],
-            },
+        ),
+        observation_id=evidence_id,
+    )
+    await uow.evidence_observation_entities.associate(
+        persisted_evidence.observation.id, entity_id
+    )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
+            investigation_id=investigation_id,
+            evidence_observation_id=persisted_evidence.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=retrieved_at,
+            added_by=InvestigationEvidenceActor.SYSTEM,
         )
     )
-    assert evidence.id is not None
     persisted = await uow.entity_location_observations.append(
         EntityLocationObservation(
-            id=observation_id or uuid4(),
+            id=evidence_id,
             entity_id=entity_id,
             location_id=location_id,
-            evidence_id=evidence.id,
+            evidence_observation_id=evidence_id,
             precision=precision,
             observed_at=observed_at,
             retrieved_at=retrieved_at,
@@ -333,7 +357,58 @@ async def seed_observation(
             resolution_method=CANONICAL_GEOGRAPHY_METHOD,
         )
     )
-    return ObservationSeed(entity_id, evidence.id, persisted.id)
+    return ObservationSeed(entity_id, evidence_id, persisted.id)
+
+
+async def seed_geolocation_for_investigation(
+    uow: UnitOfWork,
+    investigation_id: UUID,
+    entity_id: UUID,
+    entity_value: str,
+    *,
+    retrieved_at: datetime = FIXED,
+    observed_at: datetime | None = None,
+    facts: dict[str, object] | None = None,
+) -> UUID:
+    """Persist one admitted global GEOLOCATION observation for an entity."""
+    identity = uuid4()
+    stable = Evidence(
+        id=identity,
+        type=EvidenceType.GEOLOCATION,
+        source="urn:ati:source:test",
+        source_record_id=f"geo-{identity}",
+    )
+    persisted = await uow.evidence.persist(
+        ConvertedEvidence(
+            evidence=stable,
+            observation=EvidenceObservationCandidate(
+                evidence_id=stable.id,
+                observed_at=observed_at,
+                retrieved_at=retrieved_at,
+                facts=facts
+                or {
+                    "country_code": "US",
+                    "provider": "urn:ati:source:test",
+                    "precision": "country",
+                },
+            ),
+        ),
+        observation_id=identity,
+    )
+    await uow.evidence_observation_entities.associate(
+        persisted.observation.id, entity_id
+    )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
+            investigation_id=investigation_id,
+            evidence_observation_id=persisted.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=retrieved_at,
+            added_by=InvestigationEvidenceActor.SYSTEM,
+        )
+    )
+    del entity_value
+    return persisted.observation.id
 
 
 async def make_query_service(
@@ -391,7 +466,7 @@ async def test_p01_observation_evidence_in_scope_visible(
         )
         assert entity is not None
         assert entity.current_observation.observation_id == seed.observation_id
-        assert entity.current_observation.evidence_id == seed.evidence_id
+        assert entity.current_observation.evidence_observation_id == seed.evidence_id
         detail = await service.get_observation(
             GeointObservationQuery(
                 investigation_id=investigation_id,
@@ -399,7 +474,7 @@ async def test_p01_observation_evidence_in_scope_visible(
             )
         )
         assert detail is not None
-        assert detail.observation.evidence_id == seed.evidence_id
+        assert detail.observation.evidence_observation_id == seed.evidence_id
     finally:
         await close_query_service(service)
 
@@ -1753,11 +1828,13 @@ def _observation_entity_history_statement(
     """Return the exact production Entity-history statement shape."""
     return f"""
         SELECT ob.id FROM ati.entity_location_observation ob
-        JOIN ati.evidence ev ON ev.id = ob.evidence_id
+        JOIN ati.investigation_evidence ie
+          ON ie.evidence_observation_id = ob.evidence_observation_id
         WHERE ob.entity_id = '{entity_id}'
-          AND ev.investigation_id = '{investigation_id}'
+          AND ie.investigation_id = '{investigation_id}'
         ORDER BY COALESCE(ob.observed_at, ob.retrieved_at) DESC, ob.id DESC
         LIMIT 10
+
     """
 
 
@@ -1765,8 +1842,10 @@ def _observation_scope_join_statement(investigation_id: UUID) -> str:
     """Return the exact production scope-join grouping statement shape."""
     return f"""
         SELECT count(*) FROM ati.entity_location_observation ob
-        JOIN ati.evidence ev ON ev.id = ob.evidence_id
-        WHERE ev.investigation_id = '{investigation_id}'
+        JOIN ati.investigation_evidence ie
+          ON ie.evidence_observation_id = ob.evidence_observation_id
+        WHERE ie.investigation_id = '{investigation_id}'
+
     """
 
 
@@ -1774,11 +1853,13 @@ def _location_reverse_statement(location_id: UUID, investigation_id: UUID) -> st
     """Return the exact production Location-observation statement shape."""
     return f"""
         SELECT ob.id FROM ati.entity_location_observation ob
-        JOIN ati.evidence ev ON ev.id = ob.evidence_id
+        JOIN ati.investigation_evidence ie
+          ON ie.evidence_observation_id = ob.evidence_observation_id
         WHERE ob.location_id = '{location_id}'
-          AND ev.investigation_id = '{investigation_id}'
+          AND ie.investigation_id = '{investigation_id}'
         ORDER BY COALESCE(ob.observed_at, ob.retrieved_at) DESC, ob.id DESC
         LIMIT 10
+
     """
 
 
@@ -1786,14 +1867,16 @@ def _containment_statement(location_id: UUID, investigation_id: UUID) -> str:
     """Return the exact production containment statement shape."""
     return f"""
         SELECT ob.id FROM ati.entity_location_observation ob
-        JOIN ati.evidence ev ON ev.id = ob.evidence_id
+        JOIN ati.investigation_evidence ie
+          ON ie.evidence_observation_id = ob.evidence_observation_id
         WHERE ob.location_id IN (
                 SELECT l.id FROM ati.location l, ati.location sel
                 WHERE sel.id = '{location_id}'
                   AND (l.id = sel.id OR (l.geometry && sel.geometry
                        AND ST_Covers(sel.geometry, l.geometry))))
-          AND ev.investigation_id = '{investigation_id}'
+          AND ie.investigation_id = '{investigation_id}'
         LIMIT 10
+
     """
 
 
@@ -1802,9 +1885,11 @@ def _summary_counts_statement(investigation_id: UUID) -> str:
     return f"""
         SELECT count(*), count(DISTINCT ob.entity_id), count(DISTINCT ob.location_id)
         FROM ati.entity_location_observation ob
-        JOIN ati.evidence ev ON ev.id = ob.evidence_id
+        JOIN ati.investigation_evidence ie
+          ON ie.evidence_observation_id = ob.evidence_observation_id
         JOIN ati.location loc ON loc.id = ob.location_id
-        WHERE ev.investigation_id = '{investigation_id}'
+        WHERE ie.investigation_id = '{investigation_id}'
+
     """
 
 
@@ -1813,14 +1898,16 @@ def _summary_top_locations_statement(investigation_id: UUID) -> str:
     return f"""
         SELECT loc.id, count(DISTINCT ob.entity_id) AS scoped_entity_count
         FROM ati.entity_location_observation ob
-        JOIN ati.evidence ev ON ev.id = ob.evidence_id
+        JOIN ati.investigation_evidence ie
+          ON ie.evidence_observation_id = ob.evidence_observation_id
         JOIN ati.location loc ON loc.id = ob.location_id
-        WHERE ev.investigation_id = '{investigation_id}'
+        WHERE ie.investigation_id = '{investigation_id}'
         GROUP BY loc.id, loc.location_type, loc.canonical_name, loc.country_code,
                  loc.admin1_code, loc.admin2_code, loc.parent_location_id,
                  ST_Y(loc.centroid), ST_X(loc.centroid)
         ORDER BY scoped_entity_count DESC, loc.canonical_name ASC, loc.id ASC
         LIMIT 10
+
     """
 
 
@@ -1831,10 +1918,11 @@ def _latest_per_entity_statement(location_id: UUID, investigation_id: UUID) -> s
           SELECT DISTINCT ON (ob.entity_id)
             ob.id, ob.entity_id, ent.entity_type, ent.canonical_value
           FROM ati.entity_location_observation ob
-          JOIN ati.evidence ev ON ev.id = ob.evidence_id
+          JOIN ati.investigation_evidence ie
+            ON ie.evidence_observation_id = ob.evidence_observation_id
           JOIN ati.entity ent ON ent.id = ob.entity_id
           WHERE ob.location_id = '{location_id}'
-            AND ev.investigation_id = '{investigation_id}'
+            AND ie.investigation_id = '{investigation_id}'
           ORDER BY ob.entity_id, COALESCE(ob.observed_at, ob.retrieved_at) DESC,
                    ob.id DESC
         ) latest
@@ -2148,49 +2236,47 @@ async def test_vs_canonical_resolution_to_query_to_api(
         geography = await seed_geography(uow)
         # I1 GEOLOCATION LegacyEvidence resolves canonically to Seattle.
         entity_id = await seed_entity(uow, value="203.0.113.200")
-        evidence_a = await uow.evidence.insert(
-            LegacyEvidence(
-                investigation_id=investigation_a,
-                type=EvidenceType.GEOLOCATION,
-                subject=EntityRef(
-                    id=entity_id, type=EntityType.IP_ADDRESS, value="203.0.113.200"
-                ),
-                source="urn:ati:source:test",
-                retrieved_at=FIXED,
-                facts={
-                    "country_code": "US",
-                    "region": "Washington",
-                    "city": "Seattle",
-                    "precision": "city",
-                },
-            )
+        evidence_a = await seed_geolocation_for_investigation(
+            uow,
+            investigation_a,
+            entity_id,
+            "203.0.113.200",
+            retrieved_at=FIXED,
+            facts={
+                "country_code": "US",
+                "region": "Washington",
+                "city": "Seattle",
+                "precision": "city",
+            },
         )
-        assert evidence_a.id is not None
         resolution_a = await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_a.id)
+            GeoResolution(
+                id=uuid4(),
+                entity_id=entity_id,
+                evidence_observation_id=evidence_a,
+            )
         )
         assert resolution_a.id is not None
         # I2 resolves the same Entity to Vancouver with a newer timestamp.
-        evidence_b = await uow.evidence.insert(
-            LegacyEvidence(
-                investigation_id=investigation_b,
-                type=EvidenceType.GEOLOCATION,
-                subject=EntityRef(
-                    id=entity_id, type=EntityType.IP_ADDRESS, value="203.0.113.200"
-                ),
-                source="urn:ati:source:test",
-                retrieved_at=FIXED + timedelta(days=1),
-                facts={
-                    "country_code": "CA",
-                    "region": "British Columbia",
-                    "city": "Vancouver",
-                    "precision": "city",
-                },
-            )
+        evidence_b = await seed_geolocation_for_investigation(
+            uow,
+            investigation_b,
+            entity_id,
+            "203.0.113.200",
+            retrieved_at=FIXED + timedelta(days=1),
+            facts={
+                "country_code": "CA",
+                "region": "British Columbia",
+                "city": "Vancouver",
+                "precision": "city",
+            },
         )
-        assert evidence_b.id is not None
         await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_b.id)
+            GeoResolution(
+                id=uuid4(),
+                entity_id=entity_id,
+                evidence_observation_id=evidence_b,
+            )
         )
 
     worker = _worker_instance(uow_factory, session_factory)
@@ -2211,12 +2297,12 @@ async def test_vs_canonical_resolution_to_query_to_api(
         )
         assert current_a is not None
         assert current_a.current_observation.location.canonical_name == "Seattle"
-        assert current_a.current_observation.evidence_id == evidence_a.id
+        assert current_a.current_observation.evidence_observation_id == evidence_a
         known_observation_id = current_a.current_observation.observation_id
 
         # I1 cannot retrieve the I2 observation detail.
         observation_b = [
-            row for row in observation_rows if row.evidence_id == evidence_b.id
+            row for row in observation_rows if row.evidence_observation_id == evidence_b
         ]
         assert len(observation_b) == 1
         cross = await service.get_observation(
@@ -2252,12 +2338,12 @@ async def test_vs_canonical_resolution_to_query_to_api(
         assert entity_response.status_code == 200
         body = entity_response.json()
         assert body["current_observation"]["location"]["canonical_name"] == "Seattle"
-        assert body["current_observation"]["evidence_id"] == str(evidence_a.id)
+        assert body["current_observation"]["evidence_id"] == str(evidence_a)
         assert body["current_observation"]["precision"] == "city"
 
         # Exact LegacyEvidence endpoint accepts the exact evidence_id from the API.
         evidence_response = client.get(
-            f"/api/v1/investigations/{investigation_a}/evidence/{evidence_a.id}"
+            f"/api/v1/investigations/{investigation_a}/evidence/{evidence_a}"
         )
         assert evidence_response.status_code == 200
 

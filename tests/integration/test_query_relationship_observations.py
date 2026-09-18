@@ -23,8 +23,8 @@ from agentic_threat_investigator.infrastructure.persistence.query.services impor
 )
 from tests.support.query_fixtures import (
     FIXED_TIME,
-    evidence_factory,
     seed_entity,
+    seed_evidence_observation,
     seed_investigation,
     seed_observation,
     seed_relationship,
@@ -64,18 +64,17 @@ async def _seed_observation_series(
     )
     observed: list[UUID] = []
     for minutes in (30, 20, 10):
-        evidence = await uow.evidence.insert(
-            evidence_factory(
-                investigation_id,
-                source,
-                retrieved_at=FIXED_TIME + timedelta(minutes=minutes),
-            )
+        evidence = await seed_evidence_observation(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=source,
+            retrieved_at=FIXED_TIME + timedelta(minutes=minutes),
         )
         observation = await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=evidence,
+            evidence_observation_id=evidence,
             retrieved_at=FIXED_TIME + timedelta(minutes=minutes),
             observed_at=FIXED_TIME + timedelta(minutes=minutes),
         )
@@ -162,36 +161,44 @@ async def test_observation_observed_range_handles_null(
         edge = await seed_relationship(
             uow, source_entity_id=source, target_entity_id=target
         )
-        before = await uow.evidence.insert(evidence_factory(investigation_id, source))
-        inside = await uow.evidence.insert(evidence_factory(investigation_id, source))
-        after = await uow.evidence.insert(evidence_factory(investigation_id, source))
-        missing = await uow.evidence.insert(evidence_factory(investigation_id, source))
+        before = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
+        inside = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
+        after = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
+        missing = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
         inside_obs = await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=inside,
+            evidence_observation_id=inside,
             observed_at=FIXED_TIME + timedelta(days=1),
         )
         await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=before,
+            evidence_observation_id=before,
             observed_at=FIXED_TIME - timedelta(days=1),
         )
         await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=after,
+            evidence_observation_id=after,
             observed_at=FIXED_TIME + timedelta(days=2),
         )
         await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=missing,
+            evidence_observation_id=missing,
             observed_at=None,
         )
         assert uow.session is not None
@@ -229,14 +236,14 @@ async def test_exact_observation_get_is_identity_and_investigation_scoped(
         edge_a = await seed_relationship(
             uow, source_entity_id=source_a, target_entity_id=target_a
         )
-        evidence_a = await uow.evidence.insert(
-            evidence_factory(investigation_a, source_a)
+        evidence_a = await seed_evidence_observation(
+            uow, investigation_id=investigation_a, entity_id=source_a
         )
         observation_a = await seed_observation(
             uow,
             investigation_id=investigation_a,
             relationship=edge_a,
-            evidence=evidence_a,
+            evidence_observation_id=evidence_a,
             retrieved_at=FIXED_TIME + timedelta(minutes=31),
             observed_at=FIXED_TIME + timedelta(minutes=1),
         )
@@ -246,14 +253,14 @@ async def test_exact_observation_get_is_identity_and_investigation_scoped(
         edge_b = await seed_relationship(
             uow, source_entity_id=source_b, target_entity_id=target_b
         )
-        evidence_b = await uow.evidence.insert(
-            evidence_factory(investigation_b, source_b)
+        evidence_b = await seed_evidence_observation(
+            uow, investigation_id=investigation_b, entity_id=source_b
         )
         observation_b = await seed_observation(
             uow,
             investigation_id=investigation_b,
             relationship=edge_b,
-            evidence=evidence_b,
+            evidence_observation_id=evidence_b,
             retrieved_at=FIXED_TIME + timedelta(minutes=7),
             observed_at=FIXED_TIME + timedelta(minutes=2),
         )
@@ -273,7 +280,7 @@ async def test_exact_observation_get_is_identity_and_investigation_scoped(
         assert exact.relationship_source_entity_id == source_a
         assert exact.relationship_target_entity_id == target_a
         assert exact.relationship_type == RelationshipType.RESOLVES_TO
-        assert exact.evidence_id == evidence_a.id
+        assert exact.evidence_observation_id == evidence_a
         assert exact.source == "urn:ati:source:google_public_dns"
         # ``observed_at`` and ``retrieved_at`` stay distinct.
         assert exact.observed_at == FIXED_TIME + timedelta(minutes=1)

@@ -1,14 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Regression tests for the PR 19B provider-work executor HIGH fixes.
+"""Regression tests for the PR 19B provider-work executor HIGH fixes (PR 28B).
 
 Covers provider-output binding (HIGH-2), retention of all committed
-operational IDs when later LegacyEvidence processing fails (HIGH-3), bounded
+operational IDs when later observation processing fails (HIGH-3), bounded
 secret-free failure logging (HIGH-4), exact/canonical authoritative target
-binding (fixes 02), and canonical first-seen aggregate ID lists (fixes 04).
-Shared deterministic fakes and builders live in
-``tests/support.provider_executor_fixtures``; these tests drive the real
-executor through them and never import from the other executor test module.
+binding (fixes 02), canonical first-seen aggregate ID lists (fixes 04), and
+the PR 28B fail-closed legacy-provider boundary (R28B2-02): unmigrated
+``LegacyEvidence`` output is rejected deterministically with zero global
+persistence. Shared deterministic fakes and builders live in
+``tests/support.provider_executor_fixtures``.
 """
 
 # The executor test harness intentionally composes comparable deterministic
@@ -23,6 +24,7 @@ import pytest
 
 from agentic_threat_investigator.app.extraction.models import (
     EvidenceExtractionError,
+    EvidenceExtractionView,
     ExtractionErrorReason,
     ExtractionResult,
 )
@@ -45,30 +47,34 @@ from agentic_threat_investigator.app.provider_observation_persistence import (
 )
 from agentic_threat_investigator.app.providers import ProviderResult
 from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import ProviderExecutionOutcome
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEventType,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from tests.support.orchestration_fixtures import scenario_investigation_state
 from tests.support.provider_executor_fixtures import (
     DISCOVERED_ONE,
     DOMAIN_ENTITY_ID,
     EVIDENCE_ONE,
+    FIRST_OBSERVATION_ID,
     FOREIGN_INVESTIGATION_ID,
-    IP_VALUE,
     RELATIONSHIP_ONE,
     SECOND_EVIDENCE,
+    SECOND_OBSERVATION_ID,
+    THREATFOX_SOURCE,
     FakeEvidenceProvider,
     FakePersistenceService,
     FakeTimelineSink,
     build_executor,
     committed_first_observation,
-    dns_evidence,
-    dns_work_item,
     domain_entity,
+    global_converted_evidence,
+    legacy_dns_evidence,
+    legacy_dns_work_item,
     persisted_result,
+    threatfox_work_item,
 )
 
 
@@ -97,8 +103,13 @@ class TestProviderOutputBinding:
             provider_id=SourceId.RDAP.value,
         )
         timeline = FakeTimelineSink()
-        executor = build_executor(misbound, domain_entity(), timeline=timeline)
-        outcome = await executor.execute(dns_work_item())
+        executor = build_executor(
+            misbound,
+            domain_entity(),
+            timeline=timeline,
+            registry_key=SourceId.GOOGLE_PUBLIC_DNS,
+        )
+        outcome = await executor.execute(legacy_dns_work_item())
         assert not misbound.investigate_calls
         _assert_binding_failure(outcome, timeline)
         # Only the safe failure event is emitted; the work never started.
@@ -112,7 +123,7 @@ class TestProviderOutputBinding:
         provider = FakeEvidenceProvider(ProviderResult(provider=SourceId.RDAP.value))
         timeline = FakeTimelineSink()
         executor = build_executor(provider, domain_entity(), timeline=timeline)
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert len(provider.investigate_calls) == 1
         _assert_binding_failure(outcome, timeline)
         assert [event.type for event in timeline.events] == [
@@ -121,17 +132,27 @@ class TestProviderOutputBinding:
         ]
 
     @pytest.mark.asyncio
-    async def test_evidence_investigation_mismatch_fails_before_persistence(
+    async def test_legacy_evidence_output_fails_closed_before_persistence(
         self,
     ) -> None:
-        """LegacyEvidence for a foreign investigation is never extracted or persisted."""
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
-            update={"investigation_id": FOREIGN_INVESTIGATION_ID}
-        )
+        """An unmigrated provider's LegacyEvidence output never extracts or persists.
+
+        R28B2-02: the six legacy providers have no approved PR 28A stable
+        identity contract; their output is rejected deterministically with
+        zero global Evidence/EvidenceObservation persistence.
+        """
+        evidence = legacy_dns_evidence(evidence_id=uuid4())
+        extracted: list[UUID] = []
+
+        def extractor(_view: EvidenceExtractionView) -> ExtractionResult:
+            extracted.append(_view.evidence.id)
+            return ExtractionResult()
+
         provider = FakeEvidenceProvider(
             ProviderResult(
                 provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
+            ),
+            provider_id=SourceId.GOOGLE_PUBLIC_DNS.value,
         )
         persistence = FakePersistenceService()
         timeline = FakeTimelineSink()
@@ -139,31 +160,35 @@ class TestProviderOutputBinding:
             provider,
             domain_entity(),
             persistence=persistence,
+            extractor=extractor,
             timeline=timeline,
         )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(legacy_dns_work_item())
         assert len(provider.investigate_calls) == 1
+        # Zero extraction and zero persistence for the entire result.
+        assert not extracted
         assert not persistence.calls
+        assert outcome.evidence_ids == ()
         _assert_binding_failure(outcome, timeline)
 
     @pytest.mark.asyncio
-    async def test_evidence_subject_type_mismatch_fails_before_persistence(
+    async def test_blank_source_record_identity_fails_before_persistence(
         self,
     ) -> None:
-        """LegacyEvidence whose subject type differs from the target is rejected."""
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
+        """ConvertedEvidence without the exact stable source-record identity is rejected.
+
+        A global Evidence item must carry the exact upstream source-record
+        identity; an identity-less item fails closed before persistence.
+        """
+        converted = global_converted_evidence().model_copy(
             update={
-                "subject": EntityRef(
-                    id=DOMAIN_ENTITY_ID,
-                    type=EntityType.IP_ADDRESS,
-                    value=IP_VALUE,
+                "evidence": global_converted_evidence().evidence.model_copy(
+                    update={"source_record_id": "   "}
                 )
             }
         )
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(converted,))
         )
         persistence = FakePersistenceService()
         timeline = FakeTimelineSink()
@@ -173,71 +198,7 @@ class TestProviderOutputBinding:
             persistence=persistence,
             timeline=timeline,
         )
-        outcome = await executor.execute(dns_work_item())
-        assert len(provider.investigate_calls) == 1
-        assert not persistence.calls
-        _assert_binding_failure(outcome, timeline)
-
-    @pytest.mark.asyncio
-    async def test_evidence_subject_value_mismatch_fails_before_persistence(
-        self,
-    ) -> None:
-        """LegacyEvidence whose subject value differs from the target is rejected."""
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
-            update={
-                "subject": EntityRef(
-                    id=DOMAIN_ENTITY_ID,
-                    type=EntityType.DOMAIN,
-                    value="other.example",
-                )
-            }
-        )
-        provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
-        )
-        persistence = FakePersistenceService()
-        timeline = FakeTimelineSink()
-        executor = build_executor(
-            provider,
-            domain_entity(),
-            persistence=persistence,
-            timeline=timeline,
-        )
-        outcome = await executor.execute(dns_work_item())
-        assert len(provider.investigate_calls) == 1
-        assert not persistence.calls
-        _assert_binding_failure(outcome, timeline)
-
-    @pytest.mark.asyncio
-    async def test_evidence_subject_id_conflict_fails_before_persistence(
-        self,
-    ) -> None:
-        """LegacyEvidence carrying a conflicting subject identifier is rejected."""
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
-            update={
-                "subject": EntityRef(
-                    id=uuid4(),
-                    type=EntityType.DOMAIN,
-                    value="malicious.test",
-                )
-            }
-        )
-        provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
-        )
-        persistence = FakePersistenceService()
-        timeline = FakeTimelineSink()
-        executor = build_executor(
-            provider,
-            domain_entity(),
-            persistence=persistence,
-            timeline=timeline,
-        )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert len(provider.investigate_calls) == 1
         assert not persistence.calls
         _assert_binding_failure(outcome, timeline)
@@ -245,23 +206,23 @@ class TestProviderOutputBinding:
     @pytest.mark.asyncio
     async def test_second_invalid_evidence_prevents_first_commit(self) -> None:
         """One invalid item in the tuple invalidates the whole returned result."""
-        first = dns_evidence(evidence_id=EVIDENCE_ONE)
-        second = dns_evidence(evidence_id=SECOND_EVIDENCE).model_copy(
-            update={"investigation_id": FOREIGN_INVESTIGATION_ID}
+        first = global_converted_evidence(evidence_id=EVIDENCE_ONE)
+        second = global_converted_evidence(evidence_id=SECOND_EVIDENCE)
+        invalid = second.model_copy(
+            update={
+                "evidence": second.evidence.model_copy(update={"source_record_id": ""})
+            }
         )
         extracted: list[UUID] = []
 
-        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
-            extracted.append(_evidence.id or UUID(int=0))
+        def extractor(view: EvidenceExtractionView) -> ExtractionResult:
+            extracted.append(view.evidence.id)
             return ExtractionResult()
 
         persistence = FakePersistenceService()
         timeline = FakeTimelineSink()
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value,
-                evidence=(first, second),
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(first, invalid))
         )
         executor = build_executor(
             provider,
@@ -270,7 +231,7 @@ class TestProviderOutputBinding:
             extractor=extractor,
             timeline=timeline,
         )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert len(provider.investigate_calls) == 1
         # Zero extraction and zero persistence for the entire result tuple.
         assert not extracted
@@ -278,18 +239,20 @@ class TestProviderOutputBinding:
         _assert_binding_failure(outcome, timeline)
 
     @pytest.mark.asyncio
-    async def test_noncanonical_equivalent_subject_fails_closed(
+    async def test_foreign_investigation_never_materializes_global_state(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A canonical-equivalent subject that is not already canonical is rejected."""
-        marker = "MALICIOUS.TEST."
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
+        """A marker carried by legacy output never reaches logs or outcomes.
+
+        LegacyEvidence output is rejected wholesale; the synthetic secret in
+        the legacy row appears nowhere: not in logs, the outcome error, or
+        the persisted timeline representation.
+        """
+        marker = "SUPER-SECRET-LEGACY-MARKER-4271"
+        evidence = legacy_dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
             update={
-                "subject": EntityRef(
-                    id=DOMAIN_ENTITY_ID,
-                    type=EntityType.DOMAIN,
-                    value=marker,
-                )
+                "investigation_id": FOREIGN_INVESTIGATION_ID,
+                "facts": {"marker": marker},
             }
         )
         persistence = FakePersistenceService()
@@ -297,7 +260,8 @@ class TestProviderOutputBinding:
         provider = FakeEvidenceProvider(
             ProviderResult(
                 provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
+            ),
+            provider_id=SourceId.GOOGLE_PUBLIC_DNS.value,
         )
         executor = build_executor(
             provider,
@@ -306,56 +270,7 @@ class TestProviderOutputBinding:
             timeline=timeline,
         )
         with caplog.at_level(logging.ERROR, logger=EXECUTOR_LOGGER.name):
-            outcome = await executor.execute(dns_work_item())
-        assert len(provider.investigate_calls) == 1
-        assert not persistence.calls
-        _assert_binding_failure(outcome, timeline)
-        assert [event.type for event in timeline.events] == [
-            InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
-            InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
-        ]
-        # The noncanonical spelling appears nowhere: not in logs, the outcome
-        # error, or the persisted timeline representation.
-        assert outcome.error is not None
-        assert marker not in caplog.text
-        assert marker not in outcome.error.message
-        assert marker not in str([event.model_dump() for event in timeline.events])
-
-    @pytest.mark.asyncio
-    async def test_malformed_subject_canonicalization_never_escapes(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A subject that makes canonicalize() raise fails closed, never crashing."""
-        marker = "SUPER-SECRET-SUBJECT-VALUE-91"
-        target = Entity(
-            id=DOMAIN_ENTITY_ID,
-            type=EntityType.URL,
-            value="https://evil.example/",
-        )
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
-            update={
-                "subject": EntityRef(
-                    id=DOMAIN_ENTITY_ID,
-                    type=EntityType.URL,
-                    value=marker,
-                )
-            }
-        )
-        persistence = FakePersistenceService()
-        timeline = FakeTimelineSink()
-        provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
-        )
-        executor = build_executor(
-            provider,
-            target,
-            persistence=persistence,
-            timeline=timeline,
-        )
-        with caplog.at_level(logging.ERROR, logger=EXECUTOR_LOGGER.name):
-            outcome = await executor.execute(dns_work_item())
+            outcome = await executor.execute(legacy_dns_work_item())
         assert len(provider.investigate_calls) == 1
         assert not persistence.calls
         _assert_binding_failure(outcome, timeline)
@@ -368,12 +283,10 @@ class TestProviderOutputBinding:
     async def test_reader_wrong_entity_id_never_invokes_provider(self) -> None:
         """A reader returning another Entity ID fails before any provider call."""
         wrong_entity = domain_entity().model_copy(update={"id": uuid4()})
-        provider = FakeEvidenceProvider(
-            ProviderResult(provider=SourceId.GOOGLE_PUBLIC_DNS.value)
-        )
+        provider = FakeEvidenceProvider(ProviderResult(provider=THREATFOX_SOURCE))
         timeline = FakeTimelineSink()
         executor = build_executor(provider, wrong_entity, timeline=timeline)
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert not provider.investigate_calls
         _assert_binding_failure(outcome, timeline)
         # The target check precedes the started event and provider invocation.
@@ -385,12 +298,10 @@ class TestProviderOutputBinding:
     async def test_reader_entity_without_id_never_invokes_provider(self) -> None:
         """An ID-less reader result fails closed before any provider call."""
         no_id = domain_entity().model_copy(update={"id": None})
-        provider = FakeEvidenceProvider(
-            ProviderResult(provider=SourceId.GOOGLE_PUBLIC_DNS.value)
-        )
+        provider = FakeEvidenceProvider(ProviderResult(provider=THREATFOX_SOURCE))
         timeline = FakeTimelineSink()
         executor = build_executor(provider, no_id, timeline=timeline)
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert not provider.investigate_calls
         _assert_binding_failure(outcome, timeline)
         assert [event.type for event in timeline.events] == [
@@ -404,13 +315,11 @@ class TestProviderOutputBinding:
         """A reader target whose value is not already canonical fails closed."""
         marker = "MALICIOUS.TEST."
         noncanonical = Entity(id=DOMAIN_ENTITY_ID, type=EntityType.DOMAIN, value=marker)
-        provider = FakeEvidenceProvider(
-            ProviderResult(provider=SourceId.GOOGLE_PUBLIC_DNS.value)
-        )
+        provider = FakeEvidenceProvider(ProviderResult(provider=THREATFOX_SOURCE))
         timeline = FakeTimelineSink()
         executor = build_executor(provider, noncanonical, timeline=timeline)
         with caplog.at_level(logging.ERROR, logger=EXECUTOR_LOGGER.name):
-            outcome = await executor.execute(dns_work_item())
+            outcome = await executor.execute(threatfox_work_item())
         assert not provider.investigate_calls
         _assert_binding_failure(outcome, timeline)
         assert [event.type for event in timeline.events] == [
@@ -422,18 +331,14 @@ class TestProviderOutputBinding:
         assert marker not in str([event.model_dump() for event in timeline.events])
 
     @pytest.mark.asyncio
-    async def test_valid_subject_without_optional_id_is_accepted(self) -> None:
-        """A canonical exact subject without an optional identifier remains valid."""
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
-            update={
-                "subject": EntityRef(type=EntityType.DOMAIN, value="malicious.test")
-            }
+    async def test_valid_converted_evidence_succeeds(self) -> None:
+        """A valid global ConvertedEvidence commits and records its observation."""
+        converted = global_converted_evidence(evidence_id=EVIDENCE_ONE)
+        persistence = FakePersistenceService(
+            [persisted_result(converted, observation_id=FIRST_OBSERVATION_ID)]
         )
-        persistence = FakePersistenceService([persisted_result(evidence)])
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(converted,))
         )
         timeline = FakeTimelineSink()
         executor = build_executor(
@@ -442,140 +347,15 @@ class TestProviderOutputBinding:
             persistence=persistence,
             timeline=timeline,
         )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert outcome.status.name == "SUCCEEDED"
-        assert len(outcome.evidence_ids) == 1
+        assert outcome.evidence_ids == (FIRST_OBSERVATION_ID,)
         assert outcome.error is None
         assert [event.type for event in timeline.events] == [
             InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
             InvestigationTimelineEventType.EVIDENCE_PERSISTED,
             InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
         ]
-
-
-class TestMalformedBindingStopsBeforeExtraction:
-    """Malformed/noncanonical output never reaches extraction or persistence."""
-
-    @pytest.mark.asyncio
-    async def test_noncanonical_subject_never_extracts_or_persists(self) -> None:
-        """A noncanonical subject fails with zero extraction and PR 18C calls."""
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
-            update={
-                "subject": EntityRef(
-                    id=DOMAIN_ENTITY_ID,
-                    type=EntityType.DOMAIN,
-                    value="MALICIOUS.TEST.",
-                )
-            }
-        )
-        extracted: list[UUID] = []
-
-        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
-            extracted.append(_evidence.id or UUID(int=0))
-            return ExtractionResult()
-
-        persistence = FakePersistenceService()
-        timeline = FakeTimelineSink()
-        provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
-        )
-        executor = build_executor(
-            provider,
-            domain_entity(),
-            persistence=persistence,
-            extractor=extractor,
-            timeline=timeline,
-        )
-        outcome = await executor.execute(dns_work_item())
-        assert len(provider.investigate_calls) == 1
-        assert not extracted
-        assert not persistence.calls
-        _assert_binding_failure(outcome, timeline)
-
-    @pytest.mark.asyncio
-    async def test_malformed_subject_never_extracts_or_persists(self) -> None:
-        """A subject that makes canonicalize() raise never reaches extraction."""
-        target = Entity(
-            id=DOMAIN_ENTITY_ID,
-            type=EntityType.URL,
-            value="https://evil.example/",
-        )
-        evidence = dns_evidence(evidence_id=EVIDENCE_ONE).model_copy(
-            update={
-                "subject": EntityRef(
-                    id=DOMAIN_ENTITY_ID,
-                    type=EntityType.URL,
-                    value="SUPER-SECRET-SUBJECT-VALUE-91",
-                )
-            }
-        )
-        extracted: list[UUID] = []
-
-        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
-            extracted.append(_evidence.id or UUID(int=0))
-            return ExtractionResult()
-
-        persistence = FakePersistenceService()
-        timeline = FakeTimelineSink()
-        provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
-        )
-        executor = build_executor(
-            provider,
-            target,
-            persistence=persistence,
-            extractor=extractor,
-            timeline=timeline,
-        )
-        outcome = await executor.execute(dns_work_item())
-        assert len(provider.investigate_calls) == 1
-        assert not extracted
-        assert not persistence.calls
-        _assert_binding_failure(outcome, timeline)
-
-    @pytest.mark.asyncio
-    async def test_second_invalid_evidence_never_extracts_first(self) -> None:
-        """A tuple with one invalid item extracts and persists neither item."""
-        first = dns_evidence(evidence_id=EVIDENCE_ONE)
-        second = dns_evidence(evidence_id=SECOND_EVIDENCE).model_copy(
-            update={
-                "subject": EntityRef(
-                    id=DOMAIN_ENTITY_ID,
-                    type=EntityType.DOMAIN,
-                    value="MALICIOUS.TEST.",
-                )
-            }
-        )
-        extracted: list[UUID] = []
-
-        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
-            extracted.append(_evidence.id or UUID(int=0))
-            return ExtractionResult()
-
-        persistence = FakePersistenceService()
-        timeline = FakeTimelineSink()
-        provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value,
-                evidence=(first, second),
-            )
-        )
-        executor = build_executor(
-            provider,
-            domain_entity(),
-            persistence=persistence,
-            extractor=extractor,
-            timeline=timeline,
-        )
-        outcome = await executor.execute(dns_work_item())
-        assert len(provider.investigate_calls) == 1
-        assert not extracted
-        assert not persistence.calls
-        _assert_binding_failure(outcome, timeline)
 
 
 class TestCommittedIdsRetainedOnFailure:
@@ -585,29 +365,29 @@ class TestCommittedIdsRetainedOnFailure:
     async def test_second_evidence_extraction_failure_retains_committed_ids(
         self,
     ) -> None:
-        """Extraction failure on LegacyEvidence 2 keeps all LegacyEvidence 1 committed IDs."""
-        first = dns_evidence(evidence_id=EVIDENCE_ONE)
-        second = dns_evidence(evidence_id=SECOND_EVIDENCE)
+        """Extraction failure on item 2 keeps all item 1 committed observation IDs."""
+        first = global_converted_evidence(evidence_id=EVIDENCE_ONE)
+        second = global_converted_evidence(evidence_id=SECOND_EVIDENCE)
         persistence = FakePersistenceService(
-            [committed_first_observation(first), persisted_result(second)]
+            [
+                committed_first_observation(first),
+                persisted_result(second, observation_id=SECOND_OBSERVATION_ID),
+            ]
         )
         calls = {"count": 0}
 
-        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
+        def extractor(_view: EvidenceExtractionView) -> ExtractionResult:
             calls["count"] += 1
             if calls["count"] == 2:
                 raise EvidenceExtractionError(
-                    SourceId.GOOGLE_PUBLIC_DNS.value,
+                    THREATFOX_SOURCE,
                     ExtractionErrorReason.MALFORMED_FACTS,
-                    "malformed DNS facts",
+                    "malformed ThreatFox facts",
                 )
             return ExtractionResult()
 
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value,
-                evidence=(first, second),
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(first, second))
         )
         timeline = FakeTimelineSink()
         executor = build_executor(
@@ -617,11 +397,11 @@ class TestCommittedIdsRetainedOnFailure:
             extractor=extractor,
             timeline=timeline,
         )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert outcome.status.name == "FAILED"
         assert outcome.error is not None
         assert outcome.error.code == ERROR_EXTRACTION_ERROR
-        assert outcome.evidence_ids == (EVIDENCE_ONE,)
+        assert outcome.evidence_ids == (FIRST_OBSERVATION_ID,)
         assert outcome.discovered_entity_ids == (DISCOVERED_ONE,)
         assert outcome.relationship_ids == (RELATIONSHIP_ONE,)
         assert len(persistence.calls) == 1
@@ -636,30 +416,29 @@ class TestCommittedIdsRetainedOnFailure:
     async def test_second_evidence_persistence_failure_retains_committed_ids(
         self,
     ) -> None:
-        """Persistence failure on LegacyEvidence 2 keeps all LegacyEvidence 1 committed IDs."""
-        first = dns_evidence(evidence_id=EVIDENCE_ONE)
-        second = dns_evidence(evidence_id=SECOND_EVIDENCE)
+        """Persistence failure on item 2 keeps all item 1 committed observation IDs."""
+        first = global_converted_evidence(evidence_id=EVIDENCE_ONE)
+        second = global_converted_evidence(evidence_id=SECOND_EVIDENCE)
         persistence = FakePersistenceService()
         calls = {"count": 0}
 
         async def persist(
-            evidence: LegacyEvidence,
+            converted: ConvertedEvidence,
+            invocation_entity: Entity,
             extraction: ExtractionResult,
             *,
+            investigation_id: UUID,
             actor_id: UUID | None = None,
             request_id: UUID | None = None,
         ) -> ProviderObservationPersistenceResult:
             calls["count"] += 1
             if calls["count"] == 1:
-                return committed_first_observation(evidence)
+                return committed_first_observation(converted)
             raise RuntimeError("later persistence failure")
 
         persistence.persist = persist  # type: ignore[method-assign]
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value,
-                evidence=(first, second),
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(first, second))
         )
         timeline = FakeTimelineSink()
         executor = build_executor(
@@ -668,11 +447,11 @@ class TestCommittedIdsRetainedOnFailure:
             persistence=persistence,
             timeline=timeline,
         )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert outcome.status.name == "FAILED"
         assert outcome.error is not None
         assert outcome.error.code == ERROR_PERSISTENCE_ERROR
-        assert outcome.evidence_ids == (EVIDENCE_ONE,)
+        assert outcome.evidence_ids == (FIRST_OBSERVATION_ID,)
         assert outcome.discovered_entity_ids == (DISCOVERED_ONE,)
         assert outcome.relationship_ids == (RELATIONSHIP_ONE,)
         assert [event.type for event in timeline.events] == [
@@ -684,44 +463,45 @@ class TestCommittedIdsRetainedOnFailure:
 
     def _assert_bookkeeping_merges(self, outcome: ProviderExecutionOutcome) -> None:
         """Prove the failed outcome merges cleanly through PR 19A bookkeeping."""
-        state = enqueue_provider_work(scenario_investigation_state(), [dns_work_item()])
+        state = enqueue_provider_work(
+            scenario_investigation_state(), [threatfox_work_item()]
+        )
         recorded = record_provider_outcome(select_provider_work(state), outcome)
-        assert list(recorded.evidence_ids) == [EVIDENCE_ONE]
+        assert list(recorded.evidence_ids) == [FIRST_OBSERVATION_ID]
         assert list(recorded.discovered_entity_ids) == [DISCOVERED_ONE]
         assert list(recorded.relationship_ids) == [RELATIONSHIP_ONE]
         assert outcome.error is not None
         assert recorded.errors == [outcome.error]
         assert recorded.budget.provider_calls_used == 1
-        assert dns_work_item() in recorded.completed_provider_work
-        assert dns_work_item() not in recorded.pending_provider_work
+        assert threatfox_work_item() in recorded.completed_provider_work
+        assert threatfox_work_item() not in recorded.pending_provider_work
         assert recorded.current_provider_work is None
 
     @pytest.mark.asyncio
     async def test_timeline_failure_preserves_all_committed_ids(self) -> None:
-        """Committed IDs survive when the failure event itself cannot append."""
-        first = dns_evidence(evidence_id=EVIDENCE_ONE)
-        second = dns_evidence(evidence_id=SECOND_EVIDENCE)
+        """Committed observation IDs survive when the failure event cannot append."""
+        first = global_converted_evidence(evidence_id=EVIDENCE_ONE)
+        second = global_converted_evidence(evidence_id=SECOND_EVIDENCE)
         persistence = FakePersistenceService()
         calls = {"count": 0}
 
         async def persist(
-            evidence: LegacyEvidence,
+            converted: ConvertedEvidence,
+            invocation_entity: Entity,
             extraction: ExtractionResult,
             *,
+            investigation_id: UUID,
             actor_id: UUID | None = None,
             request_id: UUID | None = None,
         ) -> ProviderObservationPersistenceResult:
             calls["count"] += 1
             if calls["count"] == 1:
-                return committed_first_observation(evidence)
+                return committed_first_observation(converted)
             raise RuntimeError("later persistence failure")
 
         persistence.persist = persist  # type: ignore[method-assign]
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value,
-                evidence=(first, second),
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(first, second))
         )
         timeline = FakeTimelineSink(
             fail_on=InvestigationTimelineEventType.PROVIDER_WORK_FAILED
@@ -732,11 +512,11 @@ class TestCommittedIdsRetainedOnFailure:
             persistence=persistence,
             timeline=timeline,
         )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert outcome.status.name == "FAILED"
         assert outcome.error is not None
         assert outcome.error.code == ERROR_TIMELINE_ERROR
-        assert outcome.evidence_ids == (EVIDENCE_ONE,)
+        assert outcome.evidence_ids == (FIRST_OBSERVATION_ID,)
         assert outcome.discovered_entity_ids == (DISCOVERED_ONE,)
         assert outcome.relationship_ids == (RELATIONSHIP_ONE,)
 
@@ -746,20 +526,22 @@ class TestCanonicalAggregateIdLists:
 
     @pytest.mark.asyncio
     async def test_repeated_identity_appears_once_at_first_position(self) -> None:
-        """A repeated Entity/Relationship across LegacyEvidence commits stays first-seen."""
-        first = dns_evidence(evidence_id=EVIDENCE_ONE)
-        second = dns_evidence(evidence_id=SECOND_EVIDENCE)
+        """A repeated Entity/Relationship across commits stays first-seen."""
+        first = global_converted_evidence(evidence_id=EVIDENCE_ONE)
+        second = global_converted_evidence(evidence_id=SECOND_EVIDENCE)
         # Both observations commit the same discovered Entity and Relationship
-        # under different LegacyEvidence IDs, as stable PR 18C identities reuse.
+        # under different observation IDs, as stable PR 18C identity reuse.
         persistence = FakePersistenceService(
             [
                 persisted_result(
                     first,
+                    observation_id=FIRST_OBSERVATION_ID,
                     entity_ids=(DISCOVERED_ONE,),
                     relationship_ids=(RELATIONSHIP_ONE,),
                 ),
                 persisted_result(
                     second,
+                    observation_id=SECOND_OBSERVATION_ID,
                     entity_ids=(DISCOVERED_ONE,),
                     relationship_ids=(RELATIONSHIP_ONE,),
                 ),
@@ -767,15 +549,12 @@ class TestCanonicalAggregateIdLists:
         )
         order: list[UUID] = []
 
-        def extractor(evidence: LegacyEvidence) -> ExtractionResult:
-            order.append(evidence.id or UUID(int=0))
+        def extractor(view: EvidenceExtractionView) -> ExtractionResult:
+            order.append(view.evidence.id)
             return ExtractionResult()
 
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value,
-                evidence=(first, second),
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(first, second))
         )
         timeline = FakeTimelineSink()
         executor = build_executor(
@@ -785,17 +564,18 @@ class TestCanonicalAggregateIdLists:
             extractor=extractor,
             timeline=timeline,
         )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert order == [EVIDENCE_ONE, SECOND_EVIDENCE]
         assert len(persistence.calls) == 2
-        # Both LegacyEvidence IDs are persisted once each, in provider-return order.
-        assert outcome.evidence_ids == (EVIDENCE_ONE, SECOND_EVIDENCE)
+        # Both observations are committed once each, in provider-return order,
+        # and the committed identities are the exact observation IDs.
+        assert outcome.evidence_ids == (FIRST_OBSERVATION_ID, SECOND_OBSERVATION_ID)
         # The repeated Entity and Relationship IDs occur once, at first position.
         assert outcome.discovered_entity_ids == (DISCOVERED_ONE,)
         assert outcome.relationship_ids == (RELATIONSHIP_ONE,)
         completed = timeline.events[-1]
         assert completed.type is InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED
-        assert completed.evidence_ids == (EVIDENCE_ONE, SECOND_EVIDENCE)
+        assert completed.evidence_ids == (FIRST_OBSERVATION_ID, SECOND_OBSERVATION_ID)
         assert completed.entity_ids == (DISCOVERED_ONE,)
         assert completed.relationship_ids == (RELATIONSHIP_ONE,)
 
@@ -804,35 +584,33 @@ class TestCanonicalAggregateIdLists:
         self,
     ) -> None:
         """A later failure keeps the same first-seen canonical accumulated lists."""
-        first = dns_evidence(evidence_id=EVIDENCE_ONE)
-        second = dns_evidence(evidence_id=SECOND_EVIDENCE)
+        first = global_converted_evidence(evidence_id=EVIDENCE_ONE)
+        second = global_converted_evidence(evidence_id=SECOND_EVIDENCE)
         persistence = FakePersistenceService(
             [
                 persisted_result(
                     first,
+                    observation_id=FIRST_OBSERVATION_ID,
                     entity_ids=(DISCOVERED_ONE,),
                     relationship_ids=(RELATIONSHIP_ONE,),
                 ),
-                persisted_result(second),
+                persisted_result(second, observation_id=SECOND_OBSERVATION_ID),
             ]
         )
         calls = {"count": 0}
 
-        def extractor(_evidence: LegacyEvidence) -> ExtractionResult:
+        def extractor(_view: EvidenceExtractionView) -> ExtractionResult:
             calls["count"] += 1
             if calls["count"] == 2:
                 raise EvidenceExtractionError(
-                    SourceId.GOOGLE_PUBLIC_DNS.value,
+                    THREATFOX_SOURCE,
                     ExtractionErrorReason.MALFORMED_FACTS,
-                    "malformed DNS facts",
+                    "malformed ThreatFox facts",
                 )
             return ExtractionResult()
 
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value,
-                evidence=(first, second),
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(first, second))
         )
         executor = build_executor(
             provider,
@@ -840,11 +618,11 @@ class TestCanonicalAggregateIdLists:
             persistence=persistence,
             extractor=extractor,
         )
-        outcome = await executor.execute(dns_work_item())
+        outcome = await executor.execute(threatfox_work_item())
         assert outcome.status.name == "FAILED"
         assert outcome.error is not None
         assert outcome.error.code == ERROR_EXTRACTION_ERROR
-        assert outcome.evidence_ids == (EVIDENCE_ONE,)
+        assert outcome.evidence_ids == (FIRST_OBSERVATION_ID,)
         assert outcome.discovered_entity_ids == (DISCOVERED_ONE,)
         assert outcome.relationship_ids == (RELATIONSHIP_ONE,)
 
@@ -863,7 +641,7 @@ class TestBoundedFailureLogging:
         )
         executor = build_executor(provider, domain_entity())
         with caplog.at_level(logging.ERROR, logger=EXECUTOR_LOGGER.name):
-            outcome = await executor.execute(dns_work_item())
+            outcome = await executor.execute(threatfox_work_item())
         assert outcome.error is not None
         assert outcome.error.code == "provider_error"
         assert marker not in caplog.text
@@ -876,16 +654,14 @@ class TestBoundedFailureLogging:
     ) -> None:
         """A persistence exception logs a bounded summary without its message."""
         marker = "SUPER-SECRET-MARKER-8347"
-        evidence = dns_evidence()
+        converted = global_converted_evidence()
         persistence = FakePersistenceService(raises=RuntimeError(f"db failed {marker}"))
         provider = FakeEvidenceProvider(
-            ProviderResult(
-                provider=SourceId.GOOGLE_PUBLIC_DNS.value, evidence=(evidence,)
-            )
+            ProviderResult(provider=THREATFOX_SOURCE, evidence=(converted,))
         )
         executor = build_executor(provider, domain_entity(), persistence=persistence)
         with caplog.at_level(logging.ERROR, logger=EXECUTOR_LOGGER.name):
-            outcome = await executor.execute(dns_work_item())
+            outcome = await executor.execute(threatfox_work_item())
         assert outcome.error is not None
         assert outcome.error.code == "persistence_error"
         assert marker not in caplog.text
@@ -898,15 +674,13 @@ class TestBoundedFailureLogging:
     ) -> None:
         """A timeline append exception logs a bounded summary only."""
         marker = "SUPER-SECRET-MARKER-5930"
-        provider = FakeEvidenceProvider(
-            ProviderResult(provider=SourceId.GOOGLE_PUBLIC_DNS.value)
-        )
+        provider = FakeEvidenceProvider(ProviderResult(provider=THREATFOX_SOURCE))
         timeline = FakeTimelineSink(
             fail_on=InvestigationTimelineEventType.PROVIDER_WORK_STARTED
         )
         executor = build_executor(provider, domain_entity(), timeline=timeline)
         with caplog.at_level(logging.ERROR, logger=EXECUTOR_LOGGER.name):
-            outcome = await executor.execute(dns_work_item())
+            outcome = await executor.execute(threatfox_work_item())
         assert outcome.error is not None
         assert outcome.error.code == "timeline_error"
         assert marker not in caplog.text
@@ -925,16 +699,14 @@ class TestBoundedFailureLogging:
         the stable ``timeline_error`` category.
         """
         marker = "SUPER-SECRET-MARKER-9999"
-        provider = FakeEvidenceProvider(
-            ProviderResult(provider=SourceId.GOOGLE_PUBLIC_DNS.value)
-        )
+        provider = FakeEvidenceProvider(ProviderResult(provider=THREATFOX_SOURCE))
         timeline = FakeTimelineSink(
             fail_on=InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
             fail_exc=RuntimeError(f"timeline backend failed {marker}"),
         )
         executor = build_executor(provider, domain_entity(), timeline=timeline)
         with caplog.at_level(logging.ERROR, logger=EXECUTOR_LOGGER.name):
-            outcome = await executor.execute(dns_work_item())
+            outcome = await executor.execute(threatfox_work_item())
         assert outcome.error is not None
         assert outcome.error.code == "timeline_error"
         assert marker not in caplog.text

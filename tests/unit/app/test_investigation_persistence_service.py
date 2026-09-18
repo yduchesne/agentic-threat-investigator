@@ -24,9 +24,12 @@ from agentic_threat_investigator.app.investigation_persistence import (
 from agentic_threat_investigator.app.persistence.repositories import (
     AuditEventRepository,
     BatchOutcome,
-    EvidenceDuplicateIdentityError,
+    EvidenceMetadataConflictError,
+    EvidenceObservationEntityRepository,
+    EvidencePersistenceResult,
     EvidenceRepository,
     InvestigationDuplicateIdentityError,
+    InvestigationEvidenceRepository,
     InvestigationNotFoundError,
     InvestigationRepository,
     InvestigationVersionConflictError,
@@ -38,8 +41,15 @@ from agentic_threat_investigator.domain.audit import (
     AuditEvent,
     AuditOutcome,
 )
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservation,
+    EvidenceObservationCandidate,
+    EvidenceObservationEntity,
+    EvidenceType,
+    InvestigationEvidence,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvalidInvestigationStatusTransitionError,
     InvestigationState,
@@ -47,7 +57,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 _STARTED_AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -195,35 +204,124 @@ class FakeInvestigationRepository(InvestigationRepository):
 
 
 class FakeEvidenceRepository(EvidenceRepository):
-    """Deterministic in-memory evidence repository."""
+    """Deterministic in-memory global Evidence repository."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
-        self.insert_error: Exception | None = None
+        self.metadata_conflict: Exception | None = None
+        self.stored: dict[UUID, EvidenceObservation] = {}
+        self.stable: dict[UUID, Evidence] = {}
 
-    async def insert(
+    async def persist(
+        self, converted: ConvertedEvidence, *, observation_id: UUID | None = None
+    ) -> EvidencePersistenceResult:
+        """Create/reuse an observation, or raise the configured conflict."""
+        self.calls.append("persist")
+        if self.metadata_conflict is not None:
+            raise self.metadata_conflict
+        if converted.evidence.id not in self.stable:
+            self.stable[converted.evidence.id] = converted.evidence
+        observation = EvidenceObservation(
+            id=observation_id if observation_id is not None else uuid4(),
+            evidence_id=converted.evidence.id,
+            version=1,
+            source_url=converted.observation.source_url,
+            observed_at=converted.observation.observed_at,
+            retrieved_at=converted.observation.retrieved_at,
+            facts=converted.observation.facts,
+            raw_payload=converted.observation.raw_payload,
+            diff=None,
+        )
+        self.stored[observation.id] = observation
+        from agentic_threat_investigator.app.persistence.repositories import (
+            EvidencePersistenceOutcome,
+        )
+
+        return EvidencePersistenceResult(
+            evidence=converted.evidence,
+            observation=observation,
+            outcome=EvidencePersistenceOutcome.CREATED,
+            version=1,
+        )
+
+    async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
+        """Return the stable Evidence, if any."""
+        return self.stable.get(evidence_id)
+
+    async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
+        """Return the exact observation, if any."""
+        return self.stored.get(observation_id)
+
+    async def list_observations(
         self,
-        evidence: LegacyEvidence,
+        evidence_id: UUID,
         *,
-        actor_id: UUID | None = None,
-        request_id: UUID | None = None,
-    ) -> LegacyEvidence:
-        """Return the evidence with an identity, or raise the configured error."""
-        self.calls.append("insert")
-        if self.insert_error is not None:
-            raise self.insert_error
-        return evidence.model_copy(update={"id": uuid4()})
-
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
         """Reads are unused in these tests."""
-        self.calls.append("get_by_id")
-        return None
+        return [
+            observation
+            for observation in self.stored.values()
+            if observation.evidence_id == evidence_id
+        ]
 
     async def list_for_investigation(
-        self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
-    ) -> list[LegacyEvidence]:
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
         """Reads are unused in these tests."""
-        self.calls.append("list_for_investigation")
+        return list(self.stored.values())
+
+
+class FakeEvidenceObservationEntityRepository(EvidenceObservationEntityRepository):
+    """Record observation/Entity associations."""
+
+    def __init__(self) -> None:
+        self.associations: set[tuple[UUID, UUID]] = set()
+
+    async def associate(
+        self, observation_id: UUID, entity_id: UUID
+    ) -> EvidenceObservationEntity:
+        """Record one pair."""
+        self.associations.add((observation_id, entity_id))
+        return EvidenceObservationEntity(
+            evidence_observation_id=observation_id, entity_id=entity_id
+        )
+
+    async def list_for_observation(
+        self, observation_id: UUID
+    ) -> list[EvidenceObservationEntity]:
+        """Return the recorded pairs."""
+        return [
+            EvidenceObservationEntity(
+                evidence_observation_id=pair[0], entity_id=pair[1]
+            )
+            for pair in self.associations
+            if pair[0] == observation_id
+        ]
+
+
+class FakeInvestigationEvidenceRepository(InvestigationEvidenceRepository):
+    """Record exact admissions."""
+
+    def __init__(self) -> None:
+        self.admissions: dict[UUID, set[UUID]] = {}
+
+    async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
+        """Record one admission."""
+        self.admissions.setdefault(admission.investigation_id, set()).add(
+            admission.evidence_observation_id
+        )
+        return admission
+
+    async def list_for_investigation(
+        self, investigation_id: UUID
+    ) -> list[InvestigationEvidence]:
+        """Return the recorded admissions."""
         return []
 
 
@@ -251,11 +349,15 @@ class FakeUnitOfWork(UnitOfWork):
 
     investigations: FakeInvestigationRepository
     evidence: FakeEvidenceRepository
+    evidence_observation_entities: FakeEvidenceObservationEntityRepository
+    investigation_evidence: FakeInvestigationEvidenceRepository
     audit_events: FakeAuditEventRepository
 
     def __init__(self) -> None:
         self.investigations = FakeInvestigationRepository()
         self.evidence = FakeEvidenceRepository()
+        self.evidence_observation_entities = FakeEvidenceObservationEntityRepository()
+        self.investigation_evidence = FakeInvestigationEvidenceRepository()
         self.audit_events = FakeAuditEventRepository()
         self.commits = 0
         self.rollbacks = 0
@@ -331,14 +433,21 @@ def state_factory(
     )
 
 
-def evidence_factory(investigation_id: UUID | None = None) -> LegacyEvidence:
-    """Build a deterministic valid evidence observation."""
-    return LegacyEvidence(
-        investigation_id=investigation_id or uuid4(),
-        type=EvidenceType.DNS,
-        subject=EntityRef(type=EntityType.DOMAIN, value="example.com"),
-        source="urn:ati:source:google_public_dns",
-        retrieved_at=_RETRIEVED_AT,
+def converted_factory() -> ConvertedEvidence:
+    """Build a deterministic valid global ConvertedEvidence."""
+    identity = uuid4()
+    return ConvertedEvidence(
+        evidence=Evidence(
+            id=identity,
+            type=EvidenceType.DNS,
+            source="urn:ati:source:threatfox",
+            source_record_id=f"rec-{identity}",
+        ),
+        observation=EvidenceObservationCandidate(
+            evidence_id=identity,
+            retrieved_at=_RETRIEVED_AT,
+            facts={},
+        ),
     )
 
 
@@ -383,7 +492,9 @@ async def test_operations_commit_exactly_once(
     evidence_unit = factory.configure(FakeUnitOfWork())
     evidence_unit.investigations.visible = state_factory()
     evidence_unit.investigations.visible.investigation_id = investigation_id
-    await investigation_service.record_evidence(evidence_factory(investigation_id))
+    await investigation_service.record_evidence(
+        converted_factory(), investigation_id=investigation_id
+    )
 
     assert evidence_unit.commits == 1
     # Repositories never own the transaction lifecycle: only the UnitOfWork
@@ -533,67 +644,75 @@ async def test_stale_expected_version_conflict_rolls_back(
 async def test_record_evidence_appends_observation_and_audit(
     service: tuple[InvestigationPersistenceService, FakeUnitOfWorkFactory],
 ) -> None:
-    """LegacyEvidence records for an existing investigation with its audit event."""
+    """A global observation records for an existing investigation with admission."""
     investigation_service, factory = service
     investigation_id = uuid4()
     unit = factory.configure(FakeUnitOfWork())
     unit.investigations.visible = state_factory()
     unit.investigations.visible.investigation_id = investigation_id
-    evidence = evidence_factory(investigation_id)
+    converted = converted_factory()
 
-    recorded = await investigation_service.record_evidence(evidence, actor_id=uuid4())
+    recorded = await investigation_service.record_evidence(
+        converted, investigation_id=investigation_id, actor_id=uuid4()
+    )
 
-    assert recorded.id is not None
+    assert isinstance(recorded, EvidencePersistenceResult)
+    assert recorded.observation.id is not None
     assert unit.commits == 1
+    # Exact admission of the observation into the Investigation.
+    assert recorded.observation.id in (
+        unit.investigation_evidence.admissions.get(investigation_id, set())
+    )
     event = unit.audit_events.events[0]
     assert event.action == AuditAction.EVIDENCE_RECORD
-    assert event.object_type == "evidence"
-    assert event.object_id == recorded.id
-    assert event.metadata == {"investigation_id": str(investigation_id)}
+    assert event.object_type == "evidence_observation"
+    assert event.object_id == recorded.observation.id
+    assert event.metadata["investigation_id"] == str(investigation_id)
 
 
 @pytest.mark.asyncio
 async def test_record_evidence_requires_existing_investigation(
     service: tuple[InvestigationPersistenceService, FakeUnitOfWorkFactory],
 ) -> None:
-    """LegacyEvidence for an unknown investigation is rejected without mutation."""
+    """A global observation for an unknown investigation is rejected unharmed."""
     investigation_service, factory = service
     unit = factory.configure(FakeUnitOfWork())
-    evidence = evidence_factory()
+    converted = converted_factory()
 
     with pytest.raises(InvestigationNotFoundError):
-        await investigation_service.record_evidence(evidence)
+        await investigation_service.record_evidence(converted, investigation_id=uuid4())
 
     assert unit.evidence.calls == []
     assert unit.rollbacks == 1
 
 
 @pytest.mark.asyncio
-async def test_duplicate_evidence_identity_propagates_typed_error(
+async def test_stable_metadata_conflict_propagates_typed_error(
     service: tuple[InvestigationPersistenceService, FakeUnitOfWorkFactory],
 ) -> None:
-    """A duplicate evidence identity never becomes an update."""
+    """A stable Evidence metadata conflict never becomes an update."""
     investigation_service, factory = service
     unit = factory.configure(FakeUnitOfWork())
     unit.investigations.visible = state_factory()
-    unit.evidence.insert_error = EvidenceDuplicateIdentityError(uuid4())
-    evidence = evidence_factory(unit.investigations.visible.investigation_id)
+    unit.evidence.metadata_conflict = EvidenceMetadataConflictError(uuid4())
+    converted = converted_factory()
 
-    with pytest.raises(EvidenceDuplicateIdentityError):
-        await investigation_service.record_evidence(evidence)
+    with pytest.raises(EvidenceMetadataConflictError):
+        await investigation_service.record_evidence(
+            converted,
+            investigation_id=unit.investigations.visible.investigation_id,
+        )
 
     assert unit.commits == 0 and unit.rollbacks == 1
 
 
 def test_malformed_evidence_rejected_before_repository_mutation() -> None:
-    """Timezone-naive evidence timestamps are rejected at the domain boundary."""
+    """Timezone-naive observation timestamps are rejected at the domain boundary."""
     with pytest.raises(ValidationError, match="timezone-aware"):
-        LegacyEvidence(
-            investigation_id=uuid4(),
-            type=EvidenceType.DNS,
-            subject=EntityRef(type=EntityType.DOMAIN, value="example.com"),
-            source="urn:ati:source:google_public_dns",
+        EvidenceObservationCandidate(
+            evidence_id=uuid4(),
             retrieved_at=datetime(2026, 1, 2, 3, 4, 5),
+            facts={},
         )
 
 

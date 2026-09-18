@@ -77,7 +77,7 @@ def observation_item(
         observation_id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         entity_id=ENTITY,
         location=location_ref(),
-        evidence_id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        evidence_observation_id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
         precision=LocationPrecision.CITY,
         resolution_method="canonical_geography_v1",
         observed_at=observed_at,
@@ -240,13 +240,13 @@ def test_q07_observation_item_preserves_exact_provenance() -> None:
     """G26D-Q07 observation items retain exact observation/evidence IDs."""
     item = observation_item()
     assert item.observation_id == UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-    assert item.evidence_id == UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    assert item.evidence_observation_id == UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
     assert item.entity_id == ENTITY
     assert item.location.location_id == LOCATION
     assert item.precision is LocationPrecision.CITY
     payload = item.model_dump(mode="json")
     assert payload["observation_id"] == str(item.observation_id)
-    assert payload["evidence_id"] == str(item.evidence_id)
+    assert payload["evidence_observation_id"] == str(item.evidence_observation_id)
     for forbidden in ("facts", "raw_payload", "geometry"):
         assert forbidden not in payload
 
@@ -268,8 +268,8 @@ def test_q08_entity_current_is_explicitly_investigation_relative() -> None:
     )
     payload = item.model_dump(mode="json")
     assert payload["entity_id"] == str(ENTITY)
-    assert payload["current_observation"]["evidence_id"] == str(
-        item.current_observation.evidence_id
+    assert payload["current_observation"]["evidence_observation_id"] == str(
+        item.current_observation.evidence_observation_id
     )
     for global_state_field in (
         "version",
@@ -324,7 +324,7 @@ def _row(**values: object) -> dict[str, object]:
     base: dict[str, object] = {
         "observation_id": uuid4(),
         "entity_id": ENTITY,
-        "evidence_id": uuid4(),
+        "evidence_observation_id": uuid4(),
         "precision": "city",
         "resolution_method": "canonical_geography_v1",
         "observed_at": None,
@@ -366,7 +366,7 @@ def test_q10_malformed_persisted_mapping_fails_closed() -> None:
     with pytest.raises(GeointReadError):
         geoint_observation_item_from_row(_row(retrieved_at=None))
     with pytest.raises(GeointReadError):
-        geoint_observation_item_from_row(_row(evidence_id="not-a-uuid"))
+        geoint_observation_item_from_row(_row(evidence_observation_id="not-a-uuid"))
     with pytest.raises(GeointReadError):
         geoint_entity_location_item_from_row(_row(entity_type="bogus"))
     with pytest.raises(GeointReadError):
@@ -378,7 +378,7 @@ def test_q10_malformed_persisted_mapping_fails_closed() -> None:
     assert "raw_payload" not in item.model_dump()
     # A valid row maps cleanly through every pure mapper.
     assert geoint_location_ref_from_row(_row()).canonical_name == "United States"
-    assert geoint_observation_item_from_row(_row()).evidence_id is not None
+    assert geoint_observation_item_from_row(_row()).evidence_observation_id is not None
     assert geoint_entity_location_item_from_row(_row()).entity_id == ENTITY
     assert (
         geoint_observation_detail_from_row(_row()).entity_type is EntityType.IP_ADDRESS

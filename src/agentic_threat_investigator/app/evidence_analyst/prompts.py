@@ -58,8 +58,8 @@ Rules:
   typed orchestration decision, not a restatement of the verdict.
 - Unresolved uncertainty becomes limitations and unresolved questions.
 - Geographic context records are supplied factual context: exact
-  observation_id/evidence_id pairs are the only geographic support
-  identities; never manufacture or substitute them.
+  observation_id/evidence_observation_id pairs are the only geographic
+  support identities; never manufacture or substitute them.
 - Same city/country/coordinate, containment, or visual/spatial proximity
   never establishes a cyber relationship, common ownership, campaign
   membership, coordination, targeting, or attribution.
@@ -153,7 +153,7 @@ def _render_geoint_observation(
     lines = [
         f"{indent}observation_id: {dump['observation_id']}",
         f"{indent}entity_id: {dump['entity_id']}",
-        f"{indent}evidence_id: {dump['evidence_id']}",
+        f"{indent}evidence_observation_id: {dump['evidence_observation_id']}",
         f"{indent}location: location_id={location['location_id']} "
         f"type={location['location_type']} "
         f"canonical_name={location['canonical_location_name']!r} "
@@ -223,7 +223,7 @@ def _render_geoint_context(context: AnalystGeointContext) -> str:
     """Render the delimited bounded GEOINT context section.
 
     The section renders only what the deterministic policy selected; every
-    listed observation carries its exact observation_id/evidence_id pair,
+    listed observation carries its exact observation_id/evidence_observation_id pair,
     and bounded incompleteness is explicit through the summary_truncated and
     has_more_history flags.
     """

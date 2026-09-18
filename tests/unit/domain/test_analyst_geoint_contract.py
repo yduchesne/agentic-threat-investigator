@@ -74,7 +74,7 @@ def geographic_finding(
     *,
     kind: GeographicFindingKind = GeographicFindingKind.SHARED_LOCATION,
     observation_ids: tuple[UUID, ...] | None = None,
-    evidence_ids: tuple[UUID, ...] | None = None,
+    evidence_observation_ids: tuple[UUID, ...] | None = None,
     entity_ids: tuple[UUID, ...] | None = None,
     location_ids: tuple[UUID, ...] | None = None,
 ) -> GeographicFinding:
@@ -85,7 +85,11 @@ def geographic_finding(
         kind=kind,
         statement="Both entities were observed in the same city.",
         observation_ids=(first, second) if observation_ids is None else observation_ids,
-        evidence_ids=(first, second) if evidence_ids is None else evidence_ids,
+        evidence_observation_ids=(
+            (first, second)
+            if evidence_observation_ids is None
+            else evidence_observation_ids
+        ),
         entity_ids=(first, second) if entity_ids is None else entity_ids,
         location_ids=(first,) if location_ids is None else location_ids,
         temporal_interpretation=(
@@ -155,7 +159,7 @@ def test_g26f_s04_unsupported_kind_rejected() -> None:
 def test_g26f_s05_empty_support_rejected() -> None:
     """G26F-S05 empty geographic support collections are rejected."""
     with pytest.raises(ValidationError, match="must not be empty"):
-        geographic_finding(observation_ids=(), evidence_ids=())
+        geographic_finding(observation_ids=(), evidence_observation_ids=())
 
 
 def test_g26f_s06_duplicate_support_rejected() -> None:
@@ -163,7 +167,7 @@ def test_g26f_s06_duplicate_support_rejected() -> None:
     shared = uuid4()
     with pytest.raises(ValidationError, match="duplicates"):
         geographic_finding(
-            observation_ids=(shared, shared), evidence_ids=(shared, shared)
+            observation_ids=(shared, shared), evidence_observation_ids=(shared, shared)
         )
 
 
@@ -172,7 +176,7 @@ def test_g26f_s07_serialization_is_stable_json() -> None:
     data = context(entities=(entity_context(),))
     dumped = data.model_dump_json()
     assert '"observation_id"' in dumped
-    assert '"evidence_id"' in dumped
+    assert '"evidence_observation_id"' in dumped
     assert '"precision"' in dumped
     assert '"location"' in dumped
     assert "latitude" not in dumped  # representative coordinates never enter context
@@ -183,13 +187,13 @@ def test_g26f_s08_collection_bounds_enforced() -> None:
     """G26F-S08 finding support collections are hard-bounded."""
     many = tuple(uuid4() for _ in range(26))
     with pytest.raises(ValidationError, match="exceeds the maximum"):
-        geographic_finding(observation_ids=many, evidence_ids=many)
+        geographic_finding(observation_ids=many, evidence_observation_ids=many)
 
 
 def test_parallel_evidence_lists_must_match_length() -> None:
     """Observation and Evidence lists are parallel with equal length."""
     with pytest.raises(ValidationError, match="parallel"):
-        geographic_finding(evidence_ids=(uuid4(),))
+        geographic_finding(evidence_observation_ids=(uuid4(),))
 
 
 def test_context_rejects_repeated_entity_and_foreign_observation() -> None:

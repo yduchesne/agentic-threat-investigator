@@ -14,7 +14,8 @@ from httpx import MockTransport
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.google_dns import (
     _NUMERIC_TO_RR_TYPE,
     GooglePublicDnsProvider,
@@ -138,7 +139,7 @@ class TestGoogleDnsContract:
 
             assert result.provider == "urn:ati:source:google_public_dns"
             assert len(result.evidence) == 1
-            ev = result.evidence[0]
+            ev = _legacy(result.evidence[0])
             assert ev.type == EvidenceType.DNS
             assert ev.investigation_id == _FIXED_UUID
             assert ev.subject.value == "example.com"
@@ -179,7 +180,10 @@ class TestGoogleDnsContract:
             entity = Entity(type=EntityType.DOMAIN, value="example.com")
             result = await provider.investigate(_FIXED_UUID, entity)
             assert len(result.evidence) == 1
-            assert result.evidence[0].facts["answers"][0]["value"] == "2001:db8::1"
+            assert (
+                _legacy(result.evidence[0]).facts["answers"][0]["value"]
+                == "2001:db8::1"
+            )
 
     async def test_cname_mx_ns_txt_soa_records(self) -> None:
         """CNAME, MX, NS, TXT, and SOA records are strictly parsed and normalized."""
@@ -219,14 +223,22 @@ class TestGoogleDnsContract:
             )
             entity = Entity(type=EntityType.DOMAIN, value="example.com")
             result = await provider.investigate(_FIXED_UUID, entity)
-            types_found = {e.facts["query_type"] for e in result.evidence}
+            types_found = {_legacy(e).facts["query_type"] for e in result.evidence}
             assert types_found == {"CNAME", "MX", "NS", "TXT", "SOA"}
 
-            mx_ev = next(e for e in result.evidence if e.facts["query_type"] == "MX")
+            mx_ev = next(
+                _legacy(e)
+                for e in result.evidence
+                if _legacy(e).facts["query_type"] == "MX"
+            )
             assert mx_ev.facts["answers"][0]["preference"] == 10
             assert mx_ev.facts["answers"][0]["exchange"] == "mail.example.com"
 
-            soa_ev = next(e for e in result.evidence if e.facts["query_type"] == "SOA")
+            soa_ev = next(
+                _legacy(e)
+                for e in result.evidence
+                if _legacy(e).facts["query_type"] == "SOA"
+            )
             soa_ans = soa_ev.facts["answers"][0]
             assert soa_ans["mname"] == "ns1.example"
             assert soa_ans["rname"] == "admin.example"
@@ -254,8 +266,11 @@ class TestGoogleDnsContract:
             result = await provider.investigate(_FIXED_UUID, entity)
             assert requested_name == "42.100.51.198.in-addr.arpa"
             assert len(result.evidence) == 1
-            assert result.evidence[0].facts["query_type"] == "PTR"
-            assert result.evidence[0].facts["answers"][0]["value"] == "host.example.com"
+            assert _legacy(result.evidence[0]).facts["query_type"] == "PTR"
+            assert (
+                _legacy(result.evidence[0]).facts["answers"][0]["value"]
+                == "host.example.com"
+            )
 
     async def test_idna_domain_canonicalization(self) -> None:
         """Internationalized domain names are converted to Punycode before I/O."""
@@ -526,7 +541,7 @@ class TestGoogleDnsContract:
             assert any(
                 e.code == ProviderErrorCode.PROVIDER_UNAVAILABLE for e in result.errors
             )
-            assert result.evidence[0].source == result.provider
+            assert _legacy(result.evidence[0]).source == result.provider
 
     async def test_wrong_content_type_returns_invalid_response(self) -> None:
         """A successful non-DNS JSON media type is rejected."""
@@ -910,8 +925,8 @@ class TestGoogleDnsValidation:
                 _FIXED_UUID, Entity(type=EntityType.DOMAIN, value="example.com")
             )
         assert len(result.evidence) == 1
-        assert result.evidence[0].facts["query_type"] == "A"
-        answers = result.evidence[0].facts["answers"]
+        assert _legacy(result.evidence[0]).facts["query_type"] == "A"
+        answers = _legacy(result.evidence[0]).facts["answers"]
         assert [answer["record_type"] for answer in answers] == ["CNAME", "A"]
         assert answers[0]["value"] == "alias.example.com"
         assert answers[1]["value"] == "192.0.2.7"
@@ -942,8 +957,11 @@ class TestGoogleDnsValidation:
         )
         assert requested_name == expected_ptr
         assert len(result.evidence) == 1
-        assert result.evidence[0].facts["query_type"] == "PTR"
-        assert result.evidence[0].facts["answers"][0]["value"] == "host.example.com"
+        assert _legacy(result.evidence[0]).facts["query_type"] == "PTR"
+        assert (
+            _legacy(result.evidence[0]).facts["answers"][0]["value"]
+            == "host.example.com"
+        )
 
     async def test_facts_deep_immutable(self) -> None:
         """Nested fact mutation attempts fail; evidence facts are deeply immutable."""
@@ -965,10 +983,16 @@ class TestGoogleDnsValidation:
             result = await provider.investigate(
                 _FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value="192.0.2.1")
             )
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.raw_payload is None
         assert isinstance(evidence.facts["answers"], tuple)
         with pytest.raises(TypeError):
             evidence.facts["query_type"] = "mutated"
         with pytest.raises(TypeError):
             evidence.facts["flags"]["rd"] = False
+
+
+def _legacy(item: ConvertedEvidence | LegacyEvidence) -> LegacyEvidence:
+    """Narrow one legacy-provider output item to its transitional shape."""
+    assert isinstance(item, LegacyEvidence)
+    return item

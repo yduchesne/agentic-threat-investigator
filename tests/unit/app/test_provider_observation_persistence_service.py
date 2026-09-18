@@ -1,9 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Unit tests for the provider-observation persistence service boundary.
+"""Unit tests for the provider-observation persistence service boundary (PR 28B).
 
 Fakes replace every repository and the UnitOfWork, proving that preflight
 performs zero database work, that repositories never own the transaction
 lifecycle, and that every failure path rolls the whole observation back.
+The fake Evidence storage models the PR 28B global contract: stable
+Evidence, per-Evidence ordered observations, material no-op, append on
+material change, explicit observation/Entity pairs, and Investigation
+admissions.
 """
 
 # Fixture arguments intentionally reuse fixture names, and the fake
@@ -29,8 +34,11 @@ from agentic_threat_investigator.app.persistence.repositories import (
     AuditEventRepository,
     BatchOutcome,
     EntityRepository,
-    EvidenceDuplicateIdentityError,
+    EvidenceObservationEntityRepository,
+    EvidencePersistenceOutcome,
+    EvidencePersistenceResult,
     EvidenceRepository,
+    InvestigationEvidenceRepository,
     InvestigationNotFoundError,
     InvestigationRepository,
     InvestigationWriteResult,
@@ -45,14 +53,23 @@ from agentic_threat_investigator.app.provider_observation_persistence import (
 )
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservation,
+    EvidenceObservationCandidate,
+    EvidenceObservationEntity,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -62,6 +79,7 @@ from agentic_threat_investigator.domain.relationships import (
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 _SUBJECT_VALUE = "malicious-domain.test"
 _IP_VALUE = "203.0.113.42"
+_SOURCE = "urn:ati:source:threatfox"
 
 
 def entity_builder(
@@ -71,43 +89,76 @@ def entity_builder(
     return ExtractedEntity(type=entity_type, value=value, display_name=display_name)
 
 
-def dns_extraction(evidence_id: UUID | None) -> ExtractionResult:
-    """Build the canonical DNS extraction for the fixture LegacyEvidence."""
-    assert evidence_id is not None  # callers build persisted LegacyEvidence
+def threatfox_extraction() -> ExtractionResult:
+    """Build the canonical ThreatFox extraction for the global fixture."""
     return ExtractionResult(
-        entities=(entity_builder(EntityType.IP_ADDRESS, _IP_VALUE),),
+        entities=(entity_builder(EntityType.MALWARE, "win.asyncrat"),),
         relationships=(
             RelationshipAssertion(
-                source=EntityIdentity(type=EntityType.DOMAIN, value=_SUBJECT_VALUE),
-                type=RelationshipType.RESOLVES_TO,
-                target=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
-                evidence_id=evidence_id,
+                source=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
+                type=RelationshipType.ASSOCIATED_WITH,
+                target=EntityIdentity(type=EntityType.MALWARE, value="win.asyncrat"),
             ),
         ),
     )
 
 
-def evidence_builder(**overrides: object) -> LegacyEvidence:
-    """Build a deterministic canonical LegacyEvidence observation."""
-    values: dict[str, object] = {
-        "id": uuid4(),
-        "investigation_id": uuid4(),
-        "type": EvidenceType.DNS,
-        "subject": EntityRef(type=EntityType.DOMAIN, value=_SUBJECT_VALUE),
-        "source": "urn:ati:source:google_public_dns",
-        "observed_at": None,
-        "retrieved_at": _RETRIEVED_AT,
-        "facts": {"answers": [_IP_VALUE], "status": 0},
-        "raw_payload": None,
-    }
-    values.update(overrides)
-    return LegacyEvidence(**values)  # type: ignore[arg-type]
+def dns_extraction() -> ExtractionResult:
+    """Build the canonical DNS extraction for a global DNS fixture."""
+    return ExtractionResult(
+        entities=(
+            entity_builder(EntityType.DOMAIN, _SUBJECT_VALUE),
+            entity_builder(EntityType.IP_ADDRESS, _IP_VALUE),
+        ),
+        relationships=(
+            RelationshipAssertion(
+                source=EntityIdentity(type=EntityType.DOMAIN, value=_SUBJECT_VALUE),
+                type=RelationshipType.RESOLVES_TO,
+                target=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
+            ),
+        ),
+    )
 
 
-def require_id(evidence: LegacyEvidence) -> UUID:
-    """Narrow the optional LegacyEvidence identity for assertion construction."""
-    assert evidence.id is not None  # builders always set one
-    return evidence.id
+def converted_evidence(
+    *,
+    evidence_id: UUID | None = None,
+    source: str = _SOURCE,
+    evidence_type: EvidenceType = EvidenceType.THREAT_INTELLIGENCE,
+    facts: dict[str, object] | None = None,
+    observed_at: datetime | None = None,
+    retrieved_at: datetime | None = None,
+    source_record_id: str | None = None,
+) -> ConvertedEvidence:
+    """Build one deterministic global ConvertedEvidence.
+
+    Stable Evidence never carries Investigation, subject, observation
+    timestamps, facts, or payload.
+    """
+    identity = evidence_id if evidence_id is not None else uuid4()
+    evidence = Evidence(
+        id=identity,
+        type=evidence_type,
+        source=source,
+        source_record_id=(
+            source_record_id if source_record_id is not None else f"rec-{identity}"
+        ),
+    )
+    candidate = EvidenceObservationCandidate(
+        evidence_id=identity,
+        observed_at=observed_at,
+        retrieved_at=retrieved_at if retrieved_at is not None else _RETRIEVED_AT,
+        facts=facts
+        if facts is not None
+        else {"matches": [{"malware": "win.asyncrat"}]},
+        raw_payload=None,
+    )
+    return ConvertedEvidence(evidence=evidence, observation=candidate)
+
+
+def invitation_entity() -> Entity:
+    """Build the authoritative provider invocation target entity."""
+    return Entity(type=EntityType.IP_ADDRESS, value=_IP_VALUE)
 
 
 class FakeEntityRepository(EntityRepository):
@@ -118,6 +169,13 @@ class FakeEntityRepository(EntityRepository):
         self.upsert_calls: list[Entity] = []
         self.get_calls: list[tuple[str, str]] = []
         self.fail_on_identity: tuple[EntityType, str] | None = None
+        self.undo_actions: list[Callable[[], None]] = []
+
+    def undo(self) -> None:
+        """Undo every mutation recorded by this fake."""
+        for action in reversed(self.undo_actions):
+            action()
+        self.undo_actions.clear()
 
     async def get_by_identity(
         self, entity_type: str, canonical_value: str, *, include_deleted: bool = False
@@ -158,7 +216,16 @@ class FakeEntityRepository(EntityRepository):
         written = entity.model_copy(
             update={"id": entity.id or uuid4(), "version": version}
         )
+        previous = self.rows.get(key)
         self.rows[key] = written
+
+        def _undo() -> None:
+            if previous is None:
+                self.rows.pop(key, None)
+            else:
+                self.rows[key] = previous
+
+        self.undo_actions.append(_undo)
         return written.model_copy()
 
     async def upsert_batch(self, items: Sequence[object]) -> list[object]:  # type: ignore[override]
@@ -180,6 +247,13 @@ class FakeRelationshipRepository(RelationshipRepository):
         self.rows: dict[tuple[UUID, RelationshipType, UUID], Relationship] = {}
         self.upsert_calls: list[Relationship] = []
         self.fail = False
+        self.undo_actions: list[Callable[[], None]] = []
+
+    def undo(self) -> None:
+        """Undo every mutation recorded by this fake."""
+        for action in reversed(self.undo_actions):
+            action()
+        self.undo_actions.clear()
 
     async def get_by_identity(
         self,
@@ -216,6 +290,11 @@ class FakeRelationshipRepository(RelationshipRepository):
         if existing is not None:
             return existing
         self.rows[key] = relationship
+
+        def _undo() -> None:
+            self.rows.pop(key, None)
+
+        self.undo_actions.append(_undo)
         return relationship
 
     async def soft_delete(self, relationship_id: UUID, **_: object) -> Relationship:
@@ -231,6 +310,13 @@ class FakeObservationRepository(RelationshipObservationRepository):
     def __init__(self) -> None:
         self.rows: list[RelationshipObservation] = []
         self.fail = False
+        self.undo_actions: list[Callable[[], None]] = []
+
+    def undo(self) -> None:
+        """Undo every mutation recorded by this fake."""
+        for action in reversed(self.undo_actions):
+            action()
+        self.undo_actions.clear()
 
     async def append(
         self, observation: RelationshipObservation
@@ -238,6 +324,11 @@ class FakeObservationRepository(RelationshipObservationRepository):
         if self.fail:
             raise RuntimeError("injected observation failure")
         self.rows.append(observation)
+
+        def _undo() -> None:
+            self.rows.remove(observation)
+
+        self.undo_actions.append(_undo)
         return observation
 
     async def list_for_investigation(
@@ -250,43 +341,235 @@ class FakeObservationRepository(RelationshipObservationRepository):
         raise NotImplementedError
 
     async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
-        """Return the immutable observation with the given identity, if any."""
         return next((row for row in self.rows if row.id == observation_id), None)
 
 
+def _material_equal(
+    observation: EvidenceObservation, candidate: EvidenceObservationCandidate
+) -> bool:
+    """Return whether the persisted observation and the candidate have equal
+    material state (observed_at/source_url/facts/raw_payload)."""
+    return (
+        observation.observed_at == candidate.observed_at
+        and observation.source_url == candidate.source_url
+        and observation.facts == candidate.facts
+        and observation.raw_payload == candidate.raw_payload
+    )
+
+
 class FakeEvidenceRepository(EvidenceRepository):
-    """Append-only evidence fake with duplicate and failure seams."""
+    """Global Evidence fake modeling CREATED/UNCHANGED/APPENDED."""
 
     def __init__(self) -> None:
-        self.existing_ids: set[UUID] = set()
-        self.inserted: list[LegacyEvidence] = []
-        self.calls: list[tuple[UUID | None, UUID | None]] = []
+        self.stable: dict[UUID, Evidence] = {}
+        self.observations: dict[UUID, EvidenceObservation] = {}
+        self.by_evidence: dict[UUID, list[UUID]] = {}
+        self.persist_calls: list[ConvertedEvidence] = []
         self.fail = False
+        self.undo_actions: list[Callable[[], None]] = []
 
-    async def insert(
-        self,
-        evidence: LegacyEvidence,
-        *,
-        actor_id: UUID | None = None,
-        request_id: UUID | None = None,
-    ) -> LegacyEvidence:
-        assert evidence.id is not None  # preflight guarantees it
-        self.calls.append((actor_id, request_id))
+    def undo(self) -> None:
+        """Undo every mutation recorded by this fake (transaction rollback)."""
+        for action in reversed(self.undo_actions):
+            action()
+        self.undo_actions.clear()
+
+    def _track_created(self, evidence_id: UUID, observation_id: UUID) -> None:
+        stable = self.stable
+        observations = self.observations
+
+        def undo() -> None:
+            observations.pop(observation_id, None)
+            by_evidence = self.by_evidence.get(evidence_id, [])
+            if observation_id in by_evidence:
+                by_evidence.remove(observation_id)
+            if not by_evidence:
+                self.by_evidence.pop(evidence_id, None)
+                stable.pop(evidence_id, None)
+
+        self.undo_actions.append(undo)
+
+    async def persist(
+        self, converted: ConvertedEvidence, *, observation_id: UUID | None = None
+    ) -> EvidencePersistenceResult:
+        self.persist_calls.append(converted)
         if self.fail:
             raise RuntimeError("injected evidence failure")
-        if evidence.id in self.existing_ids:
-            raise EvidenceDuplicateIdentityError(evidence.id)
-        self.existing_ids.add(evidence.id)
-        self.inserted.append(evidence)
-        return evidence
+        evidence_id = converted.evidence.id
+        if evidence_id in self.stable:
+            existing = self.stable[evidence_id]
+            if (
+                existing.type is not converted.evidence.type
+                or existing.source != converted.evidence.source
+                or existing.source_record_id != converted.evidence.source_record_id
+            ):
+                from agentic_threat_investigator.app.persistence.repositories import (
+                    EvidenceMetadataConflictError,
+                )
 
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
-        return next((e for e in self.inserted if e.id == evidence_id), None)
+                raise EvidenceMetadataConflictError(evidence_id)
+        if evidence_id not in self.stable:
+            self.stable[evidence_id] = converted.evidence
+            version = 1
+            identity = observation_id if observation_id is not None else uuid4()
+            observation = EvidenceObservation(
+                id=identity,
+                evidence_id=evidence_id,
+                version=version,
+                source_url=converted.observation.source_url,
+                observed_at=converted.observation.observed_at,
+                retrieved_at=converted.observation.retrieved_at,
+                facts=converted.observation.facts,
+                raw_payload=converted.observation.raw_payload,
+                diff=None,
+            )
+            self.observations[identity] = observation
+            self.by_evidence[evidence_id] = [identity]
+            self._track_created(evidence_id, identity)
+            from agentic_threat_investigator.app.persistence.repositories import (
+                EvidencePersistenceResult,
+            )
+
+            return EvidencePersistenceResult(
+                evidence=converted.evidence,
+                observation=observation,
+                outcome=EvidencePersistenceOutcome.CREATED,
+                version=1,
+            )
+        latest_id = self.by_evidence[evidence_id][-1]
+        latest = self.observations[latest_id]
+        if _material_equal(latest, converted.observation):
+            from agentic_threat_investigator.app.persistence.repositories import (
+                EvidencePersistenceResult,
+            )
+
+            return EvidencePersistenceResult(
+                evidence=converted.evidence,
+                observation=latest,
+                outcome=EvidencePersistenceOutcome.UNCHANGED,
+                version=latest.version,
+            )
+        identity = uuid4()
+        observation = EvidenceObservation(
+            id=identity,
+            evidence_id=evidence_id,
+            version=latest.version + 1,
+            source_url=converted.observation.source_url,
+            observed_at=converted.observation.observed_at,
+            retrieved_at=converted.observation.retrieved_at,
+            facts=converted.observation.facts,
+            raw_payload=converted.observation.raw_payload,
+            diff={"changed": True},
+        )
+        self.observations[identity] = observation
+        self.by_evidence[evidence_id].append(identity)
+        self._track_created(evidence_id, identity)
+        from agentic_threat_investigator.app.persistence.repositories import (
+            EvidencePersistenceResult,
+        )
+
+        return EvidencePersistenceResult(
+            evidence=converted.evidence,
+            observation=observation,
+            outcome=EvidencePersistenceOutcome.APPENDED,
+            version=observation.version,
+        )
+
+    async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
+        return self.stable.get(evidence_id)
+
+    async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
+        return self.observations.get(observation_id)
+
+    async def list_observations(
+        self,
+        evidence_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
+        ids = self.by_evidence.get(evidence_id, [])
+        return [self.observations[i] for i in ids[offset : offset + limit]]
 
     async def list_for_investigation(
-        self, investigation_id: UUID, *, limit: int = 100, offset: int = 0
-    ) -> list[LegacyEvidence]:
-        return [e for e in self.inserted if e.investigation_id == investigation_id]
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvidenceObservation]:
+        raise NotImplementedError
+
+
+class FakeEvidenceObservationEntityRepository(EvidenceObservationEntityRepository):
+    """Observation/Entity association fake with deduplication."""
+
+    def __init__(self) -> None:
+        self.pairs: set[tuple[UUID, UUID]] = set()
+        self.associate_calls: list[tuple[UUID, UUID]] = []
+
+    async def associate(
+        self, observation_id: UUID, entity_id: UUID
+    ) -> EvidenceObservationEntity:
+        self.associate_calls.append((observation_id, entity_id))
+        self.pairs.add((observation_id, entity_id))
+        return EvidenceObservationEntity(
+            evidence_observation_id=observation_id, entity_id=entity_id
+        )
+
+    async def list_for_observation(
+        self, observation_id: UUID
+    ) -> list[EvidenceObservationEntity]:
+        return [
+            EvidenceObservationEntity(
+                evidence_observation_id=observation_id, entity_id=entity_id
+            )
+            for (obs, entity_id) in sorted(self.pairs)
+            if obs == observation_id
+        ]
+
+
+class FakeInvestigationEvidenceRepository(InvestigationEvidenceRepository):
+    """Exact admission fake with an injected failure seam."""
+
+    def __init__(self) -> None:
+        self.admissions: dict[UUID, set[UUID]] = {}
+        self.admit_calls: list[InvestigationEvidence] = []
+        self.fail = False
+        self.undo_actions: list[Callable[[], None]] = []
+
+    def undo(self) -> None:
+        """Undo every mutation recorded by this fake."""
+        for action in reversed(self.undo_actions):
+            action()
+        self.undo_actions.clear()
+
+    async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
+        self.admit_calls.append(admission)
+        if self.fail:
+            raise RuntimeError("injected admission failure")
+        bucket = self.admissions.setdefault(admission.investigation_id, set())
+        bucket.add(admission.evidence_observation_id)
+
+        def _undo() -> None:
+            bucket.discard(admission.evidence_observation_id)
+
+        self.undo_actions.append(_undo)
+        return admission
+
+    async def list_for_investigation(
+        self, investigation_id: UUID
+    ) -> list[InvestigationEvidence]:
+        return [
+            InvestigationEvidence(
+                investigation_id=investigation_id,
+                evidence_observation_id=observation_id,
+                inclusion_reason=InvestigationEvidenceReason.PROVIDER_RESULT,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
+            )
+            for observation_id in sorted(self.admissions.get(investigation_id, set()))
+        ]
 
 
 class FakeInvestigationRepository(InvestigationRepository):
@@ -385,16 +668,28 @@ class FakeInvestigationRepository(InvestigationRepository):
 
 
 class FakeAuditRepository(AuditEventRepository):
-    """Audit fake with an injected failure seam."""
+    """Append-only audit fake with an injected failure seam."""
 
     def __init__(self) -> None:
         self.events: list[AuditEvent] = []
         self.fail = False
+        self.undo_actions: list[Callable[[], None]] = []
+
+    def undo(self) -> None:
+        """Undo every mutation recorded by this fake."""
+        for action in reversed(self.undo_actions):
+            action()
+        self.undo_actions.clear()
 
     async def append(self, event: AuditEvent) -> AuditEvent:
         if self.fail:
             raise RuntimeError("injected audit failure")
         self.events.append(event)
+
+        def _undo() -> None:
+            self.events.remove(event)
+
+        self.undo_actions.append(_undo)
         return event
 
     async def list_events(self, **_: object) -> list[AuditEvent]:
@@ -411,6 +706,8 @@ class FakeUnitOfWork(UnitOfWork):
         relationships: FakeRelationshipRepository,
         relationship_observations: FakeObservationRepository,
         evidence: FakeEvidenceRepository,
+        evidence_observation_entities: FakeEvidenceObservationEntityRepository,
+        investigation_evidence: FakeInvestigationEvidenceRepository,
         investigations: FakeInvestigationRepository,
         audit_events: FakeAuditRepository,
     ) -> None:
@@ -420,16 +717,38 @@ class FakeUnitOfWork(UnitOfWork):
             relationship_observations
         )
         self.evidence: EvidenceRepository = evidence
+        self.evidence_observation_entities: EvidenceObservationEntityRepository = (
+            evidence_observation_entities
+        )
+        self.investigation_evidence: InvestigationEvidenceRepository = (
+            investigation_evidence
+        )
         self.investigations: InvestigationRepository = investigations
         self.audit_events: AuditEventRepository = audit_events
         self.entered = 0
         self.committed = 0
         self.rolled_back = 0
         self.active = False
+        self._undoables: list[object] = [
+            entities,
+            relationships,
+            relationship_observations,
+            evidence,
+            evidence_observation_entities,
+            investigation_evidence,
+            audit_events,
+        ]
 
     async def __aenter__(self) -> Self:
         self.entered += 1
         self.active = True
+        # Each transaction starts with a clean journal: prior committed
+        # mutations are durable in the fake and must not be undone by a
+        # later rollback.
+        for undoable in self._undoables:
+            undo_journal = getattr(undoable, "undo_actions", None)
+            if undo_journal is not None:
+                undo_journal.clear()
         return self
 
     async def __aexit__(
@@ -442,6 +761,10 @@ class FakeUnitOfWork(UnitOfWork):
         if exc_type is None:
             self.committed += 1
         else:
+            for undoable in reversed(self._undoables):
+                undo = getattr(undoable, "undo", None)
+                if undo is not None:
+                    undo()
             self.rolled_back += 1
 
     async def commit(self) -> None:
@@ -460,6 +783,8 @@ class FakeParts:
     relationships: FakeRelationshipRepository
     observations: FakeObservationRepository
     evidence: FakeEvidenceRepository
+    evidence_observation_entities: FakeEvidenceObservationEntityRepository
+    investigation_evidence: FakeInvestigationEvidenceRepository
     investigations: FakeInvestigationRepository
     audit: FakeAuditRepository
 
@@ -470,6 +795,8 @@ class FakeParts:
         relationships = FakeRelationshipRepository()
         observations = FakeObservationRepository()
         evidence = FakeEvidenceRepository()
+        evidence_observation_entities = FakeEvidenceObservationEntityRepository()
+        investigation_evidence = FakeInvestigationEvidenceRepository()
         investigations = FakeInvestigationRepository({investigation_id})
         audit = FakeAuditRepository()
         uow = FakeUnitOfWork(
@@ -477,6 +804,8 @@ class FakeParts:
             relationships=relationships,
             relationship_observations=observations,
             evidence=evidence,
+            evidence_observation_entities=evidence_observation_entities,
+            investigation_evidence=investigation_evidence,
             investigations=investigations,
             audit_events=audit,
         )
@@ -486,6 +815,8 @@ class FakeParts:
             relationships=relationships,
             observations=observations,
             evidence=evidence,
+            evidence_observation_entities=evidence_observation_entities,
+            investigation_evidence=investigation_evidence,
             investigations=investigations,
             audit=audit,
         )
@@ -499,28 +830,33 @@ class FakeParts:
         return ProviderObservationPersistenceService(self.factory())
 
 
+async def _persist(
+    parts: FakeParts,
+    converted: ConvertedEvidence | None = None,
+    extraction: ExtractionResult | None = None,
+) -> ProviderObservationPersistenceResult:
+    """Run the service over one global fixture in the fake world."""
+    investigation_id = next(iter(parts.investigations.visible))
+    return await parts.service().persist(
+        converted if converted is not None else converted_evidence(),
+        invitation_entity(),
+        extraction if extraction is not None else threatfox_extraction(),
+        investigation_id=investigation_id,
+    )
+
+
 @pytest.mark.asyncio
 async def test_preflight_failures_never_enter_the_unit_of_work() -> None:
     """Every preflight failure happens before any UnitOfWork is created."""
-    evidence = evidence_builder(id=None)
     scenarios = [
-        (evidence, dns_extraction(uuid4())),  # evidence id missing
         (
-            evidence_builder(
-                subject=EntityRef(
-                    type=EntityType.DOMAIN, value="Malicious-Domain.Test."
-                )
-            ),
-            ExtractionResult(),
-        ),  # non-canonical subject
-        (
-            evidence_builder(),
+            converted_evidence(),
             ExtractionResult(
                 entities=(entity_builder(EntityType.DOMAIN, "Not.Canonical"),)
             ),
         ),  # non-canonical extracted entity
         (
-            evidence_builder(),
+            converted_evidence(),
             ExtractionResult(
                 entities=(
                     entity_builder(EntityType.IP_ADDRESS, _IP_VALUE),
@@ -529,24 +865,7 @@ async def test_preflight_failures_never_enter_the_unit_of_work() -> None:
             ),
         ),  # duplicate extracted entity
         (
-            evidence_builder(),
-            ExtractionResult(
-                relationships=(
-                    RelationshipAssertion(
-                        source=EntityIdentity(
-                            type=EntityType.DOMAIN, value=_SUBJECT_VALUE
-                        ),
-                        type=RelationshipType.RESOLVES_TO,
-                        target=EntityIdentity(
-                            type=EntityType.IP_ADDRESS, value=_IP_VALUE
-                        ),
-                        evidence_id=uuid4(),
-                    ),
-                )
-            ),
-        ),  # assertion evidence id mismatch
-        (
-            evidence_builder(),
+            converted_evidence(),
             ExtractionResult(
                 relationships=(
                     RelationshipAssertion(
@@ -557,18 +876,45 @@ async def test_preflight_failures_never_enter_the_unit_of_work() -> None:
                         target=EntityIdentity(
                             type=EntityType.DOMAIN, value="uncovered.test"
                         ),
-                        evidence_id=uuid4(),
                     ),
                 )
             ),
         ),  # endpoint not covered
+        (
+            converted_evidence(),
+            ExtractionResult(
+                relationships=(
+                    RelationshipAssertion(
+                        source=EntityIdentity(
+                            type=EntityType.DOMAIN, value=_SUBJECT_VALUE
+                        ),
+                        type=RelationshipType.RESOLVES_TO,
+                        target=EntityIdentity(
+                            type=EntityType.DOMAIN, value=_SUBJECT_VALUE
+                        ),
+                    ),
+                    RelationshipAssertion(
+                        source=EntityIdentity(
+                            type=EntityType.DOMAIN, value=_SUBJECT_VALUE
+                        ),
+                        type=RelationshipType.RESOLVES_TO,
+                        target=EntityIdentity(
+                            type=EntityType.DOMAIN, value=_SUBJECT_VALUE
+                        ),
+                    ),
+                )
+            ),
+        ),  # duplicate assertion
     ]
-    for scenario_evidence, extraction in scenarios:
-        investigation_id = scenario_evidence.investigation_id
-        parts = FakeParts.build(investigation_id)
-        service = ProviderObservationPersistenceService(parts.factory())
+    for fixture_converted, extraction in scenarios:
+        parts = FakeParts.build(uuid4())
         with pytest.raises(ValueError):
-            await service.persist(scenario_evidence, extraction)
+            await parts.service().persist(
+                fixture_converted,
+                invitation_entity(),
+                extraction,
+                investigation_id=next(iter(parts.investigations.visible)),
+            )
         assert parts.uow.entered == 0
         assert not parts.entities.get_calls
 
@@ -576,201 +922,260 @@ async def test_preflight_failures_never_enter_the_unit_of_work() -> None:
 @pytest.mark.asyncio
 async def test_duplicate_assertion_is_rejected_in_preflight() -> None:
     """Duplicate assertions never reach the database; PR 18B output is deduplicated."""
-    evidence = evidence_builder()
+    converted = converted_evidence()
     assertion = RelationshipAssertion(
-        source=EntityIdentity(type=EntityType.DOMAIN, value=_SUBJECT_VALUE),
-        type=RelationshipType.RESOLVES_TO,
-        target=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
-        evidence_id=require_id(evidence),
+        source=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
+        type=RelationshipType.ASSOCIATED_WITH,
+        target=EntityIdentity(type=EntityType.MALWARE, value="win.asyncrat"),
     )
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
+    parts = FakeParts.build(uuid4())
     with pytest.raises(ValueError, match="duplicate relationship assertion"):
-        await service.persist(
-            evidence,
+        await parts.service().persist(
+            converted,
+            invitation_entity(),
             ExtractionResult(
-                entities=(entity_builder(EntityType.IP_ADDRESS, _IP_VALUE),),
+                entities=(entity_builder(EntityType.MALWARE, "win.asyncrat"),),
                 relationships=(assertion, assertion),
             ),
+            investigation_id=next(iter(parts.investigations.visible)),
         )
     assert parts.uow.entered == 0
 
 
 @pytest.mark.asyncio
-async def test_new_observation_persists_the_complete_graph_once() -> None:
-    """A successful observation commits exactly once with durable identities."""
-    evidence = evidence_builder()
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
-    result = await service.persist(evidence, dns_extraction(evidence.id))
+async def test_b2_p01_first_state_creates_complete_graph_once() -> None:
+    """B2-P01: a successful first observation persists exactly once."""
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    result = await _persist(parts, converted, threatfox_extraction())
 
     assert parts.uow.committed == 1
     assert parts.uow.rolled_back == 0
-    assert result.evidence.id == evidence.id
-    assert [e.type for e in result.entities] == [
-        EntityType.DOMAIN,
-        EntityType.IP_ADDRESS,
-    ]
+    assert isinstance(result, ProviderObservationPersistenceResult)
+    assert result.evidence.id == converted.evidence.id
+    assert result.observation.evidence_id == converted.evidence.id
+    assert result.observation.version == 1
+    assert result.outcome is EvidencePersistenceOutcome.CREATED
+    assert len(result.entities) == 2
     assert len(result.relationships) == 1
     assert len(result.observations) == 1
-    assert result.observations[0].evidence_observation_id == evidence.id
+    assert result.observations[0].evidence_observation_id == result.observation.id
     assert result.observations[0].relationship_id == result.relationships[0].id
-    assert result.observations[0].source == evidence.source
+    # Exact admission of the observation into the Investigation.
+    admitted = parts.investigation_evidence.admissions[
+        next(iter(parts.investigations.visible))
+    ]
+    assert result.observation.id in admitted
+    # Observation-level Entity associations (invocation target + discovered).
+    associated = {
+        entity_id
+        for (obs, entity_id) in parts.evidence_observation_entities.pairs
+        if obs == result.observation.id
+    }
+    assert len(associated) == 2
     assert len(parts.audit.events) == 1
-    assert parts.audit.events[0].object_id == evidence.id
+    assert parts.audit.events[0].object_id == result.observation.id
 
 
 @pytest.mark.asyncio
-async def test_existing_subject_reuses_identity_and_retains_metadata() -> None:
+async def test_b2_p02_unchanged_reuses_existing_observation() -> None:
+    """B2-P02: an unchanged material state reuses the existing observation."""
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    first = await _persist(parts, converted, threatfox_extraction())
+    second = await _persist(parts, converted, threatfox_extraction())
+
+    assert second.outcome is EvidencePersistenceOutcome.UNCHANGED
+    assert second.observation.id == first.observation.id
+    assert second.observation.version == 1
+    assert len(parts.evidence.observations) == 1
+    assert parts.uow.committed == 2
+
+
+@pytest.mark.asyncio
+async def test_b2_p03_changed_appends_exact_new_observation() -> None:
+    """B2-P03: a material change appends the exact next observation version."""
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    first = await _persist(parts, converted, threatfox_extraction())
+    changed = converted.model_copy(
+        update={
+            "observation": converted.observation.model_copy(
+                update={"facts": {"matches": [{"malware": "win.trojan2"}]}}
+            )
+        }
+    )
+    second = await _persist(parts, changed, threatfox_extraction())
+
+    assert second.outcome is EvidencePersistenceOutcome.APPENDED
+    assert second.observation.id != first.observation.id
+    assert second.observation.version == 2
+    assert second.observation.evidence_id == converted.evidence.id
+    assert len(parts.evidence.observations) == 2
+    assert parts.evidence.observations[first.observation.id].version == 1
+
+
+@pytest.mark.asyncio
+async def test_b2_p04_unchanged_does_not_duplicate_relationship_observations() -> None:
+    """B2-P04: unchanged state does not duplicate global RelationshipObservations."""
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    await _persist(parts, converted, threatfox_extraction())
+    await _persist(parts, converted, threatfox_extraction())
+
+    assert len(parts.observations.rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_b2_p05_same_observation_two_investigations_admission_only() -> None:
+    """B2-P05: a shared observation is admitted into a second Investigation."""
+    first_investigation = uuid4()
+    parts = FakeParts.build(first_investigation)
+    converted = converted_evidence()
+    await parts.service().persist(
+        converted,
+        invitation_entity(),
+        threatfox_extraction(),
+        investigation_id=first_investigation,
+    )
+    second_investigation = uuid4()
+    parts.investigations.visible.add(second_investigation)
+    await parts.service().persist(
+        converted,
+        invitation_entity(),
+        threatfox_extraction(),
+        investigation_id=second_investigation,
+    )
+
+    # One global observation and one global relationship observation.
+    assert len(parts.evidence.observations) == 1
+    assert len(parts.observations.rows) == 1
+    # Two exact admissions.
+    assert first_investigation in parts.investigation_evidence.admissions
+    assert second_investigation in parts.investigation_evidence.admissions
+
+
+@pytest.mark.asyncio
+async def test_b2_p06_entity_associations_exact_and_deduplicated() -> None:
+    """B2-P06: entities associate exactly once per observation (no roles)."""
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    await _persist(parts, converted, threatfox_extraction())
+
+    associated_calls = parts.evidence_observation_entities.associate_calls
+    obs_id = next(iter(parts.evidence.observations))
+    entity_ids = {entity_id for (obs, entity_id) in associated_calls if obs == obs_id}
+    # Invocation target IP + discovered MALWARE.
+    assert len(entity_ids) == 2
+    # No duplicate pairs.
+    assert len(set(associated_calls)) == len(associated_calls)
+
+
+@pytest.mark.asyncio
+async def test_existing_entity_reuses_identity_and_retains_metadata() -> None:
     """Existing entities are reused; stored display metadata is retained."""
-    evidence = evidence_builder()
-    parts = FakeParts.build(evidence.investigation_id)
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
     entities: FakeEntityRepository = parts.entities
-    stored = await entities.upsert(
-        Entity(type=EntityType.DOMAIN, value=_SUBJECT_VALUE, display_name="Stored Name")
+    malware = await entities.upsert(
+        Entity(
+            type=EntityType.MALWARE,
+            value="win.asyncrat",
+            display_name="AsyncRAT",
+        )
     )
     entities.upsert_calls.clear()
-    service = ProviderObservationPersistenceService(parts.factory())
-    result = await service.persist(evidence, dns_extraction(evidence.id))
+    result = await _persist(parts, converted, threatfox_extraction())
 
-    subject_entity = next(e for e in result.entities if e.value == _SUBJECT_VALUE)
-    assert subject_entity.id == stored.id
-    assert subject_entity.display_name == "Stored Name"
-    # Re-persisting identical metadata must not version-bump the identity.
-    assert entities.rows[(EntityType.DOMAIN, _SUBJECT_VALUE)].version == 1
-
-
-@pytest.mark.asyncio
-async def test_discovered_subject_display_metadata_is_not_lost() -> None:
-    """When the subject and a discovery share an identity, discovery metadata wins."""
-    evidence = evidence_builder()
-    extraction = ExtractionResult(
-        entities=(
-            entity_builder(
-                EntityType.DOMAIN, _SUBJECT_VALUE, display_name="Discovered"
-            ),
-            entity_builder(EntityType.IP_ADDRESS, _IP_VALUE),
-        ),
-        relationships=(
-            RelationshipAssertion(
-                source=EntityIdentity(type=EntityType.DOMAIN, value=_SUBJECT_VALUE),
-                type=RelationshipType.RESOLVES_TO,
-                target=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
-                evidence_id=require_id(evidence),
-            ),
-        ),
-    )
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
-    result = await service.persist(evidence, extraction)
-    subject_entity = next(e for e in result.entities if e.value == _SUBJECT_VALUE)
-    assert subject_entity.display_name == "Discovered"
-
-
-@pytest.mark.asyncio
-async def test_supplied_display_metadata_follows_extraction() -> None:
-    """A supplied extraction display name is passed to the entity upsert."""
-    evidence = evidence_builder(
-        subject=EntityRef(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
-        type=EvidenceType.THREAT_INTELLIGENCE,
-        source="urn:ati:source:threatfox",
-        facts={
-            "matches": [{"malware": "win.asyncrat", "malware_printable": "AsyncRAT"}]
-        },
-    )
-    extraction = ExtractionResult(
-        entities=(
-            entity_builder(EntityType.MALWARE, "win.asyncrat", display_name="AsyncRAT"),
-        ),
-        relationships=(
-            RelationshipAssertion(
-                source=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
-                type=RelationshipType.ASSOCIATED_WITH,
-                target=EntityIdentity(type=EntityType.MALWARE, value="win.asyncrat"),
-                evidence_id=require_id(evidence),
-            ),
-        ),
-    )
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
-    result = await service.persist(evidence, extraction)
-    malware = next(e for e in result.entities if e.type is EntityType.MALWARE)
-    assert malware.display_name == "AsyncRAT"
+    persisted_malware = next(e for e in result.entities if e.value == "win.asyncrat")
+    assert persisted_malware.id == malware.id
+    assert persisted_malware.display_name == "AsyncRAT"
+    assert entities.rows[(EntityType.MALWARE, "win.asyncrat")].version == 1
 
 
 @pytest.mark.asyncio
 async def test_empty_extraction_persists_evidence_only() -> None:
-    """An empty extraction still persists the LegacyEvidence and its audit event."""
-    evidence = evidence_builder()
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
-    result = await service.persist(evidence, ExtractionResult())
-    assert result.evidence.id == evidence.id
+    """An empty extraction still persists the observation and its audit event."""
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    result = await _persist(parts, converted, ExtractionResult())
+
+    assert result.observation.evidence_id == converted.evidence.id
     assert result.relationships == ()
     assert result.observations == ()
-    assert len(result.entities) == 1
+    assert len(result.entities) == 1  # only the invocation target
     assert parts.uow.committed == 1
+    stored_obs_id = next(iter(parts.evidence.observations))
+    assert result.observation.id == stored_obs_id
     assert len(parts.audit.events) == 1
 
 
 @pytest.mark.asyncio
 async def test_existing_relationship_is_reused_with_new_observation() -> None:
     """A repeated edge reuses the stable relationship and appends one observation."""
-    evidence = evidence_builder()
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
-    first = await service.persist(evidence, dns_extraction(evidence.id))
-
-    second_evidence = evidence_builder(
-        investigation_id=evidence.investigation_id,
-        facts={"answers": [_IP_VALUE], "status": 0},
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    first = await _persist(parts, converted, threatfox_extraction())
+    changed = converted.model_copy(
+        update={
+            "observation": converted.observation.model_copy(
+                update={"observed_at": datetime(2026, 2, 1, 0, 0, tzinfo=UTC)}
+            )
+        }
     )
     relationships: FakeRelationshipRepository = parts.relationships
     relationships.upsert_calls.clear()
-    second = await service.persist(
-        second_evidence, dns_extraction(require_id(second_evidence))
-    )
+    second = await _persist(parts, changed, threatfox_extraction())
 
+    assert second.outcome is EvidencePersistenceOutcome.APPENDED
     assert second.relationships[0].id == first.relationships[0].id
     assert len(relationships.upsert_calls) == 1
-    assert second.observations[0].evidence_observation_id == second_evidence.id
+    assert second.observations[0].evidence_observation_id == second.observation.id
     assert second.observations[0].relationship_id == first.relationships[0].id
 
 
 @pytest.mark.asyncio
 async def test_assertions_are_persisted_in_deterministic_order() -> None:
     """Assertion writes follow the stable identity ordering, not input order."""
-    evidence = evidence_builder()
+    converted = converted_evidence()
     second_ip = "198.51.100.7"
     assertions = (
         RelationshipAssertion(
             source=EntityIdentity(type=EntityType.DOMAIN, value=_SUBJECT_VALUE),
             type=RelationshipType.RESOLVES_TO,
             target=EntityIdentity(type=EntityType.IP_ADDRESS, value=second_ip),
-            evidence_id=require_id(evidence),
         ),
         RelationshipAssertion(
             source=EntityIdentity(type=EntityType.DOMAIN, value=_SUBJECT_VALUE),
             type=RelationshipType.RESOLVES_TO,
             target=EntityIdentity(type=EntityType.IP_ADDRESS, value=_IP_VALUE),
-            evidence_id=require_id(evidence),
         ),
     )
     extraction = ExtractionResult(
         entities=(
+            entity_builder(EntityType.DOMAIN, _SUBJECT_VALUE),
             entity_builder(EntityType.IP_ADDRESS, second_ip),
             entity_builder(EntityType.IP_ADDRESS, _IP_VALUE),
         ),
         relationships=assertions,
     )
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
-    result = await service.persist(evidence, extraction)
+    converted_dns = converted_evidence(
+        evidence_type=EvidenceType.DNS, source="urn:ati:source:threatfox"
+    )
+    parts = FakeParts.build(uuid4())
+    # DNS-shaped extraction but the stable source stays the fixture source.
+    result = await parts.service().persist(
+        converted,
+        Entity(type=EntityType.DOMAIN, value=_SUBJECT_VALUE),
+        extraction,
+        investigation_id=next(iter(parts.investigations.visible)),
+    )
     # Stable ordering is by canonical target value, not by input order.
     assert [r.target_entity_id for r in result.relationships] == [
         _entity_id(result, EntityType.IP_ADDRESS, second_ip),
         _entity_id(result, EntityType.IP_ADDRESS, _IP_VALUE),
     ]
+    del converted_dns
 
 
 def _entity_id(
@@ -788,25 +1193,25 @@ def _entity_id(
 
 @pytest.mark.asyncio
 async def test_duplicate_evidence_conflicts_and_rolls_back() -> None:
-    """A replayed LegacyEvidence ID is a typed conflict with full rollback."""
-    evidence = evidence_builder()
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
-    await service.persist(evidence, dns_extraction(evidence.id))
+    """A replayed Evidence identity with conflicting stable metadata rolls back."""
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    await _persist(parts, converted, threatfox_extraction())
 
-    replay = evidence_builder(
-        id=evidence.id, investigation_id=evidence.investigation_id
+    conflicting = converted_evidence(
+        evidence_id=converted.evidence.id,
+        source_record_id="different-record",
     )
-    with pytest.raises(EvidenceDuplicateIdentityError):
-        await service.persist(replay, dns_extraction(require_id(replay)))
+    with pytest.raises(ValueError):
+        await parts.service().persist(
+            conflicting,
+            invitation_entity(),
+            threatfox_extraction(),
+            investigation_id=next(iter(parts.investigations.visible)),
+        )
     assert parts.uow.rolled_back == 1
-    observations: FakeObservationRepository = parts.observations
-    # No new observation may be appended by the replay, and the original
-    # observation from the first successful persist remains intact.
-    assert len(observations.rows) == 1
-    assert observations.rows[0].evidence_observation_id == evidence.id
-    inserted_with_replay_id = [e for e in parts.evidence.inserted if e.id == replay.id]
-    assert len(inserted_with_replay_id) == 1
+    # No new observation or relationship provenance from the conflict.
+    assert len(parts.observations.rows) == 1
 
 
 @pytest.mark.asyncio
@@ -817,6 +1222,7 @@ async def test_duplicate_evidence_conflicts_and_rolls_back() -> None:
         ("evidence", "evidence"),
         ("relationship", "relationship"),
         ("observation", "observation"),
+        ("admission", "admission"),
         ("audit", "audit"),
     ],
 )
@@ -825,24 +1231,27 @@ async def test_injected_failure_at_each_stage_rolls_back(
 ) -> None:
     """A failure after any mutation stage rolls the whole observation back."""
     assert seam == expected_stage
-    evidence = evidence_builder()
-    parts = FakeParts.build(evidence.investigation_id)
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
     if seam == "entity":
-        parts.entities.fail_on_identity = (
-            EntityType.DOMAIN,
-            _SUBJECT_VALUE,
-        )
+        parts.entities.fail_on_identity = (EntityType.MALWARE, "win.asyncrat")
     elif seam == "evidence":
         parts.evidence.fail = True
     elif seam == "relationship":
         parts.relationships.fail = True
     elif seam == "observation":
         parts.observations.fail = True
+    elif seam == "admission":
+        parts.investigation_evidence.fail = True
     else:
         parts.audit.fail = True
-    service = ProviderObservationPersistenceService(parts.factory())
     with pytest.raises(RuntimeError, match="injected"):
-        await service.persist(evidence, dns_extraction(evidence.id))
+        await parts.service().persist(
+            converted,
+            invitation_entity(),
+            threatfox_extraction(),
+            investigation_id=next(iter(parts.investigations.visible)),
+        )
     assert parts.uow.committed == 0
     assert parts.uow.rolled_back == 1
 
@@ -850,41 +1259,47 @@ async def test_injected_failure_at_each_stage_rolls_back(
 @pytest.mark.asyncio
 async def test_missing_investigation_is_a_typed_error_without_graph_work() -> None:
     """A missing investigation is rejected before any entity mutation."""
-    evidence = evidence_builder()
+    converted = converted_evidence()
     parts = FakeParts.build(uuid4())  # no visible investigation
-    service = ProviderObservationPersistenceService(parts.factory())
     with pytest.raises(InvestigationNotFoundError):
-        await service.persist(evidence, dns_extraction(evidence.id))
+        await parts.service().persist(
+            converted,
+            invitation_entity(),
+            threatfox_extraction(),
+            investigation_id=uuid4(),
+        )
     assert parts.uow.rolled_back == 1
     assert not parts.entities.upsert_calls
-    assert not parts.evidence.inserted
+    assert not parts.evidence.observations
 
 
 @pytest.mark.asyncio
 async def test_soft_deleted_entity_is_a_fail_closed_error() -> None:
     """Rediscovery of a soft-deleted entity raises the typed policy error."""
-    evidence = evidence_builder()
-    parts = FakeParts.build(evidence.investigation_id)
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
     entities: FakeEntityRepository = parts.entities
     existing = await entities.upsert(
-        Entity(type=EntityType.IP_ADDRESS, value=_IP_VALUE)
+        Entity(type=EntityType.MALWARE, value="win.asyncrat")
     )
     assert existing.id is not None  # the fake assigns IDs
     await entities.soft_delete(existing.id)
     entities.upsert_calls.clear()
-    service = ProviderObservationPersistenceService(parts.factory())
     with pytest.raises(SoftDeletedIdentityError):
-        await service.persist(evidence, dns_extraction(evidence.id))
+        await parts.service().persist(
+            converted,
+            invitation_entity(),
+            threatfox_extraction(),
+            investigation_id=next(iter(parts.investigations.visible)),
+        )
     assert parts.uow.rolled_back == 1
-    assert not parts.evidence.inserted
-    assert entities.rows[(EntityType.IP_ADDRESS, _IP_VALUE)].deleted_at is not None
+    assert len(parts.evidence.observations) == 0
+    assert entities.rows[(EntityType.MALWARE, "win.asyncrat")].deleted_at is not None
 
 
 @pytest.mark.asyncio
 async def test_soft_deleted_relationship_is_a_fail_closed_error() -> None:
     """Rediscovery of a soft-deleted relationship raises the typed policy error."""
-    evidence = evidence_builder()
-    parts = FakeParts.build(evidence.investigation_id)
 
     class SoftDeletedRelationships(FakeRelationshipRepository):
         """Simulate the database rejecting a soft-deleted edge rediscovery."""
@@ -894,13 +1309,17 @@ async def test_soft_deleted_relationship_is_a_fail_closed_error() -> None:
         ) -> Relationship:
             raise SoftDeletedIdentityError("relationship", relationship.id)
 
+    converted = converted_evidence()
+    first_parts = FakeParts.build(uuid4())
     failing_uow = FakeUnitOfWork(
-        entities=parts.entities,
+        entities=first_parts.entities,
         relationships=SoftDeletedRelationships(),
-        relationship_observations=parts.observations,
-        evidence=parts.evidence,
-        investigations=parts.investigations,
-        audit_events=parts.audit,
+        relationship_observations=first_parts.observations,
+        evidence=first_parts.evidence,
+        evidence_observation_entities=first_parts.evidence_observation_entities,
+        investigation_evidence=first_parts.investigation_evidence,
+        investigations=first_parts.investigations,
+        audit_events=first_parts.audit,
     )
 
     def factory() -> FakeUnitOfWork:
@@ -908,23 +1327,69 @@ async def test_soft_deleted_relationship_is_a_fail_closed_error() -> None:
 
     service = ProviderObservationPersistenceService(factory)
     with pytest.raises(SoftDeletedIdentityError):
-        await service.persist(evidence, dns_extraction(evidence.id))
+        await service.persist(
+            converted,
+            invitation_entity(),
+            threatfox_extraction(),
+            investigation_id=next(iter(first_parts.investigations.visible)),
+        )
     assert failing_uow.rolled_back == 1
-    assert parts.uow.committed == 0
+    assert first_parts.uow.committed == 0
 
 
 @pytest.mark.asyncio
 async def test_actor_and_request_correlation_is_propagated() -> None:
-    """Actor and request identifiers reach the evidence write and the audit event."""
-    evidence = evidence_builder()
+    """Actor and request identifiers reach the audit event on the observation."""
+    converted = converted_evidence()
     actor_id, request_id = uuid4(), uuid4()
-    parts = FakeParts.build(evidence.investigation_id)
-    service = ProviderObservationPersistenceService(parts.factory())
-    await service.persist(
-        evidence, dns_extraction(evidence.id), actor_id=actor_id, request_id=request_id
+    parts = FakeParts.build(uuid4())
+    investigation_id = next(iter(parts.investigations.visible))
+    await parts.service().persist(
+        converted,
+        invitation_entity(),
+        threatfox_extraction(),
+        investigation_id=investigation_id,
+        actor_id=actor_id,
+        request_id=request_id,
     )
-    assert parts.evidence.calls == [(actor_id, request_id)]
     audit_event = parts.audit.events[0]
     assert audit_event.actor_id == actor_id
     assert audit_event.request_id == request_id
     assert audit_event.outcome is AuditOutcome.SUCCESS
+    assert "outcome" in audit_event.metadata
+
+
+@pytest.mark.asyncio
+async def test_b2_p10_cancellation_propagates_and_rolls_back() -> None:
+    """B2-P10: cancellation propagates and the active UoW rolls back."""
+
+    class CancellingEntityRepository(FakeEntityRepository):
+        async def upsert(
+            self, entity: Entity, *, expected_version: int | None = None
+        ) -> Entity:
+            raise asyncio.CancelledError()
+
+    import asyncio
+
+    converted = converted_evidence()
+    parts = FakeParts.build(uuid4())
+    uow = FakeUnitOfWork(
+        entities=CancellingEntityRepository(),
+        relationships=parts.relationships,
+        relationship_observations=parts.observations,
+        evidence=parts.evidence,
+        evidence_observation_entities=parts.evidence_observation_entities,
+        investigation_evidence=parts.investigation_evidence,
+        investigations=parts.investigations,
+        audit_events=parts.audit,
+    )
+    service = ProviderObservationPersistenceService(lambda: uow)
+    with pytest.raises(asyncio.CancelledError):
+        await service.persist(
+            converted,
+            invitation_entity(),
+            threatfox_extraction(),
+            investigation_id=next(iter(parts.investigations.visible)),
+        )
+    assert uow.rolled_back == 1
+    assert uow.committed == 0

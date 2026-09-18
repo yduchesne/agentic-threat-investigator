@@ -114,7 +114,7 @@ def _render_observation(
         f"RelationshipObservation {ordinal} "
         f"[label RO-{dump['relationship_observation_id']}]",
         f"  relationship_observation_id: {dump['relationship_observation_id']}",
-        f"  evidence_id: {dump['evidence_id']}",
+        f"  evidence_observation_id: {dump['evidence_observation_id']}",
         f"  relationship_id: {dump['relationship_id']}",
         f"  relationship_type: {dump['relationship_type']}",
         f"  source_entity: {_render_entity_value(observation.source_entity)}",

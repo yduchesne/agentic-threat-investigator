@@ -45,7 +45,7 @@ def _city_facts() -> dict[str, Any]:
 def _item_kwargs(**overrides: Any) -> dict[str, Any]:
     """Return one valid InvestigationGeolocationItem keyword set."""
     kwargs: dict[str, Any] = {
-        "evidence_id": uuid4(),
+        "evidence_observation_id": uuid4(),
         "entity_id": uuid4(),
         "ip_address": "203.0.113.10",
         "country_code": "US",
@@ -81,9 +81,9 @@ def test_gq01_valid_fully_mappable_item() -> None:
     """A fully mappable item carries every approved typed field."""
     evidence_id, entity_id = uuid4(), uuid4()
     item = InvestigationGeolocationItem(
-        **_item_kwargs(evidence_id=evidence_id, entity_id=entity_id)
+        **_item_kwargs(evidence_observation_id=evidence_id, entity_id=entity_id)
     )
-    assert item.evidence_id == evidence_id
+    assert item.evidence_observation_id == evidence_id
     assert item.entity_id == entity_id
     assert item.ip_address == "203.0.113.10"
     assert item.country_code == "US"
@@ -276,7 +276,7 @@ def test_gm10_no_provider_arbitrary_facts_escape() -> None:
     """Only the approved fields can ever appear on the read item."""
     item = _mapped(_city_facts())
     assert set(item.model_dump()) == {
-        "evidence_id",
+        "evidence_observation_id",
         "entity_id",
         "ip_address",
         "country_code",

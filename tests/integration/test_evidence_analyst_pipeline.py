@@ -48,7 +48,15 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     AnalysisDisposition,
     InvestigationState,
@@ -56,7 +64,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -109,21 +116,34 @@ class Graph:
         )
         await uow.entities.upsert(source)
         await uow.entities.upsert(target)
-        evidence = LegacyEvidence(
-            id=self.evidence_id,
-            investigation_id=self.investigation_id,
-            type=EvidenceType.DNS,
-            subject=EntityRef(
-                id=self.source_entity_id,
-                type=EntityType.DOMAIN,
-                value=self.subject,
+        _converted = ConvertedEvidence(
+            evidence=Evidence(
+                id=self.evidence_id,
+                type=EvidenceType.DNS,
+                source="urn:ati:source:google_public_dns",
+                source_record_id=f"pipeline-{self.evidence_id}",
             ),
-            source="urn:ati:source:google_public_dns",
-            retrieved_at=_RETRIEVED_AT,
-            facts={"a_records": [self.target_value]},
-            raw_payload={"http_headers": {"x-test-secret": "never-show"}},
+            observation=EvidenceObservationCandidate(
+                evidence_id=self.evidence_id,
+                retrieved_at=_RETRIEVED_AT,
+                facts={"a_records": [self.target_value]},
+                raw_payload={"http_headers": {"x-test-secret": "never-show"}},
+            ),
         )
-        await uow.evidence.insert(evidence)
+        _persisted = await uow.evidence.persist(_converted)
+        self.evidence_id = _persisted.observation.id
+        await uow.evidence_observation_entities.associate(
+            _persisted.observation.id, self.source_entity_id
+        )
+        await uow.investigation_evidence.admit(
+            InvestigationEvidence(
+                investigation_id=self.investigation_id,
+                evidence_observation_id=_persisted.observation.id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
+            )
+        )
         relationship = await uow.relationships.upsert(
             Relationship(
                 id=self.relationship_id,

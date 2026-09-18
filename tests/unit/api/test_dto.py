@@ -28,7 +28,10 @@ from agentic_threat_investigator.app.investigation_submission import (
     SubmissionBoundsError,
     canonical_indicator_identities,
 )
-from agentic_threat_investigator.app.query.evidence import EvidenceListQuery
+from agentic_threat_investigator.app.query.evidence import (
+    EvidenceListQuery,
+    EvidenceReadItem,
+)
 from agentic_threat_investigator.domain.assessment import (
     AnalyticalFinding,
     Assessment,
@@ -39,7 +42,14 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservation,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
@@ -50,7 +60,6 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
@@ -189,20 +198,36 @@ def test_u09_investigation_mapping_omits_internal_fields() -> None:
 
 
 def test_u10_evidence_mapping_omits_raw_payload() -> None:
-    """LegacyEvidence mapping excludes the raw provider payload."""
-    evidence = LegacyEvidence(
-        id=uuid4(),
-        investigation_id=uuid4(),
-        type=EvidenceType.DNS,
-        subject=EntityRef(id=uuid4(), type=EntityType.DOMAIN, value="example.com"),
-        source="urn:ati:source:google_public_dns",
+    """EvidenceObservation mapping excludes the raw provider payload."""
+    observation_id = uuid4()
+    observation = EvidenceObservation(
+        id=observation_id,
+        evidence_id=uuid4(),
+        version=1,
         retrieved_at=datetime(2026, 1, 1, tzinfo=UTC),
         facts={"answers": ["93.184.216.34"]},
         raw_payload={"http_response": {"status": 200, "body": "secret"}},
     )
+    read_item = EvidenceReadItem(
+        observation=observation,
+        evidence=Evidence(
+            id=observation.evidence_id,
+            type=EvidenceType.DNS,
+            source="urn:ati:source:google_public_dns",
+            source_record_id="dto-world",
+        ),
+        entities=(),
+        admission=InvestigationEvidence(
+            investigation_id=uuid4(),
+            evidence_observation_id=observation_id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=datetime(2026, 1, 1, tzinfo=UTC),
+            added_by=InvestigationEvidenceActor.SYSTEM,
+        ),
+    )
     import json
 
-    response = to_evidence_response(evidence)
+    response = to_evidence_response(read_item)
     payload = json.loads(response.model_dump_json())
     assert payload["facts"] == {"answers": ["93.184.216.34"]}
     assert "raw_payload" not in payload

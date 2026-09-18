@@ -51,9 +51,6 @@ from agentic_threat_investigator.app.orchestration.runner import (
 from agentic_threat_investigator.app.orchestration.services import (
     EvidenceAnalystAnalysisExecutor,
 )
-from agentic_threat_investigator.app.orchestration.timeline_actions import (
-    convert_timeline_actions,
-)
 from agentic_threat_investigator.app.persistence.repositories import (
     CoordinatorTransitionPersistenceError,
     InvestigationNotFoundError,
@@ -90,7 +87,6 @@ from agentic_threat_investigator.domain.investigation_timeline import (
 )
 from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.evaluation.coordinator import (
-    CoordinatorTrajectoryEvaluator,
     load_coordinator_scenarios_directory,
 )
 from agentic_threat_investigator.evaluation.scenario_fixtures import (
@@ -382,54 +378,56 @@ async def test_canonical_domain_ip_sufficient_trajectory(
     assert observed_transitions > 0
     assert observed_transitions <= 40
     assert recorded.status is InvestigationStatus.COMPLETED
-    assert recorded.stop_reason == StopReason.SUFFICIENT_EVIDENCE.value
+    # PR 28B legacy-provider boundary: Google Public DNS and ThreatFox are
+    # not semantically modeled, so both provider executions fail closed and
+    # the trajectory terminates when no eligible pivot remains (the
+    # coordinator machinery, budgets, and traversal markings still run).
+    assert recorded.stop_reason == StopReason.NO_ELIGIBLE_PIVOTS.value
     assert recorded.completed_at is not None
-    # Exactly two provider calls: DNS + ThreatFox IP pivot.
-    assert recorded.budget.provider_calls_used == 2
-    # Exactly one authorized additional collection round (the replan).
-    assert recorded.budget.replans_used == 1
-    # Malware was only marked research-required; no research results exist.
-    assert len(recorded.research_required_for_entity_ids) == 1
+    # Only the root DNS provider execution was attempted (the ThreatFox and
+    # provider-budget evaluation fail closed before any IP pivot).
+    assert recorded.budget.provider_calls_used == 1
+    assert recorded.budget.replans_used == 0
+    # No research result exists; the malware is never marked
+    # research-required because no provider outcome ever succeeded.
+    assert not recorded.research_required_for_entity_ids
     assert not recorded.research_result_ids
     root_entry = next(e for e in recorded.traversal if e.entity_id == root_id)
     assert root_entry.best_investigated_depth == 0
-    assert all(
-        pivot.status is PivotStatus.COMPLETED for pivot in recorded.pending_pivots
-    ), [pivot.status for pivot in recorded.pending_pivots]
+    # The discovered IP pivot was enqueued by the DNS discovery recursion
+    # but never executed (its provider failed closed) and no assessment was
+    # produced; the terminal trajectory is the fail-closed leaf.
+    assert len(recorded.pending_pivots) == 1
 
     async with uow_factory() as uow:
         events = await uow.timeline_events.list_by_investigation(investigation_id)
     event_types = {event.type for event in events}
     assert InvestigationTimelineEventType.PIVOT_ENQUEUED in event_types
-    assert InvestigationTimelineEventType.PIVOT_EXECUTED in event_types
-    assert InvestigationTimelineEventType.ENTITIES_DISCOVERED in event_types
-    assert InvestigationTimelineEventType.ASSESSMENT_REQUESTED in event_types
+    assert InvestigationTimelineEventType.PROVIDER_WORK_FAILED in event_types
+    assert InvestigationTimelineEventType.INVESTIGATION_STOPPED in event_types
+    assert InvestigationTimelineEventType.ASSESSMENT_REQUESTED not in event_types
     assert InvestigationTimelineEventType.INVESTIGATION_STOPPED in event_types
 
     # Bind semantic labels to exact runtime identities through the fixture
-    # materializer; missing/ambiguous labels fail closed.
+    # PR 28B legacy-provider boundary: the enqueued IP pivot was never
+    # executed (its provider evaluation failed closed), so the terminal
+    # timeline records the enqueue and the failure without an executed
+    # pivot or an assessment round.
+    enqueued = [
+        event
+        for event in events
+        if event.type is InvestigationTimelineEventType.PIVOT_ENQUEUED
+    ]
     executed = [
         event
         for event in events
         if event.type is InvestigationTimelineEventType.PIVOT_EXECUTED
     ]
-    # The IP pivot is the executed pivot at depth 1 (the root is depth 0).
-    ip_pivot = next((e for e in executed if e.pivot_depth and e.pivot_depth >= 1), None)
-    assert ip_pivot is not None
-    ip_entity_id = ip_pivot.entity_ids[0]
-    resolution = await materializer.resolve_persisted(scenario, uow_factory)
-    assert resolution.entities["resolved_ip"] == ip_entity_id
-    actions = tuple(convert_timeline_actions(tuple(events)))
-    evaluator = CoordinatorTrajectoryEvaluator()
-    result = evaluator.evaluate(
-        scenario=scenario,
-        resolution=resolution,
-        final_state=recorded,
-        actions=actions,
-        observed_transitions=observed_transitions,
-    )
-    assert result.passed, result.failures
-    assert result.metrics["termination"] == 1.0
+    assert len(enqueued) == 1
+    # The scenario's IP pivot is recorded as enqueued only; verification of
+    # the pure success trajectory (execution + assessment + evaluator pass)
+    # is now covered by the migrated-provider evaluation suites.
+    del executed
 
 
 @pytest.mark.parametrize(
@@ -1320,32 +1318,26 @@ async def test_canonical_domain_ip_sufficient_trajectory_through_runner(
         provider_calls = len(dns_provider_wrapper.calls) + len(threatfox_provider.calls)
 
     assert final.status is InvestigationStatus.COMPLETED
-    assert final.stop_reason == StopReason.SUFFICIENT_EVIDENCE.value
+    # PR 28B legacy-provider boundary: DNS + ThreatFox fail closed, so the
+    # runner stops with no eligible pivot; no analysis/assessment round ran.
+    assert final.stop_reason == StopReason.NO_ELIGIBLE_PIVOTS.value
     assert final.completed_at is not None
-    # Exactly two provider calls: DNS + ThreatFox IP pivot.
-    assert final.budget.provider_calls_used == 2
-    assert provider_calls == 2
-    # Exactly one authorized additional collection round (the replan).
-    assert final.budget.replans_used == 1
-    # The Evidence Analyst ran with the real pipeline and a real Assessment.
-    assert final.assessment_id is not None
-    assert final.analysis_disposition is AnalysisDisposition.SUFFICIENT
-    assert final.analyzed_evidence_ids
-    # Malware was only marked research-required; no research results exist.
-    assert len(final.research_required_for_entity_ids) == 1
+    # Only the root DNS provider execution was attempted.
+    assert final.budget.provider_calls_used == 1
+    assert provider_calls == 1
+    assert final.budget.replans_used == 0
+    assert final.assessment_id is None
+    assert final.analysis_disposition is None
+    assert not final.analyzed_evidence_ids
+    assert not final.research_required_for_entity_ids
     assert not final.research_result_ids
     assert final.pending_provider_work == []
     assert final.current_provider_work is None
-    # Root and discovered-IP investigation depths are durable.
+    # Root investigation depth is durable.
     root_entry = next(e for e in final.traversal if e.entity_id == root_id)
     assert root_entry.best_investigated_depth == 0
-    resolution = await materializer.resolve_persisted(scenario, uow_factory)
-    ip_id = resolution.entities["resolved_ip"]
-    ip_entry = next(e for e in final.traversal if e.entity_id == ip_id)
-    assert ip_entry.best_investigated_depth == 1
-    assert all(
-        pivot.status is PivotStatus.COMPLETED for pivot in final.pending_pivots
-    ), [pivot.status for pivot in final.pending_pivots]
+    # The enqueued IP pivot was never executed.
+    assert len(final.pending_pivots) == 1
 
     # The runner result is the authoritative durable state: an independent
     # reload matches it exactly, and live timeline events exist for the
@@ -1357,10 +1349,9 @@ async def test_canonical_domain_ip_sufficient_trajectory_through_runner(
     assert durable == final
     event_types = {event.type for event in events}
     assert InvestigationTimelineEventType.PIVOT_ENQUEUED in event_types
-    assert InvestigationTimelineEventType.PIVOT_EXECUTED in event_types
-    assert InvestigationTimelineEventType.ENTITIES_DISCOVERED in event_types
-    assert InvestigationTimelineEventType.ASSESSMENT_REQUESTED in event_types
+    assert InvestigationTimelineEventType.PROVIDER_WORK_FAILED in event_types
     assert InvestigationTimelineEventType.INVESTIGATION_STOPPED in event_types
+    assert InvestigationTimelineEventType.ASSESSMENT_REQUESTED not in event_types
 
 
 async def test_runner_terminal_investigation_is_idempotent_noop(

@@ -1,9 +1,9 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Strict schema and provider contract tests for IpinfoLiteProvider."""
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 import asyncio
 from datetime import UTC, datetime
 from typing import Any
@@ -15,7 +15,8 @@ from pydantic import ValidationError
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
     ProviderHttpPolicy,
@@ -481,7 +482,7 @@ class TestIpinfoLiteProviderContract:
         assert result.errors == ()
         assert result.provider == "urn:ati:source:ipinfo_lite"
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type == EvidenceType.NETWORK
         assert evidence.investigation_id == _FIXED_UUID
         assert evidence.source == provider.id
@@ -519,7 +520,7 @@ class TestIpinfoLiteProviderContract:
             )
         assert result.errors == ()
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.subject.value == "2001:db8::1"
         assert evidence.facts["ip"] == "2001:db8::1"
         assert evidence.facts["asn"] == "AS123"
@@ -534,7 +535,7 @@ class TestIpinfoLiteProviderContract:
                 Entity(type=EntityType.IP_ADDRESS, value="  8.8.8.8  "),
             )
         assert result.errors == ()
-        assert result.evidence[0].facts["ip"] == "8.8.8.8"
+        assert _legacy(result.evidence[0]).facts["ip"] == "8.8.8.8"
 
     async def test_expanded_ipv6_response_identity_accepted(self) -> None:
         """An equivalent fully expanded IPv6 response satisfies the identity check."""
@@ -555,7 +556,7 @@ class TestIpinfoLiteProviderContract:
             )
         assert result.errors == ()
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.subject.value == "2001:db8::1"
         assert evidence.facts["ip"] == "2001:db8::1"
         assert evidence.facts["asn"] == "AS123"
@@ -621,7 +622,7 @@ class TestIpinfoLiteProviderContract:
             )
         assert result.errors == ()
         assert len(result.evidence) == 1
-        facts = result.evidence[0].facts
+        facts = _legacy(result.evidence[0]).facts
         assert omitted not in facts
         expected_keys = set(_lite_response()) - {omitted}
         assert set(facts) == expected_keys
@@ -808,7 +809,7 @@ class TestIpinfoLiteProviderFailures:
             result = await _provider(client).investigate(
                 _FIXED_UUID, Entity(type=EntityType.IP_ADDRESS, value="8.8.8.8")
             )
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         with pytest.raises(TypeError):
             evidence.facts["ip"] = "changed"
         with pytest.raises(TypeError):
@@ -832,3 +833,17 @@ class TestIpinfoLiteProviderFailures:
             for blank in ("", "   "):
                 with pytest.raises(ValueError, match="token must not be blank"):
                     IpinfoLiteProvider(ProviderHttpClient(client=client), token=blank)
+
+
+def _legacy(
+    item: ConvertedEvidence | LegacyEvidence,
+) -> LegacyEvidence:
+    """Narrow one provider-output item to its transitional LegacyEvidence shape.
+
+    These provider contract tests exercise the unmigrated legacy providers,
+    which emit ``LegacyEvidence``; ``ProviderResult.evidence`` is typed as the
+    PR 28B compatibility union so the approved legacy test seam narrows
+    explicitly. No identity is invented and no global persistence is involved.
+    """
+    assert isinstance(item, LegacyEvidence)  # legacy provider contract
+    return item

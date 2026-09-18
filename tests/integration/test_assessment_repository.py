@@ -49,14 +49,21 @@ from agentic_threat_investigator.domain.audit import (
     AuditOutcome,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -117,20 +124,34 @@ class Graph:
         )
         await uow.entities.upsert(source)
         await uow.entities.upsert(target)
-        await uow.evidence.insert(
-            LegacyEvidence(
+        _rec_converted = ConvertedEvidence(
+            evidence=Evidence(
                 id=self.evidence_id,
-                investigation_id=self.investigation_id,
                 type=EvidenceType.DNS,
-                subject=EntityRef(
-                    id=self.source_entity_id,
-                    type=EntityType.DOMAIN,
-                    value=self.subject,
-                ),
                 source="urn:ati:source:google_public_dns",
+                source_record_id=f"graph-{self.evidence_id}",
+            ),
+            observation=EvidenceObservationCandidate(
+                evidence_id=self.evidence_id,
                 retrieved_at=_RETRIEVED_AT,
+                facts={"a_records": [self.target_value]},
+            ),
+        )
+        _rec_persisted = await uow.evidence.persist(_rec_converted)
+        self.evidence_id = _rec_persisted.observation.id
+        await uow.evidence_observation_entities.associate(
+            _rec_persisted.observation.id, self.source_entity_id
+        )
+        await uow.investigation_evidence.admit(
+            InvestigationEvidence(
+                investigation_id=self.investigation_id,
+                evidence_observation_id=_rec_persisted.observation.id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
             )
         )
+
         if with_observation:
             relationship = Relationship(
                 id=self.relationship_id,
@@ -395,32 +416,47 @@ async def test_cross_investigation_evidence_is_rejected_and_rolls_back(
                 value="elsewhere.example",
             )
         )
-        await uow.evidence.insert(
-            LegacyEvidence(
+        other_converted = ConvertedEvidence(
+            evidence=Evidence(
                 id=other_evidence_id,
-                investigation_id=other_investigation_id,
                 type=EvidenceType.REPUTATION,
-                subject=EntityRef(
-                    id=other_entity_id,
-                    type=EntityType.DOMAIN,
-                    value="elsewhere.example",
-                ),
                 source="urn:ati:source:threatfox",
+                source_record_id=f"other-{other_evidence_id}",
+            ),
+            observation=EvidenceObservationCandidate(
+                evidence_id=other_evidence_id,
                 retrieved_at=_RETRIEVED_AT,
+            ),
+        )
+        other_persisted = await uow.evidence.persist(other_converted)
+        await uow.evidence_observation_entities.associate(
+            other_persisted.observation.id, other_entity_id
+        )
+        await uow.investigation_evidence.admit(
+            InvestigationEvidence(
+                investigation_id=other_investigation_id,
+                evidence_observation_id=other_persisted.observation.id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
             )
         )
+
     service = AssessmentPersistenceService(uow_factory, batch_size=100)
     candidate = Assessment(
         investigation_id=graph.investigation_id,
         verdict=Verdict.SUSPICIOUS,
         confidence=AssessmentConfidence.MEDIUM,
         summary="Cross investigation.",
-        analyzed_evidence_ids=(other_evidence_id,),
+        analyzed_evidence_ids=(other_persisted.observation.id,),
         findings=(
             direct_finding(graph).model_copy(
                 update={
                     "support": (
-                        EvidenceSupport(kind="evidence", evidence_id=other_evidence_id),
+                        EvidenceSupport(
+                            kind="evidence",
+                            evidence_id=other_persisted.observation.id,
+                        ),
                     )
                 }
             ),
@@ -529,25 +565,37 @@ async def test_one_relationship_with_many_observations_round_trip(
         )
         assert edge is not None
         # A second LegacyEvidence observes the same stable relationship.
-        await uow.evidence.insert(
-            LegacyEvidence(
+        second_converted = ConvertedEvidence(
+            evidence=Evidence(
                 id=second_evidence_id,
-                investigation_id=graph.investigation_id,
                 type=EvidenceType.REPUTATION,
-                subject=EntityRef(
-                    id=graph.source_entity_id,
-                    type=EntityType.DOMAIN,
-                    value="example.com",
-                ),
                 source="urn:ati:source:urlhaus",
+                source_record_id=f"second-{second_evidence_id}",
+            ),
+            observation=EvidenceObservationCandidate(
+                evidence_id=second_evidence_id,
                 retrieved_at=_RETRIEVED_AT,
+            ),
+        )
+        second_persisted = await uow.evidence.persist(second_converted)
+        await uow.evidence_observation_entities.associate(
+            second_persisted.observation.id, graph.source_entity_id
+        )
+        await uow.investigation_evidence.admit(
+            InvestigationEvidence(
+                investigation_id=graph.investigation_id,
+                evidence_observation_id=second_persisted.observation.id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
             )
         )
+
         await uow.relationship_observations.append(
             RelationshipObservation(
                 id=second_observation_id,
                 relationship_id=edge.id,
-                evidence_observation_id=second_evidence_id,
+                evidence_observation_id=second_persisted.observation.id,
                 retrieved_at=_RETRIEVED_AT,
                 source="urn:ati:source:urlhaus",
             )
@@ -568,7 +616,10 @@ async def test_one_relationship_with_many_observations_round_trip(
     persisted = await service.persist_assessment(
         assessment_factory(
             graph,
-            analyzed=(graph.evidence_id, second_evidence_id),
+            analyzed=(
+                graph.evidence_id,
+                second_persisted.observation.id,
+            ),
             findings=(
                 graph_finding(graph),
                 second_observation_finding,
@@ -1318,13 +1369,15 @@ async def test_database_rejects_wrong_investigation_observation(
         # Rebind the seeded observation to a different Investigation directly
         # (test-only raw SQL; the app never mutates observations).
         assert uow.session is not None
+        # PR 28B: observation scope comes exclusively from
+        # ati.investigation_evidence admission, so simulating a
+        # cross-Investigation binding means removing the exact admission.
         await uow.session.execute(
             text("""
-                UPDATE ati.relationship_observation
-                SET investigation_id = :other
-                WHERE id = :observation_id
+                DELETE FROM ati.investigation_evidence
+                WHERE evidence_observation_id = :observation_id
             """),
-            {"other": uuid4(), "observation_id": graph.observation_id},
+            {"observation_id": graph.evidence_id},
         )
     candidate = _candidate_with_findings(
         graph, analyzed=(graph.evidence_id,), findings=(graph_finding(graph),)
@@ -1354,25 +1407,39 @@ async def test_database_rejects_substitute_observation_of_same_relationship(
         assert edge is not None
         second_evidence_id = uuid4()
         second_observation_id = uuid4()
-        await uow.evidence.insert(
-            LegacyEvidence(
+        second_evidence_id_converted = ConvertedEvidence(
+            evidence=Evidence(
                 id=second_evidence_id,
-                investigation_id=graph.investigation_id,
                 type=EvidenceType.REPUTATION,
-                subject=EntityRef(
-                    id=graph.source_entity_id,
-                    type=EntityType.DOMAIN,
-                    value="example.com",
-                ),
                 source="urn:ati:source:urlhaus",
+                source_record_id=f"second_evidence_id-{second_evidence_id}",
+            ),
+            observation=EvidenceObservationCandidate(
+                evidence_id=second_evidence_id,
                 retrieved_at=_RETRIEVED_AT,
+            ),
+        )
+        second_evidence_id_persisted = await uow.evidence.persist(
+            second_evidence_id_converted
+        )
+        await uow.evidence_observation_entities.associate(
+            second_evidence_id_persisted.observation.id, graph.source_entity_id
+        )
+        await uow.investigation_evidence.admit(
+            InvestigationEvidence(
+                investigation_id=graph.investigation_id,
+                evidence_observation_id=second_evidence_id_persisted.observation.id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
             )
         )
+
         await uow.relationship_observations.append(
             RelationshipObservation(
                 id=second_observation_id,
                 relationship_id=edge.id,
-                evidence_observation_id=second_evidence_id,
+                evidence_observation_id=second_evidence_id_persisted.observation.id,
                 retrieved_at=_RETRIEVED_AT,
                 source="urn:ati:source:urlhaus",
             )
@@ -1689,21 +1756,35 @@ async def _second_evidence_id(
     """Persist one more LegacyEvidence row in the graph's investigation."""
     second = uuid4()
     async with uow_factory() as uow:
-        await uow.evidence.insert(
-            LegacyEvidence(
+        second_converted = ConvertedEvidence(
+            evidence=Evidence(
                 id=second,
-                investigation_id=graph.investigation_id,
                 type=EvidenceType.DNS,
-                subject=EntityRef(
-                    id=graph.source_entity_id,
-                    type=EntityType.DOMAIN,
-                    value="example.com",
-                ),
                 source="urn:ati:source:google_public_dns",
+                source_record_id=f"second-{second}",
+            ),
+            observation=EvidenceObservationCandidate(
+                evidence_id=second,
                 retrieved_at=_RETRIEVED_AT,
+            ),
+        )
+        second_persisted = await uow.evidence.persist(second_converted)
+        await uow.evidence_observation_entities.associate(
+            second_persisted.observation.id, graph.source_entity_id
+        )
+        await uow.investigation_evidence.admit(
+            InvestigationEvidence(
+                investigation_id=graph.investigation_id,
+                evidence_observation_id=second_persisted.observation.id,
+                inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                added_at=_RETRIEVED_AT,
+                added_by=InvestigationEvidenceActor.SYSTEM,
             )
         )
-    return second
+
+    # Callers reference the exact EvidenceObservation identity (the stable
+    # Evidence id is never analyzed/admitted/supported directly).
+    return second_persisted.observation.id
 
 
 async def _call_append_assessment(

@@ -42,6 +42,7 @@ from agentic_threat_investigator.app.evidence_conversion import (
 )
 from agentic_threat_investigator.app.extraction.extractor import extract
 from agentic_threat_investigator.app.extraction.models import (
+    EvidenceExtractionView,
     ExtractionResult,
 )
 from agentic_threat_investigator.app.investigation_timeline import (
@@ -53,6 +54,9 @@ from agentic_threat_investigator.app.orchestration.provider_executor import (
     UowEntityReader,
 )
 from agentic_threat_investigator.app.persistence import UnitOfWork
+from agentic_threat_investigator.app.persistence.repositories import (
+    EvidencePersistenceOutcome,
+)
 from agentic_threat_investigator.app.provider_observation_persistence import (
     ProviderObservationPersistenceResult,
     ProviderObservationPersistenceService,
@@ -72,6 +76,7 @@ from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.evidence import (
     ConvertedEvidence,
     Evidence,
+    EvidenceObservation,
     EvidenceObservationCandidate,
     EvidenceType,
     evidence_id_for_source_record,
@@ -87,7 +92,7 @@ from agentic_threat_investigator.domain.investigation import (
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
+from agentic_threat_investigator.domain.legacy_evidence import EntityRef
 from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
 )
@@ -283,11 +288,27 @@ def _adapter(
     )
 
 
-def _persisted_result(evidence: LegacyEvidence) -> ProviderObservationPersistenceResult:
-    """Build one deterministic committed observation result."""
-    recorded = evidence.model_copy(update={"id": evidence.id or uuid4()})
+def _persisted_result(
+    converted: ConvertedEvidence,
+    *,
+    observation_id: UUID | None = None,
+) -> ProviderObservationPersistenceResult:
+    """Build one deterministic PR 28B committed observation result."""
+    observation = EvidenceObservation(
+        id=observation_id if observation_id is not None else uuid4(),
+        evidence_id=converted.evidence.id,
+        version=1,
+        source_url=converted.observation.source_url,
+        observed_at=converted.observation.observed_at,
+        retrieved_at=converted.observation.retrieved_at,
+        facts=converted.observation.facts,
+        raw_payload=converted.observation.raw_payload,
+        diff=None,
+    )
     return ProviderObservationPersistenceResult(
-        evidence=recorded,
+        evidence=converted.evidence,
+        observation=observation,
+        outcome=EvidencePersistenceOutcome.CREATED,
         entities=(),
         relationships=(),
         observations=(),
@@ -311,29 +332,31 @@ class _ProbePersistenceService(ProviderObservationPersistenceService):
         """Initialize the probe with the shared state and optional failure seams."""
         super().__init__(uow_factory=lambda: _Uow(state))
         self.state = state
-        self.calls: list[tuple[LegacyEvidence, ExtractionResult]] = []
+        self.calls: list[tuple[ConvertedEvidence, ExtractionResult]] = []
         self._fail_on_call = fail_on_call
         self._cancelled_on_call = cancelled_on_call
 
     async def persist(
         self,
-        evidence: LegacyEvidence,
+        converted: ConvertedEvidence,
+        invocation_entity: Entity,
         extraction: ExtractionResult,
         *,
+        investigation_id: UUID,
         actor_id: UUID | None = None,
         request_id: UUID | None = None,
     ) -> ProviderObservationPersistenceResult:
         """Record the call, assert transaction isolation, and return or fail."""
         # No lifecycle transaction may be open while an observation persists.
         assert self.state.active == 0
-        assert evidence.id is not None
-        self.calls.append((evidence, extraction))
+        del invocation_entity, investigation_id
+        self.calls.append((converted, extraction))
         call_number = len(self.calls)
         if self._cancelled_on_call == call_number:
             raise asyncio.CancelledError
         if self._fail_on_call == call_number:
             raise RuntimeError("simulated observation persistence failure")
-        return _persisted_result(evidence)
+        return _persisted_result(converted)
 
 
 class _ProbeTimelineSink(InvestigationTimelineSink):
@@ -462,11 +485,16 @@ class TestDatasourceProviderBinding:
             assert provider.definition == _DEFINITION
             assert len(result.evidence) == 2
             for item in result.evidence:
-                # A06/A07: exact Investigation and exact persisted subject.
-                assert item.investigation_id == _INVESTIGATION_ID
-                assert item.subject == _DOMAIN_SUBJECT
-                assert item.subject.id == _ENTITY_ID
-            assert [item.source_record_id for item in result.evidence] == [
+                # PR 28B: output is global ConvertedEvidence — stable identity
+                # plus observation candidate; no Investigation and no subject
+                # are bound at the adapter.
+                assert isinstance(item, ConvertedEvidence)
+                assert item.evidence.source == SourceId.THREATFOX.value
+            assert [
+                item.evidence.source_record_id
+                for item in result.evidence
+                if isinstance(item, ConvertedEvidence)
+            ] == [
                 "864201",
                 "864299",
             ]
@@ -738,7 +766,11 @@ class TestDatasourceProviderRepresentation:
             provider = _adapter(state, client)
             result = await provider.investigate(_INVESTIGATION_ID, _DOMAIN_ENTITY)
         assert isinstance(result, DatasourceEvidenceResult)
-        assert [item.source_record_id for item in result.evidence] == [
+        assert [
+            item.evidence.source_record_id
+            for item in result.evidence
+            if isinstance(item, ConvertedEvidence)
+        ] == [
             "864201",
             "864299",
         ]
@@ -756,26 +788,27 @@ class TestDatasourceProviderRepresentation:
             result = await provider.investigate(_INVESTIGATION_ID, _DOMAIN_ENTITY)
         assert isinstance(result, DatasourceEvidenceResult)
         (item,) = result.evidence
-        assert item.type is EvidenceType.THREAT_INTELLIGENCE
-        assert item.investigation_id == _INVESTIGATION_ID
-        assert item.subject == _DOMAIN_SUBJECT
-        assert item.source == SourceId.THREATFOX.value
-        # T04: exact upstream source record identity.
-        assert item.source_record_id == "864201"
-        assert item.source_url == _ENDPOINT
-        # T06: exact acquisition retrieval time.
-        assert item.retrieved_at == _OCCURRED_AT
+        assert isinstance(item, ConvertedEvidence)
+        assert item.evidence.type is EvidenceType.THREAT_INTELLIGENCE
+        assert item.evidence.source == SourceId.THREATFOX.value
+        # T04: exact upstream source record identity (global Evidence).
+        assert item.evidence.source_record_id == "864201"
+        assert item.observation.source_url == _ENDPOINT
+        # T06: exact acquisition retrieval time (observation candidate).
+        assert item.observation.retrieved_at == _OCCURRED_AT
         # T05: observed_at is the record's last seen.
-        assert item.observed_at == datetime(2026, 8, 21, 12, 0, 0, tzinfo=UTC)
-        # T07/T08: exactly one match fact per LegacyEvidence and no raw payload.
-        matches = item.facts["matches"]
+        assert item.observation.observed_at == datetime(
+            2026, 8, 21, 12, 0, 0, tzinfo=UTC
+        )
+        # T07/T08: exactly one match fact per observation and no raw payload.
+        matches = item.observation.facts["matches"]
         assert len(matches) == 1
         assert matches[0]["threatfox_id"] == "864201"
-        assert item.raw_payload is None
+        assert item.observation.raw_payload is None
         # T09: source confidence is a source fact only.
         assert matches[0]["confidence_level"] == 100
         # T10: no analytical inference is synthesized.
-        serialized = str(item.facts)
+        serialized = str(item.observation.facts)
         for fragment in ("verdict", "risk", "assessment", "confidence_weight"):
             assert fragment not in serialized
 
@@ -795,10 +828,8 @@ class TestDatasourceProviderRepresentation:
             result = await provider.investigate(_INVESTIGATION_ID, ip_entity)
         assert isinstance(result, DatasourceEvidenceResult)
         (item,) = result.evidence
-        assert item.subject.type is EntityType.IP_ADDRESS
-        assert item.subject.value == CANONICAL_ASYNCRAT_IP
-        assert item.subject.id == _ENTITY_ID
-        assert item.facts["matches"][0]["ioc"] == CANONICAL_ASYNCRAT_IP_PORT
+        assert isinstance(item, ConvertedEvidence)
+        assert item.observation.facts["matches"][0]["ioc"] == CANONICAL_ASYNCRAT_IP_PORT
 
 
 def _no_timeline(state: _State) -> _ProbeTimelineSink:
@@ -1031,11 +1062,11 @@ class TestDatasourceProviderTransactionBoundaries:
                     """Start empty."""
                     self.calls = 0
 
-                def __call__(self, evidence: LegacyEvidence) -> ExtractionResult:
+                def __call__(self, view: EvidenceExtractionView) -> ExtractionResult:
                     """Assert no UoW is open during deterministic extraction."""
                     assert state.active == 0
                     self.calls += 1
-                    return extract(evidence)
+                    return extract(view)
 
             extractor = _ExtractionProbe()
             state.entities = {_ENTITY_ID: _DOMAIN_ENTITY}
@@ -1083,9 +1114,14 @@ class TestDatasourceProviderTransactionBoundaries:
             outcome = await executor.execute(_work_item())
 
         assert outcome.status is ProviderExecutionStatus.SUCCEEDED
-        assert [call[0].id for call in persistence.calls] == list(outcome.evidence_ids)
+        # PR 28B: committed IDs are the exact observation IDs the fake
+        # persistence returned, in provider-return order.
+        assert [call[0].evidence.id for call in persistence.calls] == [
+            converted.evidence.id for converted, _ in persistence.calls
+        ]
         assert len(persistence.calls) == 2
         assert outcome.evidence_ids[0] != outcome.evidence_ids[1]
+        assert all(isinstance(call[0], ConvertedEvidence) for call in persistence.calls)
         # U07: lifecycle events are execution-level, never per LegacyEvidence.
         assert state.types.count("converted") == 1
         assert state.types.count("completed") == 1

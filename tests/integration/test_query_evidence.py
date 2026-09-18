@@ -21,9 +21,9 @@ from agentic_threat_investigator.infrastructure.persistence.query.services impor
 )
 from tests.support.query_fixtures import (
     FIXED_TIME,
-    evidence_factory,
     seed_entity,
     seed_investigation,
+    seed_observation_evidence,
 )
 
 _SOURCE_DNS = "urn:ati:source:google_public_dns"
@@ -41,35 +41,31 @@ async def _seed_mixed_evidence(
     investigation_id = await seed_investigation(uow)
     dns_entity = await seed_entity(uow, value="example.com")
     asn_entity = await seed_entity(uow, entity_type=EntityType.ASN, value="AS64512")
-    newer = await uow.evidence.insert(
-        evidence_factory(
-            investigation_id,
-            dns_entity,
-            source=_SOURCE_RDAP,
-            evidence_type=EvidenceType.REGISTRATION,
-            retrieved_at=FIXED_TIME + timedelta(minutes=10),
-        )
+    newer = await seed_observation_evidence(
+        uow,
+        investigation_id=investigation_id,
+        entity_id=dns_entity,
+        source=_SOURCE_RDAP,
+        evidence_type=EvidenceType.REGISTRATION,
+        retrieved_at=FIXED_TIME + timedelta(minutes=10),
     )
-    third = await uow.evidence.insert(
-        evidence_factory(
-            investigation_id,
-            asn_entity,
-            source=_SOURCE_DNS,
-            evidence_type=EvidenceType.DNS,
-            retrieved_at=FIXED_TIME + timedelta(minutes=5),
-        )
+    third = await seed_observation_evidence(
+        uow,
+        investigation_id=investigation_id,
+        entity_id=asn_entity,
+        source=_SOURCE_DNS,
+        evidence_type=EvidenceType.DNS,
+        retrieved_at=FIXED_TIME + timedelta(minutes=5),
     )
-    older = await uow.evidence.insert(
-        evidence_factory(
-            investigation_id,
-            dns_entity,
-            source=_SOURCE_DNS,
-            evidence_type=EvidenceType.DNS,
-            retrieved_at=FIXED_TIME,
-        )
+    older = await seed_observation_evidence(
+        uow,
+        investigation_id=investigation_id,
+        entity_id=dns_entity,
+        source=_SOURCE_DNS,
+        evidence_type=EvidenceType.DNS,
+        retrieved_at=FIXED_TIME,
     )
-    assert older.id is not None and newer.id is not None and third.id is not None
-    return investigation_id, newer.id, third.id, older.id
+    return investigation_id, newer, third, older
 
 
 async def _collect_evidence_ids(
@@ -80,7 +76,7 @@ async def _collect_evidence_ids(
     cursor: str | None = None
     while True:
         page = await services.evidence.list(query.model_copy(update={"cursor": cursor}))
-        collected.extend(item.id for item in page.items if item.id is not None)
+        collected.extend(item.observation.id for item in page.items)
         if page.next_cursor is None:
             return collected
         cursor = page.next_cursor
@@ -137,13 +133,19 @@ async def test_evidence_subject_filter(
         investigation_id = await seed_investigation(uow)
         asn_entity = await seed_entity(uow, entity_type=EntityType.ASN, value="AS64512")
         dns_entity = await seed_entity(uow, value="example.com")
-        asn_evidence = await uow.evidence.insert(
-            evidence_factory(investigation_id, asn_entity, source=_SOURCE_DNS)
+        asn_evidence = await seed_observation_evidence(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=asn_entity,
+            source=_SOURCE_DNS,
         )
-        await uow.evidence.insert(
-            evidence_factory(investigation_id, dns_entity, source=_SOURCE_RDAP)
+        await seed_observation_evidence(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=dns_entity,
+            source=_SOURCE_RDAP,
         )
-        assert asn_evidence.id is not None
+        assert asn_evidence is not None
         assert uow.session is not None
         services = PostgresQueryServices(
             uow.session, QueryLimits(default_page_size=50, max_page_size=200)
@@ -152,11 +154,11 @@ async def test_evidence_subject_filter(
             services,
             EvidenceListQuery(
                 investigation_id=investigation_id,
-                subject_entity_id=asn_entity,
+                entity_id=asn_entity,
                 limit=10,
             ),
         )
-        assert collected == [asn_evidence.id]
+        assert collected == [asn_evidence]
 
 
 @pytest.mark.asyncio
@@ -191,23 +193,21 @@ async def test_evidence_retrieved_range(
     async with uow_factory() as uow:
         investigation_id = await seed_investigation(uow)
         entity_id = await seed_entity(uow)
-        inside = await uow.evidence.insert(
-            evidence_factory(
-                investigation_id,
-                entity_id,
-                source=_SOURCE_DNS,
-                retrieved_at=FIXED_TIME + timedelta(minutes=5),
-            )
+        inside = await seed_observation_evidence(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=entity_id,
+            source=_SOURCE_DNS,
+            retrieved_at=FIXED_TIME + timedelta(minutes=5),
         )
-        await uow.evidence.insert(
-            evidence_factory(
-                investigation_id,
-                entity_id,
-                source=_SOURCE_RDAP,
-                retrieved_at=FIXED_TIME,
-            )
+        await seed_observation_evidence(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=entity_id,
+            source=_SOURCE_RDAP,
+            retrieved_at=FIXED_TIME,
         )
-        assert inside.id is not None
+        assert inside is not None
         assert uow.session is not None
         services = PostgresQueryServices(
             uow.session, QueryLimits(default_page_size=50, max_page_size=200)
@@ -221,7 +221,7 @@ async def test_evidence_retrieved_range(
                 limit=10,
             ),
         )
-        assert collected == [inside.id]
+        assert collected == [inside]
 
 
 @pytest.mark.asyncio

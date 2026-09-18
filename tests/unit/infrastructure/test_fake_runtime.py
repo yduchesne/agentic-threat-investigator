@@ -25,8 +25,9 @@ from agentic_threat_investigator.app.providers import (
 from agentic_threat_investigator.app.secrets import SecretsResolver
 from agentic_threat_investigator.config import OperatingMode, Settings
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.fake_runtime.catalog import (
     FAKE_WORLD_ID,
     FAKE_WORLD_SCHEMA_VERSION,
@@ -377,8 +378,8 @@ def test_u32_fixture_relevance_labels_are_not_evidence() -> None:
     provider = _packaged_provider()
     entity = Entity(id=uuid4(), type=EntityType.DOMAIN, value="alice-corp.test")
     result = asyncio_run(provider.investigate(uuid4(), entity))
-    for evidence in result.evidence:
-        joined = str(evidence.facts).lower()
+    for item in result.evidence:
+        joined = str(_converted(item).observation.facts).lower()
         assert "signal" not in joined
         assert "ambient" not in joined
         assert "inconclusive" not in joined
@@ -424,11 +425,19 @@ def test_u14_same_lookup_is_semantically_equivalent() -> None:
     first_result = asyncio_run(first.investigate(uuid4(), entity))
     second_result = asyncio_run(second.investigate(uuid4(), entity))
     assert len(first_result.evidence) == len(second_result.evidence)
-    assert first_result.evidence[0].facts == second_result.evidence[0].facts
-    assert first_result.evidence[0].observed_at == second_result.evidence[0].observed_at
+    assert (
+        _converted(first_result.evidence[0]).observation.facts
+        == _converted(second_result.evidence[0]).observation.facts
+    )
+    assert (
+        _converted(first_result.evidence[0]).observation.observed_at
+        == _converted(second_result.evidence[0]).observation.observed_at
+    )
     # Only the injected retrieval clock differs.
-    assert first_result.evidence[0].retrieved_at == first_clock
-    assert second_result.evidence[0].retrieved_at == second_clock
+    assert _converted(first_result.evidence[0]).observation.retrieved_at == first_clock
+    assert (
+        _converted(second_result.evidence[0]).observation.retrieved_at == second_clock
+    )
 
 
 def test_u15_fake_provider_no_result_uses_empty_semantics() -> None:
@@ -487,8 +496,11 @@ def test_u26_observed_and_retrieved_timestamps_are_distinct() -> None:
     result = asyncio_run(provider.investigate(uuid4(), entity))
     assert result.evidence
     for evidence in result.evidence:
-        assert evidence.observed_at is not None
-        assert evidence.observed_at != evidence.retrieved_at
+        assert _converted(evidence).observation.observed_at is not None
+        assert (
+            _converted(evidence).observation.observed_at
+            != _converted(evidence).observation.retrieved_at
+        )
 
 
 def test_retrieval_clock_withholds_future_observations() -> None:
@@ -509,14 +521,14 @@ def test_retrieval_clock_withholds_future_observations() -> None:
     late_result = asyncio_run(late.investigate(uuid4(), entity))
     assert len(early_result.evidence) < len(late_result.evidence)
     early_targets = {
-        ev.facts["answers"][0]["value"]
+        _converted(ev).observation.facts["answers"][0]["value"]
         for ev in early_result.evidence
-        if ev.facts.get("query_type") == "A"
+        if _converted(ev).observation.facts.get("query_type") == "A"
     }
     late_targets = {
-        ev.facts["answers"][0]["value"]
+        _converted(ev).observation.facts["answers"][0]["value"]
         for ev in late_result.evidence
-        if ev.facts.get("query_type") == "A"
+        if _converted(ev).observation.facts.get("query_type") == "A"
     }
     assert early_targets == {"203.0.113.60"}
     assert late_targets == {"203.0.113.60", "198.51.100.77"}
@@ -529,8 +541,9 @@ def test_fake_evidence_marks_synthetic_provenance() -> None:
     result = asyncio_run(provider.investigate(uuid4(), entity))
     assert result.evidence
     for evidence in result.evidence:
-        assert evidence.raw_payload is not None
-        assert evidence.raw_payload.get("synthetic_world") == FAKE_WORLD_ID
+        payload = _converted(evidence).observation.raw_payload
+        assert payload is not None
+        assert payload.get("synthetic_world") == FAKE_WORLD_ID
 
 
 # -- Composition branches (23D-U18..U21) ----------------------------------
@@ -714,3 +727,9 @@ def asyncio_run(coro: Awaitable[T]) -> T:
     import asyncio
 
     return asyncio.run(_run(coro))
+
+
+def _converted(item: ConvertedEvidence | LegacyEvidence) -> ConvertedEvidence:
+    """Narrow the migrated fake-world output to its global ConvertedEvidence."""
+    assert isinstance(item, ConvertedEvidence)
+    return item

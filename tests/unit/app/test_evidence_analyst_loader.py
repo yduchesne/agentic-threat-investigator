@@ -22,6 +22,7 @@ from agentic_threat_investigator.app.persistence.repositories import (
     EntityBatchResult,
     EntityRepository,
     EvidenceObservationEntityRepository,
+    EvidencePersistenceResult,
     EvidenceRepository,
     InvestigationEvidenceRepository,
     InvestigationNotFoundError,
@@ -186,7 +187,7 @@ class FakeEvidenceRepository(EvidenceRepository):
 
     async def persist(
         self, converted: object, *, observation_id: UUID | None = None
-    ) -> object:
+    ) -> EvidencePersistenceResult:
         raise NotImplementedError
 
     async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
@@ -310,7 +311,9 @@ class FakeEvidenceObservationEntityRepository(EvidenceObservationEntityRepositor
     def __init__(self, associations: dict[UUID, tuple[UUID, ...]]) -> None:
         self.associations = associations
 
-    async def associate(self, observation_id: UUID, entity_id: UUID) -> object:
+    async def associate(
+        self, observation_id: UUID, entity_id: UUID
+    ) -> EvidenceObservationEntity:
         existing = self.associations.setdefault(observation_id, ())
         if entity_id not in existing:
             self.associations[observation_id] = existing + (entity_id,)
@@ -335,7 +338,7 @@ class FakeInvestigationEvidenceRepository(InvestigationEvidenceRepository):
     def __init__(self, admissions: dict[UUID, tuple[UUID, ...]]) -> None:
         self.admissions = admissions
 
-    async def admit(self, admission: InvestigationEvidence) -> object:
+    async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
         existing = self.admissions.setdefault(admission.investigation_id, ())
         if admission.evidence_observation_id not in existing:
             self.admissions[admission.investigation_id] = existing + (

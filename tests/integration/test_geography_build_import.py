@@ -247,7 +247,14 @@ async def test_e2e_geography_import_cli_entrypoint(
     """
     artifact = _build_corpus(tmp_path)
     env = dict(os.environ)
-    env["ATI_DATABASE_URL"] = os.environ["DATABASE_URL"]
+    url = os.environ["DATABASE_URL"]
+    # The installed importer uses the production engine, whose connections
+    # must carry the ati schema search path exactly like the migration env
+    # (see migrations/env.py); the integration DSN supplies it explicitly.
+    if "search_path" not in url:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}options=-csearch_path=ati,public"
+    env["ATI_DATABASE_URL"] = url
     env["ATI_CONFIG_PROFILE"] = "default"
     script = _installed_script("ati-geography-import")
 

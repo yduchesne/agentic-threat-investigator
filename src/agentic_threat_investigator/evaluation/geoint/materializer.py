@@ -318,7 +318,7 @@ class GeointScenarioMaterializer:
                             observation_id=row.id,
                             entity_id=row.entity_id,
                             location_id=row.location_id,
-                            evidence_id=row.evidence_observation_id,
+                            evidence_observation_id=row.evidence_observation_id,
                             precision=row.precision,
                             observed_at=row.observed_at,
                             retrieved_at=row.retrieved_at,

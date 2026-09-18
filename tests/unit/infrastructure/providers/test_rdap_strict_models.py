@@ -1,9 +1,9 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Strict model, boundary, and bootstrap contract tests for the RDAP provider."""
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 import asyncio
 from dataclasses import FrozenInstanceError
 from typing import Any
@@ -15,6 +15,8 @@ from pydantic import ValidationError
 
 from agentic_threat_investigator.app.providers import ProviderErrorCode
 from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import ProviderHttpClient
 from agentic_threat_investigator.infrastructure.providers.rdap import (
     RdapBootstrapCache,
@@ -149,7 +151,8 @@ class TestRdapStrictNestedModels:
         )
         assert len(result.evidence) == 1
         assert (
-            result.evidence[0].facts["entities"][0]["display_name"] == "Minimal Admin"
+            _legacy(result.evidence[0]).facts["entities"][0]["display_name"]
+            == "Minimal Admin"
         )
 
     async def test_malformed_vcard_fn_values_omitted(self) -> None:
@@ -169,7 +172,9 @@ class TestRdapStrictNestedModels:
                 Entity(type=EntityType.DOMAIN, value="example.com"),
             )
             assert len(result.evidence) == 1
-            assert "display_name" not in result.evidence[0].facts["entities"][0]
+            assert (
+                "display_name" not in _legacy(result.evidence[0]).facts["entities"][0]
+            )
 
     async def test_cidr0_discriminator_rejected(self) -> None:
         """CIDR0 entries need exactly one family discriminator."""
@@ -339,7 +344,7 @@ class TestRdapEventActorContract:
             Entity(type=EntityType.DOMAIN, value="example.com"),
         )
         assert len(result.evidence) == 1
-        events = result.evidence[0].facts["events"]
+        events = _legacy(result.evidence[0]).facts["events"]
         assert events[0] == {
             "action": "registration",
             "date": "2020-01-01T00:00:00+00:00",
@@ -364,7 +369,7 @@ class TestRdapEventActorContract:
             Entity(type=EntityType.DOMAIN, value="example.com"),
         )
         assert len(result.evidence) == 1
-        events = result.evidence[0].facts["events"]
+        events = _legacy(result.evidence[0]).facts["events"]
         assert events[0]["action"] == "registration"
         assert "actor" not in events[0]
 
@@ -416,7 +421,7 @@ class TestRdapEventActorContract:
         assert request_paths == ["/rdap/dns.json", "/domain/example.com"]
         assert len(result.evidence) == 1
         assert (
-            result.evidence[0].facts["events"][0]["actor"]
+            _legacy(result.evidence[0]).facts["events"][0]["actor"]
             == "https://rdap.test/entity/REG-1"
         )
 
@@ -620,7 +625,7 @@ class TestRdapBoundaryContract:
         assert "rdap-valid.test" in requested_hosts
         assert len(result.evidence) == 1
         assert (
-            result.evidence[0].source_url
+            _legacy(result.evidence[0]).source_url
             == "https://rdap-valid.test/domain/example.com"
         )
 
@@ -630,7 +635,7 @@ class TestRdapBoundaryContract:
             _iana_then_authority_handler(_domain_payload(handle="")),
             Entity(type=EntityType.DOMAIN, value="example.com"),
         )
-        assert result.evidence[0].source_record_id == "example.com"
+        assert _legacy(result.evidence[0]).source_record_id == "example.com"
 
         result = await _investigate(
             _iana_then_authority_handler(
@@ -641,7 +646,7 @@ class TestRdapBoundaryContract:
             ),
             Entity(type=EntityType.ASN, value="AS500"),
         )
-        assert result.evidence[0].source_record_id == "AS500-600"
+        assert _legacy(result.evidence[0]).source_record_id == "AS500-600"
 
 
 @pytest.mark.unit
@@ -937,3 +942,9 @@ class TestDnsBootstrapSourceOrderSelection:
         assert outcome.base_url is None
         assert outcome.error is not None
         assert outcome.error.code == ProviderErrorCode.NOT_FOUND
+
+
+def _legacy(item: ConvertedEvidence | LegacyEvidence) -> LegacyEvidence:
+    """Narrow one legacy-provider output item to its transitional shape."""
+    assert isinstance(item, LegacyEvidence)
+    return item

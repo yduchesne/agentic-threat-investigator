@@ -64,7 +64,9 @@ _UUID_PATTERN = _re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
 
-_EVIDENCE_ID_LINE = _re.compile(r"evidence_id: (" + _UUID_PATTERN.pattern + r")")
+_EVIDENCE_ID_LINE = _re.compile(
+    r"evidence(?:_observation)?_id: (" + _UUID_PATTERN.pattern + r")"
+)
 _OBSERVATION_ID_LINE = _re.compile(
     r"relationship_observation_id: (" + _UUID_PATTERN.pattern + r")"
 )

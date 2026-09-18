@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """URLhaus documented collection-limit and validation-ordering unit tests.
 
 The official contract caps direct-response payload lists and host-response
@@ -8,13 +6,14 @@ prove invalid/unsupported input evaluates neither the retrieval clock nor
 the HTTP transport.
 """
 
+from __future__ import annotations
+
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 # The URLhaus test modules deliberately mirror the established
 # provider-family test shapes (see ThreatFox/AbuseIPDB); per-block R0801
 # suppression is not supported by Pylint, so duplicate-code is disabled at
 # module scope for the deliberately accepted duplication.
-
-from __future__ import annotations
-
 from typing import Any
 
 import httpx
@@ -22,6 +21,8 @@ import pytest
 
 from agentic_threat_investigator.app.providers import ProviderResult
 from agentic_threat_investigator.domain.entities import Entity, EntityType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from tests.support.provider_http import failing_io_client
 from tests.support.urlhaus_fixtures import (
     FIXED_UUID,
@@ -78,7 +79,7 @@ class TestDocumentedCollectionLimits:
         )
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
         assert result.errors == ()
-        assert len(result.evidence[0].facts["matches"][0]["payloads"]) == 100
+        assert len(_legacy(result.evidence[0]).facts["matches"][0]["payloads"]) == 100
 
     async def test_url_lookup_rejects_101_payloads(self) -> None:
         """101 payload entries exceed the documented limit."""
@@ -98,8 +99,8 @@ class TestDocumentedCollectionLimits:
             httpx.Response(200, json=payload), entity=_DOMAIN_ENTITY
         )
         assert result.errors == ()
-        assert len(result.evidence[0].facts["matches"]) == 100
-        assert result.evidence[0].facts["url_count"] == 250
+        assert len(_legacy(result.evidence[0]).facts["matches"]) == 100
+        assert _legacy(result.evidence[0]).facts["url_count"] == 250
 
     async def test_host_response_rejects_101_urls(self) -> None:
         """101 raw urls[] entries exceed the documented limit."""
@@ -122,8 +123,8 @@ class TestDocumentedCollectionLimits:
             httpx.Response(200, json=payload), entity=_DOMAIN_ENTITY
         )
         assert result.errors == ()
-        assert result.evidence[0].facts["url_count"] == 1000
-        assert len(result.evidence[0].facts["matches"]) == 100
+        assert _legacy(result.evidence[0]).facts["url_count"] == 1000
+        assert len(_legacy(result.evidence[0]).facts["matches"]) == 100
 
 
 @pytest.mark.unit
@@ -164,3 +165,9 @@ class TestValidationAvoidsClockAndHttp:
             Entity(type=EntityType.IP_ADDRESS, value="2001:db8::1")
         )
         _assert_unsupported_no_io(result)
+
+
+def _legacy(item: ConvertedEvidence | LegacyEvidence) -> LegacyEvidence:
+    """Narrow one legacy-provider output item to its transitional shape."""
+    assert isinstance(item, LegacyEvidence)
+    return item

@@ -24,7 +24,12 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 from agentic_threat_investigator.domain.audit import AuditAction, AuditEvent
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvalidInvestigationStatusTransitionError,
     InvestigationBudget,
@@ -35,7 +40,6 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationTriggerType,
     PivotRequest,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.audit_repositories import (
     PostgresAuditEventRepository,
 )
@@ -508,27 +512,34 @@ async def test_service_evidence_audit_failure_rolls_back_evidence(
         entity = await uow.entities.upsert(
             Entity(type=EntityType.DOMAIN, value="example.com")
         )
-        entity_id = entity.id
+        del entity
         await uow.investigations.create(state)
 
-    evidence = LegacyEvidence(
-        investigation_id=state.investigation_id,
-        type=EvidenceType.DNS,
-        subject=EntityRef(id=entity_id, type=EntityType.DOMAIN, value="example.com"),
-        source="urn:ati:source:google_public_dns",
-        retrieved_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
-        facts={"answers": ["192.0.2.1"]},
+    evidence_id = uuid4()
+    converted = ConvertedEvidence(
+        evidence=Evidence(
+            id=evidence_id,
+            type=EvidenceType.DNS,
+            source="urn:ati:source:google_public_dns",
+            source_record_id=f"audit-dep-{evidence_id}",
+        ),
+        observation=EvidenceObservationCandidate(
+            evidence_id=evidence_id,
+            retrieved_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+            facts={"answers": ["192.0.2.1"]},
+        ),
     )
 
     with pytest.raises(RuntimeError, match="audit dependency failed"):
-        await service.record_evidence(evidence, actor_id=uuid4())
+        await service.record_evidence(
+            converted, investigation_id=state.investigation_id, actor_id=uuid4()
+        )
 
     async with uow_factory() as uow:
         assert uow.session is not None
         count = (
             await uow.session.execute(
-                text("SELECT count(*) FROM ati.evidence WHERE investigation_id = :id"),
-                {"id": state.investigation_id},
+                text("SELECT count(*) FROM ati.evidence_observation")
             )
         ).scalar_one()
         assert count == 0

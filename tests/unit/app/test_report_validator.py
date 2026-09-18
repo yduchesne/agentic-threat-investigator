@@ -107,12 +107,14 @@ class World:
         )
         self.evidence = (
             AnalystEvidenceItem(
-                evidence_id=self.evidence_id,
+                evidence_observation_id=self.evidence_id,
                 type=EvidenceType.REPUTATION,
-                subject=AnalystEntity(
-                    entity_id=self.entity_id,
-                    entity_type=EntityType.DOMAIN,
-                    value="example.com",
+                entities=(
+                    AnalystEntity(
+                        entity_id=self.entity_id,
+                        entity_type=EntityType.DOMAIN,
+                        value="example.com",
+                    ),
                 ),
                 source="urn:ati:source:abuseipdb",
                 retrieved_at=_FIXED,

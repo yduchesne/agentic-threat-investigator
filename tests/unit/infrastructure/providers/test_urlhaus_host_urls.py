@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """Host-response URL identity-contract unit tests for the URLhaus provider.
 
 Every host-response ``urls[]`` URL must pass the complete shared ATI
@@ -8,16 +6,19 @@ invalidates the entire response, and accepted records emit canonical URL
 facts.
 """
 
+from __future__ import annotations
+
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 # The URLhaus test modules deliberately mirror the established
 # provider-family test shapes (see ThreatFox/AbuseIPDB); per-block R0801
 # suppression is not supported by Pylint, so duplicate-code is disabled at
 # module scope for the deliberately accepted duplication.
-
-from __future__ import annotations
-
 import httpx
 import pytest
 
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from tests.support.urlhaus_fixtures import (
     CANONICAL_URLHAUS_IPV4,
     FIXED_KEY,
@@ -95,7 +96,7 @@ class TestHostRecordUrlIdentityContract:
             httpx.Response(200, json=payload), entity=_DOMAIN_ENTITY
         )
         assert result.errors == ()
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["url"] == "http://malicious-domain.test/download/payload.bin"
         assert match["host"] is None
 
@@ -109,7 +110,7 @@ class TestHostRecordUrlIdentityContract:
             httpx.Response(200, json=payload), entity=_DOMAIN_ENTITY
         )
         assert result.errors == ()
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["url"] == source_url
 
     async def test_valid_ipv4_host_record_url_remains_accepted(self) -> None:
@@ -123,7 +124,7 @@ class TestHostRecordUrlIdentityContract:
             httpx.Response(200, json=payload), entity=_IPV4_ENTITY
         )
         assert result.errors == ()
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["url"] == "http://203.0.113.42/payload.bin"
 
     async def test_direct_match_url_is_emitted_canonically(self) -> None:
@@ -134,7 +135,7 @@ class TestHostRecordUrlIdentityContract:
         result = await investigate(httpx.Response(200, json=record), entity=_URL_ENTITY)
         assert result.errors == ()
         assert (
-            result.evidence[0].facts["matches"][0]["url"]
+            _legacy(result.evidence[0]).facts["matches"][0]["url"]
             == "http://malicious-domain.test/download/payload.bin"
         )
 
@@ -161,7 +162,7 @@ class TestCanonicalEquivalentDuplicateRecords:
         )
         assert result.errors == ()
         assert len(result.evidence) == 1
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert len(matches) == 1
         match = matches[0]
         # First occurrence keeps the output position; the emitted URL is
@@ -183,7 +184,7 @@ class TestCanonicalEquivalentDuplicateRecords:
             httpx.Response(200, json=payload), entity=_DOMAIN_ENTITY
         )
         assert result.errors == ()
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert len(matches) == 1
         assert matches[0]["url"] == "http://malicious-domain.test/download/payload.bin"
 
@@ -206,7 +207,7 @@ class TestCanonicalEquivalentDuplicateRecords:
             entity=_IPV4_ENTITY,
         )
         assert result.errors == ()
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert len(matches) == 1
         assert matches[0]["url"] == "http://203.0.113.42/payload.bin"
 
@@ -243,3 +244,9 @@ class TestCanonicalEquivalentDuplicateRecords:
         assert "556677" not in result.errors[0].message
         assert first_url not in result.errors[0].message
         assert FIXED_KEY not in result.errors[0].message
+
+
+def _legacy(item: ConvertedEvidence | LegacyEvidence) -> LegacyEvidence:
+    """Narrow one legacy-provider output item to its transitional shape."""
+    assert isinstance(item, LegacyEvidence)
+    return item

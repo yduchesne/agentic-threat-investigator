@@ -39,6 +39,7 @@ reversible, and the restored archived v0.1 functions reference the v0.1
 shape only.
 """
 
+import json
 from pathlib import Path
 
 from alembic import op
@@ -161,7 +162,8 @@ def _backfill(bind: Connection) -> None:
                 "id, evidence_id, version, source_url, observed_at, retrieved_at, "
                 "facts, raw_payload, diff, created_at) "
                 "VALUES (:id, :evidence_id, :version, :source_url, :observed_at, "
-                ":retrieved_at, :facts, :raw_payload, :diff, now())"
+                ":retrieved_at, CAST(:facts AS jsonb), CAST(:raw_payload AS "
+                "jsonb), CAST(:diff AS jsonb), now())"
             ),
             {
                 "id": row.id,
@@ -170,9 +172,11 @@ def _backfill(bind: Connection) -> None:
                 "source_url": row.source_url,
                 "observed_at": row.observed_at,
                 "retrieved_at": row.retrieved_at,
-                "facts": row.facts,
-                "raw_payload": row.raw_payload,
-                "diff": diff,
+                "facts": json.dumps(row.facts),
+                "raw_payload": None
+                if row.raw_payload is None
+                else json.dumps(row.raw_payload),
+                "diff": None if diff is None else json.dumps(diff),
             },
         )
 
@@ -225,8 +229,18 @@ def upgrade() -> None:
     conn = op.get_bind()
     op.execute(_read("global_evidence_persistence.sql"))
     _backfill(conn)
-    op.execute("DROP TABLE ati.evidence_legacy_v01")
+    # Repoint the provenance FKs only AFTER the backfill populated
+    # ati.evidence_observation: PostgreSQL validates existing rows when the
+    # FK is added, so an earlier ADD would fail closed on every legacy
+    # database carrying pre-28B observation rows.
+    op.execute(_read("repoint_provenance_fks.sql"))
+    # Install the repointed write functions BEFORE dropping the legacy
+    # table: the v0.1 GEOINT/research functions still reference
+    # ati.evidence (now ati.evidence_legacy_v01) and must be dropped by
+    # repointed_write_functions.sql first, or the DROP TABLE fails on
+    # dependent objects.
     op.execute(_read("repointed_write_functions.sql"))
+    op.execute("DROP TABLE ati.evidence_legacy_v01")
 
 
 def downgrade() -> None:

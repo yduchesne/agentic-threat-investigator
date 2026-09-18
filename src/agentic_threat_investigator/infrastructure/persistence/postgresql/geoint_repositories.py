@@ -582,7 +582,8 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         """
         result = await self.session.execute(
             text("""
-                SELECT id, entity_id, evidence_id, status, attempt_count,
+                SELECT id, entity_id, evidence_observation_id, status,
+                       attempt_count,
                        next_attempt_at, claimed_by, lease_expires_at,
                        resolved_location_id, last_error_code, version,
                        created_at, updated_at

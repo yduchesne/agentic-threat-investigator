@@ -1869,7 +1869,8 @@ BEGIN
   version := nextval('ati.entity_location_observation_version_seq');
   BEGIN
     INSERT INTO ati.entity_location_observation(
-      id, entity_id, location_id, evidence_id, "precision", observed_at,
+      id, entity_id, location_id, evidence_observation_id, "precision",
+      observed_at,
       retrieved_at, resolved_at, resolution_method, version)
       VALUES(p_id, p_entity_id, p_location_id, p_evidence_observation_id, p_precision,
              p_observed_at, p_retrieved_at, p_resolved_at,

@@ -24,7 +24,7 @@ through the normal repositories; ``FakeLlmClient`` is the only fake.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -72,14 +72,21 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     GeographicClaim,
     GeoResolution,
 )
 from agentic_threat_investigator.domain.investigation import AnalysisDisposition
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.canonical_geography_resolver import (
     PostgresCanonicalGeographyResolver,
 )
@@ -137,45 +144,97 @@ def _worker_instance(
 
 
 async def seed_geolocation_evidence(
-    uow: PostgresUnitOfWork, *, investigation_id: UUID, entity_id: UUID, value: str
+    uow: PostgresUnitOfWork,
+    *,
+    investigation_id: UUID,
+    entity_id: UUID,
+    value: str,
+    observed_at: datetime | None = _OBSERVED_AT,
+    retrieved_at: datetime | None = None,
+    facts: Mapping[str, object] | None = None,
 ) -> UUID:
-    """Persist one normal GEOLOCATION LegacyEvidence row and return its identity."""
-    evidence = await uow.evidence.insert(
-        LegacyEvidence(
+    """Persist one normal GEOLOCATION global observation and admit it."""
+    identity = uuid4()
+    stable = Evidence(
+        id=identity,
+        type=EvidenceType.GEOLOCATION,
+        source="urn:ati:source:test",
+        source_record_id=f"geo-{identity}",
+    )
+    observation_time = (
+        retrieved_at if retrieved_at is not None else observed_at or _OBSERVED_AT
+    )
+    persisted = await uow.evidence.persist(
+        ConvertedEvidence(
+            evidence=stable,
+            observation=EvidenceObservationCandidate(
+                evidence_id=stable.id,
+                observed_at=observed_at,
+                retrieved_at=observation_time,
+                facts=(
+                    dict(facts)
+                    if facts is not None
+                    else {
+                        "country_code": "US",
+                        "region": "Washington",
+                        "city": "Seattle",
+                        "precision": "city",
+                    }
+                ),
+            ),
+        ),
+        observation_id=identity,
+    )
+    await uow.evidence_observation_entities.associate(
+        persisted.observation.id, entity_id
+    )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
             investigation_id=investigation_id,
-            type=EvidenceType.GEOLOCATION,
-            subject=EntityRef(id=entity_id, type=EntityType.IP_ADDRESS, value=value),
-            source="urn:ati:source:test",
-            observed_at=_OBSERVED_AT,
-            retrieved_at=_OBSERVED_AT,
-            facts={
-                "country_code": "US",
-                "region": "Washington",
-                "city": "Seattle",
-                "precision": "city",
-            },
+            evidence_observation_id=persisted.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=_OBSERVED_AT,
+            added_by=InvestigationEvidenceActor.SYSTEM,
         )
     )
-    assert evidence.id is not None
-    return evidence.id
+    return persisted.observation.id
 
 
 async def seed_dns_evidence(
     uow: PostgresUnitOfWork, *, investigation_id: UUID, entity_id: UUID, value: str
 ) -> UUID:
-    """Persist one independent non-geographic DNS LegacyEvidence row."""
-    evidence = await uow.evidence.insert(
-        LegacyEvidence(
+    """Persist one independent non-geographic DNS global observation."""
+    identity = uuid4()
+    stable = Evidence(
+        id=identity,
+        type=EvidenceType.DNS,
+        source="urn:ati:source:test",
+        source_record_id=f"dns-{identity}",
+    )
+    persisted = await uow.evidence.persist(
+        ConvertedEvidence(
+            evidence=stable,
+            observation=EvidenceObservationCandidate(
+                evidence_id=stable.id,
+                retrieved_at=_OBSERVED_AT,
+                facts={"a_records": ["192.0.2.1"]},
+            ),
+        ),
+        observation_id=identity,
+    )
+    await uow.evidence_observation_entities.associate(
+        persisted.observation.id, entity_id
+    )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
             investigation_id=investigation_id,
-            type=EvidenceType.DNS,
-            subject=EntityRef(id=entity_id, type=EntityType.DOMAIN, value=value),
-            source="urn:ati:source:test",
-            retrieved_at=_OBSERVED_AT,
-            facts={"a_records": ["192.0.2.1"]},
+            evidence_observation_id=persisted.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=_OBSERVED_AT,
+            added_by=InvestigationEvidenceActor.SYSTEM,
         )
     )
-    assert evidence.id is not None
-    return evidence.id
+    return persisted.observation.id
 
 
 async def resolve_pending(
@@ -267,7 +326,9 @@ async def seeded_investigation(
             uow, investigation_id=investigation_id, entity_id=entity_id, value=value
         )
         await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence_id)
+            GeoResolution(
+                id=uuid4(), entity_id=entity_id, evidence_observation_id=evidence_id
+            )
         )
     completed = await resolve_pending(uow_factory, session_factory)
     assert completed == 1
@@ -284,7 +345,7 @@ async def latest_observation(
         )
     assert len(rows) == 1
     assert rows[0].id is not None
-    return rows[0].id, rows[0].evidence_id
+    return rows[0].id, rows[0].evidence_observation_id
 
 
 def descriptive_decision(
@@ -307,7 +368,7 @@ def descriptive_decision(
                 statement="The entity was observed in Seattle.",
                 temporal_interpretation=GeographicTemporalInterpretation.NONE,
                 observation_ids=(observation_id,),
-                evidence_ids=(evidence_id,),
+                evidence_observation_ids=(evidence_id,),
                 entity_ids=(entity_id,),
                 location_ids=(location_id,),
             ),
@@ -369,51 +430,38 @@ async def test_g26f_i02_location_history(
         investigation_id = await seed_investigation(uow)
         geography = await seed_geography(uow)
         entity_id = await seed_entity(uow, value="203.0.113.202")
-        seattle_evidence = await uow.evidence.insert(
-            LegacyEvidence(
-                investigation_id=investigation_id,
-                type=EvidenceType.GEOLOCATION,
-                subject=EntityRef(
-                    id=entity_id, type=EntityType.IP_ADDRESS, value="203.0.113.202"
-                ),
-                source="urn:ati:source:test",
-                observed_at=FIXED,
-                retrieved_at=FIXED + timedelta(hours=1),
-                facts={
-                    "country_code": "US",
-                    "region": "Washington",
-                    "city": "Seattle",
-                    "precision": "city",
-                },
-            )
+        seattle_evidence_id = await seed_geolocation_evidence(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=entity_id,
+            value="203.0.113.202",
         )
-        dallas_evidence = await uow.evidence.insert(
-            LegacyEvidence(
-                investigation_id=investigation_id,
-                type=EvidenceType.GEOLOCATION,
-                subject=EntityRef(
-                    id=entity_id, type=EntityType.IP_ADDRESS, value="203.0.113.202"
-                ),
-                source="urn:ati:source:test",
-                observed_at=FIXED + timedelta(days=1),
-                retrieved_at=FIXED + timedelta(days=1, hours=1),
-                facts={
-                    "country_code": "US",
-                    "region": "Texas",
-                    "city": "Dallas",
-                    "precision": "city",
-                },
-            )
+        dallas_evidence_id = await seed_geolocation_evidence(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=entity_id,
+            value="203.0.113.202",
+            observed_at=_OBSERVED_AT + timedelta(days=1),
+            retrieved_at=_OBSERVED_AT + timedelta(days=1, hours=1),
+            facts={
+                "country_code": "US",
+                "region": "Texas",
+                "city": "Dallas",
+                "precision": "city",
+            },
         )
-        assert seattle_evidence.id is not None and dallas_evidence.id is not None
         await uow.geo_resolutions.create_pending(
             GeoResolution(
-                id=uuid4(), entity_id=entity_id, evidence_id=seattle_evidence.id
+                id=uuid4(),
+                entity_id=entity_id,
+                evidence_observation_id=seattle_evidence_id,
             )
         )
         await uow.geo_resolutions.create_pending(
             GeoResolution(
-                id=uuid4(), entity_id=entity_id, evidence_id=dallas_evidence.id
+                id=uuid4(),
+                entity_id=entity_id,
+                evidence_observation_id=dallas_evidence_id,
             )
         )
     completed = await resolve_pending(uow_factory, session_factory)
@@ -424,7 +472,9 @@ async def test_g26f_i02_location_history(
             entity_id, limit=100
         )
     assert len(rows) == 2
-    by_location = {row.location_id: (row.id, row.evidence_id) for row in rows}
+    by_location = {
+        row.location_id: (row.id, row.evidence_observation_id) for row in rows
+    }
     seattle_obs, seattle_ev = by_location[geography["Seattle"]]
     dallas_obs, dallas_ev = by_location[geography["Dallas"]]
     assert (seattle_obs, seattle_ev) != (dallas_obs, dallas_ev)
@@ -445,7 +495,7 @@ async def test_g26f_i02_location_history(
                     GeographicTemporalInterpretation.LOCATION_CHANGE_OBSERVED
                 ),
                 observation_ids=(seattle_obs, dallas_obs),
-                evidence_ids=(seattle_ev, dallas_ev),
+                evidence_observation_ids=(seattle_ev, dallas_ev),
                 entity_ids=(entity_id,),
                 location_ids=(geography["Seattle"], geography["Dallas"]),
             ),
@@ -490,10 +540,14 @@ async def test_g26f_i03_same_location_unrelated_entities_rejected(
             value="203.0.113.212",
         )
         await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=first_id, evidence_id=first_evidence)
+            GeoResolution(
+                id=uuid4(), entity_id=first_id, evidence_observation_id=first_evidence
+            )
         )
         await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=second_id, evidence_id=second_evidence)
+            GeoResolution(
+                id=uuid4(), entity_id=second_id, evidence_observation_id=second_evidence
+            )
         )
     completed = await resolve_pending(uow_factory, session_factory)
     assert completed == 2
@@ -522,7 +576,10 @@ async def test_g26f_i03_same_location_unrelated_entities_rejected(
                     GeographicTemporalInterpretation.DIFFERENT_OBSERVATION_TIMES
                 ),
                 observation_ids=(first_obs[0].id, second_obs[0].id),
-                evidence_ids=(first_obs[0].evidence_id, second_obs[0].evidence_id),
+                evidence_observation_ids=(
+                    first_obs[0].evidence_observation_id,
+                    second_obs[0].evidence_observation_id,
+                ),
                 entity_ids=(first_id, second_id),
                 location_ids=(geography["Seattle"],),
             ),
@@ -536,12 +593,10 @@ async def test_g26f_i03_same_location_unrelated_entities_rejected(
     assert await assessment_count(uow_factory, investigation_id) == 0
     async with uow_factory() as uow:
         assert uow.session is not None
+        # PR 28B: no relationship observation was created and no admission
+        # scope leaked during the rejected analysis.
         result = await uow.session.execute(
-            text(
-                "SELECT count(*) FROM ati.relationship_observation "
-                "WHERE investigation_id = :id"
-            ),
-            {"id": investigation_id},
+            text("SELECT count(*) FROM ati.relationship_observation")
         )
         assert int(result.scalar_one()) == 0
 
@@ -574,7 +629,7 @@ async def test_g26f_i04_cross_investigation_isolation(
                     statement="The entity was observed in Seattle.",
                     temporal_interpretation=GeographicTemporalInterpretation.NONE,
                     observation_ids=(observation_b,),
-                    evidence_ids=(evidence_b,),
+                    evidence_observation_ids=(evidence_b,),
                     entity_ids=(entity_b,),
                     location_ids=(uuid4(),),
                 ),
@@ -628,25 +683,22 @@ async def test_g26f_i05_bounded_history_cannot_cite_omitted(
                 "city": city,
                 "precision": "city",
             }
-            evidence = await uow.evidence.insert(
-                LegacyEvidence(
-                    investigation_id=investigation_id,
-                    type=EvidenceType.GEOLOCATION,
-                    subject=EntityRef(
-                        id=entity_id,
-                        type=EntityType.IP_ADDRESS,
-                        value="203.0.113.230",
-                    ),
-                    source="urn:ati:source:test",
-                    observed_at=FIXED + timedelta(days=index),
-                    retrieved_at=FIXED + timedelta(days=index, hours=1),
-                    facts=facts,
-                )
+            evidence_id = await seed_geolocation_evidence(
+                uow,
+                investigation_id=investigation_id,
+                entity_id=entity_id,
+                value="203.0.113.230",
+                observed_at=FIXED + timedelta(days=index),
+                retrieved_at=FIXED + timedelta(days=index, hours=1),
+                facts=facts,
             )
-            assert evidence.id is not None
-            evidence_ids.append(evidence.id)
+            evidence_ids.append(evidence_id)
             await uow.geo_resolutions.create_pending(
-                GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=evidence.id)
+                GeoResolution(
+                    id=uuid4(),
+                    entity_id=entity_id,
+                    evidence_observation_id=evidence_id,
+                )
             )
     completed = await resolve_pending(uow_factory, session_factory)
     assert completed == 5
@@ -654,7 +706,7 @@ async def test_g26f_i05_bounded_history_cannot_cite_omitted(
         rows = await uow.entity_location_observations.list_for_entity(
             entity_id, limit=100
         )
-    observations = {row.evidence_id: row.id for row in rows}
+    observations = {row.evidence_observation_id: row.id for row in rows}
     assert len(observations) == 5
 
     llm = FakeLlmClient()
@@ -675,7 +727,7 @@ async def test_g26f_i05_bounded_history_cannot_cite_omitted(
                         observations[evidence_ids[2]],
                         observations[evidence_ids[4]],
                     ),
-                    evidence_ids=(evidence_ids[2], evidence_ids[4]),
+                    evidence_observation_ids=(evidence_ids[2], evidence_ids[4]),
                     entity_ids=(entity_id,),
                     location_ids=(geography["Vancouver"], geography["Boundary Town"]),
                 ),
@@ -712,7 +764,7 @@ async def test_g26f_i05_bounded_history_cannot_cite_omitted(
                         observations[evidence_ids[0]],
                         omitted,
                     ),
-                    evidence_ids=(evidence_ids[0], evidence_ids[3]),
+                    evidence_observation_ids=(evidence_ids[0], evidence_ids[3]),
                     entity_ids=(entity_id,),
                     location_ids=(geography["Seattle"], geography["Auburn"]),
                 ),
@@ -751,7 +803,9 @@ async def test_g26f_i06_independent_support_with_geoint_context(
             value="203.0.113.240",
         )
         await uow.geo_resolutions.create_pending(
-            GeoResolution(id=uuid4(), entity_id=entity_id, evidence_id=geo_evidence)
+            GeoResolution(
+                id=uuid4(), entity_id=entity_id, evidence_observation_id=geo_evidence
+            )
         )
     completed = await resolve_pending(uow_factory, session_factory)
     assert completed == 1
@@ -782,7 +836,7 @@ async def test_g26f_i06_independent_support_with_geoint_context(
                 statement="The entity was observed in Seattle.",
                 temporal_interpretation=GeographicTemporalInterpretation.NONE,
                 observation_ids=(observation_id,),
-                evidence_ids=(geo_evidence,),
+                evidence_observation_ids=(geo_evidence,),
                 entity_ids=(entity_id,),
                 location_ids=(location_id,),
             ),

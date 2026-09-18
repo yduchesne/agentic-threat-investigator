@@ -355,9 +355,7 @@ async def test_seed_cross_investigation_isolation(
             "cross_investigation",
             other_investigation_id=investigation_b,
         )
-        (i2_unit,) = [
-            unit for unit in units if unit.evidence.investigation_id == investigation_b
-        ]
+        (i2_unit,) = [unit for unit in units if unit.admitted_to == investigation_b]
         i2_detail = await service.get_observation(
             GeointObservationQuery(
                 investigation_id=investigation_a,

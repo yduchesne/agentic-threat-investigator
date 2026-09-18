@@ -30,7 +30,6 @@ from agentic_threat_investigator.app.query.relationships import (
 )
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     RelationshipDirection,
     RelationshipType,
@@ -46,8 +45,8 @@ from agentic_threat_investigator.infrastructure.persistence.query.services impor
 )
 from tests.support.query_fixtures import (
     FIXED_TIME,
-    evidence_factory,
     seed_entity,
+    seed_evidence_observation,
     seed_investigation,
     seed_observation,
     seed_relationship,
@@ -410,11 +409,13 @@ async def test_e_b14_wrong_investigation_leaks_nothing(
         fixture = await _seed_evolution_world(uow)
         other_investigation = await seed_investigation(uow)
         # Re-observe the same A->B edge inside the other Investigation.
-        evidence = await uow.evidence.insert(
-            evidence_factory(other_investigation, fixture.a)
+        observation_id = await seed_evidence_observation(
+            uow, investigation_id=other_investigation, entity_id=fixture.a
         )
         await uow.relationship_observations.append(
-            _observation(other_investigation, fixture.a_b_relationship_id, evidence)
+            _observation(
+                other_investigation, fixture.a_b_relationship_id, observation_id
+            )
         )
         assert uow.session is not None
         services = PostgresQueryServices(
@@ -453,12 +454,14 @@ async def test_e_b15_self_relationship_is_not_duplicated(
         edge = await seed_relationship(
             uow, source_entity_id=entity, target_entity_id=entity
         )
-        evidence = await uow.evidence.insert(evidence_factory(investigation_id, entity))
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=entity
+        )
         observed = await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=evidence,
+            evidence_observation_id=evidence,
         )
         assert uow.session is not None
         services = PostgresQueryServices(
@@ -712,72 +715,69 @@ async def _seed_evolution_world(
 
     obs_a_out: list[UUID] = []
     for day in (1, 2, 3):
-        evidence = await uow.evidence.insert(
-            evidence_factory(
-                investigation_id,
-                a,
-                source="urn:ati:source:google_public_dns",
-                retrieved_at=FIXED_TIME + timedelta(days=10 + day),
-            )
+        evidence = await seed_evidence_observation(
+            uow,
+            investigation_id=investigation_id,
+            entity_id=a,
+            source="urn:ati:source:google_public_dns",
+            retrieved_at=FIXED_TIME + timedelta(days=10 + day),
         )
         observation = await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=a_b,
-            evidence=evidence,
+            evidence_observation_id=evidence,
             retrieved_at=FIXED_TIME + timedelta(days=10 + day),
             observed_at=FIXED_TIME + timedelta(days=day, hours=6),
         )
         obs_a_out.append(observation.id)
 
-    b_in_evidence = await uow.evidence.insert(
-        evidence_factory(
-            investigation_id,
-            b,
-            source="urn:ati:source:google_public_dns",
-            retrieved_at=FIXED_TIME + timedelta(days=13),
-        )
+    b_in_evidence = await seed_evidence_observation(
+        uow,
+        investigation_id=investigation_id,
+        entity_id=b,
+        source="urn:ati:source:google_public_dns",
+        retrieved_at=FIXED_TIME + timedelta(days=13),
     )
     b_in = await seed_observation(
         uow,
         investigation_id=investigation_id,
         relationship=b_a,
-        evidence=b_in_evidence,
+        evidence_observation_id=b_in_evidence,
         retrieved_at=FIXED_TIME + timedelta(days=13),
         observed_at=FIXED_TIME + timedelta(days=4, hours=9),
     )
 
-    a_c_evidence = await uow.evidence.insert(
-        evidence_factory(
-            investigation_id,
-            a,
-            source="urn:ati:source:rdap",
-            evidence_type=EvidenceType.REGISTRATION,
-            retrieved_at=FIXED_TIME + timedelta(days=14),
-        )
+    a_c_evidence = await seed_evidence_observation(
+        uow,
+        investigation_id=investigation_id,
+        entity_id=a,
+        source="urn:ati:source:rdap",
+        evidence_type=EvidenceType.REGISTRATION,
+        retrieved_at=FIXED_TIME + timedelta(days=14),
     )
     a_c_obs = await seed_observation(
         uow,
         investigation_id=investigation_id,
         relationship=a_c,
-        evidence=a_c_evidence,
+        evidence_observation_id=a_c_evidence,
+        source="urn:ati:source:rdap",
         retrieved_at=FIXED_TIME + timedelta(days=14),
         observed_at=None,
     )
 
-    d_e_evidence = await uow.evidence.insert(
-        evidence_factory(
-            investigation_id,
-            d,
-            source="urn:ati:source:threatfox",
-            retrieved_at=FIXED_TIME + timedelta(days=30),
-        )
+    d_e_evidence = await seed_evidence_observation(
+        uow,
+        investigation_id=investigation_id,
+        entity_id=d,
+        source="urn:ati:source:threatfox",
+        retrieved_at=FIXED_TIME + timedelta(days=30),
     )
     d_e_obs = await seed_observation(
         uow,
         investigation_id=investigation_id,
         relationship=d_e,
-        evidence=d_e_evidence,
+        evidence_observation_id=d_e_evidence,
         retrieved_at=FIXED_TIME + timedelta(days=30),
         observed_at=FIXED_TIME + timedelta(days=20),
     )
@@ -801,15 +801,14 @@ async def _seed_evolution_world(
 def _observation(
     investigation_id: UUID,
     relationship_id: UUID,
-    evidence: LegacyEvidence,
+    evidence_observation_id: UUID,
 ) -> ObservationModel:
-    """Build one appended observation row on an already-recorded evidence row."""
-    assert evidence.id is not None
+    """Build one appended observation row on an already-recorded observation id."""
     return ObservationModel(
         id=uuid4(),
         relationship_id=relationship_id,
-        evidence_observation_id=evidence.id,
+        evidence_observation_id=evidence_observation_id,
         observed_at=None,
         retrieved_at=FIXED_TIME + timedelta(days=5),
-        source=evidence.source,
+        source="urn:ati:source:google_public_dns",
     )

@@ -14,13 +14,20 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
 from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from tests.integration.api_helpers import (
     api_client,
     api_settings,
@@ -39,28 +46,59 @@ PASSWORD = "correct horse battery staple"
 
 def _geolocation_evidence(
     investigation_id: UUID, entity_id: UUID, *, facts: dict[str, object] | None = None
-) -> LegacyEvidence:
-    """Build one persisted GEOLOCATION LegacyEvidence observation."""
-    return LegacyEvidence(
-        investigation_id=investigation_id,
-        type=EvidenceType.GEOLOCATION,
-        subject=EntityRef(
-            id=entity_id, type=EntityType.IP_ADDRESS, value="203.0.113.10"
+) -> ConvertedEvidence:
+    """Build one deterministic global GEOLOCATION ConvertedEvidence."""
+    del investigation_id, entity_id
+    evidence_id = uuid4()
+    return ConvertedEvidence(
+        evidence=Evidence(
+            id=evidence_id,
+            type=EvidenceType.GEOLOCATION,
+            source=PROVIDER,
+            source_record_id=f"api-geo-{evidence_id}",
         ),
-        source=PROVIDER,
-        observed_at=None,
-        retrieved_at=FIXED,
-        facts=facts
-        or {
-            "country_code": "US",
-            "region": "Washington",
-            "city": "Seattle",
-            "latitude": 47.6062,
-            "longitude": -122.3321,
-            "provider": PROVIDER,
-            "precision": "city",
-        },
+        observation=EvidenceObservationCandidate(
+            evidence_id=evidence_id,
+            observed_at=None,
+            retrieved_at=FIXED,
+            facts=facts
+            or {
+                "country_code": "US",
+                "region": "Washington",
+                "city": "Seattle",
+                "latitude": 47.6062,
+                "longitude": -122.3321,
+                "provider": PROVIDER,
+                "precision": "city",
+            },
+        ),
     )
+
+
+async def _seed_geolocation(
+    uow: Any,
+    *,
+    investigation_id: UUID,
+    entity_id: UUID,
+    facts: dict[str, object] | None = None,
+) -> UUID:
+    """Persist one global GEOLOCATION observation, associate, and admit it."""
+    converted = _geolocation_evidence(investigation_id, entity_id, facts=facts)
+    persisted = await uow.evidence.persist(converted)
+    await uow.evidence_observation_entities.associate(
+        persisted.observation.id, entity_id
+    )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
+            investigation_id=investigation_id,
+            evidence_observation_id=persisted.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=FIXED,
+            added_by=InvestigationEvidenceActor.SYSTEM,
+        )
+    )
+    returned: UUID = persisted.observation.id
+    return returned
 
 
 @pytest.mark.asyncio
@@ -74,19 +112,25 @@ async def test_v01_canonical_read_projection_slice(
         entity_id = await seed_entity(
             uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
         )
-        record = await uow.evidence.insert(
-            _geolocation_evidence(investigation_id, entity_id)
+        record = await _seed_geolocation(
+            uow, investigation_id=investigation_id, entity_id=entity_id
         )
-        # A raw-payload-bearing non-geolocation LegacyEvidence must never enter the
-        # projection or the response.
-        await uow.evidence.insert(
-            evidence_factory(investigation_id, entity_id).model_copy(
+        # A raw-payload-bearing non-geolocation observation must never enter
+        # the projection or the response.
+        converted = evidence_factory(investigation_id, entity_id)
+        await uow.evidence.persist(
+            converted.model_copy(
                 update={
-                    "raw_payload": {"http_response": {"body": "secret"}},
+                    "observation": converted.observation.model_copy(
+                        update={
+                            "raw_payload": {
+                                "http_response": {"body": "secret"},
+                            }
+                        }
+                    )
                 }
             )
         )
-        assert record.id is not None
     await seed_user(session_factory)
 
     with api_client(api_settings()) as client:
@@ -101,7 +145,7 @@ async def test_v01_canonical_read_projection_slice(
     assert body["truncated"] is False
     assert len(body["items"]) == 1
     (item,) = body["items"]
-    assert item["evidence_id"] == str(record.id)
+    assert item["evidence_id"] == str(record)
     assert item["entity_id"] == str(entity_id)
     assert item["ip_address"] == "203.0.113.10"
     assert item["country_code"] == "US"
@@ -129,31 +173,28 @@ async def test_v02_http_investigation_isolation(
         shared = await seed_entity(
             uow, entity_type=EntityType.IP_ADDRESS, value="203.0.113.10"
         )
-        evidence_a = await uow.evidence.insert(
-            _geolocation_evidence(
-                investigation_a,
-                shared,
-                facts={
-                    "country_code": "CA",
-                    "city": "Vancouver",
-                    "provider": PROVIDER,
-                    "precision": "city",
-                },
-            )
+        evidence_a = await _seed_geolocation(
+            uow,
+            investigation_id=investigation_a,
+            entity_id=shared,
+            facts={
+                "country_code": "CA",
+                "city": "Vancouver",
+                "provider": PROVIDER,
+                "precision": "city",
+            },
         )
-        evidence_b = await uow.evidence.insert(
-            _geolocation_evidence(
-                investigation_b,
-                shared,
-                facts={
-                    "country_code": "DE",
-                    "city": "Berlin",
-                    "provider": PROVIDER,
-                    "precision": "city",
-                },
-            )
+        evidence_b = await _seed_geolocation(
+            uow,
+            investigation_id=investigation_b,
+            entity_id=shared,
+            facts={
+                "country_code": "DE",
+                "city": "Berlin",
+                "provider": PROVIDER,
+                "precision": "city",
+            },
         )
-        assert evidence_a.id is not None and evidence_b.id is not None
     await seed_user(session_factory)
 
     with api_client(api_settings()) as client:
@@ -171,8 +212,8 @@ async def test_v02_http_investigation_isolation(
     assert response_a.status_code == response_b.status_code == 200
     (item_a,) = response_a.json()["items"]
     (item_b,) = response_b.json()["items"]
-    assert item_a["evidence_id"] == str(evidence_a.id)
-    assert item_b["evidence_id"] == str(evidence_b.id)
+    assert item_a["evidence_id"] == str(evidence_a)
+    assert item_b["evidence_id"] == str(evidence_b)
     assert item_a["city"] == "Vancouver"
     assert item_b["city"] == "Berlin"
     assert item_a["entity_id"] == item_b["entity_id"] == str(shared)

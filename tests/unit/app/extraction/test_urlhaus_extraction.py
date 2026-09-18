@@ -323,7 +323,7 @@ def test_noncanonical_ip_host_form_fails() -> None:
 
 
 def _with_facts(
-    view: EvidenceExtractionView, facts: dict[object, object]
+    view: EvidenceExtractionView, facts: dict[str, object]
 ) -> EvidenceExtractionView:
     """Return a copy of the view whose observation carries the given facts."""
     return view.model_copy(

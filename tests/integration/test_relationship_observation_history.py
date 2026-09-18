@@ -9,6 +9,7 @@ stable Relationship resource and the LegacyEvidence resource keep their existing
 historization contracts. Covers the PR 22E regression tests I01..I07.
 """
 
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -17,17 +18,19 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from agentic_threat_investigator.app.persistence.repositories import (
+    RelationshipObservationProvenanceError,
+)
+from agentic_threat_investigator.config import ensure_test_database_safe
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -39,6 +42,19 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.database 
 from agentic_threat_investigator.infrastructure.persistence.postgresql.models import (
     RelationshipRow,
 )
+from tests.support.query_fixtures import seed_evidence_observation
+
+
+def _test_engine() -> AsyncEngine:
+    """Create an engine for the guarded integration test database URL."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL must point at the isolated test database")
+    ensure_test_database_safe(url)
+    return create_async_engine(
+        url.replace("postgresql+psycopg://", "postgresql+psycopg_async://", 1)
+    )
+
 
 _RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
@@ -69,15 +85,13 @@ async def seed_graph(
         Entity(type=EntityType.IP_ADDRESS, value="192.0.2.1")
     )
     assert source.id is not None and target.id is not None
-    evidence = LegacyEvidence(
+    evidence = await seed_evidence_observation(
+        uow,
         investigation_id=investigation_id,
-        type=EvidenceType.DNS,
-        subject=EntityRef(id=source.id, type=EntityType.DOMAIN, value=source.value),
+        entity_id=source.id,
         source="urn:ati:source:google_public_dns",
         retrieved_at=_RETRIEVED_AT,
     )
-    evidence = await uow.evidence.insert(evidence)
-    assert evidence.id is not None
     relationship = await uow.relationships.upsert(
         Relationship(
             id=uuid4(),
@@ -86,7 +100,7 @@ async def seed_graph(
             type=RelationshipType.RESOLVES_TO,
         )
     )
-    return investigation_id, evidence.id, relationship.id
+    return investigation_id, evidence, relationship.id
 
 
 def observation_factory(
@@ -323,7 +337,7 @@ async def test_invalid_observation_append_rolls_back_atomically(
             source="urn:ati:source:google_public_dns",
             confidence=0.9,
         )
-        with pytest.raises(IntegrityError):
+        with pytest.raises(RelationshipObservationProvenanceError):
             await uow.relationship_observations.append(dangling)
 
     async with uow_factory() as uow:
@@ -344,24 +358,19 @@ async def test_invalid_observation_append_rolls_back_atomically(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_evidence_still_writes_create_history(
+async def test_evidence_observation_writes_no_generic_history(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """22E-I06: LegacyEvidence retains its approved immutable CREATE history contract."""
+    """PR 28B: EvidenceObservation is authoritative and never history-logged.
+
+    The global evidence write path creates no generic ``domain_object_history``
+    rows: the immutable observation IS the intelligence history.
+    """
     async with uow_factory() as uow:
         _investigation_id, evidence_id, _relationship_id = await seed_graph(uow)
-        created = await history_count(uow, "evidence", evidence_id)
-        assert uow.session is not None
-        operation = await uow.session.scalar(
-            text(
-                "SELECT operation FROM ati.domain_object_history "
-                "WHERE object_type = 'evidence' AND object_id = :evidence_id"
-            ),
-            {"evidence_id": evidence_id},
-        )
+        created = await history_count(uow, "evidence_observation", evidence_id)
 
-    assert created == 1
-    assert operation == "CREATE"
+    assert created == 0
 
 
 @pytest.mark.asyncio
@@ -375,16 +384,99 @@ async def test_migration_preserves_legacy_observation_history_rows(
         command.downgrade(alembic_cfg, "0020_research_execution")
 
         # Seed the legacy graph with the pre-22E write path (SQL API v0008),
-        # which still wrote redundant observation history rows.
+        # which still wrote redundant observation history rows. The PR 28B
+        # repositories cannot run below head, so this phase seeds with raw
+        # SQL on the migrated-down v0.1 shape.
+        legacy_id = uuid4()
+        engine = _test_engine()
+        try:
+            async with engine.begin() as connection:
+                legacy_investigation_id, legacy_relationship_id, legacy_evidence_id = (
+                    await connection.execute(
+                        text("""
+                        WITH inv AS (
+                          INSERT INTO ati.investigation
+                            (status, trigger_type, objective, budget,
+                             operational_state, version, created_at, updated_at,
+                             started_at)
+                          VALUES ('running', 'manual', 'assess', '{}'::jsonb,
+                                  '{}'::jsonb, 1, now(), now(), now())
+                          RETURNING id
+                        ), src AS (
+                          INSERT INTO ati.entity
+                            (entity_type, canonical_value, display_name,
+                             attributes, content_hash, version, created_at,
+                             updated_at)
+                          VALUES ('domain', 'source-0020.test',
+                                  'source-0020.test', '{}'::jsonb, NULL, 1,
+                                  now(), now())
+                          RETURNING id
+                        ), tgt AS (
+                          INSERT INTO ati.entity
+                            (entity_type, canonical_value, display_name,
+                             attributes, content_hash, version, created_at,
+                             updated_at)
+                          VALUES ('ip_address', '192.0.2.1',
+                                  '192.0.2.1', '{}'::jsonb, NULL, 1, now(),
+                                  now())
+                          RETURNING id
+                        ), evidence AS (
+                          INSERT INTO ati.evidence
+                            (id, investigation_id, evidence_type,
+                             subject_entity_id, source, source_record_id,
+                             retrieved_at, facts, raw_payload, version)
+                          SELECT gen_random_uuid(), inv.id,
+                                 'urn:ati:evidence:dns',
+                                 (SELECT id FROM src),
+                                 'urn:ati:source:threatfox',
+                                 'legacy-0020-seed', now(), '{}'::jsonb,
+                                 NULL, 1
+                            FROM inv
+                          RETURNING id
+                        ), edge AS (
+                          INSERT INTO ati.relationship
+                            (id, source_entity_id, target_entity_id,
+                             relationship_type_urn, version, deleted_at,
+                             created_at, updated_at)
+                          SELECT gen_random_uuid(), (SELECT id FROM src),
+                                 (SELECT id FROM tgt),
+                                 'urn:ati:relationship:dns_resolves_to', 1,
+                                 NULL, now(), now()
+                          RETURNING id
+                        )
+                        SELECT (SELECT id FROM inv),
+                               (SELECT id FROM edge),
+                               (SELECT id FROM evidence)
+                        """),
+                    )
+                ).one()
+                assert legacy_investigation_id is not None
+                assert legacy_relationship_id is not None
+                assert legacy_evidence_id is not None
+        finally:
+            await engine.dispose()
+        engine = _test_engine()
+        try:
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text("""
+                        SELECT id, version
+                          FROM ati.append_relationship_observation(
+                            :id, :relationship_id, :evidence_id,
+                            :investigation_id, NULL, :retrieved_at,
+                            'urn:ati:source:threatfox', 0.9)
+                    """),
+                    {
+                        "id": legacy_id,
+                        "relationship_id": legacy_relationship_id,
+                        "evidence_id": legacy_evidence_id,
+                        "investigation_id": legacy_investigation_id,
+                        "retrieved_at": _RETRIEVED_AT,
+                    },
+                )
+        finally:
+            await engine.dispose()
         async with uow_factory() as uow:
-            investigation_id, evidence_id, relationship_id = await seed_graph(uow)
-            legacy, legacy_id = observation_factory(
-                relationship_id=relationship_id,
-                evidence_id=evidence_id,
-                investigation_id=investigation_id,
-                retrieved_at=_RETRIEVED_AT,
-            )
-            await uow.relationship_observations.append(legacy)
             assert await history_count(uow, "relationship_observation", legacy_id) == 1
 
         command.upgrade(alembic_cfg, "head")

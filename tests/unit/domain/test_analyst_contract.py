@@ -78,12 +78,14 @@ def input_factory(**overrides: object) -> EvidenceAnalystInput:
         ),
         "evidence": (
             AnalystEvidenceItem(
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 type=EvidenceType.DNS,
-                subject=AnalystEntity(
-                    entity_id=source_id,
-                    entity_type=EntityType.DOMAIN,
-                    value="example.com",
+                entities=(
+                    AnalystEntity(
+                        entity_id=source_id,
+                        entity_type=EntityType.DOMAIN,
+                        value="example.com",
+                    ),
                 ),
                 source="urn:ati:source:google_public_dns",
                 retrieved_at=_RETRIEVED_AT,
@@ -93,7 +95,7 @@ def input_factory(**overrides: object) -> EvidenceAnalystInput:
         "relationship_observations": (
             AnalystRelationshipObservation(
                 relationship_observation_id=uuid4(),
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 relationship_id=uuid4(),
                 relationship_type=RelationshipType.RESOLVES_TO,
                 source_entity=AnalystEntity(
@@ -200,11 +202,9 @@ def test_evidence_item_freezes_facts() -> None:
 def test_evidence_item_defaults_facts_to_empty_frozen() -> None:
     """An Evidence item without facts carries an empty immutable mapping."""
     item = AnalystEvidenceItem(
-        evidence_id=uuid4(),
+        evidence_observation_id=uuid4(),
         type=EvidenceType.NETWORK,
-        subject=AnalystEntity(
-            entity_id=uuid4(), entity_type=EntityType.IP_ADDRESS, value="192.0.2.1"
-        ),
+        entities=(),
         source="urn:ati:source:rdap",
         retrieved_at=_RETRIEVED_AT,
     )
@@ -237,7 +237,7 @@ def test_input_ordering_is_preserved() -> None:
     """Tuple collections preserve the deterministic loader order."""
     analyst_input = input_factory()
 
-    assert [item.evidence_id for item in analyst_input.evidence]
+    assert [item.evidence_observation_id for item in analyst_input.evidence]
     assert [
         obs.relationship_observation_id
         for obs in analyst_input.relationship_observations

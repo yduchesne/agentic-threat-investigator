@@ -144,9 +144,7 @@ def test_u14_blank_source_rejected() -> None:
 def test_u15_evidence_subject_filter_accepted() -> None:
     """The relational subject filter is accepted and fingerprinted."""
     entity_id = uuid4()
-    query = EvidenceListQuery(
-        investigation_id=uuid4(), subject_entity_id=entity_id, limit=10
-    )
+    query = EvidenceListQuery(investigation_id=uuid4(), entity_id=entity_id, limit=10)
     assert (
         query.fingerprint()
         != EvidenceListQuery(investigation_id=uuid4(), limit=10).fingerprint()

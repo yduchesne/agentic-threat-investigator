@@ -29,7 +29,6 @@ def _assertion(suffix: str) -> RelationshipAssertion:
         source=EntityIdentity(type=EntityType.DOMAIN, value="example.test"),
         type=RelationshipType.RESOLVES_TO,
         target=EntityIdentity(type=EntityType.IP_ADDRESS, value=suffix),
-        evidence_id=EVIDENCE_ID,
     )
 
 

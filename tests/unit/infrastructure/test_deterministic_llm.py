@@ -84,12 +84,14 @@ def _evidence_input() -> EvidenceAnalystInput:
         ),
         evidence=(
             AnalystEvidenceItem(
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 type=EvidenceType.DNS,
-                subject=AnalystEntity(
-                    entity_id=source_id,
-                    entity_type=EntityType.DOMAIN,
-                    value="update-package.test",
+                entities=(
+                    AnalystEntity(
+                        entity_id=source_id,
+                        entity_type=EntityType.DOMAIN,
+                        value="update-package.test",
+                    ),
                 ),
                 source="urn:ati:source:google_public_dns",
                 retrieved_at=_RETRIEVED_AT,
@@ -99,7 +101,7 @@ def _evidence_input() -> EvidenceAnalystInput:
         relationship_observations=(
             AnalystRelationshipObservation(
                 relationship_observation_id=uuid4(),
-                evidence_id=evidence_id,
+                evidence_observation_id=evidence_id,
                 relationship_id=uuid4(),
                 relationship_type=RelationshipType.RESOLVES_TO,
                 source_entity=AnalystEntity(
@@ -204,7 +206,7 @@ async def test_evidence_analysis_canonical_trajectory_and_reflection() -> None:
     observation_support = final.findings[1].support[0]
     assert isinstance(evidence_support, EvidenceSupport)
     assert isinstance(observation_support, RelationshipSupport)
-    rendered_evidence = analysis_input.evidence[0].evidence_id
+    rendered_evidence = analysis_input.evidence[0].evidence_observation_id
     rendered_observation = analysis_input.relationship_observations[
         0
     ].relationship_observation_id

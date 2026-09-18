@@ -45,13 +45,20 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import Entity
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -81,6 +88,12 @@ from agentic_threat_investigator.evaluation.report_writer.models import (
     ReportWriterScenario,
     ReportWriterScenarioResolution,
 )
+
+_REPORT_WRITER_NAMESPACE = uuid5(
+    UUID("66c8e2f6-5d1e-4f94-8ec6-000000000001"),
+    "ATI report-writer fixture Evidence identity (test seam)",
+)
+
 
 _FIXED = datetime(2026, 1, 2, tzinfo=UTC)
 """Fixed UTC timestamp for persisted rows that declare none."""
@@ -328,25 +341,45 @@ class ReportWriterScenarioMaterializer:
                 )
             )
             for evidence in fixture.evidence:
-                subject = _entity_by_label(fixture, evidence.subject)
-                persisted_evidence = await uow.evidence.insert(
-                    LegacyEvidence(
-                        id=planned.evidence_ids[evidence.label],
-                        investigation_id=planned.investigation_id,
-                        type=evidence.type,
-                        subject=EntityRef(
-                            id=entity_ids[evidence.subject],
-                            type=subject.type,
-                            value=subject.value,
+                planned_evidence = planned.evidence_ids[evidence.label]
+                stable_evidence = Evidence(
+                    id=uuid5(
+                        _REPORT_WRITER_NAMESPACE,
+                        f"evidence-stable:{planned.investigation_id}:{evidence.label}",
+                    ),
+                    type=evidence.type,
+                    source=evidence.source,
+                    source_record_id=f"report-writer:{evidence.label}",
+                )
+                persisted_evidence = await uow.evidence.persist(
+                    ConvertedEvidence(
+                        evidence=stable_evidence,
+                        observation=EvidenceObservationCandidate(
+                            evidence_id=stable_evidence.id,
+                            observed_at=evidence.observed_at,
+                            retrieved_at=evidence.retrieved_at or _FIXED,
+                            facts=dict(evidence.facts),
                         ),
-                        source=evidence.source,
-                        observed_at=evidence.observed_at,
-                        retrieved_at=evidence.retrieved_at or _FIXED,
-                        facts=dict(evidence.facts),
+                    ),
+                    observation_id=planned_evidence,
+                )
+                await uow.evidence_observation_entities.associate(
+                    persisted_evidence.observation.id,
+                    entity_ids[evidence.subject],
+                )
+                await uow.investigation_evidence.admit(
+                    InvestigationEvidence(
+                        investigation_id=planned.investigation_id,
+                        evidence_observation_id=persisted_evidence.observation.id,
+                        inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                        added_at=_FIXED,
+                        added_by=InvestigationEvidenceActor.SYSTEM,
                     )
                 )
                 evidence_ids[evidence.label] = _confirm_id(
-                    persisted_evidence, "evidence", evidence.label
+                    persisted_evidence.observation,
+                    "evidence_observation",
+                    evidence.label,
                 )
             for relationship in fixture.relationships:
                 persisted_relationship = await uow.relationships.upsert(

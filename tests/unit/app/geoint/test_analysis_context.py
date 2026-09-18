@@ -67,12 +67,14 @@ def analyst_input(
 def evidence_item(entity_id: UUID, evidence_id: UUID) -> AnalystEvidenceItem:
     """Build one analyst Evidence item bound to an Entity."""
     return AnalystEvidenceItem(
-        evidence_id=evidence_id,
+        evidence_observation_id=evidence_id,
         type=EvidenceType.GEOLOCATION,
-        subject=AnalystEntity(
-            entity_id=entity_id,
-            entity_type=EntityType.IP_ADDRESS,
-            value="203.0.113.10",
+        entities=(
+            AnalystEntity(
+                entity_id=entity_id,
+                entity_type=EntityType.IP_ADDRESS,
+                value="203.0.113.10",
+            ),
         ),
         source="urn:ati:source:test",
         retrieved_at=FIXED,
@@ -165,7 +167,7 @@ async def test_g26f_c02_one_eligible_entity_current_and_history() -> None:
         history[1].observation_id,
         history[2].observation_id,
     }
-    assert all(item.evidence_id == evidence_id for item in entity.history)
+    assert all(item.evidence_observation_id == evidence_id for item in entity.history)
 
 
 @pytest.mark.asyncio

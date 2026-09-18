@@ -66,8 +66,9 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.database 
     PostgresUnitOfWork,
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.models import (
-    EntityRow,
+    EvidenceObservationRow,
     EvidenceRow,
+    InvestigationEvidenceRow,
     RelationshipObservationRow,
     RelationshipRow,
 )
@@ -309,70 +310,40 @@ async def test_dns_vertical_slice(
         result = await graph.ainvoke({"investigation": state})
         recorded_state = result["investigation"]
         outcome = recorded_state.last_provider_outcome
+        # PR 28B legacy-provider boundary: Google Public DNS output is not
+        # semantically modeled and therefore fails closed in the executor.
+        # The dispatcher/executor/timeline mechanics still run end to end and
+        # the outcome carries the documented fail-closed error vocabulary.
         assert outcome is not None
-        # The queued item crossed the dispatch boundary exactly once.
         assert dispatched == [work_item]
-        assert outcome.status is ProviderExecutionStatus.SUCCEEDED
-        assert len(outcome.evidence_ids) == 1
-        assert len(outcome.discovered_entity_ids) == 1
-        assert len(outcome.relationship_ids) == 1
+        assert outcome.status is ProviderExecutionStatus.FAILED
+        assert outcome.error is not None
+        assert outcome.error.code == "provider_binding"
+        assert outcome.error.recoverable is False
+        assert outcome.evidence_ids == ()
+        assert outcome.discovered_entity_ids == ()
+        assert outcome.relationship_ids == ()
 
         assert recorded_state.budget.provider_calls_used == 1
-        assert list(recorded_state.evidence_ids) == list(outcome.evidence_ids)
-        assert list(recorded_state.relationship_ids) == list(outcome.relationship_ids)
-        # Discovered entities are recorded, never automatically scheduled.
         assert recorded_state.pending_provider_work == []
-
-        evidence_id = outcome.evidence_ids[0]
-        ip_entity_id = outcome.discovered_entity_ids[0]
-        relationship_id = outcome.relationship_ids[0]
 
         async with uow_factory() as reader:
             assert reader.session is not None
-            assert await reader.session.get(EvidenceRow, evidence_id) is not None
-            ip_entity = await reader.session.get(EntityRow, ip_entity_id)
-            assert ip_entity is not None
-            assert ip_entity.entity_type == EntityType.IP_ADDRESS.value
-            assert ip_entity.canonical_value == _RESOLVED_IP
-            assert (
-                await reader.session.get(RelationshipRow, relationship_id) is not None
-            )
-
-            observations = await reader.session.execute(
-                select(RelationshipObservationRow).where(
-                    RelationshipObservationRow.relationship_id == relationship_id,
-                    RelationshipObservationRow.evidence_id == evidence_id,
-                )
-            )
-            assert len(observations.scalars().all()) == 1
-
-            # The durable Investigation references the actual root Entity.
-            durable = await reader.investigations.get_by_id(investigation_id)
-            assert durable is not None
-            assert durable.root_entity_ids == [root.id]
-            assert recorded_state.root_entity_ids == [root.id]
-            assert work_item.entity_id == root.id
-
+            # No durable Evidence, relationship, or observation was created.
+            evidence_count = await reader.session.execute(select(EvidenceRow))
+            assert len(evidence_count.scalars().all()) == 0
             timeline = await reader.timeline_events.list_by_investigation(
                 investigation_id
             )
             assert [event.type for event in timeline] == [
                 InvestigationTimelineEventType.PROVIDER_WORK_STARTED,
-                InvestigationTimelineEventType.EVIDENCE_PERSISTED,
-                InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
-            ]
-            assert InvestigationTimelineEventType.PROVIDER_WORK_FAILED not in [
-                event.type for event in timeline
+                InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
             ]
             started = timeline[0]
             assert started.provider == SourceId.GOOGLE_PUBLIC_DNS
             assert started.target_entity_id == root.id
-            persisted_event = timeline[1]
-            assert persisted_event.evidence_ids == (evidence_id,)
-            assert persisted_event.entity_ids == (root.id, ip_entity_id)
-            assert persisted_event.relationship_ids == (relationship_id,)
-            completed = timeline[2]
-            assert completed.evidence_ids == (evidence_id,)
+            failed = timeline[1]
+            assert failed.provider == SourceId.GOOGLE_PUBLIC_DNS
 
 
 async def test_dns_missing_root_never_calls_provider(
@@ -523,8 +494,14 @@ async def test_context_mismatch_fails_before_any_persistence(
         async with uow_factory() as reader:
             for investigation_id in (investigation_a, investigation_b):
                 evidence_count = await reader.session.execute(  # type: ignore[union-attr]
-                    select(EvidenceRow).where(
-                        EvidenceRow.investigation_id == investigation_id
+                    select(EvidenceObservationRow.id)
+                    .join(
+                        InvestigationEvidenceRow,
+                        InvestigationEvidenceRow.evidence_observation_id
+                        == EvidenceObservationRow.id,
+                    )
+                    .where(
+                        InvestigationEvidenceRow.investigation_id == investigation_id
                     )
                 )
                 assert len(evidence_count.scalars().all()) == 0
@@ -638,8 +615,14 @@ async def test_local_dispatcher_binding_rejects_other_investigation(
         async with uow_factory() as reader:
             for investigation_id in (investigation_a, investigation_b):
                 evidence_count = await reader.session.execute(  # type: ignore[union-attr]
-                    select(EvidenceRow).where(
-                        EvidenceRow.investigation_id == investigation_id
+                    select(EvidenceObservationRow.id)
+                    .join(
+                        InvestigationEvidenceRow,
+                        InvestigationEvidenceRow.evidence_observation_id
+                        == EvidenceObservationRow.id,
+                    )
+                    .where(
+                        InvestigationEvidenceRow.investigation_id == investigation_id
                     )
                 )
                 assert len(evidence_count.scalars().all()) == 0

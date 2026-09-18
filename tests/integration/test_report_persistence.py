@@ -30,7 +30,6 @@ from agentic_threat_investigator.domain.assessment import (
     FindingDisposition,
     Verdict,
 )
-from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.domain.report import (
     InvestigationReport,
     ReportFindingSnapshot,
@@ -39,8 +38,8 @@ from agentic_threat_investigator.infrastructure.persistence.postgresql.database 
     PostgresUnitOfWork,
 )
 from tests.support.query_fixtures import (
-    evidence_factory,
     seed_entity,
+    seed_evidence_observation,
     seed_investigation,
 )
 
@@ -121,12 +120,9 @@ async def seed_report_context(
     async with uow_factory() as uow:
         entity_id = await seed_entity(uow)
         investigation_id = await seed_investigation(uow, root_entity_ids=(entity_id,))
-        evidence: LegacyEvidence = await uow.evidence.insert(
-            evidence_factory(investigation_id, entity_id)
+        evidence_id = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=entity_id
         )
-        if evidence.id is None:  # pragma: no cover - insert assigns identity
-            raise RuntimeError("evidence insert returned no identity")
-        evidence_id = evidence.id
     assessment = await seed_assessment(uow_factory, investigation_id, evidence_id)
     return investigation_id, evidence_id, assessment
 

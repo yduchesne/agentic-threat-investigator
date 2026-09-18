@@ -34,8 +34,11 @@ from agentic_threat_investigator.app.geoint.worker import (
     GeoResolutionWorkerConfig,
 )
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
-from agentic_threat_investigator.domain.entities import EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    Evidence,
+    EvidenceObservation,
+    EvidenceType,
+)
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     EntityLocationObservation,
@@ -48,7 +51,6 @@ from agentic_threat_investigator.domain.geoint import (
     LocationType,
     observation_uuid_for_resolution,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 
 FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 RETRIEVED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
@@ -106,19 +108,27 @@ def ambiguous_outcome() -> CanonicalLocationResolution:
 def geolocation_evidence(
     *,
     evidence_id: UUID | None = None,
+    observed_at: datetime | None = None,
     facts: dict[str, object] | None = None,
     type_: EvidenceType = EvidenceType.GEOLOCATION,
-) -> LegacyEvidence:
-    """Return one deterministic GEOLOCATION LegacyEvidence fixture."""
-    return LegacyEvidence(
-        id=evidence_id or uuid4(),
-        investigation_id=uuid4(),
+) -> tuple[Evidence, EvidenceObservation]:
+    """Return one deterministic GEOLOCATION stable Evidence + observation."""
+    identity = evidence_id or uuid4()
+    evidence = Evidence(
+        id=identity,
         type=type_,
-        subject=EntityRef(id=uuid4(), type=EntityType.IP_ADDRESS, value="203.0.113.7"),
         source="urn:ati:source:test",
+        source_record_id=f"geo-{identity}",
+    )
+    observation = EvidenceObservation(
+        id=uuid4(),
+        evidence_id=identity,
+        version=1,
+        observed_at=observed_at,
         retrieved_at=RETRIEVED_AT,
         facts=facts if facts is not None else {"country_code": "ZZ"},
     )
+    return evidence, observation
 
 
 class FakeUnitOfWork:
@@ -193,7 +203,7 @@ class FakeGeoResolutionsRepository:
         return GeoResolution(
             id=resolution_id,
             entity_id=observation.entity_id,
-            evidence_id=observation.evidence_id,
+            evidence_observation_id=observation.evidence_observation_id,
             status=GeoResolutionStatus.RESOLVED,
             attempt_count=1,
             claimed_by=None,
@@ -216,7 +226,7 @@ class FakeGeoResolutionsRepository:
         return GeoResolution(
             id=resolution_id,
             entity_id=uuid4(),
-            evidence_id=uuid4(),
+            evidence_observation_id=uuid4(),
             status=GeoResolutionStatus.UNRESOLVABLE,
             attempt_count=1,
             last_error_code=error_code,
@@ -254,7 +264,7 @@ class FakeGeoResolutionsRepository:
         return GeoResolution(
             id=resolution_id,
             entity_id=uuid4(),
-            evidence_id=uuid4(),
+            evidence_observation_id=uuid4(),
             status=GeoResolutionStatus.PENDING,
             attempt_count=1,
             next_attempt_at=FIXED_NOW,
@@ -264,15 +274,24 @@ class FakeGeoResolutionsRepository:
 
 
 class FakeEvidenceRepository:
-    """In-memory immutable LegacyEvidence repository."""
+    """In-memory exact-observation repository serving stable Evidence too."""
 
-    def __init__(self, evidence_rows: list[LegacyEvidence]) -> None:
-        """Index the bound LegacyEvidence rows by identity."""
+    def __init__(
+        self,
+        evidence_rows: list[EvidenceObservation],
+        stable: dict[UUID, Evidence],
+    ) -> None:
+        """Index the bound observations by identity and the stable Evidence."""
         self.rows = {row.id: row for row in evidence_rows}
+        self.stable = stable
 
-    async def get_by_id(self, evidence_id: UUID) -> LegacyEvidence | None:
-        """Return the bound LegacyEvidence row, if any."""
-        return self.rows.get(evidence_id)
+    async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
+        """Return the bound observation, if any."""
+        return self.rows.get(observation_id)
+
+    async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
+        """Return the bound stable Evidence, if any."""
+        return self.stable.get(evidence_id)
 
 
 class FakeUnitOfWorkFactory:
@@ -280,11 +299,23 @@ class FakeUnitOfWorkFactory:
 
     def __init__(
         self,
-        evidence_rows: list[LegacyEvidence],
+        evidence_rows: list[EvidenceObservation],
         claimed: list[GeoResolution],
+        stable: dict[UUID, Evidence] | None = None,
     ) -> None:
         """Bind the evidence index and the claimed batch."""
-        self.evidence = FakeEvidenceRepository(evidence_rows)
+        built_stable: dict[UUID, Evidence] = {}
+        if stable is not None:
+            built_stable = stable
+        else:
+            for observation in evidence_rows:
+                built_stable[observation.evidence_id] = Evidence(
+                    id=observation.evidence_id,
+                    type=EvidenceType.GEOLOCATION,
+                    source="urn:ati:source:test",
+                    source_record_id="geo-fake",
+                )
+        self.evidence = FakeEvidenceRepository(evidence_rows, built_stable)
         self.geo_resolutions = FakeGeoResolutionsRepository(self)
         self.geo_resolutions.claimed = claimed
         self.active_uows = 0
@@ -329,14 +360,14 @@ def claimed_resolution(
     *,
     resolution_id: UUID | None = None,
     entity_id: UUID | None = None,
-    evidence_id: UUID | None = None,
+    evidence_observation_id: UUID | None = None,
     version: int = 7,
 ) -> GeoResolution:
     """Return one claimed (PROCESSING) GeoResolution fixture."""
     return GeoResolution(
         id=resolution_id or uuid4(),
         entity_id=entity_id or uuid4(),
-        evidence_id=evidence_id or uuid4(),
+        evidence_observation_id=evidence_observation_id or uuid4(),
         status=GeoResolutionStatus.PROCESSING,
         attempt_count=2,
         claimed_by="worker-unit",
@@ -380,8 +411,8 @@ def test_g26c_w01_resolved_completion() -> None:
     """G26C-W01 a resolved outcome persists an exact-provenance observation."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(facts={"country_code": "ZZ"})
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
+        evidence_stable, evidence = geolocation_evidence(facts={"country_code": "ZZ"})
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
         outcome = resolved_result(
             location_factory(), reason_code="exact_semantic_match", matched_fields=()
         )
@@ -397,7 +428,7 @@ def test_g26c_w01_resolved_completion() -> None:
         assert res.id is not None
         assert obs.id == observation_uuid_for_resolution(res.id)
         assert obs.entity_id == res.entity_id
-        assert obs.evidence_id == res.evidence_id
+        assert obs.evidence_observation_id == res.evidence_observation_id
         assert obs.location_id == outcome.location.id  # type: ignore[union-attr]
         assert obs.precision is LocationPrecision.COUNTRY
         assert obs.observed_at is None
@@ -412,8 +443,8 @@ def test_g26c_w02_unresolvable_completion() -> None:
     """G26C-W02 an unresolvable outcome terminates work with the reason code."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(facts={"country_code": "ZZ"})
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
+        evidence_stable, evidence = geolocation_evidence(facts={"country_code": "ZZ"})
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
         factory = FakeUnitOfWorkFactory([evidence], [res])
         resolver = FakeResolver(factory, unresolved_result())
         processed = await run_worker(factory, resolver)
@@ -429,8 +460,8 @@ def test_g26c_w03_ambiguous_is_unresolvable_and_never_guessed() -> None:
     """G26C-W03 ambiguity maps to terminal unresolvable with the stable code."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(facts={"country_code": "ZZ"})
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
+        evidence_stable, evidence = geolocation_evidence(facts={"country_code": "ZZ"})
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
         factory = FakeUnitOfWorkFactory([evidence], [res])
         resolver = FakeResolver(factory, ambiguous_outcome())
         processed = await run_worker(factory, resolver)
@@ -445,10 +476,12 @@ def test_g26c_w04_malformed_evidence_is_terminal_failed() -> None:
     """G26C-W04 malformed LegacyEvidence persists a terminal non-retryable failure."""
 
     async def scenario() -> None:
-        # A non-GEOLOCATION LegacyEvidence row fails the type guard.
-        evidence = geolocation_evidence(type_=EvidenceType.DNS)
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
-        factory = FakeUnitOfWorkFactory([evidence], [res])
+        # A non-GEOLOCATION stable Evidence fails the type guard.
+        evidence_stable, evidence = geolocation_evidence(type_=EvidenceType.DNS)
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
+        factory = FakeUnitOfWorkFactory(
+            [evidence], [res], stable={evidence.evidence_id: evidence_stable}
+        )
         resolver = FakeResolver(factory, unresolved_result())
         processed = await run_worker(factory, resolver)
         assert processed == 1
@@ -481,8 +514,8 @@ def test_g26c_w05_retryable_failure_uses_bounded_backoff_config() -> None:
     """G26C-W05 a transient resolver error schedules a bounded retry."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(facts={"country_code": "ZZ"})
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
+        evidence_stable, evidence = geolocation_evidence(facts={"country_code": "ZZ"})
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
         factory = FakeUnitOfWorkFactory([evidence], [res])
         resolver = FakeResolver(factory, unresolved_result())
         resolver.error = RuntimeError("boom")
@@ -502,8 +535,8 @@ def test_g26c_w06_retryable_failure_at_max_attempts_uses_terminal_budget() -> No
     """G26C-W06 at the max attempt the worker passes the budget to the DB."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(facts={"country_code": "ZZ"})
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
+        evidence_stable, evidence = geolocation_evidence(facts={"country_code": "ZZ"})
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
         # The worker always asks for a bounded retry; the database is the
         # final authority that transitions an exhausted budget to FAILED.
         factory = FakeUnitOfWorkFactory([evidence], [res])
@@ -524,8 +557,8 @@ def test_g26c_w07_cancellation_propagates_without_failure_persistence() -> None:
     """G26C-W07 asyncio.CancelledError propagates and persists no transition."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(facts={"country_code": "ZZ"})
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
+        evidence_stable, evidence = geolocation_evidence(facts={"country_code": "ZZ"})
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
         factory = FakeUnitOfWorkFactory([evidence], [res])
         resolver = FakeResolver(factory, unresolved_result())
         resolver.error = asyncio.CancelledError()
@@ -548,8 +581,8 @@ def test_g26c_w09_resolver_runs_with_no_claim_uow_open() -> None:
     """G26C-W09 resolver execution never overlaps a claim UnitOfWork."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(facts={"country_code": "ZZ"})
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
+        evidence_stable, evidence = geolocation_evidence(facts={"country_code": "ZZ"})
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
         factory = FakeUnitOfWorkFactory([evidence], [res])
         resolver = FakeResolver(factory, unresolved_result())
         await run_worker(factory, resolver)
@@ -565,8 +598,8 @@ def test_g26c_w10_completion_opens_a_new_short_uow() -> None:
     """G26C-W10 completion runs inside its own fresh UnitOfWork."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(facts={"country_code": "ZZ"})
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
+        evidence_stable, evidence = geolocation_evidence(facts={"country_code": "ZZ"})
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
         outcome = resolved_result(
             location_factory(), reason_code="exact_semantic_match", matched_fields=()
         )
@@ -586,9 +619,11 @@ def test_g26c_w11_failure_persistence_failure_relies_on_lease_recovery() -> None
     """G26C-W11 a rejected failure transition never terminates the iteration."""
 
     async def scenario() -> None:
-        evidence = geolocation_evidence(type_=EvidenceType.DNS)
-        res = claimed_resolution(evidence_id=evidence.id, entity_id=evidence.subject.id)
-        factory = FakeUnitOfWorkFactory([evidence], [res])
+        evidence_stable, evidence = geolocation_evidence(type_=EvidenceType.DNS)
+        res = claimed_resolution(evidence_observation_id=evidence.id, entity_id=uuid4())
+        factory = FakeUnitOfWorkFactory(
+            [evidence], [res], stable={evidence.evidence_id: evidence_stable}
+        )
         factory.geo_resolutions.failure_persistence_failure = RuntimeError
         resolver = FakeResolver(factory, unresolved_result())
         # One item failure must not raise: the lease expires and the row is

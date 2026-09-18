@@ -76,20 +76,29 @@ from agentic_threat_investigator.app.geoint.worker import (
 from agentic_threat_investigator.app.persistence.repositories import (
     EntityLocationObservationRepository,
     EntityRepository,
+    EvidenceObservationEntityRepository,
     EvidenceRepository,
     GeoResolutionRepository,
+    InvestigationEvidenceRepository,
     InvestigationRepository,
 )
 from agentic_threat_investigator.config import get_settings
 from agentic_threat_investigator.config.settings import OperatingMode, Settings
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     GeographicClaim,
     GeoResolution,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.infrastructure.persistence.postgresql.composites import (
     register_batch_composites,
 )
@@ -302,13 +311,14 @@ def derive_resolution_id(
 
 @dataclass(frozen=True)
 class SeedUnit:
-    """One deterministic Entity + GEOLOCATION LegacyEvidence + resolution plan."""
+    """One deterministic Entity + GEOLOCATION observation + resolution plan."""
 
     entity_id: UUID
     evidence_id: UUID
     resolution_id: UUID
     entity_value: str
-    evidence: LegacyEvidence
+    evidence: ConvertedEvidence
+    admitted_to: UUID
 
     @property
     def entity(self) -> Entity:
@@ -359,24 +369,25 @@ def build_seed_units(
             other_investigation_id=other_investigation_id,
         )
         retrieved_at = SEED_RETRIEVED_AT + timedelta(hours=fixture.retrieval_hours)
-        evidence = LegacyEvidence(
-            id=evidence_id,
-            investigation_id=investigation_id
-            if index == 0
-            else (other_investigation_id or investigation_id),
-            type=EvidenceType.GEOLOCATION,
-            subject=EntityRef(
-                id=entity_id,
-                type=EntityType.IP_ADDRESS,
-                value=fixture.entity_value,
+        stable_id = uuid5(
+            _SEED_NAMESPACE,
+            f"sgeoint-stable:{scenario}:{index}:{fixture.entity_value}",
+        )
+        evidence = ConvertedEvidence(
+            evidence=Evidence(
+                id=stable_id,
+                type=EvidenceType.GEOLOCATION,
+                source="urn:ati:source:e2e-seed",
+                source_record_id=f"sgeoint:{scenario}:{index}:{fixture.entity_value}",
             ),
-            source="urn:ati:source:e2e-seed",
-            source_record_id=None,
-            source_url=None,
-            observed_at=SEED_OBSERVED_AT + timedelta(hours=fixture.retrieval_hours),
-            retrieved_at=retrieved_at,
-            facts=dict(fixture.facts),
-            raw_payload=None,
+            observation=EvidenceObservationCandidate(
+                evidence_id=stable_id,
+                source_url=None,
+                observed_at=SEED_OBSERVED_AT + timedelta(hours=fixture.retrieval_hours),
+                retrieved_at=retrieved_at,
+                facts=dict(fixture.facts),
+                raw_payload=None,
+            ),
         )
         units.append(
             SeedUnit(
@@ -385,6 +396,11 @@ def build_seed_units(
                 resolution_id=resolution_id,
                 entity_value=fixture.entity_value,
                 evidence=evidence,
+                admitted_to=(
+                    investigation_id
+                    if index == 0
+                    else (other_investigation_id or investigation_id)
+                ),
             )
         )
     return tuple(units)
@@ -452,6 +468,8 @@ class SeedUnitOfWork(Protocol):
     investigations: InvestigationRepository
     entities: EntityRepository
     evidence: EvidenceRepository
+    evidence_observation_entities: EvidenceObservationEntityRepository
+    investigation_evidence: InvestigationEvidenceRepository
     geo_resolutions: GeoResolutionRepository
     entity_location_observations: EntityLocationObservationRepository
 
@@ -522,29 +540,32 @@ async def apply_seed(
             if entity.id is None:  # pragma: no cover
                 raise RuntimeError("seeded entity persisted without an id")
             entity_ids.append(entity.id)
-            existing = await uow.evidence.get_by_id(unit.evidence_id)
+            existing = await uow.evidence.get_observation(unit.evidence_id)
             if existing is not None:
                 reused.append(unit.evidence_id)
                 evidence_ids.append(unit.evidence_id)
                 continue
-            bound = unit.evidence.model_copy(
-                update={
-                    "subject": EntityRef(
-                        id=entity.id,
-                        type=EntityType.IP_ADDRESS,
-                        value=unit.entity_value,
-                    )
-                }
+            persisted = await uow.evidence.persist(
+                unit.evidence, observation_id=unit.evidence_id
             )
-            inserted = await uow.evidence.insert(bound)
-            if inserted.id is None:  # pragma: no cover
-                raise RuntimeError("seeded evidence persisted without an id")
-            created.append(inserted.id)
-            evidence_ids.append(inserted.id)
+            created.append(persisted.observation.id)
+            evidence_ids.append(persisted.observation.id)
+            await uow.evidence_observation_entities.associate(
+                persisted.observation.id, entity.id
+            )
+            await uow.investigation_evidence.admit(
+                InvestigationEvidence(
+                    investigation_id=unit.admitted_to,
+                    evidence_observation_id=persisted.observation.id,
+                    inclusion_reason=InvestigationEvidenceReason.INITIAL,
+                    added_at=SEED_RETRIEVED_AT,
+                    added_by=InvestigationEvidenceActor.SYSTEM,
+                )
+            )
             pending = GeoResolution(
                 id=unit.resolution_id,
                 entity_id=entity.id,
-                evidence_id=unit.evidence_id,
+                evidence_observation_id=persisted.observation.id,
             )
             await uow.geo_resolutions.create_pending(pending)
         report = SeedReport(
@@ -582,7 +603,11 @@ async def apply_seed(
                 rows = await uow.entity_location_observations.list_for_entity(
                     unit.entity_id
                 )
-                if not [row for row in rows if row.evidence_id == unit.evidence_id]:
+                if not [
+                    row
+                    for row in rows
+                    if row.evidence_observation_id == unit.evidence_id
+                ]:
                     missing.append(unit)
         return missing
 
@@ -602,7 +627,7 @@ async def apply_seed(
                 unit.entity_id
             )
             for row in rows:
-                if row.evidence_id != unit.evidence_id:
+                if row.evidence_observation_id != unit.evidence_id:
                     continue
                 if row.id is None:  # pragma: no cover
                     raise E2eSeedResolutionIncompleteError(

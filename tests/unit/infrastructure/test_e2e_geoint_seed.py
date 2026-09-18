@@ -67,21 +67,21 @@ def test_g26e_s02_identities_are_deterministic() -> None:
     assert first == second
     assert len(first) == 2
     assert first[0].entity_id == derive_entity_id("203.0.113.20")
-    assert first[0].evidence.investigation_id == INVESTIGATION_ID
-    assert first[0].evidence.type is not None
-    assert first[0].evidence.facts["country_code"] == "US"
-    assert first[0].evidence.facts["city"] == "Seattle"
+    assert first[0].evidence.observation.retrieved_at is not None
+    assert first[0].evidence.evidence.type is not None
+    assert first[0].evidence.observation.facts["country_code"] == "US"
+    assert first[0].evidence.observation.facts["city"] == "Seattle"
 
 
 def test_g26e_s03_fixtures_map_to_the_canonical_resolution_vocabulary() -> None:
     """Evidence facts use the exact PR 26C claim vocabulary."""
     for name in ("entity_history", "same_location", "containment", "non_mappable"):
         for unit in build_seed_units(INVESTIGATION_ID, name):
-            facts = unit.evidence.facts
+            facts = unit.evidence.observation.facts
             assert facts["country_code"] in ("US", "ZZ")
             assert facts["precision"] in ("city", "region", "country")
-            assert unit.evidence.observed_at is not None
-            assert unit.evidence.retrieved_at is not None
+            assert unit.evidence.observation.observed_at is not None
+            assert unit.evidence.observation.retrieved_at is not None
 
 
 def test_g26e_s04_cross_investigation_scoping_and_guard() -> None:
@@ -92,8 +92,8 @@ def test_g26e_s04_cross_investigation_scoping_and_guard() -> None:
         other_investigation_id=OTHER_INVESTIGATION_ID,
     )
     assert len(units) == 2
-    assert units[0].evidence.investigation_id == INVESTIGATION_ID
-    assert units[1].evidence.investigation_id == OTHER_INVESTIGATION_ID
+    assert units[0].admitted_to == INVESTIGATION_ID
+    assert units[1].admitted_to == OTHER_INVESTIGATION_ID
     # The other-investigation parameter is never silently accepted.
     with pytest.raises(UnknownSeedScenarioError):
         build_seed_units(

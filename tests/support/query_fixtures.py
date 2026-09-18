@@ -15,14 +15,21 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import (
+    ConvertedEvidence,
+    Evidence,
+    EvidenceObservationCandidate,
+    EvidenceType,
+    InvestigationEvidence,
+    InvestigationEvidenceActor,
+    InvestigationEvidenceReason,
+)
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
     default_investigation_budget,
 )
-from agentic_threat_investigator.domain.legacy_evidence import EntityRef, LegacyEvidence
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -83,16 +90,91 @@ def evidence_factory(
     retrieved_at: datetime = FIXED_TIME,
     source: str = "urn:ati:source:google_public_dns",
     evidence_type: EvidenceType = EvidenceType.DNS,
-) -> LegacyEvidence:
-    """Build one deterministic immutable evidence observation."""
-    return LegacyEvidence(
-        investigation_id=investigation_id,
-        type=evidence_type,
-        subject=EntityRef(id=entity_id, type=EntityType.DOMAIN, value="example.com"),
-        source=source,
-        retrieved_at=retrieved_at,
-        facts={"answers": ["192.0.2.1"]},
+) -> ConvertedEvidence:
+    """Build one deterministic global ConvertedEvidence observation."""
+    del investigation_id, entity_id
+    evidence_id = uuid4()
+    return ConvertedEvidence(
+        evidence=Evidence(
+            id=evidence_id,
+            type=evidence_type,
+            source=source,
+            source_record_id=f"query-{evidence_id}",
+        ),
+        observation=EvidenceObservationCandidate(
+            evidence_id=evidence_id,
+            retrieved_at=retrieved_at,
+            facts={"answers": ["192.0.2.1"]},
+        ),
     )
+
+
+async def seed_observation_evidence(
+    uow: PostgresUnitOfWork,
+    *,
+    investigation_id: UUID,
+    entity_id: UUID,
+    retrieved_at: datetime = FIXED_TIME,
+    source: str = "urn:ati:source:google_public_dns",
+    evidence_type: EvidenceType = EvidenceType.DNS,
+) -> UUID:
+    """Persist one global observation, associate it, and admit it exactly."""
+    converted = evidence_factory(
+        investigation_id,
+        entity_id,
+        retrieved_at=retrieved_at,
+        source=source,
+        evidence_type=evidence_type,
+    )
+    persisted = await uow.evidence.persist(converted)
+    await uow.evidence_observation_entities.associate(
+        persisted.observation.id, entity_id
+    )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
+            investigation_id=investigation_id,
+            evidence_observation_id=persisted.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=retrieved_at,
+            added_by=InvestigationEvidenceActor.SYSTEM,
+        )
+    )
+    return persisted.observation.id
+
+
+async def seed_evidence_observation(
+    uow: PostgresUnitOfWork,
+    *,
+    investigation_id: UUID,
+    entity_id: UUID | None = None,
+    retrieved_at: datetime = FIXED_TIME,
+    source: str = "urn:ati:source:google_public_dns",
+    evidence_type: EvidenceType = EvidenceType.DNS,
+    facts: dict[str, object] | None = None,
+) -> UUID:
+    """Persist one global observation, associate/admit it, return its id."""
+    converted = evidence_factory(
+        investigation_id,
+        entity_id or uuid4(),
+        retrieved_at=retrieved_at,
+        source=source,
+        evidence_type=evidence_type,
+    )
+    persisted = await uow.evidence.persist(converted)
+    if entity_id is not None:
+        await uow.evidence_observation_entities.associate(
+            persisted.observation.id, entity_id
+        )
+    await uow.investigation_evidence.admit(
+        InvestigationEvidence(
+            investigation_id=investigation_id,
+            evidence_observation_id=persisted.observation.id,
+            inclusion_reason=InvestigationEvidenceReason.INITIAL,
+            added_at=retrieved_at,
+            added_by=InvestigationEvidenceActor.SYSTEM,
+        )
+    )
+    return persisted.observation.id
 
 
 async def seed_relationship(
@@ -118,23 +200,18 @@ async def seed_observation(
     *,
     investigation_id: UUID,
     relationship: Relationship,
-    evidence: LegacyEvidence,
+    evidence_observation_id: UUID,
+    source: str = "urn:ati:source:google_public_dns",
     retrieved_at: datetime = FIXED_TIME,
     observed_at: datetime | None = None,
 ) -> RelationshipObservation:
-    """Append one immutable relationship observation.
-
-    ``evidence`` must be the recorded observation returned by the LegacyEvidence
-    repository insert, so its database identity is authoritative.
-    """
-    if evidence.id is None:
-        raise ValueError("evidence must be recorded before appending observations")
+    """Append one immutable relationship observation with exact provenance."""
     observation = RelationshipObservation(
         id=uuid4(),
         relationship_id=relationship.id,
-        evidence_observation_id=evidence.id,
+        evidence_observation_id=evidence_observation_id,
         observed_at=observed_at,
         retrieved_at=retrieved_at,
-        source=evidence.source,
+        source=source,
     )
     return await uow.relationship_observations.append(observation)

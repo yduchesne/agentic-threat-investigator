@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
-# SPDX-License-Identifier: AGPL-3.0-only
 """ThreatFox provider unit tests.
 
 Covers the strict response-record schema, the pure IOC identity-matching
@@ -11,6 +9,8 @@ service.
 
 from __future__ import annotations
 
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
 import asyncio
 import json
 from datetime import UTC, datetime
@@ -25,7 +25,8 @@ from agentic_threat_investigator.app.providers import (
     ProviderResult,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType
-from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.evidence import ConvertedEvidence, EvidenceType
+from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
     ProviderHttpPolicy,
@@ -123,7 +124,7 @@ class TestHttpRequestContract:
         assert FIXED_KEY not in str(request.url)
         assert FIXED_KEY not in request.content.decode("utf-8")
         assert "auth" not in str(request.url).lower()
-        assert FIXED_KEY not in str(result.evidence[0].source_url)
+        assert FIXED_KEY not in str(_legacy(result.evidence[0]).source_url)
 
     async def test_search_term_is_canonical_value(self) -> None:
         """The search term is the canonicalized entity value, not raw input."""
@@ -418,7 +419,7 @@ class TestEvidenceNormalization:
         assert result.errors == ()
         assert result.provider == "urn:ati:source:threatfox"
         assert len(result.evidence) == 1
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type == EvidenceType.THREAT_INTELLIGENCE
         assert evidence.investigation_id == FIXED_UUID
         assert evidence.subject.type == EntityType.DOMAIN
@@ -471,7 +472,7 @@ class TestEvidenceNormalization:
             clock=lambda: FIXED_TS,
         )
         assert result.errors == ()
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.subject.type == EntityType.IP_ADDRESS
         assert evidence.subject.value == CANONICAL_ASYNCRAT_IP
         match = evidence.facts["matches"][0]
@@ -490,7 +491,7 @@ class TestEvidenceNormalization:
             entity=Entity(type=EntityType.IP_ADDRESS, value="2001:db8::1"),
         )
         assert result.errors == ()
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.subject.value == "2001:db8::1"
 
     async def test_observed_at_is_latest_source_observation(self) -> None:
@@ -506,9 +507,9 @@ class TestEvidenceNormalization:
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
         assert result.errors == ()
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert [m["threatfox_id"] for m in matches] == ["864202", "864203"]
-        assert result.evidence[0].observed_at == datetime(
+        assert _legacy(result.evidence[0]).observed_at == datetime(
             2026, 8, 20, 12, 0, 0, tzinfo=UTC
         )
 
@@ -519,7 +520,7 @@ class TestEvidenceNormalization:
             asyncrat_ip_port_record(id="864203", malware="win.other_rat"),
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert {m["malware"] for m in matches} == {"win.asyncrat", "win.other_rat"}
 
     async def test_multiple_records_same_malware_are_retained(self) -> None:
@@ -534,7 +535,7 @@ class TestEvidenceNormalization:
             asyncrat_ip_port_record(id="864203", ioc=CANONICAL_ASYNCRAT_IP_PORT),
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert len(matches) == 2
         assert {m["threatfox_id"] for m in matches} == {"864202", "864203"}
         assert {m["malware"] for m in matches} == {CANONICAL_ASYNCRAT_MALWARE}
@@ -548,7 +549,7 @@ class TestEvidenceNormalization:
             asyncrat_ip_port_record(id="864203", malware_printable="asyncrat"),
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert {m["malware"] for m in matches} == {CANONICAL_ASYNCRAT_MALWARE}
         assert {m["malware_printable"] for m in matches} == {"AsyncRAT", "asyncrat"}
 
@@ -558,9 +559,9 @@ class TestEvidenceNormalization:
             asyncrat_ip_port_record(confidence_level=75)
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["confidence_level"] == 75
-        assert set(result.evidence[0].facts) == {"matches"}
+        assert set(_legacy(result.evidence[0]).facts) == {"matches"}
 
     async def test_null_tags_and_reference_retained(self) -> None:
         """Documented null tags/reference values are retained as nulls."""
@@ -568,7 +569,7 @@ class TestEvidenceNormalization:
             asyncrat_ip_port_record(tags=None, reference=None)
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
-        match = result.evidence[0].facts["matches"][0]
+        match = _legacy(result.evidence[0]).facts["matches"][0]
         assert match["tags"] is None
         assert match["reference"] is None
 
@@ -580,7 +581,7 @@ class TestEvidenceNormalization:
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
         assert result.errors == ()
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert len(matches) == 1
         assert matches[0]["threatfox_id"] == "864202"
 
@@ -614,7 +615,7 @@ class TestEvidenceNormalization:
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
         assert result.errors == ()
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert len(matches) == 1
         assert matches[0]["threatfox_id"] == "864202"
 
@@ -627,7 +628,7 @@ class TestEvidenceNormalization:
             asyncrat_ip_port_record(id="864203"),
         )
         result = await investigate(httpx.Response(200, json=payload), entity=_IP_ENTITY)
-        matches = result.evidence[0].facts["matches"]
+        matches = _legacy(result.evidence[0]).facts["matches"]
         assert [m["threatfox_id"] for m in matches] == ["864202", "864203"]
 
     async def test_no_entity_relationship_or_persistence_objects(self) -> None:
@@ -641,7 +642,7 @@ class TestEvidenceNormalization:
         assert isinstance(result, ProviderResult)
         assert result.errors == ()
         assert set(result.model_dump()) == {"provider", "evidence", "errors"}
-        evidence = result.evidence[0]
+        evidence = _legacy(result.evidence[0])
         assert evidence.type == EvidenceType.THREAT_INTELLIGENCE
         # The evidence facts carry no entity/relationship structures.
         serialized = str(evidence.facts)
@@ -715,3 +716,17 @@ class TestInputValidationOrdering:
         result = await investigate(httpx.Response(401, json={}), entity=_DOMAIN_ENTITY)
         assert len(result.errors) == 1
         assert isinstance(result.errors[0], ProviderError)
+
+
+def _legacy(
+    item: ConvertedEvidence | LegacyEvidence,
+) -> LegacyEvidence:
+    """Narrow one provider-output item to its transitional LegacyEvidence shape.
+
+    These provider contract tests exercise the unmigrated legacy providers,
+    which emit ``LegacyEvidence``; ``ProviderResult.evidence`` is typed as the
+    PR 28B compatibility union so the approved legacy test seam narrows
+    explicitly. No identity is invented and no global persistence is involved.
+    """
+    assert isinstance(item, LegacyEvidence)  # legacy provider contract
+    return item

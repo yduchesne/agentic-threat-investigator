@@ -33,7 +33,7 @@ def _observation_item() -> RelationshipObservationItem:
     return RelationshipObservationItem(
         id=UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
         relationship_id=UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
-        evidence_id=UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        evidence_observation_id=UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
         investigation_id=INVESTIGATION,
         observed_at=datetime(2026, 1, 1, tzinfo=UTC),
         retrieved_at=datetime(2026, 1, 2, tzinfo=UTC),

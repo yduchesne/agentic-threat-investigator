@@ -20,8 +20,8 @@ from agentic_threat_investigator.infrastructure.persistence.query.services impor
     PostgresQueryServices,
 )
 from tests.support.query_fixtures import (
-    evidence_factory,
     seed_entity,
+    seed_evidence_observation,
     seed_investigation,
     seed_observation,
     seed_relationship,
@@ -68,34 +68,34 @@ async def test_relationship_appears_once_per_investigation(
         )
         # Three observations of the same edge inside investigation A.
         for _ in range(3):
-            evidence = await uow.evidence.insert(
-                evidence_factory(investigation_a, source)
+            evidence = await seed_evidence_observation(
+                uow, investigation_id=investigation_a, entity_id=source
             )
             await seed_observation(
                 uow,
                 investigation_id=investigation_a,
                 relationship=edge,
-                evidence=evidence,
+                evidence_observation_id=evidence,
             )
         # One observation of the same edge inside investigation B.
-        evidence_b = await uow.evidence.insert(
-            evidence_factory(investigation_b, source)
+        evidence_b = await seed_evidence_observation(
+            uow, investigation_id=investigation_b, entity_id=source
         )
         await seed_observation(
             uow,
             investigation_id=investigation_b,
             relationship=edge,
-            evidence=evidence_b,
+            evidence_observation_id=evidence_b,
         )
         # A single observation of the second edge inside investigation A.
-        evidence_a2 = await uow.evidence.insert(
-            evidence_factory(investigation_a, source)
+        evidence_a2 = await seed_evidence_observation(
+            uow, investigation_id=investigation_a, entity_id=source
         )
         await seed_observation(
             uow,
             investigation_id=investigation_a,
             relationship=second_edge,
-            evidence=evidence_a2,
+            evidence_observation_id=evidence_a2,
         )
 
         assert uow.session is not None
@@ -140,14 +140,14 @@ async def test_relationship_source_target_type_filters(
             uow, source_entity_id=other_source, target_entity_id=target_a
         )
         for edge in (edge_a, edge_b, edge_c):
-            evidence = await uow.evidence.insert(
-                evidence_factory(investigation_id, source)
+            evidence = await seed_evidence_observation(
+                uow, investigation_id=investigation_id, entity_id=source
             )
             await seed_observation(
                 uow,
                 investigation_id=investigation_id,
                 relationship=edge,
-                evidence=evidence,
+                evidence_observation_id=evidence,
             )
 
         assert uow.session is not None
@@ -196,12 +196,14 @@ async def test_soft_deleted_relationship_hidden(
         edge = await seed_relationship(
             uow, source_entity_id=source, target_entity_id=target
         )
-        evidence = await uow.evidence.insert(evidence_factory(investigation_id, source))
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
         await seed_observation(
             uow,
             investigation_id=investigation_id,
             relationship=edge,
-            evidence=evidence,
+            evidence_observation_id=evidence,
         )
         await uow.relationships.soft_delete(edge.id)
 
