@@ -118,11 +118,11 @@ Broker offsets are transport topology, not Evidence identity or domain idempoten
 
 ## Evidence message contract
 
-The distributed boundary uses an explicit, stable, versioned `EvidenceMessage` contract. It must not be a direct serialization of an internal Pydantic/domain model. Producer-assigned stable `message_id`, `evidence_id`, and observation identity/provenance must support replay and future schema evolution. PR 28C defines the exact V1 wire fields, identities, canonical JSON codec, and fail-closed validation **(delivered)**; PR 28D+ builds the publisher/consumer/log abstraction over that contract.
+The distributed boundary uses an explicit, stable, versioned `EvidenceMessage` contract. It must not be a direct serialization of an internal Pydantic/domain model. Producer-assigned stable `message_id`, `evidence_id`, and observation identity/provenance must support replay and future schema evolution. PR 28C defines the exact V1 wire fields, identities, canonical JSON codec, and fail-closed validation **(delivered)**; PR 28D delivered the publisher/consumer/log abstraction over that contract.
 
 ## Distributed-log abstraction
 
-The application architecture is defined before Kafka/Redpanda infrastructure is introduced. PR 28D provides publisher/consumer contracts and an ATI-owned deterministic in-process append-only `InMemoryEvidenceLog` using Python standard-library concurrency primitives.
+The application architecture is defined before Kafka/Redpanda infrastructure is introduced. PR 28D provides publisher/consumer contracts and an ATI-owned deterministic in-process append-only `InMemoryEvidenceLog` using Python standard-library concurrency primitives **(delivered)**.
 
 The in-memory implementation models log semantics rather than destructive queue semantics: records remain ordered, consumer position is separate, commit occurs explicitly after successful processing, and tests can deterministically simulate redelivery and failures. It is for development and architecture validation and is not durable across process restart.
 
@@ -147,7 +147,7 @@ Reference-corpus ingestion remains distinct. Sources such as MITRE ATT&CK that f
 | **28A** | Global Evidence domain model | Stable global `Evidence`; immutable versioned `EvidenceObservation`; observation-level Entity, Relationship and Investigation provenance **(delivered)** |
 | **28B** | Persistence and query migration | PostgreSQL schema/functions/repositories plus migration of Investigation-scoped reads to the new observation model **(delivered)** |
 | **28C** | Evidence wire contract | Explicit versioned `EvidenceMessage` with stable producer-side identity and replay-safe provenance **(delivered)** |
-| **28D** | Distributed-log abstraction | `EvidencePublisher`/consumer contracts plus deterministic `InMemoryEvidenceLog` |
+| **28D** | Distributed-log abstraction | `EvidencePublisher`/consumer contracts plus deterministic `InMemoryEvidenceLog` **(delivered)** |
 | **28E** | Batch Evidence consumer | At-least-once/idempotent bounded-batch extraction and PostgreSQL persistence; offsets committed only after DB commit |
 | **28F** | Datasource producer migration | Appropriate Evidence-producing datasource pipelines publish converted Evidence through the log boundary |
 | **28G** | Kafka-compatible infrastructure | Kafka/Redpanda adapter, partitioning, consumer groups, retry/recovery and configuration |
@@ -169,9 +169,11 @@ Define the durable, versioned wire contract and stable producer-assigned message
 
 **Delivered:** immutable V1 `EvidenceMessage` in `app/evidence_message.py` with explicit wire mapping (never an internal-model dump); deterministic producer-side `message_id` (UUIDv5 over datasource-execution + flattened sequence + Evidence identity) and `observation_candidate_id` (UUIDv5 over the message identity, explicitly not a committed Observation identity); reuse and validation of the PR 28A global Evidence identity; bounded datasource/source/format/retrieval provenance; pure builder/reconstruction between `ConvertedEvidence` and the message; canonical byte-deterministic UTF-8 JSON codec with pinned UTC timestamps; strict typed fail-closed decode (malformed JSON/UTF-8, unsupported versions, extra fields, malformed values, identity mismatches); and deterministic ThreatFox/replay/later-unchanged-acquisition slices. No publisher, consumer, log, broker infrastructure, DB migration, lifecycle event, or datasource runtime reroute was added; production remains synchronous until PR 28F.
 
-### PR 28D — Distributed-log abstraction
+### PR 28D — Distributed-log abstraction **`[DONE]`**
 
 Introduce application publisher/consumer contracts and deterministic local implementation. Model ordered append, polling, explicit consumer-position commit, replay/redelivery, bounded batches, and deterministic failure injection. Do not introduce Kafka, Redis, RabbitMQ, NATS, or another infrastructure product in this slice.
+
+**Delivered:** broker-neutral `EvidencePublisher`/`EvidenceConsumer` ABCs and immutable log position/record/batch/consumer-identity contracts in `app/evidence_log.py`; the deterministic append-only `InMemoryEvidenceLog` (one ordered stream, contiguous publication, `asyncio.Lock` serialization within one event loop, records retained after commit, independent per-consumer committed cursors, bounded non-destructive `poll(max_messages)`, exact explicit `commit(batch)` with fail-closed foreign/skipped/stale/forged/reversed/non-contiguous validation, natural redelivery of uncommitted batches, same-ID handle recreation, and narrow one-shot `fail_next_publish`/`fail_next_poll`/`fail_next_commit` faults); real PR 28C `EvidenceMessage` values throughout. Unit matrix E28D-C/P/R/K/G/F passes and vertical slices D28D-V01..V05 pass. No Kafka/Redpanda/Redis, no PostgreSQL consumer, no broker fields, no datasource producer reroute, no `PUBLISHED`, and no lifecycle change were added; production remains synchronous, and the in-memory log is not durable across process restart.
 
 ### PR 28E — Batch Evidence persistence consumer
 

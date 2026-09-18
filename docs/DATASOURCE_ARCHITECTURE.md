@@ -332,10 +332,13 @@ the `ConvertedEvidence` values unchanged — there is no `LegacyEvidence`
 rebind at the runtime/persistence boundary; PostgreSQL owns observation
 identity, versioning, and material no-op detection. The pure
 `EvidenceMessage` v1 wire contract is delivered in PR 28C below
-(`ToEvidenceConverter` -> `ConvertedEvidence` -> `EvidenceMessage` v1);
-this document still makes no claim of `EvidenceMessage`/log
-publication — that stays PR 28D+ and the datasource producer migration
-stays PR 28F.
+(`ToEvidenceConverter` -> `ConvertedEvidence` -> `EvidenceMessage` v1)
+and the broker-neutral `EvidencePublisher`/`EvidenceConsumer`
+contracts plus deterministic `InMemoryEvidenceLog` are delivered in
+PR 28D (`app/evidence_log.py`). This document still makes no claim of
+production `EvidenceMessage` publication — the datasource runtime is
+not routed through the log — that stays PR 28F and the datasource
+producer migration stays PR 28F.
 
 ## Evidence wire boundary (PR 28C, delivered)
 
@@ -351,7 +354,8 @@ DatasourceDefinition
  -> ToEvidenceConverter selected by semantic_format
  -> ConvertedEvidence (global Evidence + observation candidate)
  -> EvidenceMessage v1   (builder + canonical JSON codec, PR 28C)
- -> EvidencePublisher -> distributed log   (PR 28D+, not delivered)
+ -> EvidencePublisher -> distributed log   (PR 28D, delivered;
+    datasource producer migration stays PR 28F)
 ```
 
 The boundary reuses without modification the PR 28A global Evidence
@@ -369,9 +373,11 @@ operations are pure (no DB/network/UnitOfWork).
 Production remains synchronous and behaviorally unchanged: the
 datasource runtime (provider executor, observation persistence,
 `DatasourceProvider`) is not rerouted, nothing is published, and no
-`PUBLISHED` lifecycle event exists. PR 28F will migrate appropriate
-datasource executions to publish messages through the PR 28D
-publisher/consumer/log abstraction.
+`PUBLISHED` lifecycle event exists. The PR 28D publisher/consumer/log
+abstraction exists at the application seam (`app/evidence_log.py`) but
+no production code publishes or consumes through it yet; PR 28F will
+migrate appropriate datasource executions to publish messages through
+the PR 28D publisher/consumer/log abstraction.
 
 ## Runtime datasource migration (PR 27E, delivered)
 
