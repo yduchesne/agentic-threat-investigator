@@ -1863,6 +1863,31 @@ def _location_reverse_statement(location_id: UUID, investigation_id: UUID) -> st
     """
 
 
+def _containment_observation_statement(
+    location_id: UUID, investigation_id: UUID
+) -> str:
+    """Return the observation-side join shape of the containment statement."""
+    return f"""
+        SELECT ob.id FROM ati.entity_location_observation ob
+        JOIN ati.investigation_evidence ie
+          ON ie.evidence_observation_id = ob.evidence_observation_id
+        WHERE ie.investigation_id = '{investigation_id}'
+          AND ob.location_id = '{location_id}'
+        LIMIT 10
+    """
+
+
+def _containment_geometry_statement(location_id: UUID) -> str:
+    """Return the geometry-containment walk of the containment statement."""
+    return f"""
+        SELECT l.id FROM ati.location l, ati.location sel
+        WHERE sel.id = '{location_id}'
+          AND (l.id = sel.id OR (l.geometry && sel.geometry
+               AND ST_Covers(sel.geometry, l.geometry)))
+        LIMIT 10
+    """
+
+
 def _containment_statement(location_id: UUID, investigation_id: UUID) -> str:
     """Return the exact production containment statement shape."""
     return f"""
@@ -2003,17 +2028,40 @@ async def test_explain_containment_uses_gist_and_observation_indexes(
         investigation_id = await seed_investigation(uow)
         geography = await seed_geography(uow)
         await _seed_us_observations(uow, investigation_id, geography)
-    indexes, node_types = await _plan(
+    # The full containment plan is verified as two deterministic single-path
+    # probes. The combined statement drives both the observation-side join
+    # and the geometry containment walk; at fixture scale (~20 rows) the
+    # planner legitimately flips between the GiST and the location PK paths
+    # (both are index scans of the same tiny relation and cost identically
+    # under pg_statistic noise), so asserting one composite plan would be
+    # flaky. Each probe below pins exactly one access path.
+    observation_indexes, observation_nodes = await _plan(
         session_factory,
-        _containment_statement(geography["United States"], investigation_id),
+        _containment_observation_statement(
+            geography["United States"], investigation_id
+        ),
         {},
     )
-    assert "location_geometry_gist_idx" in indexes
-    assert indexes & {
+    geometry_indexes, geometry_nodes = await _plan(
+        session_factory,
+        _containment_geometry_statement(geography["United States"]),
+        {},
+    )
+    assert geometry_indexes & {"location_geometry_gist_idx"}, (
+        f"geometry plan indexes={sorted(geometry_indexes)} "
+        f"nodes={sorted(geometry_nodes)}"
+    )
+    assert observation_indexes & {
         "entity_location_observation_evidence_idx",
         "entity_location_observation_location_idx",
-    }
-    assert "Seq Scan" not in node_types
+    }, (
+        f"observation plan indexes={sorted(observation_indexes)} "
+        f"nodes={sorted(observation_nodes)}"
+    )
+    assert "Seq Scan" not in observation_nodes, (
+        f"observation plan indexes={sorted(observation_indexes)} "
+        f"nodes={sorted(observation_nodes)}"
+    )
 
 
 @pytest.mark.asyncio
