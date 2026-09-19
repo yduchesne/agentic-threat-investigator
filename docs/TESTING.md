@@ -647,6 +647,49 @@ No PostgreSQL integration test is required for PR 28D: the slice is pure
 application state with no database boundary, and consumer-side PostgreSQL
 processing is owned by PR 28E.
 
+### Bounded Evidence persistence consumer (PR 28E)
+
+PR 28E tests span three layers and pin the E28E-C/X/P, I28E, and V28E
+matrices:
+
+- deterministic unit tests (`tests/unit/app/test_evidence_consumer.py`,
+  `tests/unit/app/test_evidence_batch_persistence_service.py`,
+  `tests/unit/app/extraction/test_message_context.py`,
+  `tests/unit/infrastructure/test_evidence_batch_repositories.py`) cover
+  consumer sequencing (empty poll, bounded poll bound, one batch = one
+  persistence call, DB-before-log-commit ordering, DB failure without
+  consumer commit, commit failure after DB success, cancellation without
+  false acknowledgement), the persistence service size/transaction
+  contract, message-context reconstruction (exact ConvertedEvidence, IP/
+  domain invocation contexts, malformed/unsupported fail-closed, reused
+  ThreatFox extractor, no subject/log-position wire fields), and the
+  adapter's deterministic JSONB serialization;
+- real-PostgreSQL injection tests (`tests/integration/
+  test_evidence_batch_consumer.py`) cover the I28E matrix: first batch
+  with exact derived state, receipt-based exact replay, CREATED candidate
+  identity, UNCHANGED candidate unused (a later same-state NEW message), a
+  material update appending the authoritative observation (Option A),
+  atomic batch rollback (metadata conflict), deterministic same-Evidence
+  ordering in one batch, duplicate messages in one batch, soft-deleted
+  Entity/Relationship conflicts, no generic Evidence history, no
+  Investigation admission, exact RelationshipObservation provenance, the
+  SQL-side size bound, and the required distinct-message recurrence test
+  (`[M1:A, M2:B, M3:A]` — the second A is APPENDED, never resolved as a
+  receipt replay);
+- the required same-Evidence multi-state replay test
+  (`tests/integration/test_evidence_batch_replay.py`) proves the canonical
+  at-least-once boundary with the real log and real PostgreSQL: persist
+  `[A,B,C]`, PostgreSQL commit succeeds, consumer commit fails, the
+  identical batch is redelivered, and exactly three observations remain
+  with no duplicate derived graph state (receipts are keyed by message
+  identity and return the previously established authoritative results
+  without invoking the Evidence transition);
+- the V28E vertical slices drive the real `InMemoryEvidenceLog` through
+  the real consumer/service/repository against the migrated database:
+  success, DB failure before log commit (cursor unchanged, redelivery),
+  material change across runs, and bounded multi-record processing in
+  bounded prefixes.
+
 ### Deterministic vertical-slice provider execution (PR 19B)
 
 `tests/integration/test_provider_execution_pipeline.py` proves the real
