@@ -141,10 +141,30 @@ def test_terminal_event_vocabulary_is_exact() -> None:
         "acquired",
         "decoded",
         "converted",
+        "published",
         "completed",
         "failed",
         "cancelled",
     }
+
+
+def test_published_stage_is_non_terminal() -> None:
+    """F2-L12: PUBLISHED exists as a non-terminal stage (PR 28F-2).
+
+    PUBLISHED is part of the closed event vocabulary but never of the
+    terminal set; it carries an accepted-message item_count and never an
+    error_code (which stays bound to FAILED only).
+    """
+    assert DatasourceExecutionEventType.PUBLISHED.value == "published"
+    assert DatasourceExecutionEventType.PUBLISHED not in (
+        TERMINAL_DATASOURCE_EXECUTION_EVENT_TYPES
+    )
+    event = _event(event_type=DatasourceExecutionEventType.PUBLISHED, item_count=2)
+    assert event.item_count == 2
+    assert event.error_code is None
+    assert DatasourceExecutionEventType.PUBLISHED in DatasourceExecutionEventType
+    for terminal in TERMINAL_DATASOURCE_EXECUTION_EVENT_TYPES:
+        assert DatasourceExecutionEventType.PUBLISHED is not terminal
 
 
 def test_d27b_u13_no_inference_from_datasource_definition() -> None:

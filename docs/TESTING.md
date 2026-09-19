@@ -372,6 +372,12 @@ matrix IDs D27B-U01..U13, D27B-P01..P15, D27B-V01/V02, D27B-C01, D27B-S01):
   objects and no `datasource_execution` table; downgrade removes only PR 27B
   objects while pre-existing authoritative rows (source records,
   investigations) survive unchanged;
+- PR 28F-2 extension (F2-L12..L15 and V28F2-06): `PUBLISHED` is a
+  non-terminal stage (accepted-message `item_count`, no `error_code`),
+  rejected before STARTED and after a terminal outcome both locally and by
+  the real stored function; SQL API v0028 (migration 0033) opens exactly
+  the one additional non-terminal stage with a round-trip-tested
+  downgrade restoring the seven-value v0025 vocabulary;
 - the canonical vertical slice (D27B-V01/V02): the real
   `DatasourceExecutionRecorder` -> append port -> PostgreSQL repository ->
   stored function path over real PostgreSQL with simulated local work
@@ -694,6 +700,59 @@ matrices:
   success, DB failure before log commit (cursor unchanged, redelivery),
   material change across runs, and bounded multi-record processing in
   bounded prefixes.
+
+### Datasource Evidence producer (PR 28F-2)
+
+PR 28F-2 tests close the producer side of the v0.2 Global Evidence
+pipeline with deterministic, offline producer vertical slices — no live
+Internet, broker, or consumer is involved:
+
+```text
+real ThreatFox-format HTTP fixture (httpx.MockTransport)
+ -> production ProviderHttpClient / orjson decode
+ -> production ThreatFox semantic parser
+ -> production ThreatFoxToEvidenceConverter
+ -> production EvidenceMessage builder (evidence_message_from_converted)
+ -> EvidencePublisher (InMemoryEvidenceLog.publisher())
+```
+
+- the unit matrix (`tests/unit/app/test_datasource_evidence_producer.py`)
+  pins F2-M01..M10 (message construction over flattened output: one/
+  multi-object order, multi-item converter return order, mixed 0/1/N
+  contiguous flat sequence, zero output, PR 28C deterministic identity,
+  exact recorder execution ID, exact semantic provenance, builder
+  failure with no publish, and identical injected execution ID + fixture
+  yielding identical messages), F2-L01..L11 (producer lifecycle through
+  the real ThreatFox HTTP stack: normal, zero, typed acquisition failure,
+  decode/semantic failure, conversion failure, message-construction
+  failure, publisher failure, acquisition and publication cancellation,
+  publish-success/PUBLISHED-append failure without republish, and
+  PUBLISHED-success/COMPLETED-append failure without republish),
+  F2-P01..P07 (exactly one ordered publish call, ordered input, empty
+  no-op publish, no retry, no direct-persistence fallback, PUBLISHED
+  count equals message count, `EvidencePublisher` ABC-only dependency),
+  and F2-S01..S06 (reference corpus excluded, no observation-persistence
+  dependency, no Investigation/broker fields in messages, no
+  consumer/PostgreSQL wait, and the PR 28F-1 stdlib JSON codec
+  unchanged). F2-L12..L15 (`PUBLISHED` non-terminal, post-terminal
+  rejection, pre-STARTED rejection, no `error_code`) live at the
+  recorder/domain level (`tests/unit/app/test_datasource_execution_recorder.py`,
+  `tests/unit/domain/test_datasource_log.py`);
+- the real-PostgreSQL vertical slices
+  (`tests/integration/test_datasource_evidence_producer.py`) run the
+  full production stack over the migrated database and pin V28F2-01..07:
+  ThreatFox success with the exact `STARTED, ACQUIRED, DECODED,
+  CONVERTED, PUBLISHED, COMPLETED` lifecycle under one execution ID,
+  multi-record order (semantic order == converted order == message
+  sequence == log position order), valid zero result recording
+  `PUBLISHED(0)`, publisher failure via
+  `InMemoryEvidenceLog.fail_next_publish()` (`FAILED(publication_failed)`,
+  no direct fallback), deterministic cancellation at the publisher
+  boundary (`CANCELLED` + propagation), real-PostgreSQL `PUBLISHED`
+  lifecycle acceptance plus atomic post-terminal rejection (SQL API
+  v0028, migration 0033), and producer/consumer separation (the producer
+  reaches `COMPLETED` without any `EvidencePersistenceConsumer` running,
+  no receipt/Evidence rows created).
 
 ### Deterministic vertical-slice provider execution (PR 19B)
 

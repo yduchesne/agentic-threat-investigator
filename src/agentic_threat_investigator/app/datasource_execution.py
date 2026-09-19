@@ -119,6 +119,15 @@ class DatasourceExecutionRecorder:
         """Append CONVERTED with the stage-local produced Evidence count."""
         await self._stage(DatasourceExecutionEventType.CONVERTED, item_count=item_count)
 
+    async def published(self, *, item_count: int | None = None) -> None:
+        """Append PUBLISHED with the accepted EvidenceMessage count (PR 28F-2).
+
+        The stage-local ``item_count`` is the number of ``EvidenceMessage``
+        values the producer's one ordered ``EvidencePublisher.publish`` call
+        accepted; zero output is a valid publication of an empty tuple.
+        """
+        await self._stage(DatasourceExecutionEventType.PUBLISHED, item_count=item_count)
+
     async def complete(self) -> None:
         """Append the COMPLETED terminal outcome."""
         await self._terminal_outcome(DatasourceExecutionEventType.COMPLETED)

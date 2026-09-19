@@ -157,14 +157,18 @@ class DatasourceExecutionEventType(StrEnum):
     Describes operational stages of one acquisition execution correlated by
     one ``execution_id``. It does not assert that every current datasource
     runtime already implements all stages; non-terminal stages may be omitted
-    because source paths differ. Terminal event types are exactly
-    ``COMPLETED``, ``FAILED``, and ``CANCELLED``.
+    because source paths differ. ``PUBLISHED`` (PR 28F-2) is the producer-side
+    publication stage of the v0.2 Global Evidence path: its stage-local
+    ``item_count`` is the number of ``EvidenceMessage`` values accepted by the
+    injected ``EvidencePublisher`` in one ordered publish call. Terminal event
+    types are exactly ``COMPLETED``, ``FAILED``, and ``CANCELLED``.
     """
 
     STARTED = "started"
     ACQUIRED = "acquired"
     DECODED = "decoded"
     CONVERTED = "converted"
+    PUBLISHED = "published"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -217,7 +221,9 @@ class DatasourceLogEvent(BaseModel):
 
     ``item_count``/``byte_count`` are stage-local: ACQUIRED may report
     acquired byte/artifact counts, DECODED decoded object counts, CONVERTED
-    produced Evidence counts, and COMPLETED usually omits them. They are
+    produced Evidence counts, PUBLISHED (PR 28F-2) reports the count of
+    ``EvidenceMessage`` values accepted by the publisher in the execution's
+    one ordered publish call, and COMPLETED usually omits them. They are
     never interpreted globally.
     """
 

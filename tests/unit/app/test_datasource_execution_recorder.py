@@ -289,3 +289,83 @@ async def test_d27b_u12_omitted_stages_legal() -> None:
     await recorder.start()
     await recorder.complete()
     assert state.types == ["started", "completed"]
+
+
+@pytest.mark.asyncio
+async def test_f2_l12_published_stage_non_terminal() -> None:
+    """F2-L12: PUBLISHED is a non-terminal stage with an accepted-message count.
+
+    The recorder appends PUBLISHED with the exact stage-local item_count and
+    no error_code after a valid STARTED, and remains open for COMPLETED.
+    """
+    state = _State()
+    recorder = _recorder(state)
+    await recorder.start()
+    await recorder.converted(item_count=2)
+    await recorder.published(item_count=2)
+    await recorder.complete()
+    assert state.types == ["started", "converted", "published", "completed"]
+    published = state.events[2]
+    assert published.event_type is DatasourceExecutionEventType.PUBLISHED
+    assert published.item_count == 2
+    assert published.error_code is None
+    assert state.commits == 4
+
+
+@pytest.mark.asyncio
+async def test_f2_l12b_published_zero_is_valid() -> None:
+    """A zero-output publication records PUBLISHED(0) then COMPLETED."""
+    state = _State()
+    recorder = _recorder(state)
+    await recorder.start()
+    await recorder.converted(item_count=0)
+    await recorder.published(item_count=0)
+    await recorder.complete()
+    assert state.types == ["started", "converted", "published", "completed"]
+    assert state.events[2].item_count == 0
+
+
+@pytest.mark.asyncio
+async def test_f2_l13_published_after_terminal_rejected() -> None:
+    """F2-L13: PUBLISHED after a terminal outcome is rejected locally."""
+    state = _State()
+    recorder = _recorder(state)
+    await recorder.start()
+    await recorder.complete()
+    with pytest.raises(DatasourceExecutionRecorderError):
+        await recorder.published(item_count=1)
+    assert state.types == ["started", "completed"]
+
+
+@pytest.mark.asyncio
+async def test_f2_l14_published_before_started_rejected() -> None:
+    """F2-L14: PUBLISHED before STARTED is rejected locally."""
+    state = _State()
+    recorder = _recorder(state)
+    with pytest.raises(DatasourceExecutionRecorderError):
+        await recorder.published(item_count=1)
+    assert state.events == []
+
+
+@pytest.mark.asyncio
+async def test_f2_l15_published_never_carries_error_code() -> None:
+    """F2-L15: a PUBLISHED event with an error_code fails closed.
+
+    The domain model binds error_code to FAILED events only; the recorder
+    appends a PUBLISHED event with no error_code and the model rejects a
+    crafted one.
+    """
+    state = _State()
+    recorder = _recorder(state)
+    await recorder.start()
+    await recorder.published(item_count=3)
+    assert state.events[-1].error_code is None
+    with pytest.raises(ValueError):
+        DatasourceLogEvent(
+            execution_id=recorder.execution_id,
+            datasource_id=_THREATFOX,
+            event_type=DatasourceExecutionEventType.PUBLISHED,
+            occurred_at=_EPOCH,
+            item_count=3,
+            error_code="publication_failed",
+        )
