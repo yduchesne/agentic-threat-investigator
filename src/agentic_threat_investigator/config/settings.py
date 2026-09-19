@@ -86,6 +86,71 @@ class EmbeddingSettings(BaseModel):
         return self
 
 
+class KafkaSecurityProtocol(str, Enum):
+    """Supported security protocol of the Kafka-compatible Evidence log (PR 28G).
+
+    Values follow the aiokafka/Kafka vocabulary. ``PLAINTEXT`` is the local
+    Redpanda development default; ``SSL``/``SASL_PLAINTEXT``/``SASL_SSL``
+    select a TLS/authenticated broker. Exactly one supported value is
+    accepted; an unsupported value fails closed rather than silently
+    falling back to plaintext.
+    """
+
+    PLAINTEXT = "PLAINTEXT"
+    SSL = "SSL"
+    SASL_PLAINTEXT = "SASL_PLAINTEXT"
+    SASL_SSL = "SASL_SSL"
+
+
+class EvidenceLogKafkaSettings(BaseModel):
+    """Bounded configuration of the Kafka-compatible Evidence log (PR 28G).
+
+    Non-secret transport settings only. SASL credentials are carried as
+    secret **reference names** (the environment variable holding the
+    username/password), never as values; the values are resolved through
+    ATI's existing SecretsResolver during composition and injected into the
+    client, never stored or logged here. ``bootstrap_servers`` is bounded
+    to non-empty ``host:port`` entries; the topic and consumer group are
+    non-blank; the poll timeout is a bounded positive number of
+    milliseconds.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    bootstrap_servers: tuple[str, ...]
+    topic: str
+    consumer_group: str = "evidence-persistence"
+    poll_timeout_ms: int = Field(default=3000, ge=1, le=600_000)
+    client_id: str = "ati-evidence"
+    security_protocol: KafkaSecurityProtocol = KafkaSecurityProtocol.PLAINTEXT
+    auto_offset_reset: str = "earliest"
+    sasl_mechanism: str | None = None
+    sasl_username_secret: str | None = None
+    sasl_password_secret: str | None = None
+
+    @model_validator(mode="after")
+    def validate_kafka_bootstrap(self) -> "EvidenceLogKafkaSettings":
+        """Reject blank bootstrap entries, topic, or group fail-closed."""
+        if not self.bootstrap_servers:
+            raise ValueError("evidence kafka bootstrap_servers must not be empty")
+        for server in self.bootstrap_servers:
+            if not server.strip():
+                raise ValueError(
+                    "evidence kafka bootstrap_servers must not contain blank entries"
+                )
+        if not self.topic.strip():
+            raise ValueError("evidence kafka topic must not be blank")
+        if not self.consumer_group.strip():
+            raise ValueError("evidence kafka consumer_group must not be blank")
+        if not self.client_id.strip():
+            raise ValueError("evidence kafka client_id must not be blank")
+        if self.auto_offset_reset not in ("earliest", "latest"):
+            raise ValueError(
+                "evidence kafka auto_offset_reset must be 'earliest' or 'latest'"
+            )
+        return self
+
+
 class Settings(BaseSettings):
     """Typed settings for the local development runtime."""
 
@@ -266,6 +331,14 @@ class Settings(BaseSettings):
     # windows) deliberately remain separate and are not migrated here.
     datasources: tuple[DatasourceDefinition, ...] = Field(
         default_factory=lambda: REPRESENTATIVE_DATASOURCE_DEFINITIONS
+    )
+    # Kafka-compatible distributed Evidence log (PR 28G). Defaults target a
+    # local Redpanda broker (PLAINTEXT) at the conventional hearth; only
+    # secret reference names are configurable here, never credential values.
+    evidence_kafka: EvidenceLogKafkaSettings = EvidenceLogKafkaSettings(
+        bootstrap_servers=("127.0.0.1:9092",),
+        topic="ati.evidence",
+        consumer_group="evidence-persistence",
     )
     # GEOINT configuration (PR 26): the Geo Resolver process policy. The
     # worker identity is an ephemeral lease owner marker, never an

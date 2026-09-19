@@ -64,12 +64,25 @@ for _ in $(seq 1 30); do
 done
 [ -n "$TEST_PORT" ] || { echo "could not find an available integration-test port" >&2; exit 1; }
 
+for _ in $(seq 1 30); do
+  REDPANDA_PORT=$(shuf -i 50000-55535 -n 1)
+  if port_is_available "$REDPANDA_PORT"; then
+    break
+  fi
+  REDPANDA_PORT=""
+done
+[ -n "$REDPANDA_PORT" ] || { echo "could not find an available Redpanda port" >&2; exit 1; }
+
 export COMPOSE_PROJECT_NAME="$TEST_ID"
 export POSTGRES_DB="$TEST_ID"
 export POSTGRES_USER=ati
 export POSTGRES_PASSWORD=ati-integration-test-only
 export ATI_POSTGRES_HOST_PORT="$TEST_PORT"
+export ATI_REDPANDA_HOST_PORT="$REDPANDA_PORT"
 export DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${TEST_PORT}/${POSTGRES_DB}"
+# PR 28G: the deterministic local Redpanda broker endpoint exposed to the
+# integration-test process (host-side OUTSIDE listener).
+export ATI_EVIDENCE_KAFKA_BOOTSTRAP="127.0.0.1:${REDPANDA_PORT}"
 
 TEST_OVERRIDE=$(mktemp --suffix=.yaml)
 cat >"$TEST_OVERRIDE" <<'OVERRIDE'
@@ -113,6 +126,43 @@ while True:
         if time.monotonic() >= deadline:
             sys.exit("postgres did not become ready in time")
         time.sleep(1)
+PY
+
+echo "== Starting isolated Redpanda broker (${TEST_ID}) =="
+"${COMPOSE[@]}" -f compose.yaml -f "$TEST_OVERRIDE" -p "$TEST_ID" up -d redpanda
+
+echo "== Waiting for Redpanda Kafka API readiness =="
+uv run python - "$REDPANDA_PORT" <<'PY'
+import asyncio
+import os
+import sys
+import time
+
+from aiokafka.admin import AIOKafkaAdminClient
+
+bootstrap = os.environ["ATI_EVIDENCE_KAFKA_BOOTSTRAP"]
+
+deadline = time.monotonic() + 180
+
+
+async def ready() -> bool:
+    client = AIOKafkaAdminClient(bootstrap_servers=bootstrap, request_timeout_ms=5000)
+    try:
+        await client.start()
+        await client.list_topics()
+        return True
+    except Exception:
+        return False
+    finally:
+        await client.close()
+
+
+while True:
+    if asyncio.run(ready()):
+        break
+    if time.monotonic() >= deadline:
+        sys.exit("redpanda did not become ready in time")
+    time.sleep(2)
 PY
 
 echo "== Applying Alembic migrations =="

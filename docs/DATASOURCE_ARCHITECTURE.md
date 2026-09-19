@@ -19,8 +19,9 @@ ordered `EvidencePublisher` publication with the non-terminal
 publication — never consumer/PostgreSQL persistence. The producer path
 is delivered and proven at the application boundary; production
 Investigation execution still runs synchronously through the PR 27E
-compatibility path, which remains transitional until PR 28G
-(Kafka/Redpanda) and PR 28H (full distributed closure).
+compatibility path, which remains transitional. PR 28G delivered the
+production Kafka/Redpanda adapters behind the unchanged PR 28D contracts;
+PR 28H owns full producer -> log -> consumer -> PostgreSQL closure.
 
 ### PR 27A landed vocabulary
 
@@ -354,7 +355,8 @@ the exact `datasource_execution_id`, published with exactly one
 never waits for the PR 28E consumer. No production Investigation
 runtime is rerouted through the log: the PR 27E compatibility path
 remains synchronous/transitional until a real producer runner is wired
-(PR 28G/H).
+(PR 28G delivered the Kafka/Redpanda adapters; runner wiring stays PR
+28H/transitional scope).
 
 ## Evidence wire boundary (PR 28C, delivered)
 
@@ -372,7 +374,7 @@ DatasourceDefinition
  -> EvidenceMessage v1   (builder + canonical JSON codec, PR 28C)
  -> EvidencePublisher (PR 28D) -> distributed log
     (producer publication delivered: PR 28F-2;
-     Kafka/Redpanda adapter: PR 28G)
+     Kafka/Redpanda adapter delivered: PR 28G)
 ```
 
 The boundary reuses without modification the PR 28A global Evidence
@@ -393,8 +395,9 @@ The PR 28F-2 producer path is delivered at the application seam
 `PUBLISHED` lifecycle event (`CONVERTED` -> `PUBLISHED` ->
 `COMPLETED`), proven by deterministic unit matrices and ThreatFox
 real-stack vertical slices. It is **not** wired into a production
-runner: broker publication is PR 28G (Kafka/Redpanda behind the
-unchanged PR 28D contracts) and full producer -> log -> consumer ->
+runner: PR 28G delivered the Kafka/Redpanda adapters behind the
+unchanged PR 28D contracts (and documented that a real producer runner
+wiring stays PR 28H/transitional scope); full producer -> log -> consumer ->
 PostgreSQL closure is PR 28H. Consumer persistence is PR 28E
 (delivered). Production Investigation execution remains synchronous
 and behaviorally unchanged on the PR 27E compatibility runtime

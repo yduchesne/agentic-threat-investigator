@@ -147,50 +147,81 @@ def _message(sequence: int = 0) -> EvidenceMessage:
 
 
 class TestContractValues:
-    """E28D-C01..C08: log position, consumer identity, records, and batches."""
+    """E28D-C01..C08 (generalized) + E28G-C: position, identity, records, batches.
 
-    def test_c01_negative_position_rejected(self) -> None:
-        """E28D-C01: a negative log position fails closed."""
+    E28G generalizes the transport position from one scalar global index to
+    a broker-neutral ``(stream, offset)`` pair while preserving every
+    E28D-C value/immutability property on stream 0.
+    """
+
+    def test_g_c01_valid_zero_position(self) -> None:
+        """E28G-C01: stream 0 offset 0 is a valid first position."""
+        position = EvidenceLogPosition(stream=0, offset=0)
+        assert position.stream == 0
+        assert position.offset == 0
+
+    def test_g_c02_negative_stream_rejected(self) -> None:
+        """E28G-C02: a negative stream fails closed."""
         with pytest.raises(ValueError):
-            EvidenceLogPosition(-1)
+            EvidenceLogPosition(stream=-1, offset=0)
+
+    def test_g_c03_negative_offset_rejected(self) -> None:
+        """E28G-C03: a negative offset fails closed."""
         with pytest.raises(ValueError):
-            EvidenceLogPosition(-3)
+            EvidenceLogPosition(stream=0, offset=-1)
+        with pytest.raises(ValueError):
+            EvidenceLogPosition(stream=0, offset=-3)
+
+    def test_g_c04_bool_stream_rejected(self) -> None:
+        """E28G-C04: a boolean stream masquerading as an integer fails closed."""
+        with pytest.raises(ValueError):
+            EvidenceLogPosition(stream=True, offset=0)
+
+    def test_g_c05_bool_offset_rejected(self) -> None:
+        """E28G-C05: a boolean offset masquerading as an integer fails closed."""
+        with pytest.raises(ValueError):
+            EvidenceLogPosition(stream=0, offset=True)
+
+    def test_c01_negative_position_rejected_legacy(self) -> None:
+        """E28D-C01 (legacy): a negative scalar position still fails closed."""
+        with pytest.raises(ValueError):
+            EvidenceLogPosition(stream=0, offset=-1)
+        with pytest.raises(ValueError):
+            EvidenceLogPosition(stream=0, offset=-3)
 
     def test_c02_valid_position_immutable_value_equality(self) -> None:
         """E28D-C02: positions are immutable, comparable, and value-equal."""
-        assert EvidenceLogPosition(3) == EvidenceLogPosition(3)
-        assert EvidenceLogPosition(0) < EvidenceLogPosition(1)
-        position = EvidenceLogPosition(2)
+        assert EvidenceLogPosition(stream=0, offset=3) == EvidenceLogPosition(
+            stream=0, offset=3
+        )
+        # Ordering is meaningful within one stream (deterministic tests only).
+        assert EvidenceLogPosition(stream=0, offset=0) < EvidenceLogPosition(
+            stream=0, offset=1
+        )
+        assert EvidenceLogPosition(stream=1, offset=0) < EvidenceLogPosition(
+            stream=1, offset=2
+        )
+        position = EvidenceLogPosition(stream=0, offset=2)
         with pytest.raises(FrozenInstanceError):
-            position.value = 5  # type: ignore[misc]
-
-    def test_c03_empty_consumer_id_rejected(self) -> None:
-        """E28D-C03: blank or non-string consumer identities fail closed."""
-        with pytest.raises(ValueError):
-            EvidenceConsumerId("")
-        with pytest.raises(ValueError):
-            EvidenceConsumerId("   ")
-        with pytest.raises(ValueError):
-            EvidenceConsumerId(cast(Any, 123))
-
-    def test_c04_oversized_consumer_id_rejected(self) -> None:
-        """E28D-C04: consumer identities are length-bounded."""
-        at_bound = EvidenceConsumerId("x" * EVIDENCE_CONSUMER_ID_MAX_LENGTH)
-        assert len(at_bound.value) == EVIDENCE_CONSUMER_ID_MAX_LENGTH
-        with pytest.raises(ValueError):
-            EvidenceConsumerId("x" * (EVIDENCE_CONSUMER_ID_MAX_LENGTH + 1))
+            position.offset = 5  # type: ignore[misc]
+        with pytest.raises(FrozenInstanceError):
+            position.stream = 1  # type: ignore[misc]
 
     def test_c05_record_contains_real_pr28c_message(self) -> None:
         """E28D-C05: a record carries the exact validated EvidenceMessage."""
         message = _message(sequence=2)
-        record = EvidenceLogRecord(position=EvidenceLogPosition(4), message=message)
-        assert record.position == EvidenceLogPosition(4)
+        record = EvidenceLogRecord(
+            position=EvidenceLogPosition(stream=0, offset=4), message=message
+        )
+        assert record.position == EvidenceLogPosition(stream=0, offset=4)
         assert record.message == message
         assert record.message.message_id == message.message_id
 
     def test_c06_batch_collection_is_immutable_tuple(self) -> None:
         """E28D-C06: a batch owns an immutable tuple of records and is frozen."""
-        record = EvidenceLogRecord(position=EvidenceLogPosition(0), message=_message())
+        record = EvidenceLogRecord(
+            position=EvidenceLogPosition(stream=0, offset=0), message=_message()
+        )
         batch = EvidenceBatch(consumer_id=_ID_A, records=(record,))
         assert isinstance(batch.records, tuple)
         assert batch.records == (record,)
@@ -210,7 +241,9 @@ class TestContractValues:
         log = InMemoryEvidenceLog()
         publisher = log.publisher()
         consumer = log.consumer(_ID_A)
-        record = EvidenceLogRecord(position=EvidenceLogPosition(0), message=_message())
+        record = EvidenceLogRecord(
+            position=EvidenceLogPosition(stream=0, offset=0), message=_message()
+        )
         batch = EvidenceBatch(consumer_id=_ID_A, records=(record,))
         result = EvidencePublishResult(records=(record,))
         for obj in (log, publisher, consumer, record, batch, result):
@@ -226,6 +259,61 @@ class TestContractValues:
             ):
                 assert not hasattr(obj, field)
 
+    def test_g_c10_position_absent_from_message_wire(self) -> None:
+        """E28G-C10: stream/offset never enter the PR 28C message wire."""
+        message = _message(sequence=2)
+        record = EvidenceLogRecord(
+            position=EvidenceLogPosition(stream=3, offset=7), message=message
+        )
+        wire = encode_evidence_message(record.message).decode("utf-8")
+        assert "stream" not in wire
+        assert "offset" not in wire
+        assert decode_evidence_message(encode_evidence_message(message)) == message
+
+    def test_c03_empty_consumer_id_rejected(self) -> None:
+        """E28D-C03: blank or non-string consumer identities fail closed."""
+        with pytest.raises(ValueError):
+            EvidenceConsumerId("")
+        with pytest.raises(ValueError):
+            EvidenceConsumerId("   ")
+        with pytest.raises(ValueError):
+            EvidenceConsumerId(cast(Any, 123))
+
+    def test_c04_oversized_consumer_id_rejected(self) -> None:
+        """E28D-C04: consumer identities are length-bounded."""
+        at_bound = EvidenceConsumerId("x" * EVIDENCE_CONSUMER_ID_MAX_LENGTH)
+        assert len(at_bound.value) == EVIDENCE_CONSUMER_ID_MAX_LENGTH
+        with pytest.raises(ValueError):
+            EvidenceConsumerId("x" * (EVIDENCE_CONSUMER_ID_MAX_LENGTH + 1))
+
+    @pytest.mark.asyncio
+    async def test_g_c09_in_memory_rejects_nonzero_stream_commit(self) -> None:
+        """E28G-C09: the in-memory log rejects a foreign nonzero-stream commit.
+
+        The in-memory implementation owns exactly transport stream 0; a batch
+        fabricating a different stream cannot correspond to its log and fails
+        closed at commit.
+        """
+        log = InMemoryEvidenceLog()
+        publisher = log.publisher()
+        consumer = log.consumer(_ID_A)
+        message = _message(0)
+        await publisher.publish([message])
+        foreign = EvidenceBatch(
+            consumer_id=_ID_A,
+            records=(
+                EvidenceLogRecord(
+                    position=EvidenceLogPosition(stream=1, offset=0),
+                    message=message,
+                ),
+            ),
+        )
+        with pytest.raises(EvidenceCommitError):
+            await consumer.commit(foreign)
+        assert [
+            record.position.offset for record in (await consumer.poll(5)).records
+        ] == [0]
+
 
 class TestPublication:
     """E28D-P01..P08: ordered, contiguous, atomic publication."""
@@ -237,7 +325,7 @@ class TestPublication:
         publisher = log.publisher()
         result = await publisher.publish([_message(0)])
         assert len(result.records) == 1
-        assert result.records[0].position == EvidenceLogPosition(0)
+        assert result.records[0].position == EvidenceLogPosition(stream=0, offset=0)
         assert result.records[0].message == _message(0)
 
     @pytest.mark.asyncio
@@ -247,7 +335,7 @@ class TestPublication:
         publisher = log.publisher()
         messages = [_message(0), _message(1), _message(2)]
         result = await publisher.publish(messages)
-        assert [record.position.value for record in result.records] == [0, 1, 2]
+        assert [record.position.offset for record in result.records] == [0, 1, 2]
         assert [record.message for record in result.records] == messages
 
     @pytest.mark.asyncio
@@ -257,7 +345,7 @@ class TestPublication:
         publisher = log.publisher()
         await publisher.publish([_message(0)])
         result = await publisher.publish([_message(1), _message(2)])
-        assert [record.position.value for record in result.records] == [1, 2]
+        assert [record.position.offset for record in result.records] == [1, 2]
 
     @pytest.mark.asyncio
     async def test_p04_empty_publish_is_no_op(self) -> None:
@@ -267,7 +355,7 @@ class TestPublication:
         empty = await publisher.publish([])
         assert empty.records == ()
         result = await publisher.publish([_message(0)])
-        assert result.records[0].position == EvidenceLogPosition(0)
+        assert result.records[0].position == EvidenceLogPosition(stream=0, offset=0)
 
     @pytest.mark.asyncio
     async def test_p05_fail_next_publish_typed_error_no_append_or_gap(self) -> None:
@@ -290,7 +378,7 @@ class TestPublication:
         with pytest.raises(EvidencePublishError):
             await publisher.publish([_message(0)])
         result = await publisher.publish([_message(1)])
-        assert result.records[0].position == EvidenceLogPosition(0)
+        assert result.records[0].position == EvidenceLogPosition(stream=0, offset=0)
         assert result.records[0].message == _message(1)
 
     @pytest.mark.asyncio
@@ -301,7 +389,7 @@ class TestPublication:
         message = _message(0)
         await publisher.publish([message])
         second = await publisher.publish([message])
-        assert second.records[0].position == EvidenceLogPosition(1)
+        assert second.records[0].position == EvidenceLogPosition(stream=0, offset=1)
         assert second.records[0].message == message
         consumer = log.consumer(_ID_A)
         batch = await consumer.poll(5)
@@ -323,11 +411,11 @@ class TestPublication:
         second = results[1].records
         assert [record.message for record in first] == first_messages
         assert [record.message for record in second] == [second_message]
-        positions = [record.position.value for record in first] + [
-            record.position.value for record in second
+        positions = [record.position.offset for record in first] + [
+            record.position.offset for record in second
         ]
         assert sorted(positions) == [0, 1, 2]
-        assert first[0].position.value + 1 == first[1].position.value
+        assert first[0].position.offset + 1 == first[1].position.offset
 
     @pytest.mark.asyncio
     async def test_p09_non_message_element_rejected(self) -> None:
@@ -359,7 +447,7 @@ class TestPollRedelivery:
         publisher = log.publisher()
         await publisher.publish([_message(0), _message(1), _message(2)])
         batch = await log.consumer(_ID_A).poll(2)
-        assert [record.position.value for record in batch.records] == [0, 1]
+        assert [record.position.offset for record in batch.records] == [0, 1]
 
     @pytest.mark.asyncio
     async def test_r03_bound_larger_returns_all_remaining(self) -> None:
@@ -381,7 +469,7 @@ class TestPollRedelivery:
         await consumer.poll(2)
         await consumer.poll(2)
         assert [
-            record.position.value for record in (await consumer.poll(2)).records
+            record.position.offset for record in (await consumer.poll(2)).records
         ] == [
             0,
             1,
@@ -408,7 +496,7 @@ class TestPollRedelivery:
         with pytest.raises(EvidencePollError):
             await consumer.poll(0)
         assert [
-            record.position.value for record in (await consumer.poll(5)).records
+            record.position.offset for record in (await consumer.poll(5)).records
         ] == [
             0,
             1,
@@ -432,7 +520,7 @@ class TestPollRedelivery:
         batch = await consumer.poll(2)
         await consumer.commit(batch)
         assert [
-            record.position.value for record in (await consumer.poll(1)).records
+            record.position.offset for record in (await consumer.poll(1)).records
         ] == [
             2,
         ]
@@ -446,7 +534,7 @@ class TestPollRedelivery:
         consumer = log.consumer(_ID_A)
         await consumer.commit(await consumer.poll(2))
         batch = await consumer.poll(5)
-        assert [record.position.value for record in batch.records] == []
+        assert [record.position.offset for record in batch.records] == []
 
     @pytest.mark.asyncio
     async def test_r10_commit_final_next_poll_empty(self) -> None:
@@ -469,7 +557,7 @@ class TestPollRedelivery:
         assert (await consumer.poll(5)).records == ()
         await publisher.publish([_message(1)])
         batch = await consumer.poll(5)
-        assert [record.position.value for record in batch.records] == [1]
+        assert [record.position.offset for record in batch.records] == [1]
 
     @pytest.mark.asyncio
     async def test_r12_recreate_after_commit_resumes_cursor(self) -> None:
@@ -481,7 +569,7 @@ class TestPollRedelivery:
         await first.commit(await first.poll(2))
         recreated = log.consumer(_ID_A)
         assert [
-            record.position.value for record in (await recreated.poll(5)).records
+            record.position.offset for record in (await recreated.poll(5)).records
         ] == [
             2,
         ]
@@ -496,7 +584,7 @@ class TestPollRedelivery:
         await first.poll(5)
         recreated = log.consumer(_ID_A)
         batch = await recreated.poll(5)
-        assert [record.position.value for record in batch.records] == [0, 1]
+        assert [record.position.offset for record in batch.records] == [0, 1]
 
 
 class TestCommitValidation:
@@ -511,7 +599,7 @@ class TestCommitValidation:
         consumer = log.consumer(_ID_A)
         await consumer.commit(EvidenceBatch(consumer_id=_ID_A, records=()))
         assert [
-            record.position.value for record in (await consumer.poll(5)).records
+            record.position.offset for record in (await consumer.poll(5)).records
         ] == [
             0,
         ]
@@ -578,7 +666,10 @@ class TestCommitValidation:
         forged = EvidenceBatch(
             consumer_id=_ID_A,
             records=(
-                EvidenceLogRecord(position=EvidenceLogPosition(0), message=_message(1)),
+                EvidenceLogRecord(
+                    position=EvidenceLogPosition(stream=0, offset=0),
+                    message=_message(1),
+                ),
             ),
         )
         with pytest.raises(EvidenceCommitError):
@@ -614,7 +705,7 @@ class TestCommitValidation:
         with pytest.raises(EvidenceCommitError):
             await consumer.commit(invalid)
         assert [
-            record.position.value for record in (await consumer.poll(5)).records
+            record.position.offset for record in (await consumer.poll(5)).records
         ] == [
             0,
             1,
@@ -651,13 +742,13 @@ class TestCommitValidation:
         consumer = log.consumer(_ID_A)
         await publisher.publish([_message(0), _message(1), _message(2)])
         polled = await consumer.poll(3)
-        assert [record.position.value for record in polled.records] == [0, 1, 2]
+        assert [record.position.offset for record in polled.records] == [0, 1, 2]
         prefix = EvidenceBatch(
             consumer_id=polled.consumer_id, records=polled.records[:2]
         )
         await consumer.commit(prefix)
         assert [
-            record.position.value for record in (await consumer.poll(3)).records
+            record.position.offset for record in (await consumer.poll(3)).records
         ] == [
             2,
         ]
@@ -676,13 +767,16 @@ class TestCommitValidation:
             consumer_id=_ID_A,
             records=(
                 log._records[0],
-                EvidenceLogRecord(position=EvidenceLogPosition(1), message=_message(1)),
+                EvidenceLogRecord(
+                    position=EvidenceLogPosition(stream=0, offset=1),
+                    message=_message(1),
+                ),
             ),
         )
         with pytest.raises(EvidenceCommitError):
             await consumer.commit(beyond)
         assert [
-            record.position.value for record in (await consumer.poll(5)).records
+            record.position.offset for record in (await consumer.poll(5)).records
         ] == [
             0,
         ]
@@ -711,7 +805,7 @@ class TestConsumerIndependence:
         consumer_b = log.consumer(_ID_B)
         await consumer_a.commit(await consumer_a.poll(2))
         batch_b = await consumer_b.poll(5)
-        assert [record.position.value for record in batch_b.records] == [0, 1]
+        assert [record.position.offset for record in batch_b.records] == [0, 1]
 
     @pytest.mark.asyncio
     async def test_g03_b_commits_a_unchanged(self) -> None:
@@ -723,7 +817,7 @@ class TestConsumerIndependence:
         consumer_b = log.consumer(_ID_B)
         await consumer_b.commit(await consumer_b.poll(2))
         batch_a = await consumer_a.poll(5)
-        assert [record.position.value for record in batch_a.records] == [0, 1]
+        assert [record.position.offset for record in batch_a.records] == [0, 1]
 
     @pytest.mark.asyncio
     async def test_g04_same_id_two_handles_shared_cursor(self) -> None:
@@ -734,7 +828,9 @@ class TestConsumerIndependence:
         first = log.consumer(_ID_A)
         second = log.consumer(_ID_A)
         await first.commit(await first.poll(2))
-        assert [record.position.value for record in (await second.poll(5)).records] == [
+        assert [
+            record.position.offset for record in (await second.poll(5)).records
+        ] == [
             2,
         ]
 
@@ -748,12 +844,12 @@ class TestConsumerIndependence:
         consumer_b = log.consumer(_ID_B)
         await consumer_a.commit(await consumer_a.poll(2))
         assert [
-            record.position.value for record in (await consumer_a.poll(5)).records
+            record.position.offset for record in (await consumer_a.poll(5)).records
         ] == [
             2,
         ]
         assert [
-            record.position.value for record in (await consumer_b.poll(5)).records
+            record.position.offset for record in (await consumer_b.poll(5)).records
         ] == [
             0,
             1,
@@ -776,7 +872,7 @@ class TestFailureInjection:
             await publisher.publish([_message(1), _message(2)])
         assert isinstance(caught.value, EvidenceLogError)
         assert [
-            record.position.value for record in (await consumer.poll(5)).records
+            record.position.offset for record in (await consumer.poll(5)).records
         ] == [
             0,
         ]
@@ -790,7 +886,7 @@ class TestFailureInjection:
         with pytest.raises(EvidencePublishError):
             await publisher.publish([_message(0)])
         result = await publisher.publish([_message(1)])
-        assert result.records[0].position == EvidenceLogPosition(0)
+        assert result.records[0].position == EvidenceLogPosition(stream=0, offset=0)
 
     @pytest.mark.asyncio
     async def test_f03_fail_poll_no_cursor_change(self) -> None:
@@ -804,7 +900,7 @@ class TestFailureInjection:
             await consumer.poll(5)
         assert isinstance(caught.value, EvidenceLogError)
         assert [
-            record.position.value for record in (await consumer.poll(5)).records
+            record.position.offset for record in (await consumer.poll(5)).records
         ] == [
             0,
             1,
@@ -821,7 +917,7 @@ class TestFailureInjection:
         with pytest.raises(EvidencePollError):
             await consumer.poll(5)
         assert [
-            record.position.value for record in (await consumer.poll(5)).records
+            record.position.offset for record in (await consumer.poll(5)).records
         ] == [
             0,
         ]
@@ -839,7 +935,7 @@ class TestFailureInjection:
             await consumer.commit(batch)
         assert isinstance(caught.value, EvidenceLogError)
         assert [
-            record.position.value for record in (await consumer.poll(5)).records
+            record.position.offset for record in (await consumer.poll(5)).records
         ] == [
             0,
             1,
@@ -886,7 +982,7 @@ class TestFailureInjection:
         with pytest.raises(EvidencePollError):
             await consumer_a.poll(5)
         assert [
-            record.position.value for record in (await consumer_b.poll(5)).records
+            record.position.offset for record in (await consumer_b.poll(5)).records
         ] == [
             0,
             1,
@@ -899,7 +995,7 @@ class TestFailureInjection:
             await consumer_a.commit(batch_a)
         await consumer_b.commit(batch_b)
         assert [
-            record.position.value for record in (await consumer_a.poll(5)).records
+            record.position.offset for record in (await consumer_a.poll(5)).records
         ] == [
             0,
             1,
@@ -924,7 +1020,7 @@ class TestFailureInjection:
             await task
         log._lock.release()
         batch = await consumer.poll(5)
-        assert [record.position.value for record in batch.records] == [0, 1]
+        assert [record.position.offset for record in batch.records] == [0, 1]
         await consumer.commit(batch)
         assert (await consumer.poll(5)).records == ()
 
@@ -940,12 +1036,12 @@ class TestVerticalSlices:
         consumer = log.consumer(_ID_A)
         messages = [_message(0), _message(1), _message(2)]
         result = await publisher.publish(messages)
-        assert [record.position.value for record in result.records] == [0, 1, 2]
+        assert [record.position.offset for record in result.records] == [0, 1, 2]
         first_batch = await consumer.poll(2)
         assert [record.message for record in first_batch.records] == messages[:2]
         await consumer.commit(first_batch)
         second_batch = await consumer.poll(5)
-        assert [record.position.value for record in second_batch.records] == [2]
+        assert [record.position.offset for record in second_batch.records] == [2]
         assert second_batch.records[0].message == messages[2]
 
     @pytest.mark.asyncio
@@ -990,9 +1086,9 @@ class TestVerticalSlices:
         consumer_b = log.consumer(_ID_B)
         await consumer_a.commit(await consumer_a.poll(2))
         batch_b = await consumer_b.poll(2)
-        assert [record.position.value for record in batch_b.records] == [0, 1]
+        assert [record.position.offset for record in batch_b.records] == [0, 1]
         batch_a = await consumer_a.poll(5)
-        assert [record.position.value for record in batch_a.records] == [2]
+        assert [record.position.offset for record in batch_a.records] == [2]
 
     @pytest.mark.asyncio
     async def test_v05_pr28c_identity_survives_transport(self) -> None:

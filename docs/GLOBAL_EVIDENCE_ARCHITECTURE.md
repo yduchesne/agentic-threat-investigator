@@ -1,6 +1,6 @@
 # ATI — v0.2 Global Evidence and Distributed Ingestion Architecture
 
-> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered, PR 28D publisher/consumer contracts and deterministic in-memory log delivered, PR 28E bounded Evidence persistence consumer delivered, PR 28F-2 datasource Evidence producer path delivered at the application seam.**
+> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered, PR 28D publisher/consumer contracts and deterministic in-memory log delivered, PR 28E bounded Evidence persistence consumer delivered, PR 28F-2 datasource Evidence producer path delivered at the application seam, PR 28G Kafka-compatible infrastructure delivered.**
 >
 > This document records the architectural decisions that govern the PR 28 series. `ROADMAP_V02.md` defines the delivery sequence. Delivered v0.1 behavior remains authoritative until the corresponding PR 28 slice lands.
 >
@@ -140,19 +140,28 @@ Invariants pinning this seam:
   entire log-instance lifetime — even after every consumer commits them —
   and `poll(max_messages)` never removes or acknowledges them. An
   uncommitted batch is always redeliverable.
-- **Explicit commit.** Polling never advances anything; only
+- **Explicit commit (in-memory stronger guarantee).** In the
+  `InMemoryEvidenceLog` polling never advances anything; only
   `commit(batch)` advances one consumer's committed cursor, and only for
   an exact, contiguous, ordered batch starting at that cursor. Foreign,
   forged, skipped, reversed, or stale/stale-repeat batches fail closed;
   a failed commit changes no cursor and the next poll naturally redelivers.
+  A partitioned broker adapter instead commits ``highest offset + 1`` per
+  represented stream after success (PR 28G).
 - **At-least-once and independent cursors.** Each `EvidenceConsumerId`
   owns one committed cursor; different consumers are fully independent and
   the same identity resumes its cursor within one log instance. Duplicate
   `EvidenceMessage` publication creates distinct records — the log never
   deduplicates.
-- **Transport-only positions.** `EvidenceLogPosition` is a per-instance
-  ordering index, never an Evidence ID, message ID, observation-candidate
-  ID, or PostgreSQL idempotency key, and never appears inside a message.
+- **Transport-only positions.** `EvidenceLogPosition` is a broker-neutral
+  `(stream, offset)` pair: `stream` is an opaque transport-local ordering
+  lane, `offset` the offset within that lane. Records sharing a stream have
+  monotonically increasing offsets; no ordering relationship exists across
+  streams. Neither field is an Evidence ID, message ID, observation-candidate
+  ID, or PostgreSQL idempotency key, and neither ever appears inside a
+  message. The in-memory implementation uses a single stream `0`; the Kafka
+  adapter maps `stream=partition` / `offset=offset` at the infrastructure
+  boundary.
 - **Deterministic one-shot faults.** `fail_next_publish()` /
   `fail_next_poll()` / `fail_next_commit()` simulate the next
   publish/poll/commit failure (optionally per consumer) with no random
@@ -161,8 +170,8 @@ Invariants pinning this seam:
 - **In-process, non-durable.** The in-memory log models restart only
   within one log instance (handle recreation with the same identity
   resumes the cursor); it provides no durability across process restart
-  and no cross-process guarantees. Kafka/Redpanda behind the same
-  contracts remain PR 28G.
+  and no cross-process guarantees. The production Kafka/Redpanda adapter
+  (PR 28G, delivered) provides that durability behind the same contracts.
 
 PR 28E builds bounded PostgreSQL consumer persistence on this seam
 (delivered). PR 28F-2 delivers the producer side at the application seam:
@@ -175,8 +184,8 @@ call, and records the non-terminal `PUBLISHED` lifecycle stage before
 consumer/PostgreSQL persistence, and the producer never waits for the
 PR 28E consumer. The production Investigation datasource runtime is
 still not routed through the log — the PR 27E Investigation
-compatibility path remains synchronous and transitional. Kafka/Redpanda
-behind the unchanged PR 28D contracts remain PR 28G, and full
+compatibility path remains synchronous and transitional. PR 28G delivers
+production Kafka/Redpanda behind the unchanged PR 28D contracts; full
 producer -> log -> consumer -> PostgreSQL closure is PR 28H.
 
 ## PR 28E bounded Evidence persistence consumer (delivered)
@@ -383,11 +392,81 @@ separate so tests can model redelivery after a failed/uncommitted batch.
 
 The in-memory implementation may use Python standard-library concurrency primitives and supports deterministic failure/replay injection. It is for local development, architecture validation, and tests; it is not durable across process restart and is not a production substitute for Kafka/Redpanda.
 
-PR 28G adds a Kafka-compatible infrastructure adapter without changing the application contracts or correctness semantics.
+PR 28G adds a production-capable Kafka-compatible infrastructure adapter
+(`src/agentic_threat_investigator/infrastructure/kafka/`) behind the
+unchanged PR 28D application contracts and delivers the full distributed
+log semantics below.
+
+## PR 28G Kafka-compatible infrastructure (delivered)
+
+PR 28G delivers the production-capable Kafka/Redpanda adapters behind the
+unchanged PR 28D application contracts (`aiokafka` as the client, Redpanda
+as ATI's deterministic local/integration-test broker).
+
+### (`stream`, `offset`) broker-neutral positions
+
+Application positions are the broker-neutral pair `(stream, offset)`
+(`app/evidence_log.py::EvidenceLogPosition`). The Kafka adapters map
+`stream = partition` and `offset = offset` at the infrastructure boundary
+only; `InMemoryEvidenceLog` continues to use a single stream `0`. No
+Kafka/partition/offset/group vocabulary enters any Evidence domain model.
+
+### Routing key and per-Evidence ordering
+
+Every record is keyed by the stable `EvidenceMessage.evidence_id`
+(canonical lowercase UUID UTF-8 bytes). Under a stable topic partition
+count, all messages for one Evidence route to the same partition, so same-
+Evidence broker ordering is preserved; `sequence` remains datasource-
+execution provenance only and no cross-partition order is guaranteed.
+Increasing the Evidence topic's partition count is an operational topology
+change that can move future records for a key; ATI never treats historical
+partition identity as domain identity.
+
+### Delivery semantics
+
+- **At-least-once + manual commit.** The consumer disables auto-commit and
+  commits explicit per-stream offsets (`highest offset + 1`) only after the
+  caller reports a batch successfully processed. Kafka transactions and
+  distributed exactly-once semantics are never used.
+- **Success-atomic, not failure-atomic, publication.** A successful
+  `publish()` return means every supplied message was broker-
+  acknowledged. On failure the publication extent is unspecified (zero,
+  some, or all messages may already be accepted), so PR 28F-2 records
+  `FAILED(publication_failed)` without claiming nothing was published. The
+  producer enables idempotent production (implying `acks=all`) and never
+  uses a transactional ID. The in-memory log's stronger injected-failure
+  guarantee (`failure -> no record appended`) is implementation-specific.
+- **Manual offset commit after persistence.** `poll` -> prepare ->
+  PostgreSQL commit -> `commit(batch)` per represented stream. If
+  PostgreSQL commits and the broker commit fails, redelivery is expected
+  and harmless through PR 28E idempotency.
+- **Consumer groups.** `EvidenceConsumerId` maps to the Kafka `group_id`;
+  the same logical identity means the same durable consumption progress and
+  different identities are independent. Ephemeral Kafka member IDs are never
+  exposed.
+- **Fail-closed adapter validation.** Broker values decode with the PR 28C
+  canonical codec; a non-null key that does not match the decoded
+  message's `evidence_id`, or undecodable payload bytes, fails closed with
+  a typed evidence-log error (no DLQ in PR 28G).
+- **Lifecycle and composition.** Each adapter owns one long-lived client
+  (explicit `start`/`stop`; no per-call client). `build_kafka_publisher` /
+  `build_kafka_consumer` / `compose_kafka_publisher` /
+  `compose_kafka_consumer` wire clients from typed `evidence_kafka`
+  settings and the existing `SecretsResolver` for SASL credentials. PR 28G
+  deliberately does **not** invent the missing production orchestrator
+  (scheduler/worker supervisor); wiring a datasource execution runner into
+  the adapters remains PR 28H/transitional scope.
+
+Configuration (local Redpanda PLAINTEXT defaults, `PLAINTEXT`/`SSL`/
+`SASL_PLAINTEXT`/`SASL_SSL` protocols, SASL credentials as secret reference
+names) lives in `EvidenceLogKafkaSettings`; Redpanda runs through the
+repository's existing container infrastructure and is used only as
+Kafka-compatible local/integration infrastructure, never as a Python
+runtime dependency.
 
 ## Datasource lifecycle semantics
 
-PR 27 datasource execution lifecycle remains operational provenance. With durable publication, producer completion means the Evidence messages were durably accepted by the configured log, not that PostgreSQL consumer persistence has completed. The detailed PR 28 producer plan will define the exact event vocabulary (including whether an explicit `PUBLISHED` stage is added) without using `datasource_log` as consumer offset, checkpoint, or deduplication state.
+PR 27 datasource execution lifecycle remains operational provenance. With durable publication, producer completion means the Evidence messages were durably accepted by the configured log, not that PostgreSQL consumer persistence has completed. The event vocabulary is fixed by PR 28F-2: the non-terminal `PUBLISHED` stage is emitted with the broker-accepted message count before `COMPLETED`, and producer `COMPLETED` means successful publication, never consumer/PostgreSQL persistence. `datasource_log` is never used as consumer offset, checkpoint, or deduplication state.
 
 `datasource_execution_id` may travel with EvidenceMessage provenance for correlation, but a repeated retrieval/execution identifier does not define stable Evidence identity and does not force a new EvidenceObservation.
 

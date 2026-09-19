@@ -18,6 +18,31 @@ services:
       retries: 10
     networks: [ati]
 
+  # PR 28G: ATI's deterministic local/integration-test Kafka-compatible
+  # broker. Redpanda is a test/development and proof-of-scope dependency only
+  # (never a Python runtime dependency); the production Evidence log is the
+  # broker-neutral contracts, and topic administration for real deployments
+  # remains an operator concern. Single-node, single-replica by design: this
+  # broker proves partition/offset/group semantics, never production HA.
+  # The OUTSIDE listener advertises 127.0.0.1:<host port> so host-side
+  # integration-test processes can connect through the mapped port.
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.8
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --node-id 0
+      - --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://127.0.0.1:${ATI_REDPANDA_HOST_PORT:-9092}
+    ports:
+      - "${ATI_REDPANDA_HOST_PORT:-9092}:9092"
+    networks: [ati]
+
   migrate:
     build: .
     command: ["alembic", "upgrade", "head"]

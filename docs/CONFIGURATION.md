@@ -22,6 +22,7 @@
 - [Operating mode (PR 23D)](#operating-mode-pr-23d)
 - [Datasource definitions (PR 27A)](#datasource-definitions-pr-27a)
 - [GEOINT configuration (planned PR 26)](#geoint-configuration-planned-pr-26)
+- [Kafka-compatible Evidence log configuration (PR 28G)](#kafka-compatible-evidence-log-configuration-pr-28g)
 - [Authentication settings](#authentication-settings)
 - [Provider settings](#provider-settings)
 - [Configuration and secrets](#configuration-and-secrets)
@@ -586,6 +587,45 @@ Semantic adapter contract:
 - Prerequisite startup neither constructs the semantic adapter nor requires OpenAI credentials: local/dev defaults remain hashing/offline, and the adapter is composed only where the deployment selects a semantic provider.
 - `embedding.api_key_secret` stores only the NAME of the environment variable carrying the key. Resolved keys are injected into the composed provider during bootstrap/composition (never read by application/domain code, never logged or persisted), following the same `SecretsResolver` contract as the LLM key.
 - CI never calls the live embedding API: automated adapter tests inject a stub at the LangChain `Embeddings` boundary and the canonical corpus tests use deterministic offline embeddings.
+
+## Kafka-compatible Evidence log configuration (PR 28G)
+
+PR 28G adds the distributed Evidence log's Kafka-compatible transport behind
+the PR 28D application contracts. Configuration is a typed nested
+`evidence_kafka` object (`EvidenceLogKafkaSettings`) with non-secret
+transport settings only:
+
+| Setting | Environment variable | Type | Default | Bounds | Description |
+|---|---|---|---|---|---|
+| `evidence_kafka.bootstrap_servers` | `ATI_EVIDENCE_KAFKA_BOOTSTRAP_SERVERS` | `list[str]` | `["127.0.0.1:9092"]` | non-empty `host:port` entries | Kafka-compatible broker bootstrap endpoint(s) |
+| `evidence_kafka.topic` | `ATI_EVIDENCE_KAFKA_TOPIC` | `str` | `ati.evidence` | non-blank | Evidence topic name |
+| `evidence_kafka.consumer_group` | `ATI_EVIDENCE_KAFKA_CONSUMER_GROUP` | `str` | `evidence-persistence` | non-blank | Default logical consumer group (`EvidenceConsumerId`) |
+| `evidence_kafka.poll_timeout_ms` | `ATI_EVIDENCE_KAFKA_POLL_TIMEOUT_MS` | `int` | `3000` | `1..600000` | Bounded poll timeout in milliseconds |
+| `evidence_kafka.client_id` | `ATI_EVIDENCE_KAFKA_CLIENT_ID` | `str` | `ati-evidence` | non-blank | Producer/consumer client identity prefix/name |
+| `evidence_kafka.security_protocol` | `ATI_EVIDENCE_KAFKA_SECURITY_PROTOCOL` | `str` | `PLAINTEXT` | `PLAINTEXT`/`SSL`/`SASL_PLAINTEXT`/`SASL_SSL` | Broker security protocol (fail-closed; no silent plaintext fallback) |
+| `evidence_kafka.auto_offset_reset` | `ATI_EVIDENCE_KAFKA_AUTO_OFFSET_RESET` | `str` | `earliest` | `earliest`/`latest` | Fresh-group offset policy; `earliest` for ATI's isolated consumer groups |
+| `evidence_kafka.sasl_mechanism` | `ATI_EVIDENCE_KAFKA_SASL_MECHANISM` | `str?` | `None` | SASL mechanism | SASL mechanism for `SASL_*` protocols |
+| `evidence_kafka.sasl_username_secret` | `ATI_EVIDENCE_KAFKA_SASL_USERNAME_SECRET` | `str?` | `None` | non-blank when set | Environment variable NAME carrying the SASL username (secret reference, never a value) |
+| `evidence_kafka.sasl_password_secret` | `ATI_EVIDENCE_KAFKA_SASL_PASSWORD_SECRET` | `str?` | `None` | non-blank when set | Environment variable NAME carrying the SASL password (secret reference, never a value) |
+
+Semantics and rules:
+
+- The `evidence_kafka` defaults target a local Redpanda broker over
+  PLAINTEXT. Production deployments must override `bootstrap_servers`,
+  `topic`, and (for authenticated brokers) the `security_protocol` and SASL
+  secret reference names; secrets are resolved through ATI's existing
+  `SecretsResolver` during composition and are never logged, persisted, or
+  embedded in a URL.
+- SASL credentials are configured only as secret reference names (env var
+  names), never as values; composing a client with a SASL protocol requires
+  a `SecretsResolver` and fails closed without one.
+- The consumer always disables auto-commit at the client level (a PR 28G
+  invariant, not a configuration switch); offsets are committed explicitly
+  after successful processing.
+- Local Redpanda startup: `./integration-test.sh` (or `podman-compose up
+  -d redpanda`) starts the deterministic single-node test broker; set
+  `ATI_EVIDENCE_KAFKA_BOOTSTRAP_SERVERS` to its Kafka API endpoint (the
+  compose OUTSIDE listener advertises `127.0.0.1:<host port>`).
 
 ## Authentication settings
 

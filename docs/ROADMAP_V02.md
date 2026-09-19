@@ -151,7 +151,7 @@ Reference-corpus ingestion remains distinct. Sources such as MITRE ATT&CK that f
 | **28E** | Batch Evidence consumer | At-least-once/idempotent bounded-batch extraction and PostgreSQL persistence; offsets committed only after DB commit |
 | **28F-1** | `orjson` integration | behavior-compatible JSON performance implementation |
 | **28F-2** | Datasource producer migration | datasource path publishes deterministic EvidenceMessages |
-| **28G** | Kafka-compatible infrastructure | Kafka/Redpanda adapter, partitioning, consumer groups, retry/recovery and configuration |
+| **28G** | Kafka-compatible infrastructure | Kafka/Redpanda adapter, partitioning, consumer groups, retry/recovery and configuration **(delivered)** |
 | **28H** | End-to-end closure | Real-stack producer -> log -> consumer -> PostgreSQL crash/replay/recovery tests and compliance documentation |
 
 ### PR 28A — Global Evidence domain model **`[DONE]`**
@@ -261,9 +261,11 @@ to the producer yet, so the PR 27E Investigation compatibility path
 remains the active synchronous production Investigation path and is
 documented as transitional (producer runner wiring stays PR 28G/H).
 
-### PR 28G — Kafka-compatible infrastructure
+### PR 28G — Kafka-compatible infrastructure **`[DONE]`**
 
 Add the production-style Kafka/Redpanda adapter behind PR 28D contracts. Define topic/partition key strategy, consumer groups, configuration, retry/recovery, startup/shutdown and observability without changing application correctness semantics.
+
+**Delivered:** generalized the broker-neutral position contract from one scalar global index to `(stream, offset)` (`app/evidence_log.py::EvidenceLogPosition`) — per-stream ordering only, `InMemoryEvidenceLog` remains a deterministic single-stream (stream 0) implementation, and the publication contract is explicitly **success-atomic, not failure-atomic** (a successful return means every message was broker-acknowledged; a failure leaves the publication extent unspecified). Added `aiokafka`-based production adapters in `infrastructure/kafka/` (`KafkaEvidencePublisher`, `KafkaEvidenceConsumer`) behind the unchanged PR 28D `EvidencePublisher`/`EvidenceConsumer` contracts: records keyed by the stable `EvidenceMessage.evidence_id` (preserving per-Evidence partition ordering), PR 28C canonical value bytes, producer idempotence enabled with no transactional ID and no Kafka transactions, consumer auto-commit disabled, explicit per-stream `highest offset + 1` commits (absent partitions never advanced), `EvidenceConsumerId` mapping to the Kafka group, fail-closed decode/key validation, propagation of cancellation, and clean `start`/`stop` lifecycle. Added bounded `evidence_kafka` configuration (`EvidenceLogKafkaSettings`; PLAINTEXT/SSL/SASL protocols with SASL credentials as secret reference names resolved through the existing `SecretsResolver`) and explicit settings-based composition (`build_kafka_publisher`/`build_kafka_consumer`/`compose_kafka_publisher`/`compose_kafka_consumer`) without inventing a missing scheduler/worker orchestrator. Added Redpanda as ATI's deterministic local/integration-test Kafka-compatible broker in the existing container infrastructure (multi-partition Evidence topic; no Schema Registry, no Internet dependency) and real-broker integration tests + vertical slices (I28G-01..12, V28G-01..05), plus an E28G-C/P/R/K unit matrix over aiokafka boundary doubles and PR 28E multi-stream compatibility. No `EvidenceMessage` schema change, no DB migration, no Kafka transactions, no DLQ/retry topic, no Investigation admission, and no full 28H pipeline were added. **PR 28H owns the complete datasource -> broker -> EvidencePersistenceConsumer -> PostgreSQL crash/replay/restart closure and real producer-runner wiring.**
 
 ### PR 28H — End-to-end closure
 
