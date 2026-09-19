@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import ipaddress
-import json
 import logging
 import math
 import random as _random
@@ -28,6 +27,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+import orjson
 
 from agentic_threat_investigator.app.datasource_semantics import DatasourceStage
 from agentic_threat_investigator.app.providers import ProviderErrorCode
@@ -968,8 +968,22 @@ class ProviderHttpClient:
             )
 
         try:
-            parsed = json.loads(body.decode("utf-8"))
-        except ValueError, UnicodeDecodeError:
+            # Parse bounded response bytes directly: ``orjson`` accepts
+            # bytes and rejects invalid UTF-8, malformed JSON, and the
+            # non-standard NaN/Infinity/-Infinity constants by default, so
+            # every failure maps to the same bounded non-retryable
+            # SERIALIZATION outcome with a fixed safe message. Decoder
+            # details and body content never leak into the outcome.
+            #
+            # Engine note (PR 28F-1): ``orjson`` parses integers exactly
+            # within the signed 64-bit minimum .. unsigned 64-bit maximum
+            # range; integers beyond that range parse as ``float`` where
+            # stdlib returned an exact ``int``. No supported provider
+            # contract emits such integers (all semantic consumers validate
+            # int64-scale fields), and realistic provider payloads parse
+            # with identical Python shapes under either engine.
+            parsed = orjson.loads(body)
+        except ValueError:
             return HttpOutcome(
                 attempt_count=0,
                 retry_count=0,

@@ -106,7 +106,7 @@ A **Protocol** identifies how ATI obtains the source material, for example HTTPS
 
 ### Serialization format
 
-A **SerializationFormat** identifies the physical encoding/representation, for example JSON, JSON Lines, CSV, XML, or a binary database/file representation. Serialization decoding yields values/records that can then be interpreted according to the semantic format.
+A **SerializationFormat** identifies the physical encoding/representation, for example JSON, JSON Lines, CSV, XML, or a binary database/file representation. Serialization decoding yields values/records that can then be interpreted according to the semantic format. The JSON engine is infrastructure (v0.2 uses `orjson` for provider response parsing, PR 28F-1): it never owns semantic validation, which remains defined by each source's semantic-format module.
 
 ### Semantic format
 

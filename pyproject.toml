@@ -29,6 +29,10 @@ dependencies = [
   # keeps plain httpx and restores the working authlib code path.
   "langsmith>=0.3.45,<0.12",
   "maxminddb>=2,<4",
+  # ATI's preferred high-performance JSON implementation at
+  # behavior-compatible runtime boundaries (PR 28F-1). Bounded below by the
+  # first release shipping Python 3.14 wheels.
+  "orjson>=3.11.1,<4",
   # Direct LangChain dependency: the PR 20B LLM adapter imports
   # langchain_core types directly, so the dependency must not rely on
   # LangGraph's transitive dependency.
