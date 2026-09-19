@@ -169,6 +169,71 @@ migrates datasource producers to publish through `EvidencePublisher`; until
 28F the production datasource runtime remains synchronous and is not
 routed through the log.
 
+## PR 28E bounded Evidence persistence consumer (delivered)
+
+PR 28E connects the PR 28D consumer seam to the PR 28B global Evidence
+PostgreSQL model.
+
+### Consumer processing boundary
+
+- `app/evidence_consumer.py::EvidencePersistenceConsumer` polls **one
+  bounded batch** (`poll(max_messages)`, default 100, hard ceiling 500),
+  prepares every record (PR 28C message reconstruction + consumer-side
+  deterministic extraction) **before** the transaction, persists the whole
+  prepared batch through one atomic PostgreSQL transaction, and only then
+  commits the consumer batch. One non-empty polled batch is one
+  PostgreSQL transaction; no `finally`-block acknowledgement and never a
+  consumer commit before the DB commit.
+- `EvidenceConsumerRunResult` carries only bounded counts
+  (polled/persisted/created/unchanged/appended/committed); an empty poll
+  returns `committed=False` with no transaction.
+- Extraction is consumer-side: the durable log stores source Evidence,
+  never derived graph state. `app/extraction/message_context.py`
+  reconstructs the smallest `EvidenceExtractionView` from durable message
+  content for the currently supported ThreatFox semantic format
+  (`matches[].ioc`/`ioc_type` map exactly to canonical `DOMAIN`/
+  `IP_ADDRESS` invocation context); unsupported sources, URL IOCs, and
+  malformed/non-canonical facts fail closed with typed errors. The
+  reconstructed invocation Entity is execution context only — no subject
+  field is added to `EvidenceMessage`.
+
+### Prepared batch contract
+
+`PreparedEvidenceRecord`/`PreparedEvidenceBatch` carry the already-
+validated, already-extracted persistence work of one polled batch
+(message_id, observation_candidate_id, ConvertedEvidence, invocation
+Entity, extraction). No Investigation identity, no transport position, and
+no broker metadata cross the persistence boundary.
+
+### PostgreSQL batch API (SQL API v0027, migration 0032)
+
+- `ati.persist_evidence_batch(p_items jsonb)` stages one bounded prepared
+  batch in input (log) order, reuses the authoritative PR 28B Evidence
+  transition per record, resolves Entities and Relationships through the
+  established functions, appends one RelationshipObservation per unique
+  assertion **only** for CREATED/APPENDED observations, and returns one
+  ordered outcome row per input record.
+- `ati.evidence_message_receipt` is the narrow durable receipt keyed by
+  the stable PR 28C `message_id` (the approved PR 28E amendment to STOP
+  #16): transactional at-least-once idempotency only — no Kafka/log
+  position, partition, consumer-group, or Investigation semantics. The
+  receipt lookup/insert happens in the same PostgreSQL transaction as the
+  persistence it records; a previously committed `message_id` returns its
+  previously established authoritative result without invoking the
+  Evidence transition or recreating derived graph state.
+- Observation identity (Option A): PostgreSQL's returned
+  `evidence_observation_id` is authoritative; `observation_candidate_id`
+  is proposed to the PR 28B transition (used by its CREATED branch) but
+  is never required to become the persisted ID on APPENDED.
+- Receipts are keyed by message identity, never by material state: a NEW
+  message carrying an OLD material state runs the authoritative transition
+  (UNCHANGED against the latest, never a historical-state search).
+- Replay safety: exact redelivery, duplicate messages inside one batch,
+  and the PostgreSQL-commit / consumer-commit-failure boundary are all
+  idempotent; a same-Evidence multi-state batch `[A,B,C]` redelivered
+  after a DB-commit/log-commit failure adds no observation and no derived
+  row.
+
 ## Domain model
 
 ```text

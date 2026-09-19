@@ -17,6 +17,7 @@ from typing import Self
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from agentic_threat_investigator.app.extraction.models import ExtractionResult
 from agentic_threat_investigator.domain.assessment import Assessment
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
 from agentic_threat_investigator.domain.datasource import (
@@ -1443,6 +1444,127 @@ class EvidenceRepository(ABC):  # pragma: no cover
         """
 
 
+@dataclass(frozen=True)
+class PreparedEvidenceRecord:
+    """Already-validated, already-extracted persistence work of one message (PR 28E).
+
+    Carries the deterministic PR 28C message identity, the replay identity
+    proposed to PostgreSQL (``observation_candidate_id``), the exact
+    reconstructed :class:`ConvertedEvidence`, the transient invocation
+    Entity (execution context only, never Evidence ownership), and the
+    deterministic extraction output. Transport position is deliberately
+    absent: acknowledgement state must never become PostgreSQL identity.
+    """
+
+    message_id: UUID
+    observation_candidate_id: UUID
+    converted: ConvertedEvidence
+    invocation_entity: Entity
+    extraction: ExtractionResult
+
+
+@dataclass(frozen=True)
+class PreparedEvidenceBatch:
+    """The ordered atomically-persisted unit of one polled EvidenceBatch (PR 28E).
+
+    Record order is the polled log order; the PostgreSQL batch API processes
+    records in this exact order so multiple states of one Evidence append in
+    deterministic sequence.
+    """
+
+    records: tuple[PreparedEvidenceRecord, ...]
+
+
+class EvidenceBatchSizeLimitExceededError(ValueError):
+    """Raised when a prepared Evidence batch exceeds the configured limit."""
+
+    def __init__(self, batch_size: int, limit: int) -> None:
+        """Record only the bounded counts; never payload content."""
+        super().__init__(
+            f"evidence batch contains {batch_size} records; limit is {limit}"
+        )
+        self.batch_size = batch_size
+        self.limit = limit
+
+
+def validate_evidence_batch_size(
+    prepared: PreparedEvidenceBatch, hard_limit: int
+) -> None:
+    """Reject an empty or oversized prepared Evidence batch before any DB work.
+
+    Shared by the application service and the PostgreSQL adapter; only the
+    bounded record count and the limit are reported.
+    """
+    batch_size = len(prepared.records)
+    if batch_size == 0:
+        raise EvidenceBatchInputError("evidence batch is empty")
+    if batch_size > hard_limit:
+        raise EvidenceBatchSizeLimitExceededError(batch_size, hard_limit)
+
+
+class EvidenceBatchInputError(ValueError):
+    """Raised when the database rejects malformed evidence batch input.
+
+    SQLSTATE ``U28E1``: a non-array or absent input, an empty batch, malformed
+    per-record shape, or a relationship endpoint not covered by the record's
+    Entity set. Only bounded detail text is reported.
+    """
+
+    def __init__(self, detail: str) -> None:
+        """Record the bounded database-reported failure detail."""
+        super().__init__(f"invalid evidence batch input: {detail}")
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class EvidenceBatchPersistenceItemResult:
+    """Authoritative persistence result of one prepared batch record.
+
+    ``evidence_observation_id`` is the exact PostgreSQL-authoritative
+    observation — the result of the PR 28B transition or the previously
+    established receipt result — never a transport position. Ordered by
+    input ordinal.
+    """
+
+    message_id: UUID
+    evidence_id: UUID
+    evidence_observation_id: UUID
+    outcome: EvidencePersistenceOutcome
+    version: int
+
+
+@dataclass(frozen=True)
+class EvidenceBatchPersistenceResult:
+    """The ordered persistence results of one complete prepared batch."""
+
+    items: tuple[EvidenceBatchPersistenceItemResult, ...]
+
+
+class EvidenceBatchRepository(ABC):  # pragma: no cover
+    """PR 28E bounded global Evidence batch persistence boundary.
+
+    One prepared batch maps to one top-level PostgreSQL batch call executed
+    inside the caller's UnitOfWork transaction; the adapter never commits
+    and never allocates versions. PostgreSQL owns the bounded input
+    validation, the authoritative Evidence transition (reusing the PR 28B
+    API), the message-receipt idempotency of the receipt table, Entity/
+    Relationship resolution, and exact-observation provenance.
+    """
+
+    @abstractmethod
+    async def persist_batch(
+        self, batch: PreparedEvidenceBatch
+    ) -> EvidenceBatchPersistenceResult:
+        """Persist a complete prepared batch atomically and return ordered results.
+
+        A message whose receipt already exists returns its previously
+        established authoritative result without invoking the Evidence
+        transition or recreating derived graph state; every other message
+        runs the authoritative transition once and records its receipt in
+        the same transaction.
+        """
+
+
 class EvidenceObservationEntityRepository(ABC):  # pragma: no cover
     """Observation-level Entity association repository (PR 28B).
 
@@ -2055,6 +2177,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     entity_location_observations: EntityLocationObservationRepository
     geo_resolutions: GeoResolutionRepository
     datasource_logs: DatasourceLogRepository
+    evidence_batches: EvidenceBatchRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:

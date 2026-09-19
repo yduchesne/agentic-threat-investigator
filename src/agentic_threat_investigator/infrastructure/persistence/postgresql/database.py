@@ -26,6 +26,7 @@ from .assessment_repositories import PostgresAssessmentRepository
 from .audit_repositories import PostgresAuditEventRepository
 from .composites import register_batch_composites
 from .datasource_log_repositories import PostgresDatasourceLogRepository
+from .evidence_batch_repositories import PostgresEvidenceBatchRepository
 from .evidence_repositories import (
     PostgresEvidenceObservationEntityRepository,
     PostgresEvidenceRepository,
@@ -109,6 +110,7 @@ class PostgresUnitOfWork(UnitOfWork):
         )
         self.geo_resolutions = cast(PostgresGeoResolutionRepository, None)
         self.datasource_logs = cast(PostgresDatasourceLogRepository, None)
+        self.evidence_batches = cast(PostgresEvidenceBatchRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -160,6 +162,9 @@ class PostgresUnitOfWork(UnitOfWork):
         )
         self.geo_resolutions = PostgresGeoResolutionRepository(self.session)
         self.datasource_logs = PostgresDatasourceLogRepository(self.session)
+        self.evidence_batches = PostgresEvidenceBatchRepository(
+            self.session, self._batch_size
+        )
         return self
 
     async def __aexit__(
@@ -217,6 +222,7 @@ class PostgresUnitOfWork(UnitOfWork):
             )
             self.geo_resolutions = cast(PostgresGeoResolutionRepository, None)
             self.datasource_logs = cast(PostgresDatasourceLogRepository, None)
+            self.evidence_batches = cast(PostgresEvidenceBatchRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

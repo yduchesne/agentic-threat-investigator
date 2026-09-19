@@ -80,6 +80,9 @@ SQLSTATE_INVESTIGATION_ADMISSION_CONFLICT = "U28B5"
 SQLSTATE_INVESTIGATION_ADDITION_INVALID_DISCOVERED_FROM = "U28B6"
 SQLSTATE_EVIDENCE_OBSERVATION_ENTITY_INVALID = "U28B7"
 SQLSTATE_RELATIONSHIP_OBSERVATION_PROVENANCE_INVALID = "U28B8"
+# PR 28E bounded Evidence batch persistence states (SQL API v0027).
+SQLSTATE_EVIDENCE_BATCH_INPUT_INVALID = "U28E1"
+SQLSTATE_EVIDENCE_BATCH_TOO_LARGE = "U28E2"
 
 
 def sqlstate(error: BaseException) -> str | None:
@@ -87,3 +90,16 @@ def sqlstate(error: BaseException) -> str | None:
     orig = getattr(error, "orig", None)
     state = getattr(orig, "sqlstate", None)
     return state if isinstance(state, str) else None
+
+
+def sqlstate_detail(error: BaseException) -> str | None:
+    """Return the bounded DETAIL payload of a DBAPI error, if any.
+
+    The PR 28E stored functions attach failing identities (evidence, entity,
+    relationship) to exception DETAIL so the adapter can build the identical
+    typed application errors without exposing raw statement text.
+    """
+    orig = getattr(error, "orig", None)
+    diag = getattr(orig, "diag", None)
+    detail = getattr(diag, "message_detail", None)
+    return detail if isinstance(detail, str) else None
