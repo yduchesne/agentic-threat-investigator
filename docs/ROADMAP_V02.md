@@ -149,7 +149,8 @@ Reference-corpus ingestion remains distinct. Sources such as MITRE ATT&CK that f
 | **28C** | Evidence wire contract | Explicit versioned `EvidenceMessage` with stable producer-side identity and replay-safe provenance **(delivered)** |
 | **28D** | Distributed-log abstraction | `EvidencePublisher`/consumer contracts plus deterministic `InMemoryEvidenceLog` **(delivered)** |
 | **28E** | Batch Evidence consumer | At-least-once/idempotent bounded-batch extraction and PostgreSQL persistence; offsets committed only after DB commit |
-| **28F** | Datasource producer migration | Appropriate Evidence-producing datasource pipelines publish converted Evidence through the log boundary |
+| **28F-1** | `orjson` integration | behavior-compatible JSON performance implementation |
+| **28F-2** | Datasource producer migration | datasource path publishes deterministic EvidenceMessages |
 | **28G** | Kafka-compatible infrastructure | Kafka/Redpanda adapter, partitioning, consumer groups, retry/recovery and configuration |
 | **28H** | End-to-end closure | Real-stack producer -> log -> consumer -> PostgreSQL crash/replay/recovery tests and compliance documentation |
 
@@ -167,7 +168,7 @@ Make the new model authoritative in PostgreSQL using versioned stored-function A
 
 Define the durable, versioned wire contract and stable producer-assigned message/Evidence/observation identities. Pin serialization, compatibility, validation, provenance, and deterministic replay semantics. No broker-specific API should leak into the contract.
 
-**Delivered:** immutable V1 `EvidenceMessage` in `app/evidence_message.py` with explicit wire mapping (never an internal-model dump); deterministic producer-side `message_id` (UUIDv5 over datasource-execution + flattened sequence + Evidence identity) and `observation_candidate_id` (UUIDv5 over the message identity, explicitly not a committed Observation identity); reuse and validation of the PR 28A global Evidence identity; bounded datasource/source/format/retrieval provenance; pure builder/reconstruction between `ConvertedEvidence` and the message; canonical byte-deterministic UTF-8 JSON codec with pinned UTC timestamps; strict typed fail-closed decode (malformed JSON/UTF-8, unsupported versions, extra fields, malformed values, identity mismatches); and deterministic ThreatFox/replay/later-unchanged-acquisition slices. No publisher, consumer, log, broker infrastructure, DB migration, lifecycle event, or datasource runtime reroute was added; production remains synchronous until PR 28F.
+**Delivered:** immutable V1 `EvidenceMessage` in `app/evidence_message.py` with explicit wire mapping (never an internal-model dump); deterministic producer-side `message_id` (UUIDv5 over datasource-execution + flattened sequence + Evidence identity) and `observation_candidate_id` (UUIDv5 over the message identity, explicitly not a committed Observation identity); reuse and validation of the PR 28A global Evidence identity; bounded datasource/source/format/retrieval provenance; pure builder/reconstruction between `ConvertedEvidence` and the message; canonical byte-deterministic UTF-8 JSON codec with pinned UTC timestamps; strict typed fail-closed decode (malformed JSON/UTF-8, unsupported versions, extra fields, malformed values, identity mismatches); and deterministic ThreatFox/replay/later-unchanged-acquisition slices. No publisher, consumer, log, broker infrastructure, DB migration, lifecycle event, or datasource runtime reroute was added; production remains synchronous until PR 28F-2.
 
 ### PR 28D — Distributed-log abstraction **`[DONE]`**
 
@@ -179,11 +180,59 @@ Introduce application publisher/consumer contracts and deterministic local imple
 
 Implement bounded consumer processing and set-oriented PostgreSQL persistence. Extraction remains consumer-side so the durable log stores source Evidence rather than derived graph state. Pin crash-before-commit, rollback, commit-before-offset, duplicate, replay, and partial/failure semantics with deterministic and real-PostgreSQL tests.
 
-**Delivered:** the bounded one-iteration `EvidencePersistenceConsumer` in `app/evidence_consumer.py` (poll -> prepare -> one atomic PostgreSQL transaction -> only-then consumer commit; empty polls open no transaction); consumer-side extraction input reconstructed from durable message content for ThreatFox (`app/extraction/message_context.py`: canonical `DOMAIN`/`IP_ADDRESS` invocation contexts from `matches[].ioc`/`ioc_type`, typed fail-closed unsupported/malformed handling, no `subject`/Investigation field added to `EvidenceMessage`); the prepared global batch contract (`PreparedEvidenceRecord`/`PreparedEvidenceBatch` — no transport position, no Investigation identity); `EvidenceBatchPersistenceService` (default 100, hard ceiling 500 enforced by the service, adapter, and SQL API v0027); the one-call PostgreSQL batch API `ati.persist_evidence_batch` (SQL API v0027, migration 0032) reusing the authoritative PR 28B/18C transition functions in input order, returning ordered CREATED/UNCHANGED/APPENDED results with authoritative observation IDs (chosen Option A — `observation_candidate_id` is never required to become the APPENDED observation ID); the narrow `ati.evidence_message_receipt` idempotency table keyed by the stable PR 28C `message_id` (the approved PR 28E amendment to STOP #16 — transactional at-least-once idempotency only, no log/consumer/Investigation semantics); deterministic and real-PostgreSQL tests for the E28E-C/X/P matrices, I28E-01..15 (including the required same-Evidence multi-state `[A,B,C]` replay and the distinct-message recurrence `[M1:A, M2:B, M3:A]` — the second A is APPENDED, never mistaken for replay), and V28E-01..05 vertical slices over the real in-memory log. No datasource producer migration, no `PUBLISHED` lifecycle state, no Kafka/Redpanda, no retry/DLQ policy, and no Investigation admission were added; production datasource execution remains synchronous until PR 28F.
+**Delivered:** the bounded one-iteration `EvidencePersistenceConsumer` in `app/evidence_consumer.py` (poll -> prepare -> one atomic PostgreSQL transaction -> only-then consumer commit; empty polls open no transaction); consumer-side extraction input reconstructed from durable message content for ThreatFox (`app/extraction/message_context.py`: canonical `DOMAIN`/`IP_ADDRESS` invocation contexts from `matches[].ioc`/`ioc_type`, typed fail-closed unsupported/malformed handling, no `subject`/Investigation field added to `EvidenceMessage`); the prepared global batch contract (`PreparedEvidenceRecord`/`PreparedEvidenceBatch` — no transport position, no Investigation identity); `EvidenceBatchPersistenceService` (default 100, hard ceiling 500 enforced by the service, adapter, and SQL API v0027); the one-call PostgreSQL batch API `ati.persist_evidence_batch` (SQL API v0027, migration 0032) reusing the authoritative PR 28B/18C transition functions in input order, returning ordered CREATED/UNCHANGED/APPENDED results with authoritative observation IDs (chosen Option A — `observation_candidate_id` is never required to become the APPENDED observation ID); the narrow `ati.evidence_message_receipt` idempotency table keyed by the stable PR 28C `message_id` (the approved PR 28E amendment to STOP #16 — transactional at-least-once idempotency only, no log/consumer/Investigation semantics); deterministic and real-PostgreSQL tests for the E28E-C/X/P matrices, I28E-01..15 (including the required same-Evidence multi-state `[A,B,C]` replay and the distinct-message recurrence `[M1:A, M2:B, M3:A]` — the second A is APPENDED, never mistaken for replay), and V28E-01..05 vertical slices over the real in-memory log. No datasource producer migration, no `PUBLISHED` lifecycle state, no Kafka/Redpanda, no retry/DLQ policy, and no Investigation admission were added; production datasource execution remains synchronous until PR 28F-2.
 
-### PR 28F — Datasource producer migration
+### PR 28F-1 — `orjson` integration and JSON performance hardening **`[DONE]`**
 
-Move appropriate Evidence-producing datasource processing through semantic conversion to EvidenceMessage publication. Preserve the PR 27 provider/protocol/serialization/semantic-format boundaries and semantic-format-driven `ToEvidenceConverter` selection. Do not force reference-corpus `SourceRecord` ingestion through Evidence.
+Introduce `orjson` as ATI's preferred high-performance JSON
+implementation at behavior-compatible runtime JSON boundaries before
+producer rerouting. Preserve ATI-owned semantic validation and durable
+wire contracts; migrate provider response parsing and other safe
+production call sites, and migrate the EvidenceMessage codec only
+where canonical compatibility is proven. Do not redesign serialization
+models, replace Pydantic, or introduce `msgspec`.
+
+**Delivered:** direct bounded runtime dependency `orjson>=3.11.1,<4`
+(regenerated lockfile, Python 3.14 resolution, no `msgspec`, no unrelated
+upgrades); the bounded accepted-response parse in
+`infrastructure/providers/http.py` now uses `orjson.loads(body)` directly
+on bounded bytes (no `str` round trip) with the typed `HttpOutcome`
+contracts, `DatasourceStage` classification, retry/size/content-type/
+content-encoding behavior, and `response_json` shapes unchanged; invalid
+UTF-8, malformed syntax, and the non-standard `NaN`/`Infinity`/`-Infinity`
+constants now fail closed through the existing non-retryable
+`INVALID_RESPONSE` / `SERIALIZATION` / `"malformed JSON"` outcome with no
+raw decoder or payload leakage (documented engine boundary: `orjson`
+parses integers beyond the signed-64/unsigned-64 range as `float`; no
+supported provider contract emits such integers); the full F1-J01..J15
+matrix plus V28F1-01/02 vertical slices; every production stdlib JSON
+site inventoried/classified (untrusted runtime parses, canonical
+fingerprint/hash and canonical-json-byte contracts, LLM-prompt
+`ensure_ascii=True` builders, `object_pairs_hook` duplicate-key loaders,
+logging redaction with `default=repr`, and JSONB persistence) with only
+the provider HTTP parse migrated; the EvidenceMessage V1 wire mapping
+(`_to_wire_dict`) remains authoritative and its codec retained Python's
+standard-library `json` in both directions because the encoder probe
+proved `orjson` cannot reproduce canonical bytes for finite float
+scientific notation (`1.2e-07` vs `1.2e-7`) and cannot parse integers
+beyond the 64-bit range exactly, so a frozen golden-bytes oracle now pins
+the canonical contract; and the roadmap split below. No `msgspec`, typed
+decoder, Pydantic replacement, datasource publication, `PUBLISHED`
+lifecycle state, Kafka/Redpanda, DB migration, or global FastAPI
+serialization change was made.
+
+### PR 28F-2 — Datasource Evidence producer migration
+
+Move appropriate Evidence-producing datasource executions through
+semantic-format-driven `ToEvidenceConverter`, deterministic
+`EvidenceMessage` construction, and `EvidencePublisher` publication.
+Preserve the PR 27 provider/protocol/serialization/semantic-format
+boundaries; flatten zero-to-many conversion results in deterministic
+sequence order; carry `datasource_execution_id`; and pin producer
+publication lifecycle semantics so `COMPLETED` means durable publication
+succeeded, not PostgreSQL consumption. Reference-corpus `SourceRecord`
+ingestion remains outside the Evidence log. Do not force reference-corpus
+`SourceRecord` ingestion through Evidence.
 
 ### PR 28G — Kafka-compatible infrastructure
 

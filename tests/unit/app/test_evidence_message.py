@@ -1064,3 +1064,94 @@ class TestThreatFoxVerticalSlice:
         ) == EvidenceMaterialState.from_candidate(
             converted_evidence_from_message(later_message).observation
         )
+
+
+class TestPr28F1CanonicalOracle:
+    """PR 28F-1 F1-E oracle: canonical V1 bytes stay pinned to the stdlib codec.
+
+    The PR 28F-1 encoder probe proved ``orjson`` emits identical canonical
+    bytes for every corpus case except finite float scientific notation
+    (stdlib ``1.2e-07`` vs ``orjson`` ``1.2e-7``) and parses integers
+    beyond the signed-64/unsigned-64 range as ``float`` instead of exact
+    ``int``. The V1 canonical byte contract and decode-equal round trip are
+    durable, so the EvidenceMessage codec deliberately retains Python's
+    standard-library ``json`` in both directions; these goldens freeze that
+    contract so a future engine change cannot silently rewrite the bytes.
+    """
+
+    _FIXED_EXECUTION = UUID("11111111-2222-3333-4444-555555555555")
+
+    def test_oracle01_minimal_message_golden_bytes(self) -> None:
+        """F1-E01/E07/E09: minimal message golden canonical bytes."""
+        message = _message(
+            _converted(
+                _context(),
+                facts={"matches": [{"ioc": "malicious-domain.test"}]},
+            ),
+            context=_context(),
+            execution_id=self._FIXED_EXECUTION,
+            sequence=0,
+        )
+        expected = (
+            b'{"datasource_execution_id":"11111111-2222-3333-4444-555555555555",'
+            b'"datasource_id":"threatfox-live",'
+            b'"evidence_id":"af3ab0fa-c917-5a44-ab42-9f2720c8d755",'
+            b'"evidence_type":"urn:ati:evidence:threat_intelligence",'
+            b'"facts":{"matches":[{"ioc":"malicious-domain.test"}]},'
+            b'"message_id":"bef63adc-e160-51cd-b7e1-ca41f2e6d316",'
+            b'"observation_candidate_id":"bbe96988-2cc2-5a6e-8ae7-1cde2a55985e",'
+            b'"observed_at":null,"raw_payload":null,'
+            b'"retrieved_at":"2026-06-01T12:00:00.000000Z",'
+            b'"schema_version":1,'
+            b'"semantic_format":"urn:ati:datasource:semanticformat:threatfox",'
+            b'"sequence":0,"source_id":"urn:ati:source:threatfox",'
+            b'"source_record_id":"record-1",'
+            b'"source_url":"https://threatfox-api.abuse.ch/api/v1/"}'
+        )
+        assert encode_evidence_message(message) == expected
+        assert decode_evidence_message(expected) == message
+
+    def test_oracle02_float_scientific_notation_pinned(self) -> None:
+        """F1-E05: canonical float notation is stdlib ``1.2e-07``, never ``1.2e-7``.
+
+        This is the exact representation ``orjson`` cannot reproduce, and
+        the reason the EvidenceMessage encoder retains stdlib JSON.
+        """
+        message = _message(
+            _converted(_context(), facts={"score": 1.2e-07, "n": 3}),
+            context=_context(),
+            execution_id=self._FIXED_EXECUTION,
+            sequence=1,
+        )
+        payload = encode_evidence_message(message)
+        assert b'"score":1.2e-07' in payload
+        assert b"1.2e-7" not in payload
+        assert decode_evidence_message(payload) == message
+
+    def test_oracle03_unicode_and_nested_containers_canonical(self) -> None:
+        """F1-E02/E03/E04/E06: unsorted keys, Unicode, escapes, nesting."""
+        text = '威胁情报 — π ≈ 3.14159 "quoted" \\ path'
+        message = _message(
+            _converted(
+                _context(),
+                facts={
+                    "z": [{"empty": [], "obj": {}}],
+                    "a": {"label": text, "flag": True, "nothing": None},
+                },
+            ),
+            context=_context(),
+            execution_id=self._FIXED_EXECUTION,
+            sequence=2,
+        )
+        payload = encode_evidence_message(message)
+        assert decode_evidence_message(payload) == message
+        # Non-ASCII text is emitted as UTF-8 (ensure_ascii=False), while
+        # quote/backslash characters are JSON-escaped (F1-E03/E04).
+        assert "威胁情报 — π ≈ 3.14159".encode("utf-8") in payload
+        assert b'\\"quoted\\"' in payload  # quotes are JSON-escaped
+        # Canonical sorted top-level order is frozen by the golden prefix.
+        assert payload.startswith(
+            b'{"datasource_execution_id":"11111111-2222-3333-4444-555555555555"'
+        )
+        # Repeated encoding stays deterministic (F1-E10).
+        assert encode_evidence_message(message) == payload

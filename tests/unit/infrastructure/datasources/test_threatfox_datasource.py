@@ -44,6 +44,10 @@ from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
     acquire_threatfox_execution,
 )
+from agentic_threat_investigator.infrastructure.datasources.threatfox_semantics import (
+    ThreatFoxRecord,
+    parse_threatfox_response,
+)
 from agentic_threat_investigator.infrastructure.providers.http import (
     ProviderHttpClient,
     ProviderHttpPolicy,
@@ -52,6 +56,7 @@ from tests.support.provider_http import no_op_sleep, zero_jitter
 from tests.support.threatfox_fixtures import (
     CANONICAL_ASYNCRAT_DOMAIN,
     CANONICAL_ASYNCRAT_IP,
+    CANONICAL_ASYNCRAT_MALWARE,
     FIXED_KEY,
     asyncrat_domain_record,
     threatfox_search_response,
@@ -553,3 +558,106 @@ class TestCancellation:
         assert state.events[-1].error_code is None
         assert "failed" not in state.types
         assert "completed" not in state.types
+
+
+class TestPr28F1JsonVerticalSlices:
+    """V28F1-01/02: orjson provider decode preserves the ThreatFox boundary.
+
+    The provider HTTP layer parses bounded response bytes with ``orjson``
+    (PR 28F-1); these slices prove the real-format ThreatFox JSON bytes
+    reach the production semantic parser with identical Python shapes, and
+    that non-standard provider JSON fails closed at the datasource boundary
+    with no payload or decoder leakage.
+    """
+
+    @pytest.mark.asyncio
+    async def test_v28f1_01_http_bytes_to_semantic_records(self) -> None:
+        """V28F1-01: real-format bytes -> response_json -> ThreatFoxRecord."""
+        record = asyncrat_domain_record(
+            threat_type_desc="Botnet C&C server — 威胁情报测试"
+        )
+        body = json.dumps(threatfox_search_response(record)).encode("utf-8")
+
+        def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+
+        async with _client(handler) as client:
+            http = ProviderHttpClient(
+                client=client, policy=ProviderHttpPolicy(max_retries=0)
+            )
+            outcome = await http.request_json(
+                "POST",
+                "https://threatfox-api.abuse.ch/api/v1/",
+                json_body={
+                    "query": "search_ioc",
+                    "search_term": CANONICAL_ASYNCRAT_DOMAIN,
+                    "exact_match": True,
+                },
+            )
+
+        assert outcome.final_error_code is None
+        assert outcome.response_bytes == body
+        assert isinstance(outcome.response_json, dict)
+        semantic = parse_threatfox_response(
+            outcome.response_json,
+            entity_type=EntityType.DOMAIN,
+            canonical_value=CANONICAL_ASYNCRAT_DOMAIN,
+        )
+        assert semantic.error is None
+        assert len(semantic.records) == 1
+        parsed = semantic.records[0]
+        assert isinstance(parsed, ThreatFoxRecord)
+        assert parsed.id == "864201"
+        assert parsed.ioc == CANONICAL_ASYNCRAT_DOMAIN
+        assert parsed.malware == CANONICAL_ASYNCRAT_MALWARE
+        assert parsed.confidence_level == 100
+        assert parsed.first_seen == datetime(2026, 8, 20, 12, 0, 0, tzinfo=UTC)
+        assert "威胁情报测试" in parsed.threat_type_desc
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        [
+            b'{"query_status": "ok", "data": [{"x": NaN}]}',
+            b'{"query_status": "ok", "data": [{"x": Infinity}]}',
+            b'{"query_status": "ok", "data": [{"x": -Infinity}]}',
+            b"\xff\xfe\x00",
+        ],
+    )
+    async def test_v28f1_02_nonstandard_json_bounded_serialization_failure(
+        self, body: bytes
+    ) -> None:
+        """V28F1-02: NaN/Infinity/invalid UTF-8 stay bounded at the source."""
+        state = _State()
+
+        def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+
+        async with _client(handler) as client:
+            result = await acquire_threatfox_execution(
+                datasource=_datasource(client),
+                definition=_DEFINITION,
+                entity=_DOMAIN_ENTITY,
+                uow_factory=_factory(state),
+                clock=lambda: _EPOCH,
+            )
+
+        assert result.objects == ()
+        assert result.error is not None
+        assert result.error.stage is DatasourceStage.SERIALIZATION
+        assert result.error.code == "serialization_failed"
+        assert result.error.retryable is False
+        assert state.types == ["started", "failed"]
+        assert "decoded" not in state.types
+        assert "acquired" not in state.types
+        assert "orjson" not in str(result.error)
+        assert "JSONDecodeError" not in str(result.error)
+        assert body.decode("utf-8", errors="replace") not in str(state.events)

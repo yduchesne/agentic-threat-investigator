@@ -568,6 +568,11 @@ E28C matrix:
   facts/raw-payload insertion-order independence, canonical lowercase
   UUID strings, stable enum URNs, pinned JSON nulls, and NaN/Infinity/
   arbitrary-object rejection;
+- PR 28F-1 canonical oracle: golden V1 bytes pin the stdlib `json` codec
+  (F1-E01..E10) — the encoder probe proved `orjson` cannot reproduce the
+  canonical float scientific notation (`1.2e-07` vs `1.2e-7`) or parse
+  beyond-64-bit integers exactly, so the EvidenceMessage codec is
+  deliberately retained on Python's standard library in both directions;
 - strict decode (E28C-D01..D18): malformed JSON/UTF-8 -> decode error,
   missing/non-integer/zero/bool/string/float/version-2 schema handling
   (unsupported-version vs validation error), extra-field rejection,
@@ -803,6 +808,7 @@ The following checklist captures recurring failure modes in live-provider implem
 - **URL safety and canonical identity:** Validate URLs on the actual request path, not only in an unused helper. Require the approved scheme, reject userinfo, queries or fragments where prohibited, malformed hosts and ports, and unsafe path replacement. Canonicalize equivalent host spellings, IDNA forms, terminal dots, IPv6 literals, and default ports before authority comparison.
 - **Selection and path construction:** Exercise multiple candidate services, invalid candidates followed by valid ones, ambiguity, longest-prefix/range boundaries, source-order rules, and exact percent-encoded resource paths. Never allow an entity value to replace the selected authority.
 - **HTTP response handling:** Bound both declared and streamed response sizes before JSON decoding. Test missing or incorrect content types, malformed JSON, malformed content encodings, redirects, timeout and transport failures, permanent HTTP errors, rate limiting, and exhausted transient retries.
+- **Provider JSON format (PR 28F-1):** accepted JSON bodies are parsed with `orjson` directly on bounded bytes. The F1-J01..J15 matrix pins valid-object/nested/array/Unicode/finite-numeric shape preservation; malformed syntax, invalid UTF-8, empty bodies, and the non-standard `NaN`/`Infinity`/`-Infinity` constants all fail closed as a non-retryable `INVALID_RESPONSE` + `SERIALIZATION` + fixed `"malformed JSON"` outcome with no decoder/payload leakage; oversize bodies, wrong content types, malformed content encodings, and retryable statuses keep their existing outcomes; V28F1-01/02 run real-format ThreatFox bytes through the production client into semantic records and prove non-standard provider JSON never reaches `DECODED`. `orjson` parses integers beyond the signed-64/unsigned-64 range as `float` (stdlib returned exact `int`); no supported provider contract emits such integers, and tests verify realistic int64-range values keep exact `int` Python shapes.
 - **Safe typed errors:** Provider failures should map to stable typed codes with generic messages. Error values and logs must not expose response bodies, credentials, headers, exception URLs, query values, or other untrusted provider content.
 - **Retry and limiter behavior:** Verify exact attempt counts, backoff numbering, jitter bounds, 429 `Retry-After` ordering and caps, first-request behavior, concurrency limits, and rate spacing. Test cancellation while waiting for a semaphore, rate slot, transport, retry delay, and streamed body; cancellation must propagate without leaking permits, resources, or stale future reservations.
 - **Validation at construction boundaries:** Enforce invariants in directly constructible infrastructure policies and caches as well as in application `Settings`. Tests and future composition code may bypass the normal settings bootstrap.
