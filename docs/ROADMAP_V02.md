@@ -221,7 +221,7 @@ decoder, Pydantic replacement, datasource publication, `PUBLISHED`
 lifecycle state, Kafka/Redpanda, DB migration, or global FastAPI
 serialization change was made.
 
-### PR 28F-2 — Datasource Evidence producer migration
+### PR 28F-2 — Datasource Evidence producer migration **`[DONE]`**
 
 Move appropriate Evidence-producing datasource executions through
 semantic-format-driven `ToEvidenceConverter`, deterministic
@@ -233,6 +233,33 @@ publication lifecycle semantics so `COMPLETED` means durable publication
 succeeded, not PostgreSQL consumption. Reference-corpus `SourceRecord`
 ingestion remains outside the Evidence log. Do not force reference-corpus
 `SourceRecord` ingestion through Evidence.
+
+**Delivered:** the generic producer service `DatasourceEvidenceProducer`
+(`app/datasource_evidence_producer.py`) reusing the PR 27B recorder, the
+PR 27C `SemanticAcquirer`, the semantic-format-only
+`ToEvidenceConverterRegistry` and deterministic 0..N flattening, the
+PR 28C `evidence_message_from_converted` builder, and the PR 28D
+`EvidencePublisher` ABC; one fresh `datasource_execution_id` per
+execution propagated into every message with execution-local zero-based
+sequence over the whole flattened output (source order, then converter
+return order; no sort/dedup); exactly one ordered `publish(...)` call per
+execution (including `publish(())` for valid zero output); the
+non-terminal `PUBLISHED` lifecycle stage whose `item_count` is the
+accepted message count (SQL API v0028, migration 0033; terminal set
+unchanged); producer `COMPLETED` defined as successful publication with
+no consumer wait and no direct observation-persistence fallback on
+publication failure; cancellation stays cancellation; and the ThreatFox
+reference producer proof (deterministic F2-M/L/P/S unit matrices plus
+real-PostgreSQL V28F2-01..07 vertical slices: success, multi-record
+order, zero result, publisher failure, publisher-boundary cancellation,
+DB lifecycle acceptance/post-terminal rejection, and producer/consumer
+separation). No Kafka/Redpanda, no retry/DLQ, no outbox, no
+Investigation/broker fields in messages, and no publish-plus-direct-
+persist dual write were added. Composition is deliberately limited to
+the application seam: no production runner routes datasource executions
+to the producer yet, so the PR 27E Investigation compatibility path
+remains the active synchronous production Investigation path and is
+documented as transitional (producer runner wiring stays PR 28G/H).
 
 ### PR 28G — Kafka-compatible infrastructure
 

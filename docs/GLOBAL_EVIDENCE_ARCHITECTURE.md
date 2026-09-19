@@ -1,6 +1,6 @@
 # ATI — v0.2 Global Evidence and Distributed Ingestion Architecture
 
-> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered, PR 28D publisher/consumer contracts and deterministic in-memory log delivered.**
+> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered, PR 28D publisher/consumer contracts and deterministic in-memory log delivered, PR 28E bounded Evidence persistence consumer delivered, PR 28F-2 datasource Evidence producer path delivered at the application seam.**
 >
 > This document records the architectural decisions that govern the PR 28 series. `ROADMAP_V02.md` defines the delivery sequence. Delivered v0.1 behavior remains authoritative until the corresponding PR 28 slice lands.
 >
@@ -164,10 +164,20 @@ Invariants pinning this seam:
   and no cross-process guarantees. Kafka/Redpanda behind the same
   contracts remain PR 28G.
 
-PR 28E builds bounded PostgreSQL consumer persistence on this seam; PR 28F
-migrates datasource producers to publish through `EvidencePublisher`; until
-28F the production datasource runtime remains synchronous and is not
-routed through the log.
+PR 28E builds bounded PostgreSQL consumer persistence on this seam
+(delivered). PR 28F-2 delivers the producer side at the application seam:
+`DatasourceEvidenceProducer` flattens one datasource execution's
+`ConvertedEvidence` tuple into an ordered `EvidenceMessage` tuple
+(execution-local zero-based sequence, exact `datasource_execution_id`),
+publishes it with exactly one ordered `EvidencePublisher.publish(...)`
+call, and records the non-terminal `PUBLISHED` lifecycle stage before
+`COMPLETED`; producer `COMPLETED` means successful publication, never
+consumer/PostgreSQL persistence, and the producer never waits for the
+PR 28E consumer. The production Investigation datasource runtime is
+still not routed through the log — the PR 27E Investigation
+compatibility path remains synchronous and transitional. Kafka/Redpanda
+behind the unchanged PR 28D contracts remain PR 28G, and full
+producer -> log -> consumer -> PostgreSQL closure is PR 28H.
 
 ## PR 28E bounded Evidence persistence consumer (delivered)
 

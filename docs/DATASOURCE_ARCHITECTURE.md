@@ -11,8 +11,16 @@ and series closure) have landed. PR 27E migrated the ThreatFox
 production Investigation runtime onto the PR 27A-D stack and closed
 the series with a source-by-source migration audit. PR 28C later
 delivered the pure `EvidenceMessage` v1 wire contract between
-conversion and the future distributed-log boundary without any
-runtime reroute (production remains synchronous until PR 28F).
+conversion and the distributed-log boundary, PR 28D the broker-neutral
+publisher/consumer/log abstraction, and PR 28F-2 the generic datasource
+Evidence producer seam: one execution's flattened output becomes one
+ordered `EvidencePublisher` publication with the non-terminal
+`PUBLISHED` lifecycle stage, and producer `COMPLETED` means successful
+publication — never consumer/PostgreSQL persistence. The producer path
+is delivered and proven at the application boundary; production
+Investigation execution still runs synchronously through the PR 27E
+compatibility path, which remains transitional until PR 28G
+(Kafka/Redpanda) and PR 28H (full distributed closure).
 
 ### PR 27A landed vocabulary
 
@@ -335,10 +343,18 @@ identity, versioning, and material no-op detection. The pure
 (`ToEvidenceConverter` -> `ConvertedEvidence` -> `EvidenceMessage` v1)
 and the broker-neutral `EvidencePublisher`/`EvidenceConsumer`
 contracts plus deterministic `InMemoryEvidenceLog` are delivered in
-PR 28D (`app/evidence_log.py`). This document still makes no claim of
-production `EvidenceMessage` publication — the datasource runtime is
-not routed through the log — that stays PR 28F and the datasource
-producer migration stays PR 28F.
+PR 28D (`app/evidence_log.py`). PR 28F-2 delivers the datasource
+Evidence producer seam (`app/datasource_evidence_producer.py`): one
+execution's flattened `ConvertedEvidence` tuple becomes an ordered
+`EvidenceMessage` tuple with execution-local zero-based sequence and
+the exact `datasource_execution_id`, published with exactly one
+`EvidencePublisher.publish(...)` call, followed by the non-terminal
+`PUBLISHED` stage (`item_count` = accepted message count) and
+`COMPLETED`. The producer completes on successful publication and
+never waits for the PR 28E consumer. No production Investigation
+runtime is rerouted through the log: the PR 27E compatibility path
+remains synchronous/transitional until a real producer runner is wired
+(PR 28G/H).
 
 ## Evidence wire boundary (PR 28C, delivered)
 
@@ -354,8 +370,9 @@ DatasourceDefinition
  -> ToEvidenceConverter selected by semantic_format
  -> ConvertedEvidence (global Evidence + observation candidate)
  -> EvidenceMessage v1   (builder + canonical JSON codec, PR 28C)
- -> EvidencePublisher -> distributed log   (PR 28D, delivered;
-    datasource producer migration stays PR 28F)
+ -> EvidencePublisher (PR 28D) -> distributed log
+    (producer publication delivered: PR 28F-2;
+     Kafka/Redpanda adapter: PR 28G)
 ```
 
 The boundary reuses without modification the PR 28A global Evidence
@@ -370,14 +387,19 @@ dictionary. Canonical UTF-8 JSON serialization is byte-deterministic and
 deserialization fails closed with typed errors; all codec/builder
 operations are pure (no DB/network/UnitOfWork).
 
-Production remains synchronous and behaviorally unchanged: the
-datasource runtime (provider executor, observation persistence,
-`DatasourceProvider`) is not rerouted, nothing is published, and no
-`PUBLISHED` lifecycle event exists. The PR 28D publisher/consumer/log
-abstraction exists at the application seam (`app/evidence_log.py`) but
-no production code publishes or consumes through it yet; PR 28F will
-migrate appropriate datasource executions to publish messages through
-the PR 28D publisher/consumer/log abstraction.
+The PR 28F-2 producer path is delivered at the application seam
+(`app/datasource_evidence_producer.py`): one ordered
+`EvidencePublisher` publication per execution and the non-terminal
+`PUBLISHED` lifecycle event (`CONVERTED` -> `PUBLISHED` ->
+`COMPLETED`), proven by deterministic unit matrices and ThreatFox
+real-stack vertical slices. It is **not** wired into a production
+runner: broker publication is PR 28G (Kafka/Redpanda behind the
+unchanged PR 28D contracts) and full producer -> log -> consumer ->
+PostgreSQL closure is PR 28H. Consumer persistence is PR 28E
+(delivered). Production Investigation execution remains synchronous
+and behaviorally unchanged on the PR 27E compatibility runtime
+(provider executor, observation persistence, `DatasourceProvider`);
+nothing in that transitional path publishes.
 
 ## Runtime datasource migration (PR 27E, delivered)
 
@@ -434,7 +456,9 @@ Delivered:
   live Investigation Evidence sources remain
   LEGACY_NOT_SEMANTICALLY_MODELED until source-specific follow-ups.
 
-Dominant lifecycle invariants:
+Dominant lifecycle invariants of the PR 27E Investigation compatibility
+path (transitional — it stays on the synchronous Investigation runtime and
+does not publish):
 
 ```text
 TX-L1 STARTED
@@ -446,6 +470,40 @@ TX-L4 CONVERTED(item_count=N)
 extract E1 / persist E1 (observation UoW)  ...  per Evidence
 TX-L5 COMPLETED
 ```
+
+### Current v0.2 Global Evidence producer lifecycle (PR 28F-2, delivered at the application seam)
+
+The `DatasourceEvidenceProducer` (`app/datasource_evidence_producer.py`)
+owns the producer-side execution over the same PR 27B recorder. Its target
+lifecycle is:
+
+```text
+TX-P1 STARTED
+HTTP/decode/semantic parse                       no TX
+TX-P2 ACQUIRED
+TX-P3 DECODED
+conversion + message construction                no TX
+TX-P4 CONVERTED(item_count=N)
+publisher.publish(messages)                      no TX, exactly one ordered call
+TX-P5 PUBLISHED(item_count=M)    # M = accepted EvidenceMessage count
+TX-P6 COMPLETED
+```
+
+`PUBLISHED.item_count` is the count of `EvidenceMessage` values accepted by
+that execution's one ordered `EvidencePublisher.publish(...)` call; a valid
+zero-output execution records `PUBLISHED(0)` and still calls `publish(())`.
+`COMPLETED` means the injected publisher accepted every message — never that
+PostgreSQL consumed or persisted them: the producer never waits for the
+PR 28E `EvidencePersistenceConsumer`, never holds a UnitOfWork across
+HTTP/conversion/message construction/publication, and never falls back to
+direct observation persistence. Datasource lifecycle logging and broker
+publication are separate durable boundaries (no distributed transaction,
+no outbox); after a successful publish a lifecycle-append failure propagates
+without republishing. This producer path is tested end-to-end on the
+ThreatFox reference datasource (deterministic unit matrices F2-* and real-
+PostgreSQL vertical slices V28F2-*) but is not yet wired into a production
+runner; the PR 27E Investigation compatibility lifecycle above remains the
+active production path for Investigation execution.
 
 One UoW = one real bounded PostgreSQL transaction. No UoW spans
 acquisition, parsing, conversion, extraction, retry sleep, or a whole
