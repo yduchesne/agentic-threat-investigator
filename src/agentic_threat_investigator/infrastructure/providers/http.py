@@ -31,6 +31,17 @@ import orjson
 
 from agentic_threat_investigator.app.datasource_semantics import DatasourceStage
 from agentic_threat_investigator.app.providers import ProviderErrorCode
+from agentic_threat_investigator.telemetry.attributes import (
+    AttributeKeys,
+    validate_bounded_attributes,
+)
+from agentic_threat_investigator.telemetry.metrics import (
+    DURATION_UNIT,
+    DurationMetrics,
+    Metrics,
+    get_counter,
+    get_histogram,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -783,7 +794,15 @@ class ProviderHttpClient:
         accepted_statuses: set[int],
         media_types: tuple[str, ...],
     ) -> HttpOutcome:
-        """Execute request attempts up to max_retries with backoff."""
+        """Execute request attempts up to max_retries with backoff.
+
+        The loop measures one *logical* request (including retries and
+        backoff sleeps) and records aggregate bounded telemetry at the single
+        exit point: the final attempt count, the retry count, the final
+        outcome, and the logical duration. Cancellation propagates without
+        recording; no URL, path, query, header, body, or raw exception text
+        is ever attached.
+        """
         attempt = 0
         last_outcome: HttpOutcome | None = None
         start_time = read_monotonic_clock(self._clock)
@@ -825,16 +844,42 @@ class ProviderHttpClient:
             last_outcome = result
 
             if result.final_error_code is None or not result.final_error_code.retryable:
-                return result
+                break
 
             if attempt > self._policy.max_retries:
-                return result
+                break
 
             delay = self.compute_backoff_delay(attempt - 1, result.retry_after_seconds)
             await self._sleep(delay)
 
         assert last_outcome is not None
+        self._record_http_telemetry(last_outcome, start_time)
         return last_outcome
+
+    def _record_http_telemetry(self, outcome: HttpOutcome, start_time: float) -> None:
+        """Record the bounded aggregate telemetry of one logical HTTP request.
+
+        Emits one logical-request duration histogram (seconds), one actual
+        attempt count, one retry count, and one failure counter for a failed
+        final outcome. Metric attributes carry only the bounded outcome; no
+        URL, host, path, query, header, body, status detail, or exception text
+        is ever attached (see ``docs/OBSERVABILITY.md``).
+        """
+        failed = outcome.final_error_code is not None
+        attributes = validate_bounded_attributes(
+            {
+                AttributeKeys.OUTCOME: "error" if failed else "success",
+            }
+        )
+        get_histogram(DurationMetrics.PROVIDER_HTTP, unit=DURATION_UNIT).record(
+            read_monotonic_clock(self._clock) - start_time,
+            attributes=attributes,
+        )
+        get_counter(Metrics.PROVIDER_HTTP_ATTEMPTS).add(outcome.attempt_count)
+        if outcome.retry_count > 0:
+            get_counter(Metrics.PROVIDER_HTTP_RETRIES).add(outcome.retry_count)
+        if failed:
+            get_counter(Metrics.PROVIDER_HTTP_FAILURES).add(1)
 
     async def _execute_attempt(
         self,

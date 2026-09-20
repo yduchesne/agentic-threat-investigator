@@ -220,6 +220,37 @@ corresponding module-level bindings in `database.py`, the Kafka adapters, and
 the Evidence consumer) are injected through the shared `tests/unit/conftest.py`
 fixtures; no test relies on process-global OTel providers.
 
+PR 29B keeps the same deterministic, offline policy and adds unit coverage
+for every remaining stable boundary:
+
+- **DS1..DS7** (datasource): acquisition success span/duration, typed stage
+  failure counts, cancellation propagation, conversion item counts (N and
+  zero), conversion exception preserving the lifecycle, and no duplicate
+  Kafka publication counters on the producer path;
+- **H1..H7** (provider HTTP): first-attempt success, retry-then-success,
+  exhausted retries, cancellation, and the absence of URLs/paths/bodies
+  from attributes;
+- **PW1..PW5** (provider work): one logical work span regardless of internal
+  HTTP attempts, mixed-result outcome semantics, bounded failure counts,
+  and cancellation;
+- **EP1..EP4** (Evidence persistence): the `ati.evidence.persist` span,
+  persist > UoW > repository nesting, rollback/exception preservation, and
+  no double-counted outcome counters;
+- **G1..G5** (GEO): resolved/unresolvable/failed counts, empty-claim no
+  invented work, and cancellation;
+- **I1..I4** (investigation): one execution span/counter, no-op terminals
+  count nothing, bounded failures, and no Investigation-ID labels;
+- **A1..A5** (agents): Research Agent normal/empty/one-repair model-attempt
+  counts, Evidence Analyst and Report Writer using the common observed
+  client;
+- **A6..A13** (LLM): one span + one observation per actual attempt, typed
+  `LlmError` and cancellation preservation, no prompt/output capture, no
+  fabricated token metrics, backend fail-open, and NoOp export absence;
+- **P1..P6** (Kafka W3C): producer traceparent injection, consumer parent
+  extraction making downstream work a child, malformed-header safety,
+  unrelated-header preservation, byte-identical payload/key, and no-outer-
+  span publish correctness.
+
 Priority unit-test areas include:
 
 - entity canonicalization;

@@ -11,9 +11,30 @@ the application layer never imports LangSmith or Langfuse.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
+
+from opentelemetry.trace import Status, StatusCode
+
+from agentic_threat_investigator.app.llm import LlmClient, ResponseT
+from agentic_threat_investigator.telemetry.attributes import (
+    AttributeKeys,
+    validate_bounded_attributes,
+)
+from agentic_threat_investigator.telemetry.metrics import (
+    DURATION_UNIT,
+    DurationMetrics,
+    Metrics,
+    get_counter,
+    get_histogram,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames, get_tracer
+
+logger = logging.getLogger(__name__)
 
 MAX_LLM_METADATA_FIELD_LENGTH = 200
 """Upper bound for any portable LLM-observability metadata field."""
@@ -87,9 +108,130 @@ class LlmObservability(ABC):
         """
 
 
+class ObservedLlmClient(LlmClient):
+    """ATI-owned observing ``LlmClient`` wrapper (PR 29B).
+
+    Composes the existing contracts exactly once per actual model attempt:
+
+    .. code-block:: text
+
+        Agent
+         -> ObservedLlmClient
+              -> ati.llm.invoke span + duration
+              -> LlmObservability.observe(LlmObservation)
+              -> existing LlmClient delegate
+
+    One actual ``generate_structured()`` call equals one OTel LLM span plus
+    one selected LLM-observability observation plus one delegate invocation.
+    Only bounded safe metadata (operation name plus the bounded configured
+    model/provider/profile/prompt-version values) is ever recorded; prompts,
+    model output, Evidence facts, and investigation IDs are never captured.
+    ``asyncio.CancelledError`` propagates unchanged and the ``LlmError``
+    taxonomy of the delegate is preserved; observability/backend export
+    failures remain fail-open by the adapters' contract.
+    """
+
+    def __init__(
+        self,
+        delegate: LlmClient,
+        observability: LlmObservability,
+        *,
+        model_provider: str | None = None,
+        model_name: str | None = None,
+        model_profile: str | None = None,
+        prompt_version: str | None = None,
+    ) -> None:
+        """Bind the delegate, the selected backend, and bounded model metadata.
+
+        The model metadata fields are bounded, code/deployment-controlled
+        values (never prompts, outputs, or IDs) that every observation reuses;
+        they are validated lazily at decoration time through
+        :func:`validate_llm_observation`.
+        """
+        self._delegate = delegate
+        self._observability = observability
+        self._model_provider = model_provider
+        self._model_name = model_name
+        self._model_profile = model_profile
+        self._prompt_version = prompt_version
+
+    async def generate_structured(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[ResponseT],
+        operation_name: str,
+    ) -> ResponseT:
+        """Generate one schema-validated structured output through the wrapper.
+
+        Opens one ``ati.llm.invoke`` span (with the bounded per-call
+        ``ati.operation`` attribute), records one seconds duration histogram,
+        and counts one failure on any ordinary delegate exception. The
+        selected observability backend observes the same single attempt with
+        safe metadata only. Cancellation propagates without telemetry and the
+        delegate's typed ``LlmError`` is re-raised unchanged.
+        """
+        if not operation_name.strip():
+            raise ValueError("operation_name must not be blank")
+        observation = LlmObservation(
+            operation_name=operation_name,
+            model_provider=self._model_provider,
+            model_name=self._model_name,
+            model_profile=self._model_profile,
+            prompt_version=self._prompt_version,
+        )
+        validate_llm_observation(observation)
+        attributes = validate_bounded_attributes(
+            {AttributeKeys.OPERATION: operation_name}
+        )
+        tracer = get_tracer()
+        histogram = get_histogram(DurationMetrics.LLM_INVOKE, unit=DURATION_UNIT)
+        failures = get_counter(Metrics.LLM_INVOKE_FAILURES)
+        start = time.perf_counter()
+        with tracer.start_as_current_span(
+            SpanNames.LLM_INVOKE, attributes=attributes
+        ) as span:
+            try:
+                # Backend entry is fail-open: a defective adapter must never
+                # fail, retry, or otherwise alter the model call.
+                try:
+                    observe_cm: AbstractContextManager[None] = (
+                        self._observability.observe(observation)
+                    )
+                except Exception:  # noqa: BLE001 - telemetry-owned fail-open boundary
+                    logger.debug("LLM observability could not start observation")
+                    observe_cm = nullcontext()
+                with observe_cm:
+                    result = await self._delegate.generate_structured(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        response_model=response_model,
+                        operation_name=operation_name,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR))
+                failures.add(1, attributes)
+                histogram.record(
+                    time.perf_counter() - start,
+                    attributes={**attributes, AttributeKeys.OUTCOME: "error"},
+                )
+                raise
+            else:
+                histogram.record(
+                    time.perf_counter() - start,
+                    attributes={**attributes, AttributeKeys.OUTCOME: "success"},
+                )
+                return result
+
+
 __all__ = [
     "LlmObservation",
     "LlmObservability",
     "MAX_LLM_METADATA_FIELD_LENGTH",
+    "ObservedLlmClient",
     "validate_llm_observation",
 ]

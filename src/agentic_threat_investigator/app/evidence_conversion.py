@@ -34,6 +34,15 @@ from agentic_threat_investigator.app.datasource_semantics import (
 )
 from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 from agentic_threat_investigator.domain.identifiers import SemanticFormatId
+from agentic_threat_investigator.telemetry.decorators import telemetry_operation
+from agentic_threat_investigator.telemetry.metrics import (
+    MESSAGE_COUNT_UNIT,
+    DurationMetrics,
+    Metrics,
+    get_counter,
+    get_histogram,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames
 
 TSource = TypeVar("TSource")
 """One validated source-native semantic object type."""
@@ -151,6 +160,21 @@ class ToEvidenceConverterRegistry:
             ) from exc
 
 
+def _record_conversion_failure() -> None:
+    """Increment the bounded conversion-failure counter (PR 29B).
+
+    Fired by the ``telemetry_operation`` decorator after an ordinary
+    conversion exception; it never fires for cancellation and never captures
+    exception text.
+    """
+    get_counter(Metrics.DATASOURCE_CONVERT_FAILURES).add(1)
+
+
+@telemetry_operation(
+    span_name=SpanNames.DATASOURCE_CONVERT,
+    duration_metric=DurationMetrics.DATASOURCE_CONVERT,
+    on_error=_record_conversion_failure,
+)
 def convert_semantic_source_objects(
     objects: tuple[TSource, ...],
     context: EvidenceConversionContext,
@@ -164,11 +188,18 @@ def convert_semantic_source_objects(
     source-object order first, then each converter's return order. The
     helper performs no sorting, no deduplication, no I/O, and no
     persistence; ``objects`` stays a bounded tuple so no unbounded generator
-    is ever drained here.
+    is ever drained here. Telemetry records one ``ati.datasource.convert``
+    span and duration plus the converted item count (zero output is a valid
+    success with count zero); no source or Evidence content is captured.
     """
     converter = registry.get(context.semantic_source.semantic_format)
-    return tuple(
+    converted = tuple(
         converted
         for source_object in objects
         for converted in converter.convert(source_object, context)
     )
+    get_histogram(
+        DurationMetrics.DATASOURCE_CONVERT_ITEMS,
+        unit=MESSAGE_COUNT_UNIT,
+    ).record(len(converted))
+    return converted

@@ -67,7 +67,10 @@ from uuid import UUID
 from agentic_threat_investigator.app.datasource_execution import (
     DatasourceExecutionRecorder,
 )
-from agentic_threat_investigator.app.datasource_provider import SemanticAcquirer
+from agentic_threat_investigator.app.datasource_provider import (
+    SemanticAcquirer,
+    observe_semantic_acquisition,
+)
 from agentic_threat_investigator.app.datasource_semantics import (
     SemanticSourceContext,
 )
@@ -269,7 +272,8 @@ class DatasourceEvidenceProducer(Generic[T]):
         )
         await recorder.start()
         try:
-            result = await self._acquirer.acquire(
+            result = await observe_semantic_acquisition(
+                self._acquirer,
                 definition=self._definition,
                 entity=entity,
                 recorder=recorder,

@@ -61,6 +61,7 @@ from agentic_threat_investigator.app.geoint.worker import (
 from agentic_threat_investigator.app.investigation_worker import (
     InvestigationJobWorker,
 )
+from agentic_threat_investigator.app.llm import LlmClient
 from agentic_threat_investigator.app.orchestration.research import (
     ResearchAgentResearchExecutor,
 )
@@ -92,6 +93,7 @@ from agentic_threat_investigator.infrastructure.intelligence_composition import 
     build_intelligence_sources,
 )
 from agentic_threat_investigator.infrastructure.llm.composition import (
+    build_observed_llm_client,
     build_openai_chat_model,
 )
 from agentic_threat_investigator.infrastructure.llm.deterministic import (
@@ -99,6 +101,9 @@ from agentic_threat_investigator.infrastructure.llm.deterministic import (
 )
 from agentic_threat_investigator.infrastructure.llm.langchain_client import (
     LangChainLlmClient,
+)
+from agentic_threat_investigator.infrastructure.observability.composition import (
+    build_llm_observability,
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.canonical_geography_resolver import (
     PostgresCanonicalGeographyResolver,
@@ -118,8 +123,27 @@ from agentic_threat_investigator.infrastructure.report_writer_composition import
 from agentic_threat_investigator.infrastructure.research_agent_composition import (
     build_research_agent,
 )
+from agentic_threat_investigator.telemetry.logging import TraceCorrelationFilter
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _configure_logging() -> None:
+    """Configure bounded structured logging with trace/span correlation.
+
+    Installs the PR 29A :class:`TraceCorrelationFilter` on the root handler so
+    every structured log record carries ``otel_trace_id`` / ``otel_span_id``
+    when a valid OTel span is current. The filter is additive and idempotent:
+    existing attributes are never overwritten and log semantics are
+    unchanged (``docs/OBSERVABILITY.md``).
+    """
+    logging.basicConfig(level=logging.INFO)
+    for handler in logging.getLogger().handlers:
+        if not any(
+            isinstance(installed, TraceCorrelationFilter)
+            for installed in handler.filters
+        ):
+            handler.addFilter(TraceCorrelationFilter())
 
 
 def _make_engine(settings: Settings) -> AsyncEngine:
@@ -157,20 +181,28 @@ def _uow_factory(
     )
 
 
-def _compose_llm(settings: Settings) -> LangChainLlmClient | DeterministicLlmClient:
+def _compose_llm(settings: Settings) -> LlmClient:
     """Compose the configured LLM client for the worker process.
 
     ``ATI_LLM_DRIVER=deterministic`` selects the repository-owned offline
     scripted boundary (PR 24B offline real-stack browser tests); the default
     ``openai`` driver resolves the API key through the secret-reference
     bootstrap contract and builds the real chat model. Operating mode never
-    selects the LLM implementation.
+    selects the LLM implementation. PR 29B wraps the concrete delegate with
+    the single ATI-owned observing client bound to the selected
+    LLM-observability backend, so every agent/report model attempt is
+    observable without content capture.
     """
-    if settings.llm_driver is LlmDriver.DETERMINISTIC:
-        return DeterministicLlmClient()
     resolver = EnvVarSecretsResolver()
-    chat_model = build_openai_chat_model(settings, resolver)
-    return LangChainLlmClient(chat_model)
+    if settings.llm_driver is LlmDriver.DETERMINISTIC:
+        delegate: LlmClient = DeterministicLlmClient()
+    else:
+        chat_model = build_openai_chat_model(settings, resolver)
+        delegate = LangChainLlmClient(chat_model)
+    observability = build_llm_observability(settings, resolver)
+    return build_observed_llm_client(
+        delegate=delegate, observability=observability, settings=settings
+    )
 
 
 def _compose_embedding(settings: Settings) -> EmbeddingClient:
@@ -196,7 +228,7 @@ def _compose_runner(
     session_factory: async_sessionmaker[AsyncSession],
     uow_factory: Callable[[], PostgresUnitOfWork],
     sources: IntelligenceSourceComposition,
-    llm: LangChainLlmClient | DeterministicLlmClient,
+    llm: LlmClient,
 ) -> LocalInvestigationRunner:
     """Compose the production InvestigationRunner for the worker process.
 
@@ -324,7 +356,7 @@ def geography_import_main(argv: list[str] | None = None) -> int:
         help="reference corpus artifacts or directories (ATI Geography Corpus NDJSON)",
     )
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    _configure_logging()
     settings = get_settings()
 
     paths: list[Path] = []
@@ -454,7 +486,7 @@ def geography_build_main(argv: list[str] | None = None) -> int:
         help="parse and validate without writing an artifact",
     )
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    _configure_logging()
 
     if args.validate_only and args.output is not None:
         LOGGER.error(
@@ -570,7 +602,7 @@ def fake_data_bootstrap_main(argv: list[str] | None = None) -> int:
     """Run the one-shot fake-data bootstrap and exit with its status code."""
     parser = argparse.ArgumentParser(prog="ati-fake-data-bootstrap")
     parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    _configure_logging()
     settings = get_settings()
     _log_operating_mode(settings)
     if settings.operating_mode is not OperatingMode.FAKE:
@@ -624,7 +656,7 @@ def worker_main(argv: list[str] | None = None) -> int:
         help="sleep between empty claim rounds (default 1.0)",
     )
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    _configure_logging()
     settings = get_settings()
     _log_operating_mode(settings)
     engine = _make_engine(settings)
@@ -739,7 +771,7 @@ def geo_resolver_main(argv: list[str] | None = None) -> int:
         help="run a single claim/resolve/complete iteration and exit",
     )
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    _configure_logging()
     settings = get_settings()
     _log_operating_mode(settings)
     if not settings.geo_resolver_enabled:

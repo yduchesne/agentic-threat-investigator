@@ -56,6 +56,23 @@ from agentic_threat_investigator.domain.report import (
     ReportWriterInput,
     ReportWriterOutput,
 )
+from agentic_threat_investigator.telemetry.decorators import telemetry_operation
+from agentic_threat_investigator.telemetry.metrics import (
+    DurationMetrics,
+    Metrics,
+    get_counter,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames
+
+
+def _record_report_failure() -> None:
+    """Increment the bounded report-generation failure counter (PR 29B).
+
+    Fired by the ``telemetry_operation`` decorator after an ordinary report
+    exception; it never fires for cancellation and never captures exception
+    text, Report content, or Investigation IDs.
+    """
+    get_counter(Metrics.REPORT_GENERATE_FAILURES).add(1)
 
 
 class ReportWriter:
@@ -89,6 +106,11 @@ class ReportWriter:
         self._llm_accounting = llm_accounting
         self._max_structured_output_attempts = max_structured_output_attempts
 
+    @telemetry_operation(
+        span_name=SpanNames.REPORT_GENERATE,
+        duration_metric=DurationMetrics.REPORT_GENERATE,
+        on_error=_record_report_failure,
+    )
     async def write(
         self,
         investigation_id: UUID,
@@ -108,7 +130,10 @@ class ReportWriter:
         advances the Investigation ``report_id`` pointer.
 
         Every explicit call to ``write`` creates a new report version;
-        unchanged source input is never silently reused.
+        unchanged source input is never silently reused. The logical
+        generation is observable through one ``ati.report.generate`` span and
+        duration; the underlying model attempt uses the common observed
+        ``LlmClient`` and Report content is never telemetry.
         """
         report_input = await self._input_loader.load(investigation_id)
         output, latest_version = await self._generate_output(

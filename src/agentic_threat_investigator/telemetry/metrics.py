@@ -64,6 +64,21 @@ class Metrics:
     - ``postgres.repository.failures``: repository operations that failed.
     - ``postgres.uow.commits`` / ``rollbacks`` / ``failures``:
       UnitOfWork transaction outcomes.
+
+    PR 29B application/network boundaries:
+    - ``datasource.acquire.failures`` / ``datasource.convert.failures``:
+      semantic acquisition/conversion invocations that failed.
+    - ``provider.http.attempts``: actual outbound request attempts.
+    - ``provider.http.retries``: retry attempts (attempts minus the first).
+    - ``provider.http.failures``: logical HTTP requests that failed.
+    - ``provider.execute.failures``: logical provider work items that failed.
+    - ``geo.resolve.resolved`` / ``unresolvable`` / ``failed``:
+      authoritative per-item GEO outcomes.
+    - ``investigation.execute.executed`` / ``failures``:
+      actual runner/worker executions and their failures.
+    - ``agent.invoke.failures`` / ``llm.invoke.failures`` /
+      ``report.generate.failures`` / ``embedding.invoke.failures``:
+      logical agent/LLM/report/embedding operation failures.
     """
 
     KAFKA_MESSAGES_PUBLISHED = "ati.kafka.messages.published"
@@ -82,10 +97,30 @@ class Metrics:
     POSTGRES_UOW_COMMITS = "ati.postgres.uow.commits"
     POSTGRES_UOW_ROLLBACKS = "ati.postgres.uow.rollbacks"
     POSTGRES_UOW_FAILURES = "ati.postgres.uow.failures"
+    DATASOURCE_ACQUIRE_FAILURES = "ati.datasource.acquire.failures"
+    DATASOURCE_CONVERT_FAILURES = "ati.datasource.convert.failures"
+    PROVIDER_HTTP_ATTEMPTS = "ati.provider.http.attempts"
+    PROVIDER_HTTP_RETRIES = "ati.provider.http.retries"
+    PROVIDER_HTTP_FAILURES = "ati.provider.http.failures"
+    PROVIDER_WORK_FAILURES = "ati.provider.execute.failures"
+    GEO_RESOLVED = "ati.geo.resolve.resolved"
+    GEO_UNRESOLVABLE = "ati.geo.resolve.unresolvable"
+    GEO_FAILED = "ati.geo.resolve.failed"
+    INVESTIGATION_EXECUTED = "ati.investigation.execute.executed"
+    INVESTIGATION_EXECUTE_FAILURES = "ati.investigation.execute.failures"
+    AGENT_INVOKE_FAILURES = "ati.agent.invoke.failures"
+    LLM_INVOKE_FAILURES = "ati.llm.invoke.failures"
+    REPORT_GENERATE_FAILURES = "ati.report.generate.failures"
+    EMBEDDING_INVOKE_FAILURES = "ati.embedding.invoke.failures"
 
 
 class DurationMetrics:
-    """Canonical seconds-unit duration histogram names."""
+    """Canonical duration and item-count histogram names.
+
+    ``*.duration`` names are seconds-unit latency histograms; ``*_items`` /
+    ``batch_size`` names are bounded count histograms (``{item}`` /
+    ``{message}`` units) for runtime semantic counts.
+    """
 
     POSTGRES_REPOSITORY = "ati.postgres.repository.duration"
     POSTGRES_UOW = "ati.postgres.uow.duration"
@@ -96,6 +131,17 @@ class DurationMetrics:
     EVIDENCE_CONSUME = "ati.evidence.consume.duration"
     EVIDENCE_PERSIST = "ati.evidence.persist.duration"
     KAFKA_POLL_BATCH_SIZE = "ati.kafka.poll.batch_size"
+    DATASOURCE_ACQUIRE = "ati.datasource.acquire.duration"
+    DATASOURCE_CONVERT = "ati.datasource.convert.duration"
+    DATASOURCE_CONVERT_ITEMS = "ati.datasource.convert.items"
+    PROVIDER_HTTP = "ati.provider.http.duration"
+    PROVIDER_EXECUTE = "ati.provider.execute.duration"
+    GEO_RESOLVE = "ati.geo.resolve.duration"
+    INVESTIGATION_EXECUTE = "ati.investigation.execute.duration"
+    AGENT_INVOKE = "ati.agent.invoke.duration"
+    LLM_INVOKE = "ati.llm.invoke.duration"
+    REPORT_GENERATE = "ati.report.generate.duration"
+    EMBEDDING_INVOKE = "ati.embedding.invoke.duration"
 
 
 COUNTER_SPECS: tuple[CounterSpec, ...] = (
@@ -178,6 +224,81 @@ COUNTER_SPECS: tuple[CounterSpec, ...] = (
         Metrics.POSTGRES_UOW_FAILURES,
         "{operation}",
         "UnitOfWork transactions that ended in a failure outcome",
+    ),
+    CounterSpec(
+        Metrics.DATASOURCE_ACQUIRE_FAILURES,
+        "{operation}",
+        "Semantic datasource acquisition operations that failed",
+    ),
+    CounterSpec(
+        Metrics.DATASOURCE_CONVERT_FAILURES,
+        "{operation}",
+        "Semantic Evidence conversion invocations that failed",
+    ),
+    CounterSpec(
+        Metrics.PROVIDER_HTTP_ATTEMPTS,
+        "{attempt}",
+        "Actual outbound provider HTTP request attempts",
+    ),
+    CounterSpec(
+        Metrics.PROVIDER_HTTP_RETRIES,
+        "{attempt}",
+        "Provider HTTP retry attempts (attempts minus the first)",
+    ),
+    CounterSpec(
+        Metrics.PROVIDER_HTTP_FAILURES,
+        "{operation}",
+        "Logical provider HTTP requests that ended in a failure outcome",
+    ),
+    CounterSpec(
+        Metrics.PROVIDER_WORK_FAILURES,
+        "{operation}",
+        "Provider work-item executions that failed",
+    ),
+    CounterSpec(
+        Metrics.GEO_RESOLVED,
+        "{item}",
+        "Geographic resolutions that reached RESOLVED",
+    ),
+    CounterSpec(
+        Metrics.GEO_UNRESOLVABLE,
+        "{item}",
+        "Geographic resolutions that reached a terminal UNRESOLVABLE outcome",
+    ),
+    CounterSpec(
+        Metrics.GEO_FAILED,
+        "{item}",
+        "Geographic resolutions recorded as failures or retries",
+    ),
+    CounterSpec(
+        Metrics.INVESTIGATION_EXECUTED,
+        "{operation}",
+        "Actual investigation runner/worker executions",
+    ),
+    CounterSpec(
+        Metrics.INVESTIGATION_EXECUTE_FAILURES,
+        "{operation}",
+        "Investigation executions that failed",
+    ),
+    CounterSpec(
+        Metrics.AGENT_INVOKE_FAILURES,
+        "{operation}",
+        "Logical agent operations that failed",
+    ),
+    CounterSpec(
+        Metrics.LLM_INVOKE_FAILURES,
+        "{operation}",
+        "Actual LLM generate_structured attempts that failed",
+    ),
+    CounterSpec(
+        Metrics.REPORT_GENERATE_FAILURES,
+        "{operation}",
+        "Report generation operations that failed",
+    ),
+    CounterSpec(
+        Metrics.EMBEDDING_INVOKE_FAILURES,
+        "{operation}",
+        "Network-backed embedding requests that failed",
     ),
 )
 

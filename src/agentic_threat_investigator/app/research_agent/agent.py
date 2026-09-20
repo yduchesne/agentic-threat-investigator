@@ -60,6 +60,24 @@ from agentic_threat_investigator.domain.research_agent import (
     ResearchAgentDecision,
     ResearchAgentRequest,
 )
+from agentic_threat_investigator.telemetry.attributes import AttributeKeys
+from agentic_threat_investigator.telemetry.decorators import telemetry_operation
+from agentic_threat_investigator.telemetry.metrics import (
+    DurationMetrics,
+    Metrics,
+    get_counter,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames
+
+
+def _record_research_agent_failure() -> None:
+    """Increment the bounded agent-invocation failure counter (PR 29B).
+
+    Fired by the ``telemetry_operation`` decorator after an ordinary research
+    exception; it never fires for cancellation and never captures exception
+    text or Investigation IDs.
+    """
+    get_counter(Metrics.AGENT_INVOKE_FAILURES).add(1)
 
 
 def research_query_from_request(request: ResearchAgentRequest) -> ResearchQuery:
@@ -116,6 +134,12 @@ class ResearchAgent:
         self._clock = clock if clock is not None else (lambda: datetime.now(UTC))
         self._id_factory = id_factory if id_factory is not None else uuid4
 
+    @telemetry_operation(
+        span_name=SpanNames.AGENT_INVOKE,
+        duration_metric=DurationMetrics.AGENT_INVOKE,
+        attributes={AttributeKeys.AGENT: "research_agent"},
+        on_error=_record_research_agent_failure,
+    )
     async def research(self, request: ResearchAgentRequest) -> ResearchResult:
         """Retrieve once, synthesize once, validate, and persist one result.
 
@@ -125,6 +149,10 @@ class ResearchAgent:
         invocation; a schema-valid decision whose claims cite chunks that were
         not supplied fails closed before any persistence; a durable result is
         returned only after its single short persistence transaction commits.
+        The logical agent operation is observable through one
+        ``ati.agent.invoke`` span and duration; actual model attempts (zero or
+        one or two with the bounded repair) flow through the common observed
+        ``LlmClient``.
         """
         query = research_query_from_request(request)
         chunks = tuple(await self._retriever.retrieve(query))

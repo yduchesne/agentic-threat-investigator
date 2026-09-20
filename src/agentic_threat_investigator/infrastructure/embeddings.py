@@ -17,10 +17,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import math
+import time
 from collections.abc import Sequence
 
 from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
+from opentelemetry.trace import Status, StatusCode
 from pydantic import SecretStr
 
 from agentic_threat_investigator.app.embeddings import (
@@ -30,6 +32,18 @@ from agentic_threat_investigator.app.embeddings import (
     EmbeddingInputError,
 )
 from agentic_threat_investigator.domain.documents import EmbeddingModelInfo
+from agentic_threat_investigator.telemetry.attributes import (
+    AttributeKeys,
+    validate_bounded_attributes,
+)
+from agentic_threat_investigator.telemetry.metrics import (
+    DURATION_UNIT,
+    DurationMetrics,
+    Metrics,
+    get_counter,
+    get_histogram,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames, get_tracer
 
 
 class HashingEmbeddingClient(EmbeddingClient):
@@ -90,18 +104,42 @@ class LangChainEmbeddingClient(EmbeddingClient):
         return self._info
 
     async def embed_texts(self, texts: Sequence[str]) -> list[EmbeddedText]:
-        """Embed texts in input order and validate count/ordinal/dimension/finiteness."""
+        """Embed texts in input order and validate count/ordinal/dimension/finiteness.
+
+        One ``ati.embedding.invoke`` span and seconds duration cover the
+        external network request; a failure counts one bounded failure and
+        never captures provider text, document content, or API keys.
+        """
         if not texts:
             raise EmbeddingInputError("cannot embed an empty text sequence")
-        try:
-            vectors = await self._embeddings.aembed_documents(list(texts))
-        except asyncio.CancelledError:
-            # Cooperative cancellation must propagate unchanged.
-            raise
-        except Exception:  # noqa: BLE001 - unexpected provider/framework failures map securely
-            # Content-free translation: prompts, provider error text, and
-            # credentials never appear in the mapped error.
-            raise EmbeddingError("semantic embedding request failed") from None
+        model_attrs = validate_bounded_attributes(
+            {AttributeKeys.COMPONENT: self._info.provider}
+        )
+        tracer = get_tracer()
+        histogram = get_histogram(DurationMetrics.EMBEDDING_INVOKE, unit=DURATION_UNIT)
+        failures = get_counter(Metrics.EMBEDDING_INVOKE_FAILURES)
+        start = time.perf_counter()
+        with tracer.start_as_current_span(
+            SpanNames.EMBEDDING_INVOKE, attributes=model_attrs
+        ) as span:
+            try:
+                vectors = await self._embeddings.aembed_documents(list(texts))
+            except asyncio.CancelledError:
+                # Cooperative cancellation must propagate unchanged.
+                raise
+            except Exception:  # noqa: BLE001 - unexpected provider/framework failures map securely
+                # Content-free translation: prompts, provider error text, and
+                # credentials never appear in the mapped error.
+                span.record_exception(
+                    EmbeddingError("semantic embedding request failed")
+                )
+                span.set_status(Status(StatusCode.ERROR))
+                failures.add(1, model_attrs)
+                histogram.record(
+                    time.perf_counter() - start,
+                    attributes={**model_attrs, AttributeKeys.OUTCOME: "error"},
+                )
+                raise EmbeddingError("semantic embedding request failed") from None
         if len(vectors) != len(texts):
             raise EmbeddingError("semantic embedding returned an invalid count")
         results: list[EmbeddedText] = []
@@ -114,6 +152,10 @@ class LangChainEmbeddingClient(EmbeddingClient):
             if any(not math.isfinite(component) for component in components):
                 raise EmbeddingError("semantic embedding contains non-finite values")
             results.append(EmbeddedText(ordinal, components))
+        histogram.record(
+            time.perf_counter() - start,
+            attributes={**model_attrs, AttributeKeys.OUTCOME: "success"},
+        )
         return results
 
 

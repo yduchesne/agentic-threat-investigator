@@ -37,7 +37,10 @@ from typing import Any
 from agentic_threat_investigator.app.datasource_execution import (
     DatasourceExecutionRecorder,
 )
-from agentic_threat_investigator.app.datasource_provider import DatasourceProvider
+from agentic_threat_investigator.app.datasource_provider import (
+    DatasourceProvider,
+    observe_semantic_acquisition,
+)
 from agentic_threat_investigator.app.datasource_semantics import (
     DatasourceStageError,
     SemanticAcquisitionResult,
@@ -350,8 +353,11 @@ async def acquire_and_convert_threatfox_execution(
     )
     await recorder.start()
     try:
-        result = await datasource.acquire(
-            definition=definition, entity=entity, recorder=recorder
+        result = await observe_semantic_acquisition(
+            datasource,
+            definition=definition,
+            entity=entity,
+            recorder=recorder,
         )
     except asyncio.CancelledError:
         await _best_effort_terminal(recorder, cancelled=True)

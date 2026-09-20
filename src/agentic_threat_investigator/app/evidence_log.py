@@ -62,6 +62,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from opentelemetry.context.context import Context
+
 from agentic_threat_investigator.app.evidence_message import EvidenceMessage
 
 EVIDENCE_CONSUMER_ID_MAX_LENGTH = 128
@@ -190,10 +192,18 @@ class EvidenceBatch:
     the complete batch: every represented stream advances through its
     highest represented offset. A commit-offset dictionary never appears in
     the batch.
+
+    ``trace_context`` is the optional W3C parent context extracted from the
+    transport headers of the polled records (PR 29B). It is transport
+    correlation metadata only: it is never serialized into Evidence,
+    never persisted, and never affects identity, payload, delivery, or
+    idempotency semantics. ``None`` (the default) means no usable parent
+    context was propagated.
     """
 
     consumer_id: EvidenceConsumerId
     records: tuple[EvidenceLogRecord, ...]
+    trace_context: Context | None = None
 
 
 @dataclass(frozen=True)

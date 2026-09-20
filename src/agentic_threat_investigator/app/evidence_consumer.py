@@ -37,6 +37,8 @@ import asyncio
 from dataclasses import dataclass
 from typing import TypeAlias
 
+from opentelemetry import context as context_api
+
 from agentic_threat_investigator.app.evidence_batch_persistence import (
     EVIDENCE_BATCH_DEFAULT_SIZE,
     EVIDENCE_BATCH_HARD_LIMIT,
@@ -262,12 +264,26 @@ class EvidencePersistenceConsumer:
             if not batch.records:
                 return _EMPTY_RUN_RESULT
             prepared = prepare_evidence_batch(batch)
-            persisted = await self._persistence.persist(prepared)
-            _record_persistence_outcomes(persisted)
-            # Only after the PostgreSQL commit has completed.
-            await self._consumer.commit(batch)
-            _record_processed_batch(persisted)
-            return _run_result(persisted)
+            # PR 29B: when the transport propagated a W3C parent context in
+            # the record headers, the durable downstream processing (PostgreSQL
+            # persist and the Kafka commit) becomes a child of that context.
+            # The attach is purely observational: payloads, identity, delivery,
+            # and idempotency are unchanged, and the token is always detached.
+            token = (
+                context_api.attach(batch.trace_context)
+                if batch.trace_context is not None
+                else None
+            )
+            try:
+                persisted = await self._persistence.persist(prepared)
+                _record_persistence_outcomes(persisted)
+                # Only after the PostgreSQL commit has completed.
+                await self._consumer.commit(batch)
+                _record_processed_batch(persisted)
+                return _run_result(persisted)
+            finally:
+                if token is not None:
+                    context_api.detach(token)
         except asyncio.CancelledError:
             raise
         except Exception:

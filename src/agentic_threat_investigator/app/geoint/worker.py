@@ -55,6 +55,13 @@ from agentic_threat_investigator.domain.geoint import (
     GeoResolution,
     observation_uuid_for_resolution,
 )
+from agentic_threat_investigator.telemetry.decorators import telemetry_operation
+from agentic_threat_investigator.telemetry.metrics import (
+    DurationMetrics,
+    Metrics,
+    get_counter,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames
 
 LOGGER = logging.getLogger(__name__)
 
@@ -160,12 +167,20 @@ class GeoResolutionWorker:
             clock if clock is not None else (lambda: datetime.now(UTC))
         )
 
+    @telemetry_operation(
+        span_name=SpanNames.GEO_RESOLVE,
+        duration_metric=DurationMetrics.GEO_RESOLVE,
+    )
     async def run_once(self) -> int:
         """Claim a bounded batch, resolve each item, and persist outcomes.
 
         Returns the number of claimed items processed. Claim and every
         completion are their own short committed UnitOfWork; resolution runs
-        with no UnitOfWork open.
+        with no UnitOfWork open. One ``ati.geo.resolve`` span and seconds
+        duration cover the whole iteration; per-item resolved, unresolvable,
+        and failed outcomes are counted at their authoritative persist points.
+        An empty claim still measures the worker iteration and never invents
+        item outcomes.
         """
         claimed = await self._claim_batch()
         for resolution in claimed:
@@ -319,6 +334,7 @@ class GeoResolutionWorker:
                     claimed_by,
                     observation,
                 )
+            get_counter(Metrics.GEO_RESOLVED).add(1)
         except asyncio.CancelledError:
             raise
         except (
@@ -326,8 +342,8 @@ class GeoResolutionWorker:
             GeoEvidenceTypeError,
             GeoEvidenceSubjectMismatchError,
         ) as error:
-            # Wrong/missing LegacyEvidence at database-authoritative completion time:
-            # a terminal, non-retryable condition. Provenance is never patched.
+            # Wrong/missing LegacyEvidence at database-authoritative completion
+            # time: a terminal, non-retryable condition. Provenance is never patched.
             LOGGER.warning(
                 "geo completion evidence conflict resolution_id=%s code=%s",
                 resolution.id,
@@ -363,6 +379,7 @@ class GeoResolutionWorker:
                     claimed_by=claimed_by,
                     error_code=code,
                 )
+            get_counter(Metrics.GEO_UNRESOLVABLE).add(1)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -399,6 +416,7 @@ class GeoResolutionWorker:
                     retry_max_seconds=self._config.retry_max_seconds,
                     max_attempts=self._config.max_attempts,
                 )
+            get_counter(Metrics.GEO_FAILED).add(1)
         except asyncio.CancelledError:
             raise
         except Exception as error:
