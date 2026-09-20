@@ -64,7 +64,6 @@ dependencies = [
   # rather than relying on a transitive import; it is only ever *used* when
   # ATI_LLM_OBSERVABILITY_BACKEND=langfuse selects it.
   "langfuse>=4,<5",
-  "opentelemetry-instrumentation-fastapi>=0.57b0,<0.59",
 ]
 
 [dependency-groups]

@@ -354,6 +354,24 @@ PR 29C still owns the OTel Collector/Prometheus/Jaeger/Loki/Grafana runtime
 and export infrastructure, and PR 29D owns the `method × route-template` API
 dashboard that consumes this bounded standard telemetry.
 
+### PR 29B-2 — API telemetry lifecycle closure and dependency cleanup
+
+> **Status: DELIVERED** as the narrow corrective completion of PR 29B-1. It
+> removes the duplicate direct `opentelemetry-instrumentation-fastapi`
+> dependency declaration and gives the `ati-api` production composition
+> deterministic telemetry-shutdown ownership.
+
+PR 29B-2 wires the existing `shutdown_telemetry()` primitive into the
+`ati-api` application lifecycle: the production composition seam (`main.py`)
+still configures telemetry and instruments FastAPI, and now also arranges
+that telemetry shutdown runs **after** `ApiComposition.dispose()` — including
+when API disposal fails, with the original exception preserved and provider
+failures fail-open. Ordering, failure-precedence, disabled-mode, and
+exactly-once behavior are proven by deterministic offline unit tests
+(API-L01..API-L07 in `tests/unit/api/test_telemetry_lifecycle.py`). No
+exporter/Collector/Prometheus/Jaeger/Loki/Grafana/dashboard infrastructure is
+included; PR 29C/29D remain responsible for it. PR 29B is now fully closed.
+
 ### PR 29C — Observability infrastructure
 
 Add source-controlled local/deployment infrastructure under

@@ -10,6 +10,7 @@
 - [PR 29A delivered foundation](#pr-29a-delivered-foundation)
 - [PR 29A-1 delivered coverage](#pr-29a-1-delivered-coverage)
 - [PR 29B-1 delivered coverage](#pr-29b-1-delivered-coverage)
+- [PR 29B-2 delivered coverage](#pr-29b-2-delivered-coverage)
 - [LLM observability backends](#llm-observability-backends)
 - [Correlation](#correlation)
 - [Provider telemetry](#provider-telemetry)
@@ -816,6 +817,44 @@ remains responsible for the OTel Collector, Prometheus, Jaeger, Loki,
 Grafana, and export/provisioning infrastructure; PR 29D owns the API
 dashboard that consumes this telemetry. No live telemetry infrastructure is
 needed to exercise or verify this boundary (see ``docs/TESTING.md``).
+
+## PR 29B-2 delivered coverage
+
+PR 29B-2 closes the two narrow corrective leftovers of PR 29B-1: the
+**duplicate** direct ``opentelemetry-instrumentation-fastapi`` declaration in
+``pyproject.toml`` is removed (exactly one declaration remains, with the
+unchanged approved version range), and the ``ati-api`` production composition
+now owns **deterministic telemetry shutdown**.
+
+### Deterministic telemetry lifecycle
+
+``main.py`` (the ``ati-api`` production composition seam) owns the whole
+telemetry lifecycle:
+
+```text
+configure_telemetry(service_name=ati-api)
+  -> create_app(settings)
+  -> instrument_fastapi_http(app, runtime)
+  -> FastAPI lifespan (ApiComposition startup ... serving ... teardown)
+  -> ApiComposition.dispose()
+  -> shutdown_telemetry()
+```
+
+``telemetry/lifecycle.py::arrange_fastapi_telemetry_shutdown`` composes the
+existing application lifespan (``app.router.lifespan_context``, the single
+supported Starlette lifespan-composition point) so the existing
+``shutdown_telemetry()`` primitive runs **after** ``ApiComposition.dispose()``
+completes — including when that disposal raises: the original application
+teardown exception stays authoritative, and provider-shutdown failures remain
+fail-open inside ``shutdown_telemetry()``. Disabled observability installs no
+providers, no HTTP instrumentation, and the shutdown path stays a harmless
+no-op. ``create_app(settings)`` itself remains generic and never configures
+process-global telemetry.
+
+This lifecycle closure is the deterministic setup/shutdown ordering that PR
+29C will attach real exporters/OTLP delivery to. No exporter, OTel Collector,
+Prometheus, Jaeger, Loki, Grafana, dashboard, or telemetry integration-test
+infrastructure is delivered here.
 
 ## LLM observability backends
 
