@@ -9,6 +9,7 @@
 - [OpenTelemetry architecture (PR 29)](#opentelemetry-architecture-pr-29)
 - [PR 29A delivered foundation](#pr-29a-delivered-foundation)
 - [PR 29A-1 delivered coverage](#pr-29a-1-delivered-coverage)
+- [PR 29B-1 delivered coverage](#pr-29b-1-delivered-coverage)
 - [LLM observability backends](#llm-observability-backends)
 - [Correlation](#correlation)
 - [Provider telemetry](#provider-telemetry)
@@ -737,6 +738,84 @@ The CLI entrypoints install the PR 29A ``TraceCorrelationFilter`` on the
 root logging handler so structured records carry ``otel_trace_id`` /
 ``otel_span_id`` when a valid span is current. Correlation is additive and
 never rewrites existing log semantics or reintroduces raw exception text.
+
+## PR 29B-1 delivered coverage
+
+PR 29B-1 closes the remaining PR 29B gap: the FastAPI/ASGI **inbound HTTP
+boundary**. The ATI API process is instrumented at the framework level with
+the official ``opentelemetry-instrumentation-fastapi`` (a new direct runtime
+dependency) — never with per-endpoint decorators, and no ATI HTTP span names
+or duplicate HTTP metrics were added. Composition lives in
+``telemetry/http.py`` (``instrument_fastapi_http`` over the providers from
+:func:`configure_telemetry`) and is wired once in ``main.py``, so the API
+process service identity is ``service.name=ati-api``.
+
+### Operation identity: method × registered route template
+
+One inbound request is one standard OTel HTTP server span. Operation
+identity is the HTTP method plus the **registered route template**: the
+framework emits ``http.route`` (``/api/v1/investigations/{investigation_id}``)
+on spans and the standard server-duration metric carries the registered
+template as its bounded route dimension, so ``GET`` and ``DELETE`` on the
+same template remain distinguishable and a dynamic Investigation/UUID path
+never becomes a metric label. Unknown unmatched paths are recorded without
+any invented route label (the 404 boundary metric simply has no route
+dimension). ``OPTIONS`` preflight and health probes participate normally.
+Standard response status (``http.status_code``) is observable for ``2xx``/
+``4xx``/``5xx``.
+
+### Privacy and cardinality
+
+The official instrumentation captures no headers or bodies by default and
+PR 29B-1 passes no header-capture option, so Authorization, Cookie,
+Set-Cookie, ``X-CSRF-Token``, and ``Idempotency-Key`` values never reach
+telemetry. The framework records the concrete request target and full URL
+(including the query string) as standard span attributes; ``redact_http_content_attributes``
+— a supported ``server_request_hook`` — blanks exactly those
+content-bearing attribute keys (``http.url``/``http.target``/
+``url.full``/``url.path``/``url.query``) and leaves the bounded
+``http.route`` identity intact. Metrics never receive concrete paths,
+targets, or query values in either convention mode. Request/response bodies
+are never read or serialized for telemetry.
+
+**Deployment constraint:** keep the official header-capture environment
+variables unset in the ATI API process
+(``OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST`` /
+``OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_RESPONSE`` and the
+sanitize-fields equivalent). If they were enabled they could override the
+code defaults and capture arbitrary headers; ATI does not configure them.
+``OTEL_SEMCONV_STABILITY_OPT_IN`` may switch the standard attribute/metric
+names to the newer HTTP semantic conventions (for example
+``http.request.method``/``http.server.request.duration``); ATI's bounded
+route-template identity is preserved in both modes and the unit suite pins
+the default mode for determinism.
+
+### Trace continuity
+
+A valid incoming W3C ``traceparent`` continues the upstream trace (the HTTP
+server span becomes its child); malformed trace context is ignored safely
+and never fails the request. ATI application spans opened during request
+processing (LLM/agent/report/UoW/repository spans) inherit the HTTP server
+span through OTel's normal current-context mechanism — no span/context
+object is ever passed through route, service, or repository signatures.
+
+Expected hierarchy:
+
+```text
+HTTP server span
+  -> ATI application span
+       -> ati.postgres.uow
+            -> ati.postgres.repository
+```
+
+Standard framework metrics (``http.server.duration`` and companions as
+emitted by the resolved official instrumentation) are used as-is and are
+sufficient for PR 29D to derive per-bounded ``method × route-template``
+request rate, latency distribution, and error/status distribution. PR 29C
+remains responsible for the OTel Collector, Prometheus, Jaeger, Loki,
+Grafana, and export/provisioning infrastructure; PR 29D owns the API
+dashboard that consumes this telemetry. No live telemetry infrastructure is
+needed to exercise or verify this boundary (see ``docs/TESTING.md``).
 
 ## LLM observability backends
 

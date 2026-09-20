@@ -325,6 +325,35 @@ Instrument the delivered architecture against the 29A contract:
 Instrumentation must not alter domain behavior, delivery semantics, transaction
 ownership, retry semantics, or Evidence identity.
 
+### PR 29B-1 — Inbound FastAPI/ASGI HTTP server telemetry
+
+> **Status: DELIVERED** as the narrow corrective completion of the PR 29B
+> inbound boundary. PR 29B instrumented every application/external boundary
+> except the FastAPI/ASGI inbound HTTP boundary; PR 29B-1 closes exactly that
+> gap and does not re-open or revise any other PR 29B work.
+
+PR 29B-1 instruments ATI's inbound `/api/v1` + health probe boundary at the
+ASGI/framework level with the **official** OpenTelemetry FastAPI
+instrumentation — one standard OTel HTTP server span and standard HTTP
+server metrics per request, never per-endpoint decorators. The `ati-api`
+process composes it through the existing `configure_telemetry`/service-identity
+setup (this PR adds the `opentelemetry-instrumentation-fastapi` direct
+dependency). Operation identity is `HTTP method × registered route template`
+(`http.route` on spans and the bounded `http.target`/`http.route` metric
+attribute, never the concrete dynamic path), standard response status is
+observable, a valid incoming W3C `traceparent` continues the upstream trace,
+and ATI application/UoW/repository spans started during a request naturally
+inherit the HTTP server span context. No request/response bodies, cookies,
+authorization material, CSRF/idempotency values, arbitrary headers, concrete
+paths, full URLs, or query strings are retained in telemetry (the supported
+server-request hook blanks the framework's standard content-bearing URL
+attributes; header capture stays disabled). Framework-standard metrics are
+used as-is; no duplicate `ati.http.*` metrics were added.
+
+PR 29C still owns the OTel Collector/Prometheus/Jaeger/Loki/Grafana runtime
+and export infrastructure, and PR 29D owns the `method × route-template` API
+dashboard that consumes this bounded standard telemetry.
+
 ### PR 29C — Observability infrastructure
 
 Add source-controlled local/deployment infrastructure under

@@ -52,11 +52,19 @@ dependencies = [
   # resolved 1.37.x line is shared and verified in uv.lock.
   "opentelemetry-api>=1.37,<2",
   "opentelemetry-sdk>=1.37,<2",
+  # Official OpenTelemetry FastAPI/ASGI server instrumentation (PR 29B-1): the
+  # ATI API process composes it directly over the standard OTel providers, so
+  # it must be a direct dependency. Bounded to the same 1.37.x SDK line; the
+  # resolved 0.58b0 instrumentation (q3/2025) matches the frozen semgrep dev
+  # scanner constraint (~=1.37.0) and emits framework-standard HTTP server
+  # spans/metrics with bounded registered-route-template identity.
+  "opentelemetry-instrumentation-fastapi>=0.57b0,<0.59",
   # Langfuse v4 OTel-native LLM-observability backend (PR 29A). The Langfuse
   # adapter imports the SDK directly, so it must be a direct dependency
   # rather than relying on a transitive import; it is only ever *used* when
   # ATI_LLM_OBSERVABILITY_BACKEND=langfuse selects it.
   "langfuse>=4,<5",
+  "opentelemetry-instrumentation-fastapi>=0.57b0,<0.59",
 ]
 
 [dependency-groups]
