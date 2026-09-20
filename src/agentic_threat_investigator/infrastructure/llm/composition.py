@@ -6,7 +6,9 @@ contract and constructs the OpenAI chat model with deterministic analysis
 configuration (temperature 0, streaming disabled, and no hidden
 LangChain/provider retry layers). Configuration carries only the secret
 reference name; the resolved key is injected here and never stored, logged,
-or embedded in prompts.
+or embedded in prompts. PR 29B adds the single ATI-owned observing wrapper
+that composes the selected LLM-observability backend around an existing
+``LlmClient`` delegate.
 """
 
 from __future__ import annotations
@@ -15,8 +17,13 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
+from agentic_threat_investigator.app.llm import LlmClient
+from agentic_threat_investigator.app.llm_observability import (
+    LlmObservability,
+    ObservedLlmClient,
+)
 from agentic_threat_investigator.app.secrets import SecretsResolver
-from agentic_threat_investigator.config.settings import Settings
+from agentic_threat_investigator.config.settings import LlmDriver, Settings
 
 
 def build_openai_chat_model(settings: Settings, secrets: SecretsResolver) -> ChatOpenAI:
@@ -39,3 +46,29 @@ def build_openai_chat_model(settings: Settings, secrets: SecretsResolver) -> Cha
     if settings.llm_max_tokens is not None:
         kwargs["max_tokens"] = settings.llm_max_tokens
     return ChatOpenAI(**kwargs)
+
+
+def build_observed_llm_client(
+    *,
+    delegate: LlmClient,
+    observability: LlmObservability,
+    settings: Settings,
+) -> ObservedLlmClient:
+    """Wrap one ``LlmClient`` delegate with the single selected backend.
+
+    Production composition builds exactly one observing client from the
+    selected ``build_llm_observability`` backend and passes it to every
+    agent/report service, so each actual model attempt emits one OTel
+    ``ati.llm.invoke`` span and one backend observation. Only bounded
+    configured metadata (the model name and the closed driver label) is
+    supplied; prompts, outputs, and IDs are never recorded.
+    """
+    provider_label = (
+        "deterministic" if settings.llm_driver is LlmDriver.DETERMINISTIC else "openai"
+    )
+    return ObservedLlmClient(
+        delegate,
+        observability,
+        model_provider=provider_label,
+        model_name=settings.llm_model,
+    )

@@ -10,6 +10,7 @@ and privacy rules.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from typing import Any, cast
 
 import pytest
@@ -75,10 +76,17 @@ class FakeProducer(AsyncKafkaProducer):
         value: bytes | None = None,
         key: bytes | None = None,
         partition: int | None = None,
+        headers: Sequence[tuple[str, bytes]] | None = None,
     ) -> asyncio.Future[RecordMetadata]:
         """Return a delivery future scripted from ``results`` in order."""
         self.sends.append(
-            {"topic": topic, "value": value, "key": key, "partition": partition}
+            {
+                "topic": topic,
+                "value": value,
+                "key": key,
+                "partition": partition,
+                "headers": headers,
+            }
         )
         index = len(self.sends) - 1
         outcome: RecordMetadata | BaseException = (

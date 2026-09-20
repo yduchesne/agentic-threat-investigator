@@ -109,16 +109,43 @@ def in_memory_persistence_telemetry(
         meter = _metrics.get_meter(meter_provider=meter_provider)
         return meter.create_histogram(name, unit=unit, description=description)
 
+    import agentic_threat_investigator.app.datasource_provider as _ds_provider
+    import agentic_threat_investigator.app.evidence_analyst.analyst as _analyst
     import agentic_threat_investigator.app.evidence_batch_persistence as _ebp
     import agentic_threat_investigator.app.evidence_consumer as _ec
+    import agentic_threat_investigator.app.evidence_conversion as _conversion
+    import agentic_threat_investigator.app.geoint.worker as _geo_worker
+    import agentic_threat_investigator.app.llm_observability as _llm_obs
+    import agentic_threat_investigator.app.orchestration.provider_executor as _pe
+    import agentic_threat_investigator.app.orchestration.runner as _runner
+    import agentic_threat_investigator.app.report_writer.writer as _rwriter
+    import agentic_threat_investigator.app.research_agent.agent as _ragent
+    import agentic_threat_investigator.infrastructure.embeddings as _embeddings
     import agentic_threat_investigator.infrastructure.kafka.evidence_log as _kafka
+    import agentic_threat_investigator.infrastructure.providers.http as _http
     from agentic_threat_investigator.infrastructure.persistence.postgresql import (
         database as _db,
     )
 
     # Patch only the helper bindings each module actually imports; decorator
     # paths already resolve through telemetry.decorators (patched above).
-    for module in (_db, _kafka, _ebp, _ec):
+    for module in (
+        _db,
+        _kafka,
+        _ebp,
+        _ec,
+        _conversion,
+        _llm_obs,
+        _ds_provider,
+        _geo_worker,
+        _pe,
+        _runner,
+        _analyst,
+        _ragent,
+        _rwriter,
+        _embeddings,
+        _http,
+    ):
         if hasattr(module, "get_tracer"):
             monkeypatch.setattr(module, "get_tracer", lambda: tracer)
         if hasattr(module, "get_counter"):

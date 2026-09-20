@@ -280,6 +280,7 @@ def telemetry_operation(
     span_name: str,
     duration_metric: str,
     attributes: Mapping[str, str] | None = None,
+    on_error: Callable[[], None] | None = None,
 ) -> Callable[[F], F]:
     """Compose one span and one duration measurement for a stable boundary.
 
@@ -293,7 +294,9 @@ def telemetry_operation(
 
     def decorator(func: F) -> F:
         traced_decorator = traced(span_name=span_name, attributes=attributes)
-        timed_decorator = timed(metric=duration_metric, attributes=attributes)
+        timed_decorator = timed(
+            metric=duration_metric, attributes=attributes, on_error=on_error
+        )
         return traced_decorator(timed_decorator(func))
 
     return decorator

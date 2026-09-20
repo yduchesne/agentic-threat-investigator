@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Unit tests for the concrete OpenAI chat-model composition (PR 20B)."""
 
-from typing import cast
+from typing import Any, cast
 
 import pytest
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 
+from agentic_threat_investigator.app.llm import LlmClient
 from agentic_threat_investigator.app.secrets import SecretNotFoundError, SecretsResolver
 from agentic_threat_investigator.config import settings_from_config
-from agentic_threat_investigator.config.settings import Settings
+from agentic_threat_investigator.config.settings import LlmDriver, Settings
 from agentic_threat_investigator.infrastructure.llm.composition import (
     build_openai_chat_model,
 )
@@ -99,3 +100,72 @@ def test_custom_secret_reference_is_used() -> None:
     )
 
     assert cast(SecretStr, model.openai_api_key).get_secret_value() == "sk-resolved"
+
+
+def test_observed_client_wraps_delegate_with_bounded_metadata() -> None:
+    """PR 29B: the common observing wrapper carries bounded model metadata."""
+    from agentic_threat_investigator.app.llm_observability import (
+        ObservedLlmClient,
+    )
+    from agentic_threat_investigator.infrastructure.llm.composition import (
+        build_observed_llm_client,
+    )
+    from agentic_threat_investigator.infrastructure.observability.noop import (
+        NoOpLlmObservability,
+    )
+
+    class _Delegate(LlmClient):
+        """Minimal delegate double."""
+
+        async def generate_structured(
+            self,
+            *,
+            system_prompt: str,
+            user_prompt: str,
+            response_model: type[BaseModel],
+            operation_name: str,
+        ) -> Any:
+            del system_prompt, user_prompt, response_model, operation_name
+            raise AssertionError("must not be invoked")
+
+    settings = _settings()
+    observed = build_observed_llm_client(
+        delegate=_Delegate(),
+        observability=NoOpLlmObservability(),
+        settings=settings,
+    )
+    assert isinstance(observed, ObservedLlmClient)
+    assert observed._model_name == "gpt-4o-mini"
+    assert observed._model_provider == "openai"
+
+
+def test_observed_client_deterministic_driver_label() -> None:
+    """The deterministic driver maps to a bounded provider label."""
+    from agentic_threat_investigator.infrastructure.llm.composition import (
+        build_observed_llm_client,
+    )
+    from agentic_threat_investigator.infrastructure.observability.noop import (
+        NoOpLlmObservability,
+    )
+
+    class _Delegate(LlmClient):
+        """Minimal delegate double."""
+
+        async def generate_structured(
+            self,
+            *,
+            system_prompt: str,
+            user_prompt: str,
+            response_model: type[BaseModel],
+            operation_name: str,
+        ) -> Any:
+            del system_prompt, user_prompt, response_model, operation_name
+            raise AssertionError("must not be invoked")
+
+    settings = _settings(llm_driver=LlmDriver.DETERMINISTIC)
+    observed = build_observed_llm_client(
+        delegate=_Delegate(),
+        observability=NoOpLlmObservability(),
+        settings=settings,
+    )
+    assert observed._model_provider == "deterministic"

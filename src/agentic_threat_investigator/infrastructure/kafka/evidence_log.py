@@ -45,6 +45,8 @@ from uuid import UUID
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.structs import ConsumerRecord, RecordMetadata, TopicPartition
+from opentelemetry import trace
+from opentelemetry.context.context import Context
 from opentelemetry.trace import Status, StatusCode
 
 from agentic_threat_investigator.app.evidence_log import (
@@ -76,6 +78,10 @@ from agentic_threat_investigator.telemetry.metrics import (
     get_counter,
     get_histogram,
 )
+from agentic_threat_investigator.telemetry.propagation import (
+    extract_trace_context,
+    inject_trace_context,
+)
 from agentic_threat_investigator.telemetry.tracing import SpanNames, get_tracer
 
 
@@ -90,7 +96,8 @@ class AsyncKafkaProducer(Protocol):
     ``send()`` yields a delivery ``asyncio.Future``, and awaiting that
     future yields the ``RecordMetadata`` once the broker acknowledges the
     record. The adapter therefore awaits both stages before constructing a
-    transport position.
+    transport position. ``headers`` is the optional Kafka record header
+    sequence (``(name, bytes)``) that carries ATI's W3C trace context.
     """
 
     async def start(self) -> None: ...
@@ -101,6 +108,7 @@ class AsyncKafkaProducer(Protocol):
         value: bytes | None = None,
         key: bytes | None = None,
         partition: int | None = None,
+        headers: Sequence[tuple[str, bytes]] | None = None,
     ) -> asyncio.Future[RecordMetadata]: ...
 
 
@@ -123,6 +131,25 @@ class AsyncKafkaConsumer(Protocol):
     async def commit(
         self, offsets: dict[TopicPartition, int] | None = None
     ) -> None: ...
+
+
+def _extract_batch_context(
+    fetched: dict[TopicPartition, list[ConsumerRecord]],
+) -> Context | None:
+    """Extract the first valid W3C parent context of a fetched batch.
+
+    Records are scanned in deterministic partition-then-offset order and the
+    first record carrying a valid ``traceparent`` header contributes the
+    batch's parent context; malformed or missing headers yield ``None`` (a
+    safe no-parent context) and never raise. The context is transport
+    correlation metadata only and never enters the Evidence payload.
+    """
+    for partition in sorted(fetched, key=lambda tp: tp.partition):
+        for broker_record in fetched[partition]:
+            context = extract_trace_context(broker_record.headers or ())
+            if trace.get_current_span(context).get_span_context().is_valid:
+                return context
+    return None
 
 
 def evidence_id_key(evidence_id: UUID) -> bytes:
@@ -317,10 +344,15 @@ class KafkaEvidencePublisher(EvidencePublisher):
                 try:
                     # aiokafka 0.14.x: awaiting send() yields the delivery future;
                     # only awaiting that future yields the broker RecordMetadata.
+                    # The W3C trace context rides in the record headers only —
+                    # never in the Evidence payload or routing key — and unrelated
+                    # headers (none exist at this adapter boundary) would be
+                    # preserved by the injection helper.
                     delivery: asyncio.Future[RecordMetadata] = await producer.send(
                         self._topic,
                         value=encode_evidence_message(message),
                         key=_canonical_key(message),
+                        headers=inject_trace_context(()),
                     )
                     metadata: RecordMetadata = await delivery
                 except asyncio.CancelledError:
@@ -513,7 +545,11 @@ class KafkaEvidenceConsumer(EvidenceConsumer):
                         AttributeKeys.OUTCOME: "success",
                     },
                 )
-            return EvidenceBatch(consumer_id=self._consumer_id, records=records)
+            return EvidenceBatch(
+                consumer_id=self._consumer_id,
+                records=records,
+                trace_context=_extract_batch_context(fetched),
+            )
 
     def _flatten(
         self,

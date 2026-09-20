@@ -47,12 +47,15 @@ raw exception text, source body, or credential is persisted.
 from __future__ import annotations
 
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Generic, Protocol, TypeVar
 from uuid import UUID
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 from pydantic import PrivateAttr
 
 from agentic_threat_investigator.app.datasource_execution import (
@@ -79,6 +82,15 @@ from agentic_threat_investigator.domain.datasource import (
 )
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import ConvertedEvidence
+from agentic_threat_investigator.telemetry.attributes import AttributeKeys
+from agentic_threat_investigator.telemetry.metrics import (
+    DURATION_UNIT,
+    DurationMetrics,
+    Metrics,
+    get_counter,
+    get_histogram,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames, get_tracer
 
 T = TypeVar("T")
 """One validated source-native semantic object type."""
@@ -151,6 +163,70 @@ class RecorderDatasourceExecutionCompletion(DatasourceExecutionCompletion):
     async def cancel(self) -> None:
         """Delegate the CANCELLED append to the recorder."""
         await self._recorder.cancel()
+
+
+async def observe_semantic_acquisition(
+    acquirer: SemanticAcquirer[T],
+    *,
+    definition: DatasourceDefinition,
+    entity: Entity,
+    recorder: DatasourceExecutionRecorder,
+) -> SemanticAcquisitionResult[T]:
+    """Run one semantic acquisition inside the canonical acquire telemetry.
+
+    This is the shared acquisition seam both the datasource Evidence producer
+    and the datasource-backed provider use, so every logical semantic
+    acquisition is observed exactly once regardless of caller. The span and
+    the seconds duration histogram carry a bounded success/error outcome: a
+    typed acquisition stage error result is a failure, an ordinary exception
+    is a failure, and ``asyncio.CancelledError`` propagates without recording
+    any telemetry. No source body, URL, IOC value, or exception text is ever
+    captured, and the caller's recorder/lifecycle semantics are untouched.
+    """
+    tracer = get_tracer()
+    histogram = get_histogram(DurationMetrics.DATASOURCE_ACQUIRE, unit=DURATION_UNIT)
+    failures = get_counter(Metrics.DATASOURCE_ACQUIRE_FAILURES)
+    start = time.perf_counter()
+    with tracer.start_as_current_span(SpanNames.DATASOURCE_ACQUIRE) as span:
+        try:
+            result = await acquirer.acquire(
+                definition=definition, entity=entity, recorder=recorder
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _record_telemetry_exception(span, exc)
+            histogram.record(
+                time.perf_counter() - start,
+                attributes={AttributeKeys.OUTCOME: "error"},
+            )
+            failures.add(1)
+            raise
+        else:
+            if result.error is not None:
+                span.set_status(Status(StatusCode.ERROR))
+                histogram.record(
+                    time.perf_counter() - start,
+                    attributes={AttributeKeys.OUTCOME: "error"},
+                )
+                failures.add(1)
+            else:
+                histogram.record(
+                    time.perf_counter() - start,
+                    attributes={AttributeKeys.OUTCOME: "success"},
+                )
+            return result
+
+
+def _record_telemetry_exception(span: trace.Span, exc: Exception) -> None:
+    """Record an ordinary exception on a span using standard OTel semantics.
+
+    The exception message travels only through OTel's standard exception event
+    semantics; this helper is used only at boundaries whose exceptions are
+    already safe and bounded (see ``docs/OBSERVABILITY.md``).
+    """
+    span.record_exception(exc)
+    span.set_status(Status(StatusCode.ERROR))
 
 
 class DatasourceEvidenceResult(ProviderResult):
@@ -305,7 +381,8 @@ class DatasourceProvider(EvidenceProvider, Generic[T]):
         )
         await recorder.start()
         try:
-            result = await self._acquirer.acquire(
+            result = await observe_semantic_acquisition(
+                self._acquirer,
                 definition=self._definition,
                 entity=entity,
                 recorder=recorder,

@@ -33,6 +33,8 @@ class AttributeKeys:
     POSTGRES_OPERATION = "ati.postgres.operation"
     KAFKA_TOPIC = "ati.kafka.topic"
     KAFKA_CONSUMER_GROUP = "ati.kafka.consumer_group"
+    PROVIDER = "ati.provider"
+    AGENT = "ati.agent"
 
 
 METRIC_ATTRIBUTE_ALLOWLIST: frozenset[str] = frozenset(
@@ -46,6 +48,8 @@ METRIC_ATTRIBUTE_ALLOWLIST: frozenset[str] = frozenset(
         AttributeKeys.POSTGRES_OPERATION,
         AttributeKeys.KAFKA_TOPIC,
         AttributeKeys.KAFKA_CONSUMER_GROUP,
+        AttributeKeys.PROVIDER,
+        AttributeKeys.AGENT,
     }
 )
 """The complete set of bounded keys permitted on telemetry attributes."""

@@ -18,6 +18,7 @@ from agentic_threat_investigator.infrastructure.embeddings import (
     LangChainEmbeddingClient,
     build_openai_embedding_client,
 )
+from tests.support.otel import counter_value, histogram_count, metrics_by_name
 
 
 class StubEmbeddings(Embeddings):
@@ -176,3 +177,57 @@ def test_semantic_vectors_are_normalized_equivalents_of_stub_output() -> None:
     assert isinstance(client, LangChainEmbeddingClient)
     assert info.dimension == 2
     assert all(math.isfinite(value) for value in [1.0, 0.0])
+
+
+class TestEmbeddingTelemetry:
+    """PR 29B: the network embedding boundary is observable and private."""
+
+    @pytest.mark.asyncio
+    async def test_success_emits_span_and_duration(
+        self, in_memory_persistence_telemetry: object
+    ) -> None:
+        """A successful embedding emits one span and one duration sample."""
+        client, _info = _client(StubEmbeddings())
+        results = await client.embed_texts(["alpha", "beta"])
+        assert len(results) == 2
+        spans = in_memory_persistence_telemetry.exporter.get_finished_spans()  # type: ignore[attr-defined]
+        assert [span.name for span in spans] == ["ati.embedding.invoke"]
+        recorded = metrics_by_name(in_memory_persistence_telemetry.reader)  # type: ignore[attr-defined]
+        duration = recorded["ati.embedding.invoke.duration"]
+        assert histogram_count(duration) == 1
+
+    @pytest.mark.asyncio
+    async def test_failure_counts_bounded_failure(
+        self, in_memory_persistence_telemetry: object
+    ) -> None:
+        """A network failure counts one failure and stays content-free."""
+        stub = StubEmbeddings()
+        stub.error = RuntimeError("provider exploded")
+        client, _info = _client(stub)
+        with pytest.raises(EmbeddingError, match="semantic embedding request failed"):
+            await client.embed_texts(["alpha"])
+        recorded = metrics_by_name(in_memory_persistence_telemetry.reader)  # type: ignore[attr-defined]
+        assert counter_value(recorded["ati.embedding.invoke.failures"]) == 1
+        assert "exploded" not in str(recorded)
+
+    @pytest.mark.asyncio
+    async def test_cancellation_propagates_without_telemetry(
+        self, in_memory_persistence_telemetry: object
+    ) -> None:
+        """Cancellation propagates unchanged with no telemetry."""
+
+        class _CancelStub(StubEmbeddings):
+            """A stub whose network call cancels."""
+
+            async def aembed_documents(
+                self, texts: list[str], chunk_size: int | None = None, **kwargs: Any
+            ) -> list[list[float]]:
+                del texts, chunk_size, kwargs
+                raise asyncio.CancelledError()
+
+        client, _info = _client(_CancelStub())
+        with pytest.raises(asyncio.CancelledError):
+            await client.embed_texts(["alpha"])
+        recorded = metrics_by_name(in_memory_persistence_telemetry.reader)  # type: ignore[attr-defined]
+        assert "ati.embedding.invoke.failures" not in recorded
+        assert "ati.embedding.invoke.duration" not in recorded

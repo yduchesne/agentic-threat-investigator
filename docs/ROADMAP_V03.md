@@ -292,6 +292,19 @@ runtime semantics expressible as decorators.
 
 ### PR 29B — Application instrumentation
 
+> **Status: DELIVERED.** PR 29B is implemented in
+> `dev/otel-app-instrumentation`. It applies the PR 29A/29A-1 contracts to
+> ATI's remaining stable application and external boundaries: datasource
+> acquisition/conversion, the shared provider HTTP/network boundary,
+> logical provider work, semantic Evidence persistence nesting, GEO
+> resolution, investigation execution, Evidence Analyst and Research Agent
+> execution, the common observed ``LlmClient`` (one OTel span + one selected
+> LangSmith/Langfuse/NoOp observation per actual model attempt), report
+> generation, the network-backed embedding boundary, Kafka W3C
+> trace-context propagation through record headers, and structured-log
+> trace correlation. Runtime Prometheus/Jaeger/Loki/Grafana infrastructure
+> remains PR 29C and dashboards remain PR 29D.
+
 Instrument the delivered architecture against the 29A contract:
 
 1. All PostgreSQL repository I/O boundaries plus UnitOfWork transaction

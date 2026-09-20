@@ -19,10 +19,12 @@ _TELEMETRY_VERSION = "0.1.0"
 
 
 class SpanNames:
-    """Canonical ATI OpenTelemetry span names (frozen by PR 29A).
+    """Canonical ATI OpenTelemetry span names (frozen by PR 29A, extended PR 29B).
 
     Rules: lowercase stable semantic operation names; no domain/provider IDs;
-    no Python class or function names.
+    no Python class or function names. PR 29B adds ``ati.provider.execute``
+    (one logical provider work item) and ``ati.embedding.invoke`` (one
+    network-backed embedding request) through the reviewed vocabulary.
     """
 
     DATASOURCE_ACQUIRE = "ati.datasource.acquire"
@@ -35,6 +37,8 @@ class SpanNames:
     AGENT_INVOKE = "ati.agent.invoke"
     LLM_INVOKE = "ati.llm.invoke"
     REPORT_GENERATE = "ati.report.generate"
+    PROVIDER_EXECUTE = "ati.provider.execute"
+    EMBEDDING_INVOKE = "ati.embedding.invoke"
     POSTGRES_REPOSITORY = "ati.postgres.repository"
     POSTGRES_UOW = "ati.postgres.uow"
     KAFKA_PUBLISH = "ati.kafka.publish"
@@ -54,6 +58,8 @@ CANONICAL_SPAN_NAMES: frozenset[str] = frozenset(
         SpanNames.AGENT_INVOKE,
         SpanNames.LLM_INVOKE,
         SpanNames.REPORT_GENERATE,
+        SpanNames.PROVIDER_EXECUTE,
+        SpanNames.EMBEDDING_INVOKE,
         SpanNames.POSTGRES_REPOSITORY,
         SpanNames.POSTGRES_UOW,
         SpanNames.KAFKA_PUBLISH,

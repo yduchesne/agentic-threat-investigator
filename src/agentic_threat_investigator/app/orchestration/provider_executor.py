@@ -54,11 +54,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
+
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
 from agentic_threat_investigator.app.datasource_provider import (
     DatasourceEvidenceResult,
@@ -94,6 +98,18 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.telemetry.attributes import (
+    AttributeKeys,
+    validate_bounded_attributes,
+)
+from agentic_threat_investigator.telemetry.metrics import (
+    DURATION_UNIT,
+    DurationMetrics,
+    Metrics,
+    get_counter,
+    get_histogram,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames, get_tracer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -183,6 +199,17 @@ def _canonicalize_or_none(entity_type: EntityType, value: str) -> str | None:
         return canonicalize(entity_type, value)
     except ValueError:
         return None
+
+
+def _record_telemetry_exception(span: trace.Span, exc: Exception) -> None:
+    """Record an ordinary exception on a span using standard OTel semantics.
+
+    The exception message travels only through OTel's standard exception event
+    semantics; the provider-work boundary maps every caught exception to a
+    bounded failure before it can be logged, so the recorded event stays safe.
+    """
+    span.record_exception(exc)
+    span.set_status(Status(StatusCode.ERROR))
 
 
 def _target_binding_error(work_item: ProviderWorkItem, target: Entity) -> str | None:
@@ -282,6 +309,61 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
         self._context = context
 
     async def execute(self, work_item: ProviderWorkItem) -> ProviderExecutionOutcome:
+        """Execute one work item inside the canonical provider-work telemetry.
+
+        Opens one ``ati.provider.execute`` span (with the bounded
+        ``ati.provider`` attribute derived from the work item's configured
+        source URN), measures the logical work-item duration in seconds, and
+        counts one failure for a FAILED outcome or an ordinary exception.
+        Cancellation propagates without telemetry; provider/URL/IOC content is
+        never captured and the existing outcome semantics are unchanged.
+        """
+        provider_attribute = validate_bounded_attributes(
+            {AttributeKeys.PROVIDER: work_item.provider.value}
+        )
+        tracer = get_tracer()
+        histogram = get_histogram(DurationMetrics.PROVIDER_EXECUTE, unit=DURATION_UNIT)
+        failures = get_counter(Metrics.PROVIDER_WORK_FAILURES)
+        start = time.perf_counter()
+        with tracer.start_as_current_span(
+            SpanNames.PROVIDER_EXECUTE, attributes=provider_attribute
+        ) as span:
+            try:
+                outcome = await self._execute_work(work_item)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _record_telemetry_exception(span, exc)
+                failures.add(1, provider_attribute)
+                histogram.record(
+                    time.perf_counter() - start,
+                    attributes={**provider_attribute, AttributeKeys.OUTCOME: "error"},
+                )
+                raise
+            else:
+                if outcome.status is ProviderExecutionStatus.FAILED:
+                    span.set_status(Status(StatusCode.ERROR))
+                    failures.add(1, provider_attribute)
+                    histogram.record(
+                        time.perf_counter() - start,
+                        attributes={
+                            **provider_attribute,
+                            AttributeKeys.OUTCOME: "error",
+                        },
+                    )
+                else:
+                    histogram.record(
+                        time.perf_counter() - start,
+                        attributes={
+                            **provider_attribute,
+                            AttributeKeys.OUTCOME: "success",
+                        },
+                    )
+                return outcome
+
+    async def _execute_work(
+        self, work_item: ProviderWorkItem
+    ) -> ProviderExecutionOutcome:
         """Execute one work item and return its typed operational outcome."""
         # The return count is intrinsic to the distinct deterministic failure
         # gates; the narrow disable follows repository convention for such

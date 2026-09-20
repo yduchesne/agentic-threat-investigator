@@ -45,6 +45,23 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationStatus,
     is_terminal_status,
 )
+from agentic_threat_investigator.telemetry.decorators import telemetry_operation
+from agentic_threat_investigator.telemetry.metrics import (
+    DurationMetrics,
+    Metrics,
+    get_counter,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames
+
+
+def _record_investigation_failure() -> None:
+    """Increment the bounded investigation-execution failure counter (PR 29B).
+
+    Fired by the ``telemetry_operation`` decorator after an ordinary
+    execution exception; it never fires for cancellation and never captures
+    exception text or Investigation IDs.
+    """
+    get_counter(Metrics.INVESTIGATION_EXECUTE_FAILURES).add(1)
 
 
 class InvestigationRunnerLifecycleError(ValueError):
@@ -137,6 +154,11 @@ class LocalInvestigationRunner(InvestigationRunner):
         )
         self._recursion_limit = recursion_limit
 
+    @telemetry_operation(
+        span_name=SpanNames.INVESTIGATION_EXECUTE,
+        duration_metric=DurationMetrics.INVESTIGATION_EXECUTE,
+        on_error=_record_investigation_failure,
+    )
     async def run(self, investigation_id: UUID) -> InvestigationState:
         """Execute one persisted Investigation and return its terminal state.
 
@@ -149,6 +171,13 @@ class LocalInvestigationRunner(InvestigationRunner):
         state, and the final durable Investigation is reloaded and returned
         after requiring the graph output to be terminal and consistent with
         the durable row. ``asyncio.CancelledError`` propagates unchanged.
+
+        Telemetry records one ``ati.investigation.execute`` span and seconds
+        duration for the whole invocation, counts exactly one executed
+        investigation only when the graph actually runs (never for the
+        idempotent terminal no-op or a lifecycle rejection), and counts one
+        failure on an ordinary exception. ``investigation_id`` is never a
+        metric label.
         """
         loaded = await self._load_investigation(investigation_id)
 
@@ -179,6 +208,9 @@ class LocalInvestigationRunner(InvestigationRunner):
             {"investigation": loaded},
             config={"recursion_limit": self._recursion_limit},
         )
+        # One actual runner execution: the graph ran to (possibly failed)
+        # completion, never an idempotent no-op or a lifecycle rejection.
+        get_counter(Metrics.INVESTIGATION_EXECUTED).add(1)
         # The graph output is untrusted runtime data: require a mapping that
         # carries a valid InvestigationState under the ``investigation`` key
         # so malformed output fails through the typed lifecycle contract

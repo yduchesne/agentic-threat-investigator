@@ -573,6 +573,171 @@ utilization/saturation where available, transaction rate, transaction
 failures/rollbacks, database/query latency indicators, locks and lock waits,
 deadlocks, database size, and connection errors.
 
+## PR 29B delivered coverage
+
+PR 29B applies the PR 29A/29A-1 contracts to ATI's remaining stable
+application and external/distributed boundaries. Instrumentation is
+observational only: it never changes transactions, Kafka delivery,
+provider retry/rate limiting, LLM accounting/repair counts, or cancellation.
+
+### Canonical span additions
+
+The PR 29A canonical span set gains two reviewed names (both covered by the
+frozen vocabulary tests):
+
+```text
+ati.provider.execute   one logical provider work-item execution
+ati.embedding.invoke   one network-backed semantic embedding request
+```
+
+### Bounded attribute additions
+
+Two bounded attribute keys join the allowlist (values are
+code/deployment-controlled, never IDs or content):
+
+```text
+ati.provider    stable source URN of one provider work item
+ati.agent       closed agent vocabulary (evidence_analyst | research_agent)
+```
+
+### Datasource acquisition/conversion
+
+- ``observe_semantic_acquisition`` is the shared acquisition seam used by
+  both the datasource Evidence producer and the datasource-backed provider:
+  every logical semantic acquisition emits one ``ati.datasource.acquire``
+  span and one ``ati.datasource.acquire.duration`` seconds histogram, with a
+  bounded success/error outcome (a typed stage-error result is a failure,
+  an exception is a failure, cancellation records nothing and propagates);
+- ``convert_semantic_source_objects`` emits one ``ati.datasource.convert``
+  span and duration plus the ``ati.datasource.convert.items`` histogram;
+  zero output is a success with a recorded count of zero;
+- ``ati.datasource.acquire.failures`` / ``ati.datasource.convert.failures``
+  count ordinary failures once. The durable datasource lifecycle log remains
+  authoritative and is never replaced or created by telemetry, and no
+  Kafka publish counters are duplicated by the producer path.
+
+### Provider HTTP boundary
+
+The shared ``ProviderHttpClient`` network execution emits aggregate
+bounded telemetry that distinguishes one *logical* request from its
+*actual* HTTP attempts:
+
+```text
+ati.provider.http.duration   one logical request (attempts + retries + backoff)
+ati.provider.http.attempts   one per actual outbound request attempt
+ati.provider.http.retries    attempts minus the first
+ati.provider.http.failures   one per failed logical request
+```
+
+URLs, paths, query strings, headers, bodies, response content, and raw
+exception text are never telemetry. ``BoundedLimiter`` is unchanged and no
+queue-wait telemetry was added.
+
+### Provider work
+
+``ProviderWorkExecutor.execute`` emits one ``ati.provider.execute`` span and
+``ati.provider.execute.duration`` per logical work item with the bounded
+``ati.provider`` source-URN attribute; ``ati.provider.execute.failures``
+counts FAILED outcomes and ordinary exceptions exactly once. Internal HTTP
+retries remain child transport attempts and never multiply the logical
+work-item count. The existing ``ProviderExecutionOutcome`` semantics are
+unchanged (no PARTIAL status exists).
+
+### Evidence persistence
+
+The ``ati.evidence.persist`` span/duration on
+``EvidenceBatchPersistenceService.persist`` (29A-1) nests over
+``ati.postgres.uow`` and ``ati.postgres.repository``. The persistence
+service itself never emits the outcome counters (created/appended/unchanged)
+— those are owned by the consumer flow exactly once — so nothing is
+double-counted.
+
+### GEO resolution
+
+``GeoResolutionWorker.run_once`` emits one ``ati.geo.resolve`` span and
+duration per worker iteration. Per-item authoritative outcomes are counted
+at their persist points:
+
+```text
+ati.geo.resolve.resolved      RESOLVED completions
+ati.geo.resolve.unresolvable  terminal UNRESOLVABLE completions
+ati.geo.resolve.failed        failure/retry records
+```
+
+An empty claim still measures the worker iteration and invents no item
+outcomes. IP/location/entity/evidence/observation IDs are never labels, and
+no expensive queue-depth query was added.
+
+### Investigation execution
+
+``LocalInvestigationRunner.run`` emits one ``ati.investigation.execute`` span
+and duration per invocation, counts ``ati.investigation.execute.executed``
+only when the graph actually runs (never for the idempotent terminal no-op
+or a lifecycle rejection), and counts ``ati.investigation.execute.failures``
+on ordinary exceptions. ``investigation_id`` is never a metric label and no
+PARTIAL classification is inferred.
+
+### Agents and Report Writer
+
+- ``EvidenceAnalyst.analyze_with_result`` and
+  ``ResearchAgent.research`` emit one ``ati.agent.invoke`` span and
+  ``ati.agent.invoke.duration`` with the closed ``ati.agent`` vocabulary;
+  ``ati.agent.invoke.failures`` counts ordinary failures once;
+- ``ReportWriter.write`` emits one ``ati.report.generate`` span and duration;
+  ``ati.report.generate.failures`` counts ordinary failures once.
+
+### Common LLM instrumentation
+
+Production composition builds exactly one observing ``LlmClient`` wrapper
+(:class:`ObservedLlmClient`) over the selected
+``build_llm_observability`` backend and passes it to every agent and the
+Report Writer:
+
+```text
+Agent
+ -> ObservedLlmClient
+      -> ati.llm.invoke span + ati.llm.invoke.duration
+      -> LlmObservability.observe(LlmObservation)   (selected backend)
+      -> existing LlmClient delegate
+```
+
+One actual ``generate_structured()`` call equals one OTel LLM span plus one
+selected backend observation; a structured-output repair is another actual
+model call and therefore another span/observation, separately accounted by
+the existing LLM accounting. Only bounded safe metadata is recorded
+(operation name plus configured model/provider labels); prompts, outputs,
+Evidence facts, and Investigation IDs are never captured, token counts are
+never fabricated, ``tracing_context(enabled=False)`` is preserved in the
+LangChain adapter, and a broken observability backend stays fail-open (it
+can never fail the model call). Cancellation propagates and the delegate's
+typed ``LlmError`` taxonomy is preserved.
+
+### Network-backed embedding boundary
+
+The network-backed ``LangChainEmbeddingClient.embed_texts`` emits one
+``ati.embedding.invoke`` span and ``ati.embedding.invoke.duration`` plus
+``ati.embedding.invoke.failures``. The deterministic offline
+``HashingEmbeddingClient`` is not instrumented, and PostgreSQL/pgvector-only
+retrieval keeps its existing database telemetry (never mislabeled as network
+I/O).
+
+### Kafka W3C trace-context propagation
+
+The Kafka publisher injects W3C ``traceparent``/``tracestate`` into record
+headers (never the Evidence payload or routing key); the Kafka consumer
+extracts the first valid parent context onto the polled
+:class:`EvidenceBatch`, and ``EvidencePersistenceConsumer`` makes the
+durable PostgreSQL persist and broker commit child spans of that context.
+Malformed headers are safe no-parents, unrelated headers are preserved,
+and the Evidence payload/identity is byte-identical.
+
+### Structured-log correlation
+
+The CLI entrypoints install the PR 29A ``TraceCorrelationFilter`` on the
+root logging handler so structured records carry ``otel_trace_id`` /
+``otel_span_id`` when a valid span is current. Correlation is additive and
+never rewrites existing log semantics or reintroduces raw exception text.
+
 ## LLM observability backends
 
 General OpenTelemetry tracing and LLM/agent observability are complementary,

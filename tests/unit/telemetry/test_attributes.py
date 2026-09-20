@@ -27,6 +27,8 @@ class TestAttributeAllowlist:
             "ati.postgres.operation": "persist_batch",
             "ati.kafka.topic": "ati.evidence",
             "ati.kafka.consumer_group": "evidence-persistence",
+            "ati.provider": "urn:ati:source:threatfox",
+            "ati.agent": "research_agent",
         }
         assert validate_bounded_attributes(attrs) == attrs
 
@@ -42,6 +44,8 @@ class TestAttributeAllowlist:
             "ati.postgres.operation",
             "ati.kafka.topic",
             "ati.kafka.consumer_group",
+            "ati.provider",
+            "ati.agent",
         } == METRIC_ATTRIBUTE_ALLOWLIST
         for key in METRIC_ATTRIBUTE_ALLOWLIST:
             assert key.startswith("ati.")

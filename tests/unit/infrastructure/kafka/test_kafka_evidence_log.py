@@ -12,6 +12,7 @@ types so the adapters exercise their real Protocol boundaries.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -135,10 +136,17 @@ class FakeProducer(AsyncKafkaProducer):
         value: bytes | None = None,
         key: bytes | None = None,
         partition: int | None = None,
+        headers: Sequence[tuple[str, bytes]] | None = None,
     ) -> asyncio.Future[RecordMetadata]:
         """Record the send and return the delivery future of the outcome."""
         self.sends.append(
-            {"topic": topic, "value": value, "key": key, "partition": partition}
+            {
+                "topic": topic,
+                "value": value,
+                "key": key,
+                "partition": partition,
+                "headers": headers,
+            }
         )
         if self.fail_send is not None:
             raise self.fail_send

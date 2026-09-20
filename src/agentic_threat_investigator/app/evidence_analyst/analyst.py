@@ -60,9 +60,27 @@ from agentic_threat_investigator.domain.assessment import (
     Verdict,
 )
 from agentic_threat_investigator.domain.investigation import AnalysisDisposition
+from agentic_threat_investigator.telemetry.attributes import AttributeKeys
+from agentic_threat_investigator.telemetry.decorators import telemetry_operation
+from agentic_threat_investigator.telemetry.metrics import (
+    DurationMetrics,
+    Metrics,
+    get_counter,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames
 
 _NO_EVIDENCE_SUMMARY = "No evidence was available for analysis."
 _NO_EVIDENCE_LIMITATION = "No evidence was available for this investigation."
+
+
+def _record_analyst_failure() -> None:
+    """Increment the bounded agent-invocation failure counter (PR 29B).
+
+    Fired by the ``telemetry_operation`` decorator after an ordinary analysis
+    exception; it never fires for cancellation and never captures exception
+    text or Investigation IDs.
+    """
+    get_counter(Metrics.AGENT_INVOKE_FAILURES).add(1)
 
 
 class EvidenceAnalyst:
@@ -121,6 +139,12 @@ class EvidenceAnalyst:
         )
         return result.assessment
 
+    @telemetry_operation(
+        span_name=SpanNames.AGENT_INVOKE,
+        duration_metric=DurationMetrics.AGENT_INVOKE,
+        attributes={AttributeKeys.AGENT: "evidence_analyst"},
+        on_error=_record_analyst_failure,
+    )
     async def analyze_with_result(
         self,
         investigation_id: UUID,
@@ -135,7 +159,10 @@ class EvidenceAnalyst:
         pointer, the exact analyzed Evidence identities, the typed
         disposition, and the version/history update; the returned result
         carries the authoritative Investigation version after that
-        transaction.
+        transaction. The logical analysis operation is observable through one
+        ``ati.agent.invoke`` span and duration; underlying model attempts use
+        the common observed ``LlmClient``, never analyst-specific vendor
+        instrumentation.
         """
         analyst_input = await self._input_loader.load(investigation_id)
         if not analyst_input.evidence:
