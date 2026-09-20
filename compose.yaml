@@ -27,7 +27,7 @@ services:
   # The OUTSIDE listener advertises 127.0.0.1:<host port> so host-side
   # integration-test processes can connect through the mapped port.
   redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v24.3.8
+    image: docker.io/redpandadata/redpanda:v24.3.8
     command:
       - redpanda
       - start

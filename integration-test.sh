@@ -131,6 +131,20 @@ PY
 echo "== Starting isolated Redpanda broker (${TEST_ID}) =="
 "${COMPOSE[@]}" -f compose.yaml -f "$TEST_OVERRIDE" -p "$TEST_ID" up -d redpanda
 
+# PR 28G CI follow-up: podman-compose 1.0.6 can return success even when the
+# container was never created (e.g. image pull failure), so verify that a
+# running Redpanda container exists for *this* integration-test project before
+# entering the Kafka readiness loop. Identification uses the Compose project
+# and service labels only -- never a guessed container name.
+if ! podman ps \
+  --filter "label=io.podman.compose.project=${TEST_ID}" \
+  --filter "label=com.docker.compose.service=redpanda" \
+  --format '{{.ID}}' | grep -q .; then
+  echo "Redpanda container failed to start for integration-test project ${TEST_ID}" >&2
+  "${COMPOSE[@]}" -f compose.yaml -f "$TEST_OVERRIDE" -p "$TEST_ID" logs redpanda >&2 || true
+  exit 1
+fi
+
 echo "== Waiting for Redpanda Kafka API readiness =="
 uv run python - "$REDPANDA_PORT" <<'PY'
 import asyncio
