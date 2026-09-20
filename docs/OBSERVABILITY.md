@@ -173,6 +173,35 @@ should expose meaningful execution boundaries. Histograms complement spans when
 aggregate latency is operationally useful; they are not required as a duplicate
 of every span.
 
+### Decorator-first instrumentation
+
+As much as practical, stable function and method execution boundaries are
+annotated with thin ATI-owned Python decorators built on the OpenTelemetry API.
+Decorators are the preferred mechanism for span lifecycle, operation duration,
+standard success/failure status, exception recording, and static or
+bounded-cardinality attributes. This keeps OpenTelemetry lifecycle boilerplate
+out of application code while preserving backend independence.
+
+Conceptually:
+
+```python
+@traced("ati.evidence.persist")
+async def persist_batch(...):
+    ...
+```
+
+A combined operation decorator may also declare both a span and an aggregate
+latency metric when both are semantically useful.
+
+Decorator-based instrumentation is not mandatory for telemetry whose value is
+known only from runtime/domain outcomes inside an operation. Evidence
+create/append/ignore outcomes, committed record counts, batch sizes, publication
+counts, retry outcomes, and similar semantic events should use explicit
+telemetry calls at the point where their meaning is known.
+
+ATI telemetry decorators must not import or expose Prometheus-, Jaeger-, Loki-,
+Grafana-, LangSmith-, or Langfuse-specific APIs.
+
 Standard W3C trace context is propagated across distributed/asynchronous
 boundaries where supported, including Kafka-compatible message headers.
 Structured logs include the current trace/span IDs so operators can correlate
