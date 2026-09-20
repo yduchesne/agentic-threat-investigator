@@ -27,6 +27,7 @@
 - [Soft deletion](#soft-deletion)
 - [Authorization](#authorization)
 - [Progress updates](#progress-updates)
+- [Inbound observability (PR 29B-1)](#inbound-observability-pr-29b-1)
 - [Versioning](#versioning)
 - [No implementation leakage](#no-implementation-leakage)
 - [Internal task dispatch](#internal-task-dispatch)
@@ -869,6 +870,18 @@ Authorization is enforced server-side.
 v0.1 uses polling of investigation/timeline resources.
 
 WebSockets are not required. SSE may be introduced later if justified.
+
+## Inbound observability (PR 29B-1)
+
+HTTP telemetry at this boundary is framework-level OpenTelemetry FastAPI/ASGI
+instrumentation (`service.name=ati-api`), purely observational, and never
+changes HTTP contracts. One request is identified by HTTP method plus the
+registered route template (for example `GET /api/v1/investigations/{investigation_id}`
+versus `DELETE /api/v1/investigations/{investigation_id}`); request/response
+bodies, query strings, cookies, authorization headers, CSRF/idempotency
+values, and concrete dynamic paths are never captured. Request-ID, CORS,
+cookie authentication, CSRF, error-envelope, and status-code behavior are
+unchanged. See `docs/OBSERVABILITY.md` for details.
 
 ## Versioning
 

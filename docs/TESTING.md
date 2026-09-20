@@ -251,6 +251,38 @@ for every remaining stable boundary:
   unrelated-header preservation, byte-identical payload/key, and no-outer-
   span publish correctness.
 
+PR 29B-1 keeps the same deterministic, offline policy for the inbound
+FastAPI/ASGI HTTP boundary and adds the API-T01..API-T18 unit matrix in
+`tests/unit/api/test_telemetry.py` using in-memory OTel providers and the
+previously delivered in-memory span/metric readers — no Collector,
+Prometheus, Jaeger, Loki, Grafana, Docker/Podman, or live services:
+
+- **API-T01/API-T15/API-T16**: one standard HTTP server span per registered
+  route (including `/health/live` and `/health/ready`) and bounded identity
+  for unknown unmatched paths (no route label is manufactured from an
+  arbitrary incoming path);
+- **API-T02/API-T03/API-T05/API-T06/API-T07**: method × registered
+  route-template distinction (GET vs DELETE on the same template), dynamic
+  UUID paths mapped to the registered template, and `2xx`/`4xx`/`5xx`
+  standard response-status telemetry with unchanged response behavior;
+- **API-T08/API-T09**: a valid incoming W3C `traceparent` resumes the
+  upstream trace and a malformed one fails safely;
+- **API-T10**: an ATI span started inside a route is a descendant of the
+  HTTP server span (same trace ID and server parent) with no context
+  plumbing into handler signatures;
+- **API-T04/API-T11/API-T12/API-T13**: query, request-body, response-body,
+  authorization, cookie, CSRF, and Idempotency-Key sentinels
+  (`DO_NOT_CAPTURE_*_29B1`) are absent from every recorded span
+  attribute/event and metric attribute;
+- **API-T14/API-T17/API-T18**: disabled telemetry installs no HTTP pipeline
+  and leaves API behavior identical, repeated instrumentation never
+  duplicates spans/metrics, and the request-ID middleware contract is
+  unchanged through the instrumented middleware stack.
+
+The tests pin `OTEL_SEMCONV_STABILITY_OPT_IN` to an empty value so the
+resolved official instrumentation deterministically emits its default
+semantic-convention names in any developer environment.
+
 Priority unit-test areas include:
 
 - entity canonicalization;

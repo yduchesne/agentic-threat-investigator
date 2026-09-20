@@ -60,11 +60,23 @@ def data_point_attributes(metric: Metric) -> dict[str, Any]:
     return dict(metric.data.data_points[0].attributes or {})
 
 
+def metric_data_points(metric: Metric) -> list[Any]:
+    """Return every recorded data point of a metric (union-safe).
+
+    OTel metric data is a union type; this helper normalizes the common
+    ``data_points`` access so tests can iterate without reasoning about the
+    union members. Each returned item exposes ``attributes`` and the
+    instrument-specific value fields.
+    """
+    return list(metric.data.data_points)
+
+
 __all__ = [
     "counter_is_monotonic",
     "counter_value",
     "data_point_attributes",
     "histogram_count",
     "histogram_sum",
+    "metric_data_points",
     "metrics_by_name",
 ]
