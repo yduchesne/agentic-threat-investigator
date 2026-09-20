@@ -1,6 +1,6 @@
 # ATI — v0.2 Global Evidence and Distributed Ingestion Architecture
 
-> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered, PR 28D publisher/consumer contracts and deterministic in-memory log delivered, PR 28E bounded Evidence persistence consumer delivered, PR 28F-2 datasource Evidence producer path delivered at the application seam, PR 28G Kafka-compatible infrastructure delivered.**
+> **Status: approved v0.2 target architecture; PR 28A contracts delivered, PR 28B persistence/Investigation-scoped reads delivered, PR 28C EvidenceMessage wire contract delivered, PR 28D publisher/consumer contracts and deterministic in-memory log delivered, PR 28E bounded Evidence persistence consumer delivered, PR 28F-2 datasource Evidence producer path delivered at the application seam, PR 28G Kafka-compatible infrastructure delivered, PR 28H real-stack distributed Evidence ingestion closure delivered (H28H-01..21).**
 >
 > This document records the architectural decisions that govern the PR 28 series. `ROADMAP_V02.md` defines the delivery sequence. Delivered v0.1 behavior remains authoritative until the corresponding PR 28 slice lands.
 >
@@ -185,8 +185,10 @@ consumer/PostgreSQL persistence, and the producer never waits for the
 PR 28E consumer. The production Investigation datasource runtime is
 still not routed through the log — the PR 27E Investigation
 compatibility path remains synchronous and transitional. PR 28G delivers
-production Kafka/Redpanda behind the unchanged PR 28D contracts; full
-producer -> log -> consumer -> PostgreSQL closure is PR 28H.
+production Kafka/Redpanda behind the unchanged PR 28D contracts, and
+PR 28H proves the full producer -> log -> consumer -> PostgreSQL closure
+against real Redpanda and real PostgreSQL (H28H-01..21) without wiring a
+production runner that would require Investigation orchestration redesign.
 
 ## PR 28E bounded Evidence persistence consumer (delivered)
 
@@ -454,8 +456,10 @@ partition identity as domain identity.
   `compose_kafka_consumer` wire clients from typed `evidence_kafka`
   settings and the existing `SecretsResolver` for SASL credentials. PR 28G
   deliberately does **not** invent the missing production orchestrator
-  (scheduler/worker supervisor); wiring a datasource execution runner into
-  the adapters remains PR 28H/transitional scope.
+  (scheduler/worker supervisor); PR 28H closed the real-stack
+  producer -> log -> consumer -> PostgreSQL path through integration
+  coverage without adding a production runner (replacing the transitional
+  synchronous Investigation path would require orchestration redesign).
 
 Configuration (local Redpanda PLAINTEXT defaults, `PLAINTEXT`/`SSL`/
 `SASL_PLAINTEXT`/`SASL_SSL` protocols, SASL credentials as secret reference

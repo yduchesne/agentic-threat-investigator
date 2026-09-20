@@ -20,8 +20,9 @@ publication — never consumer/PostgreSQL persistence. The producer path
 is delivered and proven at the application boundary; production
 Investigation execution still runs synchronously through the PR 27E
 compatibility path, which remains transitional. PR 28G delivered the
-production Kafka/Redpanda adapters behind the unchanged PR 28D contracts;
-PR 28H owns full producer -> log -> consumer -> PostgreSQL closure.
+production Kafka/Redpanda adapters behind the unchanged PR 28D contracts,
+and PR 28H closed the full producer -> log -> consumer -> PostgreSQL path
+with real-stack integration coverage (H28H-01..21).
 
 ### PR 27A landed vocabulary
 
@@ -354,9 +355,10 @@ the exact `datasource_execution_id`, published with exactly one
 `COMPLETED`. The producer completes on successful publication and
 never waits for the PR 28E consumer. No production Investigation
 runtime is rerouted through the log: the PR 27E compatibility path
-remains synchronous/transitional until a real producer runner is wired
-(PR 28G delivered the Kafka/Redpanda adapters; runner wiring stays PR
-28H/transitional scope).
+remains synchronous/transitional (PR 28G delivered the Kafka/Redpanda
+adapters; PR 28H delivered the real-stack producer -> log -> consumer ->
+PostgreSQL closure as integration coverage, without wiring a production
+runner that would require Investigation orchestration redesign).
 
 ## Evidence wire boundary (PR 28C, delivered)
 
@@ -395,14 +397,16 @@ The PR 28F-2 producer path is delivered at the application seam
 `PUBLISHED` lifecycle event (`CONVERTED` -> `PUBLISHED` ->
 `COMPLETED`), proven by deterministic unit matrices and ThreatFox
 real-stack vertical slices. It is **not** wired into a production
-runner: PR 28G delivered the Kafka/Redpanda adapters behind the
-unchanged PR 28D contracts (and documented that a real producer runner
-wiring stays PR 28H/transitional scope); full producer -> log -> consumer ->
-PostgreSQL closure is PR 28H. Consumer persistence is PR 28E
-(delivered). Production Investigation execution remains synchronous
-and behaviorally unchanged on the PR 27E compatibility runtime
-(provider executor, observation persistence, `DatasourceProvider`);
-nothing in that transitional path publishes.
+runner: the Kafka/Redpanda adapters sit behind the unchanged PR 28D
+contracts, and PR 28H proved the full producer -> log -> consumer ->
+PostgreSQL path against real Redpanda and real PostgreSQL (H28H-01..21)
+without introducing a production runner — replacing the transitional
+synchronous Investigation path would require Investigation orchestration
+redesign, which is explicitly out of the PR 28 closure scope. Consumer
+persistence is PR 28E (delivered). Production Investigation execution
+remains synchronous and behaviorally unchanged on the PR 27E
+compatibility runtime (provider executor, observation persistence,
+`DatasourceProvider`); nothing in that transitional path publishes.
 
 ## Runtime datasource migration (PR 27E, delivered)
 
