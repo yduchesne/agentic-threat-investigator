@@ -22,6 +22,9 @@ from agentic_threat_investigator.domain.source import (
     SourceRecord,
     source_record_content_hash,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 
 class PostgresSourceRecordRepository(SourceRecordRepository):
@@ -30,6 +33,9 @@ class PostgresSourceRecordRepository(SourceRecordRepository):
     def __init__(self, session: AsyncSession, batch_size: int = 100) -> None:
         self._session, self._batch_size = session, batch_size
 
+    @postgres_repository_operation(
+        repository="PostgresSourceRecordRepository", operation="upsert_batch"
+    )
     async def upsert_batch(
         self, items: Sequence[SourceRecordBatchItem]
     ) -> list[SourceRecordBatchResult]:
@@ -77,6 +83,9 @@ class PostgresSourceRecordRepository(SourceRecordRepository):
             for row in result.fetchall()
         ]
 
+    @postgres_repository_operation(
+        repository="PostgresSourceRecordRepository", operation="get_by_id"
+    )
     async def get_by_id(self, record_id: UUID) -> SourceRecord | None:
         """Look up a current normalized record by internal UUID."""
         result = await self._session.execute(
@@ -95,6 +104,9 @@ class PostgresSourceRecordRepository(SourceRecordRepository):
         values["content_hash"] = bytes(row["content_hash"]).hex()
         return SourceRecord(**values)
 
+    @postgres_repository_operation(
+        repository="PostgresSourceRecordRepository", operation="get_by_identity"
+    )
     async def get_by_identity(
         self, source_id: str, source_record_id: str
     ) -> SourceRecord | None:
@@ -124,6 +136,9 @@ class PostgresIngestionCheckpointRepository(IngestionCheckpointRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @postgres_repository_operation(
+        repository="PostgresIngestionCheckpointRepository", operation="get"
+    )
     async def get(
         self, source_id: str, artifact_uri: str, normalization_version: int
     ) -> IngestionCheckpoint | None:
@@ -150,6 +165,9 @@ class PostgresIngestionCheckpointRepository(IngestionCheckpointRepository):
             )
         )
 
+    @postgres_repository_operation(
+        repository="PostgresIngestionCheckpointRepository", operation="put"
+    )
     async def put(self, checkpoint: IngestionCheckpoint) -> None:
         await self._session.execute(
             text("""
@@ -169,6 +187,9 @@ class PostgresIngestionCheckpointRepository(IngestionCheckpointRepository):
             },
         )
 
+    @postgres_repository_operation(
+        repository="PostgresIngestionCheckpointRepository", operation="reset"
+    )
     async def reset(
         self, source_id: str, artifact_uri: str, normalization_version: int
     ) -> None:

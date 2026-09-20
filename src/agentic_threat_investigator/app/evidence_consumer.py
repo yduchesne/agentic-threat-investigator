@@ -33,6 +33,7 @@ Dominant invariants of this module:
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -63,6 +64,13 @@ from agentic_threat_investigator.app.persistence.repositories import (
     PreparedEvidenceRecord,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
+from agentic_threat_investigator.telemetry.decorators import telemetry_operation
+from agentic_threat_investigator.telemetry.metrics import (
+    DurationMetrics,
+    Metrics,
+    get_counter,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames
 
 EntityIdentityKey: TypeAlias = tuple[EntityType, str]
 """Canonical ``(type, value)`` identity key of one Entity participation."""
@@ -175,6 +183,35 @@ _EMPTY_RUN_RESULT = EvidenceConsumerRunResult(
 """The documented result of an empty poll: no DB transaction, no commit."""
 
 
+def _record_persistence_outcomes(
+    persisted: EvidenceBatchPersistenceResult,
+) -> None:
+    """Record the authoritative persistence outcomes of one committed batch.
+
+    Emitted as soon as the PostgreSQL batch persistence result is known; they
+    describe what the database did and remain observable even when a later
+    broker commit fails (the E-C6/Scenario-D diagnostic).
+    """
+    counters = {
+        EvidencePersistenceOutcome.CREATED: get_counter(
+            Metrics.EVIDENCE_OUTCOMES_CREATED
+        ),
+        EvidencePersistenceOutcome.APPENDED: get_counter(
+            Metrics.EVIDENCE_OUTCOMES_APPENDED
+        ),
+        EvidencePersistenceOutcome.UNCHANGED: get_counter(
+            Metrics.EVIDENCE_OUTCOMES_UNCHANGED
+        ),
+    }
+    for item in persisted.items:
+        counters[item.outcome].add(1)
+
+
+def _record_processed_batch(persisted: EvidenceBatchPersistenceResult) -> None:
+    """Record messages fully processed only after the broker commit succeeds."""
+    get_counter(Metrics.EVIDENCE_MESSAGES_PROCESSED).add(len(persisted.items))
+
+
 class EvidencePersistenceConsumer:
     """Poll one bounded batch, persist it atomically, then commit the consumer.
 
@@ -208,21 +245,34 @@ class EvidencePersistenceConsumer:
         """Return the configured poll bound."""
         return self._batch_size
 
+    @telemetry_operation(
+        span_name=SpanNames.EVIDENCE_CONSUME,
+        duration_metric=DurationMetrics.EVIDENCE_CONSUME,
+    )
     async def process_next_batch(self) -> EvidenceConsumerRunResult:
         """Process exactly one bounded batch and return bounded metrics.
 
         An empty poll returns the empty result with ``committed=False`` and
         opens no transaction and makes no consumer commit. Otherwise the
-        PostgreSQL batch transaction commits before the consumer commit.
+        PostgreSQL batch transaction commits before the consumer commit; a
+        message counts as fully *processed* only after both succeed.
         """
-        batch = await self._consumer.poll(self._batch_size)
-        if not batch.records:
-            return _EMPTY_RUN_RESULT
-        prepared = prepare_evidence_batch(batch)
-        persisted = await self._persistence.persist(prepared)
-        # Only after the PostgreSQL commit has completed.
-        await self._consumer.commit(batch)
-        return _run_result(persisted)
+        try:
+            batch = await self._consumer.poll(self._batch_size)
+            if not batch.records:
+                return _EMPTY_RUN_RESULT
+            prepared = prepare_evidence_batch(batch)
+            persisted = await self._persistence.persist(prepared)
+            _record_persistence_outcomes(persisted)
+            # Only after the PostgreSQL commit has completed.
+            await self._consumer.commit(batch)
+            _record_processed_batch(persisted)
+            return _run_result(persisted)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            get_counter(Metrics.EVIDENCE_PROCESSING_FAILURES).add(1)
+            raise
 
 
 def _run_result(persisted: EvidenceBatchPersistenceResult) -> EvidenceConsumerRunResult:

@@ -45,6 +45,18 @@ dependencies = [
   # Kafka-compatible distributed Evidence log infrastructure (PR 28G).
   # aiokafka 0.14.x is the first line shipping CPython 3.14 wheels.
   "aiokafka>=0.14,<0.15",
+  # OpenTelemetry API/SDK foundation (PR 29A): ATI application/infrastructure
+  # code and the ATI telemetry helpers are built directly on the public OTel
+  # API; SDK/provider composition happens at the application boundary. Bounded
+  # to the <2 line set by the semgrep dev scanner constraint (~=1.37.0); the
+  # resolved 1.37.x line is shared and verified in uv.lock.
+  "opentelemetry-api>=1.37,<2",
+  "opentelemetry-sdk>=1.37,<2",
+  # Langfuse v4 OTel-native LLM-observability backend (PR 29A). The Langfuse
+  # adapter imports the SDK directly, so it must be a direct dependency
+  # rather than relying on a transitive import; it is only ever *used* when
+  # ATI_LLM_OBSERVABILITY_BACKEND=langfuse selects it.
+  "langfuse>=4,<5",
 ]
 
 [dependency-groups]

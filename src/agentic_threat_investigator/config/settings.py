@@ -53,6 +53,21 @@ class LlmDriver(str, Enum):
     DETERMINISTIC = "deterministic"
 
 
+class LlmObservabilityBackend(str, Enum):
+    """Selected LLM/agent observability backend (PR 29A).
+
+    Exactly one value is accepted: ``langsmith``, ``langfuse``, or ``none``.
+    Backend-specific credentials are required only when the corresponding
+    backend is actually selected; ``none`` needs no vendor configuration.
+    General runtime observability (OpenTelemetry) is independent of this
+    selector and remains controlled by :attr:`Settings.observability_enabled`.
+    """
+
+    LANGSMITH = "langsmith"
+    LANGFUSE = "langfuse"
+    NONE = "none"
+
+
 class EmbeddingSettings(BaseModel):
     """Configured embedding representation.
 
@@ -357,6 +372,20 @@ class Settings(BaseSettings):
     geo_resolver_retry_max_seconds: float = Field(
         default=3600.0, ge=0, allow_inf_nan=False
     )
+    # Observability (PR 29A). Master ATI application-telemetry switch. When
+    # disabled, no OTel SDK provider is installed and no vendor LLM-
+    # observability adapter is composed (NoOp only). ``llm_observability_backend``
+    # is the typed backend selector (langsmith | langfuse | none); like
+    # ``llm_driver`` it is an operational selection resolved from the
+    # environment, never pinned by any source-controlled profile. Langfuse
+    # settings carry only secret reference names for the SDK keys plus a
+    # non-secret base URL; the key values themselves are resolved through
+    # ``SecretsResolver`` during composition and never stored or logged here.
+    observability_enabled: bool = False
+    llm_observability_backend: LlmObservabilityBackend = LlmObservabilityBackend.NONE
+    langfuse_public_key_secret: str = "ATI_LANGFUSE_PUBLIC_KEY"
+    langfuse_secret_key_secret: str = "ATI_LANGFUSE_SECRET_KEY"
+    langfuse_base_url: str = ""
 
     @field_validator(
         "provider_max_retries",
@@ -442,6 +471,61 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             raise ValueError("llm_driver must not be blank")
         return value
+
+    @field_validator("llm_observability_backend", mode="before")
+    @classmethod
+    def validate_llm_observability_backend(cls, value: object) -> object:
+        """Reject blank or unknown LLM-observability backend strings.
+
+        A blank value fails closed rather than silently falling back to
+        ``none``, matching the fail-closed configuration contract for
+        operational selections such as ``llm_driver`` and ``operating_mode``.
+        """
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("llm_observability_backend must not be blank")
+        return value
+
+    @field_validator("langfuse_public_key_secret")
+    @classmethod
+    def validate_langfuse_public_key_secret(cls, value: str) -> str:
+        """Require a non-blank secret reference name (never a key value)."""
+        if not value.strip():
+            raise ValueError("langfuse_public_key_secret must not be blank")
+        return value.strip()
+
+    @field_validator("langfuse_secret_key_secret")
+    @classmethod
+    def validate_langfuse_secret_key_secret(cls, value: str) -> str:
+        """Require a non-blank secret reference name (never a key value)."""
+        if not value.strip():
+            raise ValueError("langfuse_secret_key_secret must not be blank")
+        return value.strip()
+
+    @field_validator("langfuse_base_url")
+    @classmethod
+    def validate_langfuse_base_url(cls, value: str) -> str:
+        """Require a blank or credential-free HTTP(S) Langfuse base URL.
+
+        Credentials (userinfo) are rejected so configured URLs can never embed
+        keys; query/fragment parts are also rejected as unexpected input.
+        """
+        if not value.strip():
+            return ""
+        try:
+            parsed = urlsplit(value.strip())
+            hostname = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("langfuse_base_url is malformed") from exc
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("langfuse_base_url must use the http or https scheme")
+        if not hostname:
+            raise ValueError("langfuse_base_url must contain a hostname")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("langfuse_base_url must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("langfuse_base_url must not contain a query or fragment")
+        return value.strip()
 
     @field_validator("llm_api_key_secret")
     @classmethod

@@ -22,6 +22,9 @@ from agentic_threat_investigator.domain.identity import (
     User,
     UserRole,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .models import CredentialRow, SessionRow, UserRow
 
@@ -48,6 +51,9 @@ class PostgresUserRepository(UserRepository):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresUserRepository", operation="create"
+    )
     async def create(self, user: User) -> User:
         """Insert a user in the current transaction."""
         normalized = normalize_username(user.username)
@@ -91,6 +97,9 @@ class PostgresUserRepository(UserRepository):
         )
         return _user(row)
 
+    @postgres_repository_operation(
+        repository="PostgresUserRepository", operation="get_by_username"
+    )
     async def get_by_username(self, username: str) -> User | None:
         """Find a live user by normalized username."""
         row = (
@@ -103,17 +112,26 @@ class PostgresUserRepository(UserRepository):
         ).scalar_one_or_none()
         return None if row is None else _user(row)
 
+    @postgres_repository_operation(
+        repository="PostgresUserRepository", operation="get_by_id"
+    )
     async def get_by_id(self, user_id: UUID) -> User | None:
         """Find a live user by ID."""
         row = await self.session.get(UserRow, user_id)
         return None if row is None or row.deleted_at is not None else _user(row)
 
+    @postgres_repository_operation(
+        repository="PostgresUserRepository", operation="count"
+    )
     async def count(self) -> int:
         """Count all users, including soft-deleted identities."""
         return int(
             (await self.session.scalar(select(func.count()).select_from(UserRow))) or 0
         )
 
+    @postgres_repository_operation(
+        repository="PostgresUserRepository", operation="count_enabled_admins"
+    )
     async def count_enabled_admins(self, *, excluding: UUID | None = None) -> int:
         """Count enabled, non-deleted administrators."""
         query = (
@@ -136,6 +154,9 @@ class PostgresCredentialRepository(CredentialRepository):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresCredentialRepository", operation="create"
+    )
     async def create(
         self, user_id: UUID, password_hash: str, changed_at: datetime
     ) -> Credential:
@@ -149,6 +170,9 @@ class PostgresCredentialRepository(CredentialRepository):
             user_id=user_id, password_hash=password_hash, password_changed_at=changed_at
         )
 
+    @postgres_repository_operation(
+        repository="PostgresCredentialRepository", operation="replace"
+    )
     async def replace(
         self, user_id: UUID, password_hash: str, changed_at: datetime
     ) -> Credential:
@@ -164,6 +188,9 @@ class PostgresCredentialRepository(CredentialRepository):
             user_id=user_id, password_hash=password_hash, password_changed_at=changed_at
         )
 
+    @postgres_repository_operation(
+        repository="PostgresCredentialRepository", operation="get_by_user_id"
+    )
     async def get_by_user_id(self, user_id: UUID) -> Credential | None:
         """Return the credential for a user."""
         row = await self.session.get(CredentialRow, user_id)
@@ -180,12 +207,18 @@ class PostgresSessionRepository(SessionRepository):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresSessionRepository", operation="create"
+    )
     async def create(self, session: Session) -> Session:
         """Insert a new session."""
         self.session.add(SessionRow(**session.model_dump()))
         await self.session.flush()
         return session
 
+    @postgres_repository_operation(
+        repository="PostgresSessionRepository", operation="get_by_token_hash"
+    )
     async def get_by_token_hash(self, token_hash: bytes) -> Session | None:
         """Find a non-revoked session by digest."""
         row = (
@@ -197,6 +230,9 @@ class PostgresSessionRepository(SessionRepository):
             None if row is None else Session.model_validate(row, from_attributes=True)
         )
 
+    @postgres_repository_operation(
+        repository="PostgresSessionRepository", operation="revoke"
+    )
     async def revoke(self, session_id: UUID) -> None:
         """Mark a session revoked."""
         await self.session.execute(
@@ -205,6 +241,9 @@ class PostgresSessionRepository(SessionRepository):
             .values(revoked_at=datetime.now(timezone.utc))
         )
 
+    @postgres_repository_operation(
+        repository="PostgresSessionRepository", operation="revoke_by_token_hash"
+    )
     async def revoke_by_token_hash(self, token_hash: bytes) -> None:
         """Mark the matching session revoked."""
         await self.session.execute(
@@ -213,6 +252,9 @@ class PostgresSessionRepository(SessionRepository):
             .values(revoked_at=datetime.now(timezone.utc))
         )
 
+    @postgres_repository_operation(
+        repository="PostgresSessionRepository", operation="revoke_by_user_id"
+    )
     async def revoke_by_user_id(self, user_id: UUID) -> None:
         """Revoke every active session for the specified user."""
         await self.session.execute(
@@ -221,6 +263,9 @@ class PostgresSessionRepository(SessionRepository):
             .values(revoked_at=datetime.now(timezone.utc))
         )
 
+    @postgres_repository_operation(
+        repository="PostgresSessionRepository", operation="touch"
+    )
     async def touch(self, session_id: UUID, seen_at: datetime) -> None:
         """Update last-seen time after validation."""
         await self.session.execute(

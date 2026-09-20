@@ -38,12 +38,14 @@ use real ``aiokafka`` clients against Redpanda.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable, Sequence
 from typing import Protocol, cast
 from uuid import UUID
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.structs import ConsumerRecord, RecordMetadata, TopicPartition
+from opentelemetry.trace import Status, StatusCode
 
 from agentic_threat_investigator.app.evidence_log import (
     EvidenceBatch,
@@ -62,6 +64,19 @@ from agentic_threat_investigator.app.evidence_message import (
     decode_evidence_message,
     encode_evidence_message,
 )
+from agentic_threat_investigator.telemetry.attributes import (
+    AttributeKeys,
+    validate_bounded_attributes,
+)
+from agentic_threat_investigator.telemetry.metrics import (
+    DURATION_UNIT,
+    MESSAGE_COUNT_UNIT,
+    DurationMetrics,
+    Metrics,
+    get_counter,
+    get_histogram,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames, get_tracer
 
 
 class AsyncKafkaProducer(Protocol):
@@ -273,7 +288,8 @@ class KafkaEvidencePublisher(EvidencePublisher):
         before returning success. The returned record tuple corresponds to
         input message order even though broker acknowledgements may complete
         in a different order. An empty run is a no-op that performs no
-        broker send and returns zero records.
+        broker send, returns zero records, and emits no publish telemetry (an
+        empty publish must never look like broker traffic).
         """
         for message in messages:
             if not isinstance(message, EvidenceMessage):
@@ -283,32 +299,58 @@ class KafkaEvidencePublisher(EvidencePublisher):
         producer = self._require_started()
         if not messages:
             return EvidencePublishResult(records=())
+        topic_attrs = validate_bounded_attributes(
+            {AttributeKeys.KAFKA_TOPIC: self._topic}
+        )
+        published_counter = get_counter(Metrics.KAFKA_MESSAGES_PUBLISHED)
+        failures_counter = get_counter(Metrics.KAFKA_PUBLISH_FAILURES)
+        duration_histogram = get_histogram(
+            DurationMetrics.KAFKA_PUBLISH, unit=DURATION_UNIT
+        )
+        start = time.perf_counter()
+        tracer = get_tracer()
         records: list[EvidenceLogRecord] = []
-        for message in messages:
-            try:
-                # aiokafka 0.14.x: awaiting send() yields the delivery future;
-                # only awaiting that future yields the broker RecordMetadata.
-                delivery: asyncio.Future[RecordMetadata] = await producer.send(
-                    self._topic,
-                    value=encode_evidence_message(message),
-                    key=_canonical_key(message),
+        with tracer.start_as_current_span(
+            SpanNames.KAFKA_PUBLISH, attributes=topic_attrs
+        ) as span:
+            for message in messages:
+                try:
+                    # aiokafka 0.14.x: awaiting send() yields the delivery future;
+                    # only awaiting that future yields the broker RecordMetadata.
+                    delivery: asyncio.Future[RecordMetadata] = await producer.send(
+                        self._topic,
+                        value=encode_evidence_message(message),
+                        key=_canonical_key(message),
+                    )
+                    metadata: RecordMetadata = await delivery
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    # Never echo payload bytes or raw Evidence facts. Count only
+                    # acknowledgements known to have succeeded: the messages
+                    # already acknowledged in this run were counted above, and
+                    # the unacknowledged remainder is never claimed.
+                    failures_counter.add(1, topic_attrs)
+                    duration_histogram.record(
+                        time.perf_counter() - start,
+                        attributes={**topic_attrs, AttributeKeys.OUTCOME: "error"},
+                    )
+                    span.set_status(Status(StatusCode.ERROR))
+                    raise EvidencePublishError(
+                        "evidence publication to the broker failed"
+                    ) from exc
+                published_counter.add(1, topic_attrs)
+                records.append(
+                    EvidenceLogRecord(
+                        position=EvidenceLogPosition(
+                            stream=metadata.partition, offset=metadata.offset
+                        ),
+                        message=message,
+                    )
                 )
-                metadata: RecordMetadata = await delivery
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                # Never echo payload bytes or raw Evidence facts; never claim
-                # zero messages were published.
-                raise EvidencePublishError(
-                    "evidence publication to the broker failed"
-                ) from exc
-            records.append(
-                EvidenceLogRecord(
-                    position=EvidenceLogPosition(
-                        stream=metadata.partition, offset=metadata.offset
-                    ),
-                    message=message,
-                )
+            duration_histogram.record(
+                time.perf_counter() - start,
+                attributes={**topic_attrs, AttributeKeys.OUTCOME: "success"},
             )
         return EvidencePublishResult(records=tuple(records))
 
@@ -403,18 +445,75 @@ class KafkaEvidenceConsumer(EvidenceConsumer):
         ):
             raise EvidencePollError("poll max_messages must be a positive integer")
         consumer = self._require_started()
-        try:
-            fetched: dict[
-                TopicPartition, list[ConsumerRecord]
-            ] = await consumer.getmany(
-                timeout_ms=self._poll_timeout_ms, max_records=max_messages
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            raise EvidencePollError("evidence poll from the broker failed") from exc
-        records = self._flatten(fetched, max_messages)
-        return EvidenceBatch(consumer_id=self._consumer_id, records=records)
+        consumer_attrs = validate_bounded_attributes(
+            {
+                AttributeKeys.KAFKA_TOPIC: self._topic,
+                AttributeKeys.KAFKA_CONSUMER_GROUP: self._consumer_id.value,
+            }
+        )
+        received_counter = get_counter(Metrics.KAFKA_MESSAGES_RECEIVED)
+        poll_failures_counter = get_counter(Metrics.KAFKA_POLL_FAILURES)
+        duration_histogram = get_histogram(
+            DurationMetrics.KAFKA_POLL, unit=DURATION_UNIT
+        )
+        batch_size_histogram = get_histogram(
+            DurationMetrics.KAFKA_POLL_BATCH_SIZE, unit=MESSAGE_COUNT_UNIT
+        )
+        start = time.perf_counter()
+        tracer = get_tracer()
+        with tracer.start_as_current_span(
+            SpanNames.KAFKA_POLL, attributes=consumer_attrs
+        ) as span:
+            try:
+                fetched: dict[
+                    TopicPartition, list[ConsumerRecord]
+                ] = await consumer.getmany(
+                    timeout_ms=self._poll_timeout_ms, max_records=max_messages
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                poll_failures_counter.add(1, consumer_attrs)
+                duration_histogram.record(
+                    time.perf_counter() - start,
+                    attributes={
+                        **consumer_attrs,
+                        AttributeKeys.OUTCOME: "error",
+                    },
+                )
+                span.set_status(Status(StatusCode.ERROR))
+                raise EvidencePollError("evidence poll from the broker failed") from exc
+            try:
+                records = self._flatten(fetched, max_messages)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # A decode/key validation failure makes the poll fail as a
+                # transport operation even though the broker fetch succeeded.
+                poll_failures_counter.add(1, consumer_attrs)
+                duration_histogram.record(
+                    time.perf_counter() - start,
+                    attributes={
+                        **consumer_attrs,
+                        AttributeKeys.OUTCOME: "error",
+                    },
+                )
+                span.set_status(Status(StatusCode.ERROR))
+                raise exc
+            else:
+                if records:
+                    # Empty polls are not received Evidence messages and are
+                    # not batch-size samples; poll latency is still recorded.
+                    received_counter.add(len(records), consumer_attrs)
+                    batch_size_histogram.record(len(records), consumer_attrs)
+                duration_histogram.record(
+                    time.perf_counter() - start,
+                    attributes={
+                        **consumer_attrs,
+                        AttributeKeys.OUTCOME: "success",
+                    },
+                )
+            return EvidenceBatch(consumer_id=self._consumer_id, records=records)
 
     def _flatten(
         self,
@@ -467,10 +566,12 @@ class KafkaEvidenceConsumer(EvidenceConsumer):
     async def commit(self, batch: EvidenceBatch) -> None:
         """Acknowledge one entire batch across every represented stream.
 
-        Empty batches are a no-op. For each represented stream the adapter
-        commits ``highest processed offset + 1``; absent partitions are never
-        advanced. Rebalance/ownership and broker commit failures surface as
-        :class:`EvidenceCommitError` and never report success.
+        Empty batches are a no-op and emit no commit telemetry. For each
+        represented stream the adapter commits ``highest processed offset + 1``;
+        absent partitions are never advanced. Rebalance/ownership and broker
+        commit failures surface as :class:`EvidenceCommitError` and never
+        report success; ``messages.committed`` increments only after the
+        broker commit succeeds.
         """
         if batch.consumer_id != self._consumer_id:
             raise EvidenceCommitError("batch belongs to another consumer")
@@ -478,14 +579,50 @@ class KafkaEvidenceConsumer(EvidenceConsumer):
             return
         offsets = self._commit_offsets(batch)
         consumer = self._require_started()
-        try:
-            await consumer.commit(offsets)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            raise EvidenceCommitError(
-                "evidence batch commit to the broker failed"
-            ) from exc
+        consumer_attrs = validate_bounded_attributes(
+            {
+                AttributeKeys.KAFKA_TOPIC: self._topic,
+                AttributeKeys.KAFKA_CONSUMER_GROUP: self._consumer_id.value,
+            }
+        )
+        commits_counter = get_counter(Metrics.KAFKA_COMMITS)
+        commit_failures_counter = get_counter(Metrics.KAFKA_COMMIT_FAILURES)
+        messages_committed_counter = get_counter(Metrics.KAFKA_MESSAGES_COMMITTED)
+        duration_histogram = get_histogram(
+            DurationMetrics.KAFKA_COMMIT, unit=DURATION_UNIT
+        )
+        start = time.perf_counter()
+        tracer = get_tracer()
+        with tracer.start_as_current_span(
+            SpanNames.KAFKA_COMMIT, attributes=consumer_attrs
+        ) as span:
+            try:
+                await consumer.commit(offsets)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                commit_failures_counter.add(1, consumer_attrs)
+                duration_histogram.record(
+                    time.perf_counter() - start,
+                    attributes={
+                        **consumer_attrs,
+                        AttributeKeys.OUTCOME: "error",
+                    },
+                )
+                span.set_status(Status(StatusCode.ERROR))
+                raise EvidenceCommitError(
+                    "evidence batch commit to the broker failed"
+                ) from exc
+            else:
+                commits_counter.add(1, consumer_attrs)
+                messages_committed_counter.add(len(batch.records), consumer_attrs)
+                duration_histogram.record(
+                    time.perf_counter() - start,
+                    attributes={
+                        **consumer_attrs,
+                        AttributeKeys.OUTCOME: "success",
+                    },
+                )
 
     def _commit_offsets(self, batch: EvidenceBatch) -> dict[TopicPartition, int]:
         """Build the explicit broker offset map of one valid batch.

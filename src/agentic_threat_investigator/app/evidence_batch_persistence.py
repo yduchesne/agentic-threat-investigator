@@ -33,6 +33,9 @@ from agentic_threat_investigator.app.persistence.repositories import (
     UnitOfWork,
     validate_evidence_batch_size,
 )
+from agentic_threat_investigator.telemetry.decorators import telemetry_operation
+from agentic_threat_investigator.telemetry.metrics import DurationMetrics
+from agentic_threat_investigator.telemetry.tracing import SpanNames
 
 EVIDENCE_BATCH_DEFAULT_SIZE = 100
 """Default bounded consumer poll size for one processed Evidence batch (PR 28E)."""
@@ -69,6 +72,10 @@ class EvidenceBatchPersistenceService:
         """Return the configured hard ceiling."""
         return self._hard_limit
 
+    @telemetry_operation(
+        span_name=SpanNames.EVIDENCE_PERSIST,
+        duration_metric=DurationMetrics.EVIDENCE_PERSIST,
+    )
     async def persist(
         self, prepared: PreparedEvidenceBatch
     ) -> EvidenceBatchPersistenceResult:

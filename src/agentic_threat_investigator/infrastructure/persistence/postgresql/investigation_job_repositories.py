@@ -29,6 +29,9 @@ from agentic_threat_investigator.domain.investigation_job import (
     InvestigationJob,
     InvestigationJobStatus,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import sqlstate
 from .models import ApiIdempotencyRow, InvestigationJobRow
@@ -49,6 +52,9 @@ class PostgresInvestigationJobRepository(InvestigationJobRepository):
         """Bind the job repository to the caller's transaction session."""
         self._session = session
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationJobRepository", operation="create"
+    )
     async def create(self, job: InvestigationJob) -> InvestigationJob:
         """Create one durable pending job in the caller's transaction."""
         try:
@@ -66,6 +72,10 @@ class PostgresInvestigationJobRepository(InvestigationJobRepository):
             raise AssertionError("create_investigation_job returned no row")
         return self._job_from_values(row[0], row[1], row[2], row[3], None, None, None)
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationJobRepository",
+        operation="get_by_investigation",
+    )
     async def get_by_investigation(
         self, investigation_id: UUID
     ) -> InvestigationJob | None:
@@ -79,6 +89,9 @@ class PostgresInvestigationJobRepository(InvestigationJobRepository):
         ).scalar_one_or_none()
         return None if row is None else self._domain(row)
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationJobRepository", operation="claim_next"
+    )
     async def claim_next(self, claimed_at: datetime) -> InvestigationJob | None:
         """Atomically claim the oldest pending job, if any."""
         result = await self._session.execute(
@@ -92,6 +105,9 @@ class PostgresInvestigationJobRepository(InvestigationJobRepository):
             row[0], row[1], row[2], row[3], row[4], row[5], row[6]
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationJobRepository", operation="complete"
+    )
     async def complete(
         self,
         job_id: UUID,
@@ -193,6 +209,9 @@ class PostgresIdempotencyRepository(IdempotencyRepository):
         """Bind the idempotency repository to the caller's transaction session."""
         self._session = session
 
+    @postgres_repository_operation(
+        repository="PostgresIdempotencyRepository", operation="insert_if_absent"
+    )
     async def insert_if_absent(
         self, record: IdempotencyRecord
     ) -> IdempotencyRecord | None:
@@ -219,6 +238,9 @@ class PostgresIdempotencyRepository(IdempotencyRepository):
             return None
         return replace(record, id=row[0])
 
+    @postgres_repository_operation(
+        repository="PostgresIdempotencyRepository", operation="get"
+    )
     async def get(
         self, *, actor_id: UUID, operation: str, key_hash: bytes
     ) -> IdempotencyRecord | None:

@@ -17,6 +17,9 @@ from agentic_threat_investigator.domain.relationships import (
     RelationshipObservation,
     RelationshipType,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import (
     SQLSTATE_RELATIONSHIP_NOT_FOUND,
@@ -69,6 +72,9 @@ class PostgresRelationshipRepository(RelationshipRepository):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresRelationshipRepository", operation="get_by_id"
+    )
     async def get_by_id(
         self, relationship_id: UUID, *, include_deleted: bool = False
     ) -> Relationship | None:
@@ -79,6 +85,9 @@ class PostgresRelationshipRepository(RelationshipRepository):
         row = (await self.session.execute(query)).scalar_one_or_none()
         return None if row is None else _relationship(row)
 
+    @postgres_repository_operation(
+        repository="PostgresRelationshipRepository", operation="get_by_identity"
+    )
     async def get_by_identity(
         self,
         source_entity_id: UUID,
@@ -98,6 +107,9 @@ class PostgresRelationshipRepository(RelationshipRepository):
         row = (await self.session.execute(query)).scalar_one_or_none()
         return None if row is None else _relationship(row)
 
+    @postgres_repository_operation(
+        repository="PostgresRelationshipRepository", operation="upsert"
+    )
     async def upsert(
         self, relationship: Relationship, *, expected_version: int | None = None
     ) -> Relationship:
@@ -138,6 +150,9 @@ class PostgresRelationshipRepository(RelationshipRepository):
             raise ValueError("stale expected_version")
         return _relationship(row)
 
+    @postgres_repository_operation(
+        repository="PostgresRelationshipRepository", operation="soft_delete"
+    )
     async def soft_delete(
         self,
         relationship_id: UUID,
@@ -186,11 +201,18 @@ class PostgresRelationshipObservationRepository(RelationshipObservationRepositor
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresRelationshipObservationRepository", operation="get_by_id"
+    )
     async def get_by_id(self, observation_id: UUID) -> RelationshipObservation | None:
         """Return an immutable observation by its identity."""
         row = await self.session.get(RelationshipObservationRow, observation_id)
         return None if row is None else _observation(row)
 
+    @postgres_repository_operation(
+        repository="PostgresRelationshipObservationRepository",
+        operation="list_for_investigation",
+    )
     async def list_for_investigation(
         self,
         investigation_id: UUID,
@@ -234,6 +256,9 @@ class PostgresRelationshipObservationRepository(RelationshipObservationRepositor
         )
         return [_observation(row) for row in result.scalars().all()]
 
+    @postgres_repository_operation(
+        repository="PostgresRelationshipObservationRepository", operation="append"
+    )
     async def append(
         self, observation: RelationshipObservation
     ) -> RelationshipObservation:

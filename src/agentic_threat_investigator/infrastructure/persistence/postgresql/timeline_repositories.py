@@ -19,6 +19,9 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .models import InvestigationTimelineEventRow
 
@@ -50,6 +53,9 @@ class PostgresInvestigationTimelineRepository(InvestigationTimelineRepository):
             entity_count=row.entity_count,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationTimelineRepository", operation="append"
+    )
     async def append(self, event: InvestigationTimelineEvent) -> None:
         """Insert one event and flush without committing the caller's transaction."""
         row = InvestigationTimelineEventRow(
@@ -72,6 +78,10 @@ class PostgresInvestigationTimelineRepository(InvestigationTimelineRepository):
         self._session.add(row)
         await self._session.flush()
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationTimelineRepository",
+        operation="list_by_investigation",
+    )
     async def list_by_investigation(
         self, investigation_id: UUID
     ) -> list[InvestigationTimelineEvent]:
