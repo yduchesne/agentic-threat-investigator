@@ -173,6 +173,87 @@ should expose meaningful execution boundaries. Histograms complement spans when
 aggregate latency is operationally useful; they are not required as a duplicate
 of every span.
 
+### PostgreSQL operational coverage
+
+PostgreSQL telemetry is defined at ATI's stable persistence boundaries rather
+than by automatically tracing every SQLAlchemy/psycopg call.
+
+Every public method of a concrete PostgreSQL repository or PostgreSQL-backed
+resolver that can perform database I/O is an instrumentation boundary. Use a
+stable span such as `ati.postgres.repository` and bounded static dimensions
+for repository, operation, and outcome. Aggregate repository-operation latency
+must be available so an operator can identify which persistence operation is
+constraining throughput.
+
+The PostgreSQL `UnitOfWork` is independently observable. Its transaction
+lifetime begins after transaction begin succeeds and ends after commit/rollback
+completes or fails; repository spans intentionally nest inside that transaction
+span. Implicit context-manager commit/rollback and explicit
+`commit()`/`rollback()` operations expose latency and failure outcomes.
+Session cleanup must not silently inflate transaction-duration measurements.
+
+Initial PR 29 instrumentation does **not** enable broad SQLAlchemy/psycopg
+auto-instrumentation. SQL text, bind parameters, row/domain identifiers, and
+other content/high-cardinality values are not telemetry dimensions.
+
+A structural unit-test mechanism or explicit reviewed operation registry must
+make omissions visible when new PostgreSQL repository I/O methods are added.
+
+### Kafka/Redpanda flow health
+
+ATI application telemetry and broker telemetry are complementary.
+
+ATI emits distinct operational measurements for:
+
+- broker-acknowledged Evidence messages published;
+- valid Evidence messages returned by consumer polls;
+- successfully processed Evidence messages;
+- Evidence messages covered by successful consumer offset commits;
+- publish, poll, processing, and commit latency/failures;
+- bounded poll/batch sizes and persistence outcomes.
+
+A message is counted as successfully processed only after the required
+PostgreSQL persistence commit and Kafka consumer commit have succeeded. If
+PostgreSQL commits but the Kafka commit fails, processing is not reported as
+complete; normal at-least-once/redelivery and Evidence idempotency semantics
+remain authoritative.
+
+Kafka publication is success-atomic only on successful return and is not
+failure-atomic. On a partial publication failure, successful-message telemetry
+counts only records whose broker acknowledgement is known to have succeeded.
+
+Consumer backlog is authoritative Kafka/Redpanda state, not an ATI in-process
+queue approximation. PR 29 infrastructure must expose consumer-group lag by
+topic/partition using the deployed Redpanda/Kafka supported metrics. Aggregate
+lag and lag trend are derived in Prometheus/Grafana. Backlog age is exposed only
+if the deployed broker version supplies a reliable authoritative metric.
+
+The operational view must support direct comparison of:
+
+```text
+producer publication rate
+consumer receive rate
+consumer successful processing rate
+consumer committed-message rate
+consumer-group lag
+lag trend
+```
+
+This allows operators to distinguish a healthy consumer, a consumer falling
+behind, a backlog being drained, a stalled consumer, a slow PostgreSQL
+persistence path, and a broker/offset-commit problem.
+
+Partition is acceptable where required for broker lag/topology diagnosis.
+Application message counters normally aggregate across partitions. Kafka
+offsets, Evidence/message IDs, and arbitrary consumer identities are not metric
+labels.
+
+Redpanda infrastructure monitoring should also expose the bounded operational
+categories needed to diagnose broker/topic availability, produce/fetch request
+health, replication health, and storage/capacity. PostgreSQL infrastructure
+monitoring should expose server/pool health such as connection saturation,
+transaction/rollback activity, locks/deadlocks, and capacity where supported.
+
 ### Decorator-first instrumentation
 
 As much as practical, stable function and method execution boundaries are
@@ -231,13 +312,22 @@ PR 29 defines counters for at least:
 - Evidence batch commit failures;
 - Evidence create outcomes;
 - Evidence append outcomes;
-- Evidence ignore outcomes;
-- Evidence processing failures.
+- Evidence unchanged outcomes (matching the current `UNCHANGED` persistence
+  outcome rather than inventing a second `ignore` domain outcome);
+- Evidence processing failures;
+- PostgreSQL repository-operation and UnitOfWork transaction latency/failures;
+- Kafka publish/poll/offset-commit latency and failures;
+- distinct published, received, successfully processed, and successfully
+  committed Evidence message counts;
+- authoritative Kafka/Redpanda consumer-group lag for producer/consumer cadence
+  analysis.
 
-The exact meanings of `sent`, `received`, `committed`, `create`,
-`append`, and `ignore` are fixed in the PR 29A telemetry contract before
-application-wide instrumentation is added. Queue/backlog/consumer-lag gauges
-may be added only where ATI can measure them reliably.
+The exact meanings of `sent/published`, `received`, `processed`,
+`committed`, `create`, `append`, and `unchanged` are fixed in the PR
+29A/29A-1 telemetry contract before application-wide instrumentation is added.
+Queue/backlog/consumer-lag gauges are used only when sourced from reliable
+authoritative state; Kafka/Redpanda consumer-group lag is broker/group state,
+not inferred from ATI's local poll loop.
 
 Telemetry remains fail-open and is never authoritative product state.
 
