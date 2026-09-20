@@ -6,7 +6,7 @@
 
 ## Purpose
 
-ATI v0.4 is currently reserved for monitor-driven recurring investigations, change detection, findings, durable job administration, and related operational UI. This work was previously held in `PR_PLAN_V02.md`; it is now explicitly targeted at v0.3 because v0.2 is dedicated to the PR 28 global-Evidence and distributed-ingestion architecture.
+ATI v0.4 is currently reserved for monitor-driven recurring investigations, change detection, findings, durable job administration, and related operational UI. This work was previously held in `PR_PLAN_V02.md`; it is now explicitly targeted at v0.4 because v0.2 is dedicated to the PR 28 global-Evidence and distributed-ingestion architecture.
 
 ## Future v0.4 work
 
@@ -32,7 +32,7 @@ Architectural boundary retained from v0.1:
 
 Monitor functionality turns ATI from an analyst-initiated investigation tool into a system capable of repeatedly executing defined investigative work and surfacing material changes over time.
 
-The v0.3 implementation should preserve the existing Investigation execution architecture rather than create a separate monitor-specific investigation engine. A Monitor schedules or initiates normal durable Investigation work; the existing Investigation lifecycle, Coordinator, provider execution, Research, Assessment, Report, and provenance boundaries remain authoritative unless a later approved roadmap explicitly changes them.
+The v0.4 implementation should preserve the existing Investigation execution architecture rather than create a separate monitor-specific investigation engine. A Monitor schedules or initiates normal durable Investigation work; the existing Investigation lifecycle, Coordinator, provider execution, Research, Assessment, Report, and provenance boundaries remain authoritative unless a later approved roadmap explicitly changes them.
 
 #### Provisional scope
 
