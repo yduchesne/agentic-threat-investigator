@@ -70,6 +70,12 @@ class AsyncKafkaProducer(Protocol):
     Only the public operations the adapter relies on are declared, so unit
     tests can substitute a deterministic fake without constructing a real
     broker connection.
+
+    ``send`` models aiokafka 0.14.x's two-stage contract exactly: awaiting
+    ``send()`` yields a delivery ``asyncio.Future``, and awaiting that
+    future yields the ``RecordMetadata`` once the broker acknowledges the
+    record. The adapter therefore awaits both stages before constructing a
+    transport position.
     """
 
     async def start(self) -> None: ...
@@ -80,7 +86,7 @@ class AsyncKafkaProducer(Protocol):
         value: bytes | None = None,
         key: bytes | None = None,
         partition: int | None = None,
-    ) -> RecordMetadata: ...
+    ) -> asyncio.Future[RecordMetadata]: ...
 
 
 class AsyncKafkaConsumer(Protocol):
@@ -279,13 +285,15 @@ class KafkaEvidencePublisher(EvidencePublisher):
             return EvidencePublishResult(records=())
         records: list[EvidenceLogRecord] = []
         for message in messages:
-            future = producer.send(
-                self._topic,
-                value=encode_evidence_message(message),
-                key=_canonical_key(message),
-            )
             try:
-                metadata: RecordMetadata = await future
+                # aiokafka 0.14.x: awaiting send() yields the delivery future;
+                # only awaiting that future yields the broker RecordMetadata.
+                delivery: asyncio.Future[RecordMetadata] = await producer.send(
+                    self._topic,
+                    value=encode_evidence_message(message),
+                    key=_canonical_key(message),
+                )
+                metadata: RecordMetadata = await delivery
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

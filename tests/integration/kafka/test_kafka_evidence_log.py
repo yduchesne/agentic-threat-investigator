@@ -43,7 +43,9 @@ from agentic_threat_investigator.app.evidence_message import (
     encode_evidence_message,
 )
 from agentic_threat_investigator.app.persistence.repositories import (
+    EvidenceBatchPersistenceItemResult,
     EvidenceBatchPersistenceResult,
+    EvidencePersistenceOutcome,
     PreparedEvidenceBatch,
 )
 from agentic_threat_investigator.infrastructure.kafka.evidence_log import (
@@ -129,11 +131,16 @@ async def _publish_many(
 
 
 class RecordingPersistenceDouble(EvidenceBatchPersistenceService):
-    """Deterministic double of the PR 28E persistence boundary (no PostgreSQL)."""
+    """Deterministic double of the PR 28E persistence boundary (no PostgreSQL).
 
-    def __init__(self, result: EvidenceBatchPersistenceResult | None = None) -> None:
-        """Initialize with a fixed result or an empty default."""
-        self.result = result or EvidenceBatchPersistenceResult(items=())
+    Mirrors the production contract: one :class:`EvidenceBatchPersistenceResult`
+    item per prepared record (the real adapter guards
+    ``len(items) == len(records)``), each reported as a fresh ``CREATED``
+    version-1 persistence like the first batch of a new Evidence (I28E-01).
+    """
+
+    def __init__(self) -> None:
+        """Initialize an unstarted boundary with no recorded calls."""
         self.calls: list[PreparedEvidenceBatch] = []
         self.fail: BaseException | None = None
 
@@ -145,11 +152,21 @@ class RecordingPersistenceDouble(EvidenceBatchPersistenceService):
     async def persist(
         self, prepared: PreparedEvidenceBatch
     ) -> EvidenceBatchPersistenceResult:
-        """Record the prepared batch and return the deterministic result."""
+        """Record the prepared batch and return one result item per record."""
         self.calls.append(prepared)
         if self.fail is not None:
             raise self.fail
-        return self.result
+        items = tuple(
+            EvidenceBatchPersistenceItemResult(
+                message_id=record.message_id,
+                evidence_id=record.converted.evidence.id,
+                evidence_observation_id=record.observation_candidate_id,
+                outcome=EvidencePersistenceOutcome.CREATED,
+                version=1,
+            )
+            for record in prepared.records
+        )
+        return EvidenceBatchPersistenceResult(items=items)
 
 
 # ---------------------------------------------------------------------------
@@ -307,8 +324,8 @@ async def test_i28g_05_no_commit_causes_redelivery(
     await recreated.start()
     try:
         redelivered = await _poll_until(recreated, 10)
-        assert {record.message for record in redelivered.records} == {
-            record.message for record in polled.records
+        assert {record.message.message_id for record in redelivered.records} == {
+            record.message.message_id for record in polled.records
         }
         await recreated.commit(redelivered)
     finally:
@@ -333,7 +350,7 @@ async def test_i28g_06_independent_consumer_groups(
     await consumer_a.start()
     try:
         batch_a = await _poll_until(consumer_a, 10)
-        assert {r.message for r in batch_a.records} == {message}
+        assert {r.message.message_id for r in batch_a.records} == {message.message_id}
         await consumer_a.commit(batch_a)
     finally:
         await consumer_a.stop()
@@ -342,7 +359,7 @@ async def test_i28g_06_independent_consumer_groups(
     await consumer_b.start()
     try:
         batch_b = await _poll_until(consumer_b, 10)
-        assert {r.message for r in batch_b.records} == {message}
+        assert {r.message.message_id for r in batch_b.records} == {message.message_id}
         await consumer_b.commit(batch_b)
     finally:
         await consumer_b.stop()
@@ -485,7 +502,14 @@ async def test_i28g_12_clean_shutdown(
         await consumer.stop()
         await publisher.stop()
     await asyncio.sleep(0.05)
-    pending = [task for task in asyncio.all_tasks() if not task.done()]
+    # The currently executing pytest task is itself present in
+    # ``asyncio.all_tasks()`` and is necessarily not done while this test
+    # body runs, so leak detection excludes only that task. Any other
+    # pending task is a genuine background-task leak.
+    current = asyncio.current_task()
+    pending = [
+        task for task in asyncio.all_tasks() if task is not current and not task.done()
+    ]
     assert pending == []
 
 
@@ -568,8 +592,8 @@ async def test_v28g_03_adapter_redelivery(
     await second.start()
     try:
         redelivered = await _poll_until(second, 10)
-        assert {r.message for r in redelivered.records} == {
-            r.message for r in uncommitted.records
+        assert {r.message.message_id for r in redelivered.records} == {
+            r.message.message_id for r in uncommitted.records
         }
         await second.commit(redelivered)
     finally:
@@ -606,9 +630,14 @@ async def test_v28g_04_pr28e_compatibility_without_real_postgresql(
     )
     try:
         result = await service.process_next_batch()
-        # Poll -> prepare -> persistence double returned -> consumer committed.
+        # One record published; the real consumer polled it and the PR 28E
+        # persistence boundary received exactly one prepared record; the
+        # run result reflects that full interaction and the broker commit
+        # completed only after the persistence call succeeded.
         assert result.polled_count == 1
+        assert result.persisted_count == 1
         assert len(persistence.calls) == 1
+        assert len(persistence.calls[0].records) == 1
         assert result.committed is True
     finally:
         await consumer.stop()
@@ -656,7 +685,9 @@ async def test_v28g_05_commit_failure_safety_boundary(
     await recreated.start()
     try:
         redelivered = await _poll_until(recreated, 10)
-        assert {r.message for r in redelivered.records} == set(messages)
+        assert {r.message.message_id for r in redelivered.records} == {
+            message.message_id for message in messages
+        }
         await recreated.commit(redelivered)
     finally:
         await recreated.stop()

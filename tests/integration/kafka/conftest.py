@@ -6,8 +6,9 @@ The deterministic local broker is supplied by the integration harness
 (``integration-test.sh``) as ``ATI_EVIDENCE_KAFKA_BOOTSTRAP``. When the
 variable is absent the kafka integration tests skip cleanly rather than
 failing on a missing external service; the unit gate never touches a broker.
-A session-scoped Evidence topic with multiple partitions is provisioned once
-per test run, and consumer group IDs are isolated per test.
+A fresh multi-partition Evidence topic is provisioned per test (never shared
+between tests), and consumer group IDs are isolated per test, so each test
+reads only the records it published.
 """
 
 from __future__ import annotations
@@ -43,14 +44,19 @@ async def kafka_bootstrap() -> AsyncIterator[str]:
     yield bootstrap
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def evidence_topic(kafka_bootstrap: str) -> AsyncIterator[str]:
-    """Create one session-scoped multi-partition Evidence topic and yield it.
+    """Create one fresh multi-partition Evidence topic per test and yield it.
 
-    A unique topic name isolates this test run from prior runs (no state
-    bleed); three partitions prove the PR 28G multi-stream abstraction.
+    Every Kafka integration test gets a newly created, empty, three-partition
+    Evidence topic that no previous test has published to (no record/state
+    bleed between tests). It also carries a unique run fragment so repeated
+    runs do not collide. Three partitions prove the PR 28G multi-stream
+    abstraction. Topics are not deleted here: Redpanda is an ephemeral
+    integration-test broker destroyed at suite teardown.
     """
-    topic = f"ati.evidence.{uuid.uuid4().hex[:8]}"
+    run_id = uuid.uuid4().hex[:8]
+    topic = f"ati.evidence.{run_id}.{uuid.uuid4().hex[:6]}"
     partitions = await ensure_evidence_topic(
         bootstrap_servers=kafka_bootstrap, topic=topic, partitions=3
     )

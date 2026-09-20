@@ -103,13 +103,21 @@ def _record(message: EvidenceMessage, partition: int, offset: int) -> ConsumerRe
 
 
 class FakeProducer(AsyncKafkaProducer):
-    """Deterministic aiokafka producer boundary double."""
+    """Deterministic aiokafka producer boundary double.
+
+    Faithfully models aiokafka 0.14.x's two-stage ``send`` contract:
+    awaiting ``send()`` yields an ``asyncio.Future``, and awaiting that
+    future yields the ``RecordMetadata`` (or raises the delivery failure).
+    The fake never lets the adapter treat the first-await result as
+    metadata.
+    """
 
     def __init__(self) -> None:
         """Initialize an unstarted double with empty delivery records."""
         self.started = False
         self.stopped = False
         self.sends: list[dict[str, Any]] = []
+        self.deliveries: list[asyncio.Future[RecordMetadata]] = []
         self.results: list[RecordMetadata | BaseException] = []
         self.fail_send: BaseException | None = None
 
@@ -127,8 +135,8 @@ class FakeProducer(AsyncKafkaProducer):
         value: bytes | None = None,
         key: bytes | None = None,
         partition: int | None = None,
-    ) -> RecordMetadata:
-        """Record the send and return the next delivery outcome."""
+    ) -> asyncio.Future[RecordMetadata]:
+        """Record the send and return the delivery future of the outcome."""
         self.sends.append(
             {"topic": topic, "value": value, "key": key, "partition": partition}
         )
@@ -137,10 +145,17 @@ class FakeProducer(AsyncKafkaProducer):
         index = len(self.sends) - 1
         if index < len(self.results):
             outcome = self.results[index]
-            if isinstance(outcome, BaseException):
-                raise outcome
-            return cast(RecordMetadata, outcome)
-        return _metadata(partition=0, offset=len(self.sends) - 1)
+        else:
+            outcome = _metadata(partition=0, offset=len(self.sends) - 1)
+        delivery: asyncio.Future[RecordMetadata] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self.deliveries.append(delivery)
+        if isinstance(outcome, BaseException):
+            delivery.set_exception(outcome)
+        else:
+            delivery.set_result(cast(RecordMetadata, outcome))
+        return delivery
 
 
 class FakeConsumer(AsyncKafkaConsumer):
@@ -291,6 +306,27 @@ class TestPublisher:
         assert [record.message for record in result.records] == messages
         assert result.records[0].position.stream == 5
         assert result.records[1].position.stream == 1
+
+    @pytest.mark.asyncio
+    async def test_p07b_send_first_await_is_delivery_future_regression(
+        self,
+    ) -> None:
+        """E28G-P07b regression: publish awaits the delivery future for metadata.
+
+        aiokafka 0.14.x ``send()`` yields an ``asyncio.Future`` on its first
+        await; only a second await yields ``RecordMetadata``. If the adapter
+        treated the first-await result as metadata, position construction
+        would fail with an ``AttributeError``. The fake models the real
+        two-stage contract, so this proves the adapter consumes both stages.
+        """
+        publisher, producer = await _started_publisher()
+        producer.results = [_metadata(partition=2, offset=9)]
+        result = await publisher.publish([_message()])
+        # The first-await result is a Future, never already-made metadata.
+        assert len(producer.deliveries) == 1
+        assert isinstance(producer.deliveries[0], asyncio.Future)
+        # The published position comes from the resolved RecordMetadata.
+        assert result.records[0].position == EvidenceLogPosition(stream=2, offset=9)
 
     @pytest.mark.asyncio
     async def test_p08_operational_send_failure_typed_error(self) -> None:
