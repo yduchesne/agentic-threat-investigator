@@ -283,6 +283,34 @@ The tests pin `OTEL_SEMCONV_STABILITY_OPT_IN` to an empty value so the
 resolved official instrumentation deterministically emits its default
 semantic-convention names in any developer environment.
 
+PR 29B-2 keeps the same deterministic, offline policy for the API telemetry
+lifecycle and adds the API-L01..API-L07 unit matrix in
+`tests/unit/api/test_telemetry_lifecycle.py`, using the real `create_app`
+lifespan over an `ApiComposition` double plus a plain seam-level harness with
+in-memory OTel providers — no database, Kafka/Redpanda, Collector,
+Prometheus, Jaeger, Loki, Grafana, Docker/Podman, or live services:
+
+- **API-L01/API-L07**: on normal shutdown `ApiComposition.dispose()` runs
+  before the telemetry-shutdown callback, which runs exactly once per
+  application lifecycle;
+- **API-L02**: when API disposal raises, telemetry shutdown is still
+  attempted and the original disposal exception remains authoritative;
+- **API-L04**: when application startup fails before serving, the
+  `finally`-equivalent seam cleanup still runs and the original startup
+  exception propagates;
+- **API-L03**: disabled telemetry (no providers, no HTTP instrumentation)
+  completes the same production-style sequence safely through the real
+  `configure_telemetry`/`shutdown_telemetry`;
+- **API-L05**: a request executes and its PR 29B-1 HTTP server span records
+  before any shutdown, proving providers are never shut down prematurely;
+- **API-L06**: a failing provider shutdown stays fail-open inside
+  `shutdown_telemetry()` (logged, contained) and never replaces application
+  semantics.
+
+API-L08 (exactly one direct `opentelemetry-instrumentation-fastapi`
+declaration) is enforced by dependency review and the repository build
+(`uv lock`), consistent with the no-brittle-text-test policy.
+
 Priority unit-test areas include:
 
 - entity canonicalization;
