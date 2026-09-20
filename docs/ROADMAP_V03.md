@@ -84,8 +84,11 @@ PR 29A must establish the semantic contract used by the remainder of the series.
 Instrument architectural boundaries, especially functions or methods fronting a
 distributed system or network connection. Initial boundaries include:
 
-- PostgreSQL calls;
+- every concrete PostgreSQL repository method that performs database I/O;
+- PostgreSQL UnitOfWork transaction lifetime plus commit/rollback execution;
 - Kafka-compatible Evidence producer/consumer operations;
+- Kafka/Redpanda consumer-flow health, including authoritative consumer-group
+  lag and the metrics required to compare producer and consumer cadence;
 - datasource HTTP/network acquisition;
 - external intelligence-provider calls;
 - LLM/model calls;
@@ -119,14 +122,28 @@ The contract must cover at least:
 - Evidence batch commit failures;
 - Evidence create outcomes;
 - Evidence append outcomes;
-- Evidence ignore outcomes;
+- Evidence unchanged outcomes (the current persistence contract's
+  `UNCHANGED` outcome; do not invent a parallel `ignore` domain outcome);
 - Evidence processing failures;
+- PostgreSQL repository-operation latency/failure metrics with bounded
+  repository and operation dimensions;
+- PostgreSQL UnitOfWork transaction lifetime and commit/rollback
+  latency/outcome metrics;
+- Kafka publish, poll, and offset-commit latency/failure metrics;
+- producer-published, consumer-received, successfully-processed, and
+  successfully-committed Evidence message counts;
+- authoritative Kafka/Redpanda consumer-group lag per topic/partition, with
+  aggregate lag and lag trend derived in Prometheus/Grafana;
 - latency histograms for external/distributed operations where aggregate
   latency is operationally useful;
-- bounded queue/backlog/lag gauges where ATI can measure them reliably.
+- bounded queue/backlog gauges only where the underlying system exposes
+  authoritative state.
 
-The exact semantics of sent, received, committed, create, append, and ignore
-must be documented before instrumentation lands.
+The exact semantics of sent/published, received, processed, committed, create,
+append, and unchanged must be documented before instrumentation lands.
+Consumer lag must come from authoritative Kafka/Redpanda group/partition state,
+not from an application-side approximation. Backlog age should be exposed only
+when the deployed Redpanda version provides a reliable authoritative source.
 
 Attributes may describe bounded dimensions such as datasource instance,
 semantic format, consumer, operation, or outcome when their cardinality is
@@ -186,6 +203,42 @@ Deliver:
 Do not instrument the entire application in this PR. The purpose of 29A is to
 make telemetry semantics stable before call sites multiply.
 
+#### PR 29A-1 follow-up requirements
+
+PR 29A-1 is a logical follow-up implemented on the same PR 29A branch/PR. It
+freezes additional operational semantics required before application-wide
+instrumentation:
+
+1. **PostgreSQL repository coverage:** every public method of a concrete
+   PostgreSQL repository/resolver that can execute PostgreSQL I/O is a
+   telemetry boundary. Repository spans/latency use bounded static
+   repository+operation dimensions; SQL text, bind parameters, IDs, and other
+   high-cardinality values are prohibited.
+2. **PostgreSQL UnitOfWork coverage:** transaction lifetime is measured
+   independently from repository calls. Implicit commit/rollback on context
+   exit and explicit `commit()`/`rollback()` execution are observable,
+   including latency and failure outcomes. Repository spans intentionally nest
+   inside the UoW transaction span.
+3. **No initial SQLAlchemy/psycopg auto-instrumentation:** ATI instruments its
+   stable repository/UoW boundaries to avoid duplicate spans, SQL-content
+   leakage, and implementation-level noise.
+4. **Kafka flow coverage:** publish, poll, offset commit, received message
+   count, successfully processed message count, and successfully committed
+   message count are distinct semantics. Partial publish failure counts only
+   messages whose broker acknowledgement is known to have succeeded.
+5. **Cadence/lag contract:** dashboards must be able to compare producer
+   publication rate with consumer receive/process/commit rates and correlate
+   them with authoritative consumer-group lag. Lag is partition-aware broker
+   state; aggregate lag and lag trend are derived views, not application
+   counters.
+6. **Structural repository coverage:** unit tests or an explicit reviewed
+   operation registry must make it difficult to add a new PostgreSQL repository
+   I/O method without telemetry. Do not use brittle source-text parsing.
+
+Instrumentation must remain observational: it may not change transaction,
+delivery, acknowledgement, retry, idempotency, redelivery, or cancellation
+semantics.
+
 ### Decorator-first instrumentation policy
 
 As much as practical, ATI annotates stable function and method execution
@@ -226,8 +279,11 @@ runtime semantics expressible as decorators.
 
 Instrument the delivered architecture against the 29A contract:
 
-1. PostgreSQL/distributed-I/O boundaries.
-2. Kafka-compatible Evidence publication and consumption.
+1. All PostgreSQL repository I/O boundaries plus UnitOfWork transaction
+   lifetime and commit/rollback operations, following the PR 29A-1 contract.
+2. Kafka-compatible Evidence publication, polling, processing, and offset
+   commit operations, including the distinct throughput counters required to
+   compare producer and consumer cadence.
 3. Datasource acquisition/network boundaries.
 4. Evidence persistence and processing outcomes.
 5. Geo-resolution external/persistence boundaries where operationally useful.
@@ -251,6 +307,11 @@ Add source-controlled local/deployment infrastructure under
 - Loki for logs;
 - Grafana for visualization/correlation;
 - required OpenTelemetry export/collection wiring;
+- authoritative Redpanda/Kafka operational metrics needed for consumer-group
+  lag, partition/topic health, broker request health, replication, and
+  storage/capacity visibility;
+- PostgreSQL server-health metrics where appropriate (connections/pool
+  saturation, transactions/rollbacks, locks/deadlocks, and capacity);
 - Compose/deployment integration appropriate to ATI's existing runtime.
 
 The observability stack is optional infrastructure. Its failure or absence must
@@ -268,7 +329,11 @@ Initial dashboards should answer:
 - Is work accumulating?
 - Where is time being spent?
 - Which distributed/external boundaries are failing?
-- What are Evidence throughput and create/append/ignore outcomes?
+- What are Evidence throughput and create/append/unchanged outcomes?
+- Are Evidence consumers keeping pace with producers?
+- Is Kafka/Redpanda consumer lag growing, stable, or draining, and on which
+  partitions?
+- Is PostgreSQL repository/UoW latency constraining consumer throughput?
 - What is the state of datasource and investigation activity?
 
 Dashboard definitions must be reproducible from the repository rather than
