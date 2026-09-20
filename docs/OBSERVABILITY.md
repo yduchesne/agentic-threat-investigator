@@ -6,7 +6,8 @@
 - [Observability layers](#observability-layers)
 - [Internal abstraction](#internal-abstraction)
 - [LangSmith v0.1](#langsmith-v01)
-- [Future open-source replacement](#future-open-source-replacement)
+- [OpenTelemetry architecture (PR 29)](#opentelemetry-architecture-pr-29)
+- [LLM observability backends](#llm-observability-backends)
 - [Correlation](#correlation)
 - [Provider telemetry](#provider-telemetry)
 - [Task dispatch](#task-dispatch)
@@ -65,11 +66,15 @@ class TraceBackend(ABC):
         ...
 ```
 
-Implementations may include:
+The abstraction has two deliberately distinct concerns:
 
-- `LangSmithObservability`;
-- `NoOpObservability`;
-- future `OpenTelemetryObservability`.
+- general application/distributed telemetry uses OpenTelemetry through ATI's
+  telemetry helpers and standard OTel APIs;
+- LLM/agent observability uses ATI's portable LLM-observability contract,
+  implemented by LangSmith, Langfuse, or NoOp adapters.
+
+Business/domain code must not depend directly on Prometheus, Jaeger, Loki,
+Grafana, LangSmith, or Langfuse APIs.
 
 ## LangSmith v0.1
 
@@ -96,33 +101,172 @@ ATI does not depend on LangSmith for:
 
 Tracing failures are non-fatal.
 
-## Future open-source replacement
+## OpenTelemetry architecture (PR 29)
 
-The architecture plans for a Podman-deployed open-source observability backend.
+PR 29 makes OpenTelemetry ATI's approved application-facing telemetry
+portability layer rather than a future possibility. ATI code uses
+`opentelemetry-api` and ATI-owned helpers; SDK/exporter composition belongs at
+the application boundary.
 
-OpenTelemetry is the preferred portability layer.
-
-Future topology may be:
+The approved general-observability topology is:
 
 ```text
 ATI services
     |
-ATI observability abstraction
+OpenTelemetry API / ATI telemetry helpers
     |
-OpenTelemetry
+OpenTelemetry SDK/exporters
     |
-OTel Collector
-    |
-+----------------------+
-| Langfuse             |
-| or Phoenix           |
-| or compatible backend|
-+----------------------+
++-------------+-------------+-------------+
+| Prometheus  | Jaeger      | Loki        |
+| metrics     | traces      | logs        |
++-------------+-------------+-------------+
+              |
+           Grafana
 ```
 
-Langfuse and Phoenix are plausible LLM-aware replacements. Generic OTel-compatible systems such as Jaeger or Grafana Tempo may also participate where appropriate.
+Prometheus is the metrics backend, Jaeger the distributed-trace backend, Loki
+the log backend, and Grafana the visualization/correlation surface. Application
+and domain code must not import backend-specific APIs merely to emit telemetry.
 
-v0.1 should architect for OTel portability without requiring a full OTel stack before it provides value.
+Source-controlled deployment/provisioning assets belong under:
+
+```text
+infra/
+  observability/
+    prometheus/
+    jaeger/
+    loki/
+    grafana/
+      provisioning/
+        datasources/
+        dashboards/
+      dashboards/
+```
+
+Grafana dashboards and datasource provisioning are code, not manually maintained
+runtime state.
+
+### Instrumentation boundary
+
+Trace/timing instrumentation belongs at stable architectural boundaries,
+especially functions or methods fronting distributed systems or network I/O:
+PostgreSQL, Kafka-compatible Evidence publication/consumption, datasource HTTP
+acquisition, external intelligence providers, LLM/model calls, and future
+external embedding/object-storage calls.
+
+Representative canonical spans are:
+
+- `ati.datasource.acquire`;
+- `ati.datasource.convert`;
+- `ati.evidence.publish`;
+- `ati.evidence.consume`;
+- `ati.evidence.persist`;
+- `ati.geo.resolve`;
+- `ati.investigation.execute`;
+- `ati.agent.invoke`;
+- `ati.llm.invoke`;
+- `ati.report.generate`.
+
+Do not instrument every internal helper merely because it is callable. Spans
+should expose meaningful execution boundaries. Histograms complement spans when
+aggregate latency is operationally useful; they are not required as a duplicate
+of every span.
+
+### Decorator-first instrumentation
+
+As much as practical, stable function and method execution boundaries are
+annotated with thin ATI-owned Python decorators built on the OpenTelemetry API.
+Decorators are the preferred mechanism for span lifecycle, operation duration,
+standard success/failure status, exception recording, and static or
+bounded-cardinality attributes. This keeps OpenTelemetry lifecycle boilerplate
+out of application code while preserving backend independence.
+
+Conceptually:
+
+```python
+@traced("ati.evidence.persist")
+async def persist_batch(...):
+    ...
+```
+
+A combined operation decorator may also declare both a span and an aggregate
+latency metric when both are semantically useful.
+
+Decorator-based instrumentation is not mandatory for telemetry whose value is
+known only from runtime/domain outcomes inside an operation. Evidence
+create/append/ignore outcomes, committed record counts, batch sizes, publication
+counts, retry outcomes, and similar semantic events should use explicit
+telemetry calls at the point where their meaning is known.
+
+ATI telemetry decorators must not import or expose Prometheus-, Jaeger-, Loki-,
+Grafana-, LangSmith-, or Langfuse-specific APIs.
+
+Standard W3C trace context is propagated across distributed/asynchronous
+boundaries where supported, including Kafka-compatible message headers.
+Structured logs include the current trace/span IDs so operators can correlate
+Loki records with Jaeger traces through Grafana.
+
+Each ATI process has meaningful OTel service/resource identity. Prefer standard
+OpenTelemetry environment variables for SDK/exporter configuration; add
+ATI-specific settings only for ATI-owned semantics.
+
+### Metric cardinality and Evidence-flow semantics
+
+Metric names and units are stable ATI contracts. Metric attributes must have
+bounded, controlled cardinality. Bounded dimensions such as operation,
+outcome, consumer, semantic format, or datasource instance may be used when
+their value sets are controlled.
+
+Never use Evidence IDs, Entity IDs, Investigation IDs, IP/domain values,
+execution UUIDs, message IDs, or other unbounded identifiers as Prometheus
+labels. Such identifiers belong in traces or structured logs when allowed by
+the data-minimization policy.
+
+PR 29 defines counters for at least:
+
+- Evidence messages sent;
+- Evidence messages received;
+- Evidence batches committed;
+- Evidence batch commit failures;
+- Evidence create outcomes;
+- Evidence append outcomes;
+- Evidence ignore outcomes;
+- Evidence processing failures.
+
+The exact meanings of `sent`, `received`, `committed`, `create`,
+`append`, and `ignore` are fixed in the PR 29A telemetry contract before
+application-wide instrumentation is added. Queue/backlog/consumer-lag gauges
+may be added only where ATI can measure them reliably.
+
+Telemetry remains fail-open and is never authoritative product state.
+
+## LLM observability backends
+
+General OpenTelemetry tracing and LLM/agent observability are complementary,
+not competing, concerns. PR 29 introduces a portable ATI LLM-observability
+contract with configuration-selectable backends:
+
+- LangSmith;
+- Langfuse;
+- NoOp / disabled.
+
+LangSmith remains the currently delivered v0.1 LLM-development backend.
+Langfuse is an approved alternative target for PR 29. Backend-specific
+credentials/configuration are required only when that backend is selected.
+
+ATI defines the portable semantics it needs — agent/LLM operation identity,
+model metadata, timing, token usage where available, structured-output
+validation, safe correlation metadata, and evaluation metadata where
+appropriate. Adapters translate those semantics to each backend. ATI does not
+attempt to expose every vendor-specific feature through a lowest-common-
+denominator interface.
+
+An LLM invocation may emit both an OpenTelemetry operational span and an event
+or trace to the selected LLM-observability backend. The OTel record answers
+distributed-system/runtime questions; LangSmith or Langfuse supports AI-specific
+debugging and evaluation. Neither backend owns Investigation state, Evidence,
+Assessment, Report, retries, audit, timeline, or correctness.
 
 ## LLM operation telemetry (PR 20B)
 
@@ -379,7 +523,12 @@ Examples:
 - `ati_jobs_pending`
 - `ati_jobs_running`
 
-A Prometheus-compatible export path may be added without changing the domain.
+PR 29 standardizes Prometheus as ATI's metrics backend through OpenTelemetry
+export while keeping metric semantics independent of the backend API.
+
+PR 29 also extends this vocabulary with the canonical Evidence-flow counters
+defined above. High-cardinality domain identifiers remain prohibited as metric
+labels.
 
 ## Evaluation portability
 
