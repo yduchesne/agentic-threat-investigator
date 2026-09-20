@@ -179,8 +179,48 @@ Deliver:
 9. Focused unit-test facilities using in-memory OpenTelemetry providers where
    useful.
 
+10. Decorator-first instrumentation helpers for stable function/method
+    execution boundaries. Prefer thin ATI-owned decorators over repeated
+    OpenTelemetry span/timer lifecycle boilerplate.
+
 Do not instrument the entire application in this PR. The purpose of 29A is to
 make telemetry semantics stable before call sites multiply.
+
+### Decorator-first instrumentation policy
+
+As much as practical, ATI annotates stable function and method execution
+boundaries with Python decorators owned by ATI and implemented on top of the
+OpenTelemetry API. Typical uses include span creation, duration measurement,
+standard success/failure status, exception recording, and static or
+bounded-cardinality attributes.
+
+Conceptually:
+
+```python
+@traced("ati.evidence.persist")
+async def persist_batch(...):
+    ...
+```
+
+or, when both tracing and aggregate latency are part of the contract:
+
+```python
+@telemetry.operation(
+    span="ati.evidence.persist",
+    latency="ati.evidence.persist.duration",
+)
+async def persist_batch(...):
+    ...
+```
+
+Decorators must remain thin and backend-neutral; they must not couple business
+code to Prometheus, Jaeger, Loki, Grafana, LangSmith, or Langfuse.
+
+Explicit telemetry calls remain appropriate for semantic events or measurements
+whose meaning depends on runtime results inside an operation, such as Evidence
+create/append/ignore outcomes, committed record counts, batch size, publication
+counts, or retry outcomes. Do not distort domain code merely to make such
+runtime semantics expressible as decorators.
 
 ### PR 29B — Application instrumentation
 
