@@ -16,6 +16,7 @@
 - [Synthetic HTTP provider integration tests](#synthetic-http-provider-integration-tests)
 - [Typical provider issues to watch for](#typical-provider-issues-to-watch-for)
 - [Database integration tests](#database-integration-tests)
+- [Redpanda / Kafka integration tests (PR 28G)](#redpanda--kafka-integration-tests-pr-28g)
 - [Migration tests](#migration-tests)
 - [Test isolation](#test-isolation)
 - [Synthetic fixtures](#synthetic-fixtures)
@@ -998,6 +999,40 @@ They validate:
   staging or mutation.
 
 Do not replace critical PostgreSQL integration coverage with SQLite.
+
+## Redpanda / Kafka integration tests (PR 28G)
+
+The PR 28G real-broker tests (`tests/integration/kafka/`) prove the
+Kafka-compatible Evidence adapters against a real Redpanda broker using
+real `aiokafka` clients. They cover canonical EvidenceMessage round trip,
+same-Evidence partition affinity, multi-Evidence/multi-partition behavior,
+manual offset commit and group restart, no-commit redelivery, independent
+consumer groups, corrupt/key-mismatched payloads failing closed, producer
+metadata, empty publication, clean shutdown, and PR 28E application
+compatibility through a deterministic persistence double.
+
+Prerequisites and running:
+
+- `podman`/`podman-compose` (the same toolchain as the PostgreSQL
+  integration suite).
+- `./integration-test.sh` provisions an isolated Redpanda broker (via
+  `compose.yaml`) alongside the isolated PostgreSQL database, waits for the
+  Kafka API to become ready, and exposes it to the test process as
+  `ATI_EVIDENCE_KAFKA_BOOTSTRAP`. The Evidence topic is created explicitly
+  with **3 partitions** so the multi-stream (partition) abstraction is
+  actually exercised; each test uses an isolated topic/group identity so no
+  state bleeds across runs or prior runs.
+- The broker tests require no Internet and no Schema Registry; Redpanda is
+  Kafka-compatible test/development infrastructure only, never a Python
+  runtime dependency.
+- Unit matrix (`tests/unit/infrastructure/kafka/`) covers the adapter
+  boundaries with deterministic `aiokafka` doubles (E28G-P publisher,
+  E28G-R consumer poll, E28G-K commit) and runs offline without any broker.
+
+Responsibility split: unit tests pin the adapter contracts and failure
+mapping; real-broker tests pin partition/offset/group/redelivery/restart
+semantics. Full PostgreSQL crash/replay closure across the real producer -
+> broker -> `EvidencePersistenceConsumer` -> PostgreSQL path remains PR 28H.
 
 ## Migration tests
 

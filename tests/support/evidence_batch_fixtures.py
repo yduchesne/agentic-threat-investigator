@@ -169,7 +169,10 @@ def message_batch(
     return EvidenceBatch(
         consumer_id=EvidenceConsumerId(consumer_id),
         records=tuple(
-            EvidenceLogRecord(position=EvidenceLogPosition(index), message=message)
+            EvidenceLogRecord(
+                position=EvidenceLogPosition(stream=0, offset=index),
+                message=message,
+            )
             for index, message in enumerate(messages)
         ),
     )

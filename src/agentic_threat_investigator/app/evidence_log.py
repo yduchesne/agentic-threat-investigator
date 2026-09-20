@@ -16,13 +16,30 @@ Dominant invariants of this module:
   the entire log-instance lifetime even after every consumer commits them.
 - Delivery is **at-least-once**. Only an explicit ``commit(batch)`` advances
   one consumer's committed position. Polling without commit changes nothing.
+- A partitional transport is described by broker-neutral **streams**. A
+  ``(stream, offset)`` :class:`EvidenceLogPosition` names one lane and its
+  offset within that lane; records sharing a stream have monotonically
+  increasing offsets, while **no ordering relationship exists across
+  different streams**. A whole ``EvidenceBatch`` may span several streams;
+  ``commit(batch)`` acknowledges every represented stream at once.
 - Positions are **transport state only**. ``EvidenceLogPosition`` is a
   per-instance ordering index, never an Evidence ID, a message ID, an
   observation-candidate ID, or a PostgreSQL idempotency key. Committed
-  cursors are per-consumer transport state as well.
+  cursors are per-consumer transport state as well. Neither ``stream`` nor
+  ``offset`` is a domain identity.
 - The contracts are **broker-neutral**: no Kafka topics, partitions,
   offsets, consumer-group protocols, rebalance callbacks, broker objects,
   or generic event-bus framework types appear anywhere in this module.
+  Distributions map ``stream=Kafka partition`` / ``offset=Kafka offset`` at
+  the infrastructure boundary, never here.
+- Publication is **success-atomic, not failure-atomic**. A successful
+  ``publish()`` return means every supplied message was accepted according
+  to the implementation's durable-publication policy; on failure the
+  publication extent is unspecified (zero, some, or all messages may
+  already have been accepted). The in-memory implementation is the
+  stronger exception: its injected publish failure guarantees that **no
+  record** was appended. That stronger guarantee is implementation-
+  specific, not a universal ``EvidencePublisher`` requirement.
 - The in-memory implementation is **process-lifetime only**. It models
   restart within one log instance (recreating a consumer handle with the
   same identity resumes the same cursor) but is not durable across process
@@ -84,25 +101,38 @@ class EvidenceCommitError(EvidenceLogError):
 
 @dataclass(frozen=True, order=True)
 class EvidenceLogPosition:
-    """Zero-based ordered position of one record within one log instance.
+    """Broker-neutral ``(stream, offset)`` position of one log record.
 
-    Positions are assigned monotonically at publication time, ordered by
-    publication, and never reused. A position is transport state only: it
-    is not an Evidence ID, a message ID, an observation-candidate ID, or a
-    PostgreSQL idempotency key, and it is never serialized into an
-    :class:`EvidenceMessage`.
+    ``stream`` is an opaque non-negative transport-local ordering lane and
+    ``offset`` is a non-negative zero-based index within that lane. Records
+    sharing a stream have monotonically increasing offsets; **no ordering
+    relationship exists between positions belonging to different streams**,
+    even though dataclass ordering exists for deterministic tests.
+
+    Mappings to concrete transports (decided at the infrastructure boundary,
+    never here): ``InMemoryEvidenceLog`` uses a single stream ``0`` with the
+    existing scalar position as ``offset``; Kafka maps ``stream=partition``
+    and ``offset=offset``. Neither field is a domain identity: this is
+    transport state only, never an Evidence ID, a message ID, an
+    observation-candidate ID, or a PostgreSQL idempotency key, and it is
+    never serialized into an :class:`EvidenceMessage`.
     """
 
-    value: int
+    stream: int
+    offset: int
 
     def __post_init__(self) -> None:
-        """Reject negative or non-integer positions at construction."""
-        if (
-            not isinstance(self.value, int)
-            or isinstance(self.value, bool)
-            or self.value < 0
-        ):
-            raise ValueError("log position must be a non-negative integer")
+        """Reject negative, non-integer, or boolean fields at construction."""
+        for name in ("stream", "offset"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(
+                    "log position stream and offset must be non-negative integers"
+                )
+
+    def __str__(self) -> str:
+        """Return a bounded transport-neutral string form of the position."""
+        return f"position(stream={self.stream}, offset={self.offset})"
 
 
 @dataclass(frozen=True)
@@ -152,6 +182,14 @@ class EvidenceBatch:
     and the ordered records returned by one ``poll()`` call and contains no
     mutable acknowledgement state. An empty poll returns an empty batch for
     the same consumer; committing an empty batch is a no-op.
+
+    Records are one poll result and may span several streams. Tuple order is
+    the delivery/poll order and implies **no cross-stream ordering
+    guarantee**; within each represented stream records returned by a
+    compliant consumer are offset-ordered. ``commit(batch)`` acknowledges
+    the complete batch: every represented stream advances through its
+    highest represented offset. A commit-offset dictionary never appears in
+    the batch.
     """
 
     consumer_id: EvidenceConsumerId
@@ -172,10 +210,19 @@ class EvidencePublishResult:
 class EvidencePublisher(ABC):
     """Broker-neutral publisher contract of the Evidence log (PR 28D).
 
-    Implementations append PR 28C messages in input order as one contiguous
-    run of records. Publishing the same message twice creates two records:
-    the log is not a dedupe service and downstream persistence owns
-    semantic idempotency.
+    Implementations append PR 28C messages in input order as one run of
+    records. Publishing the same message twice creates two records: the log
+    is not a dedupe service and downstream persistence owns semantic
+    idempotency.
+
+    Publication is **success-atomic, not failure-atomic**: a successful
+    return means every supplied message was accepted according to the
+    implementation's durable-publication policy; a raised failure leaves
+    the publication extent unspecified — zero, some, or all messages may
+    already have been accepted by the broker. Implementations may provide a
+    stronger failure guarantee (e.g. the in-memory log guarantees that an
+    injected publish failure appends nothing), but that stronger behavior
+    must not be documented as a universal requirement.
     """
 
     @abstractmethod
@@ -184,37 +231,46 @@ class EvidencePublisher(ABC):
     ) -> EvidencePublishResult:
         """Publish one ordered run of messages and return the appended records.
 
-        A single call appends all records contiguously and is all-or-nothing:
-        on failure nothing is appended and no position is consumed. An empty
-        run is a deterministic no-op returning zero records (unless a
-        one-shot publish fault is armed).
+        A single call may append records across multiple transport streams
+        (a distributed broker may route different messages to different
+        lanes); the returned record tuple corresponds to input message order.
+        A successful return means every supplied message was durably
+        accepted by the implementation; on failure the publication extent
+        is unspecified. An empty run is a legal no-op returning zero records.
         """
 
 
 class EvidenceConsumer(ABC):
     """Broker-neutral consumer contract of the Evidence log (PR 28D).
 
-    Polling is bounded and non-acknowledging: ``poll(max_messages)``
-    returns at most ``max_messages`` records starting at the consumer's
-    committed cursor without changing it, so a repeated poll before commit
-    returns the same prefix and an uncommitted batch is redeliverable. Only
-    an explicit ``commit(batch)`` advances the cursor, and only for an
-    exact valid contiguous batch starting at the current cursor. Polling
-    returns immediately when nothing is available; there is no blocking
-    long-poll and no in-flight lease: the committed cursor is the
-    authoritative consumer state.
+    ``poll(max_messages)`` returns at most ``max_messages`` records and does
+    **not** acknowledge them. It may return records from multiple streams,
+    with each represented stream's offsets ordered; an empty poll is legal.
+    A transport may advance its in-process fetch position on poll even
+    though durable committed progress changes only through ``commit(batch)``
+    — a repeated pre-commit poll therefore need not return the exact same
+    prefix for every implementation (the in-memory log does; a partitioned
+    broker may fetch a different interleaving).
+
+    ``commit(batch)`` acknowledges the entire successfully processed batch:
+    for each represented stream, durable progress advances through the
+    highest offset represented in that batch. A failure is never reported as
+    success, and the caller must assume redelivery after a commit failure. A
+    distributed broker does not atomically commit offsets and an external
+    database.
     """
 
     @abstractmethod
     async def poll(self, max_messages: int) -> EvidenceBatch:
-        """Return the bounded next uncommitted prefix without acknowledging it."""
+        """Return at most ``max_messages`` records without acknowledging them."""
 
     @abstractmethod
     async def commit(self, batch: EvidenceBatch) -> None:
-        """Advance the committed cursor exactly past one valid batch.
+        """Acknowledge one entire valid batch across every represented stream.
 
-        Foreign, forged, skipped, reversed, or stale batches fail closed;
-        a commit failure never changes the cursor.
+        Foreign, forged, skipped, reversed, or stale batches fail closed; a
+        commit failure never reports success and never guarantees durable
+        progress.
         """
 
 
@@ -323,7 +379,7 @@ class InMemoryEvidenceLog:
             start = len(self._records)
             records = tuple(
                 EvidenceLogRecord(
-                    position=EvidenceLogPosition(start + index),
+                    position=EvidenceLogPosition(stream=0, offset=start + index),
                     message=message,
                 )
                 for index, message in enumerate(messages)
@@ -392,7 +448,15 @@ class InMemoryEvidenceLog:
                 self._fail_next_commit_global = False
                 raise EvidenceCommitError("injected commit failure")
             cursor = self._committed.get(consumer_id, 0)
-            first = batch.records[0].position.value
+            # The in-memory implementation owns exactly stream 0; a batch
+            # referencing any other stream cannot correspond to this log and
+            # must fail closed.
+            for record in batch.records:
+                if record.position.stream != 0:
+                    raise EvidenceCommitError(
+                        "in-memory log accepts only stream-0 batches"
+                    )
+            first = batch.records[0].position.offset
             if first < cursor:
                 raise EvidenceCommitError(
                     "batch starts before the committed cursor "
@@ -404,20 +468,20 @@ class InMemoryEvidenceLog:
                 )
             expected = first
             for record in batch.records:
-                position = record.position.value
-                if position != expected:
+                offset = record.position.offset
+                if offset != expected:
                     raise EvidenceCommitError(
                         "batch positions must be contiguous and ordered"
                     )
-                if position >= len(self._records):
+                if offset >= len(self._records):
                     raise EvidenceCommitError(
                         "batch references a position beyond the log"
                     )
-                if self._records[position] != record:
+                if self._records[offset] != record:
                     raise EvidenceCommitError(
                         "batch record does not match the authoritative log record"
                     )
-                expected = position + 1
+                expected = offset + 1
             self._committed[consumer_id] = expected
 
 

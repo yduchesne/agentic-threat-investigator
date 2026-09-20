@@ -77,4 +77,16 @@ CONFIG: dict[str, Any] = {
     "geo_resolver_max_attempts": 3,
     "geo_resolver_retry_base_seconds": 60.0,
     "geo_resolver_retry_max_seconds": 3600.0,
+    # Kafka-compatible distributed Evidence log (PR 28G). Local Redpanda
+    # development defaults only; SASL credentials are never placed here —
+    # only secret reference names (defaults omitted => plaintext).
+    "evidence_kafka": {
+        "bootstrap_servers": ["127.0.0.1:9092"],
+        "topic": "ati.evidence",
+        "consumer_group": "evidence-persistence",
+        "poll_timeout_ms": 3000,
+        "client_id": "ati-evidence",
+        "security_protocol": "PLAINTEXT",
+        "auto_offset_reset": "earliest",
+    },
 }

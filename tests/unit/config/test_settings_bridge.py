@@ -9,6 +9,8 @@ from pydantic import ValidationError
 
 from agentic_threat_investigator.config import (
     EmbeddingSettings,
+    EvidenceLogKafkaSettings,
+    KafkaSecurityProtocol,
     Settings,
     ensure_test_database_safe,
     get_settings,
@@ -139,3 +141,83 @@ def test_geo_resolver_bounds_default_and_validation() -> None:
         settings_from_config({"geo_resolver_max_attempts": 0})
     with pytest.raises(ValidationError):
         settings_from_config({"geo_resolver_poll_interval_seconds": -1})
+
+
+def test_evidence_kafka_default_and_validation() -> None:
+    """PR 28G Kafka log settings default locally and fail closed on bad input."""
+    settings = settings_from_config({})
+    kafka = settings.evidence_kafka
+    assert isinstance(kafka, EvidenceLogKafkaSettings)
+    assert kafka.bootstrap_servers == ("127.0.0.1:9092",)
+    assert kafka.topic == "ati.evidence"
+    assert kafka.consumer_group == "evidence-persistence"
+    assert kafka.poll_timeout_ms == 3000
+    assert kafka.security_protocol is KafkaSecurityProtocol.PLAINTEXT
+    assert kafka.auto_offset_reset == "earliest"
+
+    with pytest.raises(ValidationError, match="bootstrap_servers"):
+        settings_from_config(
+            {"evidence_kafka": {"bootstrap_servers": [], "topic": "t"}}
+        )
+    with pytest.raises(ValidationError, match="blank"):
+        settings_from_config(
+            {"evidence_kafka": {"bootstrap_servers": ["h:1"], "topic": "  "}}
+        )
+    with pytest.raises(ValidationError, match="consumer_group"):
+        settings_from_config(
+            {
+                "evidence_kafka": {
+                    "bootstrap_servers": ["h:1"],
+                    "topic": "t",
+                    "consumer_group": " ",
+                }
+            }
+        )
+    with pytest.raises(ValidationError):
+        settings_from_config(
+            {
+                "evidence_kafka": {
+                    "bootstrap_servers": ["h:1"],
+                    "topic": "t",
+                    "poll_timeout_ms": 0,
+                }
+            }
+        )
+    with pytest.raises(ValidationError):
+        settings_from_config(
+            {
+                "evidence_kafka": {
+                    "bootstrap_servers": ["h:1"],
+                    "topic": "t",
+                    "security_protocol": "NOT_A_PROTOCOL",
+                }
+            }
+        )
+    with pytest.raises(ValidationError, match="auto_offset_reset"):
+        settings_from_config(
+            {
+                "evidence_kafka": {
+                    "bootstrap_servers": ["h:1"],
+                    "topic": "t",
+                    "auto_offset_reset": "middle",
+                }
+            }
+        )
+    # A SASL profile is representable with secret reference names only.
+    secured = settings_from_config(
+        {
+            "evidence_kafka": {
+                "bootstrap_servers": ["h:1"],
+                "topic": "t",
+                "security_protocol": "SASL_PLAINTEXT",
+                "sasl_mechanism": "PLAIN",
+                "sasl_username_secret": "ATI_EVIDENCE_KAFKA_USER",
+                "sasl_password_secret": "ATI_EVIDENCE_KAFKA_PASS",
+            }
+        }
+    )
+    assert secured.evidence_kafka.sasl_username_secret == "ATI_EVIDENCE_KAFKA_USER"
+    assert secured.evidence_kafka.sasl_password_secret == "ATI_EVIDENCE_KAFKA_PASS"
+    assert (
+        secured.evidence_kafka.security_protocol is KafkaSecurityProtocol.SASL_PLAINTEXT
+    )

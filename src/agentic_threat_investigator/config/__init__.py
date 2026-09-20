@@ -12,6 +12,8 @@ from agentic_threat_investigator.config.config_utils import (
 from agentic_threat_investigator.config.settings import (
     DOCUMENT_CHUNK_EMBEDDING_DIMENSION,
     EmbeddingSettings,
+    EvidenceLogKafkaSettings,
+    KafkaSecurityProtocol,
     OperatingMode,
     Settings,
     ensure_test_database_safe,
@@ -25,6 +27,8 @@ __all__ = [
     "ConfigProfileNotFoundError",
     "Settings",
     "EmbeddingSettings",
+    "EvidenceLogKafkaSettings",
+    "KafkaSecurityProtocol",
     "OperatingMode",
     "DOCUMENT_CHUNK_EMBEDDING_DIMENSION",
     "ensure_test_database_safe",

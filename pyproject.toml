@@ -42,6 +42,9 @@ dependencies = [
   # the forked httpx2 package can never become importable (see the httpx2
   # note on langsmith).
   "langchain-openai>=1.6,<2",
+  # Kafka-compatible distributed Evidence log infrastructure (PR 28G).
+  # aiokafka 0.14.x is the first line shipping CPython 3.14 wheels.
+  "aiokafka>=0.14,<0.15",
 ]
 
 [dependency-groups]
@@ -154,6 +157,15 @@ known-first-party = ["agentic_threat_investigator"]
 strict = true
 python_version = "3.14"
 mypy_path = "src"
+
+# aiokafka ships no PEP 561 type stubs (verified when adding PR 28G's
+# dependency). The Kafka adapters therefore treat its public objects through
+# narrow dependency-boundary Protocols; this scoped override silences
+# import-untyped for the untyped third-party package only, never for ATI
+# code, and strict checking of our own modules remains fully enabled.
+[[tool.mypy.overrides]]
+module = ["aiokafka", "aiokafka.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
