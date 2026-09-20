@@ -17,6 +17,7 @@
 - [Typical provider issues to watch for](#typical-provider-issues-to-watch-for)
 - [Database integration tests](#database-integration-tests)
 - [Redpanda / Kafka integration tests (PR 28G)](#redpanda--kafka-integration-tests-pr-28g)
+- [Distributed Evidence ingestion closure (PR 28H)](#distributed-evidence-ingestion-closure-pr-28h)
 - [Migration tests](#migration-tests)
 - [Test isolation](#test-isolation)
 - [Synthetic fixtures](#synthetic-fixtures)
@@ -1031,8 +1032,43 @@ Prerequisites and running:
 
 Responsibility split: unit tests pin the adapter contracts and failure
 mapping; real-broker tests pin partition/offset/group/redelivery/restart
-semantics. Full PostgreSQL crash/replay closure across the real producer -
-> broker -> `EvidencePersistenceConsumer` -> PostgreSQL path remains PR 28H.
+semantics. Note that `tests/integration/kafka/conftest.py` provisions a
+fresh empty 3-partition Evidence topic per test (never shared between
+tests), with per-test consumer groups; the suite's assertions on exact
+batch sizes depend on that isolation.
+
+## Distributed Evidence ingestion closure (PR 28H)
+
+The PR 28H module `tests/integration/kafka/test_distributed_evidence_ingestion.py`
+(H28H-01..21) proves the complete production-shaped vertical slice against
+real Redpanda and real PostgreSQL, faking only the external Internet
+endpoint (`httpx.MockTransport` serving deterministic ThreatFox-format
+fixture bytes):
+
+- temporal semantics: fresh A, later A-equivalent (`UNCHANGED`, never
+exact replay), A->B, A->B->C, A->B->A recurrence (a distinct message
+appends v3), and one atomic multi-Evidence batch;
+- replay/idempotency: exact-message replay is a receipt no-op; same
+semantic state with a new datasource execution is a new receipt with
+unchanged EO history;
+- failure/recovery: failure before PostgreSQL commit (no partial state,
+no Kafka commit, same-group redelivery, one retry), PostgreSQL-commit-
+then-Kafka-commit-absent recovery, poll-then-stop redelivery, atomic
+multi-record rollback, committed-restart with no redelivery;
+- producer lifecycle: `COMPLETED` without a consumer, `publication_failed`
+failure, post-terminal lifecycle append rejection;
+- provenance: exact `EvidenceObservationEntity` and
+`RelationshipObservation` references per committed observation;
+- Investigation reproducibility: explicit observation-exact admission
+(two Investigations sharing one EO, one Investigation admitting v1+v2,
+and a later global EO never silently mutating prior admissions).
+
+Failure seams are narrow test wrappers only (a commit-failing consumer and
+a fail-before-commit persistence boundary); there are no production chaos
+APIs, no Kafka transactions, no retry topics/DLQ, no Schema Registry, no
+live Internet, and no ThreatFox clone/download. The real PostgreSQL
+integration lane, fresh per-test topics and groups, and the no-internet
+rule keep the module deterministic and isolated.
 
 ## Migration tests
 
