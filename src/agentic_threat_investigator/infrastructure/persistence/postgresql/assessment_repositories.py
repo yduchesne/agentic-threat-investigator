@@ -41,6 +41,9 @@ from agentic_threat_investigator.domain.assessment import (
     RelationshipSupport,
     Verdict,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import (
     SQLSTATE_ASSESSMENT_CURRENT_CONFLICT,
@@ -209,6 +212,9 @@ class PostgresAssessmentRepository(AssessmentRepository):
         self.session = session
         self._batch_size = batch_size
 
+    @postgres_repository_operation(
+        repository="PostgresAssessmentRepository", operation="insert"
+    )
     async def insert(
         self,
         assessment: Assessment,
@@ -278,6 +284,9 @@ class PostgresAssessmentRepository(AssessmentRepository):
             }
         )
 
+    @postgres_repository_operation(
+        repository="PostgresAssessmentRepository", operation="get_by_id"
+    )
     async def get_by_id(
         self, assessment_id: UUID, *, include_deleted: bool = False
     ) -> Assessment | None:
@@ -285,6 +294,9 @@ class PostgresAssessmentRepository(AssessmentRepository):
         row = await self._row_by_id(assessment_id, include_deleted=include_deleted)
         return None if row is None else await self._with_findings(row)
 
+    @postgres_repository_operation(
+        repository="PostgresAssessmentRepository", operation="list_for_investigation"
+    )
     async def list_for_investigation(
         self,
         investigation_id: UUID,
@@ -317,6 +329,9 @@ class PostgresAssessmentRepository(AssessmentRepository):
             assessments.append(await self._with_findings(row))
         return assessments
 
+    @postgres_repository_operation(
+        repository="PostgresAssessmentRepository", operation="soft_delete"
+    )
     async def soft_delete(
         self,
         assessment_id: UUID,

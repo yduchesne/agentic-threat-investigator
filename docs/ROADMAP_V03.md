@@ -181,6 +181,21 @@ only when that backend is selected.
 
 ### PR 29A — OpenTelemetry and LLM-observability foundation
 
+> **Status: DELIVERED.** PR 29A (with follow-up PR 29A-1 in the same
+branch/PR) is implemented in `dev/otel-setup`. It adds the
+OpenTelemetry API/SDK dependency, the `agentic_threat_investigator.telemetry`
+package (canonical span/metric/attribute contracts, `@traced`/`@timed`/
+`@telemetry_operation`/`@postgres_repository_operation`, setup/service
+identity, trace/log correlation, W3C propagation), and the portable
+`LlmObservability` abstraction with NoOp, LangSmith, and Langfuse v4 adapters
+behind the `langsmith | langfuse | none` backend selector. PR 29A-1
+additionally instruments every PostgreSQL repository I/O method, the
+`PostgresUnitOfWork` transaction lifetime, the Kafka/Redpanda
+publish/poll/commit boundaries, and the Evidence consumer flow with the
+frozen span/metric vocabulary; interoperability with the LLM-observability
+abstraction is unchanged. Application call sites beyond those boundaries
+remain for PR 29B and observability infrastructure remains PR 29C.
+
 Deliver:
 
 1. OpenTelemetry API/SDK dependencies required by ATI.

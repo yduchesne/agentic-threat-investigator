@@ -7,6 +7,8 @@
 - [Internal abstraction](#internal-abstraction)
 - [LangSmith v0.1](#langsmith-v01)
 - [OpenTelemetry architecture (PR 29)](#opentelemetry-architecture-pr-29)
+- [PR 29A delivered foundation](#pr-29a-delivered-foundation)
+- [PR 29A-1 delivered coverage](#pr-29a-1-delivered-coverage)
 - [LLM observability backends](#llm-observability-backends)
 - [Correlation](#correlation)
 - [Provider telemetry](#provider-telemetry)
@@ -331,6 +333,246 @@ not inferred from ATI's local poll loop.
 
 Telemetry remains fail-open and is never authoritative product state.
 
+## PR 29A delivered foundation
+
+PR 29A ships the telemetry contracts and reusable helpers below; it does not
+instrument application call sites broadly (that is PR 29B).
+
+### Telemetry package
+
+```text
+src/agentic_threat_investigator/telemetry/
+    __init__.py      # public re-exports
+    attributes.py    # bounded/common attribute keys + allowlist validation
+    decorators.py    # @traced / @timed / @telemetry_operation
+    logging.py       # current_correlation() + TraceCorrelationFilter
+    metrics.py       # canonical meters/counters, units, get_counter/get_meter
+    propagation.py   # inject/extract W3C trace context for message headers
+    setup.py         # configure_telemetry / shutdown_telemetry / service names
+    tracing.py       # canonical tracer + span-name vocabulary
+```
+
+### Decorators
+
+- `traced(span_name=..., attributes=...)` opens one current child span around a
+  sync or async callable; the return value, ordinary exceptions, and
+  `asyncio.CancelledError` are preserved unchanged. Ordinary exceptions are
+  recorded using standard OTel exception semantics; static attributes are
+  allowlist/bounded validated at decoration time.
+- `timed(metric=..., attributes=...)` records one seconds-unit histogram
+  (`metric` must use the canonical `<operation>.duration` suffix). Both
+  successful and failing calls contribute duration, tagged with a bounded
+  `ati.outcome` attribute; cancellation records nothing and propagates.
+- `telemetry_operation(span_name=..., duration_metric=...)` composes the two
+  primitives exactly once.
+
+Decorators never capture function arguments or return values and never
+serialize `self`, requests, Evidence, prompts, or provider payloads. They are
+used only at boundaries whose exceptions are already safe and bounded.
+
+### Canonical span names
+
+```text
+ati.datasource.acquire  ati.datasource.convert  ati.evidence.publish
+ati.evidence.consume    ati.evidence.persist    ati.geo.resolve
+ati.investigation.execute  ati.agent.invoke  ati.llm.invoke  ati.report.generate
+```
+
+Canonical names are lowercase stable semantic identifiers with no IDs or
+provider names, and never generated from Python function names.
+
+### Canonical metric names/units
+
+All are monotonic counters under the `agentic_threat_investigator`
+instrumentation scope; units are `{item}` or `{operation}` per the contract
+section above. Latency histograms use the seconds unit `s` and the
+`<operation>.duration` suffix.
+
+```text
+ati.evidence.messages.sent
+ati.evidence.messages.received
+ati.evidence.batches.committed
+ati.evidence.batch_commit.failures
+ati.evidence.outcomes.create
+ati.evidence.outcomes.append
+ati.evidence.outcomes.ignore
+ati.evidence.processing.failures
+```
+
+Prometheus rendering of a `_total` suffix is a backend concern (PR 29C) and is
+not baked into the ATI API. PR 29B adds counters at call sites using the frozen
+names above; it never invents new names.
+
+### Cardinality and data minimization
+
+Metric/decorator attributes are allowlist-first and bounded. Safe keys are
+`ati.component`, `ati.operation`, `ati.outcome`, `ati.datasource.semantic_format`,
+and `ati.consumer`. High-cardinality or content-bearing identifiers are
+rejected before any instrument is touched, including `evidence_id`, `entity_id`,
+`investigation_id`, `execution_id`, `message_id`, `ip`, `domain`, `url`,
+`prompt`, `response`, `exception`, and `exception_message` (both bare and
+fully-qualified forms).
+
+### Service identity
+
+Canonical process identities are `ati-api`, `ati-worker`, `ati-geo-resolver`,
+`ati-scheduler`, `ati-migrate`, and `ati-fake-data-bootstrap`. The explicit ATI
+process identity establishes `service.name`; verified OTel SDK `Resource.create`
+merge semantics give explicitly-passed attributes precedence over
+`OTEL_SERVICE_NAME`/`OTEL_RESOURCE_ATTRIBUTES`, and this deterministic behavior
+is unit-tested.
+
+### Trace/log correlation
+
+`current_correlation()` returns only the current valid `trace_id`/`span_id` as
+lowercase hex (or `None` outside a valid span). `TraceCorrelationFilter` sets
+`otel_trace_id`/`otel_span_id` on a `LogRecord` without overwriting existing
+attributes or changing log semantics.
+
+### W3C propagation
+
+`inject_trace_context`/`extract_trace_context` operate on Kafka-style
+`Sequence[tuple[str, bytes]]` headers using the standard OTel W3C propagator.
+Unrelated headers are preserved, duplicates are normalized, no baggage/domain
+IDs are added, and malformed incoming context yields a safe no-parent context.
+PR 29A defines the contract only; Kafka producer/consumer call sites are wired
+in PR 29B.
+
+### Telemetry setup
+
+`configure_telemetry(enabled=..., service_name=...)` is idempotent within one
+process: a conflicting second call raises, and a repeated identical call
+returns the existing runtime. Disabled mode installs no SDK provider and no
+remote exporter. `shutdown_telemetry()` flushes/shuts down providers safely
+without masking the original process error.
+
+## PR 29A-1 delivered coverage
+
+PR 29A-1 applies the PR 29A contracts to ATI's PostgreSQL and Kafka/Redpanda
+operational boundaries. Instrumentation is observational only: it never
+changes transaction, savepoint, delivery, acknowledgement, retry,
+redelivery, or cancellation semantics, never captures SQL or parameters, and
+never attaches high-cardinality identifiers to metrics.
+
+### PostgreSQL repository operations
+
+Every public method of every concrete PostgreSQL repository/resolver that can
+execute PostgreSQL I/O is annotated with
+`@postgres_repository_operation(repository=..., operation=...)`:
+
+- one `ati.postgres.repository` span;
+- one `ati.postgres.repository.duration` seconds histogram with bounded
+  `ati.postgres.repository` / `ati.postgres.operation` / `ati.outcome`
+  dimensions;
+- one `ati.postgres.repository.failures` counter increment on ordinary
+  errors.
+
+A structural unit test (`tests/unit/infrastructure/
+test_postgres_repository_coverage.py`) pins an explicit reviewed inventory of
+all repository operations against the decorator registry, so a future public
+I/O method without telemetry (or a typo'd decorator) fails the gate with a
+useful message. Repository and operation names are static
+developer-controlled strings, never derived from arguments, SQL, or domain
+values.
+
+### UnitOfWork transaction lifetime
+
+`PostgresUnitOfWork` measures the **transaction lifetime** independently of
+any repository call:
+
+- an `ati.postgres.uow` span is opened only after `session.begin()` succeeds
+  and closed only after commit/rollback completes, so repository spans nest
+  deterministically beneath it;
+- `ati.postgres.uow.duration` (s) with `ati.outcome =
+  commit | rollback | failure | cancelled`;
+- `ati.postgres.uow.commits` / `rollbacks` / `failures` counters;
+- `ati.postgres.transaction_operation.duration` (s) with
+  `ati.postgres.operation = commit | rollback` and `ati.outcome`, separating
+  *long transaction lifetime* from *fast transaction + slow COMMIT*. Both
+  the implicit exit commit/rollback and the explicit public `commit()` /
+  `rollback()` methods are measured.
+
+Session-close time is captured after the transaction end time and is never
+reported as transaction duration.
+
+### Kafka/Redpanda transport
+
+`KafkaEvidencePublisher.publish`:
+
+- `ati.kafka.publish` span; `ati.kafka.publish.duration` (s);
+- `ati.kafka.messages.published` increments **per broker-acknowledged
+  message** (publish is success-atomic, not failure-atomic: a partial
+  failure counts only the acknowledgements known to have succeeded);
+- `ati.kafka.publish.failures` increments once per failed publish;
+- an empty publish performs no broker operation and emits no publish
+  telemetry.
+
+`KafkaEvidenceConsumer.poll`:
+
+- `ati.kafka.poll` span; `ati.kafka.poll.duration` (s);
+- `ati.kafka.messages.received` counts only decoded/admitted Evidence
+  messages (raw bytes that fail decoding count zero);
+- `ati.kafka.poll.failures`;
+- `ati.kafka.poll.batch_size` histogram (`{message}`), recorded for non-empty
+  polls.
+
+`KafkaEvidenceConsumer.commit`:
+
+- `ati.kafka.commit` span; `ati.kafka.commit.duration` (s);
+- `ati.kafka.commits`; `ati.kafka.commit.failures`;
+- `ati.kafka.messages.committed` counts the records of a successfully
+  committed batch (never incremented before the broker commit succeeds).
+
+Kafka metric dimensions are bounded to `ati.kafka.topic` and
+`ati.kafka.consumer_group` (the deployment-controlled logical identity).
+Partition/offset are never metric labels for ATI application counters.
+
+### Evidence flow
+
+- `EvidenceBatchPersistenceService.persist` emits the `ati.evidence.persist`
+  span + duration;
+- `EvidencePersistenceConsumer.process_next_batch` emits the
+  `ati.evidence.consume` span + duration with nested `ati.kafka.poll`,
+  `ati.evidence.persist`/`ati.postgres.uow`/`ati.postgres.repository`, and
+  `ati.kafka.commit` spans;
+- `ati.evidence.messages.processed` increments only after prepare + PostgreSQL
+  commit + Kafka consumer commit all succeed (empty polls count nothing);
+- `ati.evidence.processing.failures` increments per failed flow iteration;
+- `ati.evidence.outcomes.created` / `appended` / `unchanged` reflect the
+  authoritative persistence result as soon as it is known, so a PostgreSQL
+  commit followed by a failed Kafka commit is visible as outcomes counting up
+  while `processed` stays zero (the redelivery diagnostic).
+
+### Redpanda operational metric contract (PR 29C)
+
+ATI emits the application-side counters/spans above only. Consumer lag and
+broker health are authoritative broker state that ATI does **not** synthesize
+inside application code (no AdminAPI lag query in every poll). PR 29C must
+scrape/expose the categories below against the deployed Redpanda version
+(compose.yaml pins `redpandadata/redpanda:v24.3.8`); exact Prometheus metric
+names are to be verified against that version at scrape-implementation time,
+not guessed here:
+
+- consumer-group lag per `topic × consumer group × partition` (log-end minus
+  committed offset), plus the aggregated lag by group/topic; derived lag
+  trend (growth/drain) is a PR 29D query concern;
+- committed-offset/lag source and partition high-water/log-end state;
+- broker/topic/partition availability, leader state, and
+  under-replicated-partition state;
+- produce/fetch request latency and error categories;
+- disk/log-segment storage utilization;
+- replication health and leadership changes where operationally useful.
+
+Backlog age (oldest unconsumed record age) is **deferred**: ATI only relies
+on it if the verified Redpanda 24.3.8 metric surface exposes a reliable,
+authoritative value; ATI never approximates backlog age from poll timestamps.
+
+PostgreSQL server-health categories ATI wants PR 29C to expose (without an
+ATI PostgreSQL exporter in 29A-1): active connections, pool
+utilization/saturation where available, transaction rate, transaction
+failures/rollbacks, database/query latency indicators, locks and lock waits,
+deadlocks, database size, and connection errors.
+
 ## LLM observability backends
 
 General OpenTelemetry tracing and LLM/agent observability are complementary,
@@ -357,6 +599,27 @@ or trace to the selected LLM-observability backend. The OTel record answers
 distributed-system/runtime questions; LangSmith or Langfuse supports AI-specific
 debugging and evaluation. Neither backend owns Investigation state, Evidence,
 Assessment, Report, retries, audit, timeline, or correctness.
+
+### Delivered PR 29A abstraction
+
+PR 29A delivers the portable boundary and backend adapters (it does not wire
+LLM call sites to them; that is PR 29B):
+
+- `app/llm_observability.py` defines `LlmObservation` (bounded, content-free
+  metadata: `operation_name` plus optional model/profile/version/ID fields) and
+  the `LlmObservability` ABC whose `observe()` returns a fail-open context
+  manager. Prompt/model output content is not representable in the contract.
+- `NoOpLlmObservability` is the default for `none` and for the master-disabled
+  case; it performs no work, logs nothing, never raises, and never validates.
+- `LangSmithLlmObservability` posts runs through the installed langsmith
+  `RunTree` lifecycle with safe metadata and a bounded `ati.outcome` tag only;
+  inputs/outputs are never captured.
+- `LangfuseLlmObservability` uses Langfuse v4 (OpenTelemetry-native) APIs with a
+  dedicated tracer provider so Langfuse exports only LLM/agent observations and
+  never receives unrelated ATI general spans.
+- `infrastructure/observability/composition.py::build_llm_observability` selects
+  the backend from `ATI_LLM_OBSERVABILITY_BACKEND`; vendor secrets are resolved
+  only for the active, master-enabled backend.
 
 ## LLM operation telemetry (PR 20B)
 

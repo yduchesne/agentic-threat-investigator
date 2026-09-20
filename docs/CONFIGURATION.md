@@ -23,6 +23,7 @@
 - [Datasource definitions (PR 27A)](#datasource-definitions-pr-27a)
 - [GEOINT configuration (planned PR 26)](#geoint-configuration-planned-pr-26)
 - [Kafka-compatible Evidence log configuration (PR 28G)](#kafka-compatible-evidence-log-configuration-pr-28g)
+- [Observability settings (PR 29A)](#observability-settings-pr-29a)
 - [Authentication settings](#authentication-settings)
 - [Provider settings](#provider-settings)
 - [Configuration and secrets](#configuration-and-secrets)
@@ -565,6 +566,41 @@ Real or resolved OpenAI API keys must never be committed, logged, persisted, pla
 - during infrastructure composition, the `SecretsResolver` bootstrap contract resolves that reference through `EnvVarSecretsResolver`;
 - the resolved key value is passed to the composed chat model, which uses it only for provider authentication; application/domain code never reads configuration or the environment directly;
 - a missing, empty, or whitespace-only required key fails clearly at composition time with `SecretNotFoundError` **before** any model object is created.
+
+## Observability settings (PR 29A)
+
+PR 29A adds the telemetry configuration seam. The master switch and the
+LLM-observability backend selector are operational selections resolved from
+the environment (never pinned by a source-controlled profile), exactly like
+`llm_driver` and `operating_mode`. Standard OpenTelemetry variables
+(`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_RESOURCE_ATTRIBUTES`)
+are **not** duplicated as ATI-prefixed settings; ATI owns only the semantics
+standard OTel configuration does not express.
+
+| Setting | Environment variable | Type | Default | Bounds | Description |
+|---|---|---|---|---|---|
+| `observability_enabled` | `ATI_OBSERVABILITY_ENABLED` | `bool` | `false` | boolean | Master ATI application-telemetry switch. Disabled (default) installs no OTel SDK provider and no vendor LLM-observability adapter (NoOp only). |
+| `llm_observability_backend` | `ATI_LLM_OBSERVABILITY_BACKEND` | `langsmith` \| `langfuse` \| `none` | `none` | non-blank; exact values only | Typed LLM/agent observability backend selector (PR 29A). Backend credentials are required only when that backend is selected and the master switch is enabled. Blank/unknown values fail validation; no silent fallback. |
+| `langfuse_public_key_secret` | `ATI_LANGFUSE_PUBLIC_KEY_SECRET` | `str` | `ATI_LANGFUSE_PUBLIC_KEY` | non-blank | Environment variable NAME carrying the Langfuse public key (secret reference, never a key value); required only when `langfuse` is selected and enabled |
+| `langfuse_secret_key_secret` | `ATI_LANGFUSE_SECRET_KEY_SECRET` | `str` | `ATI_LANGFUSE_SECRET_KEY` | non-blank | Environment variable NAME carrying the Langfuse secret key (secret reference, never a key value); required only when `langfuse` is selected and enabled |
+| `langfuse_base_url` | `ATI_LANGFUSE_BASE_URL` | `str` | `""` | blank or HTTP(S) URL without userinfo/query/fragment | Optional non-secret Langfuse endpoint; blank uses the Langfuse SDK default host. Credentials embedded in the URL are rejected. |
+
+Behavior:
+
+- `ATI_LLM_OBSERVABILITY_BACKEND=none` or a disabled master switch yields the
+  `NoOpLlmObservability` backend, which performs no work and requires no vendor
+  configuration.
+- LangSmith selection requires no ATI-declared secret reference: the standard
+  LangSmith SDK configuration is read from the environment by the SDK itself,
+  and ATI does not duplicate it.
+- Langfuse keys are resolved through the `SecretsResolver` bootstrap contract
+  at composition time and only when `langfuse` is the active, master-enabled
+  backend; a missing required key raises `SecretNotFoundError` **before** any
+  runtime work begins. Unselected-backend secret absence never fails
+  composition.
+- The Langfuse v4 adapter uses a dedicated OpenTelemetry tracer provider so
+  Langfuse exports only LLM/agent observations and never becomes an accidental
+  exporter of ATI's general infrastructure spans.
 
 ## Embedding settings (PR 22A)
 

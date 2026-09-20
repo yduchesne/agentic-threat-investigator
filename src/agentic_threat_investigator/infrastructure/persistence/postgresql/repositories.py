@@ -19,6 +19,9 @@ from agentic_threat_investigator.app.persistence.repositories import (
     SoftDeletedIdentityError,
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import SQLSTATE_ENTITY_SOFT_DELETED, sqlstate
 from .models import EntityRow
@@ -59,6 +62,12 @@ class PostgresEntityRepository(EntityRepository):
             deleted_by_actor_id=row.deleted_by_actor_id,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="get_by_identity"
+    )
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="get_by_identity"
+    )
     async def get_by_identity(
         self, entity_type: str, canonical_value: str, *, include_deleted: bool = False
     ) -> Entity | None:
@@ -74,6 +83,12 @@ class PostgresEntityRepository(EntityRepository):
         row = (await self._session.execute(statement)).scalar_one_or_none()
         return None if row is None else self._to_domain(row)
 
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="get_by_id"
+    )
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="get_by_id"
+    )
     async def get_by_id(
         self, entity_id: UUID, *, include_deleted: bool = False
     ) -> Entity | None:
@@ -85,6 +100,12 @@ class PostgresEntityRepository(EntityRepository):
             return None
         return self._to_domain(row)
 
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="upsert"
+    )
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="upsert"
+    )
     async def upsert(
         self, entity: Entity, *, expected_version: int | None = None
     ) -> Entity:
@@ -147,6 +168,12 @@ class PostgresEntityRepository(EntityRepository):
             raise RuntimeError("entity write returned no row")
         return self._to_domain(row)
 
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="upsert_batch"
+    )
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="upsert_batch"
+    )
     async def upsert_batch(
         self, items: Sequence[EntityBatchItem]
     ) -> list[EntityBatchResult]:
@@ -186,6 +213,12 @@ class PostgresEntityRepository(EntityRepository):
             for row in result.fetchall()
         ]
 
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="soft_delete"
+    )
+    @postgres_repository_operation(
+        repository="PostgresEntityRepository", operation="soft_delete"
+    )
     async def soft_delete(
         self,
         entity_id: UUID,

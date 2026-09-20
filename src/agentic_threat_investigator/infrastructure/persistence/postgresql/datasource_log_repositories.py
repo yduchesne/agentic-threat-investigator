@@ -26,6 +26,9 @@ from agentic_threat_investigator.app.persistence.repositories import (
     DatasourceLogRepository,
 )
 from agentic_threat_investigator.domain.datasource import DatasourceLogEvent
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import sqlstate
 
@@ -43,6 +46,9 @@ class PostgresDatasourceLogRepository(DatasourceLogRepository):
         """Bind the datasource-log repository to the caller's transaction session."""
         self._session = session
 
+    @postgres_repository_operation(
+        repository="PostgresDatasourceLogRepository", operation="append"
+    )
     async def append(self, event: DatasourceLogEvent) -> None:
         """Append one event in the caller's transaction without committing.
 

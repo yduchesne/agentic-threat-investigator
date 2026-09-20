@@ -33,6 +33,9 @@ from agentic_threat_investigator.domain.documents import (
 )
 from agentic_threat_investigator.domain.immutable_json import thaw_json
 from agentic_threat_investigator.domain.research import ResearchResult
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import SQLSTATE_RESEARCH_RESULT_DUPLICATE, sqlstate
 
@@ -54,6 +57,9 @@ class PostgresDocumentRepository(DocumentRepository):
         self._session = session
         self._batch_size = batch_size
 
+    @postgres_repository_operation(
+        repository="PostgresDocumentRepository", operation="upsert_batch"
+    )
     async def upsert_batch(
         self, items: Sequence[DocumentBatchItem]
     ) -> list[DocumentBatchResult]:
@@ -101,6 +107,9 @@ class PostgresDocumentRepository(DocumentRepository):
         values["content_hash"] = bytes(row["content_hash"]).hex()
         return Document(**values)
 
+    @postgres_repository_operation(
+        repository="PostgresDocumentRepository", operation="get_by_identity"
+    )
     async def get_by_identity(
         self, source_id: str, source_record_id: str
     ) -> Document | None:
@@ -141,6 +150,9 @@ class PostgresResearchResultRepository(ResearchResultRepository):
         values["citations"] = tuple(thaw_json(values["citations"]))
         return ResearchResult.model_validate(values)
 
+    @postgres_repository_operation(
+        repository="PostgresResearchResultRepository", operation="add"
+    )
     async def add(self, result: ResearchResult) -> None:
         """Insert one immutable research result through the stored function."""
         try:
@@ -173,6 +185,9 @@ class PostgresResearchResultRepository(ResearchResultRepository):
                 raise ResearchResultDuplicateIdentityError(result.id) from None
             raise
 
+    @postgres_repository_operation(
+        repository="PostgresResearchResultRepository", operation="get_by_id"
+    )
     async def get_by_id(self, result_id: UUID) -> ResearchResult | None:
         """Return one research result with its exact claims and citations."""
         result = await self._session.execute(
@@ -187,6 +202,9 @@ class PostgresResearchResultRepository(ResearchResultRepository):
         row = result.mappings().first()
         return None if row is None else self._result_from_row(row)
 
+    @postgres_repository_operation(
+        repository="PostgresResearchResultRepository", operation="list_by_investigation"
+    )
     async def list_by_investigation(
         self, investigation_id: UUID
     ) -> list[ResearchResult]:
@@ -211,6 +229,9 @@ class PostgresDocumentChunkRepository(DocumentChunkRepository):
         self._session = session
         self._batch_size = batch_size
 
+    @postgres_repository_operation(
+        repository="PostgresDocumentChunkRepository", operation="replace_batch"
+    )
     async def replace_batch(
         self, document_ids: Sequence[UUID], items: Sequence[DocumentChunkBatchItem]
     ) -> list[DocumentChunkBatchResult]:
@@ -261,6 +282,9 @@ class PostgresDocumentChunkRepository(DocumentChunkRepository):
             for row in result.fetchall()
         ]
 
+    @postgres_repository_operation(
+        repository="PostgresDocumentChunkRepository", operation="list_by_document"
+    )
     async def list_by_document(self, document_id: UUID) -> list[DocumentChunk]:
         """Return all current chunks in deterministic sequence order."""
         result = await self._session.execute(

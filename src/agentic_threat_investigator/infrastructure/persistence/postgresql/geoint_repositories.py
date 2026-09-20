@@ -57,6 +57,9 @@ from agentic_threat_investigator.domain.geoint import (
     LocationPrecision,
     LocationType,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import (
     SQLSTATE_GEOLOCATION_ENTITY_NOT_FOUND,
@@ -253,10 +256,16 @@ class PostgresLocationRepository(LocationRepository):
         row = result.mappings().first()
         return None if row is None else _location(row)
 
+    @postgres_repository_operation(
+        repository="PostgresLocationRepository", operation="get_by_id"
+    )
     async def get_by_id(self, location_id: UUID) -> Location | None:
         """Return the canonical Location with the given identifier, if any."""
         return await self._fetch("id = :location_id", {"location_id": location_id})
 
+    @postgres_repository_operation(
+        repository="PostgresLocationRepository", operation="get_by_identity"
+    )
     async def get_by_identity(
         self,
         *,
@@ -289,6 +298,9 @@ class PostgresLocationRepository(LocationRepository):
             },
         )
 
+    @postgres_repository_operation(
+        repository="PostgresLocationRepository", operation="upsert"
+    )
     async def upsert(self, location: Location) -> Location:
         """Create or reuse the canonical Location through the SQL function.
 
@@ -326,6 +338,9 @@ class PostgresLocationRepository(LocationRepository):
             raise RuntimeError("location write returned no row")
         return fetched
 
+    @postgres_repository_operation(
+        repository="PostgresLocationRepository", operation="upsert_reference"
+    )
     async def upsert_reference(self, location: Location) -> LocationWriteResult:
         """Create/enrich/reuse one canonical reference/spatial Location (PR 26B).
 
@@ -375,6 +390,9 @@ class PostgresEntityLocationRepository(EntityLocationRepository):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresEntityLocationRepository", operation="get_by_entity_id"
+    )
     async def get_by_entity_id(self, entity_id: UUID) -> EntityLocation | None:
         """Return the current EntityLocation of one Entity, if any."""
         row = await self.session.get(EntityLocationRow, entity_id)
@@ -387,11 +405,18 @@ class PostgresEntityLocationObservationRepository(EntityLocationObservationRepos
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresEntityLocationObservationRepository", operation="get_by_id"
+    )
     async def get_by_id(self, observation_id: UUID) -> EntityLocationObservation | None:
         """Return an immutable observation by its identity."""
         row = await self.session.get(EntityLocationObservationRow, observation_id)
         return None if row is None else _observation(row)
 
+    @postgres_repository_operation(
+        repository="PostgresEntityLocationObservationRepository",
+        operation="list_for_entity",
+    )
     async def list_for_entity(
         self,
         entity_id: UUID,
@@ -420,6 +445,9 @@ class PostgresEntityLocationObservationRepository(EntityLocationObservationRepos
         )
         return [_observation(row) for row in result.scalars().all()]
 
+    @postgres_repository_operation(
+        repository="PostgresEntityLocationObservationRepository", operation="append"
+    )
     async def append(
         self, observation: EntityLocationObservation
     ) -> EntityLocationObservation:
@@ -495,11 +523,17 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresGeoResolutionRepository", operation="get_by_id"
+    )
     async def get_by_id(self, resolution_id: UUID) -> GeoResolution | None:
         """Return one GeoResolution work record by its identity."""
         row = await self.session.get(GeoResolutionRow, resolution_id)
         return None if row is None else _resolution(row)
 
+    @postgres_repository_operation(
+        repository="PostgresGeoResolutionRepository", operation="get_by_entity_evidence"
+    )
     async def get_by_entity_evidence(
         self, entity_id: UUID, evidence_observation_id: UUID
     ) -> GeoResolution | None:
@@ -513,6 +547,9 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         row = result.scalar_one_or_none()
         return None if row is None else _resolution(row)
 
+    @postgres_repository_operation(
+        repository="PostgresGeoResolutionRepository", operation="create_pending"
+    )
     async def create_pending(self, resolution: GeoResolution) -> GeoResolution:
         """Create (or idempotently reuse) the initial PENDING work record.
 
@@ -564,6 +601,9 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         """Deserialize authoritative lifecycle rows from a stored function."""
         return [_resolution(row) for row in result.mappings().all()]
 
+    @postgres_repository_operation(
+        repository="PostgresGeoResolutionRepository", operation="claim_batch"
+    )
     async def claim_batch(
         self,
         *,
@@ -600,6 +640,9 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
         )
         return self._resolution_rows(result)
 
+    @postgres_repository_operation(
+        repository="PostgresGeoResolutionRepository", operation="complete_resolved"
+    )
     async def complete_resolved(
         self,
         resolution_id: UUID,
@@ -669,6 +712,9 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
             raise RuntimeError("geo resolution completion returned no row")
         return _resolution(rows[0])
 
+    @postgres_repository_operation(
+        repository="PostgresGeoResolutionRepository", operation="complete_unresolvable"
+    )
     async def complete_unresolvable(
         self,
         *,
@@ -709,6 +755,9 @@ class PostgresGeoResolutionRepository(GeoResolutionRepository):
             raise RuntimeError("geo resolution completion returned no row")
         return _resolution(rows[0])
 
+    @postgres_repository_operation(
+        repository="PostgresGeoResolutionRepository", operation="record_failure"
+    )
     async def record_failure(
         self,
         resolution_id: UUID,

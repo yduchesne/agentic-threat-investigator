@@ -35,6 +35,9 @@ from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import (
     SQLSTATE_INVESTIGATION_NOT_FOUND,
@@ -235,6 +238,9 @@ class PostgresInvestigationReportRepository(InvestigationReportRepository):
         self.session = session
         self._batch_size = batch_size
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationReportRepository", operation="append"
+    )
     async def append(
         self,
         report: InvestigationReport,
@@ -304,6 +310,9 @@ class PostgresInvestigationReportRepository(InvestigationReportRepository):
             }
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationReportRepository", operation="get_by_id"
+    )
     async def get_by_id(
         self, report_id: UUID, *, include_deleted: bool = False
     ) -> InvestigationReport | None:
@@ -316,6 +325,9 @@ class PostgresInvestigationReportRepository(InvestigationReportRepository):
         row = (await self.session.execute(query)).scalar_one_or_none()
         return None if row is None else _report_from_row(row)
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationReportRepository", operation="soft_delete"
+    )
     async def soft_delete(
         self,
         report_id: UUID,

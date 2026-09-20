@@ -41,6 +41,9 @@ from agentic_threat_investigator.domain.investigation import (
     InvestigationStatus,
     require_status_transition,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import (
     SQLSTATE_ASSESSMENT_REFERENCE_INVALID,
@@ -144,6 +147,9 @@ class PostgresInvestigationRepository(InvestigationRepository):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository", operation="get_by_id"
+    )
     async def get_by_id(
         self, investigation_id: UUID, *, include_deleted: bool = False
     ) -> InvestigationState | None:
@@ -154,6 +160,9 @@ class PostgresInvestigationRepository(InvestigationRepository):
         row = (await self.session.execute(query)).scalar_one_or_none()
         return None if row is None else _to_domain(row)
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository", operation="create"
+    )
     async def create(
         self,
         state: InvestigationState,
@@ -193,6 +202,9 @@ class PostgresInvestigationRepository(InvestigationRepository):
         written_id, version, _created = result.one()
         return InvestigationWriteResult(written_id, int(version), BatchOutcome.INSERTED)
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository", operation="update_budget"
+    )
     async def update_budget(
         self,
         investigation_id: UUID,
@@ -248,6 +260,10 @@ class PostgresInvestigationRepository(InvestigationRepository):
             BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository",
+        operation="update_assessment_reference",
+    )
     async def update_assessment_reference(
         self,
         investigation_id: UUID,
@@ -300,6 +316,10 @@ class PostgresInvestigationRepository(InvestigationRepository):
             BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository",
+        operation="update_report_reference",
+    )
     async def update_report_reference(
         self,
         investigation_id: UUID,
@@ -351,6 +371,9 @@ class PostgresInvestigationRepository(InvestigationRepository):
             BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository", operation="update_status"
+    )
     async def update_status(
         self,
         investigation_id: UUID,
@@ -410,6 +433,9 @@ class PostgresInvestigationRepository(InvestigationRepository):
             BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository", operation="set_analysis_result"
+    )
     async def set_analysis_result(
         self,
         investigation_id: UUID,
@@ -476,6 +502,10 @@ class PostgresInvestigationRepository(InvestigationRepository):
             BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository",
+        operation="update_coordinator_state",
+    )
     async def update_coordinator_state(
         self,
         investigation_id: UUID,
@@ -560,6 +590,9 @@ class PostgresInvestigationRepository(InvestigationRepository):
             BatchOutcome.UPDATED if outcome == "UPDATED" else BatchOutcome.UNCHANGED,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationRepository", operation="soft_delete"
+    )
     async def soft_delete(
         self,
         investigation_id: UUID,

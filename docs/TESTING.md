@@ -178,7 +178,47 @@ Agent/LLM behavioral evaluation may use additional markers but its contracts and
 
 ## Unit tests
 
-Unit tests should be fast, deterministic, and isolated from network/database dependencies unless the tested unit specifically requires them.
+Unit tests should be fast, deterministic, and isolated from network/database
+dependencies unless the tested unit specifically requires them.
+
+### Deterministic telemetry unit tests (PR 29A)
+
+Telemetry tests are deterministic and fully offline; they never contact
+Prometheus, Jaeger, Loki, Grafana, LangSmith Cloud, Langfuse Cloud, an OTel
+Collector, or any self-hosted backend, and they never require Docker/Podman.
+They use OpenTelemetry's in-memory exports/reads:
+
+- span assertions use `InMemorySpanExporter` (name, parent/child, attributes,
+  status, exception events);
+- metric assertions use `InMemoryMetricReader` (name, unit, value, attributes);
+- the decorator seam is injected by monkeypatching ATI's own
+  `telemetry.decorators` helper functions, never process-global OTel providers
+  (which OTel's public API only allows setting once).
+
+PR 29A adds **no telemetry integration-test requirement**; that is deliberate
+and matches the approved roadmap. There is no dedicated telemetry
+integration-testing phase.
+
+PR 29A-1 keeps that policy and adds deterministic unit coverage of the
+PostgreSQL/Kafka/Evidence instrumentation:
+
+- a structural repository-coverage test walks every concrete PostgreSQL
+  repository/resolver class and asserts each public I/O method carries
+  `@postgres_repository_operation` telemetry, pinned against a committed
+  reviewed inventory (no brittle source-text parsing);
+- UoW telemetry tests drive the real `PostgresUnitOfWork` with a fake
+  SQLAlchemy-like session (composite registration neutralized) and assert
+  commit/rollback/failure/cancelled outcomes, explicit commit/rollback
+  timing, and nested repository spans;
+- Kafka publish/poll/commit telemetry tests use the same broker boundary
+  doubles as the PR 28G adapter matrix;
+- Evidence-flow telemetry tests use the spy consumer/persistence doubles.
+
+The telemetry helper seams (
+`telemetry.decorators.get_tracer`/`get_histogram`/`get_counter` and the
+corresponding module-level bindings in `database.py`, the Kafka adapters, and
+the Evidence consumer) are injected through the shared `tests/unit/conftest.py`
+fixtures; no test relies on process-global OTel providers.
 
 Priority unit-test areas include:
 

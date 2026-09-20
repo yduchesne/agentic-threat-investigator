@@ -43,6 +43,9 @@ from agentic_threat_investigator.domain.evidence import (
     InvestigationEvidenceReason,
 )
 from agentic_threat_investigator.domain.immutable_json import thaw_json
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import (
     SQLSTATE_EVIDENCE_METADATA_CONFLICT,
@@ -95,6 +98,9 @@ class PostgresEvidenceRepository(EvidenceRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @postgres_repository_operation(
+        repository="PostgresEvidenceRepository", operation="persist"
+    )
     async def persist(
         self, converted: ConvertedEvidence, *, observation_id: UUID | None = None
     ) -> EvidencePersistenceResult:
@@ -152,16 +158,25 @@ class PostgresEvidenceRepository(EvidenceRepository):
             version=version,
         )
 
+    @postgres_repository_operation(
+        repository="PostgresEvidenceRepository", operation="get_stable_evidence"
+    )
     async def get_stable_evidence(self, evidence_id: UUID) -> Evidence | None:
         """Return the stable global Evidence with the given identity, if any."""
         row = await self._session.get(EvidenceRow, evidence_id)
         return None if row is None else _evidence(row)
 
+    @postgres_repository_operation(
+        repository="PostgresEvidenceRepository", operation="get_observation"
+    )
     async def get_observation(self, observation_id: UUID) -> EvidenceObservation | None:
         """Return one exact EvidenceObservation by its immutable identity."""
         row = await self._session.get(EvidenceObservationRow, observation_id)
         return None if row is None else observation_from_row(row)
 
+    @postgres_repository_operation(
+        repository="PostgresEvidenceRepository", operation="list_observations"
+    )
     async def list_observations(
         self,
         evidence_id: UUID,
@@ -182,6 +197,9 @@ class PostgresEvidenceRepository(EvidenceRepository):
         )
         return [observation_from_row(row) for row in result.scalars().all()]
 
+    @postgres_repository_operation(
+        repository="PostgresEvidenceRepository", operation="list_for_investigation"
+    )
     async def list_for_investigation(
         self,
         investigation_id: UUID,
@@ -223,6 +241,9 @@ class PostgresEvidenceObservationEntityRepository(EvidenceObservationEntityRepos
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @postgres_repository_operation(
+        repository="PostgresEvidenceObservationEntityRepository", operation="associate"
+    )
     async def associate(
         self, observation_id: UUID, entity_id: UUID
     ) -> EvidenceObservationEntity:
@@ -238,6 +259,10 @@ class PostgresEvidenceObservationEntityRepository(EvidenceObservationEntityRepos
             evidence_observation_id=observation_id, entity_id=entity_id
         )
 
+    @postgres_repository_operation(
+        repository="PostgresEvidenceObservationEntityRepository",
+        operation="list_for_observation",
+    )
     async def list_for_observation(
         self, observation_id: UUID
     ) -> list[EvidenceObservationEntity]:
@@ -262,6 +287,9 @@ class PostgresInvestigationEvidenceRepository(InvestigationEvidenceRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationEvidenceRepository", operation="admit"
+    )
     async def admit(self, admission: InvestigationEvidence) -> InvestigationEvidence:
         """Admit one exact observation into one Investigation."""
         try:
@@ -306,6 +334,10 @@ class PostgresInvestigationEvidenceRepository(InvestigationEvidenceRepository):
             raise
         return admission
 
+    @postgres_repository_operation(
+        repository="PostgresInvestigationEvidenceRepository",
+        operation="list_for_investigation",
+    )
     async def list_for_investigation(
         self, investigation_id: UUID
     ) -> list[InvestigationEvidence]:

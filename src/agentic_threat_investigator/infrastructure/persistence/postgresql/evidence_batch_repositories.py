@@ -51,6 +51,9 @@ from agentic_threat_investigator.app.persistence.repositories import (
 )
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.immutable_json import thaw_json
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 from .errors import (
     SQLSTATE_ENTITY_SOFT_DELETED,
@@ -90,6 +93,9 @@ class PostgresEvidenceBatchRepository(EvidenceBatchRepository):
         self._session = session
         self._batch_size = batch_size
 
+    @postgres_repository_operation(
+        repository="PostgresEvidenceBatchRepository", operation="persist_batch"
+    )
     async def persist_batch(
         self, batch: PreparedEvidenceBatch
     ) -> EvidenceBatchPersistenceResult:

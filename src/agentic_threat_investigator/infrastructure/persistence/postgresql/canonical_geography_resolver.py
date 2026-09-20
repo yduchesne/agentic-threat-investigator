@@ -39,6 +39,9 @@ from agentic_threat_investigator.domain.geoint import (
     LocationPrecision,
     LocationType,
 )
+from agentic_threat_investigator.telemetry.decorators import (
+    postgres_repository_operation,
+)
 
 # Canonical Location read projection. Every statement below is a complete
 # literal constant (the projection is inlined per statement) so no SQL text
@@ -141,6 +144,9 @@ class PostgresCanonicalGeographyResolver(CanonicalGeographyResolver):
         """Bind one active read session (no mutation is ever issued)."""
         self._session = session
 
+    @postgres_repository_operation(
+        repository="PostgresCanonicalGeographyResolver", operation="resolve"
+    )
     async def resolve(self, claim: GeographicClaim) -> CanonicalLocationResolution:
         """Resolve one validated claim with deterministic narrowing."""
         ensure_valid_claim(claim)
