@@ -652,6 +652,32 @@ The `ati-fake-data-bootstrap` service runs `ati-fake-data-bootstrap`, which load
 
 Local fake mode uses the configured real `LlmClient`: the worker requires the normal LLM secret (`ATI_OPENAI_API_KEY`) when an LLM-bearing path executes. No fake intelligence provider requires a provider API secret and no fake source performs network I/O.
 
+### Non-OpenAI OpenAI-compatible endpoints (PR 30A)
+
+The `openai` driver can target any operator-selected OpenAI-compatible HTTP endpoint through `ATI_LLM_BASE_URL`. No provider-specific driver or ATI code change is needed; only endpoint, model identifier, and secret-reference configuration. The secret-reference indirection is unchanged: `ATI_LLM_API_KEY_SECRET` is loaded into Settings as the **name** of the environment variable carrying the key, while the referenced key **value** must be present in the process environment of the LLM-hosting runtime so `EnvVarSecretsResolver` can resolve it during composition.
+
+OpenRouter example (no real keys committed):
+
+```bash
+ATI_LLM_DRIVER=openai
+ATI_LLM_BASE_URL=https://openrouter.ai/api/v1
+ATI_LLM_MODEL=<openrouter-model-id>
+ATI_LLM_API_KEY_SECRET=ATI_OPENROUTER_API_KEY
+ATI_OPENROUTER_API_KEY=<runtime secret>
+```
+
+Arbitrary OpenAI-compatible endpoint example (for example a local server):
+
+```bash
+ATI_LLM_DRIVER=openai
+ATI_LLM_BASE_URL=http://localhost:8001/v1
+ATI_LLM_MODEL=local-model
+ATI_LLM_API_KEY_SECRET=ATI_LOCAL_LLM_API_KEY
+ATI_LOCAL_LLM_API_KEY=<runtime secret>
+```
+
+`ATI_LLM_BASE_URL` is non-secret and must never contain credentials (userinfo, query, or fragment are rejected at settings validation). Omission/blank retains the OpenAI SDK default endpoint. When the Compose worker service is used, the relevant settings must be passed through to the container environment (see `compose.yaml`).
+
 Manual workflow (also valid for local QA and fresh-database initialization):
 
 ```bash

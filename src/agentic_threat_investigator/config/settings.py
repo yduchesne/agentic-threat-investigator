@@ -271,6 +271,12 @@ class Settings(BaseSettings):
     # initial attempt plus at most one schema-repair retry.
     llm_driver: LlmDriver = LlmDriver.OPENAI
     llm_model: str = "gpt-4o-mini"
+    # Optional OpenAI-compatible API base URL (PR 30A). Non-secret, operator
+    # selected endpoint; blank uses the OpenAI SDK default. A non-blank value
+    # must be a credential-free HTTP(S) URL with a hostname and no
+    # query/fragment; it may target OpenAI, OpenRouter, or any other
+    # OpenAI-compatible endpoint without changing the ``openai`` driver.
+    llm_base_url: str = ""
     llm_timeout_seconds: float = Field(default=60.0, gt=0, allow_inf_nan=False)
     llm_max_structured_output_attempts: int = Field(default=2, ge=1, le=2)
     llm_api_key_secret: str = "ATI_OPENAI_API_KEY"
@@ -533,6 +539,37 @@ class Settings(BaseSettings):
         """Require a non-blank secret reference name (never an API key value)."""
         if not value.strip():
             raise ValueError("llm_api_key_secret must not be blank")
+        return value.strip()
+
+    @field_validator("llm_base_url")
+    @classmethod
+    def validate_llm_base_url(cls, value: str) -> str:
+        """Require a blank or credential-free HTTP(S) OpenAI-compatible base URL.
+
+        A blank value is legal and retains the OpenAI SDK default endpoint. A
+        non-blank value must use ``http`` or ``https`` (local development
+        endpoints may legitimately use HTTP), contain a hostname, carry no
+        username/password (so a URL can never embed a key), and carry no
+        query or fragment. Path components such as ``/v1`` are preserved
+        exactly; trailing whitespace is stripped before storage. No DNS
+        resolution or network probing is performed here.
+        """
+        if not value.strip():
+            return ""
+        try:
+            parsed = urlsplit(value.strip())
+            hostname = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("llm_base_url is malformed") from exc
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("llm_base_url must use the http or https scheme")
+        if not hostname:
+            raise ValueError("llm_base_url must contain a hostname")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("llm_base_url must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("llm_base_url must not contain a query or fragment")
         return value.strip()
 
     @field_validator("llm_model")

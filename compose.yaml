@@ -100,8 +100,17 @@ services:
       # deterministic driver (PR 24B) selects the offline scripted boundary
       # used by offline real-stack browser tests.
       ATI_LLM_DRIVER: ${ATI_LLM_DRIVER:-openai}
-      # The worker composes the configured real LLM at normal runtime.
+      ATI_LLM_MODEL: ${ATI_LLM_MODEL:-gpt-4o-mini}
+      # PR 30A: optional non-secret OpenAI-compatible endpoint. Blank/omitted
+      # keeps the OpenAI SDK default endpoint; a configured value must never
+      # contain credentials.
+      ATI_LLM_BASE_URL: ${ATI_LLM_BASE_URL:-}
+      # Secret REFERENCE name: the variable below carrying the real key value
+      # must be present in this environment for EnvVarSecretsResolver.
+      ATI_LLM_API_KEY_SECRET: ${ATI_LLM_API_KEY_SECRET:-ATI_OPENAI_API_KEY}
       ATI_OPENAI_API_KEY: ${ATI_OPENAI_API_KEY:-}
+      # OpenRouter example secret reference (PR 30A); see docs/DEPLOYMENT.md.
+      ATI_OPENROUTER_API_KEY: ${ATI_OPENROUTER_API_KEY:-}
       # PR 29C: optional OTLP export for the worker process (ati-worker).
       ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}

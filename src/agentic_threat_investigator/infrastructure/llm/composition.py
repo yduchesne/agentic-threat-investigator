@@ -45,6 +45,13 @@ def build_openai_chat_model(settings: Settings, secrets: SecretsResolver) -> Cha
     }
     if settings.llm_max_tokens is not None:
         kwargs["max_tokens"] = settings.llm_max_tokens
+    # PR 30A: a non-blank configured OpenAI-compatible base URL is passed
+    # through the public ``base_url`` constructor parameter, while omission
+    # retains the OpenAI SDK default endpoint unchanged. The value is
+    # non-secret operational configuration; the resolved API key is never
+    # embedded in it.
+    if settings.llm_base_url:
+        kwargs["base_url"] = settings.llm_base_url
     return ChatOpenAI(**kwargs)
 
 
