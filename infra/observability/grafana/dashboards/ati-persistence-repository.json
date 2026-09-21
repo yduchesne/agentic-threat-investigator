@@ -1,0 +1,595 @@
+{
+  "uid": "ati-persistence-repository",
+  "title": "Persistence / Repository",
+  "tags": [
+    "ati",
+    "observability",
+    "persistence"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": [
+    {
+      "from": "now-30m",
+      "to": "now",
+      "name": "last 30 minutes"
+    },
+    {
+      "from": "now-1h",
+      "to": "now",
+      "name": "last 1 hour"
+    },
+    {
+      "from": "now-6h",
+      "to": "now",
+      "name": "last 6 hours"
+    },
+    {
+      "from": "now-24h",
+      "to": "now",
+      "name": "last 24 hours"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 1,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "type": "text",
+      "mode": "markdown",
+      "content": "## Persistence / Repository\nATI application persistence view: repository operations, UnitOfWork transactions, and Evidence outcomes. PostgreSQL *server* health stays on the PostgreSQL dashboard.",
+      "title": ""
+    },
+    {
+      "id": 2,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "title": "Repository failures",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(ati_postgres_repository_failures_total) by (ati_postgres_repository, ati_postgres_operation)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "{{ati_postgres_repository}}.{{ati_postgres_operation}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "title": "Repository outcomes & UoW",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(ati_postgres_uow_commits_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "UoW commits",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(ati_postgres_uow_rollbacks_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "UoW rollbacks",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(ati_postgres_uow_failures_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "UoW failures",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "title": "Repository latency p50/p95/p99 (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.5, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.99, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p99",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "title": "UoW latency p50/p95/p99 (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.5, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.99, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p99",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "title": "Transaction operation latency p50/p95 (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.5, sum(ati_postgres_transaction_operation_duration_seconds_bucket) by (le, ati_postgres_operation))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p50 {{ati_postgres_operation}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(ati_postgres_transaction_operation_duration_seconds_bucket) by (le, ati_postgres_operation))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p95 {{ati_postgres_operation}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "title": "Evidence persistence latency p50/p95 (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.5, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "title": "Evidence persistence outcomes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(ati_evidence_outcomes_created_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "created",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(ati_evidence_outcomes_appended_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "appended",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(ati_evidence_outcomes_unchanged_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "UNCHANGED",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "title": "PostgreSQL server health summary",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(pg_up)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "pg_up",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(pg_exporter_scrapes_total)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "exporter scrapes",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(pg_exporter_last_scrape_error)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "last scrape error",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "gridPos": {
+        "h": 1,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "title": "PostgreSQL (infrastructure)",
+      "type": "externalLink",
+      "link": "/d/ati-postgresql",
+      "targetBlank": false
+    },
+    {
+      "id": 11,
+      "gridPos": {
+        "h": 1,
+        "w": 8,
+        "x": 0,
+        "y": 20
+      },
+      "title": "System Overview",
+      "type": "externalLink",
+      "link": "/d/ati-system-overview",
+      "targetBlank": false
+    }
+  ]
+}

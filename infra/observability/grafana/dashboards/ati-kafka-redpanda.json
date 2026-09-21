@@ -1,0 +1,836 @@
+{
+  "uid": "ati-kafka-redpanda",
+  "title": "Kafka / Redpanda",
+  "tags": [
+    "ati",
+    "observability",
+    "infra-kafka"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": [
+    {
+      "from": "now-30m",
+      "to": "now",
+      "name": "last 30 minutes"
+    },
+    {
+      "from": "now-1h",
+      "to": "now",
+      "name": "last 1 hour"
+    },
+    {
+      "from": "now-6h",
+      "to": "now",
+      "name": "last 6 hours"
+    },
+    {
+      "from": "now-24h",
+      "to": "now",
+      "name": "last 24 hours"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 1,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "type": "text",
+      "mode": "markdown",
+      "content": "## Kafka / Redpanda\nInfrastructure view of the broker. Lag derives from authoritative Redpanda `/public_metrics` (high watermark minus committed offset); it is never synthesized from ATI counters.",
+      "title": ""
+    },
+    {
+      "id": 2,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "title": "Aggregate consumer-group lag by topic",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic) - sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "lag {{redpanda_topic}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "title": "Partition-lag diagnostic",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic, redpanda_partition) - sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic, redpanda_partition)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "lag {{redpanda_topic}}#{{redpanda_partition}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "title": "High watermark & committed offsets",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "max offset {{redpanda_topic}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "committed {{redpanda_topic}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "title": "Produce / fetch / request health",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(redpanda_kafka_records_produced_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "records produced",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(redpanda_kafka_records_fetched_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "records fetched",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(redpanda_kafka_request_bytes_total{redpanda_request=\"produce\"}[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "produce bytes",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(redpanda_kafka_request_bytes_total{redpanda_request=\"consume\"}[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "consume bytes",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "title": "Kafka request latency p50/p95 (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.5, sum(redpanda_kafka_request_latency_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(redpanda_kafka_request_latency_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "title": "Handler latency p50/p95 (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.5, sum(redpanda_kafka_handler_latency_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(redpanda_kafka_handler_latency_seconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "title": "Broker & RPC health",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_rpc_active_connections)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "RPC active connections",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(redpanda_rpc_request_errors_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "RPC request errors",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(redpanda_kafka_rpc_sasl_session_expiration_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "SASL expirations",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(redpanda_application_uptime_seconds_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "uptime (sec) growth",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "title": "Replication / availability",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_kafka_under_replicated_replicas)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "under-replicated replicas",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_cluster_unavailable_partitions)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "unavailable partitions",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_raft_recovery_offsets_pending)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "recovery offsets pending",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "title": "Storage / capacity",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_storage_disk_free_bytes)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "disk free bytes",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_storage_disk_total_bytes)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "disk total bytes",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_storage_cache_disk_free_bytes)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "cache free bytes",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "title": "Scrape & broker health",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "redpanda_application_uptime_seconds_total",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "uptime (s)",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_cluster_brokers)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "cluster brokers",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(redpanda_cluster_partitions)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "cluster partitions",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "title": "ATI publish/receive/process/commit correlation",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(ati_kafka_messages_published_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "published",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(ati_kafka_messages_received_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "received",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(ati_evidence_messages_processed_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "processed",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(ati_kafka_messages_committed_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "committed",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(ati_kafka_publish_failures_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "publish failures",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "gridPos": {
+        "h": 1,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "title": "Datasource & Ingestion",
+      "type": "externalLink",
+      "link": "/d/ati-datasource-ingestion",
+      "targetBlank": false
+    },
+    {
+      "id": 14,
+      "gridPos": {
+        "h": 1,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "title": "System Overview",
+      "type": "externalLink",
+      "link": "/d/ati-system-overview",
+      "targetBlank": false
+    }
+  ]
+}

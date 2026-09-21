@@ -21,7 +21,24 @@ fi
 # database name, random host port, and a named container volume instead of the
 # developer ATI_DATA_DIR bind mount. The guard in the test suite additionally
 # rejects any DATABASE_URL that is not unmistakably a test database.
+#
+# Host ports for the isolated containers are selected ABOVE the default Linux
+# ephemeral-port range (net.ipv4.ip_local_port_range is 32768-60999 on
+# GitHub-hosted runners). Under rootless Podman each mapped host port is bound
+# by a user-space port forwarder (pasta/gvproxy); a port inside the ephemeral
+# range can already be occupied as the source port of an outbound connection
+# even though a plain bind() probe reported it free. That surfaced once as an
+# intermittent "rootlessport listen ... bind: address already in use" CI
+# failure, so ports are also chosen per attempt and the container start is
+# retried with a fresh port on any bind conflict.
 TEST_ID="ati-test-$(date +%s)-$$"
+
+# PostgreSQL host port sits above the ephemeral range.
+HOST_PORT_LOW=62000
+HOST_PORT_HIGH=65535
+# Redpanda host port sits above the ephemeral range in a disjoint window.
+REDPANDA_PORT_LOW=61000
+REDPANDA_PORT_HIGH=61999
 
 # Remove stale containers created by this integration harness only. Never
 # disturb unrelated developer containers or services.
@@ -41,45 +58,63 @@ cleanup_stale_ati_test_containers() {
 
 port_is_available() {
   uv run python - "$1" <<'PY'
+import errno
 import socket
 import sys
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        sock.bind(("0.0.0.0", int(sys.argv[1])))
-    except OSError:
-        raise SystemExit(1)
+port = int(sys.argv[1])
+
+# Bind all interfaces on both stacks exactly as the rootless-Podman port
+# forwarder does. SO_REUSEADDR is deliberately not set: the forwarder binds a
+# fresh listener, so a live (non-TIME_WAIT) occupant must fail this probe too.
+for family, address in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        if family == socket.AF_INET6:
+            try:
+                sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            except OSError:
+                # Address family unavailable: nothing to probe on this side.
+                continue
+        try:
+            sock.bind((address, port))
+        except OSError as exc:
+            if exc.errno in (
+                errno.EAFNOSUPPORT,
+                errno.EADDRNOTAVAIL,
+                errno.ENOPROTOOPT,
+            ):
+                continue
+            raise SystemExit(1)
 PY
 }
 
+# choose_host_port <low> <high>: print one random available host port in
+# [low, high], or return non-zero when none is free after probing.
+choose_host_port() {
+  local low="$1" high="$2"
+  local candidate=""
+  for _ in $(seq 1 30); do
+    candidate=$(shuf -i "$low-$high" -n 1)
+    if port_is_available "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    echo "Port $candidate is already in use; selecting another port."
+  done
+  echo "could not find an available integration-test port in [$low, $high]" >&2
+  return 1
+}
+
 cleanup_stale_ati_test_containers
-for _ in $(seq 1 30); do
-  TEST_PORT=$(shuf -i 55536-60999 -n 1)
-  if port_is_available "$TEST_PORT"; then
-    break
-  fi
-  echo "Port $TEST_PORT is already in use; selecting another port."
-  TEST_PORT=""
-done
-[ -n "$TEST_PORT" ] || { echo "could not find an available integration-test port" >&2; exit 1; }
 
-for _ in $(seq 1 30); do
-  REDPANDA_PORT=$(shuf -i 50000-55535 -n 1)
-  if port_is_available "$REDPANDA_PORT"; then
-    break
-  fi
-  REDPANDA_PORT=""
-done
-[ -n "$REDPANDA_PORT" ] || { echo "could not find an available Redpanda port" >&2; exit 1; }
-
+# The Redpanda host port is chosen once, above the ephemeral range; the
+# PostgreSQL port is chosen per start attempt inside its retry loop below.
 export COMPOSE_PROJECT_NAME="$TEST_ID"
 export POSTGRES_DB="$TEST_ID"
 export POSTGRES_USER=ati
 export POSTGRES_PASSWORD=ati-integration-test-only
-export ATI_POSTGRES_HOST_PORT="$TEST_PORT"
-export ATI_REDPANDA_HOST_PORT="$REDPANDA_PORT"
-export DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${TEST_PORT}/${POSTGRES_DB}"
+export ATI_REDPANDA_HOST_PORT="$(choose_host_port "$REDPANDA_PORT_LOW" "$REDPANDA_PORT_HIGH")"
+export REDPANDA_PORT="$ATI_REDPANDA_HOST_PORT"
 # PR 28G: the deterministic local Redpanda broker endpoint exposed to the
 # integration-test process (host-side OUTSIDE listener).
 export ATI_EVIDENCE_KAFKA_BOOTSTRAP="127.0.0.1:${REDPANDA_PORT}"
@@ -106,7 +141,22 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== Starting isolated PostgreSQL 18 + pgvector (${TEST_ID}) =="
-"${COMPOSE[@]}" -f compose.yaml -f "$TEST_OVERRIDE" -p "$TEST_ID" up -d postgres
+# A fresh host port is chosen per attempt and the failed project state is torn
+# down between attempts, so a transient rootless-port-forwarder bind conflict
+# ("rootlessport listen ... bind: address already in use") must never abort
+# the whole integration run.
+for _attempt in $(seq 1 40); do
+  TEST_PORT="$(choose_host_port "$HOST_PORT_LOW" "$HOST_PORT_HIGH")"
+  export ATI_POSTGRES_HOST_PORT="$TEST_PORT"
+  export DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${TEST_PORT}/${POSTGRES_DB}"
+  if "${COMPOSE[@]}" -f compose.yaml -f "$TEST_OVERRIDE" -p "$TEST_ID" up -d postgres; then
+    break
+  fi
+  echo "PostgreSQL container start failed on port $TEST_PORT; retrying with a fresh port."
+  "${COMPOSE[@]}" -f compose.yaml -f "$TEST_OVERRIDE" -p "$TEST_ID" down --remove-orphans >/dev/null 2>&1 || true
+  TEST_PORT=""
+done
+[ -n "$TEST_PORT" ] || { echo "could not start the isolated PostgreSQL container" >&2; exit 1; }
 
 echo "== Waiting for PostgreSQL readiness =="
 uv run python - "$TEST_PORT" <<'PY'
@@ -129,7 +179,21 @@ while True:
 PY
 
 echo "== Starting isolated Redpanda broker (${TEST_ID}) =="
-"${COMPOSE[@]}" -f compose.yaml -f "$TEST_OVERRIDE" -p "$TEST_ID" up -d redpanda
+# Same bind-conflict backstop as PostgreSQL. Only the failed Redpanda
+# container is removed between attempts (PostgreSQL is already running and
+# the project must not come down).
+for _attempt in $(seq 1 40); do
+  REDPANDA_PORT="$(choose_host_port "$REDPANDA_PORT_LOW" "$REDPANDA_PORT_HIGH")"
+  export ATI_REDPANDA_HOST_PORT="$REDPANDA_PORT"
+  export ATI_EVIDENCE_KAFKA_BOOTSTRAP="127.0.0.1:${REDPANDA_PORT}"
+  if "${COMPOSE[@]}" -f compose.yaml -f "$TEST_OVERRIDE" -p "$TEST_ID" up -d redpanda; then
+    break
+  fi
+  echo "Redpanda container start failed on port $REDPANDA_PORT; retrying with a fresh port."
+  podman rm -f "${TEST_ID}_redpanda_1" >/dev/null 2>&1 || true
+  REDPANDA_PORT=""
+done
+[ -n "$REDPANDA_PORT" ] || { echo "could not start the isolated Redpanda broker" >&2; exit 1; }
 
 # PR 28G CI follow-up: podman-compose 1.0.6 can return success even when the
 # container was never created (e.g. image pull failure), so verify that a

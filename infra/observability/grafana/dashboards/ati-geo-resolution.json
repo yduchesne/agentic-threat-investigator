@@ -1,0 +1,345 @@
+{
+  "uid": "ati-geo-resolution",
+  "title": "GEO Resolution",
+  "tags": [
+    "ati",
+    "observability",
+    "geo"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": [
+    {
+      "from": "now-30m",
+      "to": "now",
+      "name": "last 30 minutes"
+    },
+    {
+      "from": "now-1h",
+      "to": "now",
+      "name": "last 1 hour"
+    },
+    {
+      "from": "now-6h",
+      "to": "now",
+      "name": "last 6 hours"
+    },
+    {
+      "from": "now-24h",
+      "to": "now",
+      "name": "last 24 hours"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 1,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "type": "text",
+      "mode": "markdown",
+      "content": "## GEO Resolution\nOperational telemetry of the GEO resolver worker. This is not an ATI product GEO map: no IP/entity/location identity is ever used as a dimension.",
+      "title": ""
+    },
+    {
+      "id": 2,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "title": "Resolution outcomes (items/sec)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(ati_geo_resolve_resolved_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "resolved",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(ati_geo_resolve_unresolvable_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "unresolvable",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(ati_geo_resolve_failed_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "failed/retry",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "title": "Valid outcome ratio",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(ati_geo_resolve_resolved_total) / (sum(ati_geo_resolve_resolved_total) + sum(ati_geo_resolve_unresolvable_total) + sum(ati_geo_resolve_failed_total))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "resolved / total outcomes",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "title": "Resolution latency p50/p95/p99 (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.5, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.99, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p99",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "title": "Worker activity",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "rate(ati_geo_resolve_resolved_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "resolved rate",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "increase(ati_geo_resolve_failed_total[1h])",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "failure increments",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "title": "Recent GEO resolver logs",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "ati-loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "ati-loki"
+          },
+          "expr": "{service_name=\"ati-geo-resolver\"}",
+          "luceneQuery": "",
+          "queryType": "range",
+          "queryStoreMode": "duration",
+          "queryRange": "now-1h",
+          "queryLimit": 200,
+          "queryStep": 15,
+          "instant": false
+        }
+      ],
+      "logsSortDirection": "Descending",
+      "logMessagePath": "message",
+      "logTimePath": "time",
+      "showMessage": true,
+      "showTime": true,
+      "showLabels": true,
+      "sortOrder": "Descending",
+      "dataFormat": "properties"
+    },
+    {
+      "id": 7,
+      "gridPos": {
+        "h": 1,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "title": "System Overview",
+      "type": "externalLink",
+      "link": "/d/ati-system-overview",
+      "targetBlank": false
+    }
+  ]
+}
