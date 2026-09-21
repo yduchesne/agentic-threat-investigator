@@ -348,6 +348,11 @@ end-to-end telemetry integration tests):
   succeeds on `infra/observability/prometheus/prometheus.yml`;
 - **INF-C21**: the Grafana datasource YAML parses and Datasource UIDs are
   unique/stable (`ati-prometheus`, `ati-jaeger`, `ati-loki`);
+- **LOKI-C1..C7** (PR 29C-1): PyYAML-level static invariants on
+  `infra/observability/loki/config.yaml` — global retention exactly `336h`,
+  structured metadata enabled, the obsolete `storage_retention_days` key
+  absent, Compactor retention enabled, filesystem delete-request store, and
+  the retention-compatible TSDB/v13/24h/filesystem topology;
 - **INF-C16/C17/C18**: `compose.yaml` alone and with
   `compose.observability.yaml` both validate.
 
@@ -355,6 +360,25 @@ The no-live-integration-test policy is unchanged: there is **no** PR 29E
 and PR 29C does not add a test that boots the stack and waits for spans/logs
 inside a Collector/Jaeger/Loki. The developer smoke procedure documented in
 `docs/OBSERVABILITY.md` is a manual developer flow, not CI correctness.
+
+The PR 29C-1 testing boundary for Loki configurations is three distinct
+levels; unit tests deliberately cover only the first:
+
+```text
+PyYAML unit tests (LOKI-C1..C7)
+  -> ATI-owned static retention/topology invariants
+
+pinned Loki -verify-config=true (grafana/loki:3.7.8)
+  -> Loki configuration/schema compatibility
+
+full telemetry/backend integration
+  -> intentionally not part of PR 29
+```
+
+PyYAML parsing never proves Loki accepts a configuration; the pinned
+`-verify-config=true` command is the documented developer/reviewer check
+(`docs/OBSERVABILITY.md`) and ordinary unit CI must not require a container
+runtime.
 
 Priority unit-test areas include:
 

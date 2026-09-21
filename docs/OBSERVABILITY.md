@@ -968,9 +968,11 @@ pinned ``v24.3.8``.
   renamed in Python; counter ``_total`` translation is exporter behavior.
 - **Logs → Loki**: the Collector exports OTLP/HTTP to Loki's native OTLP
   endpoint (``http://loki:3100/otlp``); the deprecated Loki-specific Collector
-  exporter is not used. Loki runs a single binary with local filesystem
-  storage and native OTLP structured metadata enabled; indexed labels stay
-  bounded (§Loki label/cardinality policy below).
+  exporter is not used. Loki runs a single binary pinned to
+  ``grafana/loki:3.7.8`` with local filesystem storage (TSDB schema v13, 24h
+  index period) and native OTLP structured metadata enabled; indexed labels stay
+  bounded (§Loki label/cardinality policy below). Local-development logs are
+  retained for 14 days.
 - **Redpanda → Prometheus**: Prometheus scrapes ``redpanda:9644/public_metrics``
   (job ``redpanda``), the lower-cardinality public endpoint Prometheus prefix
   ``redpanda_``). Verified for ``v24.3.8``: it exposes
@@ -995,6 +997,42 @@ pinned ``v24.3.8``.
   repository, PostgreSQL, Agents & LLM, GEO, and investigations/reports).
   Local admin credentials default to Grafana's documented ``admin/admin`` and
   are overridable via ``ATI_GRAFANA_ADMIN_USER`` / ``ATI_GRAFANA_ADMIN_PASSWORD``.
+
+### Loki configuration and retention (PR 29C-1)
+
+Loki runs the pinned ``grafana/loki:3.7.8`` image as a single binary. Its
+source-controlled configuration (``infra/observability/loki/config.yaml``)
+uses the local-development topology:
+
+- ``target: all`` single binary on the Compose network, in-memory ring,
+  replication factor 1;
+- ``common.path_prefix: /loki`` over the ``ATI_DATA_DIR``-backed volume, with
+  chunks and rules directly beneath it (no second storage root);
+- TSDB schema v13 with a 24h index period and filesystem object store;
+- native OTLP ingestion with ``allow_structured_metadata: true``.
+
+Retention is a local-development policy, not a production one: logs are
+retained for exactly 14 days via ``limits_config.retention_period: 336h``.
+The obsolete ``limits_config.storage_retention_days`` key is not used.
+Retention is enforced by the Compactor (``compactor.retention_enabled: true``)
+with ``compactor.delete_request_store: filesystem``, matching the filesystem
+object store. Filesystem storage and 14-day retention are deliberate
+local-development choices and are not a production retention/storage
+recommendation.
+
+Validate the source-controlled configuration against the exact pinned Loki
+binary (no telemetry stack required):
+
+```text
+podman run --rm \
+  -v "$PWD/infra/observability/loki/config.yaml:/etc/loki/config.yaml:ro" \
+  docker.io/grafana/loki:3.7.8 \
+  -config.file=/etc/loki/config.yaml \
+  -verify-config=true
+```
+
+(docker run with the same arguments is equivalent.) The command must exit 0
+with ``msg="config is valid"``.
 
 ### Loki label/cardinality policy
 

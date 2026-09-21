@@ -77,3 +77,39 @@ def test_prometheus_config_defines_required_scrape_jobs() -> None:
     assert jobs["ati-otel"]["metrics_path"] == "/metrics"
     assert jobs["redpanda"]["metrics_path"] == "/public_metrics"
     assert jobs["postgres"]["metrics_path"] == "/metrics"
+
+
+def test_loki_config_freeze_retention_contract() -> None:
+    """LOKI-C1/C3/C4/C5: PR 29C-1 retention contract for the pinned Loki runtime.
+
+    Covers the global 14-day retention period (``retention_period: 336h``), the
+    absence of the obsolete ``storage_retention_days`` key, and Compactor-managed
+    filesystem retention. These selectors freeze the ATI-owned contract only;
+    PyYAML parsing does not prove Loki accepts the configuration -- that is the
+    pinned ``grafana/loki:3.7.8 -verify-config=true`` developer/reviewer check.
+    """
+    config = _load_yaml("loki/config.yaml")
+    limits = config["limits_config"]
+    assert limits["retention_period"] == "336h"  # LOKI-C1
+    assert "storage_retention_days" not in limits  # LOKI-C3
+    compactor = config["compactor"]
+    assert compactor["retention_enabled"] is True  # LOKI-C4
+    assert compactor["delete_request_store"] == "filesystem"  # LOKI-C5
+
+
+def test_loki_config_freeze_structured_metadata_and_topology() -> None:
+    """LOKI-C2/C6/C7: structured metadata and local TSDB/v13 topology.
+
+    Holds the retention prerequisites: structured metadata stays enabled, the
+    schema is TSDB v13 with a 24h index period, and the object store remains
+    filesystem. These mirror the PR 29C topology; retention relies on them.
+    """
+    config = _load_yaml("loki/config.yaml")
+    assert config["limits_config"]["allow_structured_metadata"] is True  # LOKI-C2
+    schemas = config["schema_config"]["configs"]
+    assert len(schemas) == 1
+    (schema,) = schemas
+    assert schema["store"] == "tsdb"  # LOKI-C6
+    assert schema["object_store"] == "filesystem"  # LOKI-C7
+    assert schema["schema"] == "v13"  # LOKI-C6
+    assert schema["index"]["period"] == "24h"  # LOKI-C6

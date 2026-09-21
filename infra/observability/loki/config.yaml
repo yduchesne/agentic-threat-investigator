@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-# Loki single-binary local-development configuration (PR 29C).
+# Loki single-binary local-development configuration (PR 29C, corrected in
+# PR 29C-1).
 #
 # Loki runs as a single binary with local filesystem storage on the Compose
 # network. It accepts ATI logs through its native OTLP ingestion endpoint
@@ -12,6 +13,12 @@
 # identifiers (trace/span IDs, investigation/execution/request IDs, IP/domain
 # content, exception messages) remain queryable structured metadata rather
 # than indexed labels. Structured metadata is explicitly enabled.
+#
+# Retention: local-development logs are retained for 14 days
+# (limits_config.retention_period: 336h). Retention is enforced by the
+# Compactor (compactor.retention_enabled: true). Filesystem storage is a
+# local-development choice and is not a production retention/storage
+# recommendation.
 
 target: all
 
@@ -44,9 +51,17 @@ limits_config:
   # Native OTLP ingestion requires structured metadata (enabled by default in
   # Loki 3.x; kept explicit here so the contract is reviewable).
   allow_structured_metadata: true
-  # Bounded local-development query window. This bounds which historical data
-  # is searchable; it is not a production data-retention policy.
-  storage_retention_days: 14
+  # Global log-retention period for this local-development stack: 14 days.
+  # This is data retention, not a query-window control. Local development
+  # only; not a production retention policy.
+  retention_period: 336h
+
+compactor:
+  # The Compactor enforces the global retention_period for the
+  # filesystem-backed TSDB/v13 stack. delete_request_store must match the
+  # object store used by the schema config (filesystem here).
+  retention_enabled: true
+  delete_request_store: filesystem
 
 schema_config:
   configs:
