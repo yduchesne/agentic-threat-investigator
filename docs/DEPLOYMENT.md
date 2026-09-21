@@ -575,7 +575,50 @@ make backup
 make restore
 ```
 
-The exact implementation may be Make/scripts, but developers and coding agents should have a single documented command surface.
+The delivered command surface is a pair of repository-root scripts (and
+``./build.sh`` for quality/integration/security operations):
+
+```bash
+./start.sh             # start (or verify) the full local stack
+./stop.sh              # stop the local stack (containers + data kept)
+./stop.sh --teardown   # stop, remove containers and stored data
+```
+
+``./start.sh`` always composes ``compose.yaml`` **and**
+``compose.observability.yaml``, so one command brings up the core stack
+plus the observability stack (Collector, Prometheus, Jaeger, Loki,
+Grafana, postgres-exporter). It is idempotent: already-running healthy
+containers are left as-is, every expected container/service is health
+checked (including one-shot completion and in-network health endpoints
+for container-internal services), unhealthy services receive at most one
+repair attempt (re-run/restart/re-create) before being reported, every
+decision is logged, and the final summary prints the reachable endpoints
+(with HTTP URLs for HTTP services) and exits non-zero when any service
+stays unhealthy. ``./start.sh --teardown`` first removes all stack
+containers and the service-managed stored data (PostgreSQL data and
+Prometheus/Loki/Grafana observability data), then starts a fresh stack.
+
+``./stop.sh`` stops every stack container while preserving containers and
+data (``./start.sh`` resumes them). ``./stop.sh --teardown`` also removes
+the containers and deletes the service-managed stored data (PostgreSQL
+and the Prometheus/Loki/Grafana observability data under
+``${ATI_DATA_DIR}/observability/...``). Pre-existing operator artifacts
+under ``${ATI_DATA_DIR}/datasets/`` are inputs, never service-managed
+data, and are never deleted by the scripts.
+
+Implementation notes (rootless Podman):
+
+- podman-compose 1.0.6 stamps each created container with ``--requires``
+  edges to its compose dependencies, and its dependency-aware start
+  breaks on a graph that mixes running containers and exited one-shot
+  services (the same limitation documented in ``scripts/e2e.sh``). The
+  scripts therefore create containers with ``up --no-start`` and start
+  the whole project container set with one plain ``podman start`` call,
+  whose dependency order Podman resolves itself.
+- the observability images run as non-root users, so under rootless
+  Podman their bind-mounted data directories must be writable by those
+  (subuid-mapped) users; ``./start.sh`` creates them world-writable and
+  ``--teardown`` deletes container-owned trees through ``podman unshare``.
 
 ## Configuration profiles
 
