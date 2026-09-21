@@ -1117,6 +1117,11 @@ detail links back to System Overview; the agreed drill-downs are
 ``Persistence / Repository -> PostgreSQL``, and
 ``Investigations & Reports -> Agents & LLM``.
 
+Since PR 29D-1, navigation is encoded with Grafana's verified dashboard
+``links`` contract (``type: "link"``, ``url: "/d/<uid>"`` relative stable-UID
+destinations, ``keepTime: true`` for time-range preservation); no
+``externalLink`` pseudo-panel type remains anywhere in the dashboard JSON.
+
 ### Application vs infrastructure separation
 
 Application abstractions and infrastructure services stay on separate
@@ -1167,7 +1172,9 @@ v0.20.1 default queries.
   over the bounded OTLP label set (``service_name``, ``detected_level``);
   trace/span IDs remain structured metadata, never indexed labels.
 - Jaeger trace exploration is reached through the Jaeger all-in-one UI
-  (``http://localhost:16686``); the ``ati-jaeger`` datasource stays
+  (``http://localhost:16686``) via a supported dashboard link
+  (``type: "link"``) on ``API / HTTP``, ``Agents & LLM`` and
+  ``Investigations & Reports``; the ``ati-jaeger`` datasource stays
   provisioned for Grafana's own trace exploration.
 
 ### Privacy/cardinality rules
@@ -1182,12 +1189,18 @@ per-partition breakout is the Kafka infrastructure dashboard.
 
 ``tests/unit/observability/test_grafana_dashboards.py`` deterministically
 parses the provisioning YAML and every dashboard JSON and asserts the full
-GRAF-C01..C18 matrix plus query-ownership contracts: API route-template
+GRAF-C01..C18 matrix, the GRAF-F01..F18 runtime-contract matrix (PR 29D-1),
+and query-ownership contracts. The helpers read the *real* Grafana fields:
+executable Prometheus ``expr`` targets (never the removed ``query``
+surrogate), Loki ``expr`` targets, and dashboard ``links`` entries (never
+``externalLink`` pseudo-panels). Coverage includes: API route-template
 usage; Redpanda-authoritative lag joins; postgres-exporter usage; Persistence /
-Ingestion / GEO / Agents / Investigations series ownership; rate-/
-increase-/grouped-sum counter consumption; ``histogram_quantile``
-``le``-bucket grouping; and application/infrastructure separation. These
-tests never require a live observability stack.
+Ingestion / GEO / Agents / Investigations series ownership; the frozen PR 29D
+PromQL inventory; the verified navigation hierarchy and time preservation;
+rate-/increase-/grouped-sum counter consumption;
+``histogram_quantile`` ``le``-bucket grouping; application/infrastructure
+separation; and the no-new-ATI-telemetry scope guard. These tests never
+require a live observability stack.
 
 ### Dashboard manual smoke procedure
 
@@ -1196,12 +1209,16 @@ With the optional stack running (see the base smoke procedure above):
 1. Grafana starts and provisions all three datasources (Data sources:
    ATI Prometheus / ATI Jaeger / ATI Loki);
 2. all nine dashboards appear automatically (Dashboards, ``ATI *``);
-3. overview/detail navigation works: overview links, drill-down links, and
-   back links;
-4. Prometheus panels show no query errors on every dashboard (last 1 hour);
+3. overview/detail navigation works through the dashboard links: overview
+   links, drill-down links, back links, and time-range preservation
+   (``keepTime``) when jumping between dashboards;
+4. Prometheus panels show no query errors on every dashboard (last 1 hour) —
+   every target executes from its ``expr`` field;
 5. Loki panels show no query errors (API / HTTP, Agents & LLM, GEO Resolution,
    Investigations & Reports);
-6. Jaeger trace exploration opens from the Jaeger link panels;
+6. Jaeger trace exploration opens from the Jaeger dashboard links
+   (dashboard links, not panels) on API / HTTP, Agents & LLM and
+   Investigations & Reports;
 7. exercising the API produces request-rate/latency activity on
    ``API / HTTP``;
 8. exercising the Evidence flow produces published/received/processed/committed
@@ -1215,6 +1232,28 @@ With the optional stack running (see the base smoke procedure above):
 
 Make CI never depend on this stack: dashboard/backend failures remain
 observational and must never affect ATI services.
+
+### PR 29D-1 runtime-contract correction
+
+PR 29D-1 corrected the dashboard JSON to use Grafana 13.2.2's actual runtime
+contracts; it changed no telemetry and no dashboard architecture:
+
+- Prometheus targets execute their PromQL from the standard ``expr`` field;
+  the custom ``query`` property (an ATI convention) was removed. PromQL
+text, legends, units, layout and the ``ati-prometheus`` datasource UID are
+unchanged.
+- Navigation uses Grafana's dashboard ``links`` mechanism
+  (``type: "link"``, relative ``/d/<uid>`` stable-UID destinations,
+  ``keepTime`` preserving the time range). The ``externalLink``
+  pseudo-panels were removed. The nine-dashboard hierarchy is unchanged.
+- Loki targets already used the verified ``expr``/``queryType: "range"``
+  contract and were left unchanged. The developer Jaeger UI entry point is
+  now a supported dashboard link to ``http://localhost:16686`` (manual smoke
+  step 6 above), and the ``ati-jaeger`` datasource stays provisioned for
+  Grafana's own trace exploration.
+- The manual smoke procedure above is the qualifying runtime validation
+  against pinned Grafana 13.2.2; no telemetry integration-test phase was
+  added.
 
 ## LLM observability backends
 

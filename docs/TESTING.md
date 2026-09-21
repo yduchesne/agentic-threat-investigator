@@ -380,13 +380,18 @@ PyYAML parsing never proves Loki accepts a configuration; the pinned
 (`docs/OBSERVABILITY.md`) and ordinary unit CI must not require a container
 runtime.
 
-### Deterministic Grafana dashboard tests (PR 29D)
+### Deterministic Grafana dashboard tests (PR 29D / PR 29D-1)
 
-PR 29D adds `tests/unit/observability/test_grafana_dashboards.py`, a static
-(offline, deterministic) validation of the dashboards-as-code contract. It
-parses `infra/observability/grafana/provisioning/dashboards/dashboards.yaml`,
-`compose.observability.yaml` (mount contract), and every dashboard JSON under
-`infra/observability/grafana/dashboards/`, and asserts the frozen matrix:
+PR 29D added `tests/unit/observability/test_grafana_dashboards.py`, a static
+(offline, deterministic) validation of the dashboards-as-code contract. PR 29D-1
+corrected the tests to validate Grafana 13.2.2's *actual* runtime fields: the
+Prometheus helpers parse the executable `expr` targets (never the ATI-invented
+`query` surrogate) and the navigation helpers parse Grafana's dashboard
+`links` model (never `externalLink` pseudo-panels). The file parses
+`infra/observability/grafana/provisioning/dashboards/dashboards.yaml`, the
+provisioned datasources, `compose.observability.yaml` (mount contract), and
+every dashboard JSON under `infra/observability/grafana/dashboards/`, and
+asserts the frozen matrices:
 
 - **GRAF-C01**: the file provider parses and points at the mounted canonical
   directory (`/etc/grafana/dashboards`), and Compose mounts the provisioning
@@ -395,8 +400,8 @@ parses `infra/observability/grafana/provisioning/dashboards/dashboards.yaml`,
   exact nine UIDs (unique) and the agreed titles;
 - **GRAF-C06..C08**: Prometheus panels use `ati-prometheus`, Loki panels use
   `ati-loki` with classic LogQL brace expressions, and trace usage stays
-  within the stable `ati-jaeger` contract (datasource provisioned; Jaeger UI
-  navigation target);
+  within the stable `ati-jaeger` contract (datasource provisioned; the Jaeger
+  UI is reached through a supported dashboard `link`, not a pseudo-panel);
 - **GRAF-C09..C11**: overview links to all eight details, every detail links
   back to the overview, and the agreed drill-down hierarchy exists
   (Investigations -> Agents & LLM, Datasource & Ingestion -> Kafka / Redpanda
@@ -408,9 +413,9 @@ parses `infra/observability/grafana/provisioning/dashboards/dashboards.yaml`,
   include `ati`/`observability`, sane last-1h/10s defaults, plain-JSON-only
   canonical tree (no dashboard-generation framework), and no embedded
   credentials;
-- **query ownership** (target expressions are parsed, not descriptions
-  searched): API uses route-template HTTP telemetry; Kafka lag joins derive
-  from `redpanda_kafka_max_offset` minus
+- **query ownership** (executable target expressions are parsed, not
+  descriptions searched): API uses route-template HTTP telemetry; Kafka lag
+  joins derive from `redpanda_kafka_max_offset` minus
   `redpanda_kafka_consumer_group_committed_offset` and never from `ati_kafka`
   counters; PostgreSQL uses postgres-exporter series; Persistence uses ATI
   repository/UoW series; Datasource & Ingestion contains the Evidence-flow
@@ -419,11 +424,44 @@ parses `infra/observability/grafana/provisioning/dashboards/dashboards.yaml`,
   investigation/report series; counters are consumed with
   `rate()`/`increase()`/grouped `sum`; `histogram_quantile` uses `_bucket`
   series with `by (le, ...)` grouping; application and infrastructure
-  dashboards remain separated.
+  dashboards remain separated;
+- **GRAF-F01..F18** (PR 29D-1 runtime-contract matrix):
+  - **GRAF-F01/F02**: every intended Prometheus target has non-empty,
+    executable `expr` and no target uses the custom `query` surrogate field;
+  - **GRAF-F03**: the frozen PR 29D PromQL multiset is preserved exactly
+    (the expressions were moved into `expr` without text changes);
+  - **GRAF-F04/F05**: navigation is parsed from Grafana's verified dashboard
+    `links` contract (`type: "link"`, `url`, `keepTime`, `targetBlank`, ...)
+    and no `type == "externalLink"` pseudo-panel remains;
+  - **GRAF-F06..F10**: overview links to all eight details; every detail
+    links back; the drill-down hierarchy exists; destinations use stable
+    `/d/<uid>` relative URLs (only the allowlisted local Jaeger UI is an
+    absolute link); `keepTime` preserves the time range on dashboard links;
+  - **GRAF-F11**: the three stable datasource UIDs are unchanged; panels use
+    only `ati-prometheus`/`ati-loki` and the `ati-jaeger` datasource stays
+    provisioned for trace exploration;
+  - **GRAF-F12**: per-dashboard query-ownership markers (API
+    route-template HTTP, Redpanda-authoritative lag, postgres-exporter,
+    ATI repository/UoW, Evidence flow, GEO, agent/LLM/provider/embedding,
+    investigation/report);
+  - **GRAF-F13**: privacy/cardinality rules preserved in every executable
+    expression;
+  - **GRAF-F14**: Loki targets use the verified contract (`expr` LogQL with
+    a bounded `service_name` label set, `queryType: "range"`, `ati-loki`);
+  - **GRAF-F15**: Jaeger uses a supported dashboard link for the developer
+    UI entry point plus the provisioned `ati-jaeger` datasource — no
+    proxy/plugin/backend;
+  - **GRAF-F16**: exactly nine dashboards with the exact UID/title mapping;
+  - **GRAF-F17**: provisioning YAML and the read-only canonical mount are
+    unchanged;
+  - **GRAF-F18**: no new ATI application telemetry series is referenced
+    (scope guard: every `ati_*` series used belongs to the frozen PR 29D
+    instrument set).
 
 These tests never require a live stack. PromQL/Loki/panel runtime health is
 verified by the manual developer smoke procedure in
-`docs/OBSERVABILITY.md` (`Grafana dashboards (PR 29D)` section) — the
+`docs/OBSERVABILITY.md` (`Grafana dashboards (PR 29D)` section; PR 29D-1
+re-validates it against pinned Grafana 13.2.2) — the
 no-telemetry-integration-test rule is unchanged.
 
 Priority unit-test areas include:

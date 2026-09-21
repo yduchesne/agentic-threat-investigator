@@ -70,8 +70,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_datasource_acquire_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_datasource_acquire_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -89,8 +88,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_datasource_acquire_duration_seconds_count[1h])",
-          "expr": "",
+          "expr": "rate(ati_datasource_acquire_duration_seconds_count[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -125,8 +123,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_datasource_convert_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_datasource_convert_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -144,8 +141,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_datasource_convert_duration_seconds_count[1h])",
-          "expr": "",
+          "expr": "rate(ati_datasource_convert_duration_seconds_count[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -180,8 +176,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -199,8 +194,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -218,8 +212,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.99, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
-          "expr": "",
+          "expr": "histogram_quantile(0.99, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -254,8 +247,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_datasource_convert_duration_seconds_bucket) by (le, ati_outcome))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_datasource_convert_duration_seconds_bucket) by (le, ati_outcome))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -273,8 +265,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_datasource_convert_items_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_datasource_convert_items_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -292,8 +283,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(ati_datasource_convert_items_count)",
-          "expr": "",
+          "expr": "sum(ati_datasource_convert_items_count)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -328,8 +318,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_published_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_published_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -347,8 +336,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_received_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_received_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -366,8 +354,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_evidence_messages_processed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_evidence_messages_processed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -385,8 +372,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_committed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_committed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -404,8 +390,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_processing_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_processing_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -440,8 +425,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_created_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_created_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -459,8 +443,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_appended_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_appended_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -478,8 +461,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_unchanged_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_unchanged_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -514,8 +496,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_evidence_consume_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_evidence_consume_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -533,8 +514,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_evidence_consume_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_evidence_consume_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -552,8 +532,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -571,8 +550,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -607,8 +585,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) - sum(redpanda_kafka_consumer_group_committed_offset)",
-          "expr": "",
+          "expr": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) - sum(redpanda_kafka_consumer_group_committed_offset)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -643,8 +620,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_postgres_repository_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_postgres_repository_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -662,8 +638,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -716,45 +691,44 @@
       "showLabels": true,
       "sortOrder": "Descending",
       "dataFormat": "properties"
+    }
+  ],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "ATI System Overview",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-system-overview"
     },
     {
-      "id": 12,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 0,
-        "y": 23
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Kafka / Redpanda",
-      "type": "externalLink",
-      "link": "/d/ati-kafka-redpanda",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-kafka-redpanda"
     },
     {
-      "id": 13,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 6,
-        "y": 23
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Persistence / Repository",
-      "type": "externalLink",
-      "link": "/d/ati-persistence-repository",
-      "targetBlank": false
-    },
-    {
-      "id": 14,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 12,
-        "y": 23
-      },
-      "title": "System Overview",
-      "type": "externalLink",
-      "link": "/d/ati-system-overview",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-persistence-repository"
     }
   ]
 }

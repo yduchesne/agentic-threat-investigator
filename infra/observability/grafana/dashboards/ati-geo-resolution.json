@@ -70,8 +70,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_geo_resolve_resolved_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_geo_resolve_resolved_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -89,8 +88,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_geo_resolve_unresolvable_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_geo_resolve_unresolvable_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -108,8 +106,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_geo_resolve_failed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_geo_resolve_failed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -144,8 +141,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(ati_geo_resolve_resolved_total) / (sum(ati_geo_resolve_resolved_total) + sum(ati_geo_resolve_unresolvable_total) + sum(ati_geo_resolve_failed_total))",
-          "expr": "",
+          "expr": "sum(ati_geo_resolve_resolved_total) / (sum(ati_geo_resolve_resolved_total) + sum(ati_geo_resolve_unresolvable_total) + sum(ati_geo_resolve_failed_total))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -180,8 +176,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -199,8 +194,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -218,8 +212,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.99, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
-          "expr": "",
+          "expr": "histogram_quantile(0.99, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -254,8 +247,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_geo_resolve_resolved_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_geo_resolve_resolved_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -273,8 +265,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_geo_resolve_failed_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_geo_resolve_failed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -327,19 +318,20 @@
       "showLabels": true,
       "sortOrder": "Descending",
       "dataFormat": "properties"
-    },
+    }
+  ],
+  "links": [
     {
-      "id": 7,
-      "gridPos": {
-        "h": 1,
-        "w": 12,
-        "x": 0,
-        "y": 22
-      },
-      "title": "System Overview",
-      "type": "externalLink",
-      "link": "/d/ati-system-overview",
-      "targetBlank": false
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "ATI System Overview",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-system-overview"
     }
   ]
 }

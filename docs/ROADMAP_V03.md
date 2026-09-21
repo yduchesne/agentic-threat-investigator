@@ -500,6 +500,40 @@ instrumentation, Collector routing, Prometheus scrape jobs, Loki/Jaeger
 topology, Redpanda instrumentation, or postgres-exporter configuration are
 included.
 
+### PR 29D-1 — Grafana dashboard runtime-contract correction
+
+> **Status: DELIVERED.** PR 29D-1 corrects the PR 29D dashboard JSON to
+> Grafana 13.2.2's actual runtime contracts. It is a representation
+> correction only: no dashboard redesign and no new ATI telemetry.
+
+PR 29D-1 delivered (corrective closure of PR 29D):
+
+- Prometheus targets now execute PromQL from Grafana's standard ``expr``
+  target field; the custom ``query`` surrogate property was removed. The
+  frozen PR 29D PromQL inventory is preserved verbatim, as are legends,
+  units, layout, and the ``ati-prometheus`` datasource UID;
+- dashboard-to-dashboard navigation uses Grafana's verified dashboard
+  ``links`` contract (``type: "link"``, relative ``/d/<uid>`` stable-UID
+  destinations, ``keepTime`` preserving the time range across hops); the
+  ATI-invented ``externalLink`` pseudo-panel type is gone. The nine-dashboard
+  hierarchy and stable UIDs/titles are unchanged;
+- Loki targets were re-verified against the pinned Loki contract
+  (``expr`` + ``queryType: "range"``, ``ati-loki``) and left unchanged;
+  the developer Jaeger UI entry point is now a supported dashboard link to
+  ``http://localhost:16686``, and the ``ati-jaeger`` datasource stays
+  provisioned for Grafana's own trace exploration;
+- the static tests were corrected to parse real Grafana fields (``expr``,
+  dashboard ``links``) and extended with the GRAF-F01..F18
+  runtime-contract matrix in `tests/unit/observability/test_grafana_dashboards.py`;
+- `docs/OBSERVABILITY.md` and `docs/TESTING.md` now document the corrected
+  contracts; manual Grafana 13.2.2 smoke validates provisioning, query
+  execution, navigation, Loki, Jaeger, and re-provisioning.
+
+No telemetry integration-test phase, no Grafana plugin, no dashboard
+generator, and no ATI application/backend topology change is included.
+Retry taxonomy/Tenacity/timeouts/circuit-breaker/graceful-degradation
+remains a separate later hardening concern.
+
 ## Testing boundary
 
 PR 29 requires focused unit tests for ATI-owned telemetry semantics and

@@ -70,8 +70,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_investigation_execute_executed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_investigation_execute_executed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -89,8 +88,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_investigation_execute_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_investigation_execute_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -125,8 +123,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -144,8 +141,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -163,8 +159,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.99, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.99, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -199,8 +194,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_report_generate_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_report_generate_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -218,8 +212,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_report_generate_duration_seconds_count[1h])",
-          "expr": "",
+          "expr": "rate(ati_report_generate_duration_seconds_count[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -254,8 +247,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_report_generate_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_report_generate_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -273,8 +265,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_report_generate_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_report_generate_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -309,8 +300,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_agent_invoke_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_agent_invoke_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -328,8 +318,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_llm_invoke_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_llm_invoke_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -347,8 +336,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_report_generate_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_report_generate_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -383,8 +371,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_agent_invoke_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_agent_invoke_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -402,8 +389,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_llm_invoke_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_llm_invoke_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -456,45 +442,44 @@
       "showLabels": true,
       "sortOrder": "Descending",
       "dataFormat": "properties"
+    }
+  ],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "ATI System Overview",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-system-overview"
     },
     {
-      "id": 9,
-      "gridPos": {
-        "h": 1,
-        "w": 8,
-        "x": 0,
-        "y": 17
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Agents & LLM",
-      "type": "externalLink",
-      "link": "/d/ati-agents-llm",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-agents-llm"
     },
     {
-      "id": 10,
-      "gridPos": {
-        "h": 1,
-        "w": 8,
-        "x": 8,
-        "y": 17
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": false,
       "title": "Jaeger trace exploration",
-      "type": "externalLink",
-      "link": "http://localhost:16686",
-      "targetBlank": false
-    },
-    {
-      "id": 11,
-      "gridPos": {
-        "h": 1,
-        "w": 8,
-        "x": 16,
-        "y": 17
-      },
-      "title": "System Overview",
-      "type": "externalLink",
-      "link": "/d/ati-system-overview",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "http://localhost:16686"
     }
   ]
 }

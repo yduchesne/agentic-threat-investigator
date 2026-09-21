@@ -70,8 +70,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(ati_postgres_repository_failures_total) by (ati_postgres_repository, ati_postgres_operation)",
-          "expr": "",
+          "expr": "sum(ati_postgres_repository_failures_total) by (ati_postgres_repository, ati_postgres_operation)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -106,8 +105,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_postgres_uow_commits_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_postgres_uow_commits_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -125,8 +123,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_postgres_uow_rollbacks_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_postgres_uow_rollbacks_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -144,8 +141,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_postgres_uow_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_postgres_uow_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -180,8 +176,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -199,8 +194,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -218,8 +212,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.99, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
-          "expr": "",
+          "expr": "histogram_quantile(0.99, sum(ati_postgres_repository_duration_seconds_bucket) by (le, ati_postgres_repository, ati_postgres_operation))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -254,8 +247,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -273,8 +265,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -292,8 +283,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.99, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.99, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -328,8 +318,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_postgres_transaction_operation_duration_seconds_bucket) by (le, ati_postgres_operation))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_postgres_transaction_operation_duration_seconds_bucket) by (le, ati_postgres_operation))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -347,8 +336,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_postgres_transaction_operation_duration_seconds_bucket) by (le, ati_postgres_operation))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_postgres_transaction_operation_duration_seconds_bucket) by (le, ati_postgres_operation))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -383,8 +371,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -402,8 +389,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -438,8 +424,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_created_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_created_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -457,8 +442,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_appended_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_appended_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -476,8 +460,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_unchanged_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_unchanged_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -512,8 +495,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_up)",
-          "expr": "",
+          "expr": "sum(pg_up)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -531,8 +513,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_exporter_scrapes_total)",
-          "expr": "",
+          "expr": "sum(pg_exporter_scrapes_total)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -550,8 +531,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_exporter_last_scrape_error)",
-          "expr": "",
+          "expr": "sum(pg_exporter_last_scrape_error)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -564,32 +544,32 @@
           "useLastPointInGraph": false
         }
       ]
+    }
+  ],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "ATI System Overview",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-system-overview"
     },
     {
-      "id": 10,
-      "gridPos": {
-        "h": 1,
-        "w": 12,
-        "x": 12,
-        "y": 18
-      },
-      "title": "PostgreSQL (infrastructure)",
-      "type": "externalLink",
-      "link": "/d/ati-postgresql",
-      "targetBlank": false
-    },
-    {
-      "id": 11,
-      "gridPos": {
-        "h": 1,
-        "w": 8,
-        "x": 0,
-        "y": 20
-      },
-      "title": "System Overview",
-      "type": "externalLink",
-      "link": "/d/ati-system-overview",
-      "targetBlank": false
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "PostgreSQL",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-postgresql"
     }
   ]
 }

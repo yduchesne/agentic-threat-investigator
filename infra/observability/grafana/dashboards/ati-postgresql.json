@@ -70,8 +70,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_up)",
-          "expr": "",
+          "expr": "sum(pg_up)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -89,8 +88,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_exporter_scrapes_total)",
-          "expr": "",
+          "expr": "sum(pg_exporter_scrapes_total)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -108,8 +106,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_exporter_last_scrape_error)",
-          "expr": "",
+          "expr": "sum(pg_exporter_last_scrape_error)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -127,8 +124,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_scrape_collector_success)",
-          "expr": "",
+          "expr": "sum(pg_scrape_collector_success)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -163,8 +159,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_stat_database_numbackends) by (datname)",
-          "expr": "",
+          "expr": "sum(pg_stat_database_numbackends) by (datname)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -182,8 +177,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_settings_max_connections)",
-          "expr": "",
+          "expr": "sum(pg_settings_max_connections)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -218,8 +212,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_stat_activity_count{state=\"active\"})",
-          "expr": "",
+          "expr": "sum(pg_stat_activity_count{state=\"active\"})",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -237,8 +230,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_stat_activity_count{state=\"idle\"})",
-          "expr": "",
+          "expr": "sum(pg_stat_activity_count{state=\"idle\"})",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -256,8 +248,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_stat_activity_count{state=\"idle in transaction\"})",
-          "expr": "",
+          "expr": "sum(pg_stat_activity_count{state=\"idle in transaction\"})",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -292,8 +283,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(pg_stat_database_xact_commit[1h])",
-          "expr": "",
+          "expr": "rate(pg_stat_database_xact_commit[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -311,8 +301,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(pg_stat_database_xact_rollback[1h])",
-          "expr": "",
+          "expr": "rate(pg_stat_database_xact_rollback[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -330,8 +319,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(pg_stat_database_deadlocks[1h])",
-          "expr": "",
+          "expr": "increase(pg_stat_database_deadlocks[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -366,8 +354,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_locks_count) by (mode)",
-          "expr": "",
+          "expr": "sum(pg_locks_count) by (mode)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -402,8 +389,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(pg_stat_database_tup_inserted[1h])",
-          "expr": "",
+          "expr": "rate(pg_stat_database_tup_inserted[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -421,8 +407,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(pg_stat_database_tup_deleted[1h])",
-          "expr": "",
+          "expr": "rate(pg_stat_database_tup_deleted[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -440,8 +425,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(pg_stat_database_tup_updated[1h])",
-          "expr": "",
+          "expr": "rate(pg_stat_database_tup_updated[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -459,8 +443,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(pg_stat_database_blks_hit[1h])",
-          "expr": "",
+          "expr": "rate(pg_stat_database_blks_hit[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -478,8 +461,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(pg_stat_database_blks_read[1h])",
-          "expr": "",
+          "expr": "rate(pg_stat_database_blks_read[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -514,8 +496,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_database_size_bytes) by (datname)",
-          "expr": "",
+          "expr": "sum(pg_database_size_bytes) by (datname)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -550,8 +531,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_wal_size_bytes)",
-          "expr": "",
+          "expr": "sum(pg_wal_size_bytes)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -569,8 +549,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(pg_wal_segments)",
-          "expr": "",
+          "expr": "sum(pg_wal_segments)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -583,32 +562,32 @@
           "useLastPointInGraph": false
         }
       ]
+    }
+  ],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "ATI System Overview",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-system-overview"
     },
     {
-      "id": 10,
-      "gridPos": {
-        "h": 1,
-        "w": 12,
-        "x": 0,
-        "y": 13
-      },
-      "title": "Persistence / Repository (application)",
-      "type": "externalLink",
-      "link": "/d/ati-persistence-repository",
-      "targetBlank": false
-    },
-    {
-      "id": 11,
-      "gridPos": {
-        "h": 1,
-        "w": 12,
-        "x": 12,
-        "y": 13
-      },
-      "title": "System Overview",
-      "type": "externalLink",
-      "link": "/d/ati-system-overview",
-      "targetBlank": false
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Persistence / Repository",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-persistence-repository"
     }
   ]
 }

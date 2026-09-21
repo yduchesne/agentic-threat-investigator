@@ -70,8 +70,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic) - sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic)",
-          "expr": "",
+          "expr": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic) - sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -106,8 +105,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic, redpanda_partition) - sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic, redpanda_partition)",
-          "expr": "",
+          "expr": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic, redpanda_partition) - sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic, redpanda_partition)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -142,8 +140,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic)",
-          "expr": "",
+          "expr": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) by (redpanda_topic)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -161,8 +158,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic)",
-          "expr": "",
+          "expr": "sum(redpanda_kafka_consumer_group_committed_offset) by (redpanda_topic)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -197,8 +193,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(redpanda_kafka_records_produced_total[1h])",
-          "expr": "",
+          "expr": "rate(redpanda_kafka_records_produced_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -216,8 +211,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(redpanda_kafka_records_fetched_total[1h])",
-          "expr": "",
+          "expr": "rate(redpanda_kafka_records_fetched_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -235,8 +229,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(redpanda_kafka_request_bytes_total{redpanda_request=\"produce\"}[1h])",
-          "expr": "",
+          "expr": "rate(redpanda_kafka_request_bytes_total{redpanda_request=\"produce\"}[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -254,8 +247,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(redpanda_kafka_request_bytes_total{redpanda_request=\"consume\"}[1h])",
-          "expr": "",
+          "expr": "rate(redpanda_kafka_request_bytes_total{redpanda_request=\"consume\"}[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -290,8 +282,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(redpanda_kafka_request_latency_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(redpanda_kafka_request_latency_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -309,8 +300,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(redpanda_kafka_request_latency_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(redpanda_kafka_request_latency_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -345,8 +335,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(redpanda_kafka_handler_latency_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(redpanda_kafka_handler_latency_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -364,8 +353,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(redpanda_kafka_handler_latency_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(redpanda_kafka_handler_latency_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -400,8 +388,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_rpc_active_connections)",
-          "expr": "",
+          "expr": "sum(redpanda_rpc_active_connections)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -419,8 +406,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(redpanda_rpc_request_errors_total[1h])",
-          "expr": "",
+          "expr": "increase(redpanda_rpc_request_errors_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -438,8 +424,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(redpanda_kafka_rpc_sasl_session_expiration_total[1h])",
-          "expr": "",
+          "expr": "increase(redpanda_kafka_rpc_sasl_session_expiration_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -457,8 +442,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(redpanda_application_uptime_seconds_total[1h])",
-          "expr": "",
+          "expr": "rate(redpanda_application_uptime_seconds_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -493,8 +477,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_kafka_under_replicated_replicas)",
-          "expr": "",
+          "expr": "sum(redpanda_kafka_under_replicated_replicas)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -512,8 +495,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_cluster_unavailable_partitions)",
-          "expr": "",
+          "expr": "sum(redpanda_cluster_unavailable_partitions)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -531,8 +513,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_raft_recovery_offsets_pending)",
-          "expr": "",
+          "expr": "sum(redpanda_raft_recovery_offsets_pending)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -567,8 +548,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_storage_disk_free_bytes)",
-          "expr": "",
+          "expr": "sum(redpanda_storage_disk_free_bytes)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -586,8 +566,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_storage_disk_total_bytes)",
-          "expr": "",
+          "expr": "sum(redpanda_storage_disk_total_bytes)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -605,8 +584,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_storage_cache_disk_free_bytes)",
-          "expr": "",
+          "expr": "sum(redpanda_storage_cache_disk_free_bytes)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -641,8 +619,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "redpanda_application_uptime_seconds_total",
-          "expr": "",
+          "expr": "redpanda_application_uptime_seconds_total",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -660,8 +637,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_cluster_brokers)",
-          "expr": "",
+          "expr": "sum(redpanda_cluster_brokers)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -679,8 +655,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_cluster_partitions)",
-          "expr": "",
+          "expr": "sum(redpanda_cluster_partitions)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -715,8 +690,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_published_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_published_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -734,8 +708,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_received_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_received_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -753,8 +726,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_evidence_messages_processed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_evidence_messages_processed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -772,8 +744,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_committed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_committed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -791,8 +762,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_kafka_publish_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_kafka_publish_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -805,32 +775,32 @@
           "useLastPointInGraph": false
         }
       ]
+    }
+  ],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "ATI System Overview",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-system-overview"
     },
     {
-      "id": 13,
-      "gridPos": {
-        "h": 1,
-        "w": 8,
-        "x": 0,
-        "y": 24
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Datasource & Ingestion",
-      "type": "externalLink",
-      "link": "/d/ati-datasource-ingestion",
-      "targetBlank": false
-    },
-    {
-      "id": 14,
-      "gridPos": {
-        "h": 1,
-        "w": 8,
-        "x": 8,
-        "y": 24
-      },
-      "title": "System Overview",
-      "type": "externalLink",
-      "link": "/d/ati-system-overview",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-datasource-ingestion"
     }
   ]
 }
