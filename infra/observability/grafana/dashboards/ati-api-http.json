@@ -1,0 +1,451 @@
+{
+  "uid": "ati-api-http",
+  "title": "API / HTTP",
+  "tags": [
+    "ati",
+    "observability",
+    "api"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": [
+    {
+      "from": "now-30m",
+      "to": "now",
+      "name": "last 30 minutes"
+    },
+    {
+      "from": "now-1h",
+      "to": "now",
+      "name": "last 1 hour"
+    },
+    {
+      "from": "now-6h",
+      "to": "now",
+      "name": "last 6 hours"
+    },
+    {
+      "from": "now-24h",
+      "to": "now",
+      "name": "last 24 hours"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 1,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "title": "Request rate by method",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(http_server_duration_milliseconds_count) by (http_method)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "method: {{http_method}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "title": "Request count by method \u00d7 route template",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(http_server_duration_milliseconds_count) by (http_method, http_target)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "{{http_method}} {{http_target}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "title": "Status distribution (requests)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(http_server_duration_milliseconds_count) by (http_status_code)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "HTTP {{http_status_code}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(http_server_duration_milliseconds_count{http_status_code=~\"5..\"})",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "5xx server errors",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "title": "Active requests",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "sum(http_server_active_requests) by (http_method)",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "{{http_method}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "title": "Latency p50/p95/p99 (ms)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.5, sum(http_server_duration_milliseconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.99, sum(http_server_duration_milliseconds_bucket) by (le))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "p99",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "title": "p95 latency by method (ms)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_method))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "{{http_method}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "title": "p95 latency by route template (ms)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_target))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "{{http_target}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "title": "Slowest route templates (p95 ms, last value)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_target))",
+          "expr": "",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "interval": 1,
+          "legendFormat": "{{http_target}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "title": "Recent ATI API logs",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "ati-loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "ati-loki"
+          },
+          "expr": "{service_name=\"ati-api\"}",
+          "luceneQuery": "",
+          "queryType": "range",
+          "queryStoreMode": "duration",
+          "queryRange": "now-1h",
+          "queryLimit": 200,
+          "queryStep": 15,
+          "instant": false
+        }
+      ],
+      "logsSortDirection": "Descending",
+      "logMessagePath": "message",
+      "logTimePath": "time",
+      "showMessage": true,
+      "showTime": true,
+      "showLabels": true,
+      "sortOrder": "Descending",
+      "dataFormat": "properties"
+    },
+    {
+      "id": 10,
+      "gridPos": {
+        "h": 1,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "title": "Jaeger trace exploration",
+      "type": "externalLink",
+      "link": "http://localhost:16686",
+      "targetBlank": false
+    },
+    {
+      "id": 11,
+      "gridPos": {
+        "h": 1,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "title": "System Overview",
+      "type": "externalLink",
+      "link": "/d/ati-system-overview",
+      "targetBlank": false
+    }
+  ]
+}

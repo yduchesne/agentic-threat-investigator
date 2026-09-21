@@ -11,6 +11,8 @@
 - [PR 29A-1 delivered coverage](#pr-29a-1-delivered-coverage)
 - [PR 29B-1 delivered coverage](#pr-29b-1-delivered-coverage)
 - [PR 29B-2 delivered coverage](#pr-29b-2-delivered-coverage)
+- [PR 29C delivered runtime](#pr-29c-delivered-runtime)
+- [Grafana dashboards (PR 29D)](#grafana-dashboards-pr-29d)
 - [LLM observability backends](#llm-observability-backends)
 - [Correlation](#correlation)
 - [Provider telemetry](#provider-telemetry)
@@ -991,10 +993,11 @@ pinned ``v24.3.8``.
   application-layer concern.
 - **Grafana**: pins image ``13.2.2``, provisions stable Datasource UIDs
   ``ati-prometheus`` / ``ati-jaeger`` / ``ati-loki`` from
-  ``infra/observability/grafana/provisioning/``. No dashboard JSON is added
-  (PR 29D owns dashboards-as-code and the layer-specific hierarchy
-  including API/HTTP, datasource/ingestion, Kafka/Redpanda, persistence/
-  repository, PostgreSQL, Agents & LLM, GEO, and investigations/reports).
+  ``infra/observability/grafana/provisioning/`` and the nine
+  dashboards-as-code files under ``infra/observability/grafana/dashboards/``
+  through ``provisioning/dashboards/dashboards.yaml`` (PR 29D; see
+  `Grafana dashboards (PR 29D)` below for the hierarchy, query contracts,
+  and smoke procedure).
   Local admin credentials default to Grafana's documented ``admin/admin`` and
   are overridable via ``ATI_GRAFANA_ADMIN_USER`` / ``ATI_GRAFANA_ADMIN_PASSWORD``.
 
@@ -1057,12 +1060,161 @@ gate. Manual smoke (developer-only) flow:
 6. inspect one ATI metric: http://localhost:9090/graph
 7. inspect one Jaeger trace: http://localhost:16686
 8. inspect one Loki log: http://localhost:3000 (Explore, ATI Loki)
-9. stop the stack cleanly
+9. verify the nine PR 29D dashboards provisioned and show no query errors
+   (see the `Grafana dashboards (PR 29D)` section below)
+10. stop the stack cleanly
 ```
 
 Host UIs: Grafana ``http://localhost:3000`` (``ATI_GRAFANA_HOST_PORT``),
 Prometheus ``http://localhost:9090`` (``ATI_PROMETHEUS_HOST_PORT``), Jaeger
 ``http://localhost:16686`` (``ATI_JAEGER_HOST_PORT``).
+
+## Grafana dashboards (PR 29D)
+
+PR 29D delivers the nine source-controlled, automatically provisioned Grafana
+dashboards that turn PR 29C runtime telemetry into reproducible operational
+views. The dominant rule:
+
+> Dashboards consume the telemetry current ``main`` actually emits; they do
+> not redefine telemetry to make visualization easier.
+
+### Canonical files and provisioning
+
+Dashboard JSON is repository-canonical under
+``infra/observability/grafana/dashboards/`` (nine ``ati-*.json`` files, plain
+Grafana JSON; no Jsonnet/Grafonnet/Terraform/Helm and no dashboard-generation
+framework). Provisioning is one file provider,
+``infra/observability/grafana/provisioning/dashboards/dashboards.yaml``,
+applied by Grafana 13.2.2 at startup. ``compose.observability.yaml`` mounts
+the canonical directory read-only at ``/etc/grafana/dashboards`` and the
+provisioning tree at ``/etc/grafana/provisioning``. No manual import and no
+startup-time JSON generation is required. Repository JSON stays canonical
+when Grafana permits UI editing: ``allowUiUpdates: true`` un-provisions an
+edited copy so the next start re-applies the source file.
+
+### Dashboard inventory and hierarchy
+
+| Dashboard | UID | Responsibility |
+|---|---|---|
+| ATI System Overview | ``ati-system-overview`` | Triage: healthy? flowing? accumulating? failing/slow? |
+| API / HTTP | ``ati-api-http`` | Standard OTel HTTP server telemetry (method x registered route template) |
+| Datasource & Ingestion | ``ati-datasource-ingestion`` | Application acquisition/conversion/Evidence flow |
+| Kafka / Redpanda | ``ati-kafka-redpanda`` | Broker infrastructure (authoritative lag, traffic, health, storage) |
+| Persistence / Repository | ``ati-persistence-repository`` | ATI repository/UoW application telemetry |
+| PostgreSQL | ``ati-postgresql`` | postgres-exporter server health |
+| Agents & LLM | ``ati-agents-llm`` | Agent/LLM/provider/embedding operational telemetry |
+| GEO Resolution | ``ati-geo-resolution`` | GEO outcome/latency operational telemetry |
+| Investigations & Reports | ``ati-investigations-reports`` | Runner/report operational telemetry |
+
+All nine carry the ``ati`` and ``observability`` tags plus a bounded area
+tag, default to last 1 hour with a 10s refresh, and reuse the stable
+datasource UIDs ``ati-prometheus`` / ``ati-jaeger`` / ``ati-loki``.
+
+Navigation: System Overview links to all eight detail dashboards; every
+detail links back to System Overview; the agreed drill-downs are
+``Datasource & Ingestion -> Kafka / Redpanda``,
+``Datasource & Ingestion -> Persistence / Repository``,
+``Persistence / Repository -> PostgreSQL``, and
+``Investigations & Reports -> Agents & LLM``.
+
+### Application vs infrastructure separation
+
+Application abstractions and infrastructure services stay on separate
+dashboards: ``Datasource & Ingestion`` is not ``Kafka / Redpanda`` and
+``Persistence / Repository`` is not ``PostgreSQL``. An application dashboard
+may carry a small dependency-health summary plus a drill-down link; detailed
+infrastructure diagnosis lives on the infrastructure dashboard.
+
+### Query contracts (verified exposition)
+
+The PromQL expressions are frozen against the pinned runtime exposition
+verified from the actual services: Collector 0.161.0 OTel-to-Prometheus
+export, FastAPI/ASGI instrumentation 0.58b0 in the default semantic-convention
+stability mode, Redpanda v24.3.8 ``/public_metrics``, and postgres-exporter
+v0.20.1 default queries.
+
+- Counters render with a ``_total`` suffix; duration histograms with unit ``s``
+  render as ``<name>_seconds_bucket|_count|_sum``, unit ``ms`` as
+  ``<name>_milliseconds_*``, and count histograms (``{item}``/``{message}``
+  units, e.g. ``ati_kafka_poll_batch_size`` / ``ati_datasource_convert_items``)
+  without a unit suffix. Example series: ``ati_evidence_messages_processed_total``,
+  ``ati_postgres_repository_duration_seconds_bucket``,
+  ``http_server_duration_milliseconds_bucket``.
+- The OTel resource ``service.name`` (``ati-api`` / ``ati-worker`` /
+  ``ati-geo-resolver`` / ...) becomes the Prometheus label ``exported_job``;
+  Prometheus renames the payload ``job`` label this way to avoid colliding
+  with the scrape-job label, and the scrape jobs add ``job`` / ``scraped_src`` /
+  ``instance`` labels.
+- HTTP identity is ``http_method`` x ``http_target`` where ``http_target`` is
+  the registered route template (never a concrete path); its latency series
+  unit is milliseconds.
+- Counters are consumed with ``rate()`` / ``increase()`` (or grouped ``sum``
+  for bounded breakdowns); histogram quantiles use
+  ``histogram_quantile(p, sum(<name>_bucket) by (le, <bounded labels>))``.
+- Kafka lag derives exclusively from authoritative Redpanda ``/public_metrics``
+  series: ``redpanda_kafka_max_offset`` minus
+  ``redpanda_kafka_consumer_group_committed_offset``, joined per topic /
+  partition with ``sum(...) by (...)`` so the label sets match. When a
+  consumer group has no committed offsets the broker stops exposing the group
+  series and lag renders as absent (never as a synthesized zero; never from
+  ATI counters).
+- PostgreSQL panels consume only postgres-exporter default metrics
+  (``pg_up``, ``pg_exporter_*``, ``pg_stat_database_*``,
+  ``pg_stat_activity_count``, ``pg_locks_count``, ``pg_database_size_bytes``,
+  ``pg_wal_*``, ``pg_settings_max_connections``); no custom exporter queries.
+- Loki panels target ``/loki/api/v1/query_range`` (Loki 3 keeps range log
+  queries on the ``query_range`` route) with classic LogQL filter expressions
+  over the bounded OTLP label set (``service_name``, ``detected_level``);
+  trace/span IDs remain structured metadata, never indexed labels.
+- Jaeger trace exploration is reached through the Jaeger all-in-one UI
+  (``http://localhost:16686``); the ``ati-jaeger`` datasource stays
+  provisioned for Grafana's own trace exploration.
+
+### Privacy/cardinality rules
+
+No dashboard, panel, query, legend, or variable uses Evidence/Entity/
+Investigation/execution/message/request IDs, IP/domain values, concrete URLs,
+exception messages, prompts, or model outputs. API identity is method x
+registered route template; Kafka variables are group/topic only; the only
+per-partition breakout is the Kafka infrastructure dashboard.
+
+### Automated static validation
+
+``tests/unit/observability/test_grafana_dashboards.py`` deterministically
+parses the provisioning YAML and every dashboard JSON and asserts the full
+GRAF-C01..C18 matrix plus query-ownership contracts: API route-template
+usage; Redpanda-authoritative lag joins; postgres-exporter usage; Persistence /
+Ingestion / GEO / Agents / Investigations series ownership; rate-/
+increase-/grouped-sum counter consumption; ``histogram_quantile``
+``le``-bucket grouping; and application/infrastructure separation. These
+tests never require a live observability stack.
+
+### Dashboard manual smoke procedure
+
+With the optional stack running (see the base smoke procedure above):
+
+1. Grafana starts and provisions all three datasources (Data sources:
+   ATI Prometheus / ATI Jaeger / ATI Loki);
+2. all nine dashboards appear automatically (Dashboards, ``ATI *``);
+3. overview/detail navigation works: overview links, drill-down links, and
+   back links;
+4. Prometheus panels show no query errors on every dashboard (last 1 hour);
+5. Loki panels show no query errors (API / HTTP, Agents & LLM, GEO Resolution,
+   Investigations & Reports);
+6. Jaeger trace exploration opens from the Jaeger link panels;
+7. exercising the API produces request-rate/latency activity on
+   ``API / HTTP``;
+8. exercising the Evidence flow produces published/received/processed/committed
+   and outcome panels on ``Datasource & Ingestion``;
+9. Kafka lag panels reflect authoritative broker state (consumption behind
+   production increases lag; catching up drains it) on ``Kafka / Redpanda``;
+10. persistence and PostgreSQL separation is visible: repository/UoW activity
+    on ``Persistence / Repository`` and server health on ``PostgreSQL``;
+11. agent/LLM, investigation/report, and GEO activity appears when exercised;
+12. restart Grafana and confirm every dashboard re-provisions from source.
+
+Make CI never depend on this stack: dashboard/backend failures remain
+observational and must never affect ATI services.
 
 ## LLM observability backends
 

@@ -380,6 +380,52 @@ PyYAML parsing never proves Loki accepts a configuration; the pinned
 (`docs/OBSERVABILITY.md`) and ordinary unit CI must not require a container
 runtime.
 
+### Deterministic Grafana dashboard tests (PR 29D)
+
+PR 29D adds `tests/unit/observability/test_grafana_dashboards.py`, a static
+(offline, deterministic) validation of the dashboards-as-code contract. It
+parses `infra/observability/grafana/provisioning/dashboards/dashboards.yaml`,
+`compose.observability.yaml` (mount contract), and every dashboard JSON under
+`infra/observability/grafana/dashboards/`, and asserts the frozen matrix:
+
+- **GRAF-C01**: the file provider parses and points at the mounted canonical
+  directory (`/etc/grafana/dashboards`), and Compose mounts the provisioning
+  tree and the canonical dashboard directory read-only;
+- **GRAF-C02..C05**: exactly nine dashboard files, all valid JSON, with the
+  exact nine UIDs (unique) and the agreed titles;
+- **GRAF-C06..C08**: Prometheus panels use `ati-prometheus`, Loki panels use
+  `ati-loki` with classic LogQL brace expressions, and trace usage stays
+  within the stable `ati-jaeger` contract (datasource provisioned; Jaeger UI
+  navigation target);
+- **GRAF-C09..C11**: overview links to all eight details, every detail links
+  back to the overview, and the agreed drill-down hierarchy exists
+  (Investigations -> Agents & LLM, Datasource & Ingestion -> Kafka / Redpanda
+  and -> Persistence / Repository, Persistence / Repository -> PostgreSQL);
+- **GRAF-C12/C13**: no IDs/IP/domain/URL/request/execution identifiers or IP
+  literals anywhere in the dashboard surface, and API identity is method x
+  registered route template only (no concrete-path filter values);
+- **GRAF-C14..C18**: panels reference only the stable datasource UIDs, tags
+  include `ati`/`observability`, sane last-1h/10s defaults, plain-JSON-only
+  canonical tree (no dashboard-generation framework), and no embedded
+  credentials;
+- **query ownership** (target expressions are parsed, not descriptions
+  searched): API uses route-template HTTP telemetry; Kafka lag joins derive
+  from `redpanda_kafka_max_offset` minus
+  `redpanda_kafka_consumer_group_committed_offset` and never from `ati_kafka`
+  counters; PostgreSQL uses postgres-exporter series; Persistence uses ATI
+  repository/UoW series; Datasource & Ingestion contains the Evidence-flow
+  series; GEO contains GEO outcome series; Agents & LLM contains
+  agent/LLM/provider series; Investigations & Reports contains
+  investigation/report series; counters are consumed with
+  `rate()`/`increase()`/grouped `sum`; `histogram_quantile` uses `_bucket`
+  series with `by (le, ...)` grouping; application and infrastructure
+  dashboards remain separated.
+
+These tests never require a live stack. PromQL/Loki/panel runtime health is
+verified by the manual developer smoke procedure in
+`docs/OBSERVABILITY.md` (`Grafana dashboards (PR 29D)` section) — the
+no-telemetry-integration-test rule is unchanged.
+
 Priority unit-test areas include:
 
 - entity canonicalization;

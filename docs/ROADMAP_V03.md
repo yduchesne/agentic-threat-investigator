@@ -446,25 +446,59 @@ dashboard, or telemetry-integration-test changes are included.
 
 ### PR 29D — Grafana dashboards as code
 
-Provision Grafana datasources and version-controlled dashboards from
-`infra/observability/grafana/`.
+> **Status: DELIVERED.** PR 29D makes ATI operational views reproducible and
+> source-controlled: exactly nine plain-Grafana-JSON dashboards provision
+> automatically at Grafana startup from
+> `infra/observability/grafana/dashboards/` via the file provider
+> `infra/observability/grafana/provisioning/dashboards/dashboards.yaml`
+> (mounted read-only by `compose.observability.yaml`). See
+> `docs/OBSERVABILITY.md` → `Grafana dashboards (PR 29D)` for the inventory,
+> hierarchy, query contracts, and manual smoke procedure.
 
-Initial dashboards should answer:
+Delivered organization (nine dashboards):
 
-- Is ATI healthy?
-- Is work flowing?
-- Is work accumulating?
-- Where is time being spent?
-- Which distributed/external boundaries are failing?
-- What are Evidence throughput and create/append/unchanged outcomes?
-- Are Evidence consumers keeping pace with producers?
-- Is Kafka/Redpanda consumer lag growing, stable, or draining, and on which
-  partitions?
-- Is PostgreSQL repository/UoW latency constraining consumer throughput?
-- What is the state of datasource and investigation activity?
+```text
+ATI System Overview
+├── API / HTTP
+├── Investigations & Reports
+│   └── Agents & LLM
+├── Datasource & Ingestion
+│   ├── Kafka / Redpanda
+│   └── Persistence / Repository
+│       └── PostgreSQL
+└── GEO Resolution
+```
 
-Dashboard definitions must be reproducible from the repository rather than
-requiring manual Grafana configuration.
+PR 29D delivered (no new ATI telemetry):
+
+- dashboard-provider provisioning and the nine version-controlled JSON files
+  with stable UIDs (`ati-system-overview`, `ati-api-http`,
+  `ati-datasource-ingestion`, `ati-kafka-redpanda`, `ati-persistence-repository`,
+  `ati-postgresql`, `ati-agents-llm`, `ati-geo-resolution`,
+  `ati-investigations-reports`);
+- agreed tags, last-1h/10s defaults, and the overview-to-detail plus
+  drill-down navigation hierarchy;
+- Prometheus panels over existing ATI application metrics, standard OTel
+  HTTP server telemetry (`http_server_duration_milliseconds_*` with the
+  `http_method` × registered-`http_target` route-template identity), Redpanda
+  `/public_metrics` (authoritative consumer-group lag derived from
+  `redpanda_kafka_max_offset` minus
+  `redpanda_kafka_consumer_group_committed_offset`), and postgres-exporter
+  default metrics (`pg_up`, `pg_stat_database_*`, `pg_exporter_*`, ...);
+- Loki diagnostic panels (`/loki/api/v1/query_range`, classic LogQL over the
+  bounded `service_name`/`detected_level` label set) and Jaeger trace
+  exploration through the Jaeger all-in-one UI with the provisioned
+  `ati-jaeger` datasource;
+- deterministic static tests (GRAF-C01..C18 + query-ownership assertions) in
+  `tests/unit/observability/test_grafana_dashboards.py`;
+- updated `docs/OBSERVABILITY.md` and `docs/TESTING.md`.
+
+No alerts, SLOs, notification channels, production auth, retry/circuit-breaker
+hardening, telemetry integration tests, or changes to ATI metric
+names/instruments/attributes, logging schema, span names, FastAPI
+instrumentation, Collector routing, Prometheus scrape jobs, Loki/Jaeger
+topology, Redpanda instrumentation, or postgres-exporter configuration are
+included.
 
 ## Testing boundary
 

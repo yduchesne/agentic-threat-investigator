@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Grafana dashboard provisioning (PR 29D).
+#
+# Dashboards-as-code: every dashboard JSON shiped under
+# infra/observability/grafana/dashboards/ is provisioned automatically when
+# Grafana starts. The provider points at the repository-canonical JSON
+# directory which Compose mounts read-only at /etc/grafana/dashboards.
+# No manual import and no startup-time JSON generation is required.
+#
+# allowUiUpdates keeps repository JSON canonical: a UI edit "unprovisions"
+# that one dashboard (removes its version) so re-provisioning from the file
+# re-applies the source-controlled definition.
+
+apiVersion: 1
+
+providers:
+  - name: "ATI Dashboards (PR 29D)"
+    orgId: 1
+    folder: ""
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
