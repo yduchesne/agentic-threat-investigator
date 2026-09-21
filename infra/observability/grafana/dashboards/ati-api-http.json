@@ -57,8 +57,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(http_server_duration_milliseconds_count) by (http_method)",
-          "expr": "",
+          "expr": "sum(http_server_duration_milliseconds_count) by (http_method)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -80,7 +79,7 @@
         "x": 0,
         "y": 1
       },
-      "title": "Request count by method \u00d7 route template",
+      "title": "Request count by method × route template",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -93,8 +92,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(http_server_duration_milliseconds_count) by (http_method, http_target)",
-          "expr": "",
+          "expr": "sum(http_server_duration_milliseconds_count) by (http_method, http_target)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -129,8 +127,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(http_server_duration_milliseconds_count) by (http_status_code)",
-          "expr": "",
+          "expr": "sum(http_server_duration_milliseconds_count) by (http_status_code)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -148,8 +145,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(http_server_duration_milliseconds_count{http_status_code=~\"5..\"})",
-          "expr": "",
+          "expr": "sum(http_server_duration_milliseconds_count{http_status_code=~\"5..\"})",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -184,8 +180,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(http_server_active_requests) by (http_method)",
-          "expr": "",
+          "expr": "sum(http_server_active_requests) by (http_method)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -220,8 +215,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(http_server_duration_milliseconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(http_server_duration_milliseconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -239,8 +233,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -258,8 +251,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.99, sum(http_server_duration_milliseconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.99, sum(http_server_duration_milliseconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -294,8 +286,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_method))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_method))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -330,8 +321,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_target))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_target))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -366,8 +356,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_target))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le, http_target))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -420,32 +409,32 @@
       "showLabels": true,
       "sortOrder": "Descending",
       "dataFormat": "properties"
+    }
+  ],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "ATI System Overview",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-system-overview"
     },
     {
-      "id": 10,
-      "gridPos": {
-        "h": 1,
-        "w": 8,
-        "x": 0,
-        "y": 25
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": false,
       "title": "Jaeger trace exploration",
-      "type": "externalLink",
-      "link": "http://localhost:16686",
-      "targetBlank": false
-    },
-    {
-      "id": 11,
-      "gridPos": {
-        "h": 1,
-        "w": 8,
-        "x": 8,
-        "y": 25
-      },
-      "title": "System Overview",
-      "type": "externalLink",
-      "link": "/d/ati-system-overview",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "http://localhost:16686"
     }
   ]
 }

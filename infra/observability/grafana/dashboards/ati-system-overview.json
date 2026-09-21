@@ -45,7 +45,7 @@
       },
       "type": "text",
       "mode": "markdown",
-      "content": "## ATI System Overview\nTriage surface for the ATI observability runtime. Ask: healthy? work flowing? accumulating? failing/slow?\nTime default last 1 hour (10s refresh). Links to every detail dashboard below.",
+      "content": "## ATI System Overview\nTriage surface for the ATI observability runtime. Ask: healthy? work flowing? accumulating? failing/slow?\nTime default last 1 hour (10s refresh). Use the dashboard links in the top bar for every detail dashboard.",
       "title": ""
     },
     {
@@ -69,8 +69,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(http_server_duration_milliseconds_count[1h])",
-          "expr": "",
+          "expr": "rate(http_server_duration_milliseconds_count[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -88,8 +87,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_evidence_messages_processed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_evidence_messages_processed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -107,8 +105,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_geo_resolve_resolved_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_geo_resolve_resolved_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -126,8 +123,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_investigation_execute_executed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_investigation_execute_executed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -162,8 +158,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_published_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_published_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -181,8 +176,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_received_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_received_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -200,8 +194,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_evidence_messages_processed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_evidence_messages_processed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -219,8 +212,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_kafka_messages_committed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_kafka_messages_committed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -255,8 +247,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) - sum(redpanda_kafka_consumer_group_committed_offset)",
-          "expr": "",
+          "expr": "sum(redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"}) - sum(redpanda_kafka_consumer_group_committed_offset)",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -274,8 +265,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(redpanda_kafka_records_produced_total[1h])",
-          "expr": "",
+          "expr": "rate(redpanda_kafka_records_produced_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -293,8 +283,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(redpanda_kafka_records_fetched_total[1h])",
-          "expr": "",
+          "expr": "rate(redpanda_kafka_records_fetched_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -329,8 +318,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_geo_resolve_resolved_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_geo_resolve_resolved_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -348,8 +336,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_geo_resolve_unresolvable_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_geo_resolve_unresolvable_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -367,8 +354,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "rate(ati_geo_resolve_failed_total[1h])",
-          "expr": "",
+          "expr": "rate(ati_geo_resolve_failed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -390,7 +376,7 @@
         "x": 0,
         "y": 10
       },
-      "title": "Failures \u2014 transport & ingestion",
+      "title": "Failures — transport & ingestion",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -403,8 +389,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_kafka_publish_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_kafka_publish_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -422,8 +407,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_kafka_poll_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_kafka_poll_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -441,8 +425,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_kafka_commit_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_kafka_commit_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -460,8 +443,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_processing_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_processing_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -479,8 +461,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_datasource_acquire_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_datasource_acquire_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -498,8 +479,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_datasource_convert_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_datasource_convert_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -521,7 +501,7 @@
         "x": 12,
         "y": 10
       },
-      "title": "Failures \u2014 persistence & investigation",
+      "title": "Failures — persistence & investigation",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -534,8 +514,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_postgres_repository_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_postgres_repository_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -553,8 +532,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_postgres_uow_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_postgres_uow_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -572,8 +550,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_provider_http_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_provider_http_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -591,8 +568,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_provider_execute_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_provider_execute_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -610,8 +586,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_investigation_execute_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_investigation_execute_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -633,7 +608,7 @@
         "x": 0,
         "y": 14
       },
-      "title": "Failures \u2014 agents, LLM, report, embedding",
+      "title": "Failures — agents, LLM, report, embedding",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -646,8 +621,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_agent_invoke_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_agent_invoke_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -665,8 +639,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_llm_invoke_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_llm_invoke_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -684,8 +657,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_report_generate_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_report_generate_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -703,8 +675,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_embedding_invoke_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_embedding_invoke_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -726,7 +697,7 @@
         "x": 12,
         "y": 14
       },
-      "title": "Failures \u2014 GEO",
+      "title": "Failures — GEO",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -739,8 +710,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_geo_resolve_failed_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_geo_resolve_failed_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -758,8 +728,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_geo_resolve_unresolvable_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_geo_resolve_unresolvable_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -777,8 +746,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_processing_failures_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_processing_failures_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -813,8 +781,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.5, sum(http_server_duration_milliseconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.5, sum(http_server_duration_milliseconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -832,8 +799,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(http_server_duration_milliseconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -851,8 +817,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.99, sum(http_server_duration_milliseconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.99, sum(http_server_duration_milliseconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -887,8 +852,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -906,8 +870,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_postgres_uow_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -925,8 +888,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_postgres_repository_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_postgres_repository_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -944,8 +906,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_provider_http_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_provider_http_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -963,8 +924,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_llm_invoke_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_llm_invoke_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -982,8 +942,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "histogram_quantile(0.95, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
-          "expr": "",
+          "expr": "histogram_quantile(0.95, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -1018,8 +977,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_created_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_created_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -1037,8 +995,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_appended_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_appended_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -1056,8 +1013,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_evidence_outcomes_unchanged_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_evidence_outcomes_unchanged_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -1075,8 +1031,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_postgres_uow_commits_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_postgres_uow_commits_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -1094,8 +1049,7 @@
             "type": "prometheus",
             "uid": "ati-prometheus"
           },
-          "query": "increase(ati_postgres_uow_rollbacks_total[1h])",
-          "expr": "",
+          "expr": "increase(ati_postgres_uow_rollbacks_total[1h])",
           "instant": false,
           "format": 0,
           "hideEmpty": false,
@@ -1108,110 +1062,104 @@
           "useLastPointInGraph": false
         }
       ]
-    },
+    }
+  ],
+  "links": [
     {
-      "id": 21,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 0,
-        "y": 23
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "API / HTTP",
-      "type": "externalLink",
-      "link": "/d/ati-api-http",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-api-http"
     },
     {
-      "id": 22,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 6,
-        "y": 23
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Datasource & Ingestion",
-      "type": "externalLink",
-      "link": "/d/ati-datasource-ingestion",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-datasource-ingestion"
     },
     {
-      "id": 23,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 12,
-        "y": 23
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Kafka / Redpanda",
-      "type": "externalLink",
-      "link": "/d/ati-kafka-redpanda",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-kafka-redpanda"
     },
     {
-      "id": 24,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 18,
-        "y": 23
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Persistence / Repository",
-      "type": "externalLink",
-      "link": "/d/ati-persistence-repository",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-persistence-repository"
     },
     {
-      "id": 25,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 0,
-        "y": 24
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "PostgreSQL",
-      "type": "externalLink",
-      "link": "/d/ati-postgresql",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-postgresql"
     },
     {
-      "id": 26,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 6,
-        "y": 24
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Agents & LLM",
-      "type": "externalLink",
-      "link": "/d/ati-agents-llm",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-agents-llm"
     },
     {
-      "id": 27,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 12,
-        "y": 24
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "GEO Resolution",
-      "type": "externalLink",
-      "link": "/d/ati-geo-resolution",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-geo-resolution"
     },
     {
-      "id": 28,
-      "gridPos": {
-        "h": 1,
-        "w": 6,
-        "x": 18,
-        "y": 24
-      },
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Investigations & Reports",
-      "type": "externalLink",
-      "link": "/d/ati-investigations-reports",
-      "targetBlank": false
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-investigations-reports"
     }
   ]
 }
