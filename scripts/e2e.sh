@@ -59,36 +59,68 @@ cleanup_stale_ati_test_containers() {
   done
 }
 
+# Host ports for the isolated E2E containers sit ABOVE the default Linux
+# ephemeral-port range (net.ipv4.ip_local_port_range is 32768-60999): under
+# rootless Podman the user-space port forwarder binds each mapped host port,
+# and a port inside the ephemeral range can be silently occupied by an
+# outbound connection (intermittent rootlessport EADDRINUSE). The frontend
+# and postgres windows are disjoint so one container can never shadow the
+# other.
+HOST_PORT_LOW=62000
+HOST_PORT_HIGH=65535
+FRONTEND_PORT_LOW=61000
+FRONTEND_PORT_HIGH=61999
+
 port_is_available() {
   uv run python - "$1" <<'PY'
+import errno
 import socket
 import sys
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        sock.bind(("0.0.0.0", int(sys.argv[1])))
-    except OSError:
-        raise SystemExit(1)
+port = int(sys.argv[1])
+
+# Bind all interfaces on both stacks exactly as the rootless-Podman port
+# forwarder does. SO_REUSEADDR is deliberately not set: the forwarder binds a
+# fresh listener, so a live (non-TIME_WAIT) occupant must fail this probe too.
+for family, address in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        if family == socket.AF_INET6:
+            try:
+                sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            except OSError:
+                # Address family unavailable: nothing to probe on this side.
+                continue
+        try:
+            sock.bind((address, port))
+        except OSError as exc:
+            if exc.errno in (
+                errno.EAFNOSUPPORT,
+                errno.EADDRNOTAVAIL,
+                errno.ENOPROTOOPT,
+            ):
+                continue
+            raise SystemExit(1)
 PY
 }
 
 pick_port() {
+  local low="$1" high="$2"
   local result=""
+  local candidate=""
   for _ in $(seq 1 30); do
-    candidate=$(shuf -i 50000-59999 -n 1)
+    candidate=$(shuf -i "$low-$high" -n 1)
     if port_is_available "$candidate"; then
       result="$candidate"
       break
     fi
   done
-  [ -n "$result" ] || { echo "could not find an available port" >&2; exit 1; }
+  [ -n "$result" ] || { echo "could not find an available port in [$low, $high]" >&2; exit 1; }
   echo "$result"
 }
 
 cleanup_stale_ati_test_containers
-FRONTEND_PORT=$(pick_port)
-POSTGRES_PORT=$(pick_port)
+FRONTEND_PORT=$(pick_port "$FRONTEND_PORT_LOW" "$FRONTEND_PORT_HIGH")
+POSTGRES_PORT=$(pick_port "$HOST_PORT_LOW" "$HOST_PORT_HIGH")
 BOOTSTRAP_PASSWORD="e2e-$(uv run python -c 'import secrets; print(secrets.token_urlsafe(18))')"
 
 export COMPOSE_PROJECT_NAME="$E2E_ID"

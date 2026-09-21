@@ -1347,6 +1347,16 @@ Example:
 COMPOSE_PROJECT_NAME=ati-test-<unique>
 ```
 
+Host ports for isolated containers are selected above the default Linux
+ephemeral-port range (`net.ipv4.ip_local_port_range`, 32768-60999 on
+GitHub-hosted runners): under rootless Podman every mapped host port is bound
+by a user-space forwarder, so a port inside the ephemeral range can be
+silently occupied by an outbound connection. `integration-test.sh` and
+`scripts/e2e.sh` pick available ports from disjoint high ranges, probe them
+by binding all interfaces exactly like the forwarder (no `SO_REUSEADDR`), and
+retry container starts with a fresh port when the forwarder reports a bind
+conflict.
+
 Test startup should fail safely if configuration appears to reference a normal development database/data directory.
 
 ## Synthetic fixtures
