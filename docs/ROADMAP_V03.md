@@ -413,6 +413,37 @@ PR 29C delivered:
 The observability stack is optional infrastructure. Its failure or absence must
 not cause ATI investigation or ingestion failure.
 
+### PR 29C-1 — Loki configuration correction
+
+> **Status: DELIVERED.** PR 29C-1 is a narrow post-merge correction to the PR 29C
+> local Loki configuration against the pinned `grafana/loki:3.7.8` runtime. It
+> does not redesign PR 29C and does not begin PR 29D.
+
+Post-merge review found that PR 29C's `limits_config` contained
+`storage_retention_days: 14`, which is not Loki's log-retention field (for the
+pinned Loki 3.x runtime, global retention is `limits_config.retention_period`
+and is enforced by the Compactor). PR 29C-1 delivered:
+
+- removed the invalid `storage_retention_days` key;
+- frozen global local-development retention at exactly 14 days
+  (`limits_config.retention_period: 336h`), preserving
+  `allow_structured_metadata: true`;
+- enabled Compactor-managed retention (`compactor.retention_enabled: true`)
+  with `compactor.delete_request_store: filesystem`, matching the existing
+  filesystem object store;
+- preserved the PR 29C topology unchanged: single binary, TSDB schema v13,
+  24h index period, replication factor 1, in-memory ring, filesystem storage;
+- added deterministic PyYAML static-contract tests (LOKI-C1..C7) for the
+  retention contract — unit tests never equate YAML parsing with Loki schema
+  acceptance;
+- documented the pinned `grafana/loki:3.7.8 -verify-config=true` developer/
+  reviewer validation command (required exit 0);
+- updated `docs/OBSERVABILITY.md` and `docs/TESTING.md` for the actual
+  14-day/Compactor retention behavior and the testing boundary.
+
+No Collector, Prometheus, Jaeger, Grafana, ATI telemetry, image-version,
+dashboard, or telemetry-integration-test changes are included.
+
 ### PR 29D — Grafana dashboards as code
 
 Provision Grafana datasources and version-controlled dashboards from
