@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# OpenTelemetry Collector gateway configuration (PR 29C).
+#
+# The Collector is ATI's required telemetry gateway: every ATI process
+# exports traces/metrics/logs over OTLP/HTTP to exactly one standard
+# destination and never knows backend topology. This config receives that
+# OTLP traffic and routes it:
+#
+#   traces  -> OTLP/HTTP export to Jaeger      (http://jaeger:4318, /v1/traces)
+#   metrics -> Prometheus scrape endpoint      (:8889/metrics, scraped by Prometheus)
+#   logs    -> OTLP/HTTP export to Loki natively (http://loki:3100/otlp/v1/logs)
+#
+# The pinned image is the OpenTelemetry Collector Contrib distribution
+# (otel/opentelemetry-collector-contrib:0.161.0) because the Prometheus
+# exporter is contrib-only. No debug receivers (zPages/pprof) are exposed on
+# the host surface; the only non-OTLP surface is the health-check listener
+# used inside the Compose network.
+#
+# Bound signals: three pipelines, one bounded batch processor each, no tail
+# sampling and no content-transformation processors. ATI's data-minimization
+# contract is preserved end to end.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  otlphttp/jaeger:
+    # Jaeger 2.x all-in-one accepts the standard OTLP/HTTP receiver; the
+    # exporter appends the signal path (/v1/traces).
+    endpoint: http://jaeger:4318
+  prometheus:
+    # Prometheus-compatible scrape endpoint for ATI application metrics.
+    # Prometheus scrapes http://otel-collector:8889/metrics. Prometheus
+    # metric naming/translation is exporter/backend behavior; ATI metric
+    # names and units are never renamed in Python.
+    endpoint: 0.0.0.0:8889
+  otlphttp/loki:
+    # Loki's native OTLP ingestion endpoint; the exporter appends the
+    # signal path (/v1/logs). The deprecated Loki-specific Collector
+    # exporter is intentionally not used.
+    endpoint: http://loki:3100/otlp
+
+extensions:
+  health_check:
+    # Minimal in-network health probe so compose/manual smoke checks can
+    # confirm the pipeline is up without exposing debug surfaces.
+    endpoint: 0.0.0.0:13131
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/jaeger]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]

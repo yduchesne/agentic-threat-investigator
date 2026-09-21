@@ -52,6 +52,13 @@ dependencies = [
   # resolved 1.37.x line is shared and verified in uv.lock.
   "opentelemetry-api>=1.37,<2",
   "opentelemetry-sdk>=1.37,<2",
+  # Official OpenTelemetry OTLP/HTTP protobuf exporter (PR 29C): the single
+  # ATI -> OpenTelemetry Collector transport for traces, metrics, and logs.
+  # ATI composes it explicitly (never through a transitive import) at the
+  # application boundary; the exporter is only activated when observability
+  # is enabled AND an explicit OTEL_EXPORTER_OTLP_ENDPOINT is present.
+  # Bounded to the same 1.37.x line shared with the API/SDK packages.
+  "opentelemetry-exporter-otlp-proto-http>=1.37,<2",
   # Official OpenTelemetry FastAPI/ASGI server instrumentation (PR 29B-1): the
   # ATI API process composes it directly over the standard OTel providers, so
   # it must be a direct dependency. Bounded to the same 1.37.x SDK line; the
@@ -79,6 +86,10 @@ dev = [
   "semgrep>=1.100,<2",
   "safety>=3,<4",
   "pip-audit>=2.7,<3",
+  # Test-only YAML parsing for ATI-owned observability config assets
+  # (PR 29C INF-C16..C21); also a transitive runtime dependency, declared
+  # here so the config-validation tests never rely on an implicit import.
+  "pyyaml>=6,<7",
 ]
 
 [tool.hatch.build.targets.wheel]

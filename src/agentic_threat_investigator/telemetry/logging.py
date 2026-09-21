@@ -14,6 +14,7 @@ import logging
 from dataclasses import dataclass
 
 from opentelemetry import trace
+from opentelemetry.sdk._logs import LoggingHandler
 
 
 @dataclass(frozen=True)
@@ -58,8 +59,62 @@ class TraceCorrelationFilter(logging.Filter):
         return True
 
 
+class OtelLoggerNamespaceFilter(logging.Filter):
+    """Keep OpenTelemetry SDK/exporter log records out of OTLP export.
+
+    PR 29C transports ATI application logs additively. OTel SDK/exporter
+    diagnostics (``opentelemetry.*`` logger namespaces) are the transport's
+    own machinery: re-exporting them through the OTLP log pipeline would
+    create a feedback loop when the Collector/backend is unavailable or
+    rejects a batch. This filter drops exactly those namespaces from the
+    OTLP handler only; console logging remains untouched and useful warnings
+    from other namespaces are not suppressed.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Drop OTel-internal records; allow every other record through."""
+        return not (
+            record.name == "opentelemetry" or record.name.startswith("opentelemetry.")
+        )
+
+
+def attach_otlp_log_handler(handler: LoggingHandler) -> None:
+    """Attach an OTel ``LoggingHandler`` to the root logger additively.
+
+    The handler is added to the root logger's existing handler set without
+    removing or replacing any console handler, so developer terminal output
+    and container logs are preserved and OTLP export is an additional
+    pipeline. The OTel-internal namespace guard is installed on the handler
+    so its own diagnostics never re-enter OTLP export. Callers must remove
+    the handler through :func:`detach_otlp_log_handler` during telemetry
+    shutdown so repeated test/process-local configurations never leak
+    duplicate handlers.
+    """
+    if not any(installed is handler for installed in logging.getLogger().handlers):
+        handler.addFilter(OtelLoggerNamespaceFilter())
+        logging.getLogger().addHandler(handler)
+
+
+def detach_otlp_log_handler(handler: LoggingHandler | None) -> None:
+    """Detach one previously attached OTel ``LoggingHandler`` from the root.
+
+    Idempotent and safe: a ``None`` handler or a handler that was never
+    attached is a no-op, and removing the handler never touches console
+    handlers installed by application logging configuration.
+    """
+    if handler is None:
+        return
+    root = logging.getLogger()
+    for installed in list(root.handlers):
+        if installed is handler:
+            root.removeHandler(handler)
+
+
 __all__ = [
     "TraceCorrelation",
     "TraceCorrelationFilter",
+    "OtelLoggerNamespaceFilter",
+    "attach_otlp_log_handler",
+    "detach_otlp_log_handler",
     "current_correlation",
 ]

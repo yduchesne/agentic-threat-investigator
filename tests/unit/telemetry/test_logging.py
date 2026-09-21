@@ -9,6 +9,7 @@ from typing import Protocol, cast
 from opentelemetry import trace as otl_trace
 
 from agentic_threat_investigator.telemetry.logging import (
+    OtelLoggerNamespaceFilter,
     TraceCorrelationFilter,
     current_correlation,
 )
@@ -26,10 +27,10 @@ def _as_correlated(record: logging.LogRecord) -> _CorrelationRecord:
     return cast(_CorrelationRecord, record)
 
 
-def _log_record() -> logging.LogRecord:
+def _log_record(name: str = "ati.test") -> logging.LogRecord:
     """Build a minimal LogRecord for filter testing."""
     return logging.LogRecord(
-        name="ati.test",
+        name=name,
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
@@ -116,3 +117,21 @@ class TestTraceCorrelationFilter:
         assert TraceCorrelationFilter().filter(record) is True
         assert correlated.otel_trace_id == "existing"
         assert correlated.otel_span_id == "existing-span"
+
+
+class TestOtelLoggerNamespaceFilter:
+    """OTel internal namespaces never re-enter OTLP export (PR 29C)."""
+
+    def test_drops_otel_internal_namespaces(self) -> None:
+        """opentelemetry.* logger namespaces are excluded from OTLP export."""
+        otel_filter = OtelLoggerNamespaceFilter()
+        assert otel_filter.filter(_log_record("opentelemetry.sdk")) is False
+        assert otel_filter.filter(_log_record("opentelemetry")) is False
+        assert otel_filter.filter(_log_record("opentelemetry.exporter.otlp")) is False
+
+    def test_allows_application_namespaces(self) -> None:
+        """ATI and third-party loggers still flow to OTLP export."""
+        otel_filter = OtelLoggerNamespaceFilter()
+        assert otel_filter.filter(_log_record("ati.worker")) is True
+        assert otel_filter.filter(_log_record("uvicorn.access")) is True
+        assert otel_filter.filter(_log_record("sqlalchemy.engine")) is True

@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Loki single-binary local-development configuration (PR 29C).
+#
+# Loki runs as a single binary with local filesystem storage on the Compose
+# network. It accepts ATI logs through its native OTLP ingestion endpoint
+# (http://loki:3100/otlp, exported by the OpenTelemetry Collector); no
+# deprecated Loki-specific Collector exporter is used. No authentication is
+# required inside the local Compose network.
+#
+# Label/cardinality policy: the default OTLP resource-attribute index-label
+# set (bounded fields such as service.name) stays in effect; high-cardinality
+# identifiers (trace/span IDs, investigation/execution/request IDs, IP/domain
+# content, exception messages) remain queryable structured metadata rather
+# than indexed labels. Structured metadata is explicitly enabled.
+
+target: all
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+common:
+  instance_addr: 0.0.0.0
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+limits_config:
+  # Native OTLP ingestion requires structured metadata (enabled by default in
+  # Loki 3.x; kept explicit here so the contract is reviewable).
+  allow_structured_metadata: true
+  # Bounded local-development query window. This bounds which historical data
+  # is searchable; it is not a production data-retention policy.
+  storage_retention_days: 14
+
+schema_config:
+  configs:
+    - from: 2025-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+analytics:
+  reporting_enabled: false

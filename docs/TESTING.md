@@ -311,6 +311,51 @@ API-L08 (exactly one direct `opentelemetry-instrumentation-fastapi`
 declaration) is enforced by dependency review and the repository build
 (`uv lock`), consistent with the no-brittle-text-test policy.
 
+### Deterministic OTLP composer tests and config validation (PR 29C)
+
+PR 29C keeps the same deterministic, offline policy. The exporter
+composition matrix (INF-C01..C09) lives in
+`tests/unit/telemetry/test_setup.py` and drives the real
+`configure_telemetry`/`shutdown_telemetry` with in-memory recording
+exporters monkeypatched into the composition seams — no network, no
+Collector/backends:
+
+- **INF-C01/C02**: disabled (or enabled-without-endpoint) telemetry composes
+  no exporter/logger pipeline and stays offline;
+- **INF-C03**: enabled with an explicit endpoint composes all three
+  OTLP/HTTP pipelines exactly once;
+- **INF-C04/C05**: repeated identical setup is idempotent (no duplicate
+  pipeline or logging handler); conflicting setup raises ``RuntimeError``;
+- **INF-C06/C07**: shutdown shuts all configured signal providers, detaches
+  the additive OTel logging handler, and is fail-open;
+- **INF-C08/C09**: an exported log outside any span carries no fabricated
+  identity; inside a span it carries the standard OTel trace/span ids;
+- the endpoint contract is pinned (the exporter appends `/v1/traces`,
+  `/v1/metrics`, `/v1/logs` to the standard `OTEL_EXPORTER_OTLP_ENDPOINT`).
+
+The worker/GEO process wiring matrix (INF-C10..C14) lives in
+`tests/unit/infrastructure/test_cli_telemetry.py` and proves, with fake
+engines and no database, that disabled observability stays unchanged and
+that engines are disposed before `shutdown_telemetry` on both normal and
+failure paths, without replacing original error semantics.
+
+PR 29C adds deterministic **configuration validation** (not
+end-to-end telemetry integration tests):
+
+- **INF-C19**: the pinned Collector accepts `infra/observability/otel-collector/config.yaml`
+  via the image's non-network `validate --config` path;
+- **INF-C20**: `promtool check config` (pinned `prom/prometheus:v3.14.0`)
+  succeeds on `infra/observability/prometheus/prometheus.yml`;
+- **INF-C21**: the Grafana datasource YAML parses and Datasource UIDs are
+  unique/stable (`ati-prometheus`, `ati-jaeger`, `ati-loki`);
+- **INF-C16/C17/C18**: `compose.yaml` alone and with
+  `compose.observability.yaml` both validate.
+
+The no-live-integration-test policy is unchanged: there is **no** PR 29E
+and PR 29C does not add a test that boots the stack and waits for spans/logs
+inside a Collector/Jaeger/Loki. The developer smoke procedure documented in
+`docs/OBSERVABILITY.md` is a manual developer flow, not CI correctness.
+
 Priority unit-test areas include:
 
 - entity canonicalization;

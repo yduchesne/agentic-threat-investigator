@@ -589,8 +589,7 @@ Behavior:
 
 - `ATI_LLM_OBSERVABILITY_BACKEND=none` or a disabled master switch yields the
   `NoOpLlmObservability` backend, which performs no work and requires no vendor
-  configuration.
-- LangSmith selection requires no ATI-declared secret reference: the standard
+  configuration.- LangSmith selection requires no ATI-declared secret reference: the standard
   LangSmith SDK configuration is read from the environment by the SDK itself,
   and ATI does not duplicate it.
 - Langfuse keys are resolved through the `SecretsResolver` bootstrap contract
@@ -601,6 +600,49 @@ Behavior:
 - The Langfuse v4 adapter uses a dedicated OpenTelemetry tracer provider so
   Langfuse exports only LLM/agent observations and never becomes an accidental
   exporter of ATI's general infrastructure spans.
+
+### Runtime OTLP export (PR 29C)
+
+PR 29C wires the delivered PR 29 instrumentation to a runtime observability
+stack. Because OTel exporter settings are already standard environment
+variables, no ATI-prefixed duplicate configuration setting is added:
+
+- `ATI_OBSERVABILITY_ENABLED` is the master application-observability switch
+  (see the table above).
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (standard OTel variable) is the single
+  Collector destination. ATI processes compose OTLP/HTTP trace, metric, and
+  log exporters only when the master switch is enabled **and** this explicit
+  endpoint is present.
+
+Composition rule (implemented in `telemetry.setup.configure_telemetry`):
+
+```text
+ATI_OBSERVABILITY_ENABLED=false
+    -> no providers/exporters/logger pipeline
+
+ATI_OBSERVABILITY_ENABLED=true, OTEL_EXPORTER_OTLP_ENDPOINT absent/blank
+    -> local OTel providers usable; no remote exporter threads/networking
+
+ATI_OBSERVABILITY_ENABLED=true, OTEL_EXPORTER_OTLP_ENDPOINT=https://...
+    -> OTLP/HTTP trace/metric/log exporters composed over one endpoint
+```
+
+Fail-open: when observability is enabled but the Collector/backends are
+unavailable, application work continues; exporter buffering/retry behavior
+never becomes a domain/application failure. Compose supply environment
+substitution only (never committed values):
+
+```yaml
+ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
+OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+```
+
+The observability stack is **optional** source-controlled Compose
+infrastructure. See `docs/OBSERVABILITY.md` for the runtime topology, the
+optional override file (`compose.observability.yaml`) used with the
+repository's pinned podman-compose 1.0.6 (which does not implement the
+standard `profiles:` filter), and the local UI host-port variables
+(`ATI_GRAFANA_HOST_PORT`, `ATI_PROMETHEUS_HOST_PORT`, `ATI_JAEGER_HOST_PORT`).
 
 ## Embedding settings (PR 22A)
 

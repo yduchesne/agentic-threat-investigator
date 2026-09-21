@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Optional ATI observability runtime (PR 29C).
+#
+# This override file adds the source-controlled observability stack to the
+# core compose.yaml graph. It is strictly OPTIONAL: the core stack in
+# compose.yaml never depends on these services and still starts without them.
+#
+# Usage with the repository's pinned Compose provider (podman-compose 1.0.6,
+# which does not implement the standard `profiles:` filter), or with
+# `docker compose`:
+#
+#   podman-compose -f compose.yaml -f compose.observability.yaml up -d
+#   docker compose -f compose.yaml -f compose.observability.yaml up -d
+#
+# The observability stack is composed on top of compose.yaml so it reuses the
+# `ati` network. No host ports are exposed except the developer UIs
+# (Grafana/Prometheus/Jaeger). Collector OTLP, Loki, postgres-exporter,
+# and the Redpanda Admin API remain internal to the network.
+#
+# Architecture boundary: ATI processes know one standard OTLP destination
+# (the Collector). Backend routing lives here — Jaeger for traces, the
+# Collector Prometheus scrape endpoint for metrics, and Loki's native OTLP
+# endpoint for logs. Redpanda keeps authoritativeness over broker/consumer-
+# group metrics and postgres-exporter over PostgreSQL server health.
+
+services:
+  otel-collector:
+    # The required vendor-neutral telemetry gateway (contrib distribution:
+    # the Prometheus exporter is contrib-only). Pinned, never `latest`.
+    image: docker.io/otel/opentelemetry-collector-contrib:0.161.0
+    command: ["--config", "/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infra/observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      # Soft dependencies only: the Collector retries backend export. The
+      # absence of these must never fail ATI, and Collector unavailability
+      # must never fail ATI (fail-open by design).
+      jaeger: { condition: service_started }
+      loki: { condition: service_started }
+    networks: [ati]
+
+  prometheus:
+    # Pinned upstream image (canonical Docker Hub repository is prom/prometheus).
+    image: docker.io/prom/prometheus:v3.14.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./infra/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/observability/prometheus:/prometheus"
+    ports:
+      - "${ATI_PROMETHEUS_HOST_PORT:-9090}:9090"
+    depends_on:
+      otel-collector: { condition: service_started }
+    networks: [ati]
+
+  jaeger:
+    # Jaeger 2.x all-in-one. Runs the image's embedded in-memory
+    # configuration (no explicit config file required): it accepts OTLP on
+    # 4317/4318 and serves the query UI on 16686. In-memory storage is a
+    # documented local-development choice: traces disappear on restart.
+    image: docker.io/jaegertracing/jaeger:2.21.0
+    ports:
+      - "${ATI_JAEGER_HOST_PORT:-16686}:16686"
+    networks: [ati]
+
+  loki:
+    # Loki 3.x single binary with local filesystem storage and native OTLP
+    # log ingestion.
+    image: docker.io/grafana/loki:3.7.8
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./infra/observability/loki/config.yaml:/etc/loki/config.yaml:ro
+      - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/observability/loki:/loki"
+    networks: [ati]
+
+  grafana:
+    image: docker.io/grafana/grafana:13.2.2
+    environment:
+      # Provisioning datasources from the repository is enabled explicitly.
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      # Local-only admin credentials, environment-overridable. The default
+      # admin/admin is Grafana's own documented local default and must be
+      # overridden outside a local developer stack.
+      GF_SECURITY_ADMIN_USER: ${ATI_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${ATI_GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/observability/grafana:/var/lib/grafana"
+    ports:
+      - "${ATI_GRAFANA_HOST_PORT:-3000}:3000"
+    depends_on:
+      prometheus: { condition: service_started }
+      jaeger: { condition: service_started }
+      loki: { condition: service_started }
+    networks: [ati]
+
+  postgres-exporter:
+    # Prometheus Community PostgreSQL exporter: PostgreSQL server health from
+    # the database, kept distinct from ATI repository/UoW application telemetry.
+    # Reuses the repository's existing local database user as a documented
+    # local-development compromise (no schema/migration change); real
+    # deployments should use a least-privilege monitoring role with pg_monitor.
+    # The password is never committed — it is the same environment-provided
+    # POSTGRES_PASSWORD reused across the stack via Compose substitution.
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${POSTGRES_DB:-ati}?sslmode=disable
+      DATA_SOURCE_USER: ${POSTGRES_USER:-ati}
+      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [ati]
