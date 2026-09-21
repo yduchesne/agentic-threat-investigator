@@ -543,7 +543,8 @@ PR 20B introduces the first LLM-bearing configuration. The concrete v0.1 provide
 | Setting | Environment variable | Type | Default | Bounds | Description |
 |---|---|---|---|---|---|
 | `llm_driver` | `ATI_LLM_DRIVER` | `openai` \| `deterministic` | `openai` | non-blank; exact values only | Worker LLM implementation (PR 24B). `openai` composes the configured real chat model through the secret reference; `deterministic` composes the repository-owned offline scripted boundary used by deterministic real-stack browser tests and offline deployments. Never silently falls back; blank/unknown values fail validation. |
-| `llm_model` | `ATI_LLM_MODEL` | `str` | `gpt-4o-mini` | non-blank | Model identifier handed to the OpenAI provider |
+| `llm_model` | `ATI_LLM_MODEL` | `str` | `gpt-4o-mini` | non-blank | Model identifier handed to the OpenAI-compatible provider (provider-specific identifier for non-OpenAI endpoints) |
+| `llm_base_url` | `ATI_LLM_BASE_URL` | `str` | `""` | blank or credential-free HTTP(S) URL with hostname, no query/fragment | Optional non-secret OpenAI-compatible API base URL (PR 30A); blank uses the OpenAI SDK default endpoint. A non-blank value must not contain userinfo, query, or fragment; path components such as `/v1` are preserved exactly. |
 | `llm_timeout_seconds` | `ATI_LLM_TIMEOUT_SECONDS` | `float` | `60.0` | `> 0`, finite | Per-operation model timeout |
 | `llm_max_structured_output_attempts` | `ATI_LLM_MAX_STRUCTURED_OUTPUT_ATTEMPTS` | `int` | `2` | `1..2` | Initial attempt plus at most one schema repair; values above 2 are rejected |
 | `llm_api_key_secret` | `ATI_LLM_API_KEY_SECRET` | `str` | `ATI_OPENAI_API_KEY` | non-blank | Environment variable NAME carrying the provider key (secret reference, never a key value) |
@@ -556,11 +557,28 @@ PR 20B introduces the first LLM-bearing configuration. The concrete v0.1 provide
 
 All LLM floating-point settings must be **finite**; NaN and both infinities are rejected at startup so timeouts and temperatures can never be silently disabled. Boolean values are not accepted as numbers. Integer settings require genuine integer profile values. Oversized analyst inputs (item counts, aggregate normalized-facts bytes, or total serialized size) fail with a typed application error **before any model call**; evidence is never silently truncated. The observation overflow sentinel detects a 1001st observation at the 1000 bound without silent clamping. Structured-output attempts are bounded to `1..2` and each actual invocation (including repair attempts) is counted against the Investigation LLM budget (`max_llm_calls`/`llm_calls_used`, defaults `10`/`0`).
 
-`ATI_LLM_DRIVER=deterministic` is orthogonal to `ATI_OPERATING_MODE`: fake operating mode keeps using the configured real LLM at normal runtime (PR 23D); the deterministic driver exists specifically for offline deterministic stacks (for example the PR 24B real-stack Playwright harness) and never touches the network or secret values.
+`ATI_LLM_DRIVER=deterministic` is orthogonal to `ATI_OPERATING_MODE`: fake operating mode keeps using the configured real LLM at normal runtime (PR 23D); the deterministic driver exists specifically for offline deterministic stacks (for example the PR 24B real-stack Playwright harness) and never touches the network or secret values. `llm_base_url` is ignored entirely in deterministic mode: a configured endpoint must not cause network I/O, API-key resolution, or `ChatOpenAI` construction.
+
+### OpenAI-compatible endpoints (PR 30A)
+
+`ATI_LLM_DRIVER=openai` is the OpenAI-compatible real-client driver: it composes the existing `ChatOpenAI` implementation, which may target OpenAI itself or any operator-selected OpenAI-compatible HTTP endpoint. `llm_base_url` selects the endpoint; a blank/omitted value retains the OpenAI SDK default endpoint, so existing OpenAI deployments need no change.
+
+Accepted `llm_base_url` constraints (fail closed):
+
+- `http` or `https` only (HTTP is legal for local OpenAI-compatible development endpoints);
+- must contain a hostname;
+- no username or password (the URL can never embed credentials);
+- no query string and no fragment;
+- syntactically valid port when a port is present;
+- surrounding whitespace is stripped before storage.
+
+Path components (for example `/api/v1` or `/v1`) are preserved exactly; ATI never appends, removes, or normalizes them. No DNS resolution, HTTP probing, or model discovery is performed during settings loading. The `openai` label is a bounded ATI driver label: it means the `ChatOpenAI`-based real-client path, not a guarantee that the remote service is operated by OpenAI.
+
+The model identifier is provider-specific: for non-OpenAI endpoints configure a model identifier that endpoint recognizes. ATI requires only the OpenAI-compatible subset exercised by its `ChatOpenAI`/structured-output usage; compatibility with every OpenAI API feature is not claimed.
 
 ### OpenAI API key
 
-Real or resolved OpenAI API keys must never be committed, logged, persisted, placed in URLs or prompts, or copied into test fixtures; clearly synthetic placeholder keys are permitted only in isolated deterministic tests. In production:
+Real or resolved OpenAI API keys must never be committed, logged, persisted, placed in URLs or prompts, or copied into test fixtures; clearly synthetic placeholder keys are permitted only in isolated deterministic tests. The API key is always resolved through `ATI_LLM_API_KEY_SECRET` (a reference name; the default reference is `ATI_OPENAI_API_KEY`) — even when a non-OpenAI endpoint is configured, `llm_base_url` does not imply or change that reference name. Example: for OpenRouter, set `ATI_LLM_API_KEY_SECRET=ATI_OPENROUTER_API_KEY` and export the real key value as `ATI_OPENROUTER_API_KEY` in the runtime process environment. In production:
 
 - the setting `llm_api_key_secret` holds only the NAME of the environment variable carrying the key (default reference: `ATI_OPENAI_API_KEY`);
 - during infrastructure composition, the `SecretsResolver` bootstrap contract resolves that reference through `EnvVarSecretsResolver`;
