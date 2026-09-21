@@ -112,21 +112,28 @@ portability layer rather than a future possibility. ATI code uses
 `opentelemetry-api` and ATI-owned helpers; SDK/exporter composition belongs at
 the application boundary.
 
-The approved general-observability topology is:
+The approved general-observability topology (delivered in PR 29C) places one
+OpenTelemetry Collector between ATI processes and the backends, so ATI knows
+a single standard OTLP destination and never knows Jaeger/Prometheus/Loki
+topology:
 
 ```text
-ATI services
+ATI services (ati-api / ati-worker / ati-geo-resolver)
     |
 OpenTelemetry API / ATI telemetry helpers
     |
-OpenTelemetry SDK/exporters
+OpenTelemetry SDK/exporters (OTLP/HTTP)
     |
-+-------------+-------------+-------------+
-| Prometheus  | Jaeger      | Loki        |
-| metrics     | traces      | logs        |
-+-------------+-------------+-------------+
-              |
-           Grafana
+OpenTelemetry Collector            <-- required gateway
+    |            |            |
+    |            |            +--------> Loki (native OTLP logs)
+    |            +---> Prometheus scrape endpoint -> Prometheus (metrics)
+    +-----------> Jaeger (OTLP traces)
+                                      \
+        Redpanda /public_metrics -----> Prometheus
+        postgres-exporter /metrics ---> Prometheus
+                                      |
+                                   Grafana
 ```
 
 Prometheus is the metrics backend, Jaeger the distributed-trace backend, Loki
@@ -549,11 +556,11 @@ Partition/offset are never metric labels for ATI application counters.
 
 ATI emits the application-side counters/spans above only. Consumer lag and
 broker health are authoritative broker state that ATI does **not** synthesize
-inside application code (no AdminAPI lag query in every poll). PR 29C must
-scrape/expose the categories below against the deployed Redpanda version
-(compose.yaml pins `redpandadata/redpanda:v24.3.8`); exact Prometheus metric
-names are to be verified against that version at scrape-implementation time,
-not guessed here:
+inside application code (no AdminAPI lag query in every poll). PR 29C scrapes
+Redpanda's public metrics endpoint (``redpanda:9644/public_metrics``) and
+exposes the categories below as verified against the compose-pinned
+``redpandadata/redpanda:v24.3.8`` (see the PR 29C delivered-runtime section
+for the exact verified public metric names):
 
 - consumer-group lag per `topic × consumer group × partition` (log-end minus
   committed offset), plus the aggregated lag by group/topic; derived lag
@@ -568,12 +575,9 @@ not guessed here:
 Backlog age (oldest unconsumed record age) is **deferred**: ATI only relies
 on it if the verified Redpanda 24.3.8 metric surface exposes a reliable,
 authoritative value; ATI never approximates backlog age from poll timestamps.
-
-PostgreSQL server-health categories ATI wants PR 29C to expose (without an
-ATI PostgreSQL exporter in 29A-1): active connections, pool
-utilization/saturation where available, transaction rate, transaction
-failures/rollbacks, database/query latency indicators, locks and lock waits,
-deadlocks, database size, and connection errors.
+PR 29C exposes the PostgreSQL server-health categories below through
+postgres-exporter (active connections, transaction/commit/rollback activity,
+lock waits, deadlocks, database size, scrape failures).
 
 ## PR 29B delivered coverage
 
@@ -852,9 +856,175 @@ no-op. ``create_app(settings)`` itself remains generic and never configures
 process-global telemetry.
 
 This lifecycle closure is the deterministic setup/shutdown ordering that PR
-29C will attach real exporters/OTLP delivery to. No exporter, OTel Collector,
-Prometheus, Jaeger, Loki, Grafana, dashboard, or telemetry integration-test
-infrastructure is delivered here.
+29C attaches real exporters/OTLP delivery to. PR 29C (below) keeps this
+ordering intact; ``shutdown_telemetry()`` now also flushes/stops the OTLP
+exporters and detaches the additive OTel logging handler.
+
+## PR 29C delivered runtime
+
+PR 29C operationalizes the PR 29 series into a source-controlled local
+observability stack. The runtime is **optional** and **fail-open**: default
+``ATI_OBSERVABILITY_ENABLED=false`` needs no Collector/backend, and Collector
+unavailability can never fail ATI domain/application work.
+
+### One application export destination
+
+ATI processes know exactly one standard destination — the OpenTelemetry
+Collector — and never know backend topology:
+
+```text
+ATI process
+   |
+   | OTLP/HTTP (OTEL_EXPORTER_OTLP_ENDPOINT)
+   v
+OpenTelemetry Collector
+   |----------------------> Jaeger       (traces)
+   |----------------------> Loki (OTLP)  (logs)
+   |
+   +-- Prometheus scrape endpoint (:8889/metrics)
+             |
+             v
+        Prometheus           (ATI metrics)
+
+Redpanda /public_metrics -----> Prometheus
+postgres-exporter /metrics ----> Prometheus
+```
+
+ATI never connects directly to Jaeger/Prometheus/Loki; the Collector owns
+receiving, batching, and backend routing (``infra/observability/otel-collector/``
+config, pinned ``otel/opentelemetry-collector-contrib:0.161.0``).
+
+### Python OTLP exporter composition
+
+``telemetry.setup`` gains the pinned ``opentelemetry-exporter-otlp-proto-http``
+1.37.x exporter and composes the three OTLP/HTTP signal pipelines inside the
+existing ``configure_telemetry``/``shutdown_telemetry`` seam (no second
+telemetry runtime):
+
+- traces: ``OTLPSpanExporter`` behind ``BatchSpanProcessor``;
+- metrics: ``OTLPMetricExporter`` behind ``PeriodicExportingMetricReader``;
+- logs: ``OTLPLogExporter`` behind ``LoggerProvider`` + ``BatchLogRecordProcessor``
+  plus an **additive** root ``LoggingHandler``.
+
+Composition is gated on the standard endpoint, never an ATI-prefixed
+duplicate (see ``docs/CONFIGURATION.md#runtime-otlp-export-pr-29c``).
+
+### Logging transport
+
+OTLP log export is additive to ATI's existing console logging: developer
+terminal output and container logs are preserved, the PR 29A
+``TraceCorrelationFilter`` is untouched, and OTel-internal logger namespaces
+(``opentelemetry.*``) are excluded from the OTLP handler to prevent a
+feedback loop. A log emitted inside an active span carries standard OTel
+trace/span correlation (the exported ``LogRecord`` picks up the current span
+context); outside any span no identity is fabricated. ATI transports existing
+logs and never expands them with request/response bodies, secrets, prompts,
+Evidence payloads, raw SQL, or headers. Trace/span IDs remain queryable log
+metadata, not high-cardinality Loki indexed labels.
+
+### Service identities in the deployed processes
+
+- ``ati-api`` (``main.py``): unchanged PR 29B-2 lifecycle, now with OTLP export.
+- ``ati-worker`` (``cli.worker_main``): ``ServiceNames.WORKER``; telemetry
+  starts before instrumented services and shuts down after the process-owned
+  engine is disposed (``finally``-equivalent).
+- ``ati-geo-resolver`` (``cli.geo_resolver_main``): ``ServiceNames.GEO_RESOLVER``;
+  telemetry starts only when the resolver is enabled, and shuts down after the
+  engine is disposed.
+
+The one-shot utilities (fake-data-bootstrap, migrate, geography-import,
+geography-build) are deliberately not wired: they run once and exit, so an
+OTLP export pipeline is pointless. PR 29C does not add telemetry to
+placeholder processes merely to satisfy the service-name list.
+
+### Backends
+
+The optional stack is defined in ``compose.observability.yaml`` (composed on
+top of ``compose.yaml``) rather than via Compose ``profiles:`` because the
+repository's pinned Compose provider, podman-compose 1.0.6, does not
+implement the standard ``profiles:`` filter (verified against the pinned
+version); an override file gives the same strict optional-add behavior with
+the tooling the repository actually pins. Start it with:
+
+```text
+podman-compose -f compose.yaml -f compose.observability.yaml up -d
+docker compose -f compose.yaml -f compose.observability.yaml up -d
+```
+
+Pinned images (never ``latest``): Collector contrib ``0.161.0``, Prometheus
+``prom/prometheus:v3.14.0``, Jaeger ``jaegertracing/jaeger:2.21.0``, Loki
+``grafana/loki:3.7.8``, Grafana ``grafana/grafana:13.2.2``, postgres-exporter
+``quay.io/prometheuscommunity/postgres-exporter:v0.20.1``. Redpanda stays
+pinned ``v24.3.8``.
+
+- **Traces → Jaeger**: the Collector exports OTLP/HTTP to ``jaeger:4318``.
+  Jaeger 2.x all-in-one runs the image's embedded in-memory config (no config
+  file required): it accepts OTLP on 4317/4318 and serves the UI on 16686.
+  In-memory storage means traces disappear on restart (documented local
+  choice).
+- **Metrics → Prometheus**: the Collector's Prometheus exporter exposes
+  ``:8889/metrics``; Prometheus scrapes it (job ``ati-otel``). Collector
+  self-metrics flow through the same pipeline. ATI metric names are never
+  renamed in Python; counter ``_total`` translation is exporter behavior.
+- **Logs → Loki**: the Collector exports OTLP/HTTP to Loki's native OTLP
+  endpoint (``http://loki:3100/otlp``); the deprecated Loki-specific Collector
+  exporter is not used. Loki runs a single binary with local filesystem
+  storage and native OTLP structured metadata enabled; indexed labels stay
+  bounded (§Loki label/cardinality policy below).
+- **Redpanda → Prometheus**: Prometheus scrapes ``redpanda:9644/public_metrics``
+  (job ``redpanda``), the lower-cardinality public endpoint Prometheus prefix
+  ``redpanda_``). Verified for ``v24.3.8``: it exposes
+  ``redpanda_kafka_consumer_group_committed_offset``
+  (``redpanda_group``/``redpanda_topic``/``redpanda_partition``),
+  ``redpanda_kafka_consumer_group_consumers``, ``redpanda_kafka_consumer_group_topics``,
+  and ``redpanda_kafka_max_offset`` (partition high-watermark). Consumer lag is
+  derived in PromQL from these authoritative broker offsets (PR 29D); ATI
+  never synthesizes lag.
+- **PostgreSQL → Prometheus**: the Prometheus Community postgres-exporter
+  (job ``postgres``, ``:9187/metrics``) exposes server health: connections,
+  transactions/commits/rollbacks, locks/deadlocks, database size, and scrape
+  failures. It reuses the existing local ATI database user as a documented
+  local-development compromise; real deployments should use a least-privilege
+  ``pg_monitor`` role. ATI repository/UoW telemetry stays a separate
+  application-layer concern.
+- **Grafana**: pins image ``13.2.2``, provisions stable Datasource UIDs
+  ``ati-prometheus`` / ``ati-jaeger`` / ``ati-loki`` from
+  ``infra/observability/grafana/provisioning/``. No dashboard JSON is added
+  (PR 29D owns dashboards-as-code and the layer-specific hierarchy
+  including API/HTTP, datasource/ingestion, Kafka/Redpanda, persistence/
+  repository, PostgreSQL, Agents & LLM, GEO, and investigations/reports).
+  Local admin credentials default to Grafana's documented ``admin/admin`` and
+  are overridable via ``ATI_GRAFANA_ADMIN_USER`` / ``ATI_GRAFANA_ADMIN_PASSWORD``.
+
+### Loki label/cardinality policy
+
+Loki's default OTLP resource-attribute index-label set (bounded fields such
+as ``service.name`` → ``service_name``) stays in effect. High-cardinality
+identifiers (trace/span IDs, investigation/execution/request IDs, IP/domain/
+URL content, exception messages) are stored as structured metadata, never
+indexed labels.
+
+### Manual developer smoke procedure
+
+The stack is **not** covered by an automated telemetry integration-test
+gate. Manual smoke (developer-only) flow:
+
+```text
+1. enable observability: ATI_OBSERVABILITY_ENABLED=true and
+   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+2. start core + observability stack (compose.yaml + compose.observability.yaml)
+3. issue one API request / run one worker operation
+4. confirm Collector is healthy (http://otel-collector:13131)
+5. confirm Prometheus target health: http://localhost:9090/targets
+6. inspect one ATI metric: http://localhost:9090/graph
+7. inspect one Jaeger trace: http://localhost:16686
+8. inspect one Loki log: http://localhost:3000 (Explore, ATI Loki)
+9. stop the stack cleanly
+```
+
+Host UIs: Grafana ``http://localhost:3000`` (``ATI_GRAFANA_HOST_PORT``),
+Prometheus ``http://localhost:9090`` (``ATI_PROMETHEUS_HOST_PORT``), Jaeger
+``http://localhost:16686`` (``ATI_JAEGER_HOST_PORT``).
 
 ## LLM observability backends
 

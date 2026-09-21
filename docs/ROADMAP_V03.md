@@ -374,20 +374,41 @@ included; PR 29C/29D remain responsible for it. PR 29B is now fully closed.
 
 ### PR 29C — Observability infrastructure
 
-Add source-controlled local/deployment infrastructure under
-`infra/observability/`:
+> **Status: DELIVERED in `dev/otel-infra`.** PR 29C operationalizes the PR 29
+> instrumentation: ATI processes export OTLP/HTTP to one OpenTelemetry
+> Collector, which routes traces to Jaeger, exposes ATI metrics for
+> Prometheus scraping, and routes logs to Loki's native OTLP endpoint; an
+> optional source-controlled Compose stack adds Prometheus/Jaeger/Loki/
+> Grafana/postgres-exporter, Redpanda `/public_metrics` scraping, and
+> provisioned Grafana datasources (UIDs `ati-prometheus`/`ati-jaeger`/
+> `ati-loki`). Dashboards remain PR 29D. See `docs/OBSERVABILITY.md` for the
+> delivered runtime and manual smoke procedure.
 
-- Prometheus for metrics;
-- Jaeger for distributed traces;
-- Loki for logs;
-- Grafana for visualization/correlation;
-- required OpenTelemetry export/collection wiring;
-- authoritative Redpanda/Kafka operational metrics needed for consumer-group
-  lag, partition/topic health, broker request health, replication, and
-  storage/capacity visibility;
-- PostgreSQL server-health metrics where appropriate (connections/pool
-  saturation, transactions/rollbacks, locks/deadlocks, and capacity);
-- Compose/deployment integration appropriate to ATI's existing runtime.
+PR 29C delivered:
+
+- optional OTLP trace/metric/log exporter composition through the existing
+  `configure_telemetry`/`shutdown_telemetry` seam (one standard
+  `OTEL_EXPORTER_OTLP_ENDPOINT`, no ATI-prefixed duplicate; enabled + endpoint
+  absent stays offline/fail-open);
+- process wiring for `ati-api`, `ati-worker`, and `ati-geo-resolver` with
+  engine-disposed-before-telemetry-shutdown ordering preserved;
+- source-controlled infrastructure under `infra/observability/`: Collector
+  contrib `0.161.0`, Prometheus `prom/prometheus:v3.14.0`, Jaeger
+  `jaegertracing/jaeger:2.21.0`, Loki `grafana/loki:3.7.8`, Grafana
+  `grafana/grafana:13.2.2`, postgres-exporter
+  `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` — all explicitly
+  pinned;
+- authoritative Redpanda `v24.3.8` `/public_metrics` scraping including
+  consumer-group committed offsets and partition high-watermarks (lag is
+  derived in PromQL, never synthesized by ATI);
+- PostgreSQL server health via postgres-exporter, kept distinct from ATI
+  repository/UoW telemetry;
+- optional Compose integration via `compose.observability.yaml` (the pinned
+  podman-compose 1.0.6 does not implement the standard `profiles:` filter, so
+  an override file provides the same strict optional-add behavior with the
+  actual tooling);
+- deterministic offline unit/config validation; **no** telemetry
+  integration-test phase.
 
 The observability stack is optional infrastructure. Its failure or absence must
 not cause ATI investigation or ingestion failure.

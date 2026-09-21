@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Prometheus configuration for the PR 29C ATI observability runtime.
+#
+# This local stack keeps Prometheus pull-based: the OpenTelemetry Collector
+# exposes an OTLP -> Prometheus scrape endpoint for ATI application metrics,
+# Redpanda serves authoritative broker metrics from its Admin API, and
+# postgres-exporter serves PostgreSQL server health. Prometheus never
+# scrapes Python application processes directly and no ATI process runs a
+# Prometheus HTTP server.
+#
+# Backend/topology knowledge is intentionally Prometheus-scoped: this is the
+# one place that knows the scrape targets, mirroring the Collector-as-gateway
+# rule for ATI processes.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # ATI application metrics (and Collector self-metrics exported through the
+  # same pipeline) arrive at the Collector's Prometheus scrape endpoint.
+  # This is the ONLY application-metric scrape target.
+  - job_name: ati-otel
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - otel-collector:8889
+        labels:
+          scraped_src: ati-otel
+
+  # Redpanda v24.3.8 authoritative broker metrics. The Admin API port (9644)
+  # serves /public_metrics in Prometheus text format; it includes the
+  # consumer-group committed offsets
+  # (redpanda_kafka_consumer_group_committed_offset) and the partition
+  # high-watermark (redpanda_kafka_max_offset) from which consumer-group lag
+  # is derived in PromQL (PR 29D). Lag is never synthesized inside ATI.
+  - job_name: redpanda
+    metrics_path: /public_metrics
+    static_configs:
+      - targets:
+          - redpanda:9644
+        labels:
+          scraped_src: redpanda
+
+  # PostgreSQL server health from the Prometheus Community postgres-exporter
+  # (server/infrastructure behavior). ATI repository/UoW telemetry remains
+  # a separate application-layer concern.
+  - job_name: postgres
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - postgres-exporter:9187
+        labels:
+          scraped_src: postgres

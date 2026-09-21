@@ -124,6 +124,11 @@ from agentic_threat_investigator.infrastructure.research_agent_composition impor
     build_research_agent,
 )
 from agentic_threat_investigator.telemetry.logging import TraceCorrelationFilter
+from agentic_threat_investigator.telemetry.setup import (
+    ServiceNames,
+    configure_telemetry,
+    shutdown_telemetry,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -647,7 +652,15 @@ def fake_data_bootstrap_main(argv: list[str] | None = None) -> int:
 
 
 def worker_main(argv: list[str] | None = None) -> int:
-    """Run the durable investigation worker loop until interrupted."""
+    """Run the durable investigation worker loop until interrupted.
+
+    PR 29C wires the process telemetry composition (service identity
+    ``ati-worker``) while observability is enabled so the PR 29B
+    instrumentation is active in the deployed worker. Providers start before
+    any instrumented service executes and are shut down in a ``finally``
+    block after the process-owned engine is disposed, so worker outcomes are
+    never replaced by telemetry teardown behavior.
+    """
     parser = argparse.ArgumentParser(prog="ati-worker")
     parser.add_argument(
         "--poll-seconds",
@@ -659,6 +672,10 @@ def worker_main(argv: list[str] | None = None) -> int:
     _configure_logging()
     settings = get_settings()
     _log_operating_mode(settings)
+    configure_telemetry(
+        enabled=settings.observability_enabled,
+        service_name=ServiceNames.WORKER,
+    )
     engine = _make_engine(settings)
     factory = _session_factory(engine)
     uow_factory = _uow_factory(factory, settings)
@@ -704,6 +721,7 @@ def worker_main(argv: list[str] | None = None) -> int:
             return 0
         finally:
             await engine.dispose()
+            shutdown_telemetry()
         return 0
 
     return asyncio.run(run())
@@ -763,6 +781,11 @@ def geo_resolver_main(argv: list[str] | None = None) -> int:
     API v0024, and sleeps the configured poll interval when no work is due.
     Cancellation (``KeyboardInterrupt``/``CancelledError``) exits cleanly:
     committed leases recover by expiry.
+
+    PR 29C wires the process telemetry composition (service identity
+    ``ati-geo-resolver``) after the configuration gate so an observability-
+    disabled or resolver-disabled process never starts a provider pipeline,
+    and shuts telemetry down after the process-owned engine is disposed.
     """
     parser = argparse.ArgumentParser(prog="ati-geo-resolver")
     parser.add_argument(
@@ -777,13 +800,17 @@ def geo_resolver_main(argv: list[str] | None = None) -> int:
     if not settings.geo_resolver_enabled:
         LOGGER.info("geo resolver disabled by configuration; exiting")
         return 0
+    configure_telemetry(
+        enabled=settings.observability_enabled,
+        service_name=ServiceNames.GEO_RESOLVER,
+    )
     engine = _make_engine(settings)
     factory = _session_factory(engine)
     uow_factory = _uow_factory(factory, settings)
-    worker = _compose_geo_worker(settings, factory, uow_factory)
 
     async def run() -> int:
         try:
+            worker = _compose_geo_worker(settings, factory, uow_factory)
             while True:
                 processed = await worker.run_once()
                 if processed == 0:
@@ -797,6 +824,7 @@ def geo_resolver_main(argv: list[str] | None = None) -> int:
             return 0
         finally:
             await engine.dispose()
+            shutdown_telemetry()
         return 0
 
     return asyncio.run(run())

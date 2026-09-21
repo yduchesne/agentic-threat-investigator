@@ -66,6 +66,11 @@ services:
       # origin (http://localhost:8080) served by the frontend, not the API
       # container port.
       ATI_PUBLIC_BASE_URL: ${ATI_PUBLIC_BASE_URL:-http://localhost:8080}
+      # PR 29C: optional OTLP export. ATI processes export only when the master
+      # switch is on AND a standard OTEL_EXPORTER_OTLP_ENDPOINT is set; blank
+      # keeps the process offline/fail-open with no Collector requirement.
+      ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     command: ["uvicorn", "agentic_threat_investigator.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       fake-data-bootstrap: { condition: service_completed_successfully }
@@ -97,6 +102,9 @@ services:
       ATI_LLM_DRIVER: ${ATI_LLM_DRIVER:-openai}
       # The worker composes the configured real LLM at normal runtime.
       ATI_OPENAI_API_KEY: ${ATI_OPENAI_API_KEY:-}
+      # PR 29C: optional OTLP export for the worker process (ati-worker).
+      ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     volumes:
       - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/datasets:/var/lib/ati/datasets:ro"
     command: ["ati-worker", "--poll-seconds", "1.0"]
@@ -123,6 +131,9 @@ services:
       ATI_GEO_RESOLVER_MAX_ATTEMPTS: ${ATI_GEO_RESOLVER_MAX_ATTEMPTS:-3}
       ATI_GEO_RESOLVER_RETRY_BASE_SECONDS: ${ATI_GEO_RESOLVER_RETRY_BASE_SECONDS:-60.0}
       ATI_GEO_RESOLVER_RETRY_MAX_SECONDS: ${ATI_GEO_RESOLVER_RETRY_MAX_SECONDS:-3600.0}
+      # PR 29C: optional OTLP export for the GEO resolver process.
+      ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     command: ["ati-geo-resolver"]
     depends_on:
       fake-data-bootstrap: { condition: service_completed_successfully }

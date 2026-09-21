@@ -679,6 +679,48 @@ Real-stack PR 26 tests may use purpose-built harness support where exact
 Investigation identity is required, but such support must remain test-only and
 must not become a second production data path.
 
+### Optional observability runtime (PR 29C)
+
+The local observability stack (OpenTelemetry Collector, Prometheus, Jaeger,
+Loki, Grafana, postgres-exporter) is **optional** source-controlled Compose
+infrastructure under ``infra/observability/``. It is defined in
+``compose.observability.yaml``, composed on top of ``compose.yaml`` (the
+repository's pinned podman-compose 1.0.6 does not implement Compose
+``profiles:``, so an override file provides the same strict optional-add
+behavior with the tooling the repository actually pins):
+
+```bash
+# core stack (unchanged)
+podman-compose -f compose.yaml up -d
+
+# core + observability stack
+ATI_OBSERVABILITY_ENABLED=true \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
+podman-compose -f compose.yaml -f compose.observability.yaml up -d
+```
+
+`docker compose` users run the same two-file form with `docker compose`.
+Core ATI services never depend on observability services; the Collector may
+be absent and ATI still starts. OTLP export only activates when
+`ATI_OBSERVABILITY_ENABLED=true` **and** `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+
+Local developer UIs (host-port overridable via `ATI_GRAFANA_HOST_PORT`,
+`ATI_PROMETHEUS_HOST_PORT`, `ATI_JAEGER_HOST_PORT`):
+
+```text
+Grafana    http://localhost:3000    (ATI_GRAFANA_HOST_PORT, default 3000)
+Prometheus http://localhost:9090    (ATI_PROMETHEUS_HOST_PORT, default 9090)
+Jaeger     http://localhost:16686   (ATI_JAEGER_HOST_PORT, default 16686)
+```
+
+Postgres data, Prometheus, Loki, and Grafana data are persisted beneath
+`${ATI_DATA_DIR}/observability/...` (matching the repository's local data
+policy); Jaeger uses in-memory storage (traces disappear on restart,
+documented local choice). Grafana local admin defaults to Grafana's own
+`admin/admin` and is overridable via `ATI_GRAFANA_ADMIN_USER` /
+`ATI_GRAFANA_ADMIN_PASSWORD`. This is a local single-node stack, not
+production HA.
+
 ### Production invocation
 
 ```bash

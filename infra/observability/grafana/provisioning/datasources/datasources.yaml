@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Grafana datasource provisioning (PR 29C).
+#
+# PR 29C provisions stable, reproducible datasources for the local
+# observability runtime so PR 29D can add dashboards without manual
+# datasource setup. No dashboard JSON is added here (PR 29D owns
+# dashboards-as-code and the layer-specific dashboard hierarchy).
+#
+# Datasource UIDs are frozen so future dashboard JSON references are stable.
+# Grafana 13.2 provisions these via the standard /etc/grafana/provisioning
+# path (GF_PATHS_PROVISIONING).
+#
+# Jaeger note: the Grafana Jaeger datasource queries the Jaeger query API on
+# port 16686. Jaeger 2.x serves its HTTP query API under /api/v3; the
+# pinned plugin's REST path compatibility is validated when PR 29D builds
+# trace dashboards (the datasource itself is provisioned here).
+
+apiVersion: 1
+
+datasources:
+  - name: "ATI Prometheus"
+    uid: ati-prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    access: proxy
+    isDefault: false
+    orgId: 1
+    version: 1
+    editable: true
+
+  - name: "ATI Jaeger"
+    uid: ati-jaeger
+    type: jaeger
+    url: http://jaeger:16686
+    access: proxy
+    isDefault: false
+    orgId: 1
+    version: 1
+    editable: true
+
+  - name: "ATI Loki"
+    uid: ati-loki
+    type: loki
+    url: http://loki:3100
+    access: proxy
+    isDefault: false
+    orgId: 1
+    version: 1
+    editable: true
