@@ -16,6 +16,8 @@
 
 Before implementing a change, read the relevant authoritative documents under `docs/` and the root project documentation.
 
+__IMPORTANT__: Exclude the documents under the `docs/manual` directory: those are for human eyes only. They are also meant to be exclusively modified by humans.
+
 Major product/architecture decisions are already defined. Do not replace them with alternate designs without an explicit approved documentation change.
 
 ## Non-negotiable rules
@@ -90,7 +92,8 @@ Additionally:
 
 When implementation intentionally changes a confirmed contract, update the relevant authoritative document in the same PR.
 
-Do not add speculative functionality to documentation or implementation.
+- Do not add speculative functionality to documentation or implementation.
+- Do not modify the documents under the `docs/manual` directory: those are for human eyes only. They are also meant to be exclusively modified by humans.
 
 Additionally:
 
@@ -98,21 +101,9 @@ Additionally:
 - Public functions and methods should have docstrings.
 - For methods that are inherited from an interface: do not repeat the docstrings of the interface.
   Create specific docstrings that describe the override logic that the level of implementations.
-- After completing the implementation of functionality corresponding to a PR item in
-  [PR_PLAN.md](docs/PR_PLAN.md), add the `[DONE]` marker at the end of the PR item. Do so prior to
+- After completing the implementation of functionality corresponding to a PR item under one of the ROAMAP_<version>.md document (such as [ROADMAP_V02.md](docs/ROADMAP_V02.md)) under the [docs](docs/) directory, add the `[DONE]` marker at the end of the PR item. Do so prior to
   the changes being committed and pushed, and after all quality checks an integration tests have
   completed successfully.
-
-## Configuration and batch-persistence invariants
-
-- Follow `CONFIGURATION.md`: `default` is the base profile; `ATI_CONFIG_PROFILE` selects an optional override profile; configuration is loaded once at bootstrap.
-- Never log sensitive configuration values. Preserve recursive key-name redaction.
-- Batch persistence always uses bounded arrays of resource-specific PostgreSQL composite input types, expanded into temporary tables with set-oriented stored-function logic.
-- Assume batches may be large. Do not add a separate small-batch JSONB/CTE persistence path.
-- Python repositories must not implement reconciliation, version allocation, JSONB diff generation, or history creation.
-- Do not introduce row-level triggers for domain versioning/history.
-- Successful CREATE/UPDATE/soft DELETE creates a DB-assigned version and immutable history entry in the same transaction; UNCHANGED creates neither.
-- PostgreSQL 18 is the v0.1 database baseline.
 
 ## Storage, acquisition, and secrets invariants
 
@@ -126,6 +117,17 @@ Additionally:
 - Secrets are obtained through SecretsResolver; v0.1 uses EnvVarSecretsResolver.
 - Resolve secrets during bootstrap/composition and pass resolved credentials to providers; providers should not depend directly on SecretsResolver.
 - Never log resolved secret values.
+
+## Configuration and batch-persistence invariants
+
+- Follow `CONFIGURATION.md`: `default` is the base profile; `ATI_CONFIG_PROFILE` selects an optional override profile; configuration is loaded once at bootstrap.
+- Never log sensitive configuration values. Preserve recursive key-name redaction.
+- Batch persistence always uses bounded arrays of resource-specific PostgreSQL composite input types, expanded into temporary tables with set-oriented stored-function logic.
+- Assume batches may be large. Do not add a separate small-batch JSONB/CTE persistence path.
+- Python repositories must not implement reconciliation, version allocation, JSONB diff generation, or history creation.
+- Do not introduce row-level triggers for domain versioning/history.
+- Successful CREATE/UPDATE/soft DELETE creates a DB-assigned version and immutable history entry in the same transaction; UNCHANGED creates neither.
+- PostgreSQL 18 is the v0.1 database baseline.
 
 ## Configuration, artifact-storage, and secrets implementation rules
 
