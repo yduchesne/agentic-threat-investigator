@@ -2,7 +2,7 @@
 
 Investigations conducted autonomously by agents are the bread and butter of the system. An investigation is conducted through AI, but initiated by an external, deterministic trigger (for example, a user initiating the investigation).
 
-Furthermore, in the course of conducting an investigation, AI agents are not "inventing" facts: they are tapping into deterministically generated evidence (see [CORE_CONCEPTS.md](CORE_CONCEPTS.md)).
+Furthermore, in the course of conducting an investigation, AI agents are not "inventing" facts: they are tapping into deterministically generated evidence (see [Core Concepts](CORE_CONCEPTS.md)).
 
 This document describes the investigation workflow, with some insights into the internals. The objective is for the reader to grasp the main stages of an investigation, without delving into coding details.
 
@@ -10,7 +10,7 @@ This document describes the investigation workflow, with some insights into the 
 
 ## Investigation Trigger
 
-An investigation is triggered by an inquiry regarding an entity. For example, the `evil.com` domain could be such an entity (see [CORE_CONCEPTS.md](CORE_CONCEPTS.md) for more details regarding the notion of `Entity` in the context of ATI).
+An investigation is triggered by an inquiry regarding an entity. For example, the `evil.com` domain could be such an entity (see [Core Concepts](CORE_CONCEPTS.md) for more details regarding the notion of `Entity` in the context of ATI).
 
 In ATI, an `Investigation` preserves the state involved in an analysis that eventually results in a `Report`. Initially, the sole state consists of the `Entity` that resulted in the investigation being triggered.
 
@@ -37,19 +37,41 @@ additional discoveries       depth 2
 
 ### Agents in Charge of Pivoting
 
-Two agents are involved in pivoting:
+Two components are involved in pivoting:
 
-- __Evidence Analyst__: It is in charge of determining whether more evidence is needed or not. It produces an
+- __Evidence Analyst__ (an agent): It is in charge of determining whether more evidence is needed or not. It produces an
   `AnalysisDisposition`, which can be one of the following:
   - `SUFFICIENT`: Stop the investigation.
   - `NEEDS_MORE_EVIDENCE`: Authorizes another pivot, subject to deterministic policy.
   - `EXHAUSTED`: Try remaining eligible candidate; stop if none exists.
-- __Coordinator__: It is in charge have taking into account the `AnalysisDisposition`, together with hard-set, per investigation bounds:
+- __Coordinator__ (not an agent): It is in charge have taking into account the `AnalysisDisposition`, together with hard-set, per investigation bounds:
   - `max_depth`: The maximum depth of the traversal, in terms of number of edges from the root (defaults to 2).
   - `max_entities`: The maximum number of entities to pivot on (defaults to 10).
   - `max_provider_calls`: The maximum number of live evidence provider calls allocated (defaults to 40).
   - `max_replans`: TBD (defaults to 3).
   - `max_llm_calls`: The maximum number of LLM requests (defaults to 10).
+
+Note that the `Coordinator` is an archictural role, not an actual class or interface of the system. That role is played by two components: 1) The `coordinator_node` function that is registered with `LangGraph` as a `Node` in that framework; 2) the `CoordinatorPolicy`, which is in fact the decision engine that this document refers to most of the time, when mentioning the `Coordinator`. The following schema illustrates this:
+
+```
+coordinator_node
+       │
+       ├── load CoordinatorPolicyContext
+       │
+       ▼
+CoordinatorPolicy.decide(...)
+       │
+       ▼
+CoordinatorDecision
+       │
+       ▼
+store decision in LangGraph state
+       │
+       ▼
+LangGraph routes to next node
+```
+
+> See the [Agent Architecture](AGENTIC.md) document for more details on the agent configuration and the role played by `LangGraph`.
 
 When deeming pivoting complete, the `Coordinator` supplies a `stop_reason` (a field of the `Investigation`), which will be set to `DEPTH_LIMIT_REACHED`, `ENTITY_BUDGET_EXHAUSTED`, `PROVIDER_BUDGET_EXHAUSTED`, `REPLAN_LIMIT_REACHED`, etc., according to the actual real reason for stopping.
 
@@ -534,7 +556,7 @@ Then, orchestration returns to the `Coordinator`.
 
 #### 6. The Coordinator initiates `RESEARCHABLE` processing
 
-It is useful to be aware of the finer details of the research collection process. Entities that are `RESEARCHABLE` are have their IDs added to the `research_entity_ids` field of the `InvestigationState` - This section still does not go fully into such details, since the inner workings of the agents is explained more deeply in the [ATI_AGENTS.md](ATI_AGENTS.md) document.
+It is useful to be aware of the finer details of the research collection process. Entities that are `RESEARCHABLE` are have their IDs added to the `research_entity_ids` field of the `InvestigationState` - This section still does not go fully into such details, since the inner workings of the agents is explained more deeply in the [Agentic Architecture](AGENTIC.md) document.
 
 Suppose provider work against IP `203.0.113.42` discovers the following `Evidence`:
 
@@ -815,3 +837,169 @@ Assessment
 The last `Assessment` produced by the `Evidence Analyst`, as well as supporting Evidence/relationships, and contextual research results, are provided to the `Report Writer` agent. That agent has a constrained role, limited to synthesis and presentation, not further investigation or analytical decision-making. It uses the LLM to construct the report.
 
 > Although the `Report Writer` is an LLM-backed agent, it is not an autonomous investigative agent. It cannot call providers, pivot to new entities, alter the Assessment verdict/confidence, or introduce unsupported findings.
+
+## Summary
+
+At a high-level, the previous sections presented the following end-to-end workflow:
+
+```
+┌─────────────────────────────┐
+│      Investigation Start    │
+│  Root Entity + Objective    │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│         Coordinator         │
+│  deterministic policy /     │
+│  orchestration decisions    │
+└──────────────┬──────────────┘
+               │
+               │ select eligible entity
+               ▼
+┌─────────────────────────────┐
+│      ProviderWorkPlanner    │
+│ Which providers support it? │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│      ProviderWorkItems      │
+│ DNS / RDAP / Threat Intel / │
+│ Reputation / Geo / etc.     │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────┐
+│        Deterministic Processing         │
+│                                         │
+│  Normalize → EvidenceObservations       │
+│            → Entities                   │
+│            → RelationshipObservations   │
+│            → GEO resolution as needed   │
+└───────────────────┬─────────────────────┘
+                    │
+                    ▼
+          ┌─────────────────────┐
+          │     Coordinator     │◄──────────────────────┐
+          └──────────┬──────────┘                       │
+                     │                                  │
+          ┌──────────┴──────────┐                       │
+          │                     │                       │
+          ▼                     ▼                       │
+   New Evidence?        RESEARCHABLE Entity?            │
+          │                     │                       │
+          │ yes                 │ yes                   │
+          ▼                     ▼                       │
+┌──────────────────┐   ┌─────────────────────┐          │
+│ Evidence Analyst │   │ Mark Research       │          │
+│      Agent       │   │ Required            │          │
+└────────┬─────────┘   └──────────┬──────────┘          │
+         │                        │                     │
+         ▼                        │                     │
+┌──────────────────┐              │                     │
+│   Assessment     │              │                     │
+│                  │              │                     │
+│ • verdict        │              │                     │
+│ • confidence     │              │                     │
+│ • findings       │              │                     │
+│ • limitations    │              │                     │
+│ • questions      │              │                     │
+└────────┬─────────┘              │                     │
+         │                        │                     │
+         │ + AnalysisDisposition  │                     │
+         ▼                        ▼                     │
+┌─────────────────────────────────────────┐             │
+│               Coordinator               │             │
+│                                         │             │
+│  • SUFFICIENT                           │             │
+│  • NEEDS_MORE_EVIDENCE                  │             │
+│  • EXHAUSTED                            │             │
+│  • due contextual research              │             │
+└───────┬───────────────────┬─────────────┘             │
+        │                   │                           │
+        │ research due      │ more collection           │
+        ▼                   ▼                           │
+┌──────────────────┐  ┌──────────────────────┐          │
+│ Threat Research  │  │ Pivot / Enrichment   │          │
+│      Agent       │  │ Candidate Selection  │          │
+│                  │  └──────────┬───────────┘          │
+│ bounded RAG      │             │                      │
+└────────┬─────────┘             │                      │
+         │                       │                      │
+         ▼                       │                      │
+┌──────────────────┐             │                      │
+│ ResearchResult   │             └──────────────────────┘
+└────────┬─────────┘
+         │
+         ▼
+┌─────────────────────────────┐
+│         Coordinator         │
+│                             │
+│ Continue or terminate?      │
+└──────────────┬──────────────┘
+               │
+               │ STOP
+               ▼
+┌──────────────────────────────────────┐
+│    Final / Current Assessment        │
+│                                      │
+│ Authoritative analytical conclusion  │
+└───────────────────┬──────────────────┘
+                    │
+                    │ + Evidence
+                    │ + Relationships
+                    │ + ResearchResults
+                    ▼
+┌──────────────────────────────────────┐
+│         Report Writer Agent          │
+│                                      │
+│ Synthesis / presentation only        │
+│ Does not change Assessment           │
+└───────────────────┬──────────────────┘
+                    │
+                    ▼
+             ┌──────────────┐
+             │ Final Report │
+             └──────────────┘
+```
+
+The system has three distinct control/intelligence layers:
+
+```
+          ┌─────────────────────────┐
+          │      Coordinator        │
+          │ "What happens next?"    │
+          └────────────┬────────────┘
+                       │
+       ┌───────────────┼────────────────┐
+       ▼               ▼                ▼
+  Deterministic    LLM Analysis     LLM Research
+   Collection
+       │               │                │
+ Providers +       Evidence         Threat Research
+ Extractors        Analyst          Agent
+       │               │                │
+       ▼               ▼                ▼
+   Evidence         Assessment      ResearchResult
+ Relationships     + Disposition
+       │               │                │
+       └───────────────┼────────────────┘
+                       ▼
+                   Coordinator
+                       │
+                   iterate/stop
+                       │
+                       ▼
+                  Report Writer
+                       │
+                       ▼
+                  Final Report
+```
+
+- The `Coordinator` owns workflow;
+- the `Evidence Analyst` owns evidence interpretation; 
+- the `Research Agent` owns contextual research;
+- the `Report Writer` owns presentation. 
+
+Providers and extractors remain deterministic evidence-acquisition machinery rather than analytical agents.
