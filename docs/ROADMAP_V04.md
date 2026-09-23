@@ -120,10 +120,86 @@ First real agent target: the **Evidence Analyst** evaluation execution.
 PR 30C deliberately delivers **no** Coordinator/Research/Report Writer/
 end-to-end real targets, no LLM-as-judge, no numeric quality scoring, no
 prompt tuning to pass evals, no scheduled/PR/push real-model triggers, no
-DB migration, and no change to production analyst behavior. PR 30D should
-add Coordinator/Research Agent targets without redefining common result
+DB migration, and no change to production analyst behavior. PR 30D adds
+Coordinator/Research Agent targets without redefining common result
 semantics, LangSmith dataset identity/digest, feedback vocabulary,
 experiment association, or workflow security.
+
+## PR 30D scope (delivered) [DONE]
+
+Second real-target execution PR: the **Coordinator** and **Research Agent**
+behavioral suites execute through the common PR 30 contract.
+
+Coordinator:
+
+- exact run-scoped typed lookup and `CoordinatorEvaluationOutput` (durable
+  terminal `InvestigationState`, runtime resolution, structured timeline
+  actions, transition span);
+- run-scoped execution identity in
+  `CoordinatorScenarioMaterializer.materialize` (repeated runs isolated;
+  semantic labels preserved);
+- deterministic fixture-world composition
+  (`evaluation/coordinator_fixtures.py`: semantic `ConvertedEvidence`
+  DNS/AbuseIPDB/ThreatFox providers, DNS root discovery, TXT-only worlds,
+  AsyncRAT association truth);
+- production `LocalInvestigationRunner` + Coordinator graph/policy execute
+  unchanged; structured actions come from the durable timeline, never logs;
+- `CoordinatorTrajectoryContractEvaluator`
+  (`coordinator-trajectory-contract`) mapping the existing evaluator's
+  PASS/FAIL with JSON-safe descriptive diagnostics;
+- `run_coordinator_evaluation` service and `ati-eval run coordinator/v1`.
+
+Research Agent:
+
+- exact typed lookup preserving retrieval/synthesis kinds and rejecting
+  cross-family duplicate identities;
+- family dispatch on one target (`ResearchAgentTargetExecutor`) and one
+  evaluator (`ResearchAgentEvaluatorDispatcher`) without redesigning the
+  common runner;
+- retrieval cases run the production pgvector retriever with zero LLM calls;
+- synthesis cases run the real `ResearchAgent` (existing `LlmClient`,
+  structured-output policy, empty-retrieval zero-call short circuit) with
+  exact supplied-citation observation (recording wrapper, no probe
+  retrieval), before/after epistemic snapshots, and the persisted current
+  `ResearchResult`;
+- `research-retrieval-contract` / `research-synthesis-contract` evaluator
+  ids; existing metrics (recall@k, precision@k, MRR, citation-validity,
+  coverage) stay diagnostics only; epistemic non-promotion stays a hard
+  gate;
+- run-scoped anchor seeding + repository-owned ATT&CK corpus bootstrap
+  through production ingestion/indexing (deterministic hashing embeddings;
+  no live web);
+- `run_research_agent_evaluation` service and
+  `ati-eval run research-agent/v1`.
+
+Shared:
+
+- `ati-eval run coordinator/v1 [--langsmith]` and
+  `ati-eval run research-agent/v1 [--langsmith]` with the same exit
+  semantics, verify-first mirror check, and one-execution-per-case
+  categorical LangSmith publication as PR 30C;
+- manual workflow `run` step is dataset-agnostic (`evidence-analyst/v1`,
+  `coordinator/v1`, `research-agent/v1`); PostgreSQL + migrations, plus the
+  deterministic research corpus/index bootstrap for any benchmark run;
+- deterministic PostgreSQL/pgvector vertical slices (Coordinator
+  productive-pivot/stop/research-lifecycle PASS, nonconforming FAIL,
+  materialization ERROR; Research retrieval PASS/FAIL/zero-LLM, synthesis
+  relevant/contradiction/empty PASS, unsupported-citation ERROR, wrong-claim
+  FAIL);
+- V1 corpora reviewed: no expectations weakened and no scenario added;
+  coordinator V1 scenarios whose authored oracles/budgets predate the
+  current production Coordinator topology report FAIL/ERROR honestly (never
+  crash), documented in `docs/TESTING.md`;
+- docs: `docs/EVALUATION.md`, `docs/TESTING.md`, this roadmap.
+
+PR 30D deliberately delivers **no** Report Writer/end-to-end real targets, no
+LLM-as-judge, no numeric quality scoring, no prompt/policy tuning to pass
+evals, no scheduled/PR/push real-model triggers, no DB migration, and no
+change to production Coordinator/Research behavior. PR 30E should add Report
+Writer without redefining PASS/FAIL/ERROR, dataset identity/versioning,
+common runner, LangSmith mirror/digest, categorical feedback, experiment
+publication, or workflow security.
+
 
 ## Explicitly out of scope for PR 30A
 

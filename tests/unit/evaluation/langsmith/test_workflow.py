@@ -135,6 +135,31 @@ class TestWorkflowTriggersAndPermissions:
         ]
         assert options == ["verify", "sync", "run"]
 
+    def test_w19_dataset_is_data_not_shell_code(self) -> None:
+        """W19 the dataset input is always quoted as data, never shell code."""
+        workflow = _load(WORKFLOW_PATH)
+        run_lines = [
+            line
+            for step in _steps(workflow)
+            for line in (step.get("run") or "").splitlines()
+        ]
+        assert any('"${{ inputs.dataset }}"' in line for line in run_lines)
+        assert not any("$(inputs.dataset)" in line for line in run_lines)
+
+    def test_w20_evidence_analyst_still_supported(self) -> None:
+        """W20 Evidence Analyst stays supported and the run step is dataset-agnostic."""
+        workflow = _load(WORKFLOW_PATH)
+        rendered = yaml.safe_dump(workflow)
+        assert "evidence-analyst/v1" in rendered
+        run_steps = [
+            (step.get("run") or "")
+            for step in _steps(workflow)
+            if "ati-eval run" in (step.get("run") or "")
+        ]
+        assert run_steps
+        # One dataset-agnostic run step serves any supported target.
+        assert all('ati-eval run "${{ inputs.dataset }}"' in run for run in run_steps)
+
 
 class TestWorkflowSecretsAndSteps:
     """EA-W04..W12 secrets, dependency, and step-order contract."""

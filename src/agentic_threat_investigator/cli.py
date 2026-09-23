@@ -13,14 +13,15 @@ framework):
 - ``ati-geo-resolver``: the bounded asynchronous geographic-resolution
   worker loop (PR 26C);
 - ``ati-eval``: the PR 30 evaluation CLI (validate; langsmith sync/verify;
-  PR 30C adds run evidence-analyst/v1 [--langsmith]).
+  run evidence-analyst/v1, coordinator/v1, or research-agent/v1
+  [--langsmith]).
 
 All load the cached typed settings once and never read environment
 variables themselves, and none ever download upstream data. The worker
 composes the selected intelligence-source registry through the
 operating-mode boundary and the configured real LLM; operating mode never
-selects the LLM implementation. PR 30C reuses the worker's LLM/analyst
-composition for the optional real benchmark run.
+selects the LLM implementation. PR 30C/30D reuse the worker's LLM/analyst/
+research composition for the optional real benchmark runs.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import event as sqlalchemy_event
@@ -959,7 +960,8 @@ def evaluation_main(argv: list[str] | None = None) -> int:
 
         ati-eval validate <dataset-or-path>
         ati-eval langsmith sync|verify <dataset-id> [--namespace NAMESPACE]
-        ati-eval run evidence-analyst/v1 [--langsmith] [--namespace NAMESPACE]
+        ati-eval run evidence-analyst/v1|coordinator/v1|research-agent/v1
+            [--langsmith] [--namespace NAMESPACE]
 
     ``validate`` strictly loads a canonical dataset identity (for example
     ``evidence-analyst/v1``) or one scenario directory, enforces the
@@ -973,16 +975,18 @@ def evaluation_main(argv: list[str] | None = None) -> int:
     same comparisons read-only. Both require ``LANGSMITH_API_KEY``
     credentials and report a bounded nonzero exit otherwise.
 
-    ``run`` executes the configured real Evidence Analyst benchmark through
-    the production analyst path (``evidence-analyst/v1`` only in PR 30C).
-    Without ``--langsmith`` no LangSmith client is constructed; with
-    ``--langsmith`` the exact remote mirror is verified before any model
-    work and the categorical result is published and confirmed as one
-    experiment afterwards. The run requires the configured model-provider
-    credential (``ATI_OPENAI_API_KEY`` by default) and refuses the
-    deterministic driver. Exit semantics: ``0`` COMPLETED/PASS with requested
-    publication succeeded; ``1`` COMPLETED/FAIL; ``2``
-    ERROR/config/backend/publication failure.
+    ``run`` executes the configured real benchmark through the production
+    paths: ``evidence-analyst/v1`` (PR 30C), ``coordinator/v1`` and
+    ``research-agent/v1`` (PR 30D). Without ``--langsmith`` no LangSmith
+    client is constructed; with ``--langsmith`` the exact remote mirror is
+    verified before any model work and the categorical result is published
+    and confirmed as one experiment afterwards. The Coordinator/Research
+    benchmark seams bootstrap the deterministic research corpus/index
+    (repository-owned ATT&CK fixtures, hashing embeddings). The run requires
+    the configured model-provider credential (``ATI_OPENAI_API_KEY`` by
+    default) and refuses the deterministic driver. Exit semantics: ``0``
+    COMPLETED/PASS with requested publication succeeded; ``1``
+    COMPLETED/FAIL; ``2`` ERROR/config/backend/publication failure.
     """
     parser = argparse.ArgumentParser(prog="ati-eval")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1259,14 +1263,239 @@ async def _execute_evidence_analyst_benchmark(
         await engine.dispose()
 
 
-def _evaluation_run_main(args: argparse.Namespace) -> int:
-    """Run the configured real Evidence Analyst benchmark (PR 30C).
+def _compose_coordinator_executors(
+    *,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    uow_factory: Callable[[], PostgresUnitOfWork],
+    llm: LlmClient,
+) -> tuple[Any, Any]:
+    """Compose the Coordinator production analysis/research executor factories.
 
-    ``ati-eval run evidence-analyst/v1`` executes every repository case
-    through the real production Evidence Analyst path with the configured
-    real model, then reports the canonical local result. With ``--langsmith``
-    the exact remote mirror is verified **before** any model work and the
-    categorical result is published as one experiment afterwards.
+    The analysis factory binds one production Evidence Analyst (same
+    composition as the worker/eval analyst) to an Investigation + materialized
+    fixture; the research factory binds a production Research Agent (same
+    composition as the worker research executor) with the deterministic
+    hashing embedding path. Both factories are async (bounds-aligned with the
+    Coordinator run seam).
+    """
+    from agentic_threat_investigator.app.orchestration.research import (
+        ResearchAgentResearchExecutor,
+    )
+    from agentic_threat_investigator.app.orchestration.services import (
+        EvidenceAnalystAnalysisExecutor,
+    )
+    from agentic_threat_investigator.infrastructure.embeddings import (
+        HashingEmbeddingClient,
+    )
+    from agentic_threat_investigator.infrastructure.research_agent_composition import (
+        build_research_agent,
+    )
+
+    """Compose the Coordinator production analysis/research executor factories.
+
+    The analysis factory binds one production Evidence Analyst (same
+    composition as the worker/eval analyst) to an Investigation; the research
+    factory binds a production Research Agent (same composition as the
+    worker research executor) with the deterministic hashing embedding path.
+    """
+
+    analyst = _compose_evaluation_analyst(
+        settings=settings,
+        session_factory=session_factory,
+        uow_factory=uow_factory,
+        llm=llm,
+    )
+    research_agent = build_research_agent(
+        uow_factory=uow_factory,
+        session_factory=session_factory,
+        embedding_client=HashingEmbeddingClient(settings.embedding.dimension),
+        llm_client=llm,
+        max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+    )
+
+    async def analysis_factory(
+        investigation_id: UUID, _materialized: object
+    ) -> EvidenceAnalystAnalysisExecutor:
+        """Bind the composed analyst to one investigation fixture.
+
+        The real-model benchmark does not script the analyst output; the
+        materialized fixture argument exists for signature compatibility with
+        the deterministic research-world seams.
+        """
+        return EvidenceAnalystAnalysisExecutor(
+            analyst, bound_investigation_id=investigation_id
+        )
+
+    async def research_factory(
+        investigation_id: UUID, _materialized: object
+    ) -> ResearchAgentResearchExecutor:
+        """Bind the composed Research Agent to one investigation fixture.
+
+        The real-model benchmark does not pre-script research decisions; the
+        materialized fixture argument exists for signature compatibility with
+        the deterministic research-world seams.
+        """
+        return ResearchAgentResearchExecutor(
+            research_agent, bound_investigation_id=investigation_id
+        )
+
+    return analysis_factory, research_factory
+
+
+def _coordinator_typed_scenarios(
+    scenarios: Sequence[ScenarioLike],
+) -> tuple[object, ...]:
+    """Filter the loaded corpus to typed Coordinator scenarios."""
+    from agentic_threat_investigator.evaluation.coordinator import (
+        CoordinatorScenario,
+    )
+
+    return tuple(item for item in scenarios if isinstance(item, CoordinatorScenario))
+
+
+def _research_typed_scenarios(
+    scenarios: Sequence[ScenarioLike],
+) -> tuple[object, ...]:
+    """Filter the loaded corpus to typed research scenarios."""
+    from agentic_threat_investigator.evaluation.research.models import (
+        ResearchRetrievalScenario,
+        ResearchSynthesisScenario,
+    )
+
+    return tuple(
+        item
+        for item in scenarios
+        if isinstance(item, (ResearchRetrievalScenario, ResearchSynthesisScenario))
+    )
+
+
+async def _execute_coordinator_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real Coordinator benchmark (PR 30D).
+
+    Composes the production Coordinator world (fixture providers, real
+    analysis/research executors, real LLM) over the process database, then
+    runs the common PR 30 runner through the coordinator run service. The
+    deterministic repository-owned research corpus is bootstrapped first so
+    scenario worlds that discover researchable entities execute their full
+    production lifecycle. This is the CLI's injectable benchmark seam; it
+    never composes LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.coordinator_pr30 import (
+        run_coordinator_evaluation,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        await _bootstrap_research_corpus_if_needed(settings, uow_factory)
+        analysis_factory, research_factory = _compose_coordinator_executors(
+            settings=settings,
+            session_factory=factory,
+            uow_factory=uow_factory,
+            llm=llm,
+        )
+        return await run_coordinator_evaluation(
+            dataset_id=dataset_id,
+            uow_factory=uow_factory,
+            analysis_factory=analysis_factory,
+            research_factory=research_factory,
+            scenarios=_coordinator_typed_scenarios(scenarios),  # type: ignore[arg-type]
+        )
+    finally:
+        await engine.dispose()
+
+
+async def _execute_research_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real Research Agent benchmark (PR 30D).
+
+    Bootstraps the deterministic repository-owned corpus/index, composes the
+    production research world (real retriever + real Research Agent + real
+    LLM at the model boundary), then runs the common PR 30 runner through the
+    research run service. This is the CLI's injectable benchmark seam; it
+    never composes LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.research.composition import (
+        build_research_world,
+    )
+    from agentic_threat_investigator.evaluation.research.run import (
+        run_research_agent_evaluation,
+    )
+    from agentic_threat_investigator.infrastructure.embeddings import (
+        HashingEmbeddingClient,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        await _bootstrap_research_corpus_if_needed(settings, uow_factory)
+        world = build_research_world(
+            uow_factory=uow_factory,
+            session_factory=factory,
+            embedding_client=HashingEmbeddingClient(settings.embedding.dimension),
+            llm_client=llm,
+            max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+        )
+        return await run_research_agent_evaluation(
+            dataset_id=dataset_id,
+            world=world,
+            uow_factory=uow_factory,
+            scenarios=_research_typed_scenarios(scenarios),  # type: ignore[arg-type]
+        )
+    finally:
+        await engine.dispose()
+
+
+async def _bootstrap_research_corpus_if_needed(
+    settings: Settings, uow_factory: Callable[[], PostgresUnitOfWork]
+) -> None:
+    """Idempotently ingest and index the deterministic research corpus.
+
+    Uses repository-owned ATT&CK fixtures through the production ingestion/
+    indexing services (deterministic hashing embeddings; no live web). The
+    object store lives under the configured data directory.
+    """
+    from agentic_threat_investigator.evaluation.research.composition import (
+        REPOSITORY_RESEARCH_FIXTURES,
+        bootstrap_research_corpus,
+    )
+
+    data_dir = Path(settings.data_dir) / "research-eval"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    await bootstrap_research_corpus(
+        uow_factory=uow_factory,
+        data_dir=data_dir,
+        fixture_files=tuple(REPOSITORY_RESEARCH_FIXTURES.values()),
+    )
+
+
+def _evaluation_run_main(args: argparse.Namespace) -> int:
+    """Run the configured real benchmark (PR 30C/30D).
+
+    ``ati-eval run <target>/v1`` executes every repository case through the
+    real production path with the configured real model:
+
+    - ``evidence-analyst/v1`` (PR 30C) -> the production Evidence Analyst;
+    - ``coordinator/v1`` (PR 30D) -> the production Coordinator graph/policy;
+    - ``research-agent/v1`` (PR 30D) -> production retrieval + Research Agent.
+
+    With ``--langsmith`` the exact remote mirror is verified **before** any
+    model work and the categorical result is published as one experiment
+    afterwards. Unsupported targets are rejected.
 
     Exit semantics: ``0`` COMPLETED/PASS with requested publication
     succeeded; ``1`` COMPLETED/FAIL (publication never converts FAIL to
@@ -1304,9 +1533,14 @@ def _evaluation_run_main(args: argparse.Namespace) -> int:
             exc,
         )
         return 2
-    if dataset_id.target is not EvaluationTarget.EVIDENCE_ANALYST:
+    if dataset_id.target not in (
+        EvaluationTarget.EVIDENCE_ANALYST,
+        EvaluationTarget.COORDINATOR,
+        EvaluationTarget.RESEARCH_AGENT,
+    ):
         LOGGER.error(
-            "evaluation run refused: PR 30C executes only evidence-analyst/v1 (got %s)",
+            "evaluation run refused: PR 30C/30D supports evidence-analyst/v1, "
+            "coordinator/v1, and research-agent/v1 (got %s)",
             dataset_id.canonical,
         )
         return 2
@@ -1359,10 +1593,14 @@ def _evaluation_run_main(args: argparse.Namespace) -> int:
         )
 
     async def run() -> int:
+        if dataset_id.target is EvaluationTarget.EVIDENCE_ANALYST:
+            benchmark = _execute_evidence_analyst_benchmark
+        elif dataset_id.target is EvaluationTarget.COORDINATOR:
+            benchmark = _execute_coordinator_benchmark
+        else:
+            benchmark = _execute_research_benchmark
         try:
-            run_result = await _execute_evidence_analyst_benchmark(
-                dataset_id=dataset_id, scenarios=scenarios
-            )
+            run_result = await benchmark(dataset_id=dataset_id, scenarios=scenarios)
         except (SecretNotFoundError, ValueError, DatasetLoadError, OSError) as exc:
             LOGGER.error("evaluation run failed: %s", exc)
             return 2

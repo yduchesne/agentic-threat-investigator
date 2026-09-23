@@ -88,9 +88,12 @@ jobs:
         env:
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
         run: uv run ati-eval langsmith verify "${{ inputs.dataset }}"
-      - name: Execute real Evidence Analyst benchmark (run only)
+      - name: Execute real benchmark (run only)
         if: inputs.operation == 'run'
         env:
+          # Writable object-store root for the deterministic research corpus
+          # bootstrap performed inside the benchmark seams (never /var/lib/ati).
+          ATI_DATA_DIR: ${{ github.workspace }}/ati-data
           ATI_DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:54321/ati-eval
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           ATI_OPENAI_API_KEY: ${{ secrets.ATI_OPENAI_API_KEY }}
