@@ -168,8 +168,17 @@ class CoordinatorScenarioMaterializer:
         self,
         scenario: CoordinatorScenario,
         uow_factory: Callable[[], UnitOfWork],
+        *,
+        execution_id: UUID | None = None,
     ) -> CoordinatorMaterializedFixture:
-        """Persist the initial fixture and return all deterministic scripts."""
+        """Persist the initial fixture and return all deterministic scripts.
+
+        ``execution_id`` (PR 30D) derives a run-scoped Investigation identity
+        while preserving every semantic label: repeated executions of one
+        scenario in the same database stay isolated and never collide on the
+        deterministic caller-supplied Investigation identity (the default
+        ``None`` keeps the pre-30D deterministic identity exactly).
+        """
         declared = resolve_coordinator_scenario(scenario)
         identities = {
             label: self._entity_identity(scenario, label) for label in declared.entities
@@ -202,7 +211,11 @@ class CoordinatorScenarioMaterializer:
                 }
             )
             initial = InvestigationState(
-                investigation_id=uuid5(root_id, scenario.id),
+                investigation_id=(
+                    uuid5(root_id, scenario.id)
+                    if execution_id is None
+                    else uuid5(root_id, f"{scenario.id}:{execution_id}")
+                ),
                 status=InvestigationStatus.RUNNING,
                 trigger_type=InvestigationTriggerType.MANUAL,
                 root_entity_ids=[root_id],

@@ -1891,6 +1891,94 @@ Evidence Analyst behavior, and no common evaluation contract; adds no DB
 migration; and keeps every mandatory test free of live LLM/LangSmith
 dependencies.
 
+### PR 30D Coordinator + Research Agent target tests
+
+PR 30D adds the second and third real target layers with the same
+deterministic discipline: real PostgreSQL/pgvector in the
+`integration`-marked vertical slices, FakeLlmClient at every model
+boundary, FakeLangSmithClient at the remote boundary, and offline/
+uncredentialed ordinary CI. Coordinator research-lifecycle slices boot the
+repository-owned ATT&CK fixture corpus through the production
+ingestion/indexing services (deterministic hashing embeddings).
+
+```text
+Coordinator target (C-T01..T14):
+  exact identity lookup; unknown case/version mismatch/duplicate identity
+  fail closed; materialize + one production investigation execution;
+  durable terminal state + structured actions (no log parsing); version
+  transition span; provider/analysis failure is runner ERROR; cancellation
+  propagates; repeated cases use fresh run-scoped identities; no LangSmith
+  dependency
+
+Coordinator evaluator (C-E01..E10):
+  existing evaluator PASS/FAIL map to COMPLETED/PASS|FAIL; deterministic
+  bounded explanation; metrics diagnostics only (no threshold verdict);
+  evaluator exception is runner ERROR; cancellation propagates;
+  policy-invalid pivot, duplicate research request, and wrong stop reason
+  all FAIL through the real existing evaluator
+
+Research dispatch (R-T01..T16):
+  retrieval/synthesis exact identities; cross-family duplicate rejected;
+  retrieval branch zero LLM; synthesis branch one real agent execution;
+  exact supplied chunks from the actual invocation (no probe); resolution
+  over the exact supplied sequence; empty retrieval persists empty with
+  zero LLM; LLM failure ERROR; unsupported citation ERROR; persistence
+  failure ERROR; before/after snapshots; cancellation propagates; no
+  LangSmith dependency
+
+Research evaluator (R-E01..E14):
+  retrieval/synthesis PASS/FAIL mapping with per-kind evaluator ids;
+  JSON-safe metrics diagnostics only; no numeric correctness;
+  required/forbidden citation FAIL; Evidence/RelationshipObservation/
+  Assessment promotion hard-gate FAIL; evaluator exception ERROR;
+  cancellation propagates
+
+CLI run (D-R01..R15):
+  coordinator/v1 and research-agent/v1 dispatch to their benchmark seams;
+  Evidence Analyst unchanged; unsupported target rejected; pass/fail/error
+  exits 0/1/2; local run constructs no LangSmith client; verify-first;
+  drift/missing mirror refuse before target work; publication failure exit
+  2; FAIL stays exit 1 after successful publication; missing credential
+  bounded; cancellation propagates
+
+LangSmith targets (D-LS01..LS10):
+  exact mirrors allow coordinator/research/analyst runs; drift refuses
+  before target; one ATI execution per case; categorical values unchanged;
+  no raw research content in metadata; no numeric score; verify/sync stay
+  model-free
+
+workflow static tests (W19/W20 + the PR 30B/30C set):
+  dataset input quoted as data; Evidence Analyst remains supported;
+  dataset-agnostic run step; PostgreSQL + migrations; research corpus
+  bootstrap inside the benchmark seams; LANGSMITH_API_KEY always and
+  ATI_OPENAI_API_KEY only for run; workflow_dispatch only; contents read
+
+PostgreSQL vertical slices (integration):
+  Coordinator: productive-pivot PASS (domain-discovers-ip), immediate-stop
+  PASS (sufficient-evidence-stop), justified-replan PASS
+  (one-justified-replan), research lifecycle PASS (requested -> completed,
+  one request), exhausted research bounded (no duplicate), deliberately
+  nonconforming trajectory FAIL, materialization dependency ERROR, full
+  corpus smoke (every case PASS/FAIL/ERROR, never crashes)
+  Research: retrieval PASS with zero LLM calls, forbidden record FAIL,
+  synthesis relevant + contradictory PASS with non-promotion,
+  expected-empty retrieval zero-model-call PASS, unsupported citation
+  ERROR, scenario-wrong claim FAIL
+```
+
+Known honest state for V1 Coordinator: several `coordinator/v1` scenarios
+carry allowed-pivot oracles and budgets authored against an older
+Coordinator topology (pre-PR-28B), so their trajectories no longer
+reproduce under the current production graph; the run service reports them
+deterministically as FAIL (or ERROR for the ORGANIZATION materialization
+limitation in `non-pivotable-discovery`). No scenario expectation was
+weakened, no production policy changed, and no V1 case is silently skipped.
+
+PR 30D changes no existing V1 scenario semantics, no production
+Coordinator/Research behavior, and no common evaluation contract; adds no
+DB migration; and keeps every mandatory test free of live LLM/LangSmith
+dependencies.
+
 ### Threat Research evaluation baseline (PR 22D)
 
 PR 22D adds a separate **behavioral evaluation layer** over the unchanged
