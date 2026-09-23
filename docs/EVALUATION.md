@@ -1490,40 +1490,183 @@ latency benchmarking
 token/cost benchmarking
 ```
 
-## LangSmith integration (PR 30B boundary)
+## LangSmith integration (PR 30B delivered)
 
-LangSmith is a later execution/visualization adapter for model and agent
+LangSmith is an execution/visualization adapter for model and agent
 evaluations; it is **not** part of the PR 30 correctness semantics and not
-importable from any common evaluation module.
+importable from any common evaluation module. PR 30B delivers the adapter
+under `src/agentic_threat_investigator/evaluation/backends/langsmith/`:
 
-PR 30B owns the adapter and may provide:
+```text
+repository-owned ATI dataset
+        |
+        v
+LangSmith dataset projection/synchronization
 
-- datasets (ATI dataset -> LangSmith dataset);
-- experiments/runs (ATI run -> LangSmith experiment);
-- trace inspection;
-- prompt/model comparison;
-- feedback/metadata mapping (`ATI PASS/FAIL/ERROR` -> LangSmith
-  feedback/metadata);
-- regression visualization.
+ATI EvaluationRunResult
+        |
+        v
+LangSmith feedback / experiment-result projection
 
-PR 30B consumes the already-frozen common types
-(`EvaluationDataset`, `EvaluationCase`, `EvaluationResult`,
+manual GitHub workflow
+        |
+        +--> validate ATI dataset
+        +--> synchronize/verify LangSmith dataset
+        +--> adapter smoke/contract operation
+```
+
+> **ATI defines evaluation truth; LangSmith stores, executes/visualizes, and
+> compares projections of that truth.**
+
+The adapter consumes the already-frozen common types
+(`EvaluationDatasetId`, `EvaluationCase`, `EvaluationResult`,
 `EvaluationCaseResult`, `EvaluationRunResult`, `Evaluator`,
-`EvaluationRunner`) and maps them to LangSmith objects; it must not change
-core semantics. LangSmith IDs and API objects never appear inside the
-common models; the machine-readable report is the adapter input.
+`EvaluationRunner`) and never adds LangSmith fields or API objects to
+them; LangSmith UUIDs live only inside bounded adapter DTOs.
 
-PR 30B also owns the optional GitHub Actions evaluation workflow
-(initially manual and credentialed, using `LANGSMITH_API_KEY` plus the
-selected real LLM provider secret). Ordinary PR CI in 30A remains
-uncredentialed and offline.
+### Dataset naming and stable example identity
 
-ATI's scenarios, expected outcomes, rubrics, evaluator code, and release
-gates remain repository-owned.
+A canonical ATI dataset projects to the remote dataset name
+`<namespace>/<target>/v<version>` (default namespace `ati`):
 
-The same evaluation framework must be portable to a future self-hosted
-backend such as Langfuse or Phoenix through ATI's observability/evaluation
-abstractions.
+```text
+ati/evidence-analyst/v1
+ati/coordinator/v1
+ati/research-agent/v1
+ati/report-writer/v1
+ati/geoint/v1
+```
+
+Each remote example carries the stable ATI identity in its inputs and
+metadata so it resolves back to `dataset_id`, `case_id`, `case_version`,
+and `target`. A LangSmith UUID is never used as an ATI semantic identity.
+
+### Projection contents
+
+Example inputs carry only the stable ATI identity:
+
+```json
+{
+  "ati_dataset_id": "evidence-analyst/v1",
+  "ati_case_id": "conflicting-reputation",
+  "ati_case_version": 1,
+  "ati_target": "evidence-analyst"
+}
+```
+
+Reference outputs carry the canonical narrative expected behavior (no
+exact golden prose is invented):
+
+```json
+{
+  "required_behavior": [],
+  "forbidden_behavior": []
+}
+```
+
+`ati.*` metadata carries the bounded descriptive envelope (`ati.title`,
+`ati.purpose`, `ati.operational_relevance`, `ati.regression_risk`,
+`ati.tags`, `ati.architecture_refs`), the projection schema version, and
+the semantic content digest. No secrets, raw provider payloads, prompts,
+raw model outputs, chain-of-thought, or runtime UUIDs are ever projected.
+
+### Semantic digest and drift
+
+The projection is versioned by `ati.projection_schema_version` (currently
+`1`), which versions the LangSmith representation, never benchmark
+semantics. The `ati.content_digest` is a SHA-256 over the deterministic
+canonical JSON form of the complete authored typed scenario object after
+strict typed loading — including target-specific fixtures and expectation
+envelopes — so a target-specific semantic change is observable as digest
+drift. Canonicalization sorts mapping keys, normalizes semantically
+unordered string collections and sets, preserves structured collection
+order, and serializes enums/dates deterministically.
+
+### Synchronization (`ati-eval langsmith sync`)
+
+```text
+ati-eval langsmith sync <dataset-id> [--namespace NAMESPACE]
+```
+
+Local validation always runs first (a malformed local dataset means no
+LangSmith operation). Synchronization is idempotent and fail-closed:
+
+| State | Behavior |
+|---|---|
+| missing remote dataset | create with ATI dataset metadata |
+| missing example | create (batched) |
+| identical identity + digest | no-op |
+| same identity, different digest | fail closed (no overwrite) |
+| remote extra ATI identity | fail closed (no delete) |
+| duplicate/malformed remote identity | fail closed |
+| dataset identity mismatch / unsupported schema | fail closed |
+
+Repeated exact synchronization performs zero semantic changes, zero
+updates, and zero deletes.
+
+### Verification (`ati-eval langsmith verify`)
+
+```text
+ati-eval langsmith verify <dataset-id> [--namespace NAMESPACE]
+```
+
+Read-only exact-mirror verification: dataset exists, dataset identity
+metadata matches, projection schema is supported, identity sets match
+exactly, digests match, and no duplicate/malformed remote ATI identities
+exist. No writes are ever performed.
+
+### Categorical PASS/FAIL/ERROR result projection
+
+The pure mapping `EvaluationRunResult -> LangSmithEvaluationPublication`
+retains dataset identity, case identity, evaluator identity, execution
+status, categorical verdict, and a bounded explanation. The frozen mapping
+is:
+
+```text
+COMPLETED + PASS   -> "pass"
+COMPLETED + FAIL   -> "fail"
+ERROR              -> "error"
+```
+
+There is **no** numeric correctness score, percentage, weight, threshold,
+partial pass, confidence, severity, or pairwise ranking anywhere in this
+boundary, and an execution ERROR is never uploaded as a behavioral FAIL.
+Feedback keys are stable (`ati.run.status`, `ati.case.<case_id>`,
+`ati.evaluator.<evaluator_id>`). Diagnostics are **not** published by
+default; any future diagnostic key requires an explicit allowlist.
+
+### Experiment metadata
+
+An adapter-only metadata builder supports optional fields for PR 30C+
+(commit SHA, dataset id, projection schema version, agent/prompt/model
+versions, bounded model parameters, fixture/normalization/retriever/
+embedding/evaluator versions, judge model/prompt version, timestamp).
+Unset values are omitted; no secrets, raw prompts, model outputs, or
+chain-of-thought are accepted. `EvaluationRunResult` is never modified to
+carry this.
+
+### Manual workflow
+
+`.github/workflows/evaluation.yml` is an explicitly credentialed,
+`workflow_dispatch`-only workflow (read-only `contents` permission) that
+validates the dataset locally, then runs the selected `verify`/`sync`
+operation with `LANGSMITH_API_KEY` from GitHub Secrets. It does not
+pretend to run a real agent experiment and needs no model-provider
+secret; that arrives in PR 30C with the first real target execution path.
+Ordinary CI remains uncredentialed and offline. A real LangSmith smoke is
+manual through this workflow or operator execution; no mandatory test
+merely skips without `LANGSMITH_API_KEY`.
+
+### Executing real targets remains PR 30C+
+
+PR 30B delivers the dataset/result adapter and the manual sync/verify
+workflow only. Real Evidence Analyst / Coordinator / Research / Report
+Writer / end-to-end target execution, real judge evaluators, prompt
+tuning, numeric thresholds, and online evaluation remain PR 30C and later
+PRs. ATI's scenarios, expected outcomes, rubrics, evaluator code, and
+release gates remain repository-owned; the same evaluation framework stays
+portable to a future self-hosted backend such as Langfuse or Phoenix
+through ATI's observability/evaluation abstractions.
 
 ## Initial evaluation corpus size
 

@@ -1755,6 +1755,73 @@ in the unit suite; future judge scenarios (PR 30B/30C) stay offline behind
 deterministic fakes. The optional credentialed evaluation workflow (real
 model runs uploading to LangSmith) begins in PR 30B only.
 
+### PR 30B LangSmith adapter tests
+
+PR 30B adds the LangSmith evaluation adapter under
+`src/agentic_threat_investigator/evaluation/backends/langsmith/` with a
+fully deterministic, network-free, credential-free unit matrix in
+`tests/unit/evaluation/langsmith/` (fake-boundary tests only) and static
+workflow tests. All ordinary tests inject the in-memory
+`FakeLangSmithClient` (or the duck-typed `FakeSdkClient` for the real SDK
+wrapper); no test acquires `LANGSMITH_API_KEY` or reaches the network, and
+no test merely skips without a key and calls that coverage.
+
+```text
+mapping (LS-M01..M10):
+  deterministic dataset names; stable case identity inputs;
+  required/forbidden behavior projection; sorted tag/architecture
+  metadata; identical canonical projection for identical inputs; digest
+  changes on any semantic change; ordering-only changes keep the digest;
+  no secret/raw runtime fields projected; projection schema version
+  emitted; malformed metadata rejected before any remote call
+
+sync (LS-S01..S16):
+  absent dataset -> create + examples; existing empty dataset -> create;
+  exact mirror -> no writes; only missing examples created; same
+  identity/digest -> unchanged; digest mismatch -> fail without overwrite;
+  remote extra ATI identity -> fail without delete; duplicate remote
+  identity -> fail; dataset identity mismatch -> fail; unsupported
+  projection schema -> fail; malformed local -> no remote mutation;
+  create/list/create-examples API errors surfaced; repeated identical sync
+  performs zero writes; cancellation propagates
+
+verify (LS-V01..V08):
+  exact mirror success; missing dataset/example/extra example/digest
+  mismatch/duplicate identity/malformed metadata all fail closed;
+  verification performs no writes
+
+result mapping (LS-R01..R10):
+  PASS/FAIL/ERROR map to categorical pass/fail/error (never numeric);
+  bounded explanations preserved; ERROR explanations sanitized;
+  diagnostics never published by default; case/run aggregates categorical
+  only; stable evaluator feedback keys/order; no score/weight/percentage
+
+client boundary (LS-C01..C06):
+  SDK dataset/example objects convert to bounded DTOs; foreign metadata
+  filtered to the ati.* namespace; SDK exceptions become bounded backend
+  errors; credential-like/control-character text bounded out of messages;
+  cancellation propagates; no SDK object escapes the adapter boundary
+
+CLI (LS-CLI01..CLI09):
+  valid sync/verify succeed through the fake; invalid datasets fail
+  before any client call; missing credentials bounded nonzero failure
+  with no environment dump; drift exits nonzero; pre-existing validate
+  unchanged; no run command; no secret in output
+
+workflow static tests (LS-W01..W13):
+  evaluation.yml exists; workflow_dispatch only (no push/PR/schedule);
+  contents: read; references LANGSMITH_API_KEY only (no model-provider
+  secret); Python 3.14; uv sync --locked; local validation before the
+  remote operation; invokes ati-eval langsmith; ci.yml stays
+  uncredentialed (GITHUB_TOKEN only)
+```
+
+PR 30B changes no production agent/persistence behavior, requires no
+living LangSmith service for mandatory CI, and adds no dependency beyond
+the already-locked `langsmith>=0.3.45,<0.12` bound inspected against the
+installed 0.11.x SDK. A real LangSmith smoke is manual only, through the
+optional `workflow_dispatch` workflow or operator execution.
+
 ### Threat Research evaluation baseline (PR 22D)
 
 PR 22D adds a separate **behavioral evaluation layer** over the unchanged

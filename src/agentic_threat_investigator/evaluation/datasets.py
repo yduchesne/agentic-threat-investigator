@@ -81,6 +81,50 @@ _FAMILY_LOADERS: Mapping[tuple[EvaluationTarget, Path], _FamilyLoader] = {
 }
 
 
+def load_evaluation_scenarios(
+    dataset_id: EvaluationDatasetId,
+    *,
+    corpus_root: Path = SCENARIOS_ROOT,
+) -> tuple[ScenarioLike, ...]:
+    """Strictly load the fully typed scenarios of one canonical dataset.
+
+    PR 30B's LangSmith projection needs the complete authored scenario
+    objects (``AnalystScenario``, ``CoordinatorScenario``, ...) rather than
+    only their common :class:`EvaluationCase` projection, because the
+    truthful semantic digest covers every typed semantic field (including
+    target-specific fixtures and expectation envelopes). The common
+    projection alone would silently hide a target-specific semantic
+    change. Dataset-level identity validation still runs exactly as in
+    :func:`load_evaluation_dataset`.
+
+    Raises :class:`DatasetLoadError` under the same fail-closed conditions
+    as :func:`load_evaluation_dataset`.
+    """
+    relatives = _TARGET_CORPORA[dataset_id.target]
+    if not relatives:
+        raise DatasetLoadError(
+            f"no corpus is registered for target {dataset_id.target.value}: "
+            f"{dataset_id.canonical}"
+        )
+    scenarios: list[ScenarioLike] = []
+    for relative in relatives:
+        loader = _FAMILY_LOADERS[(dataset_id.target, relative)]
+        directory = Path(corpus_root) / relative
+        try:
+            scenarios.extend(loader(directory))
+        except Exception as exc:
+            raise DatasetLoadError(
+                f"cannot load {dataset_id.canonical} corpus "
+                f"{relative}: {type(exc).__name__}: {exc}",
+                path=directory,
+            ) from exc
+    validate_dataset_cases(
+        [evaluation_case_from(scenario) for scenario in scenarios],
+        dataset_id=dataset_id,
+    )
+    return tuple(scenarios)
+
+
 def load_evaluation_dataset(
     dataset_id: EvaluationDatasetId,
     *,
@@ -97,27 +141,10 @@ def load_evaluation_dataset(
     identity contract (empty dataset, duplicate case IDs, mixed versions,
     or a target mismatch).
     """
-    relatives = _TARGET_CORPORA[dataset_id.target]
-    if not relatives:
-        raise DatasetLoadError(
-            f"no corpus is registered for target {dataset_id.target.value}: "
-            f"{dataset_id.canonical}"
-        )
-    cases: list[EvaluationCase] = []
-    for relative in relatives:
-        loader = _FAMILY_LOADERS[(dataset_id.target, relative)]
-        directory = Path(corpus_root) / relative
-        try:
-            scenarios = loader(directory)
-        except Exception as exc:
-            raise DatasetLoadError(
-                f"cannot load {dataset_id.canonical} corpus "
-                f"{relative}: {type(exc).__name__}: {exc}",
-                path=directory,
-            ) from exc
-        cases.extend(evaluation_case_from(scenario) for scenario in scenarios)
-    validate_dataset_cases(cases, dataset_id=dataset_id)
-    return tuple(cases)
+    return tuple(
+        evaluation_case_from(scenario)
+        for scenario in load_evaluation_scenarios(dataset_id, corpus_root=corpus_root)
+    )
 
 
 def _common_version(cases: list[EvaluationCase]) -> int:

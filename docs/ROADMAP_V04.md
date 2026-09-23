@@ -25,8 +25,9 @@ production agent behavior, or establish numeric quality thresholds.
 
 ```text
 PR 30A — Evaluation foundation
-PR 30B — LangSmith adapter + optional GitHub eval workflow
-PR 30C — Evidence Analyst evaluation suite
+PR 30B — dataset/result LangSmith adapter + manual sync/verify workflow [DONE]
+PR 30C — first real agent target experiment (Evidence Analyst evaluation
+         suite and the first workflow path needing an LLM provider secret)
 PR 30D — Coordinator + Research Agent evaluation suite
 PR 30E — Report Writer evaluation suite
 PR 30F — End-to-end investigation evaluation
@@ -53,6 +54,36 @@ PR 30F — End-to-end investigation evaluation
 
 PR 30A leaves PR 30B able to add LangSmith purely as an adapter without
 changing core semantics.
+
+## PR 30B scope (delivered) [DONE]
+
+- deterministic ATI dataset/case -> LangSmith dataset projection
+  (`ati/<target>/v<version>` names, stable example identity, bounded
+  `ati.*` metadata, projection schema v1);
+- truthful semantic digest over the complete typed scenario object
+  (canonical JSON + SHA-256; ordering-only changes keep the digest);
+- idempotent, fail-closed synchronization (`ati-eval langsmith sync`:
+  create missing dataset/examples, no-op on identical, fail on
+  drift/extras/duplicates/mismatches; never overwrite or delete);
+- read-only exact-mirror verification (`ati-eval langsmith verify`);
+- categorical PASS/FAIL/ERROR result projection and adapter-only
+  experiment-metadata builder (no numeric correctness, no thresholds);
+- narrow injectable LangSmith SDK boundary (bounded DTOs, sanitized
+  errors, no credential logging, cancellation preserved);
+- optional manual GitHub Actions evaluation workflow
+  (`.github/workflows/evaluation.yml`: `workflow_dispatch` only,
+  `contents: read`, `LANGSMITH_API_KEY` only; no real agent target);
+- deterministic fake-backed unit/static coverage (LS-M/S/V/R/C/CLI/W)
+  with ordinary CI remaining offline and uncredentialed;
+- docs: `docs/EVALUATION.md`, `docs/TESTING.md`, this roadmap;
+  `.env.example` documents the optional key for explicit commands.
+
+PR 30B deliberately delivers **no** real-model target execution, no
+LLM-as-judge invocation, no numeric quality score or baseline promotion,
+and no automatic/scheduled evaluation runs. Real agent experiments start
+in PR 30C, which consumes PR 30B's adapter without redefining dataset
+naming, example identity, digest, feedback keys, PASS/FAIL/ERROR mapping,
+client construction, or the workflow security model.
 
 ## Explicitly out of scope for PR 30A
 

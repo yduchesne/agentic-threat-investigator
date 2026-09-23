@@ -1,0 +1,41 @@
+name: Evaluation (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: 'Canonical ATI dataset identity, for example evidence-analyst/v1'
+        required: true
+        type: string
+        default: 'evidence-analyst/v1'
+      operation:
+        description: 'verify = read-only exact-mirror check; sync = idempotent fail-closed mirror create'
+        required: true
+        type: choice
+        default: 'verify'
+        options:
+          - verify
+          - sync
+permissions:
+  contents: read
+jobs:
+  evaluation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.5.30'
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Validate dataset locally
+        run: uv run ati-eval validate "${{ inputs.dataset }}"
+      - name: LangSmith adapter operation
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: uv run ati-eval langsmith "${{ inputs.operation }}" "${{ inputs.dataset }}"

@@ -33,7 +33,7 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from enum import Enum
-from typing import Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias
 
 from pydantic import (
     BaseModel,
@@ -464,11 +464,22 @@ class EvaluationCase(BaseModel):
 
 
 class ScenarioLike(Protocol):
-    """Structural view of any repository scenario carrying the common contract."""
+    """Structural view of any repository scenario carrying the common contract.
+
+    The optional canonical serialization seam (:meth:`model_dump`) is the PR
+    30B addition needed for the truthful semantic digest of the complete
+    authored scenario object: every repository typed scenario model already
+    provides ``model_dump``, so the protocol only widens the structural
+    contract without changing any scenario semantics.
+    """
 
     id: str
     version: int
     specification: ScenarioSpecification
+
+    def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
+        """Return the canonical python-mode serialization of this scenario."""
+        ...
 
 
 def evaluation_case_from(scenario: ScenarioLike) -> EvaluationCase:

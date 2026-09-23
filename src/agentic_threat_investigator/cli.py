@@ -28,6 +28,7 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import event as sqlalchemy_event
@@ -37,6 +38,11 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+if TYPE_CHECKING:
+    from agentic_threat_investigator.evaluation.backends.langsmith.client import (
+        LangSmithEvaluationClient,
+    )
 
 from agentic_threat_investigator.app.assessment_persistence import (
     AssessmentPersistenceService,
@@ -914,20 +920,29 @@ def _resolve_and_validate(dataset_or_path: str) -> tuple[EvaluationDatasetId, in
 
 
 def evaluation_main(argv: list[str] | None = None) -> int:
-    """Run the PR 30A offline evaluation CLI (``ati-eval``).
+    """Run the PR 30 offline evaluation CLI (``ati-eval``).
 
-    PR 30A exposes exactly one subcommand:
+    PR 30A exposes local validation and PR 30B adds explicit LangSmith
+    operations:
 
     .. code-block:: text
 
         ati-eval validate <dataset-or-path>
+        ati-eval langsmith sync|verify <dataset-id> [--namespace NAMESPACE]
 
     ``validate`` strictly loads a canonical dataset identity (for example
     ``evidence-analyst/v1``) or one scenario directory, enforces the
     scenario-quality and dataset-identity contracts, and exits 0 on success
     or nonzero on failure. The command is fully offline: no LangSmith, no
-    LLM, and no network. Operator-facing real-model runs (``ati-eval run``)
-    are deferred to PR 30B/30C when deliverable experiment adapters exist.
+    LLM, and no network.
+
+    ``langsmith sync`` validates the local dataset first, then creates the
+    missing remote mirror (dataset and examples) idempotently and fails
+    closed on drift/extras/duplicates; ``langsmith verify`` performs the
+    same comparisons read-only. Both require ``LANGSMITH_API_KEY``
+    credentials and report a bounded nonzero exit otherwise. Operator-facing
+    real-model runs (``ati-eval run``) remain deferred to PR 30C when
+    deliverable experiment adapters exist.
     """
     parser = argparse.ArgumentParser(prog="ati-eval")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -940,10 +955,43 @@ def evaluation_main(argv: list[str] | None = None) -> int:
         help="canonical dataset identity such as evidence-analyst/v1 or a "
         "scenario directory path",
     )
+    langsmith_parser = subparsers.add_parser(
+        "langsmith",
+        help="explicit LangSmith dataset operations (sync/verify; needs "
+        "LANGSMITH_API_KEY credentials)",
+    )
+    langsmith_subparsers = langsmith_parser.add_subparsers(
+        dest="langsmith_operation", required=True
+    )
+    for operation in ("sync", "verify"):
+        operation_parser = langsmith_subparsers.add_parser(
+            operation,
+            help=(
+                "idempotently create the missing remote mirror (sync) or "
+                "read-only check (verify); both fail closed on drift"
+            ),
+        )
+        operation_parser.add_argument(
+            "dataset_id",
+            help="canonical dataset identity such as evidence-analyst/v1",
+        )
+        operation_parser.add_argument(
+            "--namespace",
+            default="ati",
+            help="optional remote dataset name prefix (default: ati)",
+        )
     args = parser.parse_args(argv)
     _configure_logging()
-    if args.command != "validate":
-        parser.error(f"unknown evaluation command: {args.command}")
+    if args.command == "validate":
+        return _evaluation_validate_main(args)
+    if args.command == "langsmith":
+        return _evaluation_langsmith_main(args)
+    parser.error(f"unknown evaluation command: {args.command}")
+    return 2  # pragma: no cover - argparse exits before this line
+
+
+def _evaluation_validate_main(args: argparse.Namespace) -> int:
+    """Run one PR 30A offline validation command and return its exit code."""
     try:
         dataset_id, case_count = _resolve_and_validate(args.dataset_or_path)
     except (ValueError, OSError, DatasetLoadError) as exc:
@@ -955,3 +1003,106 @@ def evaluation_main(argv: list[str] | None = None) -> int:
         case_count,
     )
     return 0
+
+
+def _build_langsmith_evaluation_client() -> LangSmithEvaluationClient:
+    """Construct the real LangSmith SDK client for explicit evaluation commands.
+
+    Credentials come from the standard ``LANGSMITH_API_KEY`` environment
+    contract; missing credentials surface as a bounded backend failure on
+    the first remote call, never as an environment dump.
+    """
+    from agentic_threat_investigator.evaluation.backends.langsmith.client import (
+        LangSmithSdkEvaluationClient,
+    )
+
+    return LangSmithSdkEvaluationClient()
+
+
+def _evaluation_langsmith_main(args: argparse.Namespace) -> int:
+    """Run one explicit LangSmith operator command (sync/verify).
+
+    The local dataset is strictly loaded and validated before any remote
+    operation; a malformed local dataset means no LangSmith mutation
+    attempt at all. Credential/network/API failures and all fail-closed
+    drift conditions exit nonzero with a bounded message.
+    """
+    from agentic_threat_investigator.evaluation.backends.langsmith.client import (
+        LangSmithBackendError,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.datasets import (
+        LangSmithSyncError,
+        synchronize_dataset,
+        verify_dataset,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.mapping import (
+        LangSmithProjectionError,
+    )
+    from agentic_threat_investigator.evaluation.datasets import (
+        load_evaluation_scenarios,
+    )
+
+    try:
+        dataset_id = EvaluationDatasetId.from_canonical(args.dataset_id)
+    except ValueError as exc:
+        LOGGER.error(
+            "evaluation langsmith refused: dataset argument must be a canonical "
+            "dataset identity such as evidence-analyst/v1: %s",
+            exc,
+        )
+        return 1
+    try:
+        scenarios = load_evaluation_scenarios(dataset_id)
+    except (ValueError, OSError, DatasetLoadError) as exc:
+        LOGGER.error(
+            "evaluation langsmith %s failed before any remote operation: %s",
+            args.langsmith_operation,
+            exc,
+        )
+        return 1
+    client = _build_langsmith_evaluation_client()
+    namespace = args.namespace
+
+    async def run() -> int:
+        if args.langsmith_operation == "sync":
+            receipt = await synchronize_dataset(
+                dataset_id=dataset_id,
+                client=client,
+                scenarios=scenarios,
+                namespace=namespace,
+            )
+            LOGGER.info(
+                "evaluation langsmith sync complete dataset=%s local_cases=%d "
+                "created=%d unchanged=%d status=%s",
+                receipt.dataset,
+                receipt.local_cases,
+                receipt.created,
+                receipt.unchanged,
+                receipt.status,
+            )
+            return 0
+        report = await verify_dataset(
+            dataset_id=dataset_id,
+            client=client,
+            scenarios=scenarios,
+            namespace=namespace,
+        )
+        LOGGER.info(
+            "evaluation langsmith verify complete dataset=%s local_cases=%d "
+            "remote_examples=%d status=%s",
+            report.dataset,
+            report.local_cases,
+            report.remote_examples,
+            report.status,
+        )
+        return 0
+
+    try:
+        return asyncio.run(run())
+    except (LangSmithBackendError, LangSmithSyncError, LangSmithProjectionError) as exc:
+        LOGGER.error(
+            "evaluation langsmith %s failed: %s",
+            args.langsmith_operation,
+            exc,
+        )
+        return 1
