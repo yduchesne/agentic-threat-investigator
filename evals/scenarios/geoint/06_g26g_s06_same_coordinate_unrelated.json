@@ -1,8 +1,33 @@
 {
   "id": "g26g_s06_same_coordinate_unrelated",
   "version": 1,
-  "description": "Two unrelated Entities with the same representative coordinates produce no ownership or coordination inference; the shared coordinate remains descriptive observation only.",
-  "tags": ["geoint", "same-coordinate", "no-ownership", "no-coordination", "pr26g"],
+  "specification": {
+    "title": "Shared coordinates produce no ownership inference",
+    "description": "Two unrelated Entities with the same representative coordinates produce no ownership or coordination inference; the shared coordinate remains descriptive observation only.",
+    "target": "geoint",
+    "purpose": "Verify two unrelated Entities with identical representative coordinates produce no ownership or coordination inference; the shared coordinate remains descriptive.",
+    "operational_relevance": "Remote hosting and NAT exits share coordinates routinely; inferring ownership from coordinates would be badly wrong.",
+    "regression_risk": "The pipeline could upgrade shared coordinates into an ownership or coordination claim.",
+    "expected_behavior": {
+      "required": [
+        "The shared coordinate is recorded descriptively",
+        "No ownership or coordination inference is emitted"
+      ],
+      "forbidden": [
+        "Shared representative coordinates imply ownership or coordination"
+      ]
+    },
+    "tags": [
+      "geoint",
+      "no-coordination",
+      "no-ownership",
+      "pr26g",
+      "same-coordinate"
+    ],
+    "architecture_refs": [
+      "coordinate-description-boundary"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the two target IPs are malicious.",
     "root_entity": "ip_a",
@@ -116,11 +141,15 @@
     "histories": [
       {
         "entity": "ip_a",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       },
       {
         "entity": "ip_b",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       }
     ],
     "agent_context": {
@@ -128,22 +157,45 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"],
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ],
       "required_geographic_findings": [
         {
           "kind": "shared_location",
-          "observation_labels": ["a_obs", "b_obs"],
-          "evidence_labels": ["a_evidence", "b_evidence"],
-          "entity_labels": ["ip_a", "ip_b"],
-          "location_labels": ["seattle"]
+          "observation_labels": [
+            "a_obs",
+            "b_obs"
+          ],
+          "evidence_labels": [
+            "a_evidence",
+            "b_evidence"
+          ],
+          "entity_labels": [
+            "ip_a",
+            "ip_b"
+          ],
+          "location_labels": [
+            "seattle"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["ownership", "coordination"]
+    "forbidden_inferences": [
+      "ownership",
+      "coordination"
+    ]
   }
 }

@@ -31,6 +31,7 @@ from agentic_threat_investigator.domain.geoint import (
     LocationType,
 )
 from agentic_threat_investigator.domain.investigation import AnalysisDisposition
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
 from agentic_threat_investigator.evaluation.geoint.materializer import (
     DEFAULT_GEOINT_SCENARIO_NAMESPACE,
     scenario_investigation_id,
@@ -53,6 +54,7 @@ from agentic_threat_investigator.evaluation.geoint.models import (
     GeointValidationExpectation,
     GeointValidationOutcome,
 )
+from tests.support.evaluation_common import unit_specification
 
 UNIT_SCENARIO_ID = "unit_geoint_scenario"
 
@@ -156,7 +158,7 @@ def unit_geoint_scenario(
     return GeointScenario(
         id=UNIT_SCENARIO_ID,
         version=1,
-        description="Deterministic unit-test GEOINT scenario.",
+        specification=unit_specification(target=EvaluationTarget.GEOINT),
         fixture=default_fixture,
         expected=envelope,
     )
@@ -240,7 +242,7 @@ def overstatement_scenario() -> GeointScenario:
     return GeointScenario(
         id="unit_overstatement_scenario",
         version=1,
-        description="Deterministic unit-test overstatement scenario.",
+        specification=unit_specification(target=EvaluationTarget.GEOINT),
         fixture=fixture,
         expected=ExpectedGeointOutcome(
             resolutions=(

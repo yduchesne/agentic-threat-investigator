@@ -43,7 +43,7 @@ def test_committed_corpus_is_versioned_complete_and_valid(tmp_path: Path) -> Non
     scenarios = load_scenarios_directory(CORPUS_DIRECTORY)
     assert [scenario.id for scenario in scenarios] == list(EXPECTED_CORPUS_IDS)
     assert all(scenario.version == 1 for scenario in scenarios)
-    assert all(scenario.description.strip() for scenario in scenarios)
+    assert all(scenario.specification.description.strip() for scenario in scenarios)
     # Deterministic discovery: filenames sort exactly to the ids above.
     assert [path.name for path in sorted(CORPUS_DIRECTORY.glob("*.json"))] == [
         f"{scenario_id}.json" for scenario_id in EXPECTED_CORPUS_IDS

@@ -1,7 +1,29 @@
 {
   "id": "rag-s02-no-retrieval-result",
   "version": 1,
-  "description": "No retrieval result: a source filter matching nothing produces a persisted zero-claim/zero-citation result with zero LLM invocations.",
+  "specification": {
+    "title": "No retrieval result persists an empty, honest result",
+    "description": "No retrieval result: a source filter matching nothing produces a persisted zero-claim/zero-citation result with zero LLM invocations.",
+    "target": "research-agent",
+    "purpose": "Verify a source filter matching nothing persists a zero-claim, zero-citation ResearchResult with zero LLM invocations.",
+    "operational_relevance": "Empty results must be explicit so investigation flows do not mistake the absence of retrieval for a non-response.",
+    "regression_risk": "The executor could invoke the model or fabricate claims when retrieval returned nothing.",
+    "expected_behavior": {
+      "required": [
+        "The persisted result declares the empty outcome",
+        "Zero claims and zero citations are persisted",
+        "No LLM invocation is performed"
+      ],
+      "forbidden": [
+        "Claims are synthesized without any retrieved context"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "retrieval-gap-signaling",
+      "epistemic-non-promotion"
+    ]
+  },
   "fixture": {
     "name": "mitre-attack-small"
   },

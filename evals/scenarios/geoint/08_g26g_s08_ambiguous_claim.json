@@ -1,8 +1,34 @@
 {
   "id": "g26g_s08_ambiguous_claim",
   "version": 1,
-  "description": "An ambiguous input (two equally-valued city candidates under the same country) terminates UNRESOLVABLE with no invented Location, observation, or current state.",
-  "tags": ["geoint", "ambiguous", "terminal-unresolvable", "no-invention", "pr26g"],
+  "specification": {
+    "title": "Ambiguous claims terminate unresolvable",
+    "description": "An ambiguous input (two equally-valued city candidates under the same country) terminates UNRESOLVABLE with no invented Location, observation, or current state.",
+    "target": "geoint",
+    "purpose": "Verify an ambiguous input with two equally-valued city candidates terminates UNRESOLVABLE with no invented Location, observation, or current state.",
+    "operational_relevance": "Ambiguity is real in geocoding; honest unresolvable outcomes beat invented resolutions.",
+    "regression_risk": "The resolver could arbitrarily pick one city candidate and fabricate certainty.",
+    "expected_behavior": {
+      "required": [
+        "The ambiguous claim terminates unresolvable",
+        "No Location, observation, or current state is invented",
+        "The Evidence row remains intact"
+      ],
+      "forbidden": [
+        "An arbitrary city candidate resolves an ambiguous claim"
+      ]
+    },
+    "tags": [
+      "ambiguous",
+      "geoint",
+      "no-invention",
+      "pr26g",
+      "terminal-unresolvable"
+    ],
+    "architecture_refs": [
+      "claim-resolvability"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious.",
     "root_entity": "target_ip",
@@ -92,13 +118,24 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"]
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ]
     },
-    "forbidden_inferences": ["maliciousness"]
+    "forbidden_inferences": [
+      "maliciousness"
+    ]
   }
 }

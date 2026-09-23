@@ -14,6 +14,7 @@ from agentic_threat_investigator.domain.research import (
     ResearchClaim,
     ResearchResult,
 )
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
 from agentic_threat_investigator.evaluation.research import (
     ExpectedResearchClaim,
     ExpectedResearchResult,
@@ -25,6 +26,7 @@ from agentic_threat_investigator.evaluation.research import (
     ResearchSynthesisFailureCode,
     ResearchSynthesisScenario,
 )
+from tests.support.evaluation_common import unit_specification
 
 _INVESTIGATION = UUID("00000000-0000-0000-0000-0000000000c1")
 _SUBJECT = UUID("00000000-0000-0000-0000-0000000000c2")
@@ -118,6 +120,7 @@ def _scenario(**overrides: Any) -> ResearchSynthesisScenario:
         "id": "unit.synthesis-scenario",
         "version": 1,
         "fixture": ResearchFixtureReference(name="mitre-attack-small"),
+        "specification": unit_specification(target=EvaluationTarget.RESEARCH_AGENT),
         "query": "obfuscate command and control traffic",
         "max_results": 3,
         "source_records": {

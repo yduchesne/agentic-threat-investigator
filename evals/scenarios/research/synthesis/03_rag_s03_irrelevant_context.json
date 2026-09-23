@@ -1,7 +1,27 @@
 {
   "id": "rag-s03-irrelevant-context",
   "version": 1,
-  "description": "Retrieved-but-irrelevant context: the model deterministically returns claims=() so retrieval is never automatically promoted to claims.",
+  "specification": {
+    "title": "Irrelevant retrieved context is never auto-promoted",
+    "description": "Retrieved-but-irrelevant context: the model deterministically returns claims=() so retrieval is never automatically promoted to claims.",
+    "target": "research-agent",
+    "purpose": "Verify retrieved-but-irrelevant context deterministically yields zero claims instead of automatic promotion to persisted claims.",
+    "operational_relevance": "Retrieval relevance does not equal claim-worthiness; auto-promotion would flood investigations with garbage claims.",
+    "regression_risk": "The agent could promote retrieved chunks into claims without a model decision.",
+    "expected_behavior": {
+      "required": [
+        "The persisted result declares the empty outcome for irrelevant context",
+        "Zero claims are persisted"
+      ],
+      "forbidden": [
+        "Retrieved context is automatically promoted into claims"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "epistemic-non-promotion"
+    ]
+  },
   "fixture": {
     "name": "mitre-attack-small"
   },

@@ -1,7 +1,28 @@
 {
   "id": "rpt-s06-unsupported-reference",
   "version": 1,
-  "description": "Unsupported ReportWriter reference: the model output references a research claim that was never supplied. Deterministic provenance validation must fail, no report may be persisted, and no report pointer may advance.",
+  "specification": {
+    "title": "Unsupported references fail before persistence",
+    "description": "Unsupported ReportWriter reference: the model output references a research claim that was never supplied. Deterministic provenance validation must fail, no report may be persisted, and no report pointer may advance.",
+    "target": "report-writer",
+    "purpose": "Verify deterministic provenance validation rejects a model output referencing a research claim that was never supplied: no report is persisted and no report pointer advances.",
+    "operational_relevance": "Reference integrity is what makes reports trustworthy enough to act on.",
+    "regression_risk": "The writer could persist a report citing material outside the supplied input.",
+    "expected_behavior": {
+      "required": [
+        "The report execution fails with the unsupported-reference error before persistence",
+        "No report is persisted for the investigation"
+      ],
+      "forbidden": [
+        "A report citing unsupplied material is persisted"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "report-groundedness",
+      "no-report-on-execution-failure"
+    ]
+  },
   "fixture": "report-unsupported-ref",
   "expected": {
     "verdict": "malicious",

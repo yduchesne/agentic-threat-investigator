@@ -1,7 +1,26 @@
 {
   "id": "real-mitre-forbidden-technique",
   "version": 1,
-  "description": "Deliberately failing expectation: the structurally successful retrieval of the technique must fail the baseline because the scenario forbids that exact record.",
+  "specification": {
+    "title": "Forbidden records fail the baseline even when retrieved",
+    "description": "Deliberately failing expectation: the structurally successful retrieval of the technique must fail the baseline because the scenario forbids that exact record.",
+    "target": "research-agent",
+    "purpose": "Verify the deliberately failing expectation: a structurally successful retrieval of the forbidden technique record must FAIL the baseline.",
+    "operational_relevance": "Negative tests prove the baseline can actually fail, protecting the evaluator from always-green behavior.",
+    "regression_risk": "A regression in the evaluator could turn an intentionally failing case into a pass.",
+    "expected_behavior": {
+      "required": [
+        "The retrieval of the forbidden technique record is marked as a failure"
+      ],
+      "forbidden": [
+        "The forbidden record is treated as an acceptable retrieval"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "retrieval-truth-declaration"
+    ]
+  },
   "query": "obfuscate command-and-control traffic conceal exfiltrated data",
   "max_results": 3,
   "source_ids": [],
@@ -10,7 +29,9 @@
   "expected_forbidden_source_records": [
     "attack-pattern--8a8e9e5e-2b4c-4d6e-8f0a-112233445566"
   ],
-  "expected_source_ids": ["urn:ati:source:mitre_attack"],
+  "expected_source_ids": [
+    "urn:ati:source:mitre_attack"
+  ],
   "expected_document_types": [],
   "expected_retrieval_gap": false
 }

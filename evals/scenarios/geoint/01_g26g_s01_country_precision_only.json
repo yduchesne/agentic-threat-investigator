@@ -1,8 +1,34 @@
 {
   "id": "g26g_s01_country_precision_only",
   "version": 1,
-  "description": "Country-only input resolves to the country canonical Location with country precision; no administrative area or city is invented, the exact Evidence is preserved, and the only acceptable verdict is INCONCLUSIVE.",
-  "tags": ["geoint", "precision", "country-only", "pr26g"],
+  "specification": {
+    "title": "Country-only input resolves to country precision",
+    "description": "Country-only input resolves to the country canonical Location with country precision; no administrative area or city is invented, the exact Evidence is preserved, and the only acceptable verdict is INCONCLUSIVE.",
+    "target": "geoint",
+    "purpose": "Verify country-only input resolves to the canonical country Location with country precision, inventing neither administrative area nor city, and preserving the exact Evidence.",
+    "operational_relevance": "Most free geo sources provide only country granularity; honest precision preservation is essential for downstream trust.",
+    "regression_risk": "The resolver could over-resolve to administrative or city precision, or the analyst could emit a verdict beyond inconclusive.",
+    "expected_behavior": {
+      "required": [
+        "The observation resolves to the country Location with country precision",
+        "The persisted Evidence row is preserved exactly",
+        "The analyst verdict stays inconclusive"
+      ],
+      "forbidden": [
+        "An administrative area or city location is invented from country-only input"
+      ]
+    },
+    "tags": [
+      "country-only",
+      "geoint",
+      "pr26g",
+      "precision"
+    ],
+    "architecture_refs": [
+      "resolution-precision-honesty",
+      "geographic-support-only"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious.",
     "root_entity": "target_ip",
@@ -60,7 +86,9 @@
     "histories": [
       {
         "entity": "target_ip",
-        "locations": ["us"]
+        "locations": [
+          "us"
+        ]
       }
     ],
     "agent_context": {
@@ -68,22 +96,41 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"],
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ],
       "required_geographic_findings": [
         {
           "kind": "shared_location",
-          "observation_labels": ["us_obs"],
-          "evidence_labels": ["us_evidence"],
-          "entity_labels": ["target_ip"],
-          "location_labels": ["us"]
+          "observation_labels": [
+            "us_obs"
+          ],
+          "evidence_labels": [
+            "us_evidence"
+          ],
+          "entity_labels": [
+            "target_ip"
+          ],
+          "location_labels": [
+            "us"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["maliciousness"]
+    "forbidden_inferences": [
+      "maliciousness"
+    ]
   }
 }

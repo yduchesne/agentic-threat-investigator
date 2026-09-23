@@ -1,7 +1,28 @@
 {
   "id": "entity-budget",
   "version": 1,
-  "description": "Entity working-set exhaustion blocks discovered-entity expansion.",
+  "specification": {
+    "title": "Entity working-set exhaustion blocks expansion",
+    "description": "Entity working-set exhaustion blocks discovered-entity expansion.",
+    "target": "coordinator",
+    "purpose": "Verify the entity working-set budget blocks discovered-entity expansion and stops with the entity budget reason.",
+    "operational_relevance": "Real investigations must bound the number of tracked entities to preserve memory and query boundaries.",
+    "regression_risk": "The coordinator could keep expanding the working set past the declared bound.",
+    "expected_behavior": {
+      "required": [
+        "The investigation stops with entity_budget_exhausted",
+        "Discovered entities respect the declared working-set bound"
+      ],
+      "forbidden": [
+        "The investigation expands beyond the declared entity budget"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "entity-budget-enforcement",
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "entity-budget"
   },

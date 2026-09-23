@@ -1,8 +1,33 @@
 {
   "id": "g26g_s10_retry_then_resolve",
   "version": 1,
-  "description": "A retryable resolver failure followed by success produces correct attempt/retry semantics and exactly one final geographic truth.",
-  "tags": ["geoint", "retry", "recovery", "one-final-truth", "pr26g"],
+  "specification": {
+    "title": "Retryable failures retry then resolve",
+    "description": "A retryable resolver failure followed by success produces correct attempt/retry semantics and exactly one final geographic truth.",
+    "target": "geoint",
+    "purpose": "Verify a retryable resolver failure followed by success produces correct attempt and retry semantics and exactly one final geographic truth.",
+    "operational_relevance": "Transient geo-provider failures are routine; the retry path must converge on one truth.",
+    "regression_risk": "The pipeline could double-persist, exhaust attempts, or leave the observation stuck.",
+    "expected_behavior": {
+      "required": [
+        "The observation resolves after the declared retry semantics",
+        "Exactly one final geographic truth is persisted"
+      ],
+      "forbidden": [
+        "Duplicate geographic truths are persisted after the retry"
+      ]
+    },
+    "tags": [
+      "geoint",
+      "one-final-truth",
+      "pr26g",
+      "recovery",
+      "retry"
+    ],
+    "architecture_refs": [
+      "retry-attempt-semantics"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious.",
     "root_entity": "target_ip",
@@ -80,7 +105,9 @@
     "histories": [
       {
         "entity": "target_ip",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       }
     ],
     "agent_context": {
@@ -88,22 +115,41 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"],
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ],
       "required_geographic_findings": [
         {
           "kind": "shared_location",
-          "observation_labels": ["seattle_obs"],
-          "evidence_labels": ["seattle_evidence"],
-          "entity_labels": ["target_ip"],
-          "location_labels": ["seattle"]
+          "observation_labels": [
+            "seattle_obs"
+          ],
+          "evidence_labels": [
+            "seattle_evidence"
+          ],
+          "entity_labels": [
+            "target_ip"
+          ],
+          "location_labels": [
+            "seattle"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["maliciousness"]
+    "forbidden_inferences": [
+      "maliciousness"
+    ]
   }
 }

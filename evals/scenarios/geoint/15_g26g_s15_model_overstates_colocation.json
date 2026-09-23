@@ -1,8 +1,33 @@
 {
   "id": "g26g_s15_model_overstates_colocation",
   "version": 1,
-  "description": "The scripted model attempts to overstate co-location by writing a shared_location finding over observations in two different cities; the deterministic runtime validator rejects it before persistence and evaluation fails hard.",
-  "tags": ["geoint", "overstatement", "hard-rejection", "adversarial", "pr26g"],
+  "specification": {
+    "title": "Overstated co-location is rejected deterministically",
+    "description": "The scripted model attempts to overstate co-location by writing a shared_location finding over observations in two different cities; the deterministic runtime validator rejects it before persistence and evaluation fails hard.",
+    "target": "geoint",
+    "purpose": "Verify a scripted model attempt to write a shared_location finding over observations in two different cities is rejected by the deterministic runtime validator.",
+    "operational_relevance": "Model overstatement is the real failure mode this baseline protects analysts from.",
+    "regression_risk": "The validator could accept a city-mismatched co-location finding.",
+    "expected_behavior": {
+      "required": [
+        "The overstatement is rejected with the documented validation outcome",
+        "No geographic finding is persisted for the mismatched observations"
+      ],
+      "forbidden": [
+        "A shared-location finding over different cities is accepted"
+      ]
+    },
+    "tags": [
+      "adversarial",
+      "geoint",
+      "hard-rejection",
+      "overstatement",
+      "pr26g"
+    ],
+    "architecture_refs": [
+      "colocation-validation"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the two target IPs are malicious.",
     "root_entity": "ip_a",
@@ -130,11 +155,15 @@
     "histories": [
       {
         "entity": "ip_a",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       },
       {
         "entity": "ip_b",
-        "locations": ["dallas"]
+        "locations": [
+          "dallas"
+        ]
       }
     ],
     "agent_context": {
@@ -142,13 +171,25 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "rejected",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"]
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ]
     },
-    "forbidden_inferences": ["coordination", "maliciousness"]
+    "forbidden_inferences": [
+      "coordination",
+      "maliciousness"
+    ]
   }
 }

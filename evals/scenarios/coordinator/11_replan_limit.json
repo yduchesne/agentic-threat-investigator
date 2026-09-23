@@ -1,7 +1,27 @@
 {
   "id": "replan-limit",
   "version": 1,
-  "description": "Replan budget exhaustion stops with the specific reason.",
+  "specification": {
+    "title": "Replan budget exhaustion stops the investigation",
+    "description": "Replan budget exhaustion stops with the specific reason.",
+    "target": "coordinator",
+    "purpose": "Verify exceeding the replan allowance stops the investigation with the dedicated reason.",
+    "operational_relevance": "Unbounded replanning is a classic agent-loop failure in real systems.",
+    "regression_risk": "The coordinator could keep replanning past the declared maximum.",
+    "expected_behavior": {
+      "required": [
+        "The investigation stops with replan_limit_reached"
+      ],
+      "forbidden": [
+        "The coordinator replans more times than the declared maximum"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "replan-budget-enforcement",
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "replan-limit"
   },

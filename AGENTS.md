@@ -98,10 +98,8 @@ Additionally:
 - Public functions and methods should have docstrings.
 - For methods that are inherited from an interface: do not repeat the docstrings of the interface.
   Create specific docstrings that describe the override logic that the level of implementations.
-- After completing the implementation of functionality corresponding to a PR item in
-  [PR_PLAN.md](docs/PR_PLAN.md), add the `[DONE]` marker at the end of the PR item. Do so prior to
-  the changes being committed and pushed, and after all quality checks an integration tests have
-  completed successfully.
+- After completing the implementation of functionality corresponding to a PR item in the relevant `ROAMDAP_<version>.md`
+  document, add the `[DONE]` marker at the end of the PR item. Do so prior to the changes being committed and pushed, and after all quality checks an integration tests have completed successfully.
 
 ## Configuration and batch-persistence invariants
 

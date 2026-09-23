@@ -1,12 +1,32 @@
 {
   "id": "conflicting_reputation",
   "version": 1,
-  "description": "A strong malicious reputation signal from one provider and a valid no-hit from another must be represented as an explicit contradiction: one SUPPORTING Finding and one CONTRADICTING Finding.",
-  "tags": [
-    "evidence-analyst",
-    "contradiction",
-    "conflicting-providers"
-  ],
+  "specification": {
+    "title": "Conflicting provider reputation is an explicit contradiction",
+    "description": "A strong malicious reputation signal from one provider and a valid no-hit from another must be represented as an explicit contradiction: one SUPPORTING Finding and one CONTRADICTING Finding.",
+    "target": "evidence-analyst",
+    "purpose": "Verify the analyst represents a strong malicious signal and a valid no-hit from different providers as an explicit two-sided contradiction instead of silently preferring one source.",
+    "operational_relevance": "Provider reputation data routinely conflicts; a sound investigation must preserve both sides so downstream reviewers can weigh the disagreement.",
+    "regression_risk": "The analyst could treat observations from different providers as simultaneous compatible state, drop the no-hit, or omit the contradicting side of the Assessment.",
+    "expected_behavior": {
+      "required": [
+        "The Assessment represents both the supporting and the contradicting reputation observations",
+        "The Assessment verdict is drawn only from the declared inconclusive, suspicious, or malicious envelope"
+      ],
+      "forbidden": [
+        "The Assessment silently discards the valid no-hit observation",
+        "The Assessment hides the contradiction by using only one side of the disagreement"
+      ]
+    },
+    "tags": [
+      "conflicting-providers",
+      "contradiction",
+      "evidence-analyst"
+    ],
+    "architecture_refs": [
+      "contradiction-representation"
+    ]
+  },
   "fixture": {
     "objective": "Assess the target IP given directly conflicting reputation observations.",
     "root_entity": "target_ip",

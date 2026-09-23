@@ -1,7 +1,27 @@
 {
   "id": "sufficient-evidence-stop",
   "version": 1,
-  "description": "Sufficient evidence causes an immediate stop after analysis.",
+  "specification": {
+    "title": "Sufficient evidence stops the investigation immediately",
+    "description": "Sufficient evidence causes an immediate stop after analysis.",
+    "target": "coordinator",
+    "purpose": "Verify sufficient evidence triggers an immediate stop after analysis rather than continued exploration.",
+    "operational_relevance": "Stopping at sufficiency keeps real investigations focused and cheap; unnecessary pivots delay reporting.",
+    "regression_risk": "The coordinator could continue exploring after sufficient evidence is reached.",
+    "expected_behavior": {
+      "required": [
+        "The root-domain pivot executes",
+        "The investigation stops with sufficient_evidence"
+      ],
+      "forbidden": [
+        "Provider work continues after sufficient evidence has been reached"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "sufficient-evidence"
   },

@@ -1,7 +1,27 @@
 {
   "id": "rpt-s08-stale-assessment-race",
   "version": 1,
-  "description": "Stale Assessment race: report input is materialized against Assessment A, then the Investigation advances to Assessment B before persistence. The report append must revalidate under lock and fail with the typed stale-input conflict; no report row, history, or pointer update may commit.",
+  "specification": {
+    "title": "Stale Assessment races fail under lock",
+    "description": "Stale Assessment race: report input is materialized against Assessment A, then the Investigation advances to Assessment B before persistence. The report append must revalidate under lock and fail with the typed stale-input conflict; no report row, history, or pointer update may commit.",
+    "target": "report-writer",
+    "purpose": "Verify the report append revalidates the Assessment generation under lock and fails with the stale-input error when the Investigation advanced before persistence.",
+    "operational_relevance": "Concurrent investigations can race report generation; persisting a report against a stale Assessment corrupts the timeline.",
+    "regression_risk": "The writer could append a report materialized against a superseded Assessment.",
+    "expected_behavior": {
+      "required": [
+        "The report append fails with the stale-input conflict error",
+        "No report is persisted against the superseded Assessment"
+      ],
+      "forbidden": [
+        "A report materialized from a stale Assessment is persisted"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "no-report-on-execution-failure"
+    ]
+  },
   "fixture": "report-stale-race",
   "expected": {
     "verdict": "malicious",

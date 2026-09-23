@@ -1,8 +1,36 @@
 {
   "id": "g26g_s05_same_location_unrelated",
   "version": 1,
-  "description": "Two unrelated Entities in the same canonical Location stay independently inspectable; no Relationship is created and geography alone never supports a positive verdict.",
-  "tags": ["geoint", "same-location", "unrelated-entities", "no-relationship", "pr26g"],
+  "specification": {
+    "title": "Same-location entities stay independent",
+    "description": "Two unrelated Entities in the same canonical Location stay independently inspectable; no Relationship is created and geography alone never supports a positive verdict.",
+    "target": "geoint",
+    "purpose": "Verify two unrelated Entities in the same canonical Location remain independently inspectable with no created Relationship, and geography alone never supports a positive verdict.",
+    "operational_relevance": "Co-location is weak evidence in real investigations; preserving independence prevents fabricated linkage.",
+    "regression_risk": "The pipeline could create a relationship, or the analyst could infer coordination from shared location alone.",
+    "expected_behavior": {
+      "required": [
+        "Both entities remain independently inspectable",
+        "A descriptive shared-location finding is accepted with exact observation support",
+        "The analyst verdict stays inconclusive"
+      ],
+      "forbidden": [
+        "A Relationship is created between same-location entities",
+        "Geography alone supports a positive verdict"
+      ]
+    },
+    "tags": [
+      "geoint",
+      "no-relationship",
+      "pr26g",
+      "same-location",
+      "unrelated-entities"
+    ],
+    "architecture_refs": [
+      "geography-no-relationship-inference",
+      "geographic-support-only"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the two target IPs are malicious.",
     "root_entity": "ip_a",
@@ -112,11 +140,15 @@
     "histories": [
       {
         "entity": "ip_a",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       },
       {
         "entity": "ip_b",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       }
     ],
     "agent_context": {
@@ -124,22 +156,45 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"],
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ],
       "required_geographic_findings": [
         {
           "kind": "shared_location",
-          "observation_labels": ["a_obs", "b_obs"],
-          "evidence_labels": ["a_evidence", "b_evidence"],
-          "entity_labels": ["ip_a", "ip_b"],
-          "location_labels": ["seattle"]
+          "observation_labels": [
+            "a_obs",
+            "b_obs"
+          ],
+          "evidence_labels": [
+            "a_evidence",
+            "b_evidence"
+          ],
+          "entity_labels": [
+            "ip_a",
+            "ip_b"
+          ],
+          "location_labels": [
+            "seattle"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["coordination", "maliciousness"]
+    "forbidden_inferences": [
+      "coordination",
+      "maliciousness"
+    ]
   }
 }

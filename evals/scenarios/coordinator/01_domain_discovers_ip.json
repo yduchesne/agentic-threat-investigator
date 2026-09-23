@@ -1,7 +1,30 @@
 {
   "id": "domain-discovers-ip",
   "version": 1,
-  "description": "Root domain DNS work discovers an actionable IP, which is pivoted and analyzed to a sufficient stop.",
+  "specification": {
+    "title": "DNS discovery of an actionable IP leads to a sufficient stop",
+    "description": "Root domain DNS work discovers an actionable IP, which is pivoted and analyzed to a sufficient stop.",
+    "target": "coordinator",
+    "purpose": "Verify the coordinator pivots an IP discovered through the root domain's DNS work onto the expected provider path and stops with sufficient evidence.",
+    "operational_relevance": "Domain-to-IP resolution is the most common first pivot in real DNS-driven investigations.",
+    "regression_risk": "The coordinator could fail to enqueue or execute the discovered-IP pivot, over-investigate beyond the provider bound, or stop with the wrong reason.",
+    "expected_behavior": {
+      "required": [
+        "The investigation performs the root-domain DNS provider work",
+        "The resolved-IP pivot is enqueued and executed exactly at the expected depth",
+        "The investigation stops with sufficient_evidence within the provider budget"
+      ],
+      "forbidden": [
+        "Any pivot outside the declared allowed-pivot oracle executes at an unexpected depth"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "pivot-policy-authorization",
+      "provider-budget-enforcement",
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "canonical-domain-ip"
   },

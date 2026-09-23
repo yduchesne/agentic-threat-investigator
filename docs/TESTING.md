@@ -1705,6 +1705,56 @@ context, and preserve LLM-accounting version increments. `FakeLlmClient` is
 the only fake external model boundary; tests never require live Internet or
 a live LLM.
 
+### PR 30A common evaluation foundation tests
+
+PR 30A adds one backend-neutral evaluation contract under
+`src/agentic_threat_investigator/evaluation/common/` and freezes it with
+fully offline, deterministic tests in `tests/unit/evaluation/common/` plus
+dataset tests in `tests/unit/evaluation/test_datasets.py`:
+
+```text
+common models (EVAL-A01..A12):
+  COMPLETED+PASS and COMPLETED+FAIL valid; ERROR+no-verdict valid;
+  ERROR+PASS/FAIL and COMPLETED+null rejected; no numeric score field;
+  nonblank explanations; stable evaluator IDs; PASS/FAIL/ERROR
+  aggregation rules identical to the frozen contract; timestamps absent;
+  JSON-safe diagnostics that never alter aggregation
+
+scenario-quality validation (EVAL-S01..S15):
+  fully described case loads; missing/blank title, description, purpose,
+  operational_relevance, and regression_risk rejected; empty, blank, or
+  duplicate-normalized expected-behavior statements rejected; duplicate
+  case IDs rejected; invalid dataset versions and unknown targets
+  rejected; target/version mismatches rejected; invalid/duplicate
+  architecture refs rejected; unknown fields fail closed; target-specific
+  fixture/expectation validation still executes; strict duplicate-key JSON
+  loading; deterministic target inference
+
+runner (EVAL-R01..R10):
+  all-PASS -> dataset PASS; evaluator FAIL -> FAIL; evaluator exception
+  -> ERROR never FAIL; target exception -> case ERROR; cancellation
+  propagates; independent cases continue after an ERROR; deterministic
+  case and evaluator ordering; no backend/network dependency; diagnostics
+  cannot affect aggregation; malformed datasets refuse to start
+
+reporting (EVAL-P01..P06):
+  correct PASS/FAIL/ERROR summaries; failing case/evaluator/explanation
+  identified; ERROR visually distinct from FAIL; machine output
+  round-trips with sorted keys; no aggregate numeric score; human report
+  never exposes diagnostics or secrets
+
+datasets:
+  every registered target loads with deterministic counts/ordering;
+  research-agent concatenates retrieval then synthesis; unregistered and
+  version-mismatched datasets refuse; mixed-version and mixed-target
+  directories reject; `ati-eval validate` CLI exit codes offline
+```
+
+PR 30A requires no LangSmith, no real LLM, and no network access anywhere
+in the unit suite; future judge scenarios (PR 30B/30C) stay offline behind
+deterministic fakes. The optional credentialed evaluation workflow (real
+model runs uploading to LangSmith) begins in PR 30B only.
+
 ### Threat Research evaluation baseline (PR 22D)
 
 PR 22D adds a separate **behavioral evaluation layer** over the unchanged

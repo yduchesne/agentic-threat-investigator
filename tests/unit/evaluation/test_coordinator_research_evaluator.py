@@ -24,6 +24,7 @@ from agentic_threat_investigator.domain.investigation import (
     StopReason,
     default_investigation_budget,
 )
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
 from agentic_threat_investigator.evaluation.coordinator import (
     ACTION_INVESTIGATION_STOPPED,
     ACTION_PIVOT_ENQUEUED,
@@ -40,6 +41,7 @@ from agentic_threat_investigator.evaluation.coordinator import (
     ExpectedCoordinatorTrajectory,
     ExpectedPivot,
 )
+from tests.support.evaluation_common import unit_specification
 
 _ROOT = UUID("00000000-0000-0000-0000-0000000000a1")
 _IP = UUID("00000000-0000-0000-0000-0000000000a2")
@@ -103,6 +105,7 @@ def _scenario(**overrides: Any) -> CoordinatorScenario:
     params: dict[str, Any] = {
         "id": "scenario.malware-research",
         "version": 1,
+        "specification": unit_specification(target=EvaluationTarget.COORDINATOR),
         "fixture": CoordinatorFixtureReference(name="malware-research"),
         "expected": ExpectedCoordinatorTrajectory(
             allowed_pivots=(ExpectedPivot(entity="resolved_ip", depth=1),),
@@ -325,6 +328,7 @@ def test_u42_existing_pr21_scenario_without_research_fields_is_unchanged() -> No
     scenario = CoordinatorScenario(
         id="scenario.pre-research",
         version=1,
+        specification=unit_specification(target=EvaluationTarget.COORDINATOR),
         fixture=CoordinatorFixtureReference(name="malware-research"),
         expected=step,
     )
