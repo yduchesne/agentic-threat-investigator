@@ -19,6 +19,7 @@ from agentic_threat_investigator.evaluation.analyst.loader import (
 )
 from agentic_threat_investigator.evaluation.analyst.materializer import (
     AnalystScenarioMaterializer,
+    MaterializedScenarioStateError,
 )
 from agentic_threat_investigator.evaluation.analyst.models import (
     AnalystEvaluationFailure,
@@ -38,6 +39,16 @@ from agentic_threat_investigator.evaluation.analyst.models import (
     RequiredContradiction,
     UnknownFixtureLabelError,
 )
+from agentic_threat_investigator.evaluation.analyst.pr30 import (
+    EVIDENCE_ANALYST_ASSESSMENT_CONTRACT_EVALUATOR_ID,
+    EvidenceAnalystContractEvaluator,
+)
+from agentic_threat_investigator.evaluation.analyst.target import (
+    AnalystScenarioLookup,
+    EvidenceAnalystEvaluationOutput,
+    EvidenceAnalystTargetExecutor,
+    ScenarioLookupError,
+)
 
 __all__ = [
     "AnalystEvaluationFailure",
@@ -47,9 +58,14 @@ __all__ = [
     "AnalystFixture",
     "AnalystScenario",
     "AnalystScenarioLoadError",
+    "AnalystScenarioLookup",
     "AnalystScenarioMaterializer",
     "AnalystScenarioResolution",
+    "EVIDENCE_ANALYST_ASSESSMENT_CONTRACT_EVALUATOR_ID",
+    "EvidenceAnalystContractEvaluator",
+    "EvidenceAnalystEvaluationOutput",
     "EvidenceAnalystEvaluator",
+    "EvidenceAnalystTargetExecutor",
     "ExpectedAssessment",
     "ExpectedFinding",
     "FixtureEntity",
@@ -57,7 +73,9 @@ __all__ = [
     "FixtureObservation",
     "FixtureRelationship",
     "ForbiddenFinding",
+    "MaterializedScenarioStateError",
     "RequiredContradiction",
+    "ScenarioLookupError",
     "UnknownFixtureLabelError",
     "load_scenario_file",
     "load_scenarios_directory",

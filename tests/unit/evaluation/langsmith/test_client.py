@@ -228,3 +228,102 @@ class TestCancellation:
                 dataset=LangSmithDatasetRef(name="x", dataset_id="ds-1"),
                 examples=_projection(),
             )
+
+
+class TestExperimentBoundary:
+    """PR 30C experiment SDK operations stay on the bounded adapter boundary."""
+
+    @pytest.mark.asyncio
+    async def test_experiment_create_read_feedback_round_trip(self) -> None:
+        """Experiment creation, feedback publication, and read-back round trip."""
+        from agentic_threat_investigator.evaluation.backends.langsmith.models import (
+            LangSmithEvaluationPublication,
+            LangSmithPublicationFeedback,
+        )
+
+        sdk = FakeSdkClient()
+        client = _client(sdk)
+        ref = await client.create_experiment(
+            name="ati/evidence-analyst/v1/abc/123",
+            metadata={"ati.dataset_id": "evidence-analyst/v1"},
+        )
+        assert ref.run_id
+        assert ref.name == "ati/evidence-analyst/v1/abc/123"
+        await client.publish_feedback(
+            run_id=ref.run_id,
+            publication=LangSmithEvaluationPublication(
+                dataset_id="evidence-analyst/v1",
+                run_status="pass",
+                feedback=(
+                    LangSmithPublicationFeedback(key="ati.run.status", value="pass"),
+                ),
+            ),
+        )
+        observed = await client.read_experiment(run_id=ref.run_id)
+        assert observed is not None
+        assert observed.name == ref.name
+        assert observed.metadata == {"ati.dataset_id": "evidence-analyst/v1"}
+        items = await client.list_feedback(run_id=ref.run_id)
+        assert [(item.key, item.value) for item in items] == [
+            ("ati.run.status", "pass")
+        ]
+
+    @pytest.mark.asyncio
+    async def test_experiment_read_missing_returns_none(self) -> None:
+        """Reading a nonexistent experiment run returns ``None``."""
+        client = _client(FakeSdkClient())
+        assert await client.read_experiment(run_id="missing") is None
+
+    @pytest.mark.asyncio
+    async def test_experiment_sdk_failure_is_bounded_error(self) -> None:
+        """An SDK failure in experiment creation becomes a bounded backend error."""
+        sdk = FakeSdkClient()
+        sdk.fail_operations = {"create_run"}
+        client = _client(sdk)
+        with pytest.raises(LangSmithBackendError, match="create_experiment"):
+            await client.create_experiment(
+                name="ati/x", metadata={"ati.dataset_id": "x/v1"}
+            )
+
+    @pytest.mark.asyncio
+    async def test_experiment_no_sdk_object_escapes_boundary(self) -> None:
+        """Experiment operations return bounded adapter DTOs only."""
+        from agentic_threat_investigator.evaluation.backends.langsmith.models import (
+            LangSmithExperimentRef,
+            LangSmithFeedbackItem,
+        )
+
+        sdk = FakeSdkClient()
+        client = _client(sdk)
+        ref = await client.create_experiment(
+            name="ati/x", metadata={"ati.dataset_id": "x/v1"}
+        )
+        assert isinstance(ref, LangSmithExperimentRef)
+        observed = await client.read_experiment(run_id=ref.run_id)
+        assert isinstance(observed, LangSmithExperimentRef)
+        items = await client.list_feedback(run_id=ref.run_id)
+        assert all(isinstance(item, LangSmithFeedbackItem) for item in items)
+
+    @pytest.mark.asyncio
+    async def test_experiment_cancellation_propagates(self) -> None:
+        """Cancellation in experiment creation propagates unchanged."""
+
+        class CancelSdk(FakeSdkClient):
+            """SDK stand-in whose create_run raises CancelledError."""
+
+            def create_run(
+                self,
+                name: str,
+                inputs: dict[str, Any],
+                run_type: str,
+                **kwargs: Any,
+            ) -> None:
+                """Raise CancelledError instead of creating the run."""
+                del name, inputs, run_type, kwargs
+                raise asyncio.CancelledError("cancelled by operator")
+
+        client = _client(CancelSdk())
+        with pytest.raises(asyncio.CancelledError):
+            await client.create_experiment(
+                name="ati/x", metadata={"ati.dataset_id": "x/v1"}
+            )
