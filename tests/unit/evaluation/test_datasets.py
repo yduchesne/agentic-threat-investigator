@@ -19,7 +19,7 @@ from agentic_threat_investigator.evaluation.common import (
     EvaluationTarget,
 )
 from agentic_threat_investigator.evaluation.datasets import (
-    load_dataset,
+    load_evaluation_dataset,
     validate_dataset_directory,
 )
 
@@ -42,13 +42,13 @@ def test_load_dataset_counts_and_ordering(
 ) -> None:
     """Every registered dataset loads deterministically with uniform version."""
     dataset_id = EvaluationDatasetId(target=target, version=1)
-    cases = load_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
+    cases = load_evaluation_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
     assert len(cases) == expected_count
     assert [case.version for case in cases] == [1] * expected_count
     assert all(case.specification.target is target for case in cases)
     # Deterministic ordering: sorted file names per family, families in
     # registered directory order.
-    again = load_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
+    again = load_evaluation_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
     assert [case.case_id for case in again] == [case.case_id for case in cases]
 
 
@@ -59,7 +59,7 @@ def test_load_dataset_research_agent_concatenates_both_families() -> None:
         load_synthesis_scenarios_directory,
     )
 
-    cases = load_dataset(
+    cases = load_evaluation_dataset(
         EvaluationDatasetId(target=EvaluationTarget.RESEARCH_AGENT, version=1),
         corpus_root=SCENARIOS_ROOT,
     )
@@ -83,21 +83,21 @@ def test_load_dataset_refuses_unregistered_target() -> None:
     """The investigation target has no PR 30A corpus and refuses loading."""
     dataset_id = EvaluationDatasetId(target=EvaluationTarget.INVESTIGATION, version=1)
     with pytest.raises(DatasetLoadError, match="no corpus"):
-        load_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
+        load_evaluation_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
 
 
 def test_load_dataset_refuses_version_mismatch() -> None:
     """A dataset identity whose version mismatches the corpus fails closed."""
     dataset_id = EvaluationDatasetId(target=EvaluationTarget.GEOINT, version=99)
     with pytest.raises(DatasetLoadError, match="does not match"):
-        load_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
+        load_evaluation_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
 
 
 def test_load_dataset_refuses_missing_corpus_root(tmp_path: Path) -> None:
     """A missing corpus root fails closed."""
     dataset_id = EvaluationDatasetId(target=EvaluationTarget.GEOINT, version=1)
     with pytest.raises(DatasetLoadError):
-        load_dataset(dataset_id, corpus_root=tmp_path / "absent")
+        load_evaluation_dataset(dataset_id, corpus_root=tmp_path / "absent")
 
 
 def test_all_committed_cases_carry_scenario_specific_metadata() -> None:
@@ -114,7 +114,7 @@ def test_all_committed_cases_carry_scenario_specific_metadata() -> None:
         EvaluationTarget.REPORT_WRITER,
         EvaluationTarget.RESEARCH_AGENT,
     ):
-        for case in load_dataset(
+        for case in load_evaluation_dataset(
             EvaluationDatasetId(target=target, version=1),
             corpus_root=SCENARIOS_ROOT,
         ):
@@ -156,7 +156,7 @@ def test_validate_dataset_directory_matches_identity() -> None:
         "research/synthesis",
     ]:
         dataset_id = validate_dataset_directory(SCENARIOS_ROOT / relative)
-        cases = load_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
+        cases = load_evaluation_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
         assert len(cases) >= 1
 
 

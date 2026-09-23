@@ -81,12 +81,16 @@ _FAMILY_LOADERS: Mapping[tuple[EvaluationTarget, Path], _FamilyLoader] = {
 }
 
 
-def load_dataset(
+def load_evaluation_dataset(
     dataset_id: EvaluationDatasetId,
     *,
     corpus_root: Path = SCENARIOS_ROOT,
 ) -> tuple[EvaluationCase, ...]:
     """Strictly load one canonical dataset and validate its identity.
+
+    Note: the explicit ``evaluation`` name keeps this repository dataloader
+    distinct from third-party ``load_dataset`` APIs (for example Hugging
+    Face Hub), so the security scanner never confuses the two.
 
     Raises :class:`DatasetLoadError` when the target owns no corpus, a
     family fails to load, or the loaded cases violate the dataset-level

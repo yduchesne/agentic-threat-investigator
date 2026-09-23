@@ -85,7 +85,7 @@ class EvaluationVerdict(str, Enum):
     partial pass, or threshold-derived verdict.
     """
 
-    PASS = "pass"
+    PASS = "pass"  # nosec B105 - canonical PR 30 wire value for a passing verdict (frozen in docs/EVALUATION.md); never a credential
     """The expected behavior was satisfied."""
 
     FAIL = "fail"

@@ -90,7 +90,7 @@ from agentic_threat_investigator.evaluation.common import (
     EvaluationDatasetId,
 )
 from agentic_threat_investigator.evaluation.datasets import (
-    load_dataset,
+    load_evaluation_dataset,
     validate_dataset_directory,
 )
 from agentic_threat_investigator.infrastructure.embeddings import (
@@ -908,8 +908,8 @@ def _resolve_and_validate(dataset_or_path: str) -> tuple[EvaluationDatasetId, in
         dataset_id = EvaluationDatasetId.from_canonical(dataset_or_path)
     except ValueError:
         dataset_id = validate_dataset_directory(Path(dataset_or_path))
-        return dataset_id, len(load_dataset(dataset_id))
-    cases = load_dataset(dataset_id)
+        return dataset_id, len(load_evaluation_dataset(dataset_id))
+    cases = load_evaluation_dataset(dataset_id)
     return dataset_id, len(cases)
 
 
