@@ -147,12 +147,6 @@ class TestCliContract:
         assert evaluation_main(["validate", "evidence-analyst/v1"]) == 0
         assert evaluation_main(["validate", "evals/scenarios/research/retrieval"]) == 0
 
-    def test_cli08_no_run_command(self) -> None:
-        """CLI08 no run command exists (argparse rejects it with exit 2)."""
-        with pytest.raises(SystemExit) as excinfo:
-            evaluation_main(["run", "evidence-analyst/v1"])
-        assert excinfo.value.code == 2
-
     def test_cli09_namespace_output_bounded(
         self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:

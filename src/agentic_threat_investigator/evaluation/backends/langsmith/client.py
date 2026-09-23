@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Narrow injectable LangSmith evaluation client boundary (PR 30B).
+"""Narrow injectable LangSmith evaluation client boundary (PR 30B/30C).
 
-The :class:`LangSmithEvaluationClient` protocol declares only the five
-operations PR 30B needs; SDK-specific objects stay behind the wrapper and
-unit tests inject an in-memory fake. The real
-:class:`LangSmithSdkEvaluationClient` constructs the installed
+The :class:`LangSmithEvaluationClient` protocol declares only the operations
+PR 30B and PR 30C need (dataset/examples sync and verification, categorical
+feedback publication, and the PR 30C experiment-run operations); SDK-specific
+objects stay behind the wrapper and unit tests inject an in-memory fake. The
+real :class:`LangSmithSdkEvaluationClient` constructs the installed
 ``langsmith.Client`` from the standard environment, runs blocking SDK calls
 off the event loop, converts ordinary failures into bounded
 :class:`LangSmithBackendError` failures (fail-closed for explicit operator
@@ -19,12 +20,15 @@ import asyncio
 import itertools
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
+from uuid import uuid4
 
 from agentic_threat_investigator.evaluation.backends.langsmith.models import (
     LangSmithDatasetRef,
     LangSmithEvaluationPublication,
     LangSmithExampleProjection,
     LangSmithExampleRef,
+    LangSmithExperimentRef,
+    LangSmithFeedbackItem,
     bound_remote_metadata,
 )
 from agentic_threat_investigator.evaluation.common.models import (
@@ -98,6 +102,29 @@ class LangSmithEvaluationClient(Protocol):
         The run is the PR 30C+ experiment run; PR 30B only defines the
         boundary and the mapping, never a real target execution.
         """
+        ...
+
+    async def create_experiment(
+        self, *, name: str, metadata: Mapping[str, JsonValue]
+    ) -> LangSmithExperimentRef:
+        """Create one ATI experiment run and return its adapter-owned reference.
+
+        The run records the ATI execution identity; categorical feedback is
+        published separately through :meth:`publish_feedback`. No target is
+        executed here and no data/evaluator is ever re-run.
+        """
+        ...
+
+    async def read_experiment(self, *, run_id: str) -> LangSmithExperimentRef | None:
+        """Return one experiment run's bounded reference, ``None`` when absent.
+
+        Only the run identity, name, and bounded ``ati.`` metadata are
+        retained; untrusted run payloads never escape the adapter.
+        """
+        ...
+
+    async def list_feedback(self, *, run_id: str) -> tuple[LangSmithFeedbackItem, ...]:
+        """Return every bounded categorical feedback item published on a run."""
         ...
 
 
@@ -261,6 +288,44 @@ class LangSmithSdkEvaluationClient:
             except Exception as exc:
                 raise _bounded_error("publish_feedback", exc) from exc
 
+    async def create_experiment(
+        self, *, name: str, metadata: Mapping[str, JsonValue]
+    ) -> LangSmithExperimentRef:
+        """Create one ATI experiment run with bounded metadata.
+
+        The run id is adapter-generated; no target executes here, so one ATI
+        benchmark execution still corresponds to exactly one model call per
+        case on the ATI side.
+        """
+        run_id = str(uuid4())
+        try:
+            await asyncio.to_thread(
+                _create_experiment, self._sdk, run_id, name, dict(metadata)
+            )
+        except Exception as exc:
+            raise _bounded_error("create_experiment", exc) from exc
+        return LangSmithExperimentRef(run_id=run_id, name=name, metadata=dict(metadata))
+
+    async def read_experiment(self, *, run_id: str) -> LangSmithExperimentRef | None:
+        """Return one experiment run's bounded reference or ``None`` when absent."""
+        from langsmith.utils import LangSmithNotFoundError
+
+        try:
+            run = await asyncio.to_thread(_read_run, self._sdk, run_id)
+        except LangSmithNotFoundError:
+            return None
+        except Exception as exc:
+            raise _bounded_error("read_experiment", exc) from exc
+        return _experiment_dto(run)
+
+    async def list_feedback(self, *, run_id: str) -> tuple[LangSmithFeedbackItem, ...]:
+        """Return every bounded categorical feedback item published on a run."""
+        try:
+            items = await asyncio.to_thread(_list_feedback, self._sdk, run_id)
+        except Exception as exc:
+            raise _bounded_error("list_feedback", exc) from exc
+        return tuple(_feedback_dto(item) for item in items)
+
 
 def _create_dataset(sdk: Any, name: str, metadata: dict[str, JsonValue]) -> Any:
     """Run the blocking dataset-creation SDK call."""
@@ -282,3 +347,62 @@ def _create_examples(sdk: Any, dataset_id: str, payload: list[dict[str, Any]]) -
 def _publish_feedback(sdk: Any, run_id: str, key: str, value: str, comment: str) -> Any:
     """Run the blocking categorical feedback SDK call."""
     return sdk.create_feedback(run_id=run_id, key=key, value=value, comment=comment)
+
+
+def _experiment_dto(run: Any) -> LangSmithExperimentRef:
+    """Convert one SDK run object into its bounded experiment reference.
+
+    Only the run identity, name, and bounded ``ati.`` metadata are retained;
+    run inputs/outputs and any foreign metadata never escape the adapter.
+    """
+    metadata: dict[str, JsonValue] = bound_remote_metadata(
+        getattr(run, "metadata", None)
+    )
+    return LangSmithExperimentRef(
+        run_id=str(getattr(run, "id", "")),
+        name=str(getattr(run, "name", "")),
+        metadata=metadata,
+    )
+
+
+def _feedback_dto(item: Any) -> LangSmithFeedbackItem:
+    """Convert one SDK feedback object into its bounded categorical item."""
+    return LangSmithFeedbackItem(
+        key=str(getattr(item, "key", "")),
+        value=str(getattr(item, "value", "")),
+    )
+
+
+def _create_experiment(
+    sdk: Any, run_id: str, name: str, metadata: dict[str, JsonValue]
+) -> Any:
+    """Run the blocking experiment-run creation SDK call.
+
+    The run records the ATI execution identity with a bounded ``ati.``
+    metadata envelope; no example reference, data, or evaluator is attached
+    because ATI already executed the target exactly once.
+    """
+    from datetime import UTC, datetime
+    from uuid import UUID
+
+    now = datetime.now(UTC)
+
+    return sdk.create_run(
+        id=UUID(run_id),
+        name=name,
+        run_type="chain",
+        inputs={"ati.experiment": True},
+        start_time=now,
+        end_time=now,
+        metadata=metadata or None,
+    )
+
+
+def _read_run(sdk: Any, run_id: str) -> Any:
+    """Run the blocking read-run SDK call."""
+    return sdk.read_run(run_id)
+
+
+def _list_feedback(sdk: Any, run_id: str) -> list[Any]:
+    """Run the blocking feedback-listing SDK call for one run id."""
+    return list(sdk.list_feedback(run_ids=[run_id]))

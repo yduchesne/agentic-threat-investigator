@@ -208,13 +208,16 @@ def test_cli15_ati_eval_langsmith_sync_help_succeeds_offline() -> None:
     assert "--namespace" in captured.getvalue()
 
 
-def test_cli16_ati_eval_has_no_run_command() -> None:
-    """PR 30B no run command exists yet (argparse rejects it)."""
+def test_cli16_ati_eval_run_requires_canonical_dataset() -> None:
+    """PR 30C run refuses a malformed dataset identity with a bounded exit 2."""
     from agentic_threat_investigator.cli import evaluation_main
 
-    with pytest.raises(SystemExit) as excinfo:
-        evaluation_main(["run", "evidence-analyst/v1"])
-    assert excinfo.value.code == 2
+    assert (
+        evaluation_main(
+            ["run", "unknown-target/v1"],
+        )
+        == 2
+    )
 
 
 def test_cli17_ati_eval_langsmith_requires_subcommand() -> None:

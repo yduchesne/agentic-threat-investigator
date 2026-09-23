@@ -1806,11 +1806,11 @@ CLI (LS-CLI01..CLI09):
   valid sync/verify succeed through the fake; invalid datasets fail
   before any client call; missing credentials bounded nonzero failure
   with no environment dump; drift exits nonzero; pre-existing validate
-  unchanged; no run command; no secret in output
+  unchanged; run command deferred to PR 30C; no secret in output
 
 workflow static tests (LS-W01..W13):
   evaluation.yml exists; workflow_dispatch only (no push/PR/schedule);
-  contents: read; references LANGSMITH_API_KEY only (no model-provider
+  contents: read; LANGSMITH_API_KEY only (PR 30B has no model-provider
   secret); Python 3.14; uv sync --locked; local validation before the
   remote operation; invokes ati-eval langsmith; ci.yml stays
   uncredentialed (GITHUB_TOKEN only)
@@ -1821,6 +1821,75 @@ living LangSmith service for mandatory CI, and adds no dependency beyond
 the already-locked `langsmith>=0.3.45,<0.12` bound inspected against the
 installed 0.11.x SDK. A real LangSmith smoke is manual only, through the
 optional `workflow_dispatch` workflow or operator execution.
+
+### PR 30C real Evidence Analyst target tests
+
+PR 30C adds the first real target execution layer
+(`tests/unit/evaluation/analyst/`, `tests/unit/evaluation/langsmith/`,
+`tests/integration/`) with the same deterministic discipline: mandatory
+CI stays offline/uncredentialed (FakeLlmClient at the model boundary,
+FakeLangSmithClient at the remote boundary, real PostgreSQL only in the
+`integration`-marked vertical slice).
+
+```text
+target executor (EA-T01..T12):
+  exact identity lookup; unknown case/version mismatch/duplicate identity
+  fail closed; target mismatch refuses before any model call;
+  materialization then exactly one analyst call; persisted Assessment +
+  resolution returned; LLM/persistence failures are runner ERROR;
+  cancellation propagates; two cases never cross-contaminate;
+  deterministic same-case rerun; target has no LangSmith dependency
+
+evaluator adapter (EA-E01..E10):
+  existing evaluator PASS/FAIL map to COMPLETED/PASS and COMPLETED/FAIL;
+  deterministic nonblank explanation; JSON-safe descriptive diagnostics;
+  partial coverage never decides a verdict; no numeric correctness;
+  identity mismatch is runner ERROR; cancellation propagates; forbidden
+  support and missing required contradiction FAIL
+
+run service (EA-R01..R14):
+  all cases projected to the runner; non-analyst dataset rejected;
+  pass/fail/error aggregation preserved; no LangSmith dependency;
+  cancellation propagates; exactly one materializer + analyst call per
+  case; one case rerun stays deterministic
+
+LangSmith experiment (EA-LS01..LS15):
+  exact mirror allows the experiment; one case -> one remote case
+  association; PASS/FAIL/ERROR map to pass/fail/error; missing remote
+  dataset/digest drift refuse before any model work (verify-first);
+  feedback acceptance confirms; feedback/confirmation failures fail
+  closed; no score/threshold; diagnostics not uploaded; metadata bounded
+  and secret-free; cancellation propagates; no duplicate model execution
+  (evaluate()/aevaluate() never invoked)
+
+CLI run (EA-R06..R12):
+  local run constructs no LangSmith client; PASS exits 0; FAIL exits 1;
+  ERROR exits 2; missing model credential bounded exit 2; deterministic
+  driver rejected; publication failure is exit 2; FAIL stays exit 1 after
+  successful publication; non-analyst dataset rejected
+
+workflow static tests (EA-W01..W18):
+  workflow_dispatch only; contents read; operations verify/sync/run;
+  Python 3.14; uv sync --locked; validate before run; LangSmith verify
+  before the model run; PostgreSQL and migrations configured for run;
+  LANGSMITH_API_KEY used; the model-provider secret is wired only for run;
+  verify/sync need no model execution; ordinary CI uncredentialed; no
+  push/PR/schedule; no write permission; secrets never echoed/literalized
+
+PostgreSQL vertical slice (integration):
+  real scenarios -> real materializer -> real loader -> real
+  EvidenceAnalyst -> FakeLlmClient -> real AssessmentPersistenceService
+  -> persisted Assessment -> real evaluator through the PR 30 adapter ->
+  common EvaluationRunner; direct-evidence PASS, contradiction PASS,
+  nonconforming output FAIL (still persists), LLM failure ERROR (nothing
+  persists, one bounded attempt); rerun reuses the fixture and evaluates
+  the current invocation
+```
+
+PR 30C changes no existing V1 scenario semantics, no production
+Evidence Analyst behavior, and no common evaluation contract; adds no DB
+migration; and keeps every mandatory test free of live LLM/LangSmith
+dependencies.
 
 ### Threat Research evaluation baseline (PR 22D)
 

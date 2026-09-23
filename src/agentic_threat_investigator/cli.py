@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Narrow CLI entrypoints (PR 23D, extended PR 26B/26B-2/26C).
+"""Narrow CLI entrypoints (PR 23D, extended PR 26B/26B-2/26C/30C).
 
 Explicit, repository-owned entrypoints follow the current bootstrap
 convention (plain modules invoked by deployment; no general-purpose CLI
@@ -11,13 +11,16 @@ framework):
 - ``ati-geography-build``: deterministic ATI Geography Corpus derivation
   from the documented GeoNames/Natural Earth local source artifacts;
 - ``ati-geo-resolver``: the bounded asynchronous geographic-resolution
-  worker loop (PR 26C).
+  worker loop (PR 26C);
+- ``ati-eval``: the PR 30 evaluation CLI (validate; langsmith sync/verify;
+  PR 30C adds run evidence-analyst/v1 [--langsmith]).
 
 All load the cached typed settings once and never read environment
 variables themselves, and none ever download upstream data. The worker
 composes the selected intelligence-source registry through the
 operating-mode boundary and the configured real LLM; operating mode never
-selects the LLM implementation.
+selects the LLM implementation. PR 30C reuses the worker's LLM/analyst
+composition for the optional real benchmark run.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ import argparse
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -94,7 +97,13 @@ from agentic_threat_investigator.domain.geoint import (
 from agentic_threat_investigator.evaluation.common import (
     DatasetLoadError,
     EvaluationDatasetId,
+    EvaluationExecutionStatus,
+    EvaluationRunResult,
+    EvaluationTarget,
+    EvaluationVerdict,
+    render_human_report,
 )
+from agentic_threat_investigator.evaluation.common.models import ScenarioLike
 from agentic_threat_investigator.evaluation.datasets import (
     load_evaluation_dataset,
     validate_dataset_directory,
@@ -242,6 +251,38 @@ def _compose_embedding(settings: Settings) -> EmbeddingClient:
     )
 
 
+def _compose_evaluation_analyst(
+    *,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    uow_factory: Callable[[], PostgresUnitOfWork],
+    llm: LlmClient,
+) -> EvidenceAnalyst:
+    """Compose the production Evidence Analyst for a benchmark process.
+
+    Reuses exactly the same loader, persistence seam, accounting, GEOINT
+    context loader, and structured-output policy as the worker composition;
+    PR 30C never builds a parallel evaluation-only analyst.
+    """
+    geoint_context_loader = _compose_geoint_context_loader(settings, session_factory)
+    return EvidenceAnalyst(
+        input_loader=EvidenceAnalystInputLoader(
+            uow_factory,
+            max_evidence_items=settings.llm_max_evidence_items,
+            max_relationship_observations=settings.llm_max_relationship_observations,
+            max_normalized_facts_bytes=settings.llm_max_normalized_facts_bytes,
+            max_input_bytes=settings.llm_max_input_bytes,
+            geoint_context_loader=geoint_context_loader,
+        ),
+        llm_client=llm,
+        assessment_persistence=AssessmentPersistenceService(
+            uow_factory, batch_size=settings.db_batch_size
+        ),
+        llm_accounting=LlmAccountingService(uow_factory),
+        max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+    )
+
+
 def _compose_runner(
     *,
     settings: Settings,
@@ -262,22 +303,11 @@ def _compose_runner(
     boundary is only ever composed for test/demo stacks.
     """
     recursion_limit = 120 if settings.llm_driver is LlmDriver.DETERMINISTIC else 40
-    geoint_context_loader = _compose_geoint_context_loader(settings, session_factory)
-    analyst = EvidenceAnalyst(
-        input_loader=EvidenceAnalystInputLoader(
-            uow_factory,
-            max_evidence_items=settings.llm_max_evidence_items,
-            max_relationship_observations=settings.llm_max_relationship_observations,
-            max_normalized_facts_bytes=settings.llm_max_normalized_facts_bytes,
-            max_input_bytes=settings.llm_max_input_bytes,
-            geoint_context_loader=geoint_context_loader,
-        ),
-        llm_client=llm,
-        assessment_persistence=AssessmentPersistenceService(
-            uow_factory, batch_size=settings.db_batch_size
-        ),
-        llm_accounting=LlmAccountingService(uow_factory),
-        max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+    analyst = _compose_evaluation_analyst(
+        settings=settings,
+        session_factory=session_factory,
+        uow_factory=uow_factory,
+        llm=llm,
     )
     research_agent = build_research_agent(
         uow_factory=uow_factory,
@@ -920,15 +950,16 @@ def _resolve_and_validate(dataset_or_path: str) -> tuple[EvaluationDatasetId, in
 
 
 def evaluation_main(argv: list[str] | None = None) -> int:
-    """Run the PR 30 offline evaluation CLI (``ati-eval``).
+    """Run the PR 30 evaluation CLI (``ati-eval``).
 
-    PR 30A exposes local validation and PR 30B adds explicit LangSmith
-    operations:
+    PR 30A exposes local validation, PR 30B adds explicit LangSmith dataset
+    operations, and PR 30C adds the first real-model run:
 
     .. code-block:: text
 
         ati-eval validate <dataset-or-path>
         ati-eval langsmith sync|verify <dataset-id> [--namespace NAMESPACE]
+        ati-eval run evidence-analyst/v1 [--langsmith] [--namespace NAMESPACE]
 
     ``validate`` strictly loads a canonical dataset identity (for example
     ``evidence-analyst/v1``) or one scenario directory, enforces the
@@ -940,9 +971,18 @@ def evaluation_main(argv: list[str] | None = None) -> int:
     missing remote mirror (dataset and examples) idempotently and fails
     closed on drift/extras/duplicates; ``langsmith verify`` performs the
     same comparisons read-only. Both require ``LANGSMITH_API_KEY``
-    credentials and report a bounded nonzero exit otherwise. Operator-facing
-    real-model runs (``ati-eval run``) remain deferred to PR 30C when
-    deliverable experiment adapters exist.
+    credentials and report a bounded nonzero exit otherwise.
+
+    ``run`` executes the configured real Evidence Analyst benchmark through
+    the production analyst path (``evidence-analyst/v1`` only in PR 30C).
+    Without ``--langsmith`` no LangSmith client is constructed; with
+    ``--langsmith`` the exact remote mirror is verified before any model
+    work and the categorical result is published and confirmed as one
+    experiment afterwards. The run requires the configured model-provider
+    credential (``ATI_OPENAI_API_KEY`` by default) and refuses the
+    deterministic driver. Exit semantics: ``0`` COMPLETED/PASS with requested
+    publication succeeded; ``1`` COMPLETED/FAIL; ``2``
+    ERROR/config/backend/publication failure.
     """
     parser = argparse.ArgumentParser(prog="ati-eval")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -980,12 +1020,35 @@ def evaluation_main(argv: list[str] | None = None) -> int:
             default="ati",
             help="optional remote dataset name prefix (default: ati)",
         )
+    run_parser = subparsers.add_parser(
+        "run",
+        help="execute the configured real Evidence Analyst benchmark "
+        "(evidence-analyst/v1; needs the configured model-provider key; "
+        "--langsmith also needs LANGSMITH_API_KEY)",
+    )
+    run_parser.add_argument(
+        "dataset_id",
+        help="canonical dataset identity such as evidence-analyst/v1",
+    )
+    run_parser.add_argument(
+        "--langsmith",
+        action="store_true",
+        help="verify the exact remote mirror before any model work, then publish "
+        "and confirm the categorical experiment",
+    )
+    run_parser.add_argument(
+        "--namespace",
+        default="ati",
+        help="optional remote dataset/experiment name prefix (default: ati)",
+    )
     args = parser.parse_args(argv)
     _configure_logging()
     if args.command == "validate":
         return _evaluation_validate_main(args)
     if args.command == "langsmith":
         return _evaluation_langsmith_main(args)
+    if args.command == "run":
+        return _evaluation_run_main(args)
     parser.error(f"unknown evaluation command: {args.command}")
     return 2  # pragma: no cover - argparse exits before this line
 
@@ -1106,3 +1169,254 @@ def _evaluation_langsmith_main(args: argparse.Namespace) -> int:
             exc,
         )
         return 1
+
+
+def _current_commit_sha() -> str | None:
+    """Return the bounded ATI git SHA of the running checkout, if available.
+
+    Reads the repository's own ``.git`` files only (no subprocess and no
+    environment access): a detached HEAD resolves directly, a symbolic ref
+    resolves through ``<gitdir>/refs/...``, and a worktree ``gitdir:``
+    pointer is followed. Any missing/malformed state returns ``None`` and the
+    metadata field is omitted. The value is validated as exactly 40 lowercase
+    hex characters and never treated as a credential.
+    """
+    git_dir = _repo_git_dir()
+    if git_dir is None:
+        return None
+    head = git_dir / "HEAD"
+    try:
+        ref = head.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if ref.startswith("ref:"):
+        ref_path = git_dir / ref[4:].strip()
+        try:
+            ref = ref_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+    if len(ref) != 40 or any(character not in "0123456789abcdef" for character in ref):
+        return None
+    return ref
+
+
+def _repo_git_dir() -> Path | None:
+    """Return the repository's ``.git`` directory, following worktree pointers."""
+    git = Path(".git")
+    if git.is_dir():
+        return git
+    if git.is_file():
+        try:
+            pointer = git.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if pointer.startswith("gitdir:"):
+            candidate = Path(pointer[len("gitdir:") :].strip())
+            return candidate if candidate.is_dir() else None
+    return None
+
+
+async def _execute_evidence_analyst_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real Evidence Analyst benchmark (PR 30C).
+
+    Composes the production analyst over the configured real LLM and the
+    process database, then runs the common PR 30 runner through the
+    evidence-analyst run service. This is the CLI's injectable benchmark seam
+    (unit tests replace it with a deterministic double); it never composes
+    LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.analyst.models import (
+        AnalystScenario,
+    )
+    from agentic_threat_investigator.evaluation.analyst.run import (
+        run_evidence_analyst_evaluation,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        analyst = _compose_evaluation_analyst(
+            settings=settings,
+            session_factory=factory,
+            uow_factory=uow_factory,
+            llm=llm,
+        )
+        typed = tuple(item for item in scenarios if isinstance(item, AnalystScenario))
+        return await run_evidence_analyst_evaluation(
+            dataset_id=dataset_id,
+            analyst=analyst,
+            uow_factory=uow_factory,
+            scenarios=typed,
+        )
+    finally:
+        await engine.dispose()
+
+
+def _evaluation_run_main(args: argparse.Namespace) -> int:
+    """Run the configured real Evidence Analyst benchmark (PR 30C).
+
+    ``ati-eval run evidence-analyst/v1`` executes every repository case
+    through the real production Evidence Analyst path with the configured
+    real model, then reports the canonical local result. With ``--langsmith``
+    the exact remote mirror is verified **before** any model work and the
+    categorical result is published as one experiment afterwards.
+
+    Exit semantics: ``0`` COMPLETED/PASS with requested publication
+    succeeded; ``1`` COMPLETED/FAIL (publication never converts FAIL to
+    success); ``2`` ERROR/config/backend/publication failure.
+    """
+    from agentic_threat_investigator.app.secrets import SecretNotFoundError
+    from agentic_threat_investigator.evaluation.backends.langsmith.client import (
+        LangSmithBackendError,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.datasets import (
+        LangSmithSyncError,
+        verify_dataset,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.experiments import (
+        LangSmithExperimentError,
+        publish_experiment,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.mapping import (
+        PROJECTION_SCHEMA_VERSION,
+        LangSmithProjectionError,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.results import (
+        build_experiment_metadata,
+    )
+    from agentic_threat_investigator.evaluation.datasets import (
+        load_evaluation_scenarios,
+    )
+
+    try:
+        dataset_id = EvaluationDatasetId.from_canonical(args.dataset_id)
+    except ValueError as exc:
+        LOGGER.error(
+            "evaluation run refused: dataset argument must be a canonical dataset "
+            "identity such as evidence-analyst/v1: %s",
+            exc,
+        )
+        return 2
+    if dataset_id.target is not EvaluationTarget.EVIDENCE_ANALYST:
+        LOGGER.error(
+            "evaluation run refused: PR 30C executes only evidence-analyst/v1 (got %s)",
+            dataset_id.canonical,
+        )
+        return 2
+    try:
+        scenarios = load_evaluation_scenarios(dataset_id)
+    except (ValueError, OSError, DatasetLoadError) as exc:
+        LOGGER.error(
+            "evaluation run failed before any model work: %s",
+            exc,
+        )
+        return 2
+
+    settings = get_settings()
+    if settings.llm_driver is LlmDriver.DETERMINISTIC:
+        LOGGER.error(
+            "evaluation run refused: ATI_LLM_DRIVER=deterministic selects the "
+            "offline scripted boundary, not a real benchmark model"
+        )
+        return 2
+
+    client: LangSmithEvaluationClient | None = None
+    if args.langsmith:
+        try:
+            client = _build_langsmith_evaluation_client()
+            report = asyncio.run(
+                verify_dataset(
+                    dataset_id=dataset_id,
+                    client=client,
+                    scenarios=scenarios,
+                    namespace=args.namespace,
+                )
+            )
+        except (
+            LangSmithBackendError,
+            LangSmithSyncError,
+            LangSmithProjectionError,
+        ) as exc:
+            LOGGER.error(
+                "evaluation run refused before any model work: remote dataset "
+                "verification failed: %s",
+                exc,
+            )
+            return 2
+        LOGGER.info(
+            "evaluation run remote verification passed dataset=%s local_cases=%d "
+            "remote_examples=%d",
+            report.dataset,
+            report.local_cases,
+            report.remote_examples,
+        )
+
+    async def run() -> int:
+        try:
+            run_result = await _execute_evidence_analyst_benchmark(
+                dataset_id=dataset_id, scenarios=scenarios
+            )
+        except (SecretNotFoundError, ValueError, DatasetLoadError, OSError) as exc:
+            LOGGER.error("evaluation run failed: %s", exc)
+            return 2
+        except Exception:
+            LOGGER.exception("evaluation run failed")
+            return 2
+        LOGGER.info(
+            "evaluation run complete:%s", "\n" + render_human_report(run_result)
+        )
+        if client is not None:
+            commit_sha = _current_commit_sha()
+            bounded_parameters: dict[str, str | float | int | bool | None] = {
+                "temperature": settings.llm_temperature
+            }
+            if settings.llm_max_tokens is not None:
+                bounded_parameters["max_tokens"] = settings.llm_max_tokens
+            try:
+                confirmation = await publish_experiment(
+                    dataset_id=dataset_id,
+                    run=run_result,
+                    client=client,
+                    execution_id=uuid4().hex,
+                    namespace=args.namespace,
+                    commit_sha=commit_sha,
+                    metadata=build_experiment_metadata(
+                        commit_sha=commit_sha,
+                        dataset_id=dataset_id.canonical,
+                        projection_schema_version=PROJECTION_SCHEMA_VERSION,
+                        model_provider=settings.llm_driver.value,
+                        model_name=settings.llm_model,
+                        model_parameters=dict(bounded_parameters),
+                    ),
+                )
+            except (
+                LangSmithBackendError,
+                LangSmithSyncError,
+                LangSmithExperimentError,
+            ) as exc:
+                LOGGER.error(
+                    "evaluation run completed but LangSmith publication failed: %s",
+                    exc,
+                )
+                return 2
+            LOGGER.info(
+                "evaluation experiment confirmed run_id=%s experiment=%s "
+                "feedback_count=%d",
+                confirmation.run_id,
+                confirmation.experiment_name,
+                confirmation.feedback_count,
+            )
+        if run_result.execution_status is EvaluationExecutionStatus.ERROR:
+            return 2
+        if run_result.verdict is EvaluationVerdict.FAIL:
+            return 1
+        return 0
+
+    return asyncio.run(run())

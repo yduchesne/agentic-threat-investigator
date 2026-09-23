@@ -78,6 +78,22 @@ def scenario_investigation_id(
     )
 
 
+class MaterializedScenarioStateError(RuntimeError):
+    """A scenario Investigation exists but its fixture is incomplete or foreign.
+
+    PR 30C reuses an already-materialized scenario without destructive
+    cleanup: when the deterministic scenario Investigation exists but one or
+    more expected fixture rows are missing, the materializer fails closed
+    instead of repairing or mutating the existing Investigation (repairing
+    could cross-contaminate case data), and it never deletes authoritative or
+    history records.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Record the bounded failure message."""
+        super().__init__(f"scenario fixture state is not reusable: {message}")
+
+
 class AnalystScenarioMaterializer:
     """Persist one scenario fixture and resolve its labels to UUIDs.
 
@@ -89,6 +105,33 @@ class AnalystScenarioMaterializer:
     def __init__(self, *, namespace: UUID = DEFAULT_SCENARIO_NAMESPACE) -> None:
         """Bind the identity namespace used for stable fixture UUIDs."""
         self._namespace = namespace
+
+    def investigation_id(self, scenario: AnalystScenario) -> UUID:
+        """Return the deterministic Investigation identity of one fixture.
+
+        Callers that run the analyst against a materialized fixture (verification
+        slices, PR 30C target execution) use this method so the identity always
+        matches the namespace this materializer persists into.
+        """
+        return scenario_investigation_id(scenario, namespace=self._namespace)
+
+    async def materialize_or_reuse(
+        self, uow: UnitOfWork, scenario: AnalystScenario
+    ) -> AnalystScenarioResolution:
+        """Materialize the fixture or reuse an already-materialized one (PR 30C).
+
+        Repeated runs of the same case are deterministic without destructive
+        cleanup: when the scenario Investigation already exists, the fixture is
+        reused as-is and the resolution is rebuilt from the planned deterministic
+        identities after verifying every fixture row exists. A scenario
+        Investigation that exists but is missing expected fixture rows fails
+        closed with :class:`MaterializedScenarioStateError`; this method never
+        repairs or mutates an existing Investigation and never deletes
+        authoritative/history records.
+        """
+        if await uow.investigations.get_by_id(self.investigation_id(scenario)) is None:
+            return await self.materialize(uow, scenario)
+        return await self._reuse(uow, scenario)
 
     async def materialize(
         self, uow: UnitOfWork, scenario: AnalystScenario
@@ -204,6 +247,73 @@ class AnalystScenarioMaterializer:
             observation_ids[observation.label] = _persisted_id(
                 persisted_observation, "relationship_observation", observation.label
             )
+
+        return AnalystScenarioResolution(
+            evidence_ids=evidence_ids,
+            relationship_observation_ids=observation_ids,
+            entity_ids=entity_ids,
+            relationship_ids=relationship_ids,
+        )
+
+    async def _reuse(
+        self, uow: UnitOfWork, scenario: AnalystScenario
+    ) -> AnalystScenarioResolution:
+        """Rebuild the resolution over the already-persisted fixture rows.
+
+        Every planned identity is verified through the normal repository read
+        seam; a missing row means the existing Investigation is incomplete or
+        foreign, which fails closed instead of silently repairing it.
+        """
+        fixture = scenario.fixture
+
+        entity_ids: dict[str, UUID] = {}
+        for entity in fixture.entities:
+            # Entity identity is resolved exactly as the DB resolves upserts:
+            # the canonical (type, value) identity, which survives entity
+            # values shared across scenarios and database-assigned ids.
+            persisted_entity = await uow.entities.get_by_identity(
+                entity.type.value, entity.value
+            )
+            if persisted_entity is None or persisted_entity.id is None:
+                raise MaterializedScenarioStateError(
+                    f"expected entity {entity.label!r} is missing"
+                )
+            entity_ids[entity.label] = persisted_entity.id
+
+        evidence_ids: dict[str, UUID] = {}
+        for evidence in fixture.evidence:
+            planned = self._planned(scenario, "evidence_observation", evidence.label)
+            if await uow.evidence.get_observation(planned) is None:
+                raise MaterializedScenarioStateError(
+                    f"expected evidence observation {evidence.label!r} is missing"
+                )
+            evidence_ids[evidence.label] = planned
+
+        relationship_ids: dict[str, UUID] = {}
+        for relationship in fixture.relationships:
+            # Relationship identity is database-owned: upsert resolves the
+            # edge by canonical (source, type, target) identity, so the
+            # persisted id is never a planned UUID. Reuse resolves the same
+            # edge through the canonical repository lookup.
+            persisted_relationship = await uow.relationships.get_by_identity(
+                entity_ids[relationship.source],
+                relationship.type.value,
+                entity_ids[relationship.target],
+            )
+            if persisted_relationship is None or persisted_relationship.id is None:
+                raise MaterializedScenarioStateError(
+                    f"expected relationship {relationship.label!r} is missing"
+                )
+            relationship_ids[relationship.label] = persisted_relationship.id
+
+        observation_ids: dict[str, UUID] = {}
+        for observation in fixture.observations:
+            planned = self._planned(scenario, "observation", observation.label)
+            if await uow.relationship_observations.get_by_id(planned) is None:
+                raise MaterializedScenarioStateError(
+                    f"expected relationship observation {observation.label!r} is missing"
+                )
+            observation_ids[observation.label] = planned
 
         return AnalystScenarioResolution(
             evidence_ids=evidence_ids,

@@ -1524,6 +1524,95 @@ The adapter consumes the already-frozen common types
 `EvaluationRunner`) and never adds LangSmith fields or API objects to
 them; LangSmith UUIDs live only inside bounded adapter DTOs.
 
+### Real target execution (PR 30C delivered)
+
+PR 30C adds ATI's **first real-agent target**: the Evidence Analyst. The
+full production path executes repository-owned scenarios through the real
+materializer, the real `EvidenceAnalyst` (with the configured real model
+through the existing `LlmClient` boundary), real persistence, and the
+existing deterministic `EvidenceAnalystEvaluator`:
+
+```text
+AnalystScenario
+  -> AnalystScenarioMaterializer (fresh or materialize_or_reuse)
+  -> PostgreSQL production-shaped fixture
+  -> EvidenceAnalystInputLoader
+  -> EvidenceAnalyst
+  -> configured LlmClient
+  -> persisted Assessment
+  -> existing EvidenceAnalystEvaluator
+  -> EvidenceAnalystContractEvaluator (PR 30 adapter)
+  -> EvaluationRunner
+  -> EvaluationRunResult
+  -> optional LangSmith experiment + categorical feedback
+```
+
+Key PR 30C guarantees:
+
+- **ATI owns correctness.** The existing `EvidenceAnalystEvaluator` remains
+the semantic authority; the PR 30 adapter only maps its deterministic
+PASS/FAIL onto the common verdicts and exposes `AnalystEvaluationMetrics`
+counts as JSON-safe descriptive diagnostics. No numeric score, recall/
+coverage threshold, weight, or partial credit ever determines a verdict.
+- **ERROR is not FAIL.** Model/provider/DB/fixture/publication failures
+surface as ERROR through the common runner and never become behavioral
+FAIL.
+- **The persisted Assessment of the current invocation is evaluated**, and
+the `AnalystScenarioResolution` maps every expectation label to the exact
+persisted UUID.
+- **Deterministic reruns.** Repeating one case reuses its already-
+materialized fixture through `AnalystScenarioMaterializer.materialize_or_reuse`
+(fail-closed on an incomplete/foreign fixture; no destructive cleanup, no
+history mutation). One case rerun yields exactly one new analyst invocation
+whose Assessment is evaluated against the scenario envelope.
+- **One model execution per case per experiment.** LangSmith's
+`evaluate()`/`aevaluate()` are never invoked (they would execute the target
+again); the experiment association is a run created by the adapter around
+the single ATI execution.
+- **No secrets, chain-of-thought, raw provider responses, or prompt text**
+in results, metadata, diagnostics, or logs.
+
+#### Local run (`ati-eval run evidence-analyst/v1`)
+
+Executes every repository case through the real Evidence Analyst path and
+reports the canonical local result. Without `--langsmith` no LangSmith
+client is constructed. The command requires the configured model-provider
+credential (default reference `ATI_OPENAI_API_KEY`) and refuses the
+deterministic driver (`ATI_LLM_DRIVER=deterministic`) rather than silently
+benchmarking with a scripted boundary.
+
+Exit semantics:
+
+```text
+0 = COMPLETED/PASS and requested publication succeeded
+1 = COMPLETED/FAIL (publication never converts FAIL to success)
+2 = ERROR / configuration / backend / publication failure
+```
+
+#### LangSmith-backed run (`ati-eval run evidence-analyst/v1 --langsmith`)
+
+The exact remote mirror is verified (read-only, same `verify` semantics)
+**before any model work**; drift or a missing dataset refuses the run.
+After the run the adapter creates one experiment run named
+`<namespace>/<dataset>/<short-sha|local>/<execution-id>`, publishes the PR
+30B categorical feedback (`pass`/`fail`/`error`; no numeric correctness)
+on it, and confirms remote state: the experiment exists under the exact
+identity, the expected case/run association is present, and every
+categorical feedback item was accepted. No silent `sync` is ever performed
+inside `run`.
+
+#### Manual workflow
+
+`.github/workflows/evaluation.yml` gains a `run` operation (still
+`workflow_dispatch` only, `contents: read`). The `run` operation starts the
+project PostgreSQL 18 + pgvector service (compose convention), applies
+Alembic migrations, validates the dataset locally, verifies the exact
+LangSmith mirror, then executes `ati-eval run ... --langsmith` with
+`LANGSMITH_API_KEY` and the model-provider key (`ATI_OPENAI_API_KEY`)
+from GitHub Secrets. `verify`/`sync` remain available and need no
+model-provider secret; ordinary CI stays uncredentialed and offline; no
+push/PR/scheduled real-model trigger exists.
+
 ### Dataset naming and stable example identity
 
 A canonical ATI dataset projects to the remote dataset name
@@ -1649,24 +1738,29 @@ carry this.
 
 `.github/workflows/evaluation.yml` is an explicitly credentialed,
 `workflow_dispatch`-only workflow (read-only `contents` permission) that
-validates the dataset locally, then runs the selected `verify`/`sync`
-operation with `LANGSMITH_API_KEY` from GitHub Secrets. It does not
-pretend to run a real agent experiment and needs no model-provider
-secret; that arrives in PR 30C with the first real target execution path.
-Ordinary CI remains uncredentialed and offline. A real LangSmith smoke is
-manual through this workflow or operator execution; no mandatory test
-merely skips without `LANGSMITH_API_KEY`.
+validates the dataset locally, then runs the selected
+`verify`/`sync`/`run` operation. `verify`/`sync` need only
+`LANGSMITH_API_KEY` from GitHub Secrets and execute no model; `run` (PR
+30C) additionally starts the project PostgreSQL 18 + pgvector service,
+applies Alembic migrations, verifies the exact remote mirror, and executes
+the real Evidence Analyst benchmark with `LANGSMITH_API_KEY` plus the
+model-provider key (`ATI_OPENAI_API_KEY`). Ordinary CI remains
+uncredentialed and offline. A real LangSmith smoke is manual through this
+workflow or operator execution; no mandatory test merely skips without
+`LANGSMITH_API_KEY`.
 
-### Executing real targets remains PR 30C+
+### Executing remaining real targets is PR 30D+
 
-PR 30B delivers the dataset/result adapter and the manual sync/verify
-workflow only. Real Evidence Analyst / Coordinator / Research / Report
-Writer / end-to-end target execution, real judge evaluators, prompt
-tuning, numeric thresholds, and online evaluation remain PR 30C and later
-PRs. ATI's scenarios, expected outcomes, rubrics, evaluator code, and
-release gates remain repository-owned; the same evaluation framework stays
-portable to a future self-hosted backend such as Langfuse or Phoenix
-through ATI's observability/evaluation abstractions.
+PR 30C delivers the first real Evidence Analyst target execution (real
+model through `LlmClient`, persisted Assessment evaluated deterministically,
+optional LangSmith experiment association, manual `run` workflow path).
+Coordinator / Research / Report Writer / end-to-end real target execution,
+real judge evaluators, prompt tuning, numeric thresholds, and online
+evaluation remain PR 30D and later PRs. ATI's scenarios, expected outcomes,
+rubrics, evaluator code, and release gates remain repository-owned; the
+same evaluation framework stays portable to a future self-hosted backend
+such as Langfuse or Phoenix through ATI's observability/evaluation
+abstractions.
 
 ## Initial evaluation corpus size
 

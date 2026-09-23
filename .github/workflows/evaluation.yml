@@ -8,13 +8,17 @@ on:
         type: string
         default: 'evidence-analyst/v1'
       operation:
-        description: 'verify = read-only exact-mirror check; sync = idempotent fail-closed mirror create'
+        description: >-
+          verify = read-only exact-mirror check; sync = idempotent fail-closed
+          mirror create; run = execute the real Evidence Analyst benchmark
+          (needs PostgreSQL, LANGSMITH_API_KEY and ATI_OPENAI_API_KEY)
         required: true
         type: choice
         default: 'verify'
         options:
           - verify
           - sync
+          - run
 permissions:
   contents: read
 jobs:
@@ -33,9 +37,61 @@ jobs:
           version: '0.5.30'
       - name: Install locked dependencies
         run: uv sync --locked
+      - name: Setup podman-compose (run only)
+        if: inputs.operation == 'run'
+        run: uv tool install podman-compose==1.0.6
+      - name: Start PostgreSQL 18 + pgvector (run only)
+        if: inputs.operation == 'run'
+        env:
+          ATI_DATA_DIR: /tmp/ati-eval-unused
+          POSTGRES_DB: ati-eval
+          POSTGRES_USER: ati
+          POSTGRES_PASSWORD: ati-integration-test-only
+          ATI_POSTGRES_HOST_PORT: '54321'
+        run: podman-compose -f compose.yaml up -d postgres
+      - name: Wait for PostgreSQL readiness (run only)
+        if: inputs.operation == 'run'
+        env:
+          DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:54321/ati-eval
+        run: |
+          uv run python - <<'PY'
+          import os
+          import time
+
+          import psycopg
+
+          url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://", 1)
+          deadline = time.monotonic() + 90
+          while True:
+              try:
+                  with psycopg.connect(url, connect_timeout=3):
+                      break
+              except psycopg.OperationalError:
+                  if time.monotonic() >= deadline:
+                      raise SystemExit("postgres did not become ready in time")
+                  time.sleep(1)
+          PY
+      - name: Apply migrations (run only)
+        if: inputs.operation == 'run'
+        env:
+          DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:54321/ati-eval
+        run: uv run alembic upgrade head
       - name: Validate dataset locally
         run: uv run ati-eval validate "${{ inputs.dataset }}"
       - name: LangSmith adapter operation
         env:
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
         run: uv run ati-eval langsmith "${{ inputs.operation }}" "${{ inputs.dataset }}"
+        if: inputs.operation != 'run'
+      - name: Verify remote mirror before model work (run only)
+        if: inputs.operation == 'run'
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: uv run ati-eval langsmith verify "${{ inputs.dataset }}"
+      - name: Execute real Evidence Analyst benchmark (run only)
+        if: inputs.operation == 'run'
+        env:
+          ATI_DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:54321/ati-eval
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          ATI_OPENAI_API_KEY: ${{ secrets.ATI_OPENAI_API_KEY }}
+        run: uv run ati-eval run "${{ inputs.dataset }}" --langsmith

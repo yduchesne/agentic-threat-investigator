@@ -85,6 +85,46 @@ in PR 30C, which consumes PR 30B's adapter without redefining dataset
 naming, example identity, digest, feedback keys, PASS/FAIL/ERROR mapping,
 client construction, or the workflow security model.
 
+## PR 30C scope (delivered) [DONE]
+
+First real agent target: the **Evidence Analyst** evaluation execution.
+
+- typed execution output (persisted `Assessment` +
+  `AnalystScenarioResolution`) and a run-scoped exact scenario lookup;
+- `EvidenceAnalystTargetExecutor` executing repository-owned scenarios
+  through the real materializer (fresh or `materialize_or_reuse`),
+  `EvidenceAnalystInputLoader`, `EvidenceAnalyst`, configured `LlmClient`,
+  `AssessmentPersistenceService`, and `LlmAccountingService`;
+- `EvidenceAnalystContractEvaluator` — a thin PR 30 adapter over the
+  existing deterministic `EvidenceAnalystEvaluator` (COMPLETED/PASS and
+  COMPLETED/FAIL with deterministic explanations and JSON-safe descriptive
+  diagnostics; exceptions become ERROR through the common runner; no
+  numeric correctness/threshold);
+- `run_evidence_analyst_evaluation` service composing scenarios, target,
+  evaluator, and the common `EvaluationRunner`;
+- `materialize_or_reuse` idempotent fixture lifecycle (no destructive
+  cleanup, no history mutation, fail-closed on incomplete state);
+- `ati-eval run evidence-analyst/v1 [--langsmith]` with exact exit
+  semantics (0 PASS, 1 FAIL, 2 ERROR/config/backend/publication);
+- minimum LangSmith experiment association — one experiment run per
+  execution, PR 30B categorical feedback, remote confirmation — without
+  ever re-executing the target (no `evaluate()`/`aevaluate()`);
+- optional manual workflow `run` operation (workflow_dispatch only,
+  `contents: read`, PostgreSQL 18 + pgvector + Alembic migrations,
+  `LANGSMITH_API_KEY` and `ATI_OPENAI_API_KEY` GitHub Secrets);
+- deterministic unit matrices (target, evaluator adapter, run service,
+  experiment, workflow, CLI) plus a PostgreSQL vertical slice with a
+  FakeLlmClient boundary;
+- docs: `docs/EVALUATION.md`, `docs/TESTING.md`, this roadmap.
+
+PR 30C deliberately delivers **no** Coordinator/Research/Report Writer/
+end-to-end real targets, no LLM-as-judge, no numeric quality scoring, no
+prompt tuning to pass evals, no scheduled/PR/push real-model triggers, no
+DB migration, and no change to production analyst behavior. PR 30D should
+add Coordinator/Research Agent targets without redefining common result
+semantics, LangSmith dataset identity/digest, feedback vocabulary,
+experiment association, or workflow security.
+
 ## Explicitly out of scope for PR 30A
 
 LangSmith dataset upload/sync, experiment execution/result fetching,

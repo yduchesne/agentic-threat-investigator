@@ -507,3 +507,79 @@ class LangSmithExperimentMetadata(BaseModel):
         if len(result) > 16:
             raise ValueError("model_parameters are bounded to 16 entries")
         return result
+
+
+class LangSmithExperimentRef(BaseModel):
+    """Bounded reference to one ATI experiment recorded as a LangSmith run.
+
+    The experiment run is created by the adapter itself from the ATI
+    execution identity; the LangSmith run id is adapter-owned and never
+    enters common ATI evaluation models. ``metadata`` is bounded to the
+    ``ati.`` wire namespace exactly like remote dataset/example metadata.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str
+    name: str
+    metadata: Mapping[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("run_id", "name", mode="after")
+    @classmethod
+    def identifiers_bounded(cls, value: str, info: ValidationInfo) -> str:
+        """Require nonblank bounded remote identifiers."""
+        return _require_nonblank_bounded(
+            value, info.field_name or "identifier", max_length=_MAX_IDENTIFIER_LENGTH
+        )
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def metadata_bounded(cls, value: object) -> dict[str, JsonValue]:
+        """Restrict remote experiment metadata to bounded ATI keys."""
+        return bound_remote_metadata(value)
+
+
+class LangSmithFeedbackItem(BaseModel):
+    """One categorical feedback item read back from a LangSmith run.
+
+    Values are bounded text; the adapter only ever writes and reads the
+    categorical ``pass``/``fail``/``error`` vocabulary.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    key: str
+    value: str
+
+    @field_validator("key", "value", mode="after")
+    @classmethod
+    def values_bounded(cls, value: str, info: ValidationInfo) -> str:
+        """Require nonblank bounded feedback fields."""
+        return _require_nonblank_bounded(
+            value, info.field_name or "field", max_length=_MAX_IDENTIFIER_LENGTH
+        )
+
+
+class LangSmithExperimentConfirmation(BaseModel):
+    """Deterministic confirmation of one published ATI experiment.
+
+    Produced only after remote state proves the experiment run exists, the
+    expected case/run association is present, and every expected categorical
+    feedback key was accepted. Remote averages never determine ATI
+    correctness; this is an existence/association confirmation only.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str
+    experiment_name: str
+    feedback_count: int = Field(ge=0)
+    status: Literal["confirmed"] = "confirmed"
+
+    @field_validator("run_id", "experiment_name", mode="after")
+    @classmethod
+    def identifiers_bounded(cls, value: str, info: ValidationInfo) -> str:
+        """Require nonblank bounded remote identifiers."""
+        return _require_nonblank_bounded(
+            value, info.field_name or "identifier", max_length=_MAX_IDENTIFIER_LENGTH
+        )
