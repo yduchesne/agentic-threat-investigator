@@ -285,6 +285,14 @@ def test_evaluation_case_projection_keeps_identity() -> None:
         version: int = 1
         specification: ScenarioSpecification = unit_specification()
 
+        def model_dump(self, *, mode: str = "python") -> dict[str, object]:
+            """Satisfy the PR 30B canonical serialization seam on ScenarioLike."""
+            return {
+                "id": self.id,
+                "version": self.version,
+                "specification": self.specification.model_dump(mode=mode),
+            }
+
     case = evaluation_case_from(FakeScenario())
     assert case.case_id == "fake-case"
     assert case.version == 1

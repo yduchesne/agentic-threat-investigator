@@ -177,3 +177,50 @@ def test_cli13_ati_eval_validate_help_succeeds_offline() -> None:
     with pytest.raises(SystemExit) as excinfo:
         evaluation_main(["--help"])
     assert excinfo.value.code == 0
+
+
+def test_cli14_ati_eval_langsmith_help_succeeds_offline() -> None:
+    """PR 30B langsmith subcommand help exits 0 offline."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    with pytest.raises(SystemExit) as excinfo:
+        evaluation_main(["langsmith", "--help"])
+    assert excinfo.value.code == 0
+
+
+def test_cli15_ati_eval_langsmith_sync_help_succeeds_offline() -> None:
+    """PR 30B langsmith sync accepts --namespace and a dataset argument."""
+    import io
+    import sys
+
+    from agentic_threat_investigator.cli import evaluation_main
+
+    captured = io.StringIO()
+    previous = sys.stdout
+    sys.stdout = captured
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            evaluation_main(["langsmith", "sync", "--help"])
+    finally:
+        sys.stdout = previous
+    assert excinfo.value.code == 0
+    assert "dataset_id" in captured.getvalue()
+    assert "--namespace" in captured.getvalue()
+
+
+def test_cli16_ati_eval_has_no_run_command() -> None:
+    """PR 30B no run command exists yet (argparse rejects it)."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    with pytest.raises(SystemExit) as excinfo:
+        evaluation_main(["run", "evidence-analyst/v1"])
+    assert excinfo.value.code == 2
+
+
+def test_cli17_ati_eval_langsmith_requires_subcommand() -> None:
+    """PR 30B langsmith without sync/verify exits 2 (bounded usage error)."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    with pytest.raises(SystemExit) as excinfo:
+        evaluation_main(["langsmith"])
+    assert excinfo.value.code == 2
