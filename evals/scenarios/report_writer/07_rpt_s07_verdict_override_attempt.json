@@ -1,7 +1,28 @@
 {
   "id": "rpt-s07-verdict-override-attempt",
   "version": 1,
-  "description": "Attempted verdict override: the ReportWriterOutput schema excludes verdict/confidence entirely (extra=forbid), so a provider payload carrying a forbidden verdict field can never validate. The harness simulates the provider-level structured-output rejection; no report may be persisted.",
+  "specification": {
+    "title": "Verdict override attempts cannot validate",
+    "description": "Attempted verdict override: the ReportWriterOutput schema excludes verdict/confidence entirely (extra=forbid), so a provider payload carrying a forbidden verdict field can never validate. The harness simulates the provider-level structured-output rejection; no report may be persisted.",
+    "target": "report-writer",
+    "purpose": "Verify the structured output schema excludes verdict and confidence entirely so a provider payload carrying them can never validate or be persisted.",
+    "operational_relevance": "Model outputs must never decide the assessment's verdict; the report only reflects the authoritative Assessment.",
+    "regression_risk": "A provider payload could smuggle a verdict field and override the Assessment.",
+    "expected_behavior": {
+      "required": [
+        "The verdict-override attempt fails closed as invalid structured output",
+        "No report is persisted"
+      ],
+      "forbidden": [
+        "A provider-declared verdict overrides the authoritative Assessment verdict"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "assessment-faithful-reporting",
+      "no-report-on-execution-failure"
+    ]
+  },
   "fixture": "report-verdict-override",
   "expected": {
     "verdict": "malicious",

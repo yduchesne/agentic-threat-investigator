@@ -1,8 +1,33 @@
 {
   "id": "g26g_s16_independent_support_plus_geography",
   "version": 1,
-  "description": "Independent non-geographic Evidence supports a positive verdict; GEOINT remains descriptive context only with exact observation/Evidence support.",
-  "tags": ["geoint", "independent-support", "descriptive-context", "pr26g"],
+  "specification": {
+    "title": "Independent evidence can support a verdict; geography stays context",
+    "description": "Independent non-geographic Evidence supports a positive verdict; GEOINT remains descriptive context only with exact observation/Evidence support.",
+    "target": "geoint",
+    "purpose": "Verify independent non-geographic Evidence supports a positive verdict while GEOINT remains descriptive context with exact observation and Evidence support.",
+    "operational_relevance": "Geography can contextualize but never prove maliciousness; the analyst must still act on genuine independent evidence.",
+    "regression_risk": "The analyst could require geography support, or the pipeline could promote geography into the verdict.",
+    "expected_behavior": {
+      "required": [
+        "The verdict follows the independent non-geographic Evidence",
+        "A descriptive geographic finding stays supported by exact observations",
+        "Geography never becomes the verdict's support"
+      ],
+      "forbidden": [
+        "GEOINT evidence alone supports the positive verdict"
+      ]
+    },
+    "tags": [
+      "descriptive-context",
+      "geoint",
+      "independent-support",
+      "pr26g"
+    ],
+    "architecture_refs": [
+      "geographic-support-only"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the domain is malicious.",
     "root_entity": "domain",
@@ -52,7 +77,9 @@
         "source": "urn:ati:source:test",
         "type": "urn:ati:evidence:dns",
         "facts": {
-          "a_records": ["192.0.2.10"]
+          "a_records": [
+            "192.0.2.10"
+          ]
         }
       },
       {
@@ -94,7 +121,9 @@
     "histories": [
       {
         "entity": "target_ip",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       }
     ],
     "agent_context": {
@@ -102,22 +131,42 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["malicious", "suspicious"],
-      "allowed_confidence": ["medium", "high"],
+      "allowed_verdicts": [
+        "malicious",
+        "suspicious"
+      ],
+      "allowed_confidence": [
+        "medium",
+        "high"
+      ],
       "required_geographic_findings": [
         {
           "kind": "shared_location",
-          "observation_labels": ["geo_obs"],
-          "evidence_labels": ["geo_evidence"],
-          "entity_labels": ["target_ip"],
-          "location_labels": ["seattle"]
+          "observation_labels": [
+            "geo_obs"
+          ],
+          "evidence_labels": [
+            "geo_evidence"
+          ],
+          "entity_labels": [
+            "target_ip"
+          ],
+          "location_labels": [
+            "seattle"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["maliciousness"]
+    "forbidden_inferences": [
+      "maliciousness"
+    ]
   }
 }

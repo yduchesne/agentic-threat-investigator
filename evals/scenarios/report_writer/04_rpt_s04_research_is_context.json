@@ -1,22 +1,54 @@
 {
   "id": "rpt-s04-research-is-context",
   "version": 1,
-  "description": "Research context is not Evidence: a SUSPICIOUS Assessment with contextual research claims supplied. The report must include the research claim as context only, must not turn it into an Assessment finding, and must not infer a malicious verdict from research alone.",
+  "specification": {
+    "title": "Research context stays context in the report",
+    "description": "Research context is not Evidence: a SUSPICIOUS Assessment with contextual research claims supplied. The report must include the research claim as context only, must not turn it into an Assessment finding, and must not infer a malicious verdict from research alone.",
+    "target": "report-writer",
+    "purpose": "Verify research claims are reported as context only and never promoted to Assessment findings or maliciousness proof.",
+    "operational_relevance": "RAG context informs narratives but carries different epistemic weight than persisted Evidence.",
+    "regression_risk": "The writer could present the research claim as a material finding or as proof of maliciousness.",
+    "expected_behavior": {
+      "required": [
+        "The report includes the research claim as context only",
+        "The report preserves the suspicious verdict and medium confidence"
+      ],
+      "forbidden": [
+        "The report turns the research claim into a finding or maliciousness proof"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "research-epistemic-boundary"
+    ]
+  },
   "fixture": "report-research-context",
   "expected": {
     "verdict": "suspicious",
     "confidence": "medium",
-    "required_assessment_finding_ordinals": [1],
-    "forbidden_assessment_finding_ordinals": [2, 3, 4],
-    "required_research_claim_labels": ["contextual_claim"],
+    "required_assessment_finding_ordinals": [
+      1
+    ],
+    "forbidden_assessment_finding_ordinals": [
+      2,
+      3,
+      4
+    ],
+    "required_research_claim_labels": [
+      "contextual_claim"
+    ],
     "forbidden_research_claim_labels": [],
     "required_limitations": [],
     "required_unresolved_questions": [],
     "required_next_steps": [],
     "min_narrative_statements": 1,
     "max_narrative_statements": 5,
-    "required_phrases": ["research provides context only"],
-    "forbidden_phrases": ["research proves malicious"],
+    "required_phrases": [
+      "research provides context only"
+    ],
+    "forbidden_phrases": [
+      "research proves malicious"
+    ],
     "expected_no_report": false
   }
 }

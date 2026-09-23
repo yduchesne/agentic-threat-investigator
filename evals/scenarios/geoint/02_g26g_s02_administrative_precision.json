@@ -1,8 +1,32 @@
 {
   "id": "g26g_s02_administrative_precision",
   "version": 1,
-  "description": "Administrative-area input resolves to the correct administrative canonical Location with administrative_area precision; no city is invented and the exact provenance is preserved.",
-  "tags": ["geoint", "precision", "administrative-only", "pr26g"],
+  "specification": {
+    "title": "Administrative-area input keeps administrative precision",
+    "description": "Administrative-area input resolves to the correct administrative canonical Location with administrative_area precision; no city is invented and the exact provenance is preserved.",
+    "target": "geoint",
+    "purpose": "Verify administrative-area input resolves to the correct canonical administrative Location without inventing a city.",
+    "operational_relevance": "State-level granularity is common in real geo datasets; over-precision distorts later analysis.",
+    "regression_risk": "The resolver could extrapolate a city from administrative-area input.",
+    "expected_behavior": {
+      "required": [
+        "The observation resolves to the administrative-area Location with administrative_area precision",
+        "The analyst verdict stays inconclusive"
+      ],
+      "forbidden": [
+        "A city location is invented from administrative-area input"
+      ]
+    },
+    "tags": [
+      "administrative-only",
+      "geoint",
+      "pr26g",
+      "precision"
+    ],
+    "architecture_refs": [
+      "resolution-precision-honesty"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious.",
     "root_entity": "target_ip",
@@ -70,7 +94,9 @@
     "histories": [
       {
         "entity": "target_ip",
-        "locations": ["washington"]
+        "locations": [
+          "washington"
+        ]
       }
     ],
     "agent_context": {
@@ -78,22 +104,41 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"],
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ],
       "required_geographic_findings": [
         {
           "kind": "shared_location",
-          "observation_labels": ["wa_obs"],
-          "evidence_labels": ["wa_evidence"],
-          "entity_labels": ["target_ip"],
-          "location_labels": ["washington"]
+          "observation_labels": [
+            "wa_obs"
+          ],
+          "evidence_labels": [
+            "wa_evidence"
+          ],
+          "entity_labels": [
+            "target_ip"
+          ],
+          "location_labels": [
+            "washington"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["maliciousness"]
+    "forbidden_inferences": [
+      "maliciousness"
+    ]
   }
 }

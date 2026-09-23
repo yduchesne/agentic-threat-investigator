@@ -101,6 +101,7 @@ ati-worker = "agentic_threat_investigator.cli:worker_main"
 ati-geography-import = "agentic_threat_investigator.cli:geography_import_main"
 ati-geography-build = "agentic_threat_investigator.cli:geography_build_main"
 ati-geo-resolver = "agentic_threat_investigator.cli:geo_resolver_main"
+ati-eval = "agentic_threat_investigator.cli:evaluation_main"
 
 [tool.ruff]
 line-length = 88

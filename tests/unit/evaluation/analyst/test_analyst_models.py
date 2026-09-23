@@ -251,7 +251,7 @@ def test_committed_fixture_labels_are_stable_forms() -> None:
         lambda raw: raw["expected"]["required_findings"][0][
             "required_evidence_support"
         ].append({"provider_a": 1}),
-        lambda raw: raw["tags"].append(["tag-a"]),
+        lambda raw: raw["specification"]["tags"].append(["tag-a"]),
     ],
 )
 def test_unhashable_collection_members_fail_via_pydantic(

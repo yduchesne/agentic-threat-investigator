@@ -1,7 +1,28 @@
 {
   "id": "rag-s01-relevant-context",
   "version": 1,
-  "description": "Relevant ATT&CK context: the Research Agent receives the technique chunk and must persist a claim that cites exactly the supplied technique citation.",
+  "specification": {
+    "title": "Relevant technique context is synthesized into cited claims",
+    "description": "Relevant ATT&CK context: the Research Agent receives the technique chunk and must persist a claim that cites exactly the supplied technique citation.",
+    "target": "research-agent",
+    "purpose": "Verify the Research Agent persists a claim that cites exactly the supplied technique citation when relevant context is retrieved.",
+    "operational_relevance": "Claim-level citation grounding is what makes RAG output reviewable and safe.",
+    "regression_risk": "The agent could omit the required claim, cite the wrong citation, or drop the required phrase.",
+    "expected_behavior": {
+      "required": [
+        "At least one claim is persisted",
+        "Every claim cites only supplied citations",
+        "A claim contains the required phrase about obscuring command-and-control traffic"
+      ],
+      "forbidden": [
+        "A claim cites a citation that was not supplied"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "synthesis-citation-groundedness"
+    ]
+  },
   "fixture": {
     "name": "mitre-attack-small"
   },

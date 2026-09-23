@@ -1,12 +1,33 @@
 {
   "id": "cloud_asn_context",
   "version": 1,
-  "description": "Membership in a known cloud/hosting ASN is contextual and must not independently establish BENIGN; with no other evidence the acceptable envelope is INCONCLUSIVE.",
-  "tags": [
-    "evidence-analyst",
-    "cloud-asn-regression",
-    "inconclusive"
-  ],
+  "specification": {
+    "title": "Cloud ASN membership is contextual, not benignness evidence",
+    "description": "Membership in a known cloud/hosting ASN is contextual and must not independently establish BENIGN; with no other evidence the acceptable envelope is INCONCLUSIVE.",
+    "target": "evidence-analyst",
+    "purpose": "Verify the analyst treats membership in a known cloud/hosting ASN as contextual-only and never as independent evidence for a BENIGN verdict.",
+    "operational_relevance": "Threat triage routinely sees targets that merely share hosting-provider infrastructure; treating cloud-ASN membership as a benign signal would clear malicious infrastructure shared with unrelated tenants.",
+    "regression_risk": "The analyst could weight ASN co-location as positive reputation, emit a BENIGN verdict, or promote the context evidence into a material finding.",
+    "expected_behavior": {
+      "required": [
+        "The Assessment verdict is INCONCLUSIVE with low or medium confidence when only cloud-ASN context exists",
+        "The Assessment states the cloud-ASN contextual limitation"
+      ],
+      "forbidden": [
+        "No Supporting finding cites the cloud-ASN context evidence",
+        "The Assessment reaches a BENIGN verdict"
+      ]
+    },
+    "tags": [
+      "cloud-asn-regression",
+      "evidence-analyst",
+      "inconclusive"
+    ],
+    "architecture_refs": [
+      "evidence-contextual-support-only",
+      "exact-investigation-evidence-admission"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether cloud ASN ownership indicates anything about the target IP's maliciousness.",
     "root_entity": "target_ip",

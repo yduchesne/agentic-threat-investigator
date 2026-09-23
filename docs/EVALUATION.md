@@ -10,6 +10,7 @@
   - [4. Model-assisted quality evaluations](#4-model-assisted-quality-evaluations)
 - [Repository-owned evaluation assets](#repository-owned-evaluation-assets)
 - [Evaluation scenario model](#evaluation-scenario-model)
+- [PR 30 evaluation foundation](#pr-30-evaluation-foundation)
 - [Observable action vocabulary](#observable-action-vocabulary)
 - [Coordinator evaluations](#coordinator-evaluations)
 - [Infrastructure Collector evaluations](#infrastructure-collector-evaluations)
@@ -127,7 +128,10 @@ External evaluation platforms such as LangSmith may execute or visualize these a
 
 ## Evaluation scenario model
 
-Evaluation models are separate from runtime domain models.
+Evaluation models are separate from runtime domain models. The PR 30
+common contract (below) defines the implemented canonical case model;
+the following sketch is historical conceptual background and is not the
+frozen contract.
 
 Conceptually:
 
@@ -178,6 +182,249 @@ while this may be unacceptable:
 ```text
 DNS -> DNS again -> irrelevant ASN expansion -> duplicate investigation
 ```
+
+## PR 30 evaluation foundation
+
+The PR 30 series freezes one repository-owned, backend-neutral evaluation
+contract that every canonical evaluator, case, and dataset must satisfy,
+independently of LangSmith or any other execution backend. All of the
+following is implemented under
+`src/agentic_threat_investigator/evaluation/common/` and documented here;
+LangSmith (PR 30B) is a later adapter, never part of the semantics.
+
+### 3.1 Binary evaluator verdict
+
+Every successfully executed canonical ATI evaluator returns exactly **PASS**
+or **FAIL**. The PR 30 correctness contract has **no** float score,
+percentage score, weighting, confidence, partial pass, severity, or
+threshold-derived score:
+
+```python
+class EvaluationVerdict(str, Enum):  # conceptual
+    PASS = "pass"
+    FAIL = "fail"
+```
+
+### 3.2 Execution status
+
+An evaluator that cannot execute did not determine that expected behavior
+failed. **ERROR** is deliberately distinct from **FAIL**:
+
+```python
+class EvaluationExecutionStatus(str, Enum):  # conceptual
+    COMPLETED = "completed"
+    ERROR = "error"
+```
+
+Valid combinations are exactly:
+
+```text
+COMPLETED + PASS
+COMPLETED + FAIL
+ERROR      + no verdict
+```
+
+Rejected at model construction: `ERROR + PASS`, `ERROR + FAIL`, and
+`COMPLETED + null verdict`. There is no `SKIP` in PR 30A.
+
+### Evaluator result
+
+```python
+class EvaluationResult(BaseModel):  # conceptual
+    evaluator_id: str
+    execution_status: EvaluationExecutionStatus
+    verdict: EvaluationVerdict | None
+    explanation: str            # nonblank for PASS, FAIL, and ERROR
+    diagnostics: Mapping[str, JsonValue]
+```
+
+Requirements: stable nonblank evaluator IDs; nonblank explanations;
+sanitized explanations on ERROR (the runner redacts URL-embedded credentials,
+strips control characters, and bounds length before recording an exception);
+JSON-safe diagnostics; no chain-of-thought; no raw prompt/response
+requirement; and no `score` field. Diagnostics are measurements and never
+affect aggregation.
+
+### Aggregation
+
+Case aggregation over its evaluator results:
+
+```text
+all evaluator results COMPLETED/PASS          -> case COMPLETED/PASS
+one or more COMPLETED/FAIL, no ERROR          -> case COMPLETED/FAIL
+one or more ERROR (or zero results, meaning  -> case ERROR/no verdict
+    the target never produced output)
+```
+
+Dataset aggregation over its cases:
+
+```text
+all cases COMPLETED/PASS                       -> dataset COMPLETED/PASS
+one or more case FAIL, no ERROR                -> dataset COMPLETED/FAIL
+one or more case ERROR                         -> dataset ERROR/no verdict
+```
+
+Every evaluator attached to a canonical case is required; there is no
+informational evaluator category in PR 30A. Counts (cases/passed/failed/
+errors) may be displayed, but no pass rate is ever computed, and a displayed
+count never changes the aggregate verdict. Case and run models revalidate
+their declared status/verdict against the frozen aggregation at
+construction.
+
+### Dataset identity and versioning
+
+A dataset is one target plus one version, canonical form `<target>/v<N>`.
+Stable external identities resemble:
+
+```text
+evidence-analyst/v1
+coordinator/v1
+research-agent/v1
+report-writer/v1
+investigation/v1
+geoint/v1
+```
+
+The target vocabulary is frozen:
+
+- `evidence-analyst`
+- `coordinator`
+- `research-agent`
+- `report-writer`
+- `investigation`
+- `geoint` (kept in the common vocabulary so the delivered GEOINT baseline
+  migrates cleanly instead of being forced into an inaccurate category)
+
+Dataset version is part of benchmark identity; case IDs are stable within a
+dataset version; materially changing expected semantic behavior requires a
+new version; and a published benchmark case is never silently redefined. PR
+30B adds remote synchronization/immutability enforcement.
+
+### Canonical scenario quality contract
+
+> **No canonical PR 30 case is valid unless a reviewer can understand the
+> investigative scenario, why it matters, the behavior it exercises, and
+> what constitutes acceptable/unacceptable behavior without reading
+> evaluator code.**
+
+Every canonical case includes, under its `specification` object:
+
+```text
+id
+version
+title
+description          # the investigation situation, not the test implementation
+target
+purpose
+operational_relevance
+regression_risk
+expected_behavior   # required/forbidden narrative statements
+tags                 # normalized descriptive tags; never correctness semantics
+architecture_refs    # stable repository-owned invariant identifiers
+```
+
+`expected_behavior` is the common narrative contract:
+
+```python
+class ExpectedBehavior(BaseModel):  # conceptual
+    required: tuple[str, ...]
+    forbidden: tuple[str, ...]
+```
+
+Rules: at least one list nonempty; no blank items; duplicates rejected after
+canonical whitespace normalization; statements may not be simultaneously
+required and forbidden; and statements describe observable, reviewable
+behavior (not test implementation). Target-specific typed expectation
+models (an Analyst expected-Assessment envelope, a Coordinator trajectory
+oracle, a GEOINT outcome, a research citation envelope, a Report Writer
+output contract) remain authoritative beside the common narrative contract.
+
+### Scenario admission rule
+
+> A case is not admitted merely because it is easy to score. It must
+> represent a meaningful ATI investigative behavior, failure mode, boundary
+> condition, or architectural invariant.
+
+Code validates structural completeness; human review is responsible for
+semantic relevance. **Do not use an LLM to decide whether a scenario is
+"good enough".**
+
+### Architecture traceability
+
+Where applicable, scenarios carry stable repository-owned architecture
+reference identifiers (never Markdown line numbers or commit SHAs), giving
+the trace:
+
+```text
+architecture invariant
+ -> investigative risk
+ -> scenario
+ -> expected behavior
+ -> evaluator
+ -> PASS / FAIL
+```
+
+The PR 30A vocabulary (documented here so references stay stable):
+
+| Reference | Meaning |
+|---|---|
+| `exact-investigation-evidence-admission` | Verdicts and material findings are backed by admitted Evidence/RelationshipObservation provenance |
+| `evidence-contextual-support-only` | Context-only evidence (geolocation, ASN, no-hit) can never materially support a verdict |
+| `contradiction-representation` | Provider disagreement is represented as an explicit two-sided contradiction |
+| `stale-evidence-limitation` | Staleness is declared via limitations, never a hidden freshness policy |
+| `geolocation-approximation` | Geolocation is approximate context, never maliciousness evidence |
+| `relationship-observation-temporal-semantics` | RelationshipObservation history keeps temporal/value semantics |
+| `pivot-policy-authorization` | Every pivot passes deterministic policy authorization and the declared legal-pivot oracle |
+| `duplicate-discovery-suppression` | Equivalent work is never repeated (identical entities, cycles) |
+| `provider-budget-enforcement` | Provider-call budgets are hard limits |
+| `entity-budget-enforcement` | Entity working-set budgets are hard limits |
+| `depth-limit-enforcement` | Pivot depth never exceeds the declared limit |
+| `replan-budget-enforcement` | Replan rounds never exceed the declared limit |
+| `termination-guarantee` | Every investigation terminates with a declared stop reason |
+| `non-pivotable-discovery` | Entities without a deterministic provider path are never pivoted |
+| `research-request-authorization` | Research requests are bounded and authorized per scenario |
+| `research-termination-enforcement` | Completed/exhausted research is never re-requested |
+| `assessment-faithful-reporting` | Reports preserve the Assessment verdict/confidence/findings |
+| `research-epistemic-boundary` | Research is context, never Evidence or Assessment material |
+| `report-groundedness` | Reports cite only supplied material |
+| `caveat-preservation` | Limitations/questions/next steps are carried into reports |
+| `no-report-on-execution-failure` | Failed executions persist no report |
+| `retrieval-truth-declaration` | Expected/forbidden upstream records are the retrieval truth |
+| `retrieval-filter-enforcement` | Source/document-type filters are enforced |
+| `retrieval-gap-signaling` | Empty retrieval is signaled explicitly, never fabricated |
+| `synthesis-citation-groundedness` | Claims cite exactly the supplied citations |
+| `epistemic-non-promotion` | Research is never promoted into Evidence/Assessment |
+| `prompt-injection-containment` | Hostile corpus content stays untrusted data |
+| `resolution-precision-honesty` | Locations resolve at exactly the supported precision |
+| `location-history-truth` | Location history preserves effective-time truth |
+| `geography-no-relationship-inference` | Co-location creates no Relationship |
+| `coordinate-description-boundary` | Representative coordinates are never exact positions |
+| `claim-resolvability` | Ambiguous/unmatched claims stay unresolvable |
+| `retry-attempt-semantics` | Retryable failures retry and converge on one truth |
+| `lease-recovery-convergence` | Expired leases recover to exactly one authoritative result |
+| `cross-investigation-isolation` | Evidence support never leaks across Investigations |
+| `geographic-support-only` | Geography is descriptive context only |
+| `colocation-validation` | Co-location findings require exact observation support |
+
+### Local validation CLI (`ati-eval validate`)
+
+A local, offline validation seam is required; LangSmith is not:
+
+```text
+ati-eval validate <dataset-or-path>
+```
+
+`<dataset-or-path>` is either a canonical dataset identity (for example
+`evidence-analyst/v1`, resolved against the committed corpus under
+`evals/scenarios/`) or a scenario directory (target inferred from the
+files' `specification.target`). Validation strictly loads every case with
+the typed fail-closed loaders, enforces the scenario-quality contract and
+the dataset-identity contract (unique case IDs, uniform version, matching
+target), exits 0 on success and nonzero on failure, and performs no
+network I/O. The operator-facing experiment command (`ati-eval run`) is
+deferred until a deliverable experiment adapter exists (PR 30B/30C); a run
+command that misleadingly suggested real-model PR 30 experiments would
+ship before they do.
 
 ## Observable action vocabulary
 
@@ -1038,40 +1285,49 @@ Where possible these belong in deterministic security regression suites.
 
 ## Evaluator architecture
 
-Evaluators are provider-independent abstractions.
+Evaluators are backend-neutral abstractions (PR 30A). The common seam is
+async-capable, carries no LangSmith/provider SDK types, and takes explicit
+inputs instead of hidden global state:
 
 ```python
-class Evaluator(ABC):
-    @abstractmethod
+class Evaluator(Protocol[OutputT]):  # conceptual; see evaluation/common/evaluator.py
+    @property
+    def evaluator_id(self) -> str: ...
+
     async def evaluate(
         self,
-        case: EvalCase,
-        result: EvalRunResult,
-    ) -> EvalResult:
-        ...
+        *,
+        case: EvaluationCase,
+        output: OutputT,
+        context: EvaluationContext,
+    ) -> EvaluationResult: ...
 ```
 
-Evaluator categories:
+The companion :class:`TargetExecutor` seam produces the typed output payload
+evaluators consume. The common runner (`EvaluationRunner`) refuses malformed
+datasets, executes each case through the executor, runs every case evaluator
+in declared order, converts ordinary exceptions into ERROR results with
+sanitized explanations, never catches ``BaseException`` (so cancellation
+propagates), continues independent cases after an ERROR, and aggregates with
+the frozen rules. Deterministic test doubles prove the whole contract;
+production target adapters for every agent are added by later PR 30 suites.
+
+Evaluator categories (constraints, not separate classes):
 
 ```text
 DeterministicEvaluator
-StructuredSemanticEvaluator
-LlmJudgeEvaluator
-CompositeEvaluator
+StructuredSemanticEvaluator   # uses typed expectation models, never prose parsing
+LlmJudgeEvaluator             # seam defined (JudgeDecision); real invocation lands in PR 30B/30C
+CompositeEvaluator            # multiple evaluators bound to one case
 ```
 
-Conceptual result:
-
-```python
-class EvalResult(BaseModel):
-    passed: bool
-    hard_failures: list[EvalFailure]
-    metrics: dict[str, float]
-    warnings: list[str]
-    judge_results: list[JudgeResult]
-```
-
-Hard failures are preserved separately from semantic scores.
+Binary correctness is expressed through explicit scenario predicates, never
+arbitrary global thresholds. Existing useful numeric measurements (for
+example Recall@k or invalid-pivot-rate) remain **diagnostics only**: they
+never appear in the common result and never change the verdict. When a
+"metric gate" is actually an exact invariant (`invalid_pivot_rate == 0`),
+the invariant is exposed directly as a binary predicate and the number is
+retained only diagnostically.
 
 ## LLM-as-judge policy
 
@@ -1094,19 +1350,28 @@ Do not use judge models to decide:
 - exact verdict acceptability when the scenario defines it;
 - whether the graph terminated.
 
-Judge prompts use structured rubrics.
+Judge prompts use structured binary rubrics. A judge returns exactly
+:class:`JudgeDecision` (a PASS/FAIL verdict plus a nonblank explanation);
+it never returns a numeric quality score and never hides a numeric
+tolerance behind PASS/FAIL.
 
-Example:
+Example rubric:
 
 ```text
-0 = unsupported or contradictory
-1 = materially misleading
-2 = meaningful omission or ambiguity
-3 = minor omission, no unsupported material claim
-4 = complete and fully grounded
+PASS = every required statement is present, every forbidden statement is
+       absent, and the explanation cites the exact scenario evidence;
+FAIL = any required statement is missing, any forbidden statement is
+       present, or the explanation invents material not in the scenario.
 ```
 
-Judge model, prompt version, rubric version, and parameters must be recorded.
+Judge model, prompt version, rubric version, and parameters must be
+recorded outside the common result models; evaluator decisions remain
+strictly PASS/FAIL/ERROR.
+
+Judge evaluators (PR 30B/30C) must use ATI's
+:class:`~agentic_threat_investigator.app.llm.LlmClient` abstraction, must
+not call LangSmith as the judge, return no numeric quality score, expose no
+chain-of-thought, and follow explicit scenario-specific binary rubrics.
 
 ## Baselines and regression metadata
 
@@ -1147,7 +1412,7 @@ A candidate cannot pass merely because an aggregate semantic score increases if 
 
 ## v0.1 release gates
 
-Hard gates:
+Hard gates (exact invariants, not scores):
 
 ```text
 Invented pivot rate                       0%
@@ -1162,18 +1427,15 @@ Persistence invariant violations           0%
 Canonical scenario unacceptable verdict    0%
 ```
 
-Additional semantic thresholds should be set empirically after the initial evaluation corpus exists.
+Under the PR 30 contract these are exact invariants evaluated per canonical
+scenario as binary PASS/FAIL (`invalid_pivot_count == 0`), and the numbers
+listed above are diagnostic observations only — never correctness scores.
 
-Possible future thresholds:
-
-```text
-Coordinator required-pivot recall >= 95%
-Coordinator unnecessary-action rate <= 5%
-Assessment contradiction coverage >= 95%
-RAG expected-source Recall@5 >= 90%
-```
-
-Do not invent these thresholds before sufficient empirical runs.
+PR 30 deliberately adds **no** pass-rate, percentage, or threshold-derived
+correctness verdicts, and no weighted scoring or automatic baseline
+promotion. Any empirical threshold adopted later strictly for release
+governance (never for benchmark verdicts) would be a separate, approved
+decision; do not invent such thresholds now.
 
 ## Flakiness and stochastic models
 
@@ -1184,7 +1446,7 @@ For real-model evaluation:
 - use low temperature;
 - require structured output;
 - run fixed scenarios;
-- record distributions/pass rates;
+- record diagnostics/distributions (never a correctness score);
 - rerun important scenarios multiple times when measuring stability.
 
 A candidate prompt/model may use 3–5 repeated executions for selected scenarios.
@@ -1228,26 +1490,49 @@ latency benchmarking
 token/cost benchmarking
 ```
 
-## LangSmith integration
+## LangSmith integration (PR 30B boundary)
 
-LangSmith is the initial execution/visualization backend for model and agent evaluations.
+LangSmith is a later execution/visualization adapter for model and agent
+evaluations; it is **not** part of the PR 30 correctness semantics and not
+importable from any common evaluation module.
 
-It may provide:
+PR 30B owns the adapter and may provide:
 
-- datasets;
-- experiments;
+- datasets (ATI dataset -> LangSmith dataset);
+- experiments/runs (ATI run -> LangSmith experiment);
 - trace inspection;
 - prompt/model comparison;
-- judge scoring;
+- feedback/metadata mapping (`ATI PASS/FAIL/ERROR` -> LangSmith
+  feedback/metadata);
 - regression visualization.
 
-ATI's scenarios, expected outcomes, rubrics, evaluator code, and release gates remain repository-owned.
+PR 30B consumes the already-frozen common types
+(`EvaluationDataset`, `EvaluationCase`, `EvaluationResult`,
+`EvaluationCaseResult`, `EvaluationRunResult`, `Evaluator`,
+`EvaluationRunner`) and maps them to LangSmith objects; it must not change
+core semantics. LangSmith IDs and API objects never appear inside the
+common models; the machine-readable report is the adapter input.
 
-The same evaluation framework must be portable to a future self-hosted backend such as Langfuse or Phoenix through ATI's observability/evaluation abstractions.
+PR 30B also owns the optional GitHub Actions evaluation workflow
+(initially manual and credentialed, using `LANGSMITH_API_KEY` plus the
+selected real LLM provider secret). Ordinary PR CI in 30A remains
+uncredentialed and offline.
+
+ATI's scenarios, expected outcomes, rubrics, evaluator code, and release
+gates remain repository-owned.
+
+The same evaluation framework must be portable to a future self-hosted
+backend such as Langfuse or Phoenix through ATI's observability/evaluation
+abstractions.
 
 ## Initial evaluation corpus size
 
 Before v0.1 is considered credible, target approximately 30–50 curated scenarios.
+
+The committed PR 30A corpus currently contains 60 cases (8 Evidence
+Analyst, 17 Coordinator, 16 GEOINT, 8 Report Writer, 5 research
+retrieval, and 6 synthesis), each carrying the mandatory scenario-quality
+contract.
 
 Suggested coverage:
 

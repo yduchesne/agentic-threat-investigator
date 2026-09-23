@@ -1,12 +1,31 @@
 {
   "id": "malicious_ioc_direct_evidence",
   "version": 1,
-  "description": "A target IP with a direct negative reputation observation from a single provider supports a MALICIOUS verdict with a direct Evidence-backed Finding.",
-  "tags": [
-    "evidence-analyst",
-    "direct-evidence",
-    "malicious"
-  ],
+  "specification": {
+    "title": "Direct reputation evidence supports a malicious verdict",
+    "description": "A target IP with a direct negative reputation observation from a single provider supports a MALICIOUS verdict with a direct Evidence-backed Finding.",
+    "target": "evidence-analyst",
+    "purpose": "Verify a single provider's direct negative reputation observation on the target supports a MALICIOUS verdict through an Evidence-backed Finding.",
+    "operational_relevance": "Direct IOC reputation is the primary triage signal; an analyst that cannot act on one credible provider observation stalls real investigations.",
+    "regression_risk": "The analyst could under-weight direct provider evidence, demand corroboration that was not supplied, or refuse the supported verdict.",
+    "expected_behavior": {
+      "required": [
+        "The Assessment verdict is MALICIOUS with medium or high confidence",
+        "The Assessment includes a Supporting reputation Finding that resolves the direct reputation evidence"
+      ],
+      "forbidden": [
+        "The Assessment reaches a benign or non-malicious verdict"
+      ]
+    },
+    "tags": [
+      "direct-evidence",
+      "evidence-analyst",
+      "malicious"
+    ],
+    "architecture_refs": [
+      "exact-investigation-evidence-admission"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is associated with malicious activity.",
     "root_entity": "target_ip",

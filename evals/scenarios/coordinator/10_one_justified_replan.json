@@ -1,7 +1,27 @@
 {
   "id": "one-justified-replan",
   "version": 1,
-  "description": "NEEDS_MORE_EVIDENCE authorizes exactly one additional round then sufficient.",
+  "specification": {
+    "title": "One justified replan is authorized and honored",
+    "description": "NEEDS_MORE_EVIDENCE authorizes exactly one additional round then sufficient.",
+    "target": "coordinator",
+    "purpose": "Verify a NEEDS_MORE_EVIDENCE disposition authorizes exactly one additional planning round and the investigation then terminates.",
+    "operational_relevance": "Replanning is the coordinator's bounded mechanism to react to new knowledge; a single justified round is the expected real behavior.",
+    "regression_risk": "The coordinator could refuse the justified replan or loop beyond the replan allowance.",
+    "expected_behavior": {
+      "required": [
+        "The requested replan round executes within the declared allowance",
+        "The investigation stops with sufficient_evidence after one replan"
+      ],
+      "forbidden": [
+        "More replans are executed than the declared maximum"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "replan-budget-enforcement"
+    ]
+  },
   "fixture": {
     "name": "one-replan"
   },

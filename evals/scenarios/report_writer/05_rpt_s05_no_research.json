@@ -1,21 +1,47 @@
 {
   "id": "rpt-s05-no-research",
   "version": 1,
-  "description": "No ResearchResult: a valid report without research context. The writer must not invent context or citations when no ResearchResult was persisted for the Investigation.",
+  "specification": {
+    "title": "Absent research is never invented",
+    "description": "No ResearchResult: a valid report without research context. The writer must not invent context or citations when no ResearchResult was persisted for the Investigation.",
+    "target": "report-writer",
+    "purpose": "Verify a report produced without any persisted ResearchResult never invents context or citations.",
+    "operational_relevance": "Invented context in final reports is a serious trust violation for security teams.",
+    "regression_risk": "The writer could fabricate a research context citation when none exists.",
+    "expected_behavior": {
+      "required": [
+        "The report includes the supported malicious finding",
+        "The report states that no research context was available"
+      ],
+      "forbidden": [
+        "The report invents research context or citations"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "report-groundedness"
+    ]
+  },
   "fixture": "report-no-research",
   "expected": {
     "verdict": "malicious",
     "confidence": "high",
-    "required_assessment_finding_ordinals": [1],
+    "required_assessment_finding_ordinals": [
+      1
+    ],
     "forbidden_assessment_finding_ordinals": [],
     "required_research_claim_labels": [],
-    "forbidden_research_claim_labels": ["invented_context"],
+    "forbidden_research_claim_labels": [
+      "invented_context"
+    ],
     "required_limitations": [],
     "required_unresolved_questions": [],
     "required_next_steps": [],
     "min_narrative_statements": 1,
     "max_narrative_statements": 5,
-    "required_phrases": ["no research context was available"],
+    "required_phrases": [
+      "no research context was available"
+    ],
     "forbidden_phrases": [],
     "expected_no_report": false
   }

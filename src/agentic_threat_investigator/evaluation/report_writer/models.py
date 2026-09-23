@@ -41,6 +41,9 @@ from pydantic import (
 
 from agentic_threat_investigator.domain.assessment import AssessmentConfidence, Verdict
 from agentic_threat_investigator.domain.report import InvestigationReport
+from agentic_threat_investigator.evaluation.common.models import (
+    ScenarioSpecification,
+)
 
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 """Stable lowercase scenario identifiers: letters, digits, dot, dash, underscore."""
@@ -305,15 +308,16 @@ class ExpectedReportWriterOutput(BaseModel):
 class ReportWriterScenario(BaseModel):
     """One repository-owned, versioned Report Writer evaluation scenario.
 
-    The scenario pairs one deterministic fixture reference with one expected
-    envelope. It never contains model prompt text, runtime UUIDs, or secrets.
+    The scenario pairs one common PR 30A scenario specification, one
+    deterministic fixture reference, and one expected envelope. It never
+    contains model prompt text, runtime UUIDs, or secrets.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     version: int = Field(ge=1)
-    description: str | None = None
+    specification: ScenarioSpecification
     fixture: str
     expected: ExpectedReportWriterOutput
 
@@ -328,14 +332,6 @@ class ReportWriterScenario(BaseModel):
     def fixture_valid(cls, value: str) -> str:
         """Require a stable lowercase fixture reference."""
         return _semantic_label(value)
-
-    @field_validator("description", mode="after")
-    @classmethod
-    def description_not_blank(cls, value: str | None) -> str | None:
-        """Reject blank scenario descriptions."""
-        if value is None:
-            return None
-        return _not_blank(value)
 
 
 class ReportWriterScenarioResolution(BaseModel):

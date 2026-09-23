@@ -1,22 +1,57 @@
 {
   "id": "rpt-s01-clearly-malicious",
   "version": 1,
-  "description": "Clearly malicious: a MALICIOUS/high Assessment with a supported reputation finding and useful research context. The report must preserve verdict/confidence, include the malicious finding, may include the contextual research claim, and must not invent unsupported actor attribution.",
+  "specification": {
+    "title": "Clearly malicious report preserves verdict and confidence",
+    "description": "Clearly malicious: a MALICIOUS/high Assessment with a supported reputation finding and useful research context. The report must preserve verdict/confidence, include the malicious finding, may include the contextual research claim, and must not invent unsupported actor attribution.",
+    "target": "report-writer",
+    "purpose": "Verify the report preserves the MALICIOUS and high confidence Assessment, includes the supported malicious finding, may include the contextual research claim, and never invents unsupported attribution.",
+    "operational_relevance": "Final reports are the operator-facing product; faithful verdict and confidence propagation is the baseline contract.",
+    "regression_risk": "The writer could downgrade the verdict, drop the malicious finding, or invent actor attribution not present in the Assessment.",
+    "expected_behavior": {
+      "required": [
+        "The report preserves the malicious verdict and high confidence",
+        "The report includes the supported malicious Assessment finding",
+        "The report states the required limitation and next step"
+      ],
+      "forbidden": [
+        "The report attributes the indicator to a threat actor",
+        "The report omits the required malicious finding or caveats"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "assessment-faithful-reporting",
+      "caveat-preservation"
+    ]
+  },
   "fixture": "report-malicious",
   "expected": {
     "verdict": "malicious",
     "confidence": "high",
-    "required_assessment_finding_ordinals": [1],
+    "required_assessment_finding_ordinals": [
+      1
+    ],
     "forbidden_assessment_finding_ordinals": [],
-    "required_research_claim_labels": ["malicious_context"],
+    "required_research_claim_labels": [
+      "malicious_context"
+    ],
     "forbidden_research_claim_labels": [],
-    "required_limitations": ["reputation evidence is third-party and may lag"],
+    "required_limitations": [
+      "reputation evidence is third-party and may lag"
+    ],
     "required_unresolved_questions": [],
-    "required_next_steps": ["monitor the indicator for 30 days"],
+    "required_next_steps": [
+      "monitor the indicator for 30 days"
+    ],
     "min_narrative_statements": 1,
     "max_narrative_statements": 5,
-    "required_phrases": ["malicious indicator with high confidence"],
-    "forbidden_phrases": ["attributed to threat actor"],
+    "required_phrases": [
+      "malicious indicator with high confidence"
+    ],
+    "forbidden_phrases": [
+      "attributed to threat actor"
+    ],
     "expected_no_report": false
   }
 }

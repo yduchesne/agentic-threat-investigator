@@ -1,7 +1,28 @@
 {
   "id": "cycle-suppression",
   "version": 1,
-  "description": "domain -> IP -> domain -> IP never repeats equivalent execution.",
+  "specification": {
+    "title": "Cycles between domain and IP never repeat work",
+    "description": "domain -> IP -> domain -> IP never repeats equivalent execution.",
+    "target": "coordinator",
+    "purpose": "Verify domain-to-IP-to-domain cycles never repeat equivalent execution while the IP pivot still completes.",
+    "operational_relevance": "Cyclic relationships between domains and resolved IPs are routine; cycle suppression is what guarantees termination in real graphs.",
+    "regression_risk": "The coordinator could re-execute the domain or IP after the cycle returns.",
+    "expected_behavior": {
+      "required": [
+        "The resolved-IP pivot executes exactly once",
+        "The investigation stops with sufficient_evidence"
+      ],
+      "forbidden": [
+        "The root domain is re-pivoted after the IP cycle returns to it"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "duplicate-discovery-suppression",
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "cycle-suppression"
   },

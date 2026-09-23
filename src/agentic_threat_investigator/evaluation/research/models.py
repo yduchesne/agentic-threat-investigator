@@ -34,6 +34,9 @@ from pydantic import (
 
 from agentic_threat_investigator.domain.investigation import ResearchExecutionStatus
 from agentic_threat_investigator.domain.research import ResearchResult
+from agentic_threat_investigator.evaluation.common.models import (
+    ScenarioSpecification,
+)
 
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 """Stable lowercase scenario identifiers: letters, digits, dot, dash, underscore."""
@@ -95,19 +98,19 @@ def _not_blank(value: str) -> str:
 class ResearchRetrievalScenario(BaseModel):
     """One repository-owned, versioned retrieval expectation.
 
-    The scenario declares a deterministic query and retrieval-context filters,
-    plus the exact stable **upstream** identities expected and forbidden in
-    the ordered retrieval response: ``source_record_id`` values (for example
-    MITRE ATT&CK STIX object ids), ``source_id`` values (durable source
-    URNs), and ``document_type`` values. Runtime UUIDs never appear in
-    scenario files.
+    The scenario carries the common PR 30A scenario specification plus a
+    deterministic query and retrieval-context filters, and the exact stable
+    **upstream** identities expected and forbidden in the ordered retrieval
+    response: ``source_record_id`` values (for example MITRE ATT&CK STIX
+    object ids), ``source_id`` values (durable source URNs), and
+    ``document_type`` values. Runtime UUIDs never appear in scenario files.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     version: int = Field(ge=1)
-    description: str | None = None
+    specification: ScenarioSpecification
     query: str
     max_results: int = Field(ge=1, le=100)
 
@@ -131,14 +134,6 @@ class ResearchRetrievalScenario(BaseModel):
     @classmethod
     def query_not_blank(cls, value: str) -> str:
         """Reject blank retrieval queries."""
-        return _not_blank(value)
-
-    @field_validator("description", mode="after")
-    @classmethod
-    def description_not_blank(cls, value: str | None) -> str | None:
-        """Reject blank scenario descriptions."""
-        if value is None:
-            return None
         return _not_blank(value)
 
     @field_validator(
@@ -408,20 +403,21 @@ class ExpectedResearchResult(BaseModel):
 class ResearchSynthesisScenario(BaseModel):
     """One repository-owned, versioned synthesis evaluation scenario.
 
-    The scenario pairs one deterministic fixture with one expected-result
-    envelope, carries the exact retrieval context (query, filters,
-    ``max_results``) used to produce the persisted result under evaluation,
-    and declares the semantic label universe: each citation label in
-    ``source_records`` names the stable upstream ``source_record_id`` that
-    materialization must resolve to an exact persisted ``citation_id``. It
-    never contains model prompt text, runtime UUIDs, or secrets.
+    The scenario carries the common PR 30A scenario specification, pairs
+    one deterministic fixture with one expected-result envelope, carries
+    the exact retrieval context (query, filters, ``max_results``) used to
+    produce the persisted result under evaluation, and declares the
+    semantic label universe: each citation label in ``source_records``
+    names the stable upstream ``source_record_id`` that materialization
+    must resolve to an exact persisted ``citation_id``. It never contains
+    model prompt text, runtime UUIDs, or secrets.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     version: int = Field(ge=1)
-    description: str | None = None
+    specification: ScenarioSpecification
     fixture: ResearchFixtureReference
     query: str
     source_ids: tuple[str, ...] = ()
@@ -435,14 +431,6 @@ class ResearchSynthesisScenario(BaseModel):
     def id_valid(cls, value: str) -> str:
         """Require a stable lowercase scenario identifier."""
         return _scenario_id(value)
-
-    @field_validator("description", mode="after")
-    @classmethod
-    def description_not_blank(cls, value: str | None) -> str | None:
-        """Reject blank scenario descriptions."""
-        if value is None:
-            return None
-        return _not_blank(value)
 
     @field_validator("query", mode="after")
     @classmethod

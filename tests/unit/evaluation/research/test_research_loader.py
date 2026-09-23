@@ -9,6 +9,11 @@ from typing import Any
 
 import pytest
 
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
+from agentic_threat_investigator.evaluation.common.models import (
+    ExpectedBehavior,
+    ScenarioSpecification,
+)
 from agentic_threat_investigator.evaluation.research import (
     ExpectedResearchResult,
     ResearchScenarioLoadError,
@@ -20,11 +25,26 @@ _RETRIEVAL_CORPUS = Path(__file__).parents[4] / "evals/scenarios/research/retrie
 _SYNTHESIS_CORPUS = Path(__file__).parents[4] / "evals/scenarios/research/synthesis"
 
 
+_RETRIEVAL_SPECIFICATION = ScenarioSpecification(
+    title="Unit retrieval scenario",
+    description="A deterministic unit retrieval scenario.",
+    target=EvaluationTarget.RESEARCH_AGENT,
+    purpose="Exercises retrieval unit validation.",
+    operational_relevance="Relevant to retrieval unit coverage.",
+    regression_risk="Protects retrieval contract regressions.",
+    expected_behavior=ExpectedBehavior(
+        required=("The expected relevant source record is retrieved.",),
+        forbidden=("Forbidden source records appear in the retrieved set.",),
+    ),
+)
+
+
 def _retrieval_payload(**overrides: Any) -> dict[str, Any]:
     """Build one minimal valid retrieval scenario payload."""
     payload: dict[str, Any] = {
         "id": "unit.scenario",
         "version": 1,
+        "specification": _RETRIEVAL_SPECIFICATION.model_dump(mode="json"),
         "query": "obfuscate command and control traffic",
         "max_results": 3,
         "expected_relevant_source_records": ["record-a"],
@@ -146,6 +166,7 @@ def _synthesis_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "id": "unit.synthesis",
         "version": 1,
+        "specification": _RETRIEVAL_SPECIFICATION.model_dump(mode="json"),
         "fixture": {"name": "mitre-attack-small"},
         "query": "obfuscate command and control traffic",
         "max_results": 2,

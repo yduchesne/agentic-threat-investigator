@@ -27,6 +27,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Callable
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from sqlalchemy import event as sqlalchemy_event
@@ -83,6 +84,14 @@ from agentic_threat_investigator.config.settings import (
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     GeographicClaim,
+)
+from agentic_threat_investigator.evaluation.common import (
+    DatasetLoadError,
+    EvaluationDatasetId,
+)
+from agentic_threat_investigator.evaluation.datasets import (
+    load_dataset,
+    validate_dataset_directory,
 )
 from agentic_threat_investigator.infrastructure.embeddings import (
     HashingEmbeddingClient,
@@ -885,3 +894,64 @@ def _log_operating_mode(settings: Settings) -> None:
             "deterministic local fakes; LLM: configured runtime implementation "
             "(not selected by operating mode)"
         )
+
+
+def _resolve_and_validate(dataset_or_path: str) -> tuple[EvaluationDatasetId, int]:
+    """Resolve one dataset-or-path argument and strictly validate it.
+
+    A canonical dataset identity such as ``evidence-analyst/v1`` loads the
+    registered corpus; any other argument is treated as a scenario directory
+    whose target is inferred from its files. Raises
+    :class:`DatasetLoadError`/``ValueError`` on any failure.
+    """
+    try:
+        dataset_id = EvaluationDatasetId.from_canonical(dataset_or_path)
+    except ValueError:
+        dataset_id = validate_dataset_directory(Path(dataset_or_path))
+        return dataset_id, len(load_dataset(dataset_id))
+    cases = load_dataset(dataset_id)
+    return dataset_id, len(cases)
+
+
+def evaluation_main(argv: list[str] | None = None) -> int:
+    """Run the PR 30A offline evaluation CLI (``ati-eval``).
+
+    PR 30A exposes exactly one subcommand:
+
+    .. code-block:: text
+
+        ati-eval validate <dataset-or-path>
+
+    ``validate`` strictly loads a canonical dataset identity (for example
+    ``evidence-analyst/v1``) or one scenario directory, enforces the
+    scenario-quality and dataset-identity contracts, and exits 0 on success
+    or nonzero on failure. The command is fully offline: no LangSmith, no
+    LLM, and no network. Operator-facing real-model runs (``ati-eval run``)
+    are deferred to PR 30B/30C when deliverable experiment adapters exist.
+    """
+    parser = argparse.ArgumentParser(prog="ati-eval")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="strictly validate a canonical dataset or one scenario directory",
+    )
+    validate_parser.add_argument(
+        "dataset_or_path",
+        help="canonical dataset identity such as evidence-analyst/v1 or a "
+        "scenario directory path",
+    )
+    args = parser.parse_args(argv)
+    _configure_logging()
+    if args.command != "validate":
+        parser.error(f"unknown evaluation command: {args.command}")
+    try:
+        dataset_id, case_count = _resolve_and_validate(args.dataset_or_path)
+    except (ValueError, OSError, DatasetLoadError) as exc:
+        LOGGER.error("evaluation validation failed: %s", exc)
+        return 1
+    LOGGER.info(
+        "evaluation validation passed: %s (%d cases)",
+        dataset_id.canonical,
+        case_count,
+    )
+    return 0

@@ -1,12 +1,31 @@
 {
   "id": "stale_evidence",
   "version": 1,
-  "description": "Material threat evidence intentionally designated stale by the scenario must be accompanied by an explicit staleness limitation rather than a hidden freshness policy.",
-  "tags": [
-    "evidence-analyst",
-    "stale-evidence",
-    "limitation"
-  ],
+  "specification": {
+    "title": "Stale evidence is surfaced by an explicit limitation",
+    "description": "Material threat evidence intentionally designated stale by the scenario must be accompanied by an explicit staleness limitation rather than a hidden freshness policy.",
+    "target": "evidence-analyst",
+    "purpose": "Verify material threat evidence designated stale is still considered, with the staleness explicitly stated as a limitation instead of silently dropped by a hidden freshness policy.",
+    "operational_relevance": "Threat intelligence decays; a hidden recency discount makes final assessments look stronger than the underlying data supports.",
+    "regression_risk": "The analyst could silently discount the stale reputation evidence or forget to declare the staleness limitation, unresolved question, and next step.",
+    "expected_behavior": {
+      "required": [
+        "The Assessment includes the Supporting reputation Finding backed by the stale evidence",
+        "The Assessment states the staleness limitation, unresolved question, and recommended next step"
+      ],
+      "forbidden": [
+        "The Assessment applies a hidden freshness discount without declaring the staleness limitation"
+      ]
+    },
+    "tags": [
+      "evidence-analyst",
+      "limitation",
+      "stale-evidence"
+    ],
+    "architecture_refs": [
+      "stale-evidence-limitation"
+    ]
+  },
   "fixture": {
     "objective": "Assess the target IP from reputation evidence that is materially stale.",
     "root_entity": "target_ip",

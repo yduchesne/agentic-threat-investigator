@@ -1,8 +1,34 @@
 {
   "id": "g26g_s03_city_precision",
   "version": 1,
-  "description": "City input resolves to the canonical city with city precision retained; the representative reference coordinate never becomes an exact source physical position in model context, and the exact Evidence closes the observation.",
-  "tags": ["geoint", "precision", "city", "no-coordinates-in-context", "pr26g"],
+  "specification": {
+    "title": "City input never claims an exact physical position",
+    "description": "City input resolves to the canonical city with city precision retained; the representative reference coordinate never becomes an exact source physical position in model context, and the exact Evidence closes the observation.",
+    "target": "geoint",
+    "purpose": "Verify city input resolves with city precision and the representative reference coordinate is never treated as an exact source physical position.",
+    "operational_relevance": "Representative city coordinates are reference points, not observed device positions; confusing them misleads investigations.",
+    "regression_risk": "The pipeline could present the representative coordinate as an exact physical observation.",
+    "expected_behavior": {
+      "required": [
+        "The observation resolves to the city Location with city precision",
+        "The analyst verdict stays inconclusive"
+      ],
+      "forbidden": [
+        "The representative reference coordinate is treated as an exact source physical position"
+      ]
+    },
+    "tags": [
+      "city",
+      "geoint",
+      "no-coordinates-in-context",
+      "pr26g",
+      "precision"
+    ],
+    "architecture_refs": [
+      "coordinate-description-boundary",
+      "resolution-precision-honesty"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious.",
     "root_entity": "target_ip",
@@ -80,7 +106,9 @@
     "histories": [
       {
         "entity": "target_ip",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       }
     ],
     "agent_context": {
@@ -88,22 +116,41 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"],
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ],
       "required_geographic_findings": [
         {
           "kind": "shared_location",
-          "observation_labels": ["seattle_obs"],
-          "evidence_labels": ["seattle_evidence"],
-          "entity_labels": ["target_ip"],
-          "location_labels": ["seattle"]
+          "observation_labels": [
+            "seattle_obs"
+          ],
+          "evidence_labels": [
+            "seattle_evidence"
+          ],
+          "entity_labels": [
+            "target_ip"
+          ],
+          "location_labels": [
+            "seattle"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["maliciousness"]
+    "forbidden_inferences": [
+      "maliciousness"
+    ]
   }
 }

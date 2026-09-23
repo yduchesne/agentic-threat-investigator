@@ -1,8 +1,32 @@
 {
   "id": "g26g_s09_unresolvable_claim",
   "version": 1,
-  "description": "A claim with no canonical match terminates UNRESOLVABLE: no geographic truth is invented and the Evidence row remains intact.",
-  "tags": ["geoint", "unresolvable", "no-invention", "pr26g"],
+  "specification": {
+    "title": "Claims without a canonical match stay unresolvable",
+    "description": "A claim with no canonical match terminates UNRESOLVABLE: no geographic truth is invented and the Evidence row remains intact.",
+    "target": "geoint",
+    "purpose": "Verify a claim with no canonical match terminates UNRESOLVABLE without inventing geographic truth.",
+    "operational_relevance": "Uncoverage is common for novel or low-signal place names; honesty matters more than coverage metrics.",
+    "regression_risk": "The resolver could fabricate a location for an unmatched claim.",
+    "expected_behavior": {
+      "required": [
+        "The unmatched claim terminates unresolvable",
+        "The Evidence row remains intact"
+      ],
+      "forbidden": [
+        "Geographic truth is invented for a claim with no canonical match"
+      ]
+    },
+    "tags": [
+      "geoint",
+      "no-invention",
+      "pr26g",
+      "unresolvable"
+    ],
+    "architecture_refs": [
+      "claim-resolvability"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious.",
     "root_entity": "target_ip",
@@ -74,13 +98,24 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"]
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ]
     },
-    "forbidden_inferences": ["maliciousness"]
+    "forbidden_inferences": [
+      "maliciousness"
+    ]
   }
 }
