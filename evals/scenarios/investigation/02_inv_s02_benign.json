@@ -1,0 +1,111 @@
+{
+  "id": "inv-s02-benign",
+  "version": 1,
+  "specification": {
+    "title": "Benign organization domain end-to-end",
+    "description": "A legitimate organization domain with benign infrastructure, ambient DNS noise, and explicit no-result provider outcomes. The production investigation must reach a terminal benign Assessment without inventing a malicious conclusion, traverse boundedly, and persist a faithful report.",
+    "target": "investigation",
+    "purpose": "Verify the production end-to-end path does not invent maliciousness: clean reputation, no malicious association, bounded traversal, and a faithful report that preserves the benign verdict.",
+    "operational_relevance": "Benign domains vastly outnumber malicious ones; a production pipeline that fabricates threats erodes operator trust.",
+    "regression_risk": "The pipeline could over-investigate clean infrastructure, invent a malicious association from shared hosting, or persist a report that contradicts the benign Assessment.",
+    "expected_behavior": {
+      "required": [
+        "The investigation reaches a terminal benign Assessment",
+        "The final report preserves the benign verdict and confidence",
+        "Traversal stays within the authored depth and action bounds"
+      ],
+      "forbidden": [
+        "The investigation invents a malicious conclusion or malware association",
+        "The report contradicts the benign Assessment"
+      ]
+    },
+    "tags": [
+      "benign",
+      "no-threat"
+    ],
+    "architecture_refs": [
+      "coordinator-policy",
+      "provider-execution",
+      "evidence-analyst",
+      "assessment-faithful-reporting"
+    ]
+  },
+  "fixture": "f01-benign",
+  "root": {
+    "entity_label": "root_domain",
+    "entity_type": "domain",
+    "value": "alice-corp.test"
+  },
+  "expected": {
+    "terminal": {
+      "status": "completed",
+      "stop_reason": "sufficient_evidence"
+    },
+    "assessment": {
+      "verdict": "benign",
+      "confidence": "medium",
+      "required_findings": [
+        "reputation:contradicting"
+      ],
+      "forbidden_findings": []
+    },
+    "evidence": {
+      "required_sources": [
+        "urn:ati:source:google_public_dns",
+        "urn:ati:source:rdap"
+      ],
+      "required_entity_labels": [
+        "resolved_ip"
+      ],
+      "forbidden_entity_labels": [
+        "malware_family"
+      ]
+    },
+    "relationships": {
+      "required": [
+        "urn:ati:relationship:dns:resolves_to"
+      ],
+      "forbidden": [
+        "urn:ati:relationship:threat:associated_with"
+      ]
+    },
+    "research": {
+      "required_subject_labels": [],
+      "forbidden_subject_labels": []
+    },
+    "report": {
+      "required": true,
+      "verdict": "benign",
+      "confidence": "medium",
+      "required_finding_ordinals": [
+        1
+      ],
+      "forbidden_finding_ordinals": [],
+      "min_narrative_statements": 0,
+      "max_narrative_statements": 5
+    },
+    "trajectory": {
+      "required_actions": [
+        "urn:ati:action:provider_query",
+        "urn:ati:action:assessment_requested",
+        "urn:ati:action:investigation_stopped"
+      ],
+      "forbidden_actions": [
+        "urn:ati:action:research_requested"
+      ],
+      "required_research": [],
+      "forbidden_research": [],
+      "max_depth": 2,
+      "termination_required": true
+    },
+    "efficiency": {
+      "max_provider_calls": 20,
+      "max_llm_calls": 8,
+      "max_replans": 3,
+      "max_pivots": 6,
+      "max_duplicate_provider_calls": 0,
+      "max_duplicate_entity_investigations": 0,
+      "max_total_actions": 60
+    }
+  }
+}

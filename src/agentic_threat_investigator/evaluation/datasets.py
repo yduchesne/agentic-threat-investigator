@@ -37,6 +37,9 @@ from agentic_threat_investigator.evaluation.coordinator import (
 from agentic_threat_investigator.evaluation.geoint.loader import (
     load_geoint_scenarios_directory,
 )
+from agentic_threat_investigator.evaluation.investigation.loader import (
+    load_investigation_scenarios_directory,
+)
 from agentic_threat_investigator.evaluation.report_writer.loader import (
     load_report_writer_scenarios_directory,
 )
@@ -57,7 +60,7 @@ _TARGET_CORPORA: Mapping[EvaluationTarget, tuple[Path, ...]] = {
         Path("research/retrieval"),
         Path("research/synthesis"),
     ),
-    EvaluationTarget.INVESTIGATION: (),
+    EvaluationTarget.INVESTIGATION: (Path("investigation"),),
 }
 """Deterministic target-to-corpus-directory mapping, mirroring the evaluator families."""
 
@@ -77,6 +80,9 @@ _FAMILY_LOADERS: Mapping[tuple[EvaluationTarget, Path], _FamilyLoader] = {
     ),
     (EvaluationTarget.RESEARCH_AGENT, Path("research/synthesis")): (
         load_synthesis_scenarios_directory
+    ),
+    (EvaluationTarget.INVESTIGATION, Path("investigation")): (
+        load_investigation_scenarios_directory
     ),
 }
 

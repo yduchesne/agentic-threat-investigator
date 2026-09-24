@@ -1608,8 +1608,9 @@ inside `run`.
 project PostgreSQL 18 + pgvector service (compose convention), applies
 Alembic migrations, validates the dataset locally, verifies the exact
 LangSmith mirror, then executes `ati-eval run "<dataset>" --langsmith`
-(dataset-agnostic: `evidence-analyst/v1`, `coordinator/v1`, or
-`research-agent/v1`) with `LANGSMITH_API_KEY` and the model-provider key
+(dataset-agnostic: `evidence-analyst/v1`, `coordinator/v1`,
+`research-agent/v1`, `report-writer/v1`, or `investigation/v1`) with
+`LANGSMITH_API_KEY` and the model-provider key
 (`ATI_OPENAI_API_KEY`) from GitHub Secrets. `ATI_DATA_DIR` is set to a
 writable workspace path so the deterministic research corpus/index
 bootstrap (inside the Coordinator/Research benchmark seams) never writes to
@@ -1627,6 +1628,7 @@ ati/evidence-analyst/v1
 ati/coordinator/v1
 ati/research-agent/v1
 ati/report-writer/v1
+ati/investigation/v1
 ati/geoint/v1
 ```
 
@@ -1841,21 +1843,91 @@ PR 30E guarantees:
 - no raw report/prompt/model/Evidence/Research content is ever published by
   evaluation.
 
-End-to-end real target execution, real judge evaluators, prompt tuning,
-numeric thresholds, and online evaluation remain PR 30F and later PRs. ATI's
-scenarios, expected outcomes, rubrics, evaluator code, and release gates
-remain repository-owned; the same evaluation framework stays portable to a
-future self-hosted backend such as Langfuse or Phoenix through ATI's
+### End-to-end Investigation real target execution: PR 30F delivered
+
+PR 30F closes PR 30 by executing the committed end-to-end Investigation
+corpus through the **complete production investigation path** and the
+**production Report Writer**, evaluating final durable state and the
+structured trajectory with repository-owned deterministic predicates:
+
+```text
+InvestigationScenario
+ -> deterministic external world (repository-owned fixture providers)
+ -> persisted RUNNING Investigation (run-scoped execution identity)
+ -> production LocalInvestigationRunner
+      -> production Coordinator graph/policy
+      -> production providers/extractors/persistence
+      -> production Evidence Analyst (injected LlmClient)
+      -> production Research Agent when authorized (injected LlmClient)
+ -> terminal Investigation + final current Assessment
+ -> production ReportWriter consuming the actual final Assessment/Research
+ -> persisted InvestigationReport
+ -> authoritative durable snapshot + structured trajectory actions
+ -> InvestigationEvaluator (pure predicates)
+ -> common EvaluationRunner -> PASS / FAIL / ERROR
+ -> optional LangSmith publication
+```
+
+Run it with ``ati-eval run investigation/v1 [--langsmith]`` (same exit
+semantics, verify-first mirror check, and one-execution-per-case categorical
+LangSmith publication as PR 30C/30D/30E). The end-to-end benchmark
+bootstraps the deterministic repository-owned research corpus/index so
+researchable worlds execute their full production Research lifecycle.
+
+PR 30F guarantees:
+
+- the durable terminal Investigation, the final current Assessment loaded
+  from persistence, and the persisted report are the authoritative sources
+  of truth; logs and LangSmith traces are never parsed;
+- providers define **world truth only**; the production Coordinator decides
+  every pivot, Research request, verdict boundary, and stop;
+- the Report Writer runs only after terminal investigation state and consumes
+  the actual final Assessment/Research of that investigation (never a
+  pre-materialized report fixture);
+- outcome, trajectory, provenance, and efficiency correctness are **binary
+  predicates**; numeric observations (provider calls, LLM calls, replans,
+  pivots, duplicates, depth, total actions) are envelope operands and
+  diagnostics only — there is no aggregate, weighted, percentage, or
+  threshold-derived correctness score and no LLM judge;
+- hard epistemic gates hold: ResearchResult identities never collide with
+  Evidence identities, Research never creates Evidence, RelationshipObservation
+  provenance closes, Assessment references resolve to admitted material, and
+  report references resolve to the final Assessment/Research (verdict and
+  confidence always equal the final Assessment);
+- a completed state that violates the authored expectation is ``FAIL``;
+  unexpected model/provider/report failures are ``ERROR`` (never FAIL);
+  cancellation propagates unchanged;
+- run-scoped Investigation identity isolates repeated runs (fresh
+  Investigation/Assessment/Research/Report identities) with no destructive
+  cleanup; canonical Entity/Relationship rows may be reused;
+- the V1 corpus is small and high-value: six canonical variants (malicious
+  multi-source, benign, inconclusive sparse, conflicting evidence,
+  research-required malware, cycle/duplicate bounded termination); every
+  efficiency envelope corresponds to a documented operational regression
+  risk;
+- no raw prompt/model/Evidence/Research/report content is ever published by
+  evaluation; LangSmith stores categorical projections only;
+- real-model runs execute each case exactly once with the configured real
+  ``LlmClient``; a predicate violation is ``FAIL`` with no retry-until-pass,
+  no SKIP, no averaging, and no prompt/policy tuning in PR 30F.
+
+After PR 30F, real-model evaluation is primarily operational: configure
+``LANGSMITH_API_KEY`` and the ATI model-provider secret, sync/verify
+``investigation/v1``, and run the existing manual workflow. LLM judges,
+prompt tuning, numeric thresholds, online evaluation, and v0.2 GEOINT stay
+out of scope. ATI's scenarios, expected outcomes, rubrics, evaluator code,
+and release gates remain repository-owned; the same evaluation framework
+stays portable to a future self-hosted backend through ATI's
 observability/evaluation abstractions.
 
 ## Initial evaluation corpus size
 
 Before v0.1 is considered credible, target approximately 30–50 curated scenarios.
 
-The committed PR 30A corpus currently contains 60 cases (8 Evidence
+The committed PR 30A corpus currently contains 66 cases (8 Evidence
 Analyst, 17 Coordinator, 16 GEOINT, 8 Report Writer, 5 research
-retrieval, and 6 synthesis), each carrying the mandatory scenario-quality
-contract.
+retrieval, 6 synthesis, and 6 investigation), each carrying the mandatory
+scenario-quality contract.
 
 Suggested coverage:
 

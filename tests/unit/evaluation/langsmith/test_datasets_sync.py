@@ -349,3 +349,64 @@ class TestCancellation:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+class TestInvestigationDatasetSync:
+    """LS-INV: the investigation/v1 corpus syncs through the generic path."""
+
+    @pytest.mark.asyncio
+    async def test_inv_corpus_syncs_and_verifies_exact_mirror(self) -> None:
+        """The real investigation corpus syncs and its mirror verifies exactly."""
+        from agentic_threat_investigator.evaluation.backends.langsmith.datasets import (
+            verify_dataset,
+        )
+        from agentic_threat_investigator.evaluation.common import (
+            EvaluationDatasetId,
+            EvaluationTarget,
+        )
+        from agentic_threat_investigator.evaluation.datasets import (
+            load_evaluation_scenarios,
+        )
+
+        dataset_id = EvaluationDatasetId(
+            target=EvaluationTarget.INVESTIGATION, version=1
+        )
+        scenarios = load_evaluation_scenarios(dataset_id)
+        fake = FakeLangSmithClient()
+        receipt = await synchronize_dataset(
+            dataset_id=dataset_id,
+            client=fake,
+            scenarios=scenarios,
+        )
+        assert receipt.local_cases == 6
+        assert receipt.created == 6
+        report = await verify_dataset(
+            dataset_id=dataset_id,
+            client=fake,
+            scenarios=scenarios,
+        )
+        assert report.local_cases == 6
+        assert report.remote_examples == 6
+
+    @pytest.mark.asyncio
+    async def test_inv_semantic_digest_round_trips(self) -> None:
+        """The Investigation scenario digest is stable and content-sensitive."""
+        from agentic_threat_investigator.evaluation.backends.langsmith.mapping import (
+            semantic_digest,
+        )
+        from agentic_threat_investigator.evaluation.common import (
+            EvaluationDatasetId,
+            EvaluationTarget,
+        )
+        from agentic_threat_investigator.evaluation.datasets import (
+            load_evaluation_scenarios,
+        )
+
+        dataset_id = EvaluationDatasetId(
+            target=EvaluationTarget.INVESTIGATION, version=1
+        )
+        scenarios = load_evaluation_scenarios(dataset_id)
+        first = semantic_digest(tuple(scenarios))
+        second = semantic_digest(tuple(scenarios))
+        assert first == second
+        assert len(first) == 64

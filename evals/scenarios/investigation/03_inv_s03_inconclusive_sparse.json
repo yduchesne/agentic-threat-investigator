@@ -1,0 +1,110 @@
+{
+  "id": "inv-s03-inconclusive-sparse",
+  "version": 1,
+  "specification": {
+    "title": "Inconclusive sparse evidence end-to-end",
+    "description": "A suspicious-looking but weakly corroborated domain with sparse evidence. The production investigation must reach a terminal inconclusive low-confidence Assessment, preserve explicit uncertainty, never invent attribution, and persist a faithful report.",
+    "target": "investigation",
+    "purpose": "Verify the production end-to-end path preserves epistemic honesty: insufficient evidence yields an inconclusive Assessment with declared limitations, never a fabricated verdict or attribution.",
+    "operational_relevance": "Analysts must distinguish absence of evidence from evidence of absence; fabricated certainty on sparse evidence is a safety failure.",
+    "regression_risk": "The pipeline could force a confident verdict on sparse evidence, invent a threat actor, or persist a report that overstates certainty.",
+    "expected_behavior": {
+      "required": [
+        "The investigation reaches a terminal inconclusive low-confidence Assessment",
+        "The final report preserves the inconclusive verdict and declares the uncertainty",
+        "No attribution is invented beyond the admitted evidence"
+      ],
+      "forbidden": [
+        "The investigation asserts a malicious or benign verdict without sufficient evidence",
+        "The report invents unsupported actor attribution"
+      ]
+    },
+    "tags": [
+      "inconclusive",
+      "sparse-evidence"
+    ],
+    "architecture_refs": [
+      "coordinator-policy",
+      "provider-execution",
+      "evidence-analyst",
+      "assessment-faithful-reporting"
+    ]
+  },
+  "fixture": "f05-insufficient-evidence",
+  "root": {
+    "entity_label": "root_domain",
+    "entity_type": "domain",
+    "value": "order-portal.test"
+  },
+  "expected": {
+    "terminal": {
+      "status": "completed",
+      "stop_reason": "sufficient_evidence"
+    },
+    "assessment": {
+      "verdict": "inconclusive",
+      "confidence": "low",
+      "required_findings": [],
+      "forbidden_findings": []
+    },
+    "evidence": {
+      "required_sources": [
+        "urn:ati:source:google_public_dns",
+        "urn:ati:source:rdap",
+        "urn:ati:source:abuseipdb"
+      ],
+      "required_entity_labels": [
+        "resolved_ip"
+      ],
+      "forbidden_entity_labels": []
+    },
+    "relationships": {
+      "required": [
+        "urn:ati:relationship:dns:resolves_to",
+        "urn:ati:relationship:network:belongs_to"
+      ],
+      "forbidden": [
+        "urn:ati:relationship:threat:associated_with"
+      ]
+    },
+    "research": {
+      "required_subject_labels": [],
+      "forbidden_subject_labels": []
+    },
+    "report": {
+      "required": true,
+      "verdict": "inconclusive",
+      "confidence": "low",
+      "required_finding_ordinals": [],
+      "forbidden_finding_ordinals": [],
+      "required_limitations": [
+        "sparse evidence does not support a confident verdict"
+      ],
+      "min_narrative_statements": 0,
+      "max_narrative_statements": 5
+    },
+    "trajectory": {
+      "required_actions": [
+        "urn:ati:action:provider_query",
+        "urn:ati:action:assessment_requested",
+        "urn:ati:action:investigation_stopped"
+      ],
+      "forbidden_actions": [
+        "urn:ati:action:research_requested"
+      ],
+      "required_research": [],
+      "forbidden_research": [],
+      "max_depth": 2,
+      "termination_required": true
+    },
+    "efficiency": {
+      "max_provider_calls": 20,
+      "max_llm_calls": 8,
+      "max_replans": 3,
+      "max_pivots": 6,
+      "max_duplicate_provider_calls": 0,
+      "max_duplicate_entity_investigations": 0,
+      "max_total_actions": 60
+    }
+  }
+}

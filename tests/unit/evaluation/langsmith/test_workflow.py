@@ -376,6 +376,45 @@ class TestReportWriterWorkflow:
             assert "index" not in line
 
 
+class TestInvestigationWorkflow:
+    """INV-W01..W03: Investigation acceptance and description accuracy."""
+
+    def test_inv_w01_investigation_accepted(self) -> None:
+        """INV-W01 the workflow accepts investigation/v1 as a dataset."""
+        workflow = _load(WORKFLOW_PATH)
+        rendered = yaml.safe_dump(workflow)
+        assert "investigation/v1" in rendered
+        run_steps = [
+            (step.get("run") or "")
+            for step in _steps(workflow)
+            if "ati-eval run" in (step.get("run") or "")
+        ]
+        assert run_steps
+        assert all('ati-eval run "${{ inputs.dataset }}"' in run for run in run_steps)
+
+    def test_inv_w02_operation_description_lists_investigation(self) -> None:
+        """INV-W02 the run operation description lists investigation/v1."""
+        workflow = _load(WORKFLOW_PATH)
+        description = _triggers(workflow)["workflow_dispatch"]["inputs"]["operation"][
+            "description"
+        ]
+        assert "investigation/v1" in description
+
+    def test_inv_w03_prior_targets_remain_supported(self) -> None:
+        """INV-W03 every prior component target stays listed for the operator."""
+        workflow = _load(WORKFLOW_PATH)
+        description = _triggers(workflow)["workflow_dispatch"]["inputs"]["operation"][
+            "description"
+        ]
+        for dataset in (
+            "evidence-analyst/v1",
+            "coordinator/v1",
+            "research-agent/v1",
+            "report-writer/v1",
+        ):
+            assert dataset in description
+
+
 class TestOrdinaryCiUncredentialed:
     """EA-W13 ordinary CI remains uncredentialed and offline."""
 

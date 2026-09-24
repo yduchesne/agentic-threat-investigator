@@ -1,0 +1,118 @@
+{
+  "id": "inv-s01-malicious-multi-source",
+  "version": 1,
+  "specification": {
+    "title": "Malicious multi-source domain end-to-end",
+    "description": "A malicious update-delivery domain correlated across DNS, RDAP registration, ThreatFox malware association, and AbuseIPDB reputation, with a researchable malware family and shared hosting infrastructure. The production investigation must reach a malicious high-confidence final Assessment, authorize and complete research on the malware family, and persist a faithful report.",
+    "target": "investigation",
+    "purpose": "Verify the complete production end-to-end path: Coordinator-driven provider work, Evidence Analyst, Research Agent where authorized, and Report Writer consuming the actual final Assessment all execute and persist the expected durable outcome.",
+    "operational_relevance": "Malicious multi-source domains are the most common real-world investigation shape; the final Assessment and report are the operator-facing product.",
+    "regression_risk": "The Coordinator could skip the malware research lifecycle, the Evidence Analyst could downgrade the verdict, or the Report Writer could fail to consume the actual final Assessment or invent unsupported attribution.",
+    "expected_behavior": {
+      "required": [
+        "The investigation reaches a terminal malicious high-confidence Assessment",
+        "Provider work covers DNS, RDAP, ThreatFox, and AbuseIPDB evidence",
+        "Research is authorized and persists a result for the malware family",
+        "A faithful report preserves the malicious verdict and high confidence"
+      ],
+      "forbidden": [
+        "The investigation stops non-terminal or without a final Assessment",
+        "The report contradicts the final Assessment or references unsupported material"
+      ]
+    },
+    "tags": [
+      "malicious",
+      "multi-source",
+      "research-required"
+    ],
+    "architecture_refs": [
+      "coordinator-policy",
+      "provider-execution",
+      "evidence-analyst",
+      "research-agent",
+      "assessment-faithful-reporting"
+    ]
+  },
+  "fixture": "f02-malicious-multi-source",
+  "root": {
+    "entity_label": "root_domain",
+    "entity_type": "domain",
+    "value": "update-package.test"
+  },
+  "expected": {
+    "terminal": {
+      "status": "completed",
+      "stop_reason": "sufficient_evidence"
+    },
+    "assessment": {
+      "verdict": "malicious",
+      "confidence": "high",
+      "required_findings": [
+        "reputation:supporting"
+      ],
+      "forbidden_findings": []
+    },
+    "evidence": {
+      "required_sources": [
+        "urn:ati:source:google_public_dns",
+        "urn:ati:source:rdap",
+        "urn:ati:source:threatfox",
+        "urn:ati:source:abuseipdb"
+      ],
+      "required_entity_labels": [
+        "resolved_ip",
+        "malware_family"
+      ],
+      "forbidden_entity_labels": []
+    },
+    "relationships": {
+      "required": [
+        "urn:ati:relationship:dns:resolves_to",
+        "urn:ati:relationship:threat:associated_with"
+      ],
+      "forbidden": []
+    },
+    "research": {
+      "required_subject_labels": [
+        "malware_family"
+      ],
+      "forbidden_subject_labels": []
+    },
+    "report": {
+      "required": true,
+      "verdict": "malicious",
+      "confidence": "high",
+      "required_finding_ordinals": [
+        1
+      ],
+      "forbidden_finding_ordinals": [],
+      "min_narrative_statements": 0,
+      "max_narrative_statements": 5
+    },
+    "trajectory": {
+      "required_actions": [
+        "urn:ati:action:provider_query",
+        "urn:ati:action:pivot_executed",
+        "urn:ati:action:research_requested",
+        "urn:ati:action:assessment_requested",
+        "urn:ati:action:investigation_stopped"
+      ],
+      "forbidden_actions": [],
+      "required_research": [
+        "malware_family"
+      ],
+      "forbidden_research": [],
+      "max_depth": 2,
+      "termination_required": true
+    },
+    "efficiency": {
+      "max_provider_calls": 20,
+      "max_llm_calls": 12,
+      "max_replans": 3,
+      "max_pivots": 6,
+      "max_duplicate_provider_calls": 0,
+      "max_duplicate_entity_investigations": 0,
+      "max_total_actions": 60
+    }
+  }
+}

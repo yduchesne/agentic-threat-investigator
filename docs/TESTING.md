@@ -2065,6 +2065,104 @@ Writer/Assessment/Research behavior, and no common evaluation contract;
 adds no DB migration; and keeps every mandatory test free of live
 LLM/LangSmith dependencies.
 
+### PR 30F End-to-end Investigation target tests
+
+PR 30F adds the end-to-end Investigation real-target layer: one case is one
+complete deterministic investigation world executed through the production
+Coordinator graph/policy, providers/extractors/persistence, Evidence
+Analyst, Research Agent where authorized, and production Report Writer after
+the terminal state. The same deterministic discipline applies: real
+PostgreSQL + pgvector, FakeLlmClient exactly at the model boundary,
+FakeLangSmithClient at the remote boundary, and offline/uncredentialed
+ordinary CI.
+
+```text
+models (L01..L09):
+  valid V1 scenario loads; unknown fields rejected; wrong target rejected
+  at dataset level; mixed/wrong version rejected; duplicate cases rejected;
+  invalid semantic labels rejected; negative envelopes rejected;
+  investigation/v1 registered; deterministic file order
+
+fixtures (F01..F08):
+  known fixture resolves its exact world; unknown fixture fails closed;
+  scenario-owned worlds validated through the strict catalog
+  extraction-contract loader; provider registries expose exactly the
+  enabled world-truth providers (never policy)
+
+materialization (F03..F10, integration):
+  same execution identity deterministic planned state; new execution
+  identity isolates Investigation worlds; initial state is a
+  production-valid RUNNING Investigation with only the root Entity
+  (providers discover everything else); providers state truth only;
+  root persists through the normal repository seam; deterministic
+  Research corpus via production ingestion/indexing; no live dependency
+  for non-Research worlds; reruns require no destructive cleanup
+
+target executor (T01..T16):
+  exact identity lookup; production runner invoked once per case;
+  terminal durable state required; final current Assessment loaded from
+  persistence; production Report Writer after terminal state consuming
+  the actual final Assessment; captured structured trajectory; exact
+  provider/LLM counts; unexpected runner failure ERROR; report failure
+  ERROR; cancellation propagates; repeated runs isolated; no LangSmith;
+  no component-target chaining (the end-to-end target never invokes the
+  analyst/coordinator/research/report-writer evaluation targets)
+
+evaluator (E01..):
+  every outcome/trajectory/provenance/efficiency predicate tested
+  independently; all true -> PASS; one semantic violation -> FAIL;
+  evaluator exception -> ERROR via the common runner; values within an
+  envelope PASS regardless of numeric variation; cancellation propagates
+
+run service (INV-R01..R06):
+  investigation/v1 requires the Investigation target; wrong/empty
+  datasets rejected before model work; cases projected to the common
+  runner; cancellation propagates; bounded output payload; no LangSmith
+
+CLI run (INV-R01..R04/INV-LS08):
+  investigation/v1 dispatches to the end-to-end benchmark seam; prior
+  four targets unchanged; unsupported target rejected; PASS/FAIL/ERROR
+  exits 0/1/2; local run constructs no LangSmith client; drift refuses
+  before target; missing model credential bounded exit 2; the end-to-end
+  benchmark bootstraps the deterministic research corpus; publication
+  metadata carries no raw prompt/model/Evidence/Research/report content
+
+LangSmith targets (INV-LS01..LS03, unit):
+  exact investigation mirror allows the run; drift refuses before model;
+  the real investigation corpus syncs and verifies through the generic
+  dataset path; the scenario semantic digest is stable and
+  content-sensitive
+
+workflow static tests (INV-W01..W03):
+  investigation/v1 accepted by the dataset-agnostic run step; run
+  operation description lists investigation/v1; prior component targets
+  remain supported
+
+PostgreSQL vertical slice
+(`tests/integration/test_evaluation_investigation_runner.py`):
+  real scenario JSON -> strict loader -> repository-owned world -> real
+  PostgreSQL/pgvector -> persisted RUNNING Investigation -> production
+  LocalInvestigationRunner -> production Coordinator -> production
+  provider/extraction/persistence -> production Evidence Analyst ->
+  production Research Agent where authorized -> FakeLlmClient only at
+  the model boundary -> terminal durable Investigation -> final current
+  Assessment -> production ReportWriter -> persisted report -> durable
+  Evidence/Relationship/Research/timeline snapshot -> InvestigationEvaluator
+  -> common EvaluationRunner; I01..I06 canonical worlds PASS (malicious
+  multi-source, benign, inconclusive, conflicting, research-required,
+  cycle/duplicate) with zero forbidden duplicates where authored;
+  I07 structurally valid but scenario-wrong model output is
+  COMPLETED/FAIL (FAIL distinct from ERROR); I08 unexpected model error
+  is ERROR; I09 report-stage error is case ERROR; I10 cancellation
+  propagates; I11 rerun isolation (distinct Investigation worlds, no
+  destructive cleanup); full-corpus smoke never crashes
+```
+
+PR 30F changes no existing V1 scenario semantics, no production
+Coordinator/provider/Evidence Analyst/Research Agent/Report Writer
+behavior, and no common evaluation contract; adds no DB migration; and
+keeps every mandatory test free of live LLM/LangSmith dependencies.
+
 ### Threat Research evaluation baseline (PR 22D)
 
 PR 22D adds a separate **behavioral evaluation layer** over the unchanged
