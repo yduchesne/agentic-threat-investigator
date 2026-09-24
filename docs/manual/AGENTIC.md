@@ -197,7 +197,7 @@ async def research(self, request: ResearchAgentRequest):
 
     result = await self._llm.invoke(prompt)
 
-    return ResearchResult(...)
+    return result
 ```
 
 Document retrieval happens __before__ LLM invocation. The agent's prompt commands the following (approximately):
@@ -733,3 +733,6 @@ In summary:
 -  Coordinator node -> LangGraph execution step that invokes `CoordinatorPolicy`
 - `CoordinatorDecision` -> typed result describing what should happen next.
 
+### Tools
+
+ATI agents to dot make use of tools: rather, they are deterministically invoking dependencies as needed, without the mediation of an LLM. This approach was illustrated when discussing the `Research Agent`, further above. This conservative approach was chosen to minimize non-deterministic drift. AI, on the other hand, is leveraged for analysis, synthesis, summarization.

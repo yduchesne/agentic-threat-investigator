@@ -93,7 +93,7 @@ Additionally:
 When implementation intentionally changes a confirmed contract, update the relevant authoritative document in the same PR.
 
 - Do not add speculative functionality to documentation or implementation.
-- Do not modify the documents under the `docs/manual` directory: those are for human eyes only. They are also meant to be exclusively modified by humans.
+- Do not modify the documents under the `docs/manual` directory, unless explicitly told so by a human user: those documents are for human eyes only. They are also meant to be exclusively modified by humans.
 
 Additionally:
 

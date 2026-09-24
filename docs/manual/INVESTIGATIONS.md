@@ -8,6 +8,11 @@ This document describes the investigation workflow, with some insights into the 
 
 > Although this document is human-written - and human-maintained, AI has been leveraged to produce diagrams and generate content excerpts.
 
+## References
+
+- [Core Concepts](CORE_CONCEPTS.md): Presents core concepts such as `Entity`, `Evidence`, etc.
+- [Agentic Architecture](AGENTIC.md): Goes deeper than this document in the details of the different agents and the use of `LangChain`/`LangGraph`.
+
 ## Investigation Trigger
 
 An investigation is triggered by an inquiry regarding an entity. For example, the `evil.com` domain could be such an entity (see [Core Concepts](CORE_CONCEPTS.md) for more details regarding the notion of `Entity` in the context of ATI).
