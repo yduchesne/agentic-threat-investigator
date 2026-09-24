@@ -200,6 +200,69 @@ Writer without redefining PASS/FAIL/ERROR, dataset identity/versioning,
 common runner, LangSmith mirror/digest, categorical feedback, experiment
 publication, or workflow security.
 
+## PR 30E scope (delivered) [DONE]
+
+Fourth real-target execution PR: the **Report Writer** behavioral suite
+(RPT-S01..S08) executes through the common PR 30 contract with the existing
+deterministic `ReportWriterEvaluator` as the sole semantic authority.
+
+- repository-owned fixture/materialization support promoted out of
+  `tests.support` into `evaluation/report_writer/fixtures.py` and
+  `scenarios.py` (single source of truth; `tests.support` keeps thin
+  test-only re-exports; production evaluation code never imports
+  `tests.support`):
+- run-scoped execution identity (`materialize(..., execution_id=)`)
+  isolating Investigation/Assessment/EvidenceObservation/Research
+  identities while canonical Entity/Relationship rows may be reused;
+  repeated runs never collide and never destructively reset history;
+- exact `(case_id, version) -> ReportWriterScenario` lookup and
+  `ReportWriterEvaluationOutput` (resolution + evaluation input), never
+  reconstructed from LangSmith;
+- narrow evaluation composition seam building the real
+  `ReportWriterInputLoader`/`ReportWriter`/
+  `InvestigationReportPersistenceService`/`LlmAccountingService` over real
+  PostgreSQL/UnitOfWork with the existing `LlmClient` and a transparent
+  counting decorator capturing the exact current-execution model-attempt
+  count;
+- production `ReportWriter.write` executes the actual persisted report
+  (S01..S05 PASS); declared no-report scenarios are behavioral outcomes
+  (S06 real provenance rejection, S07 real structured-output
+  repair/budget exhaustion, S08 real stale-Assessment persistence
+  conflict under lock) mapped only through allowlisted typed failures to
+  the stable bounded codes `report_provenance_error` /
+  `invalid_structured_output` / `stale_report_input` (never message
+  parsing); unexpected exceptions remain ERROR;
+- `report-writer-contract` evaluator adapter mapping the existing
+  evaluator's PASS/FAIL with JSON-safe diagnostics only
+  (`narrative_statement_count`, `included_finding_ordinals`,
+  `included_research_claim_count`, `required_finding_coverage`,
+  `required_research_coverage`); no LLM judge, no numeric threshold, no
+  semantic-entailment claim;
+- `run_report_writer_evaluation` service and
+  `ati-eval run report-writer/v1 [--langsmith]` (same exit semantics,
+  verify-first mirror check, and one-execution-per-case categorical
+  LangSmith publication as PR 30C/30D); the Report Writer benchmark never
+  bootstraps the research corpus;
+- deterministic PostgreSQL vertical slice
+  (`tests/integration/test_evaluation_report_writer_runner.py`):
+  S01..S05 PASS on the actual persisted report with the advanced pointer;
+  S06/S07/S08 declared no-report PASS with no report/history/pointer;
+  runtime-valid-but-scenario-wrong output FAIL (report persists: FAIL is
+  distinct from ERROR); unexpected model failure ERROR; cancellation
+  propagates; canonical Entity reuse and isolation assertions;
+- manual workflow description corrected (no longer Evidence-Analyst-only)
+  and `report-writer/v1` accepted by the dataset-agnostic run step;
+- V1 corpus untouched: no expectations weakened and no scenario added;
+- docs: `docs/EVALUATION.md`, `docs/TESTING.md`, this roadmap.
+
+PR 30E delivers **no** end-to-end investigation execution (PR 30F), no
+LLM-as-judge, no numeric quality scoring, no prompt/policy tuning to pass
+evals, no scheduled/PR/push real-model triggers, no DB migration, and no
+change to production Report Writer/Assessment/Research behavior. PR 30F
+composes whole-investigation evaluation afterwards without redefining
+component semantics, the common runner, dataset versioning, LangSmith
+mirror/digest/publication, or workflow security.
+
 
 ## Explicitly out of scope for PR 30A
 

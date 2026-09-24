@@ -53,7 +53,8 @@ from tests.support.langsmith_fakes import FakeLangSmithClient
 DATASET = "evidence-analyst/v1"
 COORDINATOR_DATASET = "coordinator/v1"
 RESEARCH_DATASET = "research-agent/v1"
-UNSUPPORTED_DATASET = "report-writer/v1"
+REPORT_WRITER_DATASET = "report-writer/v1"
+UNSUPPORTED_DATASET = "investigation/v1"
 
 
 def _run_result(
@@ -231,6 +232,17 @@ class TestRunExitSemantics:
         )
         assert evaluation_main(["run", RESEARCH_DATASET]) == 0
 
+    def test_r01_report_writer_run_supported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RPT-R01 report-writer/v1 dispatches to the Report Writer benchmark."""
+        _install_benchmark(
+            monkeypatch,
+            _pass_run_result(REPORT_WRITER_DATASET),
+            seam="_execute_report_writer_benchmark",
+        )
+        assert evaluation_main(["run", REPORT_WRITER_DATASET]) == 0
+
     def test_r04_unsupported_target_rejected(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -290,12 +302,13 @@ class TestRunLangSmith:
             (DATASET, "_execute_evidence_analyst_benchmark"),
             (COORDINATOR_DATASET, "_execute_coordinator_benchmark"),
             (RESEARCH_DATASET, "_execute_research_benchmark"),
+            (REPORT_WRITER_DATASET, "_execute_report_writer_benchmark"),
         ],
     )
     def test_ls01_mirror_exact_run_allowed(
         self, monkeypatch: pytest.MonkeyPatch, dataset: str, seam: str
     ) -> None:
-        """D-LS01/02/EA-LS01 an exact mirror allows a LangSmith-backed run."""
+        """D-LS01/02/EA-LS01/RPT-LS01 an exact mirror allows a LangSmith-backed run."""
         fake = _seeded_mirror(dataset)
         _install_fake(monkeypatch, fake)
         _install_benchmark(monkeypatch, _pass_run_result(dataset), seam=seam)
@@ -309,6 +322,7 @@ class TestRunLangSmith:
         [
             (COORDINATOR_DATASET, "_execute_coordinator_benchmark"),
             (RESEARCH_DATASET, "_execute_research_benchmark"),
+            (REPORT_WRITER_DATASET, "_execute_report_writer_benchmark"),
         ],
     )
     def test_ls03_drift_refuses_before_target(
@@ -426,3 +440,73 @@ class TestRunLangSmith:
         source = inspect.getsource(cli_module._evaluation_run_main)
         assert "except BaseException" not in source
         assert "except asyncio.CancelledError" not in source
+
+
+class TestReportWriterRun:
+    """RPT-R01/RPT-R06/RPT-R11/RPT-LS08 report-writer-specific run contract."""
+
+    def test_rpt_r06_local_run_constructs_no_langsmith_client(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R06 a report-writer local run never constructs a LangSmith client."""
+        _install_benchmark(
+            monkeypatch,
+            _pass_run_result(REPORT_WRITER_DATASET),
+            seam="_execute_report_writer_benchmark",
+        )
+
+        def exploding() -> object:
+            raise AssertionError("LangSmith client must not be constructed")
+
+        monkeypatch.setattr(
+            "agentic_threat_investigator.cli._build_langsmith_evaluation_client",
+            exploding,
+        )
+        assert evaluation_main(["run", REPORT_WRITER_DATASET]) == 0
+
+    def test_rpt_r11_missing_model_credential_bounded_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R11 a missing model credential surfaces as a bounded exit-2 failure."""
+        from agentic_threat_investigator.app.secrets import SecretNotFoundError
+
+        _install_benchmark(
+            monkeypatch,
+            _pass_run_result(REPORT_WRITER_DATASET),
+            fail=SecretNotFoundError("ATI_OPENAI_API_KEY"),
+            seam="_execute_report_writer_benchmark",
+        )
+        assert evaluation_main(["run", REPORT_WRITER_DATASET]) == 2
+
+    def test_rpt_ls08_no_raw_report_content_published(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RPT-LS08 publication metadata carries no raw report/model content."""
+        fake = _seeded_mirror(REPORT_WRITER_DATASET)
+        _install_fake(monkeypatch, fake)
+        _install_benchmark(
+            monkeypatch,
+            _pass_run_result(REPORT_WRITER_DATASET),
+            seam="_execute_report_writer_benchmark",
+        )
+        assert evaluation_main(["run", REPORT_WRITER_DATASET, "--langsmith"]) == 0
+        run_id, _publication = fake.published[0]
+        metadata = fake.experiments[run_id]["ref"].metadata
+        rendered = f"{metadata}"
+        for forbidden in (
+            "reputation",
+            "malicious indicator",
+            "prompt",
+            "chain_of_thought",
+        ):
+            assert forbidden not in rendered
+
+    def test_rpt_no_research_corpus_bootstrap_for_report_writer(self) -> None:
+        """The Report Writer benchmark never bootstraps the research corpus."""
+        import inspect as _inspect
+
+        from agentic_threat_investigator import cli as cli_module
+
+        source = _inspect.getsource(cli_module._execute_report_writer_benchmark)
+        assert "_bootstrap_research_corpus_if_needed" not in source
+        assert "run_report_writer_evaluation" in source

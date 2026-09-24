@@ -20,6 +20,11 @@ from agentic_threat_investigator.domain.report import (
 from agentic_threat_investigator.evaluation.report_writer.evaluator import (
     ReportWriterEvaluator,
 )
+from agentic_threat_investigator.evaluation.report_writer.fixtures import (
+    ReportWriterFixture,
+    build_canonical_report_output,
+    report_scenario_resolution,
+)
 from agentic_threat_investigator.evaluation.report_writer.loader import (
     load_report_writer_scenarios_directory,
 )
@@ -30,12 +35,9 @@ from agentic_threat_investigator.evaluation.report_writer.models import (
     ReportWriterScenario,
     ReportWriterScenarioResolution,
 )
-from tests.support.report_writer_fixtures import (
-    ReportWriterFixture,
-    build_canonical_report_output,
-    report_scenario_resolution,
+from agentic_threat_investigator.evaluation.report_writer.scenarios import (
+    report_writer_fixture,
 )
-from tests.support.report_writer_scenarios import report_writer_fixture
 
 _CORPUS = Path(__file__).parents[4] / "evals/scenarios/report_writer"
 

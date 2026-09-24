@@ -1979,6 +1979,92 @@ Coordinator/Research behavior, and no common evaluation contract; adds no
 DB migration; and keeps every mandatory test free of live LLM/LangSmith
 dependencies.
 
+### PR 30E Report Writer target tests
+
+PR 30E adds the Report Writer real-target layer with the same deterministic
+discipline: real PostgreSQL in the `integration`-marked vertical slice,
+FakeLlmClient exactly at the model boundary, FakeLangSmithClient at the
+remote boundary, and offline/uncredentialed ordinary CI. The canonical
+fixture/materializer code moved out of `tests.support` into
+`agentic_threat_investigator.evaluation.report_writer.fixtures|scenarios`;
+`tests/support/report_writer_fixtures.py|scenarios.py` are thin test-only
+re-exports and production evaluation code never imports `tests.support`.
+
+```text
+fixture/materializer (RPT-F01..F09):
+  known fixture exact; unknown fixture fails closed; same execution
+  identity deterministic; different execution identities isolate
+  execution-owned Investigation/Assessment/EvidenceObservation/Research
+  identities while canonical Entity/Relationship identities stay global;
+  Assessment/Research persistence confirmed (integration); canonical
+  Entity reuse without destructive reset (integration); evaluation package
+  has no tests.support import
+
+target executor (RPT-T01..T14):
+  exact identity lookup; unknown/version mismatch/duplicate fail closed;
+  normal scenario runs the production writer exactly once; success returns
+  the persisted report; exact current-execution model-attempt count;
+  declared no-report failures become evaluation inputs (PASS), unexpected
+  exceptions are runner ERROR; allowlisted typed failures map to stable
+  codes (report_provenance_error / invalid_structured_output /
+  stale_report_input) without message parsing; cancellation propagates;
+  repeated runs use isolated execution identities; no LangSmith dependency
+
+evaluator adapter (RPT-E01..E13):
+  existing evaluator PASS/FAIL map to COMPLETED/PASS|FAIL; bounded stable
+  failure-code explanations (never report prose); diagnostics-only metrics
+  with no threshold verdict; verdict mismatch, missing finding, forbidden
+  research claim, and phrase-envelope violation FAIL; expected no-report
+  with correct code PASS, wrong code FAIL; evaluator exception is runner
+  ERROR; cancellation propagates
+
+run service (RPT-R01..R13):
+  report-writer/v1 requires the Report Writer target; wrong/empty datasets
+  rejected before model work; cases projected to the common runner;
+  cancellation propagates; no LangSmith dependency
+
+CLI run (RPT-R01..R13):
+  report-writer/v1 dispatches to the Report Writer benchmark seam; prior
+  three targets unchanged; unsupported target rejected; PASS/FAIL/ERROR
+  exits 0/1/2; local run constructs no LangSmith client; verify-first;
+  drift refuses before target; publication failure exit 2; FAIL stays exit
+  1 after successful publication; missing model credential bounded exit 2;
+  the Report Writer benchmark never bootstraps the research corpus;
+  cancellation propagates
+
+LangSmith targets (RPT-LS01..LS10):
+  exact report-writer mirror allows the run; drift refuses before model;
+  categorical PASS/FAIL/ERROR publication reused; one ATI execution per
+  case; no raw report/prompt/model content in metadata; confirmation
+  mismatch fails closed
+
+workflow static tests (RPT-W01..W04):
+  report-writer/v1 accepted by the dataset-agnostic run step; stale
+  Evidence-Analyst-only run description corrected; no research-corpus
+  bootstrap step in the workflow; prior targets remain supported
+
+PostgreSQL vertical slice
+(`tests/integration/test_evaluation_report_writer_runner.py`):
+  real scenarios -> strict loader -> repository-owned fixture -> real
+  materializer (run-scoped execution identity) -> PostgreSQL -> real
+  Assessment/Research persistence -> ReportWriterInputLoader -> real
+  ReportWriter -> FakeLlmClient -> real provenance validator -> real report
+  persistence -> actual persisted report/no-report -> existing
+  ReportWriterEvaluator -> PR 30 adapter -> common EvaluationRunner; S01..S05
+  PASS with the pointer advanced to the persisted report; S06 unsupported
+  reference rejected by the real provenance boundary (no report/history/
+  pointer); S07 real structured-output repair exhaustion (two bounded
+  attempts); S08 real stale-Assessment race (Assessment B current, no
+  report); runtime-valid-but-scenario-wrong output FAIL (report still
+  persists: FAIL is distinct from ERROR); unexpected model failure ERROR;
+  cancellation propagates; canonical Entity reuse and no destructive reset
+```
+
+PR 30E changes no existing V1 scenario semantics, no production Report
+Writer/Assessment/Research behavior, and no common evaluation contract;
+adds no DB migration; and keeps every mandatory test free of live
+LLM/LangSmith dependencies.
+
 ### Threat Research evaluation baseline (PR 22D)
 
 PR 22D adds a separate **behavioral evaluation layer** over the unchanged

@@ -326,6 +326,56 @@ class TestRunOperation:
         assert all("--langsmith" in run for run in run_steps)
 
 
+class TestReportWriterWorkflow:
+    """RPT-W01..W04: Report Writer acceptance and description accuracy."""
+
+    def test_rpt_w01_report_writer_accepted(self) -> None:
+        """RPT-W01 the workflow accepts report-writer/v1 as a dataset."""
+        workflow = _load(WORKFLOW_PATH)
+        rendered = yaml.safe_dump(workflow)
+        assert "report-writer/v1" in rendered
+        # The run step remains dataset-agnostic, serving Report Writer too.
+        run_steps = [
+            (step.get("run") or "")
+            for step in _steps(workflow)
+            if "ati-eval run" in (step.get("run") or "")
+        ]
+        assert run_steps
+        assert all('ati-eval run "${{ inputs.dataset }}"' in run for run in run_steps)
+
+    def test_rpt_w02_stale_evidence_analyst_only_description_corrected(self) -> None:
+        """RPT-W02 the run description no longer claims an Analyst-only benchmark."""
+        description = _triggers(_load(WORKFLOW_PATH))["workflow_dispatch"]["inputs"][
+            "operation"
+        ]["description"]
+        assert isinstance(description, str)
+        assert "Evidence Analyst benchmark" not in description
+        assert "report-writer/v1" in description
+        assert "evidence-analyst/v1" in description
+        assert "coordinator/v1" in description
+        assert "research-agent/v1" in description
+
+    def test_rpt_w03_no_research_corpus_bootstrap_step(self) -> None:
+        """RPT-W03 the workflow never bootstraps a research corpus itself.
+
+        Report Writer fixtures materialize ResearchResults directly; the
+        workflow's run step only invokes ``ati-eval run`` and never performs
+        a corpus/index bootstrap (that stays inside the Coordinator/Research
+        benchmark seams).
+        """
+        workflow = _load(WORKFLOW_PATH)
+        run_lines = [
+            line
+            for step in _steps(workflow)
+            for line in (step.get("run") or "").splitlines()
+            if "ati-eval run" in (step.get("run") or "")
+        ]
+        for line in run_lines:
+            assert "bootstrap" not in line
+            assert "ingest" not in line
+            assert "index" not in line
+
+
 class TestOrdinaryCiUncredentialed:
     """EA-W13 ordinary CI remains uncredentialed and offline."""
 
