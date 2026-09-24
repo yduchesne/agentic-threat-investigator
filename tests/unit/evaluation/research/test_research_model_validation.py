@@ -8,6 +8,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
+from agentic_threat_investigator.evaluation.common.models import (
+    ExpectedBehavior,
+    ScenarioSpecification,
+)
 from agentic_threat_investigator.evaluation.research import (
     ExpectedResearchClaim,
     ExpectedResearchResult,
@@ -21,16 +26,29 @@ from agentic_threat_investigator.evaluation.research import (
     ResearchSynthesisScenario,
 )
 
+_SPECIFICATION = ScenarioSpecification(
+    title="Unit retrieval scenario",
+    description="A deterministic unit retrieval scenario.",
+    target=EvaluationTarget.RESEARCH_AGENT,
+    purpose="Exercises retrieval unit validation.",
+    operational_relevance="Relevant to retrieval unit coverage.",
+    regression_risk="Protects retrieval contract regressions.",
+    expected_behavior=ExpectedBehavior(
+        required=("The expected relevant source record is retrieved.",),
+        forbidden=("Forbidden source records appear in the retrieved set.",),
+    ),
+)
 
-def test_retrieval_scenario_rejects_blank_query_and_description() -> None:
-    """Blank queries and blank descriptions fail model validation."""
+
+def test_retrieval_scenario_rejects_blank_query() -> None:
+    """Blank retrieval queries fail model validation."""
     with pytest.raises(ValidationError):
         ResearchRetrievalScenario(
-            id="unit.scenario", version=1, query="   ", max_results=3
-        )
-    with pytest.raises(ValidationError):
-        ResearchRetrievalScenario(
-            id="unit.scenario", version=1, query="q", max_results=3, description=" "
+            id="unit.scenario",
+            version=1,
+            specification=_SPECIFICATION,
+            query="   ",
+            max_results=3,
         )
 
 
@@ -38,12 +56,18 @@ def test_retrieval_scenario_rejects_blank_filters_and_overlap() -> None:
     """Blank filter entries and required/forbidden overlap fail closed."""
     with pytest.raises(ValidationError):
         ResearchRetrievalScenario(
-            id="unit.scenario", version=1, query="q", max_results=3, source_ids=(" ",)
+            id="unit.scenario",
+            version=1,
+            specification=_SPECIFICATION,
+            query="q",
+            max_results=3,
+            source_ids=(" ",),
         )
     with pytest.raises(ValidationError):
         ResearchRetrievalScenario(
             id="unit.scenario",
             version=1,
+            specification=_SPECIFICATION,
             query="q",
             max_results=3,
             expected_relevant_source_records=("rec",),
@@ -53,6 +77,7 @@ def test_retrieval_scenario_rejects_blank_filters_and_overlap() -> None:
         ResearchRetrievalScenario(
             id="unit.scenario",
             version=1,
+            specification=_SPECIFICATION,
             query="q",
             max_results=3,
             expected_relevant_source_records=("rec",),
@@ -105,6 +130,7 @@ def test_synthesis_scenario_rejects_blank_filters_and_undeclared_labels() -> Non
             "id": "unit.synthesis",
             "version": 1,
             "fixture": ResearchFixtureReference(name="fixture"),
+            "specification": _SPECIFICATION,
             "query": "q",
             "max_results": 3,
             "expected": ExpectedResearchResult(),

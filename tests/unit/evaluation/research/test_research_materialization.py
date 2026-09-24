@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from agentic_threat_investigator.domain.research import RetrievedChunk
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
 from agentic_threat_investigator.evaluation.research import (
     ExpectedResearchResult,
     ResearchFixtureReference,
@@ -16,6 +17,7 @@ from agentic_threat_investigator.evaluation.research import (
     ResearchSynthesisScenario,
     resolve_research_scenario,
 )
+from tests.support.evaluation_common import unit_specification
 
 
 def _chunk(record_id: str, *, citation_id: UUID | None = None) -> RetrievedChunk:
@@ -38,6 +40,7 @@ def _scenario(**overrides: Any) -> ResearchSynthesisScenario:
         "id": "unit.materialization",
         "version": 1,
         "fixture": ResearchFixtureReference(name="mitre-attack-small"),
+        "specification": unit_specification(target=EvaluationTarget.RESEARCH_AGENT),
         "query": "obfuscate command and control traffic",
         "max_results": 3,
         "source_records": {"alpha": "record-a", "beta": "record-b"},

@@ -1,17 +1,44 @@
 {
   "id": "real-mitre-technique-filter",
   "version": 1,
-  "description": "A document-type filter to attack_technique isolates the technique record at rank one.",
+  "specification": {
+    "title": "Technique filter isolates the technique at rank one",
+    "description": "A document-type filter to attack_technique isolates the technique record at rank one.",
+    "target": "research-agent",
+    "purpose": "Verify a document-type filter to attack_technique returns the technique record at rank one.",
+    "operational_relevance": "Focused technique research must land on the technique, not sibling corpus documents.",
+    "regression_risk": "Mixed-type distances could let non-technique records outrank the expected technique.",
+    "expected_behavior": {
+      "required": [
+        "The technique record ranks first",
+        "No non-technique document type is retrieved"
+      ],
+      "forbidden": [
+        "A non-technique record outranks the expected technique record"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "retrieval-filter-enforcement",
+      "retrieval-truth-declaration"
+    ]
+  },
   "query": "obfuscate command-and-control traffic conceal exfiltrated data",
   "max_results": 5,
   "source_ids": [],
-  "document_types": ["attack_technique"],
+  "document_types": [
+    "attack_technique"
+  ],
   "expected_relevant_source_records": [
     "attack-pattern--8a8e9e5e-2b4c-4d6e-8f0a-112233445566"
   ],
   "expected_forbidden_source_records": [],
-  "expected_source_ids": ["urn:ati:source:mitre_attack"],
-  "expected_document_types": ["attack_technique"],
+  "expected_source_ids": [
+    "urn:ati:source:mitre_attack"
+  ],
+  "expected_document_types": [
+    "attack_technique"
+  ],
   "expected_max_source_rank": 1,
   "expected_retrieval_gap": false
 }

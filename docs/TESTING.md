@@ -1705,6 +1705,464 @@ context, and preserve LLM-accounting version increments. `FakeLlmClient` is
 the only fake external model boundary; tests never require live Internet or
 a live LLM.
 
+### PR 30A common evaluation foundation tests
+
+PR 30A adds one backend-neutral evaluation contract under
+`src/agentic_threat_investigator/evaluation/common/` and freezes it with
+fully offline, deterministic tests in `tests/unit/evaluation/common/` plus
+dataset tests in `tests/unit/evaluation/test_datasets.py`:
+
+```text
+common models (EVAL-A01..A12):
+  COMPLETED+PASS and COMPLETED+FAIL valid; ERROR+no-verdict valid;
+  ERROR+PASS/FAIL and COMPLETED+null rejected; no numeric score field;
+  nonblank explanations; stable evaluator IDs; PASS/FAIL/ERROR
+  aggregation rules identical to the frozen contract; timestamps absent;
+  JSON-safe diagnostics that never alter aggregation
+
+scenario-quality validation (EVAL-S01..S15):
+  fully described case loads; missing/blank title, description, purpose,
+  operational_relevance, and regression_risk rejected; empty, blank, or
+  duplicate-normalized expected-behavior statements rejected; duplicate
+  case IDs rejected; invalid dataset versions and unknown targets
+  rejected; target/version mismatches rejected; invalid/duplicate
+  architecture refs rejected; unknown fields fail closed; target-specific
+  fixture/expectation validation still executes; strict duplicate-key JSON
+  loading; deterministic target inference
+
+runner (EVAL-R01..R10):
+  all-PASS -> dataset PASS; evaluator FAIL -> FAIL; evaluator exception
+  -> ERROR never FAIL; target exception -> case ERROR; cancellation
+  propagates; independent cases continue after an ERROR; deterministic
+  case and evaluator ordering; no backend/network dependency; diagnostics
+  cannot affect aggregation; malformed datasets refuse to start
+
+reporting (EVAL-P01..P06):
+  correct PASS/FAIL/ERROR summaries; failing case/evaluator/explanation
+  identified; ERROR visually distinct from FAIL; machine output
+  round-trips with sorted keys; no aggregate numeric score; human report
+  never exposes diagnostics or secrets
+
+datasets:
+  every registered target loads with deterministic counts/ordering;
+  research-agent concatenates retrieval then synthesis; unregistered and
+  version-mismatched datasets refuse; mixed-version and mixed-target
+  directories reject; `ati-eval validate` CLI exit codes offline
+```
+
+PR 30A requires no LangSmith, no real LLM, and no network access anywhere
+in the unit suite; future judge scenarios (PR 30B/30C) stay offline behind
+deterministic fakes. The optional credentialed evaluation workflow (real
+model runs uploading to LangSmith) begins in PR 30B only.
+
+### PR 30B LangSmith adapter tests
+
+PR 30B adds the LangSmith evaluation adapter under
+`src/agentic_threat_investigator/evaluation/backends/langsmith/` with a
+fully deterministic, network-free, credential-free unit matrix in
+`tests/unit/evaluation/langsmith/` (fake-boundary tests only) and static
+workflow tests. All ordinary tests inject the in-memory
+`FakeLangSmithClient` (or the duck-typed `FakeSdkClient` for the real SDK
+wrapper); no test acquires `LANGSMITH_API_KEY` or reaches the network, and
+no test merely skips without a key and calls that coverage.
+
+```text
+mapping (LS-M01..M10):
+  deterministic dataset names; stable case identity inputs;
+  required/forbidden behavior projection; sorted tag/architecture
+  metadata; identical canonical projection for identical inputs; digest
+  changes on any semantic change; ordering-only changes keep the digest;
+  no secret/raw runtime fields projected; projection schema version
+  emitted; malformed metadata rejected before any remote call
+
+sync (LS-S01..S16):
+  absent dataset -> create + examples; existing empty dataset -> create;
+  exact mirror -> no writes; only missing examples created; same
+  identity/digest -> unchanged; digest mismatch -> fail without overwrite;
+  remote extra ATI identity -> fail without delete; duplicate remote
+  identity -> fail; dataset identity mismatch -> fail; unsupported
+  projection schema -> fail; malformed local -> no remote mutation;
+  create/list/create-examples API errors surfaced; repeated identical sync
+  performs zero writes; cancellation propagates
+
+verify (LS-V01..V08):
+  exact mirror success; missing dataset/example/extra example/digest
+  mismatch/duplicate identity/malformed metadata all fail closed;
+  verification performs no writes
+
+result mapping (LS-R01..R10):
+  PASS/FAIL/ERROR map to categorical pass/fail/error (never numeric);
+  bounded explanations preserved; ERROR explanations sanitized;
+  diagnostics never published by default; case/run aggregates categorical
+  only; stable evaluator feedback keys/order; no score/weight/percentage
+
+client boundary (LS-C01..C06):
+  SDK dataset/example objects convert to bounded DTOs; foreign metadata
+  filtered to the ati.* namespace; SDK exceptions become bounded backend
+  errors; credential-like/control-character text bounded out of messages;
+  cancellation propagates; no SDK object escapes the adapter boundary
+
+CLI (LS-CLI01..CLI09):
+  valid sync/verify succeed through the fake; invalid datasets fail
+  before any client call; missing credentials bounded nonzero failure
+  with no environment dump; drift exits nonzero; pre-existing validate
+  unchanged; run command deferred to PR 30C; no secret in output
+
+workflow static tests (LS-W01..W13):
+  evaluation.yml exists; workflow_dispatch only (no push/PR/schedule);
+  contents: read; LANGSMITH_API_KEY only (PR 30B has no model-provider
+  secret); Python 3.14; uv sync --locked; local validation before the
+  remote operation; invokes ati-eval langsmith; ci.yml stays
+  uncredentialed (GITHUB_TOKEN only)
+```
+
+PR 30B changes no production agent/persistence behavior, requires no
+living LangSmith service for mandatory CI, and adds no dependency beyond
+the already-locked `langsmith>=0.3.45,<0.12` bound inspected against the
+installed 0.11.x SDK. A real LangSmith smoke is manual only, through the
+optional `workflow_dispatch` workflow or operator execution.
+
+### PR 30C real Evidence Analyst target tests
+
+PR 30C adds the first real target execution layer
+(`tests/unit/evaluation/analyst/`, `tests/unit/evaluation/langsmith/`,
+`tests/integration/`) with the same deterministic discipline: mandatory
+CI stays offline/uncredentialed (FakeLlmClient at the model boundary,
+FakeLangSmithClient at the remote boundary, real PostgreSQL only in the
+`integration`-marked vertical slice).
+
+```text
+target executor (EA-T01..T12):
+  exact identity lookup; unknown case/version mismatch/duplicate identity
+  fail closed; target mismatch refuses before any model call;
+  materialization then exactly one analyst call; persisted Assessment +
+  resolution returned; LLM/persistence failures are runner ERROR;
+  cancellation propagates; two cases never cross-contaminate;
+  deterministic same-case rerun; target has no LangSmith dependency
+
+evaluator adapter (EA-E01..E10):
+  existing evaluator PASS/FAIL map to COMPLETED/PASS and COMPLETED/FAIL;
+  deterministic nonblank explanation; JSON-safe descriptive diagnostics;
+  partial coverage never decides a verdict; no numeric correctness;
+  identity mismatch is runner ERROR; cancellation propagates; forbidden
+  support and missing required contradiction FAIL
+
+run service (EA-R01..R14):
+  all cases projected to the runner; non-analyst dataset rejected;
+  pass/fail/error aggregation preserved; no LangSmith dependency;
+  cancellation propagates; exactly one materializer + analyst call per
+  case; one case rerun stays deterministic
+
+LangSmith experiment (EA-LS01..LS15):
+  exact mirror allows the experiment; one case -> one remote case
+  association; PASS/FAIL/ERROR map to pass/fail/error; missing remote
+  dataset/digest drift refuse before any model work (verify-first);
+  feedback acceptance confirms; feedback/confirmation failures fail
+  closed; no score/threshold; diagnostics not uploaded; metadata bounded
+  and secret-free; cancellation propagates; no duplicate model execution
+  (evaluate()/aevaluate() never invoked)
+
+CLI run (EA-R06..R12):
+  local run constructs no LangSmith client; PASS exits 0; FAIL exits 1;
+  ERROR exits 2; missing model credential bounded exit 2; deterministic
+  driver rejected; publication failure is exit 2; FAIL stays exit 1 after
+  successful publication; non-analyst dataset rejected
+
+workflow static tests (EA-W01..W18):
+  workflow_dispatch only; contents read; operations verify/sync/run;
+  Python 3.14; uv sync --locked; validate before run; LangSmith verify
+  before the model run; PostgreSQL and migrations configured for run;
+  LANGSMITH_API_KEY used; the model-provider secret is wired only for run;
+  verify/sync need no model execution; ordinary CI uncredentialed; no
+  push/PR/schedule; no write permission; secrets never echoed/literalized
+
+PostgreSQL vertical slice (integration):
+  real scenarios -> real materializer -> real loader -> real
+  EvidenceAnalyst -> FakeLlmClient -> real AssessmentPersistenceService
+  -> persisted Assessment -> real evaluator through the PR 30 adapter ->
+  common EvaluationRunner; direct-evidence PASS, contradiction PASS,
+  nonconforming output FAIL (still persists), LLM failure ERROR (nothing
+  persists, one bounded attempt); rerun reuses the fixture and evaluates
+  the current invocation
+```
+
+PR 30C changes no existing V1 scenario semantics, no production
+Evidence Analyst behavior, and no common evaluation contract; adds no DB
+migration; and keeps every mandatory test free of live LLM/LangSmith
+dependencies.
+
+### PR 30D Coordinator + Research Agent target tests
+
+PR 30D adds the second and third real target layers with the same
+deterministic discipline: real PostgreSQL/pgvector in the
+`integration`-marked vertical slices, FakeLlmClient at every model
+boundary, FakeLangSmithClient at the remote boundary, and offline/
+uncredentialed ordinary CI. Coordinator research-lifecycle slices boot the
+repository-owned ATT&CK fixture corpus through the production
+ingestion/indexing services (deterministic hashing embeddings).
+
+```text
+Coordinator target (C-T01..T14):
+  exact identity lookup; unknown case/version mismatch/duplicate identity
+  fail closed; materialize + one production investigation execution;
+  durable terminal state + structured actions (no log parsing); version
+  transition span; provider/analysis failure is runner ERROR; cancellation
+  propagates; repeated cases use fresh run-scoped identities; no LangSmith
+  dependency
+
+Coordinator evaluator (C-E01..E10):
+  existing evaluator PASS/FAIL map to COMPLETED/PASS|FAIL; deterministic
+  bounded explanation; metrics diagnostics only (no threshold verdict);
+  evaluator exception is runner ERROR; cancellation propagates;
+  policy-invalid pivot, duplicate research request, and wrong stop reason
+  all FAIL through the real existing evaluator
+
+Research dispatch (R-T01..T16):
+  retrieval/synthesis exact identities; cross-family duplicate rejected;
+  retrieval branch zero LLM; synthesis branch one real agent execution;
+  exact supplied chunks from the actual invocation (no probe); resolution
+  over the exact supplied sequence; empty retrieval persists empty with
+  zero LLM; LLM failure ERROR; unsupported citation ERROR; persistence
+  failure ERROR; before/after snapshots; cancellation propagates; no
+  LangSmith dependency
+
+Research evaluator (R-E01..E14):
+  retrieval/synthesis PASS/FAIL mapping with per-kind evaluator ids;
+  JSON-safe metrics diagnostics only; no numeric correctness;
+  required/forbidden citation FAIL; Evidence/RelationshipObservation/
+  Assessment promotion hard-gate FAIL; evaluator exception ERROR;
+  cancellation propagates
+
+CLI run (D-R01..R15):
+  coordinator/v1 and research-agent/v1 dispatch to their benchmark seams;
+  Evidence Analyst unchanged; unsupported target rejected; pass/fail/error
+  exits 0/1/2; local run constructs no LangSmith client; verify-first;
+  drift/missing mirror refuse before target work; publication failure exit
+  2; FAIL stays exit 1 after successful publication; missing credential
+  bounded; cancellation propagates
+
+LangSmith targets (D-LS01..LS10):
+  exact mirrors allow coordinator/research/analyst runs; drift refuses
+  before target; one ATI execution per case; categorical values unchanged;
+  no raw research content in metadata; no numeric score; verify/sync stay
+  model-free
+
+workflow static tests (W19/W20 + the PR 30B/30C set):
+  dataset input quoted as data; Evidence Analyst remains supported;
+  dataset-agnostic run step; PostgreSQL + migrations; research corpus
+  bootstrap inside the benchmark seams; LANGSMITH_API_KEY always and
+  ATI_OPENAI_API_KEY only for run; workflow_dispatch only; contents read
+
+PostgreSQL vertical slices (integration):
+  Coordinator: productive-pivot PASS (domain-discovers-ip), immediate-stop
+  PASS (sufficient-evidence-stop), justified-replan PASS
+  (one-justified-replan), research lifecycle PASS (requested -> completed,
+  one request), exhausted research bounded (no duplicate), deliberately
+  nonconforming trajectory FAIL, materialization dependency ERROR, full
+  corpus smoke (every case PASS/FAIL/ERROR, never crashes)
+  Research: retrieval PASS with zero LLM calls, forbidden record FAIL,
+  synthesis relevant + contradictory PASS with non-promotion,
+  expected-empty retrieval zero-model-call PASS, unsupported citation
+  ERROR, scenario-wrong claim FAIL
+```
+
+Known honest state for V1 Coordinator: several `coordinator/v1` scenarios
+carry allowed-pivot oracles and budgets authored against an older
+Coordinator topology (pre-PR-28B), so their trajectories no longer
+reproduce under the current production graph; the run service reports them
+deterministically as FAIL (or ERROR for the ORGANIZATION materialization
+limitation in `non-pivotable-discovery`). No scenario expectation was
+weakened, no production policy changed, and no V1 case is silently skipped.
+
+PR 30D changes no existing V1 scenario semantics, no production
+Coordinator/Research behavior, and no common evaluation contract; adds no
+DB migration; and keeps every mandatory test free of live LLM/LangSmith
+dependencies.
+
+### PR 30E Report Writer target tests
+
+PR 30E adds the Report Writer real-target layer with the same deterministic
+discipline: real PostgreSQL in the `integration`-marked vertical slice,
+FakeLlmClient exactly at the model boundary, FakeLangSmithClient at the
+remote boundary, and offline/uncredentialed ordinary CI. The canonical
+fixture/materializer code moved out of `tests.support` into
+`agentic_threat_investigator.evaluation.report_writer.fixtures|scenarios`;
+`tests/support/report_writer_fixtures.py|scenarios.py` are thin test-only
+re-exports and production evaluation code never imports `tests.support`.
+
+```text
+fixture/materializer (RPT-F01..F09):
+  known fixture exact; unknown fixture fails closed; same execution
+  identity deterministic; different execution identities isolate
+  execution-owned Investigation/Assessment/EvidenceObservation/Research
+  identities while canonical Entity/Relationship identities stay global;
+  Assessment/Research persistence confirmed (integration); canonical
+  Entity reuse without destructive reset (integration); evaluation package
+  has no tests.support import
+
+target executor (RPT-T01..T14):
+  exact identity lookup; unknown/version mismatch/duplicate fail closed;
+  normal scenario runs the production writer exactly once; success returns
+  the persisted report; exact current-execution model-attempt count;
+  declared no-report failures become evaluation inputs (PASS), unexpected
+  exceptions are runner ERROR; allowlisted typed failures map to stable
+  codes (report_provenance_error / invalid_structured_output /
+  stale_report_input) without message parsing; cancellation propagates;
+  repeated runs use isolated execution identities; no LangSmith dependency
+
+evaluator adapter (RPT-E01..E13):
+  existing evaluator PASS/FAIL map to COMPLETED/PASS|FAIL; bounded stable
+  failure-code explanations (never report prose); diagnostics-only metrics
+  with no threshold verdict; verdict mismatch, missing finding, forbidden
+  research claim, and phrase-envelope violation FAIL; expected no-report
+  with correct code PASS, wrong code FAIL; evaluator exception is runner
+  ERROR; cancellation propagates
+
+run service (RPT-R01..R13):
+  report-writer/v1 requires the Report Writer target; wrong/empty datasets
+  rejected before model work; cases projected to the common runner;
+  cancellation propagates; no LangSmith dependency
+
+CLI run (RPT-R01..R13):
+  report-writer/v1 dispatches to the Report Writer benchmark seam; prior
+  three targets unchanged; unsupported target rejected; PASS/FAIL/ERROR
+  exits 0/1/2; local run constructs no LangSmith client; verify-first;
+  drift refuses before target; publication failure exit 2; FAIL stays exit
+  1 after successful publication; missing model credential bounded exit 2;
+  the Report Writer benchmark never bootstraps the research corpus;
+  cancellation propagates
+
+LangSmith targets (RPT-LS01..LS10):
+  exact report-writer mirror allows the run; drift refuses before model;
+  categorical PASS/FAIL/ERROR publication reused; one ATI execution per
+  case; no raw report/prompt/model content in metadata; confirmation
+  mismatch fails closed
+
+workflow static tests (RPT-W01..W04):
+  report-writer/v1 accepted by the dataset-agnostic run step; stale
+  Evidence-Analyst-only run description corrected; no research-corpus
+  bootstrap step in the workflow; prior targets remain supported
+
+PostgreSQL vertical slice
+(`tests/integration/test_evaluation_report_writer_runner.py`):
+  real scenarios -> strict loader -> repository-owned fixture -> real
+  materializer (run-scoped execution identity) -> PostgreSQL -> real
+  Assessment/Research persistence -> ReportWriterInputLoader -> real
+  ReportWriter -> FakeLlmClient -> real provenance validator -> real report
+  persistence -> actual persisted report/no-report -> existing
+  ReportWriterEvaluator -> PR 30 adapter -> common EvaluationRunner; S01..S05
+  PASS with the pointer advanced to the persisted report; S06 unsupported
+  reference rejected by the real provenance boundary (no report/history/
+  pointer); S07 real structured-output repair exhaustion (two bounded
+  attempts); S08 real stale-Assessment race (Assessment B current, no
+  report); runtime-valid-but-scenario-wrong output FAIL (report still
+  persists: FAIL is distinct from ERROR); unexpected model failure ERROR;
+  cancellation propagates; canonical Entity reuse and no destructive reset
+```
+
+PR 30E changes no existing V1 scenario semantics, no production Report
+Writer/Assessment/Research behavior, and no common evaluation contract;
+adds no DB migration; and keeps every mandatory test free of live
+LLM/LangSmith dependencies.
+
+### PR 30F End-to-end Investigation target tests
+
+PR 30F adds the end-to-end Investigation real-target layer: one case is one
+complete deterministic investigation world executed through the production
+Coordinator graph/policy, providers/extractors/persistence, Evidence
+Analyst, Research Agent where authorized, and production Report Writer after
+the terminal state. The same deterministic discipline applies: real
+PostgreSQL + pgvector, FakeLlmClient exactly at the model boundary,
+FakeLangSmithClient at the remote boundary, and offline/uncredentialed
+ordinary CI.
+
+```text
+models (L01..L09):
+  valid V1 scenario loads; unknown fields rejected; wrong target rejected
+  at dataset level; mixed/wrong version rejected; duplicate cases rejected;
+  invalid semantic labels rejected; negative envelopes rejected;
+  investigation/v1 registered; deterministic file order
+
+fixtures (F01..F08):
+  known fixture resolves its exact world; unknown fixture fails closed;
+  scenario-owned worlds validated through the strict catalog
+  extraction-contract loader; provider registries expose exactly the
+  enabled world-truth providers (never policy)
+
+materialization (F03..F10, integration):
+  same execution identity deterministic planned state; new execution
+  identity isolates Investigation worlds; initial state is a
+  production-valid RUNNING Investigation with only the root Entity
+  (providers discover everything else); providers state truth only;
+  root persists through the normal repository seam; deterministic
+  Research corpus via production ingestion/indexing; no live dependency
+  for non-Research worlds; reruns require no destructive cleanup
+
+target executor (T01..T16):
+  exact identity lookup; production runner invoked once per case;
+  terminal durable state required; final current Assessment loaded from
+  persistence; production Report Writer after terminal state consuming
+  the actual final Assessment; captured structured trajectory; exact
+  provider/LLM counts; unexpected runner failure ERROR; report failure
+  ERROR; cancellation propagates; repeated runs isolated; no LangSmith;
+  no component-target chaining (the end-to-end target never invokes the
+  analyst/coordinator/research/report-writer evaluation targets)
+
+evaluator (E01..):
+  every outcome/trajectory/provenance/efficiency predicate tested
+  independently; all true -> PASS; one semantic violation -> FAIL;
+  evaluator exception -> ERROR via the common runner; values within an
+  envelope PASS regardless of numeric variation; cancellation propagates
+
+run service (INV-R01..R06):
+  investigation/v1 requires the Investigation target; wrong/empty
+  datasets rejected before model work; cases projected to the common
+  runner; cancellation propagates; bounded output payload; no LangSmith
+
+CLI run (INV-R01..R04/INV-LS08):
+  investigation/v1 dispatches to the end-to-end benchmark seam; prior
+  four targets unchanged; unsupported target rejected; PASS/FAIL/ERROR
+  exits 0/1/2; local run constructs no LangSmith client; drift refuses
+  before target; missing model credential bounded exit 2; the end-to-end
+  benchmark bootstraps the deterministic research corpus; publication
+  metadata carries no raw prompt/model/Evidence/Research/report content
+
+LangSmith targets (INV-LS01..LS03, unit):
+  exact investigation mirror allows the run; drift refuses before model;
+  the real investigation corpus syncs and verifies through the generic
+  dataset path; the scenario semantic digest is stable and
+  content-sensitive
+
+workflow static tests (INV-W01..W03):
+  investigation/v1 accepted by the dataset-agnostic run step; run
+  operation description lists investigation/v1; prior component targets
+  remain supported
+
+PostgreSQL vertical slice
+(`tests/integration/test_evaluation_investigation_runner.py`):
+  real scenario JSON -> strict loader -> repository-owned world -> real
+  PostgreSQL/pgvector -> persisted RUNNING Investigation -> production
+  LocalInvestigationRunner -> production Coordinator -> production
+  provider/extraction/persistence -> production Evidence Analyst ->
+  production Research Agent where authorized -> FakeLlmClient only at
+  the model boundary -> terminal durable Investigation -> final current
+  Assessment -> production ReportWriter -> persisted report -> durable
+  Evidence/Relationship/Research/timeline snapshot -> InvestigationEvaluator
+  -> common EvaluationRunner; I01..I06 canonical worlds PASS (malicious
+  multi-source, benign, inconclusive, conflicting, research-required,
+  cycle/duplicate) with zero forbidden duplicates where authored;
+  I07 structurally valid but scenario-wrong model output is
+  COMPLETED/FAIL (FAIL distinct from ERROR); I08 unexpected model error
+  is ERROR; I09 report-stage error is case ERROR; I10 cancellation
+  propagates; I11 rerun isolation (distinct Investigation worlds, no
+  destructive cleanup); full-corpus smoke never crashes
+```
+
+PR 30F changes no existing V1 scenario semantics, no production
+Coordinator/provider/Evidence Analyst/Research Agent/Report Writer
+behavior, and no common evaluation contract; adds no DB migration; and
+keeps every mandatory test free of live LLM/LangSmith dependencies.
+
 ### Threat Research evaluation baseline (PR 22D)
 
 PR 22D adds a separate **behavioral evaluation layer** over the unchanged

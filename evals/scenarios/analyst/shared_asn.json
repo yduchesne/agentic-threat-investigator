@@ -1,12 +1,32 @@
 {
   "id": "shared_asn",
   "version": 1,
-  "description": "Sharing an ASN with a known malicious IP must not independently establish that the target is MALICIOUS; with no direct target evidence the acceptable envelope is INCONCLUSIVE.",
-  "tags": [
-    "evidence-analyst",
-    "shared-asn-regression",
-    "inconclusive"
-  ],
+  "specification": {
+    "title": "Shared ASN membership is not maliciousness evidence",
+    "description": "Sharing an ASN with a known malicious IP must not independently establish that the target is MALICIOUS; with no direct target evidence the acceptable envelope is INCONCLUSIVE.",
+    "target": "evidence-analyst",
+    "purpose": "Verify sharing an Autonomous System with a known malicious IP never establishes that the target is MALICIOUS.",
+    "operational_relevance": "Shared hosting and SaaS ASNs contain thousands of unrelated tenants; ASN guilt-by-association would generate mass false positives.",
+    "regression_risk": "The analyst could chain ASN membership evidence or its relationship observations into a material finding and a malicious verdict.",
+    "expected_behavior": {
+      "required": [
+        "The Assessment verdict is INCONCLUSIVE when the only link is shared-ASN membership",
+        "The Assessment states the shared-ASN contextual limitation"
+      ],
+      "forbidden": [
+        "No Supporting finding cites the ASN membership evidence or relationship observations",
+        "The Assessment reaches a MALICIOUS verdict from ASN co-location alone"
+      ]
+    },
+    "tags": [
+      "evidence-analyst",
+      "inconclusive",
+      "shared-asn-regression"
+    ],
+    "architecture_refs": [
+      "evidence-contextual-support-only"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious because it shares an ASN with a known malicious host.",
     "root_entity": "target_ip",

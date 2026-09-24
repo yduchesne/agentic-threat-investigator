@@ -1,7 +1,28 @@
 {
   "id": "depth-limit",
   "version": 1,
-  "description": "A discovered entity beyond max_depth never becomes a pivot.",
+  "specification": {
+    "title": "Entities beyond the depth limit are never pivoted",
+    "description": "A discovered entity beyond max_depth never becomes a pivot.",
+    "target": "coordinator",
+    "purpose": "Verify a discovered entity past max_depth is never turned into a pivot and the stop reason reflects the depth limit.",
+    "operational_relevance": "Depth bounds keep investigations from expanding indefinitely through nested infrastructure.",
+    "regression_risk": "The coordinator could pivot a deep entity and violate the depth budget, or stop with the wrong reason.",
+    "expected_behavior": {
+      "required": [
+        "The investigation stops with depth_limit_reached",
+        "The deep entity never appears as a pivot"
+      ],
+      "forbidden": [
+        "A pivot executes beyond the maximum investigation depth"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "depth-limit-enforcement",
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "depth-limit"
   },

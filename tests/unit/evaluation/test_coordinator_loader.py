@@ -10,12 +10,26 @@ import pytest
 from pydantic import ValidationError
 
 from agentic_threat_investigator.domain.investigation import StopReason
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
 from agentic_threat_investigator.evaluation.coordinator import (
     CoordinatorScenarioLoadError,
     load_coordinator_scenarios_directory,
 )
+from tests.support.evaluation_common import unit_specification
 
 _CORPUS = Path(__file__).parents[3] / "evals/scenarios/coordinator"
+
+
+def _spec_payload() -> dict[str, object]:
+    """Return the deterministic coordinator specification JSON payload."""
+    return unit_specification(target=EvaluationTarget.COORDINATOR).model_dump(
+        mode="json"
+    )
+
+
+def _coordinator_spec() -> object:
+    """Return the deterministic coordinator specification model."""
+    return unit_specification(target=EvaluationTarget.COORDINATOR)
 
 
 def test_corpus_loads_strictly_and_deterministically() -> None:
@@ -91,6 +105,7 @@ def test_unknown_fields_fail_closed(tmp_path: Path) -> None:
             {
                 "id": "x",
                 "version": 1,
+                "specification": _spec_payload(),
                 "fixture": {"name": "f"},
                 "expected": {
                     "expected_stop_reason": "sufficient_evidence",
@@ -105,6 +120,7 @@ def test_duplicate_scenario_ids_fail_closed(tmp_path: Path) -> None:
     base = {
         "id": "dup",
         "version": 1,
+        "specification": _spec_payload(),
         "fixture": {"name": "f"},
         "expected": {"expected_stop_reason": "sufficient_evidence"},
     }
@@ -137,6 +153,7 @@ def test_duplicate_labels_fail_closed(tmp_path: Path) -> None:
             {
                 "id": "dup-labels",
                 "version": 1,
+                "specification": _spec_payload(),
                 "fixture": {"name": "f"},
                 "expected": {
                     "expected_stop_reason": "sufficient_evidence",
@@ -183,6 +200,7 @@ def test_fixture_resolution_fails_closed_on_unknown_fixture() -> None:
     bogus = CoordinatorScenario(
         id="bogus",
         version=1,
+        specification=unit_specification(target=EvaluationTarget.COORDINATOR),
         fixture=CoordinatorFixtureReference(name="no-such-fixture"),
         expected=ExpectedCoordinatorTrajectory(
             expected_stop_reason=StopReason.NO_ELIGIBLE_PIVOTS
@@ -208,6 +226,7 @@ def test_fixture_resolution_fails_closed_on_unresolved_label() -> None:
     missing = CoordinatorScenario(
         id="missing-label",
         version=1,
+        specification=unit_specification(target=EvaluationTarget.COORDINATOR),
         fixture=CoordinatorFixtureReference(name="canonical-domain-ip"),
         expected=ExpectedCoordinatorTrajectory(
             required_pivots=("does_not_exist",),
@@ -234,6 +253,7 @@ def test_fixture_resolution_rejects_required_forbidden_overlap() -> None:
     overlap = CoordinatorScenario(
         id="overlap",
         version=1,
+        specification=unit_specification(target=EvaluationTarget.COORDINATOR),
         fixture=CoordinatorFixtureReference(name="canonical-domain-ip"),
         expected=ExpectedCoordinatorTrajectory(
             required_pivots=("resolved_ip",),
@@ -261,6 +281,7 @@ def _valid_scenario_json(*, allowed_pivots: object = ()) -> dict[str, object]:
     return {
         "id": "s-oracle",
         "version": 1,
+        "specification": _spec_payload(),
         "fixture": {"name": "f"},
         "expected": expected,
     }
@@ -278,6 +299,7 @@ def test_s1_allowed_pivots_omitted_fails_closed(tmp_path: Path) -> None:
     raw: dict[str, object] = {
         "id": "s-omitted",
         "version": 1,
+        "specification": _spec_payload(),
         "fixture": {"name": "f"},
         "expected": expected,
     }
@@ -334,6 +356,7 @@ def test_s5_unknown_allowed_entity_label_fails_resolution() -> None:
     bogus = CoordinatorScenario(
         id="unknown-allowed",
         version=1,
+        specification=unit_specification(target=EvaluationTarget.COORDINATOR),
         fixture=CoordinatorFixtureReference(name="canonical-domain-ip"),
         expected=ExpectedCoordinatorTrajectory(
             allowed_pivots=(ExpectedPivot(entity="does_not_exist", depth=1),),
@@ -355,6 +378,7 @@ def test_s6_required_pivot_not_in_allowed_set_fails_closed(tmp_path: Path) -> No
     raw: dict[str, object] = {
         "id": "s-uncovered",
         "version": 1,
+        "specification": _spec_payload(),
         "fixture": {"name": "f"},
         "expected": expected,
     }
@@ -374,6 +398,7 @@ def test_s7_forbidden_pivot_in_allowed_set_fails_closed(tmp_path: Path) -> None:
     raw: dict[str, object] = {
         "id": "s-conflict",
         "version": 1,
+        "specification": _spec_payload(),
         "fixture": {"name": "f"},
         "expected": expected,
     }
@@ -408,6 +433,7 @@ def test_s9_valid_allowed_pivot_resolves_to_expected_identity() -> None:
     scenario = CoordinatorScenario(
         id="valid-allowed",
         version=1,
+        specification=unit_specification(target=EvaluationTarget.COORDINATOR),
         fixture=CoordinatorFixtureReference(name="canonical-domain-ip"),
         expected=ExpectedCoordinatorTrajectory(
             allowed_pivots=(ExpectedPivot(entity="resolved_ip", depth=1),),

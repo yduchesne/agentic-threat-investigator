@@ -1,22 +1,54 @@
 {
   "id": "rpt-s02-inconclusive-sparse",
   "version": 1,
-  "description": "Inconclusive / sparse evidence: an INCONCLUSIVE/low Assessment with no findings. The report must preserve the inconclusive verdict, retain the limitation and unresolved question, and must not infer a benign verdict from the absence of hits. With no supplied findings or research claims, no narrative statement is authored.",
+  "specification": {
+    "title": "Inconclusive sparse evidence is not turned into a verdict",
+    "description": "Inconclusive / sparse evidence: an INCONCLUSIVE/low Assessment with no findings. The report must preserve the inconclusive verdict, retain the limitation and unresolved question, and must not infer a benign verdict from the absence of hits. With no supplied findings or research claims, no narrative statement is authored.",
+    "target": "report-writer",
+    "purpose": "Verify an INCONCLUSIVE Assessment with no findings is reported as inconclusive with its limitation and unresolved question, never as benign.",
+    "operational_relevance": "Honest inconclusive reporting preserves uncertainty instead of false-clearing infrastructure.",
+    "regression_risk": "The writer could infer a benign verdict from the absence of findings or drop the unresolved question.",
+    "expected_behavior": {
+      "required": [
+        "The report preserves the inconclusive verdict and low confidence",
+        "The report retains the required limitation and unresolved question"
+      ],
+      "forbidden": [
+        "The report emits a benign verdict",
+        "The report invents findings from absent evidence"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "assessment-faithful-reporting",
+      "caveat-preservation"
+    ]
+  },
   "fixture": "report-inconclusive",
   "expected": {
     "verdict": "inconclusive",
     "confidence": "low",
     "required_assessment_finding_ordinals": [],
-    "forbidden_assessment_finding_ordinals": [1, 2, 3],
+    "forbidden_assessment_finding_ordinals": [
+      1,
+      2,
+      3
+    ],
     "required_research_claim_labels": [],
     "forbidden_research_claim_labels": [],
-    "required_limitations": ["no evidence was available"],
-    "required_unresolved_questions": ["why no reputation data was retrieved"],
+    "required_limitations": [
+      "no evidence was available"
+    ],
+    "required_unresolved_questions": [
+      "why no reputation data was retrieved"
+    ],
     "required_next_steps": [],
     "min_narrative_statements": 0,
     "max_narrative_statements": 0,
     "required_phrases": [],
-    "forbidden_phrases": ["benign"],
+    "forbidden_phrases": [
+      "benign"
+    ],
     "expected_no_report": false
   }
 }

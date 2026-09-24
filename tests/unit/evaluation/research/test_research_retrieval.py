@@ -9,11 +9,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from agentic_threat_investigator.domain.research import RetrievedChunk
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
 from agentic_threat_investigator.evaluation.research import (
     ResearchRetrievalEvaluator,
     ResearchRetrievalFailureCode,
     ResearchRetrievalScenario,
 )
+from tests.support.evaluation_common import unit_specification
 
 _SOURCE = "urn:ati:source:mitre_attack"
 
@@ -46,6 +48,7 @@ def _scenario(**overrides: Any) -> ResearchRetrievalScenario:
         "version": 1,
         "query": "obfuscate command and control traffic",
         "max_results": 3,
+        "specification": unit_specification(target=EvaluationTarget.RESEARCH_AGENT),
         "expected_relevant_source_records": ("record-a",),
         "expected_source_ids": (_SOURCE,),
         "expected_document_types": ("attack_technique",),

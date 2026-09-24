@@ -105,6 +105,17 @@ Additionally:
   the changes being committed and pushed, and after all quality checks an integration tests have
   completed successfully.
 
+## Configuration and batch-persistence invariants
+
+- Follow `CONFIGURATION.md`: `default` is the base profile; `ATI_CONFIG_PROFILE` selects an optional override profile; configuration is loaded once at bootstrap.
+- Never log sensitive configuration values. Preserve recursive key-name redaction.
+- Batch persistence always uses bounded arrays of resource-specific PostgreSQL composite input types, expanded into temporary tables with set-oriented stored-function logic.
+- Assume batches may be large. Do not add a separate small-batch JSONB/CTE persistence path.
+- Python repositories must not implement reconciliation, version allocation, JSONB diff generation, or history creation.
+- Do not introduce row-level triggers for domain versioning/history.
+- Successful CREATE/UPDATE/soft DELETE creates a DB-assigned version and immutable history entry in the same transaction; UNCHANGED creates neither.
+- PostgreSQL 18 is the v0.1 database baseline.
+
 ## Storage, acquisition, and secrets invariants
 
 - BatchSource consumes pre-existing artifacts; it does not download them.

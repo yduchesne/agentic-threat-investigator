@@ -59,15 +59,15 @@ from agentic_threat_investigator.domain.assessment import (
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.relationships import RelationshipType
+from agentic_threat_investigator.evaluation.common.models import (
+    ScenarioSpecification,
+)
 
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 """Stable lowercase scenario identifiers: letters, digits, dot, dash, underscore."""
 
 _SEMANTIC_LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 """Stable lowercase semantic fixture labels: letters, digits, dot, dash, underscore."""
-
-_MAX_SCENARIO_TAGS = 10
-"""Bounded number of tags a scenario may carry."""
 
 _MAX_SCENARIO_ID_LENGTH = 64
 """Bounded scenario identifier length."""
@@ -633,32 +633,20 @@ def expected_support_labels(
 class AnalystScenario(BaseModel):
     """One repository-owned Evidence Analyst evaluation scenario.
 
-    The scenario carries a stable identifier, a positive version, a bounded
-    tag set, one deterministic fixture, and one expected-Assessment
-    contract. It never contains executable callbacks, model/prompt text, or
-    secrets.
+    The scenario carries a stable identifier, a positive version, the
+    common PR 30A scenario specification (title, narrative contract,
+    expected behavior, tags, architecture references), one deterministic
+    fixture, and one expected-Assessment contract. It never contains
+    executable callbacks, model/prompt text, or secrets.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     version: int = Field(ge=1)
-    description: str
-    tags: frozenset[str] = frozenset()
+    specification: ScenarioSpecification
     fixture: AnalystFixture
     expected: ExpectedAssessment
-
-    @field_validator("tags", mode="before")
-    @classmethod
-    def tags_reject_duplicates_and_bound(
-        cls, value: object, info: ValidationInfo
-    ) -> object:
-        """Reject duplicate tags and enforce the raw count bound."""
-        if isinstance(value, (list, tuple)) and len(value) > _MAX_SCENARIO_TAGS:
-            raise ValueError(
-                f"{info.field_name or 'tags'} is bounded to {_MAX_SCENARIO_TAGS} entries"
-            )
-        return _reject_duplicates(value, info.field_name or "tags")
 
     @field_validator("id", mode="after")
     @classmethod
@@ -667,28 +655,6 @@ class AnalystScenario(BaseModel):
         if len(value) > _MAX_SCENARIO_ID_LENGTH or not _SCENARIO_ID_RE.fullmatch(value):
             raise ValueError("scenario id must match " + _SCENARIO_ID_RE.pattern)
         return value
-
-    @field_validator("description", mode="after")
-    @classmethod
-    def description_not_blank(cls, value: str) -> str:
-        """Reject blank scenario descriptions."""
-        if not value.strip():
-            raise ValueError("scenario description must not be blank")
-        return value
-
-    @model_validator(mode="after")
-    def tags_bounded(self) -> "AnalystScenario":
-        """Require nonblank tags within a bounded count."""
-        # The mode="before" validator already rejects raw list/tuple inputs
-        # above the bound; this branch defends direct frozenset construction,
-        # which is not a supported authoring path.
-        if (
-            len(self.tags) > _MAX_SCENARIO_TAGS
-        ):  # pragma: no cover - before-validator guards raw input
-            raise ValueError(f"scenario tags are bounded to {_MAX_SCENARIO_TAGS}")
-        if any(not tag.strip() for tag in self.tags):
-            raise ValueError("scenario tags must not be blank")
-        return self
 
     @model_validator(mode="after")
     def expected_labels_resolve(self) -> "AnalystScenario":

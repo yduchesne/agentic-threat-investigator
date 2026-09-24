@@ -1,7 +1,28 @@
 {
   "id": "already-investigated-ip",
   "version": 1,
-  "description": "An IP already investigated at the same depth is not pivoted again.",
+  "specification": {
+    "title": "An already-investigated IP is not pivoted again",
+    "description": "An IP already investigated at the same depth is not pivoted again.",
+    "target": "coordinator",
+    "purpose": "Verify the coordinator does not re-pivot an entity already investigated at the same depth.",
+    "operational_relevance": "Re-analysing identical identities wastes provider budget and creates confusing duplicate work in long investigations.",
+    "regression_risk": "The coordinator could re-pivot the IP despite the existing investigation mark.",
+    "expected_behavior": {
+      "required": [
+        "The root-domain DNS provider work executes",
+        "The investigation stops with sufficient_evidence"
+      ],
+      "forbidden": [
+        "The already-investigated IP appears as a pivot execution"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "duplicate-discovery-suppression",
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "already-investigated-ip"
   },

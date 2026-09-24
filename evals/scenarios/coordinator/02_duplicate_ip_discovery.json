@@ -1,7 +1,27 @@
 {
   "id": "duplicate-ip-discovery",
   "version": 1,
-  "description": "The same IP is discovered twice; only one pivot executes.",
+  "specification": {
+    "title": "Duplicate IP discovery executes only one pivot",
+    "description": "The same IP is discovered twice; only one pivot executes.",
+    "target": "coordinator",
+    "purpose": "Verify that discovering the same IP twice suppresses the duplicate so exactly one pivot executes.",
+    "operational_relevance": "Real provider environments surface the same entity through multiple paths; duplicate pivots waste budget and pollute trajectories.",
+    "regression_risk": "The coordinator could execute the same entity identity twice or double-charge the provider budget.",
+    "expected_behavior": {
+      "required": [
+        "The discovered-IP pivot executes exactly once",
+        "The provider budget accounts for the suppressed duplicate"
+      ],
+      "forbidden": [
+        "The investigation pivots the same discovered IP more than once"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "duplicate-discovery-suppression"
+    ]
+  },
   "fixture": {
     "name": "duplicate-ip"
   },

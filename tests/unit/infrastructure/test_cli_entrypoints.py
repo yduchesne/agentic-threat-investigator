@@ -127,3 +127,103 @@ def test_cli08_geo_resolver_once_documented_in_help() -> None:
     finally:
         sys.stdout = previous
     assert "--once" in captured.getvalue()
+
+
+def test_cli09_ati_eval_registered_and_resolves() -> None:
+    """PR 30A ati-eval exists in the installed scripts and resolves to main."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    scripts = _console_scripts()
+    assert "ati-eval" in scripts
+    assert (
+        scripts["ati-eval"].value == "agentic_threat_investigator.cli:evaluation_main"
+    )
+    assert scripts["ati-eval"].load() is evaluation_main
+
+
+def test_cli10_ati_eval_validate_dataset_identity() -> None:
+    """PR 30A ati-eval validate accepts a canonical dataset identity offline."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    assert evaluation_main(["validate", "evidence-analyst/v1"]) == 0
+    assert evaluation_main(["validate", "coordinator/v1"]) == 0
+    assert evaluation_main(["validate", "geoint/v1"]) == 0
+    assert evaluation_main(["validate", "report-writer/v1"]) == 0
+    assert evaluation_main(["validate", "research-agent/v1"]) == 0
+
+
+def test_cli11_ati_eval_validate_directory_path() -> None:
+    """PR 30A ati-eval validate accepts a scenario directory path offline."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    assert evaluation_main(["validate", "evals/scenarios/analyst"]) == 0
+    assert evaluation_main(["validate", "evals/scenarios/research/retrieval"]) == 0
+    assert evaluation_main(["validate", "evals/scenarios/research/synthesis"]) == 0
+
+
+def test_cli12_ati_eval_validate_rejects_invalid_offline() -> None:
+    """PR 30A ati-eval validate exits nonzero for invalid input, offline."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    assert evaluation_main(["validate", "unknown-target/v1"]) == 1
+    assert evaluation_main(["validate", "evidence-analyst/v99"]) == 1
+    assert evaluation_main(["validate", "evals/scenarios/does-not-exist"]) == 1
+
+
+def test_cli13_ati_eval_validate_help_succeeds_offline() -> None:
+    """PR 30A ati-eval --help exits 0 without DB or network access."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    with pytest.raises(SystemExit) as excinfo:
+        evaluation_main(["--help"])
+    assert excinfo.value.code == 0
+
+
+def test_cli14_ati_eval_langsmith_help_succeeds_offline() -> None:
+    """PR 30B langsmith subcommand help exits 0 offline."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    with pytest.raises(SystemExit) as excinfo:
+        evaluation_main(["langsmith", "--help"])
+    assert excinfo.value.code == 0
+
+
+def test_cli15_ati_eval_langsmith_sync_help_succeeds_offline() -> None:
+    """PR 30B langsmith sync accepts --namespace and a dataset argument."""
+    import io
+    import sys
+
+    from agentic_threat_investigator.cli import evaluation_main
+
+    captured = io.StringIO()
+    previous = sys.stdout
+    sys.stdout = captured
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            evaluation_main(["langsmith", "sync", "--help"])
+    finally:
+        sys.stdout = previous
+    assert excinfo.value.code == 0
+    assert "dataset_id" in captured.getvalue()
+    assert "--namespace" in captured.getvalue()
+
+
+def test_cli16_ati_eval_run_requires_canonical_dataset() -> None:
+    """PR 30C run refuses a malformed dataset identity with a bounded exit 2."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    assert (
+        evaluation_main(
+            ["run", "unknown-target/v1"],
+        )
+        == 2
+    )
+
+
+def test_cli17_ati_eval_langsmith_requires_subcommand() -> None:
+    """PR 30B langsmith without sync/verify exits 2 (bounded usage error)."""
+    from agentic_threat_investigator.cli import evaluation_main
+
+    with pytest.raises(SystemExit) as excinfo:
+        evaluation_main(["langsmith"])
+    assert excinfo.value.code == 2

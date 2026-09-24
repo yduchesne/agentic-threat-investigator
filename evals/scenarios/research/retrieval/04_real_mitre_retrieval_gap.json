@@ -1,10 +1,32 @@
 {
   "id": "real-mitre-retrieval-gap",
   "version": 1,
-  "description": "A source filter that matches no persisted source produces an explicit retrieval gap.",
+  "specification": {
+    "title": "A source filter with no match signals an explicit gap",
+    "description": "A source filter that matches no persisted source produces an explicit retrieval gap.",
+    "target": "research-agent",
+    "purpose": "Verify a source filter matching no persisted source yields an explicit retrieval gap instead of fabricated results.",
+    "operational_relevance": "Honest gap signaling prevents downstream synthesis from building claims on missing corpora.",
+    "regression_risk": "The retriever could silently return unrelated documents to mask the gap.",
+    "expected_behavior": {
+      "required": [
+        "The retrieval returns no material for the unmatched source filter",
+        "The retrieval declares the explicit gap"
+      ],
+      "forbidden": [
+        "The retrieval fabricates results when no source matches"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "retrieval-gap-signaling"
+    ]
+  },
   "query": "obfuscate command-and-control traffic conceal exfiltrated data",
   "max_results": 5,
-  "source_ids": ["urn:ati:source:missing"],
+  "source_ids": [
+    "urn:ati:source:missing"
+  ],
   "document_types": [],
   "expected_relevant_source_records": [],
   "expected_forbidden_source_records": [],

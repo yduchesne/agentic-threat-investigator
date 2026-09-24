@@ -1,7 +1,28 @@
 {
   "id": "rag-s05-unsupported-citation",
   "version": 1,
-  "description": "Unsupported-citation safe failure: a schema-valid model decision citing a real corpus citation that was not supplied must fail closed before persistence. No fabricated empty result is persisted; the execution envelope records the typed error.",
+  "specification": {
+    "title": "Unsupported citations fail closed before persistence",
+    "description": "Unsupported-citation safe failure: a schema-valid model decision citing a real corpus citation that was not supplied must fail closed before persistence. No fabricated empty result is persisted; the execution envelope records the typed error.",
+    "target": "research-agent",
+    "purpose": "Verify a schema-valid model decision citing a real corpus citation that was not supplied fails closed before any ResearchResult is persisted.",
+    "operational_relevance": "Unsupported citations would poison the epistemic chain that later reports rely on.",
+    "regression_risk": "The executor could persist claims whose citations were never in the supplied context.",
+    "expected_behavior": {
+      "required": [
+        "The execution fails closed with an unsupported-citation error",
+        "No fabricated empty result is persisted"
+      ],
+      "forbidden": [
+        "A ResearchResult citing unsupplied material is persisted"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "synthesis-citation-groundedness",
+      "epistemic-non-promotion"
+    ]
+  },
   "fixture": {
     "name": "mitre-attack-small"
   },

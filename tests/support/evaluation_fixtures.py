@@ -39,6 +39,8 @@ from agentic_threat_investigator.evaluation.analyst.models import (
     FixtureObservation,
     FixtureRelationship,
 )
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
+from tests.support.evaluation_common import unit_specification
 
 FindingSupport = EvidenceSupport | RelationshipSupport
 UNIT_SCENARIO_ID = "unit_scenario"
@@ -103,7 +105,7 @@ def unit_scenario(*, expected: ExpectedAssessment | None = None) -> AnalystScena
     return AnalystScenario(
         id=UNIT_SCENARIO_ID,
         version=1,
-        description="Deterministic unit-test scenario.",
+        specification=unit_specification(target=EvaluationTarget.EVIDENCE_ANALYST),
         fixture=fixture,
         expected=envelope,
     )

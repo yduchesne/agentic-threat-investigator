@@ -1,0 +1,118 @@
+{
+  "id": "inv-s04-conflicting-evidence",
+  "version": 1,
+  "specification": {
+    "title": "Conflicting evidence end-to-end",
+    "description": "A domain whose resolved IP carries both a ThreatFox malware association (supporting maliciousness) and a clean AbuseIPDB reputation (contradicting it). The production investigation must reach a terminal suspicious medium-confidence Assessment that keeps the disagreement visible, never assert unsupported certainty, and persist a faithful report.",
+    "target": "investigation",
+    "purpose": "Verify the production end-to-end path represents conflicting evidence honestly: the final Assessment and report keep supporting and contradicting signals visible without forcing certainty.",
+    "operational_relevance": "Real investigations routinely receive contradictory source signals; hiding the disagreement or forcing a confident verdict is a safety failure.",
+    "regression_risk": "The pipeline could suppress the contradicting reputation signal, force a malicious verdict, or persist a report that overstates certainty.",
+    "expected_behavior": {
+      "required": [
+        "The investigation reaches a terminal suspicious medium-confidence Assessment",
+        "Both the supporting and the contradicting signal remain visible",
+        "The final report preserves the suspicious verdict and confidence"
+      ],
+      "forbidden": [
+        "The investigation forces a malicious verdict despite the clean reputation signal",
+        "The report contradicts the final Assessment or hides the disagreement"
+      ]
+    },
+    "tags": [
+      "conflicting-evidence",
+      "research-required"
+    ],
+    "architecture_refs": [
+      "coordinator-policy",
+      "provider-execution",
+      "evidence-analyst",
+      "research-agent",
+      "assessment-faithful-reporting"
+    ]
+  },
+  "fixture": "conflicting-evidence",
+  "root": {
+    "entity_label": "root_domain",
+    "entity_type": "domain",
+    "value": "conflict-hub.test"
+  },
+  "expected": {
+    "terminal": {
+      "status": "completed",
+      "stop_reason": "sufficient_evidence"
+    },
+    "assessment": {
+      "verdict": "suspicious",
+      "confidence": "medium",
+      "required_findings": [
+        "association:supporting",
+        "reputation:contradicting"
+      ],
+      "forbidden_findings": []
+    },
+    "evidence": {
+      "required_sources": [
+        "urn:ati:source:google_public_dns",
+        "urn:ati:source:rdap",
+        "urn:ati:source:threatfox",
+        "urn:ati:source:abuseipdb"
+      ],
+      "required_entity_labels": [
+        "resolved_ip",
+        "malware_family"
+      ],
+      "forbidden_entity_labels": []
+    },
+    "relationships": {
+      "required": [
+        "urn:ati:relationship:dns:resolves_to",
+        "urn:ati:relationship:network:belongs_to",
+        "urn:ati:relationship:threat:associated_with"
+      ],
+      "forbidden": []
+    },
+    "research": {
+      "required_subject_labels": [
+        "malware_family"
+      ],
+      "forbidden_subject_labels": []
+    },
+    "report": {
+      "required": true,
+      "verdict": "suspicious",
+      "confidence": "medium",
+      "required_finding_ordinals": [
+        1
+      ],
+      "forbidden_finding_ordinals": [],
+      "min_narrative_statements": 0,
+      "max_narrative_statements": 5
+    },
+    "trajectory": {
+      "required_actions": [
+        "urn:ati:action:provider_query",
+        "urn:ati:action:pivot_executed",
+        "urn:ati:action:research_requested",
+        "urn:ati:action:assessment_requested",
+        "urn:ati:action:investigation_stopped"
+      ],
+      "forbidden_actions": [],
+      "required_research": [
+        "malware_family"
+      ],
+      "forbidden_research": [],
+      "max_depth": 2,
+      "termination_required": true
+    },
+    "efficiency": {
+      "max_provider_calls": 20,
+      "max_llm_calls": 12,
+      "max_replans": 3,
+      "max_pivots": 6,
+      "max_duplicate_provider_calls": 0,
+      "max_duplicate_entity_investigations": 0,
+      "max_total_actions": 60
+    }
+  }
+}

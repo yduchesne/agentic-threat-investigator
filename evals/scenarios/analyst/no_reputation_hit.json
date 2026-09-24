@@ -1,12 +1,33 @@
 {
   "id": "no_reputation_hit",
   "version": 1,
-  "description": "A valid no-hit reputation observation must not establish BENIGN; the acceptable envelope is INCONCLUSIVE, while geolocation may still appear as contextual support.",
-  "tags": [
-    "evidence-analyst",
-    "no-hit-regression",
-    "inconclusive"
-  ],
+  "specification": {
+    "title": "A reputation no-hit never establishes benignness",
+    "description": "A valid no-hit reputation observation must not establish BENIGN; the acceptable envelope is INCONCLUSIVE, while geolocation may still appear as contextual support.",
+    "target": "evidence-analyst",
+    "purpose": "Verify a valid no-hit reputation observation never establishes BENIGN while geolocation may still appear as contextual support.",
+    "operational_relevance": "Absence of a reputation hit is coverage, not clearance; treating a no-hit as benignness creates false negatives for novel or under-reported infrastructure.",
+    "regression_risk": "The analyst could read the no-hit as positive reputation and emit a BENIGN verdict.",
+    "expected_behavior": {
+      "required": [
+        "The Assessment verdict is INCONCLUSIVE when the only direct observation is a no-hit",
+        "A geolocation contextual Finding may appear without material support"
+      ],
+      "forbidden": [
+        "No material finding cites the no-hit reputation observation",
+        "The Assessment reaches a BENIGN verdict"
+      ]
+    },
+    "tags": [
+      "evidence-analyst",
+      "inconclusive",
+      "no-hit-regression"
+    ],
+    "architecture_refs": [
+      "evidence-contextual-support-only",
+      "geolocation-approximation"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP shows any malicious reputation signal.",
     "root_entity": "target_ip",

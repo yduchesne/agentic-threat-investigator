@@ -14,14 +14,21 @@ from pathlib import Path
 
 import pytest
 
+from agentic_threat_investigator.evaluation.common import EvaluationTarget
 from agentic_threat_investigator.evaluation.geoint.loader import (
     DuplicateJsonKeyError,
     GeointScenarioLoadError,
     load_geoint_scenario_file,
     load_geoint_scenarios_directory,
 )
+from tests.support.evaluation_common import unit_specification
 
 CORPUS = Path("evals/scenarios/geoint")
+
+
+def _spec_payload() -> dict[str, object]:
+    """Return the deterministic GEOINT specification JSON payload."""
+    return unit_specification(target=EvaluationTarget.GEOINT).model_dump(mode="json")
 
 
 def test_committed_corpus_loads_deterministically() -> None:
@@ -63,7 +70,7 @@ def test_unknown_scenario_field_fails_closed(tmp_path: Path) -> None:
             {
                 "id": "unknown_field_scenario",
                 "version": 1,
-                "description": "Unknown field scenario.",
+                "specification": _spec_payload(),
                 "unexpected": True,
                 "fixture": {
                     "objective": "Objective.",
@@ -108,7 +115,7 @@ def test_duplicate_scenario_identity_fails_closed(tmp_path: Path) -> None:
     body = {
         "id": "same_scenario",
         "version": 1,
-        "description": "Duplicate identity scenario.",
+        "specification": _spec_payload(),
         "fixture": {
             "objective": "Objective.",
             "root_entity": "target_ip",
@@ -154,7 +161,7 @@ def test_same_id_different_version_is_allowed(tmp_path: Path) -> None:
     body = {
         "id": "versioned_scenario",
         "version": 1,
-        "description": "Version 1.",
+        "specification": _spec_payload(),
         "fixture": {
             "objective": "Objective.",
             "root_entity": "target_ip",

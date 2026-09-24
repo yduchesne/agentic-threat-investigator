@@ -1,7 +1,28 @@
 {
   "id": "non-pivotable-discovery",
   "version": 1,
-  "description": "A discovery with no deterministic provider path is never pivoted.",
+  "specification": {
+    "title": "Non-pivotable discoveries are never pivoted",
+    "description": "A discovery with no deterministic provider path is never pivoted.",
+    "target": "coordinator",
+    "purpose": "Verify a discovered entity with no deterministic provider path is never enqueued or executed as a pivot.",
+    "operational_relevance": "Discoveries without provider coverage must not stall or invent new data sources; the investigation drains and terminates.",
+    "regression_risk": "The coordinator could invent an unsupported provider path or pivot an entity with no legal provider work.",
+    "expected_behavior": {
+      "required": [
+        "The investigation stops with no_eligible_pivots",
+        "The non-pivotable entity never appears as a pivot"
+      ],
+      "forbidden": [
+        "The coordinator invents provider work for an entity without a deterministic provider path"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "non-pivotable-discovery",
+      "pivot-policy-authorization"
+    ]
+  },
   "fixture": {
     "name": "non-pivotable-discovery"
   },

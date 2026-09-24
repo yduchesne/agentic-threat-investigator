@@ -1,8 +1,34 @@
 {
   "id": "g26g_s14_valid_geographic_pattern",
   "version": 1,
-  "description": "A descriptive, exactly supported co-location pattern is accepted with exact observation/Evidence support and no stronger cyber inference.",
-  "tags": ["geoint", "valid-pattern", "exact-support", "descriptive-only", "pr26g"],
+  "specification": {
+    "title": "Exactly supported co-location patterns are accepted",
+    "description": "A descriptive, exactly supported co-location pattern is accepted with exact observation/Evidence support and no stronger cyber inference.",
+    "target": "geoint",
+    "purpose": "Verify a descriptive, exactly supported co-location pattern is accepted with exact observation and Evidence support and no stronger cyber inference.",
+    "operational_relevance": "Valid co-location observations carry real descriptive value without implying coordination.",
+    "regression_risk": "The validator could over-reject a legitimate co-location pattern or let an unsupported one through.",
+    "expected_behavior": {
+      "required": [
+        "The co-location finding is accepted with exact observation and Evidence support",
+        "No cyber relationship inference is emitted"
+      ],
+      "forbidden": [
+        "A co-location pattern is accepted without exact observation support"
+      ]
+    },
+    "tags": [
+      "descriptive-only",
+      "exact-support",
+      "geoint",
+      "pr26g",
+      "valid-pattern"
+    ],
+    "architecture_refs": [
+      "colocation-validation",
+      "geographic-support-only"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the two target IPs are malicious.",
     "root_entity": "ip_a",
@@ -112,11 +138,15 @@
     "histories": [
       {
         "entity": "ip_a",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       },
       {
         "entity": "ip_b",
-        "locations": ["seattle"]
+        "locations": [
+          "seattle"
+        ]
       }
     ],
     "agent_context": {
@@ -124,22 +154,46 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"],
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ],
       "required_geographic_findings": [
         {
           "kind": "shared_location",
-          "observation_labels": ["a_obs", "b_obs"],
-          "evidence_labels": ["a_evidence", "b_evidence"],
-          "entity_labels": ["ip_a", "ip_b"],
-          "location_labels": ["seattle"]
+          "observation_labels": [
+            "a_obs",
+            "b_obs"
+          ],
+          "evidence_labels": [
+            "a_evidence",
+            "b_evidence"
+          ],
+          "entity_labels": [
+            "ip_a",
+            "ip_b"
+          ],
+          "location_labels": [
+            "seattle"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["coordination", "campaign", "maliciousness"]
+    "forbidden_inferences": [
+      "coordination",
+      "campaign",
+      "maliciousness"
+    ]
   }
 }

@@ -1,12 +1,33 @@
 {
   "id": "geolocation_context",
   "version": 1,
-  "description": "City/country geolocation is contextual-only and must never support a material verdict; with nothing else the acceptable envelope is INCONCLUSIVE and the approximation must be stated as a limitation.",
-  "tags": [
-    "evidence-analyst",
-    "geolocation-regression",
-    "contextual-only"
-  ],
+  "specification": {
+    "title": "Geolocation is contextual and never material support",
+    "description": "City/country geolocation is contextual-only and must never support a material verdict; with nothing else the acceptable envelope is INCONCLUSIVE and the approximation must be stated as a limitation.",
+    "target": "evidence-analyst",
+    "purpose": "Verify city/country geolocation appears only as contextual support, contributes no material maliciousness evidence, and is surfaced as an approximation limitation.",
+    "operational_relevance": "Geolocation data is approximate and provider-derived; investigations must not let a city or country label drive a maliciousness verdict.",
+    "regression_risk": "The analyst could promote geolocation context into a material finding or omit the required approximation limitation.",
+    "expected_behavior": {
+      "required": [
+        "The Assessment verdict is INCONCLUSIVE when the only context is geolocation",
+        "The Assessment states the approximate-geolocation limitation"
+      ],
+      "forbidden": [
+        "No material finding cites the geolocation context evidence",
+        "The Assessment reaches a verdict beyond the inconclusive envelope"
+      ]
+    },
+    "tags": [
+      "contextual-only",
+      "evidence-analyst",
+      "geolocation-regression"
+    ],
+    "architecture_refs": [
+      "geolocation-approximation",
+      "evidence-contextual-support-only"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious based on its geolocation.",
     "root_entity": "target_ip",

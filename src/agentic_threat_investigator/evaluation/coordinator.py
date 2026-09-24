@@ -27,6 +27,9 @@ from agentic_threat_investigator.domain.investigation import (
     ResearchExecutionStatus,
     StopReason,
 )
+from agentic_threat_investigator.evaluation.common.models import (
+    ScenarioSpecification,
+)
 
 # Stable PR 21 action URNs shared by emission and evaluation.
 ACTION_PROVIDER_QUERY = "urn:ati:action:provider_query"
@@ -61,7 +64,7 @@ class _ScenarioValidator(BaseModel):
 
     id: str
     version: int = Field(ge=1)
-    description: str | None = None
+    specification: ScenarioSpecification
     fixture: CoordinatorFixtureReference
     expected: ExpectedCoordinatorTrajectory
 
@@ -178,6 +181,7 @@ def load_coordinator_scenarios_directory(
             CoordinatorScenario(
                 id=envelope.id,
                 version=envelope.version,
+                specification=envelope.specification,
                 fixture=envelope.fixture,
                 expected=envelope.expected,
             )
@@ -256,12 +260,19 @@ class ExpectedCoordinatorTrajectory(BaseModel):
 
 
 class CoordinatorScenario(BaseModel):
-    """Repository-owned, versioned coordinator evaluation scenario."""
+    """Repository-owned, versioned coordinator evaluation scenario.
+
+    The scenario carries a stable identifier, a positive version, the
+    common PR 30A scenario specification (title, narrative contract,
+    expected behavior, tags, architecture references), one deterministic
+    fixture reference, and one expected-trajectory envelope.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     version: int = Field(ge=1)
+    specification: ScenarioSpecification
     fixture: CoordinatorFixtureReference
     expected: ExpectedCoordinatorTrajectory
 

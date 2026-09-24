@@ -1,18 +1,23 @@
 # Testing
 
-As of this writing, ATI comprises more than 5,000 unit tests, and around 800 integration tests. 
+As of this writing, ATI comprises more than 5,000 unit tests, and around 800 integration tests. Those integration tests share common infrastructure with agent evaluation tests (AKA "evals").
+
+- [Core Concepts](CORE_CONCEPTS.md): Presents core concepts such as `Entity`, `Evidence`, etc.
+- [Investigations](INVESTIGATIONS.md): Goes over the investigation workflow, especially the notion of __pivoting__.
+- [Agentic Architecture](AGENTIC.md): Goes deeper than this document in the details of the different agents and the use of `LangChain`/`LangGraph`.
+- [LangSmith](LANGSMITH.md): Documents specifically how LangSmith is used in the context of observability and evaluation. This goes further into how evals are structure and how they have infrastructure in common with integration tests.
 
 ## Unit Testing
 
-Unit testing has been performed agressively, with an 85% test coverage target (enforced through a pre-commit hook).
+Unit testing has been implemented agressively, with an 85% test coverage target (enforced through a pre-commit hook).
 
-At the core, unit testing rests on the notion of interface, which are used at system/dependency boundaries. This allows introducing mocks while keeping domain and application logic real: Mock boundaries, not internals.
+At the core, unit testing rests on the notion of interface, which are used at system/dependency boundaries. This allows introducing mocks while keeping domain and application logic real: mock boundaries, not internals.
 
-The 85% threshold is therefore only a backstop; the more important characteristic is how the code has been structured to make meaningful isolation possible.
+### Principles
 
 The following principles constitute the unit testing philosophy adopted for ATI.
 
-### 1. Interfaces define the natural mocking seams
+#### 1. Interfaces define the natural mocking seams
 
 ATI deliberately puts interfaces (modeled in code using Python ABCs - i.e.: from Python's `abc` module) around capabilities whose implementations involve infrastructure, nondeterminism, or independently testable behavior.
 
@@ -51,7 +56,7 @@ Consequently, a `ResearchAgent` unit test doesn't need:
 
 Those are outside the unit under test. They are replaced by mocks/fakes when unit testing.
 
-### 2. Prefer purpose-built fakes/stubs over deep mocking
+#### 2. Prefer purpose-built fakes/stubs over deep mocking
 
 An important ATI pattern is that ATI often has explicit deterministic implementations such as:
 
@@ -67,7 +72,7 @@ There is no architectural objection to conventional mocking.
 
 > Another factor that has favored fakes is the fact that AI is generating their implementation, which is much faster.
 
-### 3. Pure domain logic needs no mocks
+#### 3. Pure domain logic needs no mocks
 
 A substantial amount of ATI is deliberately "pure" - not relying on dependencies outside of the unit:
 
@@ -86,7 +91,7 @@ A substantial amount of ATI is deliberately "pure" - not relying on dependencies
 
 This allows unit testing without any mocking.
 
-### 4. Each unit gets tested separately, with fakes/mocks at the boundary
+#### 4. Each unit gets tested separately, with fakes/mocks at the boundary
 
 Given:
 
@@ -105,8 +110,7 @@ BaseChatModel(Mock/Fake)
 
 Then the `ResearchAgent` unit is tested against a `FakeLlmClient`; the `LangChainLlmClient` is tested against a mock/fake `BaseChatModel`.
 
-
-### 5. Test the public/observable contract rather than internal logic/state
+#### 5. Test the public/observable contract rather than internal logic/state
 
 Given:
 
@@ -130,18 +134,37 @@ assert coordinator._foo.called_once()
 assert coordinator._bar.call_count == 2
 ```
 
-### 6. Test both the happy/unhappy paths
+#### 6. Test both the happy/unhappy paths
 
 ATI's unit tests do not just exercise happy paths. A large part of the value comes from testing fail-closed behavior. For example, if the `Coordinator` encounters exhausted budget, the expectation is that pivoting stops. A test should verify that expectations.
 
 In other words, the unhappy path isn't just including exceptions/errors, it is also comprising expected negative outcomes that don't lead to hard failures.
 
-### 7. Dependency injection has a dual role
+#### 7. Dependency injection has a dual role
 
 Dependency injection, where dependencies are externally instantiated and passed to units, has a dual role:
 
 1. It contributes to a modular architecture where concise, specialized units exercise compact logic and where the use of interfaces allows shielding dependents from concrete implementations.
 2. It eases the introduction of mocks/fakes, where interfaces document a public contract against which expectations are tested.
+
+### File System Layout
+
+The unit tests are under the [tests/unit](../../tests/unit/) directory. The are subdivided according to the layer of the application they target:
+
+```
+tests/unit/
+├── api
+├── app
+├── config
+├── conftest.py
+├── domain
+├── evaluation
+├── infrastructure
+├── observability
+├── telemetry
+```
+
+Certain test suites are present under the `tests/unit` directory, directly.
 
 ## Integration Testing
 
@@ -250,30 +273,535 @@ An integration test can deliberately tests a slice of the system without launchi
 
 Testing the full system belongs to E2E testing.
 
+### File System Layout
+
+The integration tests are present under the [tests/integration](tests/integration) directory.
+
 ### Fixtures
 
+The codebase has different types of fixtures: they can be programmatic or "static" (based on configuration files); they can be destined to "traditional" integration tests or to agent evals. The following table lists the fixture directories and what they correspond to:
+
+| Location                                           | What it represents                 | Typical purpose                                            |
+| -------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------- |
+| [tests/fixtures/](../../tests/fixtures/)           | Static test input artifacts        | Feed real parsers, ingestion, indexing, GEO datasets, etc. |
+| [tests/support/*fixtures.py](../../tests/support/) | Programmatic test builders/doubles | Construct controlled domain/provider/query inputs          |
+| [evals/scenarios/](../../evals/scenarios/)         | Versioned evaluation scenarios     | Describe semantic/behavioral worlds and expected outcomes  |
+
+#### Programmatic Fixtures
+
+The fixtures under `tests/support/` are not simple static config files. They are in fact Python code:
+
+```
+tests/support/
+├── abuseipdb_fixtures.py
+├── evidence_batch_fixtures.py
+├── extraction_fixtures.py
+├── geoint_fixtures.py
+├── orchestration_fixtures.py
+├── provider_executor_fixtures.py
+├── query_fixtures.py
+├── threatfox_fixtures.py
+├── urlhaus_fixtures.py
+└── ...
+```
+
+Those are fixture builders/test doubles. Some support unit tests, some integration tests, and some both.
+
+#### "Tradtional" Fixtures
+
+Certain fixtures are not meant for agent evaluation (at least, not directly). They are used to fake external dependencies, as the diagram below shows:
+
+```
+tests/fixtures/
+├── geoint/
+│   ├── corpus_small.jsonl
+│   ├── corpus_synthetic_edge.jsonl
+│   ├── geonames/
+│   │   ├── admin1CodesASCII.txt
+│   │   ├── cities1000.txt
+│   │   └── countryInfo.txt
+│   └── natural_earth/
+│       ├── ne_admin1.geojson
+│       └── ne_countries.geojson
+│
+├── mitre_attack/
+│   ├── enterprise_attack_small.json
+│   ├── enterprise_attack_hostile_small.json
+│   ├── enterprise_attack_tie_small.json
+│   └── enterprise_contradiction_small.json
+│
+└── openapi_v1.json
+```
+
+#### Evals
+
+The files under under `evals/scenarios` are agent evaluation scenarios and are paired with corresponding Python code. Together, they form fixtures (although the Python code in question may also be called "fixture", in this documentation, depending on context). The repository has explicit evaluation corpora for several targets:
+
+```
 evals/scenarios/
-├── analyst/
-│   ├── malicious_ioc_direct_evidence.json
-│   ├── conflicting_reputation.json
-│   ├── stale_evidence.json
-│   ├── geolocation_context.json
-│   └── ...
-│
-├── coordinator/
-│   ├── 01_domain_discovers_ip.json
-│   ├── 05_depth_limit.json
-│   ├── 08_sufficient_evidence_stop.json
-│   ├── 12_cycle_suppression.json
-│   ├── 13_malware_research_marker.json
-│   └── ...
-│
+├── analyst/          # Evidence Analyst eval scenarios
+├── coordinator/      # Coordinator policy/trajectory eval scenarios
 ├── research/
 │   ├── retrieval/
-│   └── synthesis/
+│   └── synthesis/    # Research/RAG eval scenarios
+├── report_writer/    # Report Writer eval scenarios
+├── geoint/           # GEOINT semantic + lifecycle eval scenarios
+└── investigation/    # full-investigation eval scenarios
+```
+
+Those scenarios have corresponding integration tests:
+
+```
+tests/integration/
+├── test_evaluation_analyst_runner.py
+├── test_evaluation_coordinator_runner.py
+├── test_evaluation_research_runner.py
+├── test_evaluation_report_writer_runner.py
+├── test_evaluation_investigation_runner.py
+├── test_evidence_analyst_evaluation.py
+├── test_research_evaluation.py
+├── test_research_retrieval_evaluation.py
+├── test_geoint_evaluation.py
+└── ...
+```
+
+For example, there are multiple investigation test scenarios, which test the whole investigation flow:
+
+```
+evals/scenarios/investigation/
+├── 01_inv_s01_malicious_multi_source.json
+├── 02_inv_s02_benign.json
+├── 03_inv_s03_inconclusive_sparse.json
+├── 04_inv_s04_conflicting_evidence.json
+├── 05_inv_s05_research_required.json
+└── 06_inv_s06_cycle_duplicate_bounded.json
+```
+
+The following integration test runs the above scenario files (it is a multi-scenario test runner):
+
+```
+tests/integration/test_evaluation_investigation_runner.py
+```
+
+The above highlight different types of evals: targeted/focused ones; investigation-scoped ones. The focused ones exist for specific agentic components of the system:
+
+- Evidence Analyst
+- Coordinator
+- Research Agent
+- Report Writer
+
+The investigation-scoped ones run the full investigation flow and attempt to catch issues such as:
+
+- Too many pivots
+- Duplicate work
+- Wrong research timing
+- Wrong terminal Assessment
+- Excessive LLM calls
+- Provenance lost
+
+The execution flow, for a given investigation eval scenario, is as follows:
+
+```
+Investigation JSON scenario
+          │
+          ▼
+strict typed loader
+          │
+          ▼
+repository-owned fixture world
+          │
+          ▼
+run-scoped Investigation materialization
+          │
+          ▼
+production LocalInvestigationRunner
+          │
+          ▼
+production Coordinator graph
+          │
+     ┌────┴────┐
+     ▼         ▼
+ Evidence     Research
+ Analyst       Agent
+     │
+     └────┬────┘
+          ▼
+ terminal InvestigationState
+          │
+          ▼
+ current Assessment
+          │
+          ▼
+ production ReportWriter
+          │
+          ▼
+ persisted InvestigationReport
+          │
+          ▼
+ authoritative durable snapshot
+ + structured trajectory actions
+          │
+          ▼
+ InvestigationEvaluator
+          │
+          ▼
+ common EvaluationRunner
+          │
+          ▼
+    PASS / FAIL / ERROR
+```
+
+##### GEOINT Evals
+
+The fixtures under `evals/scenarios/geoint/*` are GEOINT evaluation scenarios.
+
+`tests/integration/test_geoint_evaluation.py` then exercises those scenarios against real infrastructure and production behavior.
+
+The GEOINT JSON files are not simply data fixtures for PostgreSQL integration tests. They form a GEOINT evaluation corpus, and integration tests prove that the corpus can be materialized and evaluated correctly through real ATI components.
+
+##### Eval Scenario Structure
+
+As mentioned earlier, scenarios are kept under he files under under `evals/scenarios`. A scenario is essentially a declarative specification of an evaluation case:
+
+```
+Scenario
+├── identity / documentation
+├── fixture-world reference
+├── starting condition
+└── expected outcome envelope
+```
+
+Scenarios are kept in JSON files. Each such scenario is paired with a fixture, in Python. The scenario is meant to declare what needs to be verified and what the expectations are. The fixture describes a "fake world" against which the scenario is tested. That fake world defines `Entities`, `Evidence` and other objects relevant to the scenario.
+
+The following sub-sections explain the above scenario structure, focusing on the main fields, and using an investigation scenario as an example. 
+
+###### 1. Top-Level
+
+Simplified, the file looks like:
+
+```JSON
+{
+  "id": "inv-s01-malicious-multi-source",
+  "version": 1,
+
+  "specification": { ... },
+
+  "fixture": "f02-malicious-multi-source",
+
+  "root": { ... },
+
+  "expected": { ... }
+}
+```
+
+Schematically:
+
+```
+InvestigationScenario
 │
-└── report_writer/
-    ├── 01_rpt_s01_clearly_malicious.json
-    ├── 03_rpt_s03_conflicting_evidence.json
-    ├── 07_rpt_s07_verdict_override_attempt.json
-    └── ...
+├── id
+├── version
+├── specification
+├── fixture
+├── root
+└── expected
+```
+
+###### 2. `id` and `version`
+
+```JSON
+"id": "inv-s01-malicious-multi-source",
+"version": 1
+```
+
+These establish the stable identity of the scenario.
+
+- The ID is deliberately semantic rather than an arbitrary UUID. The schema constrains it to a bounded lowercase identifier.
+- `version` allows the evaluation corpus to evolve without silently changing the meaning of an existing scenario.
+
+The combination of `id` and `version` constitutes the identity of the scenario: 
+
+```
+inv-s01-malicious-multi-source@1
+```
+
+###### 3. `specification`
+
+The specification explains why the scenario exists. It isn't the machine-verifiable assertion section. Rather, it provides evaluation intent and traceability. It also provides executable evaluation data (TBD: what does this mean?).
+
+```JSON
+"specification": {
+  "title": "Malicious multi-source domain end-to-end",
+
+  "description":
+    "A malicious update-delivery domain correlated across DNS, ...",
+
+  "target": "investigation",
+
+  "purpose":
+    "Verify the complete production end-to-end path...",
+
+  "operational_relevance":
+    "Malicious multi-source domains are ...",
+
+  "regression_risk":
+    "The Coordinator could skip the malware research lifecycle...",
+
+  "expected_behavior": {
+    "required": [ ... ],
+    "forbidden": [ ... ]
+  },
+
+  "tags": [
+    "malicious",
+    "multi-source",
+    "research-required"
+  ],
+
+  "architecture_refs": [
+    "coordinator-policy",
+    "provider-execution",
+    "evidence-analyst",
+    "research-agent",
+    "assessment-faithful-reporting"
+  ]
+}
+```
+
+The fields are explained below:
+
+- `target`: what is being evaluated.
+- `purpose`: the question is this scenario answering.
+- `operational_relevance`: why this case matters operationally.
+- `regression_risk`: the type of failure this scenario is intended to detect.
+- `expected_behavior`: the human-readable required/forbidden behavior.
+- `architecture_refs`: the architectural contracts it exercises.
+
+###### 4. `fixture`
+
+This references a repository-owned fixture world. For example, given the following scenario": 
+
+```JSON
+"fixture": "f02-malicious-multi-source",
+"root": {
+	"entity_label": "root_domain",
+  	"entity_type": "domain",
+  	"value": "update-package.test"
+}
+```
+
+Then the following fixture Python object is resolved:
+
+```python
+InvestigationFixture(
+    name="f02-malicious-multi-source",
+    enabled_providers=(
+        SourceId.GOOGLE_PUBLIC_DNS,
+        SourceId.RDAP,
+        SourceId.THREATFOX,
+        SourceId.ABUSEIPDB,
+    ),
+
+    world_entities={
+        "root_domain": (
+            EntityType.DOMAIN,
+            "update-package.test"
+        ),
+        "resolved_ip": (
+            EntityType.IP_ADDRESS,
+            "203.0.113.81"
+        ),
+        "malware_family": (
+            EntityType.MALWARE,
+            "malware.badloader_v2"
+        ),
+    },
+    ...
+)
+```
+
+###### 5. `root`
+
+The `root_*` fields designate the `Entity` at which pivoting starts - it is the initial condition:
+
+```JSON
+"root": {
+  "entity_label": "root_domain",
+  "entity_type": "domain",
+  "value": "update-package.test"
+}
+...
+```
+
+###### 6. `expected`
+
+This holds the machine-verifiable data. This section doesn't prescribe one exact execution trace. It specifies constraints that a valid execution must satisfy. The value of the `expected` field is corresponds to a JSON graph with multiple fields:
+
+```
+expected
+├── terminal
+├── assessment
+├── evidence
+├── relationships
+├── research
+├── report
+├── trajectory
+└── efficiency
+```
+
+__6.1. `terminal`__
+
+Indicates the final state of the investigation. Below: the investigation must terminate successfully because evidence became sufficient.
+
+```JSON
+"terminal": {
+  "status": "completed",
+  "stop_reason": "sufficient_evidence"
+}
+```
+
+__6.2. `assessment`__
+
+Indicates the state of the final `Assessment` produced by the `Evidence Analyst`. Below: he final `Assessment` must therefore have `verdict` -> `MALICIOUS`, etc.
+
+```JSON
+"assessment": {
+  "verdict": "malicious",
+  "confidence": "high",
+
+  "required_findings": [
+    "reputation:supporting"
+  ],
+
+  "forbidden_findings": []
+}
+```
+
+Notice that the `assessment` object doesn't contain prose string, but rather well-known identifiers/semantic labels. For example, above, `required_findings` contains `reputation:supporting`, not `The IP has a bad reputation`.
+
+__6.3. `evidence`__
+
+This verifies that actual investigation execution reached the required intelligence sources and discovered the required entities.
+
+```JSON
+"evidence": {
+  "required_sources": [
+    "urn:ati:source:google_public_dns",
+    "urn:ati:source:rdap",
+    "urn:ati:source:threatfox",
+    "urn:ati:source:abuseipdb"
+  ],
+
+  "required_entity_labels": [
+    "resolved_ip",
+    "malware_family"
+  ],
+
+  "forbidden_entity_labels": []
+}
+```
+
+Again, semantic labels are used: `resolved_ip`, `malware_family`.
+
+__6.4. `relationships`__
+
+Indicates which relationships pivoting is expected to have surfaced. Example:
+
+```JSON
+"relationships": {
+  "required": [
+    "urn:ati:relationship:dns:resolves_to",
+    "urn:ati:relationship:threat:associated_with"
+  ],
+  "forbidden": []
+}
+```
+
+__6.5. `research`__
+
+The `Coordinator` must have recognized the discovered malware entity as `RESEARCHABLE` and caused the Research Agent lifecycle to execute for it:
+
+```JSON
+"research": {
+  "required_subject_labels": [
+    "malware_family"
+  ],
+  "forbidden_subject_labels": []
+}
+```
+
+__6.6. `report`__
+
+Verifies that a report exists and remains faithful to the final `Assessment`:
+
+```JSON
+"report": {
+  "required": true,
+  "verdict": "malicious",
+  "confidence": "high",
+
+  "required_finding_ordinals": [1],
+  "forbidden_finding_ordinals": [],
+
+  "min_narrative_statements": 0,
+  "max_narrative_statements": 5
+}
+```
+
+__6.7. `trajectory`__
+
+This field allows constraining how ATI go to the final investigation state. This verifies orchestration behavior, ensuring that ATI can't accidentally get the expected final verdict while bypassing important workflow contracts.
+
+```JSON
+"trajectory": {
+  "required_actions": [
+    "urn:ati:action:provider_query",
+    "urn:ati:action:pivot_executed",
+    "urn:ati:action:research_requested",
+    "urn:ati:action:assessment_requested",
+    "urn:ati:action:investigation_stopped"
+  ],
+
+  "forbidden_actions": [],
+
+  "required_research": [
+    "malware_family"
+  ],
+
+  "forbidden_research": [],
+
+  "max_depth": 2,
+  "termination_required": true
+}
+```
+
+The scenario therefore evaluates both outcome and trajectory:
+
+```
+              Investigation evaluation
+                        │
+             ┌──────────┴──────────┐
+             ▼                     ▼
+         Outcome                Trajectory
+             │                     │
+     Assessment correct?      Pivoted correctly?
+     Evidence correct?        Research invoked?
+     Report correct?          Bounded depth?
+                               Terminated?
+```
+
+__6.8. `efficiency`__
+
+Allows defining hard behaviorial bounds that pertain to how much "effort" the system spends on an investigation, before that investigation reaches its final state:
+
+```JSON
+"efficiency": {
+  "max_provider_calls": 20,
+  "max_llm_calls": 12,
+  "max_replans": 3,
+  "max_pivots": 6,
+  "max_duplicate_provider_calls": 0,
+  "max_duplicate_entity_investigations": 0,
+  "max_total_actions": 60
+}
+```

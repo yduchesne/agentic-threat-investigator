@@ -1,7 +1,27 @@
 {
   "id": "rag-s04-contradictory-context",
   "version": 1,
-  "description": "Contradictory context: both fixtures' techniques are supplied and both sides must be represented as separately cited claims with no verdict/winner semantics.",
+  "specification": {
+    "title": "Contradictory context yields separately cited claims",
+    "description": "Contradictory context: both fixtures' techniques are supplied and both sides must be represented as separately cited claims with no verdict/winner semantics.",
+    "target": "research-agent",
+    "purpose": "Verify both contradicting technique contexts are represented as separately cited claims with no verdict or winner semantics.",
+    "operational_relevance": "Research must preserve source disagreement for downstream analysts instead of picking a winner.",
+    "regression_risk": "The agent could emit one claim, drop one side, or add verdict semantics to the claims.",
+    "expected_behavior": {
+      "required": [
+        "Claims cite both contradiction sides with their required phrases",
+        "Exactly two claims are persisted"
+      ],
+      "forbidden": [
+        "One side of the contradiction is dropped or the claims declare a winner"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "epistemic-non-promotion"
+    ]
+  },
   "fixture": {
     "name": "mitre-attack-contradiction"
   },

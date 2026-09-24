@@ -1,7 +1,27 @@
 {
   "id": "no-eligible-pivots",
   "version": 1,
-  "description": "No eligible pivot remains after provider work drains.",
+  "specification": {
+    "title": "Drained providers leave no eligible pivots",
+    "description": "No eligible pivot remains after provider work drains.",
+    "target": "coordinator",
+    "purpose": "Verify the investigation stops with no_eligible_pivots once provider work is exhausted and nothing actionable remains.",
+    "operational_relevance": "Real investigations terminate on exhaustion rather than looping forever on unreachable entities.",
+    "regression_risk": "The coordinator could loop on empty work or report the wrong terminal reason.",
+    "expected_behavior": {
+      "required": [
+        "The investigation stops with no_eligible_pivots",
+        "No pivot executes without eligible provider work"
+      ],
+      "forbidden": [
+        "The investigation continues without any eligible provider work remaining"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "no-eligible-pivots"
   },

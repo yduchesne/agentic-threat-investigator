@@ -12,6 +12,8 @@ This document describes the investigation workflow, with some insights into the 
 
 - [Core Concepts](CORE_CONCEPTS.md): Presents core concepts such as `Entity`, `Evidence`, etc.
 - [Agentic Architecture](AGENTIC.md): Goes deeper than this document in the details of the different agents and the use of `LangChain`/`LangGraph`.
+- [Testing](TESTING.md): Describes the different forms of testing in ATI (including agent evals).
+- [LangSmith](LANGSMITH.md): Documents specifically how LangSmith is used in the context of observability and evaluation.
 
 ## Investigation Trigger
 

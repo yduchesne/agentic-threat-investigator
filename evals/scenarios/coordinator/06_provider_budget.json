@@ -1,7 +1,28 @@
 {
   "id": "provider-budget",
   "version": 1,
-  "description": "Provider budget exhaustion stops with the specific reason.",
+  "specification": {
+    "title": "Provider budget exhaustion stops the investigation",
+    "description": "Provider budget exhaustion stops with the specific reason.",
+    "target": "coordinator",
+    "purpose": "Verify exhaustion of the per-investigation provider budget stops with the dedicated stop reason instead of continuing unbounded work.",
+    "operational_relevance": "Provider calls are the principal cost driver; hard budget enforcement protects operators from cost blowouts.",
+    "regression_risk": "The coordinator could exceed the provider cap or stop without the provider_budget_exhausted reason.",
+    "expected_behavior": {
+      "required": [
+        "The investigation stops with provider_budget_exhausted",
+        "Total provider calls respect the declared maximum"
+      ],
+      "forbidden": [
+        "The total provider call count exceeds the declared provider budget"
+      ]
+    },
+    "tags": [],
+    "architecture_refs": [
+      "provider-budget-enforcement",
+      "termination-guarantee"
+    ]
+  },
   "fixture": {
     "name": "provider-budget"
   },

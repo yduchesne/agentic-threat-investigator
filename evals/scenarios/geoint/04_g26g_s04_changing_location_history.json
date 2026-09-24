@@ -1,8 +1,34 @@
 {
   "id": "g26g_s04_changing_location_history",
   "version": 1,
-  "description": "One Entity at two supported Locations at distinct effective times yields two immutable observations, the correct Investigation-relative current and history order, and a descriptive location_change_observed finding; movement/travel/route is never inferred.",
-  "tags": ["geoint", "changing-location", "history", "no-movement", "pr26g"],
+  "specification": {
+    "title": "Changing location history is preserved in order",
+    "description": "One Entity at two supported Locations at distinct effective times yields two immutable observations, the correct Investigation-relative current and history order, and a descriptive location_change_observed finding; movement/travel/route is never inferred.",
+    "target": "geoint",
+    "purpose": "Verify one Entity at two supported Locations at distinct effective times yields two immutable observations with the correct Investigation-relative current and history ordering.",
+    "operational_relevance": "IPs move between cities; history truth is what later temporal analysis depends on.",
+    "regression_risk": "The pipeline could collapse the two resolutions, reorder history, or mis-assign current state.",
+    "expected_behavior": {
+      "required": [
+        "Both location observations are persisted immutably",
+        "The current state reflects the latest effective time",
+        "The history preserves the distinct effective times in order"
+      ],
+      "forbidden": [
+        "The changing location history is collapsed or reordered"
+      ]
+    },
+    "tags": [
+      "changing-location",
+      "geoint",
+      "history",
+      "no-movement",
+      "pr26g"
+    ],
+    "architecture_refs": [
+      "location-history-truth"
+    ]
+  },
   "fixture": {
     "objective": "Assess whether the target IP is malicious.",
     "root_entity": "target_ip",
@@ -124,7 +150,10 @@
     "histories": [
       {
         "entity": "target_ip",
-        "locations": ["dallas", "seattle"]
+        "locations": [
+          "dallas",
+          "seattle"
+        ]
       }
     ],
     "agent_context": {
@@ -132,22 +161,45 @@
       "max_observations_per_entity": 5,
       "max_total_observations": 50,
       "max_context_bytes": 262144,
-      "allowed_operations": ["summary", "current_for_entity", "history_for_entity"]
+      "allowed_operations": [
+        "summary",
+        "current_for_entity",
+        "history_for_entity"
+      ]
     },
     "agent_output": {
       "expected_validation": "accepted",
-      "allowed_verdicts": ["inconclusive"],
-      "allowed_confidence": ["low", "medium"],
+      "allowed_verdicts": [
+        "inconclusive"
+      ],
+      "allowed_confidence": [
+        "low",
+        "medium"
+      ],
       "required_geographic_findings": [
         {
           "kind": "location_change_observed",
-          "observation_labels": ["seattle_obs", "dallas_obs"],
-          "evidence_labels": ["seattle_evidence", "dallas_evidence"],
-          "entity_labels": ["target_ip"],
-          "location_labels": ["seattle", "dallas"]
+          "observation_labels": [
+            "seattle_obs",
+            "dallas_obs"
+          ],
+          "evidence_labels": [
+            "seattle_evidence",
+            "dallas_evidence"
+          ],
+          "entity_labels": [
+            "target_ip"
+          ],
+          "location_labels": [
+            "seattle",
+            "dallas"
+          ]
         }
       ]
     },
-    "forbidden_inferences": ["travel", "route"]
+    "forbidden_inferences": [
+      "travel",
+      "route"
+    ]
   }
 }

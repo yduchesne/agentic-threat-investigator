@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Narrow CLI entrypoints (PR 23D, extended PR 26B/26B-2/26C).
+"""Narrow CLI entrypoints (PR 23D, extended PR 26B/26B-2/26C/30C).
 
 Explicit, repository-owned entrypoints follow the current bootstrap
 convention (plain modules invoked by deployment; no general-purpose CLI
@@ -11,13 +11,17 @@ framework):
 - ``ati-geography-build``: deterministic ATI Geography Corpus derivation
   from the documented GeoNames/Natural Earth local source artifacts;
 - ``ati-geo-resolver``: the bounded asynchronous geographic-resolution
-  worker loop (PR 26C).
+  worker loop (PR 26C);
+- ``ati-eval``: the PR 30 evaluation CLI (validate; langsmith sync/verify;
+  run evidence-analyst/v1, coordinator/v1, research-agent/v1, report-writer/v1,
+  or investigation/v1 [--langsmith]).
 
 All load the cached typed settings once and never read environment
 variables themselves, and none ever download upstream data. The worker
 composes the selected intelligence-source registry through the
 operating-mode boundary and the configured real LLM; operating mode never
-selects the LLM implementation.
+selects the LLM implementation. PR 30C/30D reuse the worker's LLM/analyst/
+research composition for the optional real benchmark runs.
 """
 
 from __future__ import annotations
@@ -26,7 +30,9 @@ import argparse
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import event as sqlalchemy_event
@@ -36,6 +42,11 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+if TYPE_CHECKING:
+    from agentic_threat_investigator.evaluation.backends.langsmith.client import (
+        LangSmithEvaluationClient,
+    )
 
 from agentic_threat_investigator.app.assessment_persistence import (
     AssessmentPersistenceService,
@@ -83,6 +94,20 @@ from agentic_threat_investigator.config.settings import (
 from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     GeographicClaim,
+)
+from agentic_threat_investigator.evaluation.common import (
+    DatasetLoadError,
+    EvaluationDatasetId,
+    EvaluationExecutionStatus,
+    EvaluationRunResult,
+    EvaluationTarget,
+    EvaluationVerdict,
+    render_human_report,
+)
+from agentic_threat_investigator.evaluation.common.models import ScenarioLike
+from agentic_threat_investigator.evaluation.datasets import (
+    load_evaluation_dataset,
+    validate_dataset_directory,
 )
 from agentic_threat_investigator.infrastructure.embeddings import (
     HashingEmbeddingClient,
@@ -227,6 +252,38 @@ def _compose_embedding(settings: Settings) -> EmbeddingClient:
     )
 
 
+def _compose_evaluation_analyst(
+    *,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    uow_factory: Callable[[], PostgresUnitOfWork],
+    llm: LlmClient,
+) -> EvidenceAnalyst:
+    """Compose the production Evidence Analyst for a benchmark process.
+
+    Reuses exactly the same loader, persistence seam, accounting, GEOINT
+    context loader, and structured-output policy as the worker composition;
+    PR 30C never builds a parallel evaluation-only analyst.
+    """
+    geoint_context_loader = _compose_geoint_context_loader(settings, session_factory)
+    return EvidenceAnalyst(
+        input_loader=EvidenceAnalystInputLoader(
+            uow_factory,
+            max_evidence_items=settings.llm_max_evidence_items,
+            max_relationship_observations=settings.llm_max_relationship_observations,
+            max_normalized_facts_bytes=settings.llm_max_normalized_facts_bytes,
+            max_input_bytes=settings.llm_max_input_bytes,
+            geoint_context_loader=geoint_context_loader,
+        ),
+        llm_client=llm,
+        assessment_persistence=AssessmentPersistenceService(
+            uow_factory, batch_size=settings.db_batch_size
+        ),
+        llm_accounting=LlmAccountingService(uow_factory),
+        max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+    )
+
+
 def _compose_runner(
     *,
     settings: Settings,
@@ -247,22 +304,11 @@ def _compose_runner(
     boundary is only ever composed for test/demo stacks.
     """
     recursion_limit = 120 if settings.llm_driver is LlmDriver.DETERMINISTIC else 40
-    geoint_context_loader = _compose_geoint_context_loader(settings, session_factory)
-    analyst = EvidenceAnalyst(
-        input_loader=EvidenceAnalystInputLoader(
-            uow_factory,
-            max_evidence_items=settings.llm_max_evidence_items,
-            max_relationship_observations=settings.llm_max_relationship_observations,
-            max_normalized_facts_bytes=settings.llm_max_normalized_facts_bytes,
-            max_input_bytes=settings.llm_max_input_bytes,
-            geoint_context_loader=geoint_context_loader,
-        ),
-        llm_client=llm,
-        assessment_persistence=AssessmentPersistenceService(
-            uow_factory, batch_size=settings.db_batch_size
-        ),
-        llm_accounting=LlmAccountingService(uow_factory),
-        max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+    analyst = _compose_evaluation_analyst(
+        settings=settings,
+        session_factory=session_factory,
+        uow_factory=uow_factory,
+        llm=llm,
     )
     research_agent = build_research_agent(
         uow_factory=uow_factory,
@@ -885,3 +931,843 @@ def _log_operating_mode(settings: Settings) -> None:
             "deterministic local fakes; LLM: configured runtime implementation "
             "(not selected by operating mode)"
         )
+
+
+def _resolve_and_validate(dataset_or_path: str) -> tuple[EvaluationDatasetId, int]:
+    """Resolve one dataset-or-path argument and strictly validate it.
+
+    A canonical dataset identity such as ``evidence-analyst/v1`` loads the
+    registered corpus; any other argument is treated as a scenario directory
+    whose target is inferred from its files. Raises
+    :class:`DatasetLoadError`/``ValueError`` on any failure.
+    """
+    try:
+        dataset_id = EvaluationDatasetId.from_canonical(dataset_or_path)
+    except ValueError:
+        dataset_id = validate_dataset_directory(Path(dataset_or_path))
+        return dataset_id, len(load_evaluation_dataset(dataset_id))
+    cases = load_evaluation_dataset(dataset_id)
+    return dataset_id, len(cases)
+
+
+def evaluation_main(argv: list[str] | None = None) -> int:
+    """Run the PR 30 evaluation CLI (``ati-eval``).
+
+    PR 30A exposes local validation, PR 30B adds explicit LangSmith dataset
+    operations, and PR 30C adds the first real-model run:
+
+    .. code-block:: text
+
+        ati-eval validate <dataset-or-path>
+        ati-eval langsmith sync|verify <dataset-id> [--namespace NAMESPACE]
+        ati-eval run evidence-analyst/v1|coordinator/v1|research-agent/v1|report-writer/v1
+            |investigation/v1 [--langsmith] [--namespace NAMESPACE]
+
+    ``validate`` strictly loads a canonical dataset identity (for example
+    ``evidence-analyst/v1``) or one scenario directory, enforces the
+    scenario-quality and dataset-identity contracts, and exits 0 on success
+    or nonzero on failure. The command is fully offline: no LangSmith, no
+    LLM, and no network.
+
+    ``langsmith sync`` validates the local dataset first, then creates the
+    missing remote mirror (dataset and examples) idempotently and fails
+    closed on drift/extras/duplicates; ``langsmith verify`` performs the
+    same comparisons read-only. Both require ``LANGSMITH_API_KEY``
+    credentials and report a bounded nonzero exit otherwise.
+
+    ``run`` executes the configured real benchmark through the production
+    paths: ``evidence-analyst/v1`` (PR 30C), ``coordinator/v1`` and
+    ``research-agent/v1`` (PR 30D), ``report-writer/v1`` (PR 30E), and
+    ``investigation/v1`` (PR 30F). Without
+    ``--langsmith`` no LangSmith
+    client is constructed; with ``--langsmith`` the exact remote mirror is
+    verified before any model work and the categorical result is published
+    and confirmed as one experiment afterwards. The Coordinator/Research
+    benchmark seams bootstrap the deterministic research corpus/index
+    (repository-owned ATT&CK fixtures, hashing embeddings); the Report Writer
+    fixtures materialize ResearchResults directly and never bootstrap the
+    corpus. The run requires
+    the configured model-provider credential (``ATI_OPENAI_API_KEY`` by
+    default) and refuses the deterministic driver. Exit semantics: ``0``
+    COMPLETED/PASS with requested publication succeeded; ``1``
+    COMPLETED/FAIL; ``2`` ERROR/config/backend/publication failure.
+    """
+    parser = argparse.ArgumentParser(prog="ati-eval")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="strictly validate a canonical dataset or one scenario directory",
+    )
+    validate_parser.add_argument(
+        "dataset_or_path",
+        help="canonical dataset identity such as evidence-analyst/v1 or a "
+        "scenario directory path",
+    )
+    langsmith_parser = subparsers.add_parser(
+        "langsmith",
+        help="explicit LangSmith dataset operations (sync/verify; needs "
+        "LANGSMITH_API_KEY credentials)",
+    )
+    langsmith_subparsers = langsmith_parser.add_subparsers(
+        dest="langsmith_operation", required=True
+    )
+    for operation in ("sync", "verify"):
+        operation_parser = langsmith_subparsers.add_parser(
+            operation,
+            help=(
+                "idempotently create the missing remote mirror (sync) or "
+                "read-only check (verify); both fail closed on drift"
+            ),
+        )
+        operation_parser.add_argument(
+            "dataset_id",
+            help="canonical dataset identity such as evidence-analyst/v1",
+        )
+        operation_parser.add_argument(
+            "--namespace",
+            default="ati",
+            help="optional remote dataset name prefix (default: ati)",
+        )
+    run_parser = subparsers.add_parser(
+        "run",
+        help="execute the configured real benchmark for the selected dataset "
+        "(evidence-analyst/v1, coordinator/v1, research-agent/v1, "
+        "report-writer/v1, investigation/v1; needs the configured "
+        "model-provider key; --langsmith also needs LANGSMITH_API_KEY)",
+    )
+    run_parser.add_argument(
+        "dataset_id",
+        help="canonical dataset identity such as evidence-analyst/v1",
+    )
+    run_parser.add_argument(
+        "--langsmith",
+        action="store_true",
+        help="verify the exact remote mirror before any model work, then publish "
+        "and confirm the categorical experiment",
+    )
+    run_parser.add_argument(
+        "--namespace",
+        default="ati",
+        help="optional remote dataset/experiment name prefix (default: ati)",
+    )
+    args = parser.parse_args(argv)
+    _configure_logging()
+    if args.command == "validate":
+        return _evaluation_validate_main(args)
+    if args.command == "langsmith":
+        return _evaluation_langsmith_main(args)
+    if args.command == "run":
+        return _evaluation_run_main(args)
+    parser.error(f"unknown evaluation command: {args.command}")
+    return 2  # pragma: no cover - argparse exits before this line
+
+
+def _evaluation_validate_main(args: argparse.Namespace) -> int:
+    """Run one PR 30A offline validation command and return its exit code."""
+    try:
+        dataset_id, case_count = _resolve_and_validate(args.dataset_or_path)
+    except (ValueError, OSError, DatasetLoadError) as exc:
+        LOGGER.error("evaluation validation failed: %s", exc)
+        return 1
+    LOGGER.info(
+        "evaluation validation passed: %s (%d cases)",
+        dataset_id.canonical,
+        case_count,
+    )
+    return 0
+
+
+def _build_langsmith_evaluation_client() -> LangSmithEvaluationClient:
+    """Construct the real LangSmith SDK client for explicit evaluation commands.
+
+    Credentials come from the standard ``LANGSMITH_API_KEY`` environment
+    contract; missing credentials surface as a bounded backend failure on
+    the first remote call, never as an environment dump.
+    """
+    from agentic_threat_investigator.evaluation.backends.langsmith.client import (
+        LangSmithSdkEvaluationClient,
+    )
+
+    return LangSmithSdkEvaluationClient()
+
+
+def _evaluation_langsmith_main(args: argparse.Namespace) -> int:
+    """Run one explicit LangSmith operator command (sync/verify).
+
+    The local dataset is strictly loaded and validated before any remote
+    operation; a malformed local dataset means no LangSmith mutation
+    attempt at all. Credential/network/API failures and all fail-closed
+    drift conditions exit nonzero with a bounded message.
+    """
+    from agentic_threat_investigator.evaluation.backends.langsmith.client import (
+        LangSmithBackendError,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.datasets import (
+        LangSmithSyncError,
+        synchronize_dataset,
+        verify_dataset,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.mapping import (
+        LangSmithProjectionError,
+    )
+    from agentic_threat_investigator.evaluation.datasets import (
+        load_evaluation_scenarios,
+    )
+
+    try:
+        dataset_id = EvaluationDatasetId.from_canonical(args.dataset_id)
+    except ValueError as exc:
+        LOGGER.error(
+            "evaluation langsmith refused: dataset argument must be a canonical "
+            "dataset identity such as evidence-analyst/v1: %s",
+            exc,
+        )
+        return 1
+    try:
+        scenarios = load_evaluation_scenarios(dataset_id)
+    except (ValueError, OSError, DatasetLoadError) as exc:
+        LOGGER.error(
+            "evaluation langsmith %s failed before any remote operation: %s",
+            args.langsmith_operation,
+            exc,
+        )
+        return 1
+    client = _build_langsmith_evaluation_client()
+    namespace = args.namespace
+
+    async def run() -> int:
+        if args.langsmith_operation == "sync":
+            receipt = await synchronize_dataset(
+                dataset_id=dataset_id,
+                client=client,
+                scenarios=scenarios,
+                namespace=namespace,
+            )
+            LOGGER.info(
+                "evaluation langsmith sync complete dataset=%s local_cases=%d "
+                "created=%d unchanged=%d status=%s",
+                receipt.dataset,
+                receipt.local_cases,
+                receipt.created,
+                receipt.unchanged,
+                receipt.status,
+            )
+            return 0
+        report = await verify_dataset(
+            dataset_id=dataset_id,
+            client=client,
+            scenarios=scenarios,
+            namespace=namespace,
+        )
+        LOGGER.info(
+            "evaluation langsmith verify complete dataset=%s local_cases=%d "
+            "remote_examples=%d status=%s",
+            report.dataset,
+            report.local_cases,
+            report.remote_examples,
+            report.status,
+        )
+        return 0
+
+    try:
+        return asyncio.run(run())
+    except (LangSmithBackendError, LangSmithSyncError, LangSmithProjectionError) as exc:
+        LOGGER.error(
+            "evaluation langsmith %s failed: %s",
+            args.langsmith_operation,
+            exc,
+        )
+        return 1
+
+
+def _current_commit_sha() -> str | None:
+    """Return the bounded ATI git SHA of the running checkout, if available.
+
+    Reads the repository's own ``.git`` files only (no subprocess and no
+    environment access): a detached HEAD resolves directly, a symbolic ref
+    resolves through ``<gitdir>/refs/...``, and a worktree ``gitdir:``
+    pointer is followed. Any missing/malformed state returns ``None`` and the
+    metadata field is omitted. The value is validated as exactly 40 lowercase
+    hex characters and never treated as a credential.
+    """
+    git_dir = _repo_git_dir()
+    if git_dir is None:
+        return None
+    head = git_dir / "HEAD"
+    try:
+        ref = head.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if ref.startswith("ref:"):
+        ref_path = git_dir / ref[4:].strip()
+        try:
+            ref = ref_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+    if len(ref) != 40 or any(character not in "0123456789abcdef" for character in ref):
+        return None
+    return ref
+
+
+def _repo_git_dir() -> Path | None:
+    """Return the repository's ``.git`` directory, following worktree pointers."""
+    git = Path(".git")
+    if git.is_dir():
+        return git
+    if git.is_file():
+        try:
+            pointer = git.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if pointer.startswith("gitdir:"):
+            candidate = Path(pointer[len("gitdir:") :].strip())
+            return candidate if candidate.is_dir() else None
+    return None
+
+
+async def _execute_evidence_analyst_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real Evidence Analyst benchmark (PR 30C).
+
+    Composes the production analyst over the configured real LLM and the
+    process database, then runs the common PR 30 runner through the
+    evidence-analyst run service. This is the CLI's injectable benchmark seam
+    (unit tests replace it with a deterministic double); it never composes
+    LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.analyst.models import (
+        AnalystScenario,
+    )
+    from agentic_threat_investigator.evaluation.analyst.run import (
+        run_evidence_analyst_evaluation,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        analyst = _compose_evaluation_analyst(
+            settings=settings,
+            session_factory=factory,
+            uow_factory=uow_factory,
+            llm=llm,
+        )
+        typed = tuple(item for item in scenarios if isinstance(item, AnalystScenario))
+        return await run_evidence_analyst_evaluation(
+            dataset_id=dataset_id,
+            analyst=analyst,
+            uow_factory=uow_factory,
+            scenarios=typed,
+        )
+    finally:
+        await engine.dispose()
+
+
+def _compose_coordinator_executors(
+    *,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    uow_factory: Callable[[], PostgresUnitOfWork],
+    llm: LlmClient,
+) -> tuple[Any, Any]:
+    """Compose the Coordinator production analysis/research executor factories.
+
+    The analysis factory binds one production Evidence Analyst (same
+    composition as the worker/eval analyst) to an Investigation + materialized
+    fixture; the research factory binds a production Research Agent (same
+    composition as the worker research executor) with the deterministic
+    hashing embedding path. Both factories are async (bounds-aligned with the
+    Coordinator run seam).
+    """
+    from agentic_threat_investigator.app.orchestration.research import (
+        ResearchAgentResearchExecutor,
+    )
+    from agentic_threat_investigator.app.orchestration.services import (
+        EvidenceAnalystAnalysisExecutor,
+    )
+    from agentic_threat_investigator.infrastructure.embeddings import (
+        HashingEmbeddingClient,
+    )
+    from agentic_threat_investigator.infrastructure.research_agent_composition import (
+        build_research_agent,
+    )
+
+    """Compose the Coordinator production analysis/research executor factories.
+
+    The analysis factory binds one production Evidence Analyst (same
+    composition as the worker/eval analyst) to an Investigation; the research
+    factory binds a production Research Agent (same composition as the
+    worker research executor) with the deterministic hashing embedding path.
+    """
+
+    analyst = _compose_evaluation_analyst(
+        settings=settings,
+        session_factory=session_factory,
+        uow_factory=uow_factory,
+        llm=llm,
+    )
+    research_agent = build_research_agent(
+        uow_factory=uow_factory,
+        session_factory=session_factory,
+        embedding_client=HashingEmbeddingClient(settings.embedding.dimension),
+        llm_client=llm,
+        max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+    )
+
+    async def analysis_factory(
+        investigation_id: UUID, _materialized: object
+    ) -> EvidenceAnalystAnalysisExecutor:
+        """Bind the composed analyst to one investigation fixture.
+
+        The real-model benchmark does not script the analyst output; the
+        materialized fixture argument exists for signature compatibility with
+        the deterministic research-world seams.
+        """
+        return EvidenceAnalystAnalysisExecutor(
+            analyst, bound_investigation_id=investigation_id
+        )
+
+    async def research_factory(
+        investigation_id: UUID, _materialized: object
+    ) -> ResearchAgentResearchExecutor:
+        """Bind the composed Research Agent to one investigation fixture.
+
+        The real-model benchmark does not pre-script research decisions; the
+        materialized fixture argument exists for signature compatibility with
+        the deterministic research-world seams.
+        """
+        return ResearchAgentResearchExecutor(
+            research_agent, bound_investigation_id=investigation_id
+        )
+
+    return analysis_factory, research_factory
+
+
+def _coordinator_typed_scenarios(
+    scenarios: Sequence[ScenarioLike],
+) -> tuple[object, ...]:
+    """Filter the loaded corpus to typed Coordinator scenarios."""
+    from agentic_threat_investigator.evaluation.coordinator import (
+        CoordinatorScenario,
+    )
+
+    return tuple(item for item in scenarios if isinstance(item, CoordinatorScenario))
+
+
+def _research_typed_scenarios(
+    scenarios: Sequence[ScenarioLike],
+) -> tuple[object, ...]:
+    """Filter the loaded corpus to typed research scenarios."""
+    from agentic_threat_investigator.evaluation.research.models import (
+        ResearchRetrievalScenario,
+        ResearchSynthesisScenario,
+    )
+
+    return tuple(
+        item
+        for item in scenarios
+        if isinstance(item, (ResearchRetrievalScenario, ResearchSynthesisScenario))
+    )
+
+
+def _report_writer_typed_scenarios(
+    scenarios: Sequence[ScenarioLike],
+) -> tuple[object, ...]:
+    """Filter the loaded corpus to typed Report Writer scenarios."""
+    from agentic_threat_investigator.evaluation.report_writer.models import (
+        ReportWriterScenario,
+    )
+
+    return tuple(item for item in scenarios if isinstance(item, ReportWriterScenario))
+
+
+async def _execute_report_writer_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real Report Writer benchmark (PR 30E).
+
+    Composes the production Report Writer (input loader, accounting, writer,
+    provenance validator, atomic report persistence) over the process database
+    and the configured real LLM, then runs the common PR 30 runner through the
+    report-writer run service. Report Writer fixtures materialize their own
+    ResearchResults directly; no research-corpus/index bootstrap is performed.
+    This is the CLI's injectable benchmark seam; it never composes LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.report_writer.run import (
+        run_report_writer_evaluation,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        return await run_report_writer_evaluation(
+            dataset_id=dataset_id,
+            llm=llm,
+            uow_factory=uow_factory,
+            scenarios=_report_writer_typed_scenarios(scenarios),  # type: ignore[arg-type]
+            batch_size=settings.db_batch_size,
+            max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+        )
+    finally:
+        await engine.dispose()
+
+
+async def _execute_coordinator_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real Coordinator benchmark (PR 30D).
+
+    Composes the production Coordinator world (fixture providers, real
+    analysis/research executors, real LLM) over the process database, then
+    runs the common PR 30 runner through the coordinator run service. The
+    deterministic repository-owned research corpus is bootstrapped first so
+    scenario worlds that discover researchable entities execute their full
+    production lifecycle. This is the CLI's injectable benchmark seam; it
+    never composes LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.coordinator_pr30 import (
+        run_coordinator_evaluation,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        await _bootstrap_research_corpus_if_needed(settings, uow_factory)
+        analysis_factory, research_factory = _compose_coordinator_executors(
+            settings=settings,
+            session_factory=factory,
+            uow_factory=uow_factory,
+            llm=llm,
+        )
+        return await run_coordinator_evaluation(
+            dataset_id=dataset_id,
+            uow_factory=uow_factory,
+            analysis_factory=analysis_factory,
+            research_factory=research_factory,
+            scenarios=_coordinator_typed_scenarios(scenarios),  # type: ignore[arg-type]
+        )
+    finally:
+        await engine.dispose()
+
+
+async def _execute_research_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real Research Agent benchmark (PR 30D).
+
+    Bootstraps the deterministic repository-owned corpus/index, composes the
+    production research world (real retriever + real Research Agent + real
+    LLM at the model boundary), then runs the common PR 30 runner through the
+    research run service. This is the CLI's injectable benchmark seam; it
+    never composes LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.research.composition import (
+        build_research_world,
+    )
+    from agentic_threat_investigator.evaluation.research.run import (
+        run_research_agent_evaluation,
+    )
+    from agentic_threat_investigator.infrastructure.embeddings import (
+        HashingEmbeddingClient,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        await _bootstrap_research_corpus_if_needed(settings, uow_factory)
+        world = build_research_world(
+            uow_factory=uow_factory,
+            session_factory=factory,
+            embedding_client=HashingEmbeddingClient(settings.embedding.dimension),
+            llm_client=llm,
+            max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+        )
+        return await run_research_agent_evaluation(
+            dataset_id=dataset_id,
+            world=world,
+            uow_factory=uow_factory,
+            scenarios=_research_typed_scenarios(scenarios),  # type: ignore[arg-type]
+        )
+    finally:
+        await engine.dispose()
+
+
+def _investigation_typed_scenarios(
+    scenarios: Sequence[ScenarioLike],
+) -> tuple[object, ...]:
+    """Filter the loaded corpus to typed Investigation scenarios."""
+    from agentic_threat_investigator.evaluation.investigation.models import (
+        InvestigationScenario,
+    )
+
+    return tuple(item for item in scenarios if isinstance(item, InvestigationScenario))
+
+
+async def _execute_investigation_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real end-to-end Investigation benchmark (PR 30F).
+
+    Bootstraps the deterministic research corpus/index, then composes the
+    production end-to-end world (fixture providers over the deterministic
+    catalog, production Evidence Analyst, production Research Agent,
+    production LocalInvestigationRunner, production Report Writer) over the
+    process database and the configured real LLM, and runs the common PR 30
+    runner through the investigation run service. This is the CLI's
+    injectable benchmark seam; it never composes LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.investigation.run import (
+        run_investigation_evaluation,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        await _bootstrap_research_corpus_if_needed(settings, uow_factory)
+        return await run_investigation_evaluation(
+            dataset_id=dataset_id,
+            llm=llm,
+            uow_factory=uow_factory,
+            session_factory=factory,
+            scenarios=_investigation_typed_scenarios(scenarios),  # type: ignore[arg-type]
+            batch_size=settings.db_batch_size,
+            max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+        )
+    finally:
+        await engine.dispose()
+
+
+async def _bootstrap_research_corpus_if_needed(
+    settings: Settings, uow_factory: Callable[[], PostgresUnitOfWork]
+) -> None:
+    """Idempotently ingest and index the deterministic research corpus.
+
+    Uses repository-owned ATT&CK fixtures through the production ingestion/
+    indexing services (deterministic hashing embeddings; no live web). The
+    object store lives under the configured data directory.
+    """
+    from agentic_threat_investigator.evaluation.research.composition import (
+        REPOSITORY_RESEARCH_FIXTURES,
+        bootstrap_research_corpus,
+    )
+
+    data_dir = Path(settings.data_dir) / "research-eval"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    await bootstrap_research_corpus(
+        uow_factory=uow_factory,
+        data_dir=data_dir,
+        fixture_files=tuple(REPOSITORY_RESEARCH_FIXTURES.values()),
+    )
+
+
+def _evaluation_run_main(args: argparse.Namespace) -> int:
+    """Run the configured real benchmark (PR 30C/30D/30E).
+
+    ``ati-eval run <target>/v1`` executes every repository case through the
+    real production path with the configured real model:
+
+    - ``evidence-analyst/v1`` (PR 30C) -> the production Evidence Analyst;
+    - ``coordinator/v1`` (PR 30D) -> the production Coordinator graph/policy;
+    - ``research-agent/v1`` (PR 30D) -> production retrieval + Research Agent;
+    - ``report-writer/v1`` (PR 30E) -> the production Report Writer;
+    - ``investigation/v1`` (PR 30F) -> the production end-to-end investigation
+      path (Coordinator, providers/extractors, Evidence Analyst, Research
+      Agent, Report Writer).
+
+    With ``--langsmith`` the exact remote mirror is verified **before** any
+    model work and the categorical result is published as one experiment
+    afterwards. Unsupported targets are rejected.
+
+    Exit semantics: ``0`` COMPLETED/PASS with requested publication
+    succeeded; ``1`` COMPLETED/FAIL (publication never converts FAIL to
+    success); ``2`` ERROR/config/backend/publication failure.
+    """
+    from agentic_threat_investigator.app.secrets import SecretNotFoundError
+    from agentic_threat_investigator.evaluation.backends.langsmith.client import (
+        LangSmithBackendError,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.datasets import (
+        LangSmithSyncError,
+        verify_dataset,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.experiments import (
+        LangSmithExperimentError,
+        publish_experiment,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.mapping import (
+        PROJECTION_SCHEMA_VERSION,
+        LangSmithProjectionError,
+    )
+    from agentic_threat_investigator.evaluation.backends.langsmith.results import (
+        build_experiment_metadata,
+    )
+    from agentic_threat_investigator.evaluation.datasets import (
+        load_evaluation_scenarios,
+    )
+
+    try:
+        dataset_id = EvaluationDatasetId.from_canonical(args.dataset_id)
+    except ValueError as exc:
+        LOGGER.error(
+            "evaluation run refused: dataset argument must be a canonical dataset "
+            "identity such as evidence-analyst/v1: %s",
+            exc,
+        )
+        return 2
+    if dataset_id.target not in (
+        EvaluationTarget.EVIDENCE_ANALYST,
+        EvaluationTarget.COORDINATOR,
+        EvaluationTarget.RESEARCH_AGENT,
+        EvaluationTarget.REPORT_WRITER,
+        EvaluationTarget.INVESTIGATION,
+    ):
+        LOGGER.error(
+            "evaluation run refused: PR 30C/30D/30E/30F supports evidence-analyst/v1, "
+            "coordinator/v1, research-agent/v1, report-writer/v1, and "
+            "investigation/v1 (got %s)",
+            dataset_id.canonical,
+        )
+        return 2
+    try:
+        scenarios = load_evaluation_scenarios(dataset_id)
+    except (ValueError, OSError, DatasetLoadError) as exc:
+        LOGGER.error(
+            "evaluation run failed before any model work: %s",
+            exc,
+        )
+        return 2
+
+    settings = get_settings()
+    if settings.llm_driver is LlmDriver.DETERMINISTIC:
+        LOGGER.error(
+            "evaluation run refused: ATI_LLM_DRIVER=deterministic selects the "
+            "offline scripted boundary, not a real benchmark model"
+        )
+        return 2
+
+    client: LangSmithEvaluationClient | None = None
+    if args.langsmith:
+        try:
+            client = _build_langsmith_evaluation_client()
+            report = asyncio.run(
+                verify_dataset(
+                    dataset_id=dataset_id,
+                    client=client,
+                    scenarios=scenarios,
+                    namespace=args.namespace,
+                )
+            )
+        except (
+            LangSmithBackendError,
+            LangSmithSyncError,
+            LangSmithProjectionError,
+        ) as exc:
+            LOGGER.error(
+                "evaluation run refused before any model work: remote dataset "
+                "verification failed: %s",
+                exc,
+            )
+            return 2
+        LOGGER.info(
+            "evaluation run remote verification passed dataset=%s local_cases=%d "
+            "remote_examples=%d",
+            report.dataset,
+            report.local_cases,
+            report.remote_examples,
+        )
+
+    async def run() -> int:
+        if dataset_id.target is EvaluationTarget.EVIDENCE_ANALYST:
+            benchmark = _execute_evidence_analyst_benchmark
+        elif dataset_id.target is EvaluationTarget.COORDINATOR:
+            benchmark = _execute_coordinator_benchmark
+        elif dataset_id.target is EvaluationTarget.REPORT_WRITER:
+            benchmark = _execute_report_writer_benchmark
+        elif dataset_id.target is EvaluationTarget.INVESTIGATION:
+            benchmark = _execute_investigation_benchmark
+        else:
+            benchmark = _execute_research_benchmark
+        try:
+            run_result = await benchmark(dataset_id=dataset_id, scenarios=scenarios)
+        except (SecretNotFoundError, ValueError, DatasetLoadError, OSError) as exc:
+            LOGGER.error("evaluation run failed: %s", exc)
+            return 2
+        except Exception:
+            LOGGER.exception("evaluation run failed")
+            return 2
+        LOGGER.info(
+            "evaluation run complete:%s", "\n" + render_human_report(run_result)
+        )
+        if client is not None:
+            commit_sha = _current_commit_sha()
+            bounded_parameters: dict[str, str | float | int | bool | None] = {
+                "temperature": settings.llm_temperature
+            }
+            if settings.llm_max_tokens is not None:
+                bounded_parameters["max_tokens"] = settings.llm_max_tokens
+            try:
+                confirmation = await publish_experiment(
+                    dataset_id=dataset_id,
+                    run=run_result,
+                    client=client,
+                    execution_id=uuid4().hex,
+                    namespace=args.namespace,
+                    commit_sha=commit_sha,
+                    metadata=build_experiment_metadata(
+                        commit_sha=commit_sha,
+                        dataset_id=dataset_id.canonical,
+                        projection_schema_version=PROJECTION_SCHEMA_VERSION,
+                        model_provider=settings.llm_driver.value,
+                        model_name=settings.llm_model,
+                        model_parameters=dict(bounded_parameters),
+                    ),
+                )
+            except (
+                LangSmithBackendError,
+                LangSmithSyncError,
+                LangSmithExperimentError,
+            ) as exc:
+                LOGGER.error(
+                    "evaluation run completed but LangSmith publication failed: %s",
+                    exc,
+                )
+                return 2
+            LOGGER.info(
+                "evaluation experiment confirmed run_id=%s experiment=%s "
+                "feedback_count=%d",
+                confirmation.run_id,
+                confirmation.experiment_name,
+                confirmation.feedback_count,
+            )
+        if run_result.execution_status is EvaluationExecutionStatus.ERROR:
+            return 2
+        if run_result.verdict is EvaluationVerdict.FAIL:
+            return 1
+        return 0
+
+    return asyncio.run(run())
