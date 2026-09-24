@@ -1781,14 +1781,72 @@ Run them with ``ati-eval run coordinator/v1 [--langsmith]`` and
 verify-first mirror check, and one-execution-per-case categorical LangSmith
 publication as PR 30C). The manual workflow's `run` step is dataset-agnostic
 and bootstraps the deterministic repository-owned research corpus/index
-before any benchmark run.
+before any Coordinator/Research benchmark run.
 
-Report Writer / end-to-end real target execution, real judge evaluators,
-prompt tuning, numeric thresholds, and online evaluation remain PR 30E and
-later PRs. ATI's scenarios, expected outcomes, rubrics, evaluator code, and
-release gates remain repository-owned; the same evaluation framework stays
-portable to a future self-hosted backend such as Langfuse or Phoenix
-through ATI's observability/evaluation abstractions.
+### Report Writer real target execution: PR 30E delivered
+
+PR 30E executes the committed Report Writer behavioral corpus through the
+**production Report Writer path** and evaluates the actual persisted report
+(or the declared typed no-report outcome) with the existing deterministic
+:class:`~agentic_threat_investigator.evaluation.report_writer.evaluator.ReportWriterEvaluator`
+as the sole semantic authority:
+
+```text
+ReportWriterScenario
+ -> repository-owned fixture (run-scoped execution identity)
+ -> production ReportWriterInputLoader / LlmAccountingService / ReportWriter
+ -> FakeLlmClient (tests) or configured real LlmClient (CLI) at the boundary
+ -> real ReportProvenanceValidator + InvestigationReportPersistenceService
+ -> persisted InvestigationReport OR declared typed no-report outcome
+ -> existing ReportWriterEvaluator (PR 30 adapter)
+ -> common EvaluationRunner -> PASS / FAIL / ERROR
+ -> optional LangSmith publication
+```
+
+Run it with ``ati-eval run report-writer/v1 [--langsmith]`` (same exit
+semantics, verify-first mirror check, and one-execution-per-case categorical
+LangSmith publication as PR 30C/30D). The Report Writer benchmark never
+bootstraps the research corpus: its fixtures materialize ResearchResults
+directly through the production persistence service.
+
+PR 30E guarantees:
+
+- the existing deterministic evaluator remains the authority; the PR 30
+  adapter only maps its PASS/FAIL decision onto the common contract;
+- successful cases evaluate the **actual persisted report** returned by
+  production execution, with the exact current-execution model-attempt count
+  captured through a transparent counting ``LlmClient`` decorator;
+- declared no-report scenarios (S06 unsupported reference, S07
+  structured-output exhaustion, S08 stale-Assessment race) are behavioral
+  outcomes, not ERROR: only allowlisted typed production failures map to the
+  stable bounded codes ``report_provenance_error``, ``invalid_structured_output``,
+  and ``stale_report_input`` (never exception-message parsing);
+- unexpected exceptions remain ERROR through the common runner;
+- S06 exercises the real provenance boundary, S07 the real bounded
+  structured-output repair path, and S08 the real stale-Assessment
+  persistence protection under lock;
+- Assessment verdict/confidence/caveats remain application-owned and Research
+  remains contextual, never verdict authority;
+- run-scoped execution identity isolates repeated runs (fresh
+  Investigation/Assessment/EvidenceObservation/Research identities) while
+  canonical Entity/Relationship rows may be reused; no destructive reset ever
+  occurs;
+- metric values (``narrative_statement_count``,
+  ``included_finding_ordinals``, ``included_research_claim_count``,
+  ``required_finding_coverage``, ``required_research_coverage``) are
+  diagnostics only: no numeric threshold or weight ever decides a verdict;
+- no LLM-as-judge and no semantic-entailment claim: the deterministic
+  provenance validator proves reference closure, while the scenarios prove
+  expected behavior through exact membership and canonical phrase envelopes;
+- no raw report/prompt/model/Evidence/Research content is ever published by
+  evaluation.
+
+End-to-end real target execution, real judge evaluators, prompt tuning,
+numeric thresholds, and online evaluation remain PR 30F and later PRs. ATI's
+scenarios, expected outcomes, rubrics, evaluator code, and release gates
+remain repository-owned; the same evaluation framework stays portable to a
+future self-hosted backend such as Langfuse or Phoenix through ATI's
+observability/evaluation abstractions.
 
 ## Initial evaluation corpus size
 

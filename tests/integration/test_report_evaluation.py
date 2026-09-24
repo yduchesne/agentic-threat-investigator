@@ -46,6 +46,11 @@ from agentic_threat_investigator.domain.report import (
 from agentic_threat_investigator.evaluation.report_writer.evaluator import (
     ReportWriterEvaluator,
 )
+from agentic_threat_investigator.evaluation.report_writer.fixtures import (
+    ReportWriterFixture,
+    ReportWriterScenarioMaterializer,
+    build_canonical_report_output,
+)
 from agentic_threat_investigator.evaluation.report_writer.loader import (
     load_report_writer_scenarios_directory,
 )
@@ -55,6 +60,9 @@ from agentic_threat_investigator.evaluation.report_writer.models import (
     ReportWriterScenario,
     ReportWriterScenarioResolution,
 )
+from agentic_threat_investigator.evaluation.report_writer.scenarios import (
+    report_writer_fixture,
+)
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
 )
@@ -62,12 +70,6 @@ from agentic_threat_investigator.infrastructure.report_writer_composition import
     build_report_writer,
 )
 from tests.support.llm_fixtures import FakeLlmClient
-from tests.support.report_writer_fixtures import (
-    ReportWriterFixture,
-    ReportWriterScenarioMaterializer,
-    build_canonical_report_output,
-)
-from tests.support.report_writer_scenarios import report_writer_fixture
 
 pytestmark = [
     pytest.mark.integration,
