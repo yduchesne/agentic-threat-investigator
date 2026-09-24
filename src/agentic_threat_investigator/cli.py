@@ -13,8 +13,8 @@ framework):
 - ``ati-geo-resolver``: the bounded asynchronous geographic-resolution
   worker loop (PR 26C);
 - ``ati-eval``: the PR 30 evaluation CLI (validate; langsmith sync/verify;
-  run evidence-analyst/v1, coordinator/v1, research-agent/v1, or
-  report-writer/v1 [--langsmith]).
+  run evidence-analyst/v1, coordinator/v1, research-agent/v1, report-writer/v1,
+  or investigation/v1 [--langsmith]).
 
 All load the cached typed settings once and never read environment
 variables themselves, and none ever download upstream data. The worker
@@ -961,7 +961,7 @@ def evaluation_main(argv: list[str] | None = None) -> int:
         ati-eval validate <dataset-or-path>
         ati-eval langsmith sync|verify <dataset-id> [--namespace NAMESPACE]
         ati-eval run evidence-analyst/v1|coordinator/v1|research-agent/v1|report-writer/v1
-            [--langsmith] [--namespace NAMESPACE]
+            |investigation/v1 [--langsmith] [--namespace NAMESPACE]
 
     ``validate`` strictly loads a canonical dataset identity (for example
     ``evidence-analyst/v1``) or one scenario directory, enforces the
@@ -977,7 +977,8 @@ def evaluation_main(argv: list[str] | None = None) -> int:
 
     ``run`` executes the configured real benchmark through the production
     paths: ``evidence-analyst/v1`` (PR 30C), ``coordinator/v1`` and
-    ``research-agent/v1`` (PR 30D), and ``report-writer/v1`` (PR 30E). Without
+    ``research-agent/v1`` (PR 30D), ``report-writer/v1`` (PR 30E), and
+    ``investigation/v1`` (PR 30F). Without
     ``--langsmith`` no LangSmith
     client is constructed; with ``--langsmith`` the exact remote mirror is
     verified before any model work and the categorical result is published
@@ -1031,8 +1032,8 @@ def evaluation_main(argv: list[str] | None = None) -> int:
         "run",
         help="execute the configured real benchmark for the selected dataset "
         "(evidence-analyst/v1, coordinator/v1, research-agent/v1, "
-        "report-writer/v1; needs the configured model-provider key; "
-        "--langsmith also needs LANGSMITH_API_KEY)",
+        "report-writer/v1, investigation/v1; needs the configured "
+        "model-provider key; --langsmith also needs LANGSMITH_API_KEY)",
     )
     run_parser.add_argument(
         "dataset_id",
@@ -1511,6 +1512,56 @@ async def _execute_research_benchmark(
         await engine.dispose()
 
 
+def _investigation_typed_scenarios(
+    scenarios: Sequence[ScenarioLike],
+) -> tuple[object, ...]:
+    """Filter the loaded corpus to typed Investigation scenarios."""
+    from agentic_threat_investigator.evaluation.investigation.models import (
+        InvestigationScenario,
+    )
+
+    return tuple(item for item in scenarios if isinstance(item, InvestigationScenario))
+
+
+async def _execute_investigation_benchmark(
+    *,
+    dataset_id: EvaluationDatasetId,
+    scenarios: Sequence[ScenarioLike],
+) -> EvaluationRunResult:
+    """Execute the configured real end-to-end Investigation benchmark (PR 30F).
+
+    Bootstraps the deterministic research corpus/index, then composes the
+    production end-to-end world (fixture providers over the deterministic
+    catalog, production Evidence Analyst, production Research Agent,
+    production LocalInvestigationRunner, production Report Writer) over the
+    process database and the configured real LLM, and runs the common PR 30
+    runner through the investigation run service. This is the CLI's
+    injectable benchmark seam; it never composes LangSmith.
+    """
+    from agentic_threat_investigator.evaluation.investigation.run import (
+        run_investigation_evaluation,
+    )
+
+    settings = get_settings()
+    engine = _make_engine(settings)
+    factory = _session_factory(engine)
+    uow_factory = _uow_factory(factory, settings)
+    try:
+        llm = _compose_llm(settings)
+        await _bootstrap_research_corpus_if_needed(settings, uow_factory)
+        return await run_investigation_evaluation(
+            dataset_id=dataset_id,
+            llm=llm,
+            uow_factory=uow_factory,
+            session_factory=factory,
+            scenarios=_investigation_typed_scenarios(scenarios),  # type: ignore[arg-type]
+            batch_size=settings.db_batch_size,
+            max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+        )
+    finally:
+        await engine.dispose()
+
+
 async def _bootstrap_research_corpus_if_needed(
     settings: Settings, uow_factory: Callable[[], PostgresUnitOfWork]
 ) -> None:
@@ -1543,7 +1594,10 @@ def _evaluation_run_main(args: argparse.Namespace) -> int:
     - ``evidence-analyst/v1`` (PR 30C) -> the production Evidence Analyst;
     - ``coordinator/v1`` (PR 30D) -> the production Coordinator graph/policy;
     - ``research-agent/v1`` (PR 30D) -> production retrieval + Research Agent;
-    - ``report-writer/v1`` (PR 30E) -> the production Report Writer.
+    - ``report-writer/v1`` (PR 30E) -> the production Report Writer;
+    - ``investigation/v1`` (PR 30F) -> the production end-to-end investigation
+      path (Coordinator, providers/extractors, Evidence Analyst, Research
+      Agent, Report Writer).
 
     With ``--langsmith`` the exact remote mirror is verified **before** any
     model work and the categorical result is published as one experiment
@@ -1590,10 +1644,12 @@ def _evaluation_run_main(args: argparse.Namespace) -> int:
         EvaluationTarget.COORDINATOR,
         EvaluationTarget.RESEARCH_AGENT,
         EvaluationTarget.REPORT_WRITER,
+        EvaluationTarget.INVESTIGATION,
     ):
         LOGGER.error(
-            "evaluation run refused: PR 30C/30D/30E supports evidence-analyst/v1, "
-            "coordinator/v1, research-agent/v1, and report-writer/v1 (got %s)",
+            "evaluation run refused: PR 30C/30D/30E/30F supports evidence-analyst/v1, "
+            "coordinator/v1, research-agent/v1, report-writer/v1, and "
+            "investigation/v1 (got %s)",
             dataset_id.canonical,
         )
         return 2
@@ -1652,6 +1708,8 @@ def _evaluation_run_main(args: argparse.Namespace) -> int:
             benchmark = _execute_coordinator_benchmark
         elif dataset_id.target is EvaluationTarget.REPORT_WRITER:
             benchmark = _execute_report_writer_benchmark
+        elif dataset_id.target is EvaluationTarget.INVESTIGATION:
+            benchmark = _execute_investigation_benchmark
         else:
             benchmark = _execute_research_benchmark
         try:

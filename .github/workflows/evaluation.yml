@@ -12,8 +12,8 @@ on:
           verify = read-only exact-mirror check; sync = idempotent fail-closed
           mirror create; run = execute the real benchmark for the selected
           dataset (evidence-analyst/v1, coordinator/v1, research-agent/v1,
-          report-writer/v1; needs PostgreSQL, LANGSMITH_API_KEY and
-          ATI_OPENAI_API_KEY)
+          report-writer/v1, investigation/v1; needs PostgreSQL,
+          LANGSMITH_API_KEY and ATI_OPENAI_API_KEY)
         required: true
         type: choice
         default: 'verify'

@@ -79,11 +79,22 @@ def test_load_dataset_research_agent_concatenates_both_families() -> None:
     assert "rag-s01-relevant-context" in expected_ids
 
 
-def test_load_dataset_refuses_unregistered_target() -> None:
-    """The investigation target has no PR 30A corpus and refuses loading."""
+def test_load_dataset_investigation_registered() -> None:
+    """The PR 30F investigation target owns a typed corpus (L08)."""
     dataset_id = EvaluationDatasetId(target=EvaluationTarget.INVESTIGATION, version=1)
-    with pytest.raises(DatasetLoadError, match="no corpus"):
-        load_evaluation_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
+    cases = load_evaluation_dataset(dataset_id, corpus_root=SCENARIOS_ROOT)
+    assert cases
+    assert all(
+        case.specification.target is EvaluationTarget.INVESTIGATION for case in cases
+    )
+    assert {case.case_id for case in cases} >= {
+        "inv-s01-malicious-multi-source",
+        "inv-s02-benign",
+        "inv-s03-inconclusive-sparse",
+        "inv-s04-conflicting-evidence",
+        "inv-s05-research-required",
+        "inv-s06-cycle-duplicate-bounded",
+    }
 
 
 def test_load_dataset_refuses_version_mismatch() -> None:

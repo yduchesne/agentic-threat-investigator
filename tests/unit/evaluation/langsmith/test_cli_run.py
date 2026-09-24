@@ -54,7 +54,8 @@ DATASET = "evidence-analyst/v1"
 COORDINATOR_DATASET = "coordinator/v1"
 RESEARCH_DATASET = "research-agent/v1"
 REPORT_WRITER_DATASET = "report-writer/v1"
-UNSUPPORTED_DATASET = "investigation/v1"
+INVESTIGATION_DATASET = "investigation/v1"
+UNSUPPORTED_DATASET = "geoint/v1"
 
 
 def _run_result(
@@ -243,6 +244,17 @@ class TestRunExitSemantics:
         )
         assert evaluation_main(["run", REPORT_WRITER_DATASET]) == 0
 
+    def test_r01_investigation_run_supported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """INV-R01 investigation/v1 dispatches to the end-to-end benchmark."""
+        _install_benchmark(
+            monkeypatch,
+            _pass_run_result(INVESTIGATION_DATASET),
+            seam="_execute_investigation_benchmark",
+        )
+        assert evaluation_main(["run", INVESTIGATION_DATASET]) == 0
+
     def test_r04_unsupported_target_rejected(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -303,12 +315,13 @@ class TestRunLangSmith:
             (COORDINATOR_DATASET, "_execute_coordinator_benchmark"),
             (RESEARCH_DATASET, "_execute_research_benchmark"),
             (REPORT_WRITER_DATASET, "_execute_report_writer_benchmark"),
+            (INVESTIGATION_DATASET, "_execute_investigation_benchmark"),
         ],
     )
     def test_ls01_mirror_exact_run_allowed(
         self, monkeypatch: pytest.MonkeyPatch, dataset: str, seam: str
     ) -> None:
-        """D-LS01/02/EA-LS01/RPT-LS01 an exact mirror allows a LangSmith-backed run."""
+        """D-LS01/02/EA-LS01/RPT-LS01/INV-LS01 an exact mirror allows a run."""
         fake = _seeded_mirror(dataset)
         _install_fake(monkeypatch, fake)
         _install_benchmark(monkeypatch, _pass_run_result(dataset), seam=seam)
@@ -323,12 +336,13 @@ class TestRunLangSmith:
             (COORDINATOR_DATASET, "_execute_coordinator_benchmark"),
             (RESEARCH_DATASET, "_execute_research_benchmark"),
             (REPORT_WRITER_DATASET, "_execute_report_writer_benchmark"),
+            (INVESTIGATION_DATASET, "_execute_investigation_benchmark"),
         ],
     )
     def test_ls03_drift_refuses_before_target(
         self, monkeypatch: pytest.MonkeyPatch, dataset: str, seam: str
     ) -> None:
-        """D-LS03 semantic drift refuses the run before any target work."""
+        """D-LS03/INV-LS03 semantic drift refuses the run before any target work."""
         calls: list[str] = []
         _install_fake(monkeypatch, _drifted_mirror(dataset))
         _install_benchmark(
@@ -510,3 +524,83 @@ class TestReportWriterRun:
         source = _inspect.getsource(cli_module._execute_report_writer_benchmark)
         assert "_bootstrap_research_corpus_if_needed" not in source
         assert "run_report_writer_evaluation" in source
+
+
+class TestInvestigationRun:
+    """INV-R01/R06/R11/INV-LS08 investigation-specific run contract."""
+
+    def test_inv_r06_local_run_constructs_no_langsmith_client(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R06 an investigation local run never constructs a LangSmith client."""
+        _install_benchmark(
+            monkeypatch,
+            _pass_run_result(INVESTIGATION_DATASET),
+            seam="_execute_investigation_benchmark",
+        )
+
+        def exploding() -> object:
+            raise AssertionError("LangSmith client must not be constructed")
+
+        monkeypatch.setattr(
+            "agentic_threat_investigator.cli._build_langsmith_evaluation_client",
+            exploding,
+        )
+        assert evaluation_main(["run", INVESTIGATION_DATASET]) == 0
+
+    def test_inv_r11_missing_model_credential_bounded_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R11 a missing model credential surfaces as a bounded exit-2 failure."""
+        from agentic_threat_investigator.app.secrets import SecretNotFoundError
+
+        _install_benchmark(
+            monkeypatch,
+            _pass_run_result(INVESTIGATION_DATASET),
+            fail=SecretNotFoundError("ATI_OPENAI_API_KEY"),
+            seam="_execute_investigation_benchmark",
+        )
+        assert evaluation_main(["run", INVESTIGATION_DATASET]) == 2
+
+    def test_inv_ls08_no_raw_content_published(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """INV-LS08 publication metadata carries no raw prompt/model content."""
+        fake = _seeded_mirror(INVESTIGATION_DATASET)
+        _install_fake(monkeypatch, fake)
+        _install_benchmark(
+            monkeypatch,
+            _pass_run_result(INVESTIGATION_DATASET),
+            seam="_execute_investigation_benchmark",
+        )
+        assert evaluation_main(["run", INVESTIGATION_DATASET, "--langsmith"]) == 0
+        run_id, _publication = fake.published[0]
+        metadata = fake.experiments[run_id]["ref"].metadata
+        rendered = f"{metadata}"
+        for forbidden in (
+            "malware.badloader_v2",
+            "update-package.test",
+            "prompt",
+            "chain_of_thought",
+            "assessment_verdict",
+        ):
+            assert forbidden not in rendered
+
+    def test_inv_research_corpus_bootstrap_used(self) -> None:
+        """The end-to-end benchmark bootstraps the deterministic corpus."""
+        import inspect as _inspect
+
+        from agentic_threat_investigator import cli as cli_module
+
+        source = _inspect.getsource(cli_module._execute_investigation_benchmark)
+        assert "_bootstrap_research_corpus_if_needed" in source
+        assert "run_investigation_evaluation" in source
+
+    def test_inv_r04_unsupported_target_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """INV-R04 a genuinely unsupported target is rejected before work."""
+        calls: list[str] = []
+        _install_benchmark(monkeypatch, _pass_run_result(), calls=calls)
+        assert evaluation_main(["run", UNSUPPORTED_DATASET]) == 2
+        assert calls == []

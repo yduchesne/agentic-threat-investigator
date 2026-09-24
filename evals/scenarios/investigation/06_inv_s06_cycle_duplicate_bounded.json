@@ -1,0 +1,116 @@
+{
+  "id": "inv-s06-cycle-duplicate-bounded",
+  "version": 1,
+  "specification": {
+    "title": "Cycle and duplicate-discovery bounded termination end-to-end",
+    "description": "A domain with shared hosting infrastructure whose CNAME branch and MX neighbor re-discover the already-investigated resolved IP and the same shared network prefix. The production Coordinator must suppress duplicate provider work and duplicate entity investigations, terminate boundedly, and persist a clean terminal state and report.",
+    "target": "investigation",
+    "purpose": "Verify cycle/duplicate suppression in the production end-to-end path: rediscovery of already-investigated entities never re-executes provider work or pivots, and the investigation terminates cleanly within the authored bounds.",
+    "operational_relevance": "Shared hosting and mail/name infrastructure routinely create rediscovery potential; unbounded duplicate work is a cost and correctness hazard.",
+    "regression_risk": "The Coordinator could re-investigate an already-investigated entity discovered through a second path, re-run provider work, or fail to terminate within the authored depth/action bounds.",
+    "expected_behavior": {
+      "required": [
+        "The investigation terminates completed with a final Assessment",
+        "Rediscovered entities never trigger duplicate provider work or duplicate investigation",
+        "A clean persisted report preserves the final Assessment verdict"
+      ],
+      "forbidden": [
+        "Duplicate provider work on the same provider and entity",
+        "Duplicate investigation of the same entity",
+        "Execution beyond the authored depth bound"
+      ]
+    },
+    "tags": [
+      "cycle",
+      "duplicate-suppression",
+      "bounded-termination"
+    ],
+    "architecture_refs": [
+      "coordinator-policy",
+      "pivot-policy-authorization",
+      "termination-guarantee",
+      "assessment-faithful-reporting"
+    ]
+  },
+  "fixture": "f02-shared-infrastructure-cycle",
+  "root": {
+    "entity_label": "root_domain",
+    "entity_type": "domain",
+    "value": "update-package.test"
+  },
+  "expected": {
+    "terminal": {
+      "status": "completed",
+      "stop_reason": "sufficient_evidence"
+    },
+    "assessment": {
+      "verdict": "suspicious",
+      "confidence": "medium",
+      "required_findings": [
+        "reputation:supporting"
+      ],
+      "forbidden_findings": []
+    },
+    "evidence": {
+      "required_sources": [
+        "urn:ati:source:google_public_dns",
+        "urn:ati:source:rdap",
+        "urn:ati:source:abuseipdb"
+      ],
+      "required_entity_labels": [
+        "resolved_ip"
+      ],
+      "forbidden_entity_labels": [
+        "malware_family"
+      ]
+    },
+    "relationships": {
+      "required": [
+        "urn:ati:relationship:dns:resolves_to",
+        "urn:ati:relationship:network:belongs_to"
+      ],
+      "forbidden": [
+        "urn:ati:relationship:threat:associated_with"
+      ]
+    },
+    "research": {
+      "required_subject_labels": [],
+      "forbidden_subject_labels": []
+    },
+    "report": {
+      "required": true,
+      "verdict": "suspicious",
+      "confidence": "medium",
+      "required_finding_ordinals": [
+        1
+      ],
+      "forbidden_finding_ordinals": [],
+      "min_narrative_statements": 0,
+      "max_narrative_statements": 5
+    },
+    "trajectory": {
+      "required_actions": [
+        "urn:ati:action:provider_query",
+        "urn:ati:action:pivot_executed",
+        "urn:ati:action:assessment_requested",
+        "urn:ati:action:investigation_stopped"
+      ],
+      "forbidden_actions": [
+        "urn:ati:action:research_requested"
+      ],
+      "required_research": [],
+      "forbidden_research": [],
+      "max_depth": 2,
+      "termination_required": true
+    },
+    "efficiency": {
+      "max_provider_calls": 20,
+      "max_llm_calls": 8,
+      "max_replans": 3,
+      "max_pivots": 6,
+      "max_duplicate_provider_calls": 0,
+      "max_duplicate_entity_investigations": 0,
+      "max_total_actions": 60
+    }
+  }
+}

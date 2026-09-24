@@ -1,0 +1,117 @@
+{
+  "id": "inv-s05-research-required",
+  "version": 1,
+  "specification": {
+    "title": "Research-required malware context end-to-end",
+    "description": "A content-delivery domain whose resolved IP carries a strong AbuseIPDB reputation and a ThreatFox malware association. The production Coordinator must authorize research on the malware family; the production Research Agent must execute against the deterministic repository corpus; the final Assessment keeps verdict authority and the report consumes the actual Research as context only.",
+    "target": "investigation",
+    "purpose": "Verify the research dimension of the end-to-end path: Coordinator authorization, production Research Agent execution with citation closure, Research remaining separate from Evidence, and the report keeping Assessment authority over Research context.",
+    "operational_relevance": "Malware-family context is a core enrichment for analyst decisions; contextual Research must never become Evidence or override the Assessment verdict.",
+    "regression_risk": "The Coordinator could skip research authorization, the Research Agent could fail citation closure, or the report could treat Research claims as verdict authority.",
+    "expected_behavior": {
+      "required": [
+        "Research is authorized and executes for the malware family",
+        "The persisted ResearchResult cites supplied repository chunks",
+        "Research remains separate from Evidence and never creates Evidence",
+        "The report keeps the Assessment verdict authority over research context"
+      ],
+      "forbidden": [
+        "Research results collide with Evidence identities",
+        "The report references research material that was not supplied"
+      ]
+    },
+    "tags": [
+      "research-required",
+      "malware-context"
+    ],
+    "architecture_refs": [
+      "coordinator-policy",
+      "research-agent",
+      "research-retrieval",
+      "assessment-faithful-reporting"
+    ]
+  },
+  "fixture": "research-required-malware",
+  "root": {
+    "entity_label": "root_domain",
+    "entity_type": "domain",
+    "value": "cdn-update.test"
+  },
+  "expected": {
+    "terminal": {
+      "status": "completed",
+      "stop_reason": "sufficient_evidence"
+    },
+    "assessment": {
+      "verdict": "malicious",
+      "confidence": "high",
+      "required_findings": [
+        "reputation:supporting"
+      ],
+      "forbidden_findings": []
+    },
+    "evidence": {
+      "required_sources": [
+        "urn:ati:source:google_public_dns",
+        "urn:ati:source:rdap",
+        "urn:ati:source:threatfox",
+        "urn:ati:source:abuseipdb"
+      ],
+      "required_entity_labels": [
+        "resolved_ip",
+        "malware_family"
+      ],
+      "forbidden_entity_labels": []
+    },
+    "relationships": {
+      "required": [
+        "urn:ati:relationship:dns:resolves_to",
+        "urn:ati:relationship:threat:associated_with"
+      ],
+      "forbidden": []
+    },
+    "research": {
+      "required_subject_labels": [
+        "malware_family"
+      ],
+      "forbidden_subject_labels": []
+    },
+    "report": {
+      "required": true,
+      "verdict": "malicious",
+      "confidence": "high",
+      "required_finding_ordinals": [
+        1
+      ],
+      "forbidden_finding_ordinals": [],
+      "min_research_context": 1,
+      "min_narrative_statements": 0,
+      "max_narrative_statements": 5
+    },
+    "trajectory": {
+      "required_actions": [
+        "urn:ati:action:provider_query",
+        "urn:ati:action:pivot_executed",
+        "urn:ati:action:research_requested",
+        "urn:ati:action:assessment_requested",
+        "urn:ati:action:investigation_stopped"
+      ],
+      "forbidden_actions": [],
+      "required_research": [
+        "malware_family"
+      ],
+      "forbidden_research": [],
+      "max_depth": 2,
+      "termination_required": true
+    },
+    "efficiency": {
+      "max_provider_calls": 20,
+      "max_llm_calls": 12,
+      "max_replans": 3,
+      "max_pivots": 6,
+      "max_duplicate_provider_calls": 0,
+      "max_duplicate_entity_investigations": 0,
+      "max_total_actions": 60
+    }
+  }
+}

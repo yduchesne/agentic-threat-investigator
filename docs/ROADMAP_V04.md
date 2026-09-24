@@ -29,8 +29,8 @@ PR 30B — dataset/result LangSmith adapter + manual sync/verify workflow [DONE]
 PR 30C — first real agent target experiment (Evidence Analyst evaluation
          suite and the first workflow path needing an LLM provider secret)
 PR 30D — Coordinator + Research Agent evaluation suite
-PR 30E — Report Writer evaluation suite
-PR 30F — End-to-end investigation evaluation
+PR 30E — Report Writer evaluation suite [DONE]
+PR 30F — End-to-end investigation evaluation [DONE]
 ```
 
 ## PR 30A scope (delivered)
@@ -43,7 +43,8 @@ PR 30F — End-to-end investigation evaluation
 - dataset identity/versioning (`<target>/v<N>` vocabulary incl. GEOINT);
 - mandatory scenario-quality fields (`ScenarioSpecification`) composed into
   every target-specific scenario model;
-- full migration of the committed scenario corpus (60 cases) with
+- full migration of the committed scenario corpus (66 cases after the
+  PR 30F end-to-end addition) with
   scenario-specific metadata — no behavioral meaning changed;
 - strict loader/validation that fails closed;
 - common async evaluator/target-executor seams and a deterministic runner
@@ -262,6 +263,78 @@ change to production Report Writer/Assessment/Research behavior. PR 30F
 composes whole-investigation evaluation afterwards without redefining
 component semantics, the common runner, dataset versioning, LangSmith
 mirror/digest/publication, or workflow security.
+
+## PR 30F scope (delivered) [DONE]
+
+Fifth and final substantive implementation PR: the **end-to-end
+Investigation** benchmark executes one complete deterministic investigation
+world through the production investigation orchestration and the production
+Report Writer, then evaluates final durable state and the structured
+trajectory with repository-owned deterministic predicates.
+
+- typed `investigation/v1` scenario contract
+  (`evaluation/investigation/models.py`: root indicator, terminal/Assessment/
+  Evidence/Relationship/Research/Report/Trajectory expectations, and explicit
+  efficiency envelopes — every rule a binary predicate, never a score);
+- strict loader with deterministic filename ordering, duplicate-identity
+  rejection, and no network/DB/LLM (L01..L09 unit matrix);
+- repository-owned fixture worlds
+  (`evaluation/investigation/fixtures.py`): the packaged synthetic worlds
+  (F02/F01/F05) plus scenario-owned worlds validated through the strict
+  fake-runtime catalog extraction contracts; fixture providers state world
+  truth only, never policy;
+- scenario-owned custom world entries (conflicting evidence,
+  research-required malware) authored inline and validated by the same
+  catalog loader used by the packaged world;
+- materialization persists only the minimum production-valid initial state
+  (root Entity + RUNNING Investigation with initial traversal metadata and a
+  budget derived from the authored envelopes); execution-scoped
+  Investigation identity isolates repeated runs with zero destructive
+  cleanup;
+- `evaluation/investigation/composition.py` wires the existing production
+  `EvidenceAnalyst`, `ResearchAgent`, `LocalInvestigationRunner`, and
+  `ReportWriter` over one shared transparent counting `LlmClient`; the
+  Report Writer consumes the **actual final Assessment/Research** of the run;
+- `InvestigationTargetExecutor` captures the authoritative durable snapshot
+  (terminal Investigation, final current Assessment, persisted report,
+  Evidence observations, Entities, Relationships, Relationship observations,
+  Research results) and the structured timeline actions (never logs);
+- `investigation-contract` evaluator: pure outcome/trajectory/
+  provenance/efficiency predicates including hard gates (Research/Evidence
+  separation, RelationshipObservation provenance closure, Assessment/report
+  reference resolution, report verdict/confidence equal to the final
+  Assessment, unknown-entity and duplicate-work rejection);
+- V1 corpus: six canonical variants — malicious multi-source, benign,
+  inconclusive sparse, conflicting evidence, research-required malware, and
+  cycle/duplicate bounded termination — each documented with its operational
+  regression risk and efficiency envelopes;
+- `run_investigation_evaluation` service and
+  `ati-eval run investigation/v1 [--langsmith]` with the same exit
+  semantics, verify-first mirror check, and one-execution-per-case
+  categorical LangSmith publication as PR 30C/30D/30E; the end-to-end
+  benchmark bootstraps the deterministic research corpus/index so
+  researchable worlds execute their full production Research lifecycle;
+- deterministic PostgreSQL/pgvector vertical slice
+  (`tests/integration/test_evaluation_investigation_runner.py`): malicious/
+  benign/inconclusive/conflicting/research/cycle PASS, semantic FAIL
+  (COMPLETED/FAIL on structurally valid scenario-wrong output), unexpected
+  model ERROR, report-stage ERROR, cancellation propagation, rerun
+  isolation, and full-corpus smoke;
+- manual workflow accepts `investigation/v1`; previous component targets
+  remain unchanged; the run step stays dataset-agnostic;
+- credentials remain `LANGSMITH_API_KEY` + the ATI model-provider secret;
+  no raw prompt/model/Evidence/Research/report content is ever published;
+  ordinary CI stays uncredentialed;
+- docs: `docs/EVALUATION.md`, `docs/TESTING.md`, this roadmap.
+
+PR 30F deliberately delivers **no** LLM judge, no numeric correctness score
+or threshold, no prompt/policy tuning, no new Coordinator/Provider/
+Research/Report Writer behavior, no `LangSmith.evaluate()`/`aevaluate()`,
+no live-web evaluation, no DB migration, no scheduled/PR/push real-model
+triggers, and no v0.2 work. With PR 30F the PR 30 series is complete: real
+model evaluation is operational — configure `LANGSMITH_API_KEY` and the ATI
+model-provider secret, sync/verify `investigation/v1`, and run the existing
+manual workflow. There is no PR 30G in this roadmap.
 
 
 ## Explicitly out of scope for PR 30A
