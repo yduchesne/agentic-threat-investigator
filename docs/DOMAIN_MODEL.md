@@ -375,6 +375,23 @@ Relationship identity is unique by source entity, relationship URN, and target e
 
 A Relationship is the durable semantic edge. RelationshipObservation records when and why ATI observed or imported the assertion and is frozen after validation. Since PR 28A the observation references the exact supporting ``EvidenceObservation`` (``evidence_observation_id``) and carries no Investigation correlation: relationships are global per observation, and reusing an observation in multiple Investigations never duplicates the observation. In v0.1 persistence the Evidence row *is* the observation, so the v0.1 adapter maps its ``evidence_id`` onto this field until PR 28B migrates the schema. Historical relationships are not deleted merely because they are no longer current.
 
+### Graph read projections (PR 31A)
+
+``GraphNode`` and ``GraphEdge`` are **not** domain aggregates. They are
+immutable application read projections owned by ``app/query/graph.py``:
+
+- ``GraphNode`` projects the canonical ``Entity`` (``entity_id`` is
+  ``Entity.id``);
+- ``GraphEdge`` projects the canonical ``Relationship`` (``relationship_id``
+  is ``Relationship.id``, endpoints are ``source_entity_id`` /
+  ``target_entity_id``);
+- ``RelationshipObservation`` is never rendered as a separate canonical
+  edge; repeated observations of one Relationship yield exactly one graph
+  edge whose ``observation_count`` / first/last observed summaries are
+  descriptive metadata;
+- observation summaries never imply relationship lifetime, and missing
+  ``observed_at`` values are never replaced with ``retrieved_at``.
+
 ## Assessment
 
 ```python
