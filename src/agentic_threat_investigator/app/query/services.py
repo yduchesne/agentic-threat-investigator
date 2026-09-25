@@ -17,6 +17,7 @@ from agentic_threat_investigator.app.query.geoint import GeointQueryService
 from agentic_threat_investigator.app.query.geolocation import (
     InvestigationGeolocationQueryService,
 )
+from agentic_threat_investigator.app.query.graph import GraphQueryService
 from agentic_threat_investigator.app.query.history import DomainHistoryQueryService
 from agentic_threat_investigator.app.query.investigations import (
     InvestigationQueryService,
@@ -43,6 +44,7 @@ class QueryServiceBundle(ABC):
     evidence: EvidenceQueryService
     geolocations: InvestigationGeolocationQueryService
     geoint: GeointQueryService
+    graph: GraphQueryService
     relationships: RelationshipQueryService
     relationship_observations: RelationshipObservationQueryService
     research_results: ResearchResultQueryService

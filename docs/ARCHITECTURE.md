@@ -1136,17 +1136,20 @@ Division of responsibility:
   SQL or query behavior, and no route imports concrete PostgreSQL
   repositories.
 
-### Graph exploration read boundary (PR 31A)
+### Graph exploration read boundary (PR 31A/31B)
 
 The v0.5 graph-exploration experience is a read projection over ATI's
 authoritative relational domain, delivered through the same analyst
-read/query path as PR 23A:
+read/query path as PR 23A. PR 31A owns the application contract; PR 31B
+adds the concrete PostgreSQL implementation:
 
 ```text
-Entity / Relationship / RelationshipObservation  (authoritative relational domain)
-    -> GraphQueryService (app/query/graph.py)    (application graph read contract)
-    -> later graph API functions                  (PR 31C)
-    -> later visualization                        (PR 31D+)
+Entity / Relationship / RelationshipObservation
+    / InvestigationEvidence / EvidenceObservationEntity  (authoritative relational domain)
+    -> GraphQueryService (app/query/graph.py)             (application graph read contract)
+    -> PostgresGraphQueryService (infrastructure/persistence/query/graph.py)
+    -> later graph API functions                          (PR 31C)
+    -> later visualization                                (PR 31D+)
 ```
 
 Architectural decisions:
@@ -1168,10 +1171,44 @@ Architectural decisions:
 - **no graph database**: the contract is satisfiable directly from ATI's
   PostgreSQL relational model; no AGE/Cypher/Neo4j abstraction is
   introduced;
-- PR 31A is contract-only; PR 31B implements the PostgreSQL one-hop graph
-  reads (reconciling the existing `PostgresRelationshipQueryService`
-  semantics) and then production composition may add the service to the
-  query bundle.
+- **direct SQLAlchemy analyst reads**: `PostgresGraphQueryService` follows
+  the established analyst-facing query-service architecture (no stored read
+  functions) and is bound to the same short-lived read `AsyncSession` as
+  the other query services. It never writes, never performs provider/LLM
+  I/O, and never caches graph projections.
+
+PR 31B implements the PostgreSQL one-hop graph reads, reconciling the
+PR 24E `PostgresRelationshipQueryService` Investigation-visibility
+semantics, and production composition wires the concrete service into
+`QueryServiceBundle.graph`.
+
+#### PR 31B visibility and projection rules
+
+- **focal Entity visibility**: the focal Entity is visible when it exists,
+  is not soft-deleted, and at least one `EvidenceObservationEntity`
+  association links it to an `EvidenceObservation` exactly admitted to the
+  requested Investigation through `InvestigationEvidence`. A missing or
+  not-visible focal Entity returns `None`; a visible isolated focal
+  Entity returns a one-node `GraphResult` (`truncated=False`);
+- **edge visibility**: a canonical Relationship is visible when it is not
+  soft-deleted, both endpoint Entities are live, and at least one
+  `RelationshipObservation` whose exact `EvidenceObservation` is
+  admitted to the requested Investigation exists. Direction (SOURCE / TARGET
+  / EITHER) is relative to the focal Entity and self-relationships appear
+  once;
+- **edge summary scope**: `observation_count`, `first_observed_at` and
+  `last_observed_at` aggregate only the qualifying admitted observations
+  of the requested Investigation. Another Investigation's observations
+  never affect these values; null `observed_at` values are counted but
+  never summarized, and `retrieved_at` is never substituted;
+- **bounds and ordering**: the server-owned `QueryLimits` ceiling is
+  enforced, at most `limit` canonical Relationships are returned
+  (a `limit + 1` probe truthfully reports truncation), edges are ordered by
+  `Relationship.id ASC`, and nodes place the focal first with remaining
+  endpoints by `Entity.id ASC`;
+- **no cursor, no traversal**: PR 31B is a bounded one-hop read with no
+  cursor pagination, depth, recursive CTEs, path finding, or graph
+  analytics.
 
 ### API and asynchronous submission (PR 23C)
 

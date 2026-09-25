@@ -240,6 +240,7 @@ class FakeQueryBundle:
         self.evidence = FakeCollectionService()
         self.geolocations = FakeGeolocationService()
         self.geoint = geoint or FakeGeointService()
+        self.graph = FakeGraphService()
         self.relationships = FakeCollectionService()
         self.relationship_observations = FakeCollectionService()
         self.research_results = FakeCollectionService()
@@ -254,6 +255,20 @@ class FakeQueryBundle:
     def as_bundle(self) -> QueryServiceBundle:
         """Cast this duck-typed bundle to the application read contract."""
         return cast(QueryServiceBundle, self)
+
+
+class FakeGraphService:
+    """Record neighborhood queries and return a configured graph result."""
+
+    def __init__(self, result: Any = None) -> None:
+        """Bind the default result and an empty received-query log."""
+        self.result = result
+        self.neighborhood_queries: list[Any] = []
+
+    async def neighborhood(self, query: Any) -> Any:
+        """Record the query and return the configured result."""
+        self.neighborhood_queries.append(query)
+        return self.result
 
 
 class FakeSubmissionService:
