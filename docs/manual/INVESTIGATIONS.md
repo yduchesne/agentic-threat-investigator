@@ -1,14 +1,16 @@
 # Investigations
 
-Investigations conducted autonomously by agents are the bread and butter of the system. An investigation is conducted through AI, but initiated by an external, deterministic trigger (for example, an end-user initiating the investigation).
+Investigations conducted autonomously by agents are the bread and butter of the system. An investigation is initiated by an external, deterministic trigger (for example, an end-user initiating the investigation) and conducted with the help of AI.
 
-Furthermore, in the course of conducting an investigation, AI agents are not "inventing" facts: they are tapping into deterministically generated evidence (see [Core Concepts](CORE_CONCEPTS.md)).
+Furthermore, in the course of conducting an investigation, AI agents are not "inventing" facts: they are tapping into deterministically generated evidence (see [Core Concepts](CORE_CONCEPTS.md) for more on the notion of evidence).
 
 This document describes the investigation workflow, with some insights into the internals. The objective is for the reader to grasp the main stages of an investigation, without delving into coding details.
 
 > Although this document is human-written - and human-maintained, AI has been leveraged to produce diagrams and generate content excerpts.
 
 ## References
+
+This document will make more sense to the reader in the context of the other documents suggested below (the order in which they are listed matters):
 
 - [Core Concepts](CORE_CONCEPTS.md): Presents core concepts such as `Entity`, `Evidence`, etc.
 - [Agentic Architecture](AGENTIC.md): Goes deeper than this document in the details of the different agents and the use of `LangChain`/`LangGraph`.
@@ -23,7 +25,7 @@ In ATI, an `Investigation` preserves the state involved in an analysis that even
 
 ## Pivoting
 
-Pivoting is the cornerstone of CTI analysis, using facts about infrastructure, threats, and so forth. It is the process by which an investigation expands from one known entity to other entities, gathering evidence for each in the process. ATI performs pivoting automatically, progressively investigating the surrounding infrastructure and context.
+Pivoting is the cornerstone of CTI analysis. It rests upon facts about infrastructure, threats, and so forth. More concretely, it is the process by which an investigation expands from one known entity to other entities, gathering evidence for each in the process. ATI performs pivoting automatically, progressively investigating the surrounding infrastructure and context.
 
 From an initial `Entity` (for example, the `evil.com` domain), the goal is to obtain a greature picture of the situation. For example: from `evil.com`, what additional observations can we make? We could find that the domain resolves to the `203.0.113.42` IP address, that the address has been used to deliver malware in the past, or to host command-and-control infrastructure. Or we can find, through DNS registrar information, that the domain name is registered with an party associated in the past to known threat actor...
 
@@ -42,7 +44,7 @@ evil.come                    depth 0
 additional discoveries       depth 2
 ```
 
-### Agents in Charge of Pivoting
+### Pivoting Decisions
 
 Two components are involved in pivoting:
 
@@ -55,11 +57,11 @@ Two components are involved in pivoting:
   - `max_depth`: The maximum depth of the traversal, in terms of number of edges from the root (defaults to 2).
   - `max_entities`: The maximum number of entities to pivot on (defaults to 10).
   - `max_provider_calls`: The maximum number of live evidence provider calls allocated (defaults to 40).
-  - `max_replans`: TBD (defaults to 3).
+  - `max_replans`: Maximum additional collection rounds caused by `NEEDS_MORE_EVIDENCE` (defaults to 3).
   - `max_llm_calls`: The maximum number of LLM requests (defaults to 10).
-  
- TBD: the term budget is often use. Explain what it means.
 
+> The [Agentic Architecture](AGENTIC.md) document should be read as a complement, for more details regarding every agent in the system.
+  
 Note that the `Coordinator` is an archictural role, not an actual class or interface of the system. That role is played by two components: 1) The `coordinator_node` function that is registered with `LangGraph` as a `Node` in that framework; 2) the `CoordinatorPolicy`, which is in fact the decision engine that this document refers to most of the time, when mentioning the `Coordinator`. The following schema illustrates this:
 
 ```
@@ -84,11 +86,37 @@ LangGraph routes to next node
 
 When deeming pivoting complete, the `Coordinator` supplies a `stop_reason` (a field of the `Investigation`), which will be set to `DEPTH_LIMIT_REACHED`, `ENTITY_BUDGET_EXHAUSTED`, `PROVIDER_BUDGET_EXHAUSTED`, `REPLAN_LIMIT_REACHED`, etc., according to the actual real reason for stopping.
 
-TBD: When the Evidence Analyst emits SUFFICIENT as a disposition, what will be the Coordinator stop_reason?
+### Budget
+
+Before considering the next pivot, the `Coordinator` examine its budget for the investigation.
+
+Pivoting can go on for a long time, if unrestricted. That is why it is a constrained process in ATI. Abstractly, the term "budget" is used to designate the collection of hard constraints around the use of resources allocated to an investigation.
+
+The following table lists the constraints that the system applies, and which aspect of the "budget" each corresponds to:
+
+| Budget dimension | Default | Meaning |
+|---|---:|---|
+| `max_depth` | 2 | Maximum traversal/pivot depth |
+| `max_entities` | 10 | Maximum number of entities admitted to the investigation's expandable working set |
+| `max_provider_calls` | 40 | Maximum `EvidenceProvider` executions |
+| `max_replans` | 3 | Maximum additional collection rounds caused by `NEEDS_MORE_EVIDENCE` |
+| `max_llm_calls` | 10 | Maximum actual model invocations, including structured-output repair attempts |
+
+There are persisted usage counters for three of these:
+
+- `provider_calls_used`
+- `replans_used`
+- `llm_calls_used`
+
+Depth and entity capacity are different: ATI can derive their consumption from traversal/entity state, so there isn't a `depth_used` or `entities_used` counter.
 
 ### Pivot Determination
 
-To follow up on the previous section: the `Evidence Analyst` examines the accumulated evidence and produces an `Assessment` (which is more the topic of the _Final Analysis_ section, towards the end of this document). As was mentioned earlier, it also generates an analytical conclusion about the sufficiency of the evidence, through an `AnalystDisposition`. For example:
+To follow up on the previous section: the `Evidence Analyst` examines the accumulated evidence and produces an `Assessment` (which is more the topic of the _Final Analysis_ section, towards the end of this document). 
+
+#### Evidence Analysis is an AI-Driven Process
+
+As was mentioned earlier, the `Evidence Analyst` generates an analytical conclusion about the sufficiency of the evidence, through an `AnalystDisposition`. For example:
 
 ```
 Evidence:
@@ -104,11 +132,113 @@ Evidence Analyst
 AnalysisDisposition.SUFFICIENT
 ```
 
+How the `Evidence Analyst` arrives at its conclusion (i.e.: how it yields an `AnalysisDisposition`) is AI-driven: it is based on a prompt that is constructed using the investigation state and executed by the LLM. The `Evidence Analyst` receives a bounded, normalized snapshot of the investigation: admitted `EvidenceObservations`, relevant `RelationshipObservations`, `Entity` context, and other relevant data. 
+
+Its structured-output contract requires it to answer whether the current evidence is sufficient to support an `Assessment` - and, if not, to determine whether another round of evidence collection is justified?
+
+The decision model is approximately:
+```
+Current evidence
+      │
+      ▼
+Can I adequately support an assessment?
+      │
+   ┌──┴─────────────┐
+  YES               NO
+   │                │
+   ▼                ▼
+SUFFICIENT    Would more evidence
+              meaningfully help?
+                    │
+         ┌──────────┴──────────┐
+        YES                    NO
+         │                     │
+         ▼                     ▼
+NEEDS_MORE_EVIDENCE       EXHAUSTED
+```
+
 When the disposition is `SUFFICIENT`, the `Evidence Analyst` adds a new corresponding `Entity` ID to the `InvestigationState`'s `discovered_entities`. The `Evidence Analyst` is __NOT__ making a pivot decision.
 
-TBD: how does the `Evidence Analyst` evaluate whether or not more evidence is needed?
+Otherwise, if the evidence isn't sufficient, then either one of the following two `AnalystDispositions` will be produced: `NEEDS_MORE_EVIDENCE`, `EXHAUSTED`.
 
-The `Coordinator` then examines the `AnalystDisposition` and each `discovered_entities`. It stops the investigation if the disposition is `SUFFICIENT`. Otherwise, for each discovered entity, it answers the following questions and stops or allows the investigation, accordingly:
+__`NEEDS_MORE_EVIDENCE`__
+
+The analyst cannot adequately support an assessment from the evidence currently available, and another bounded collection round is analytically justified. Importantly, it does __not__ mean that the `Evidence Analyst` knows which `EntityProvider` should be queried or which `Entity` should be pivoted on. That remains outside the LLM's authority (and outside the analyst's scope).
+
+For example, given the following current investigation state passed as input to the `Evidence Analyst`:
+
+```
+domain: suspicious-example.com
+
+Evidence:
+  Google DNS → resolves to 203.0.113.42
+  RDAP       → recently registered domain
+  IPinfo     → IP belongs to ASN X
+
+No:
+  reputation hit
+  ThreatFox hit
+  URLhaus association
+  malware association
+```
+
+The Analyst should not conclude "malicious" merely from recent registration, location, ASN, or shared infrastructure. It might instead produce something conceptually like:
+
+```
+verdict: INCONCLUSIVE
+confidence: LOW
+
+limitations:
+  - No direct threat-intelligence evidence currently
+    associates the infrastructure with malicious activity.
+
+disposition:
+  NEEDS_MORE_EVIDENCE
+```
+
+__`EXHAUSTED`__
+
+This is the most subtle of the three dispositions because the `Evidence Analyst` does not actually know whether ATI has mechanically exhausted every provider or pivot. It corresponds to: The current evidence is insufficient for a stronger assessment, but based on the evidence presented to the Analyst, another collection round is not analytically justified.
+
+For example, consider the following current investigation state passed to the Analyst:
+
+```
+domain: old-example.com
+
+Evidence:
+  DNS       → ordinary resolution
+  RDAP      → established registration
+  IPinfo    → ordinary network context
+  AbuseIPDB → no reported abuse
+  ThreatFox → no matching IOC
+
+No evidence of:
+  malware association
+  malicious URL
+  known threat infrastructure
+  suspicious relationships
+```
+
+The Analyst may conclude: 
+
+```
+verdict: INCONCLUSIVE
+confidence: LOW
+
+limitations:
+  - Available evidence does not establish malicious
+    or benign behavior.
+
+disposition:
+  EXHAUSTED
+```
+
+The above conclusion (instead of `NEEDS_MORE_EVIDENCE`) is determined by the fact that the `Evidence Analyst` sees in this case no particular evidentiary deficiency that makes another collection round analytically worthwhile. It has weak evidence, but simply collecting more of the same kind of contextual information may not resolve the uncertainty.
+
+#### Evidence Analysis Consumption
+
+The output of evidence analysis is used by the `Coordinator`, to formulate a pivoting decision. More specifically, the `Coordinator` examines the `AnalystDisposition` produced by the `Evidence Analyst` and each `discovered_entities`. It stops the investigation if the disposition is `SUFFICIENT`. Otherwise, for each discovered entity, it answers the following questions and stops or allows the investigation, accordingly:
+
 - Does the Entity actually exist?
 - Has it been deleted?
 - Is its Entity type supported for pivoting?
@@ -121,7 +251,7 @@ The `Coordinator` then examines the `AnalystDisposition` and each `discovered_en
 - Is there enough remaining `max_provider_calls` capacity?
 - etc. (see the previous section regarding the hard-set bounds that are examined by the `Coordinator`).
 
-Furthermore, another condition may occur: graph exhaustion (TBD: is the Evidence Analyse also determining this through the EXHAUSTED disposition?). ATI may still want more evidence, but every known `Entity` may have been investigated, be unsupported, have no applicable `EvidenceProvider`, be a duplicate, etc. In that case, there simply isn't another legitimate edge of the investigation to follow.
+Furthermore, another condition may occur: graph exhaustion. ATI may still want more evidence, but every known `Entity` may have been investigated, be unsupported, have no applicable `EvidenceProvider`, be a duplicate, etc. In that case, there simply isn't another legitimate edge of the investigation to follow.
 
 From the above, it can be seen that the current implementation is stronger on boundedness and validity (therefore, favors determinism) than on sophisticated pivot value scoring. The `Coordinator`'s deterministic policy decides whether a proposed expansion is permissible and executable. The coordinator processes entities in discovery order and authorizes the first eligible pivot. It is __NOT__ currently doing something like:
 
@@ -523,9 +653,9 @@ This last point confirms that `best_investigated_depth` changes when provider wo
 
 #### 4. The next `ProviderWorkItem` is dispatched for execution
 
-The orchestration then dispatches the selected work item, internally, to a work dispatcher/executor abstraction (TBD: explain this in more details in another section).
+The orchestration then dispatches the selected work item, internally, to a work dispatcher/executor abstraction (i.e.: the `TaskDispatcher` interface) - for now, the implementation is merely a local async implementation.
 
-The executor resolves the actual Entity and actual provider implementation and executes the provider. Conceptually:
+The executor resolves the actual `Entity` and actual provider implementation and executes the provider. Conceptually:
 
 ```
 ProviderWorkItem
@@ -559,7 +689,7 @@ This phase consists of a few steps:
     - `evidence_ids`
     - `relationship_ids`
     - `discovered_entity_ids`
-4. updates traversal metadata for discoveries, records errors if necessary, and increments the following exactly once: `budget.provider_calls_used` (TBD: need more doc).
+4. updates traversal metadata for discoveries, records errors if necessary, and increments the following exactly once: `budget.provider_calls_used`.
 
 Then, orchestration returns to the `Coordinator`.
 
