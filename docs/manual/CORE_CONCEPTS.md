@@ -2,6 +2,11 @@
 
 This page describes concepts that are fundamental to understanding the rest of the system. Most concepts correspond to the different types of data (i.e.: records in database tables) that the system stores.
 
+## References
+
+- [Data Sources](DATA_SOURCES.md): Presents core concepts such as `Entity`, `Evidence`, etc.
+
+
 ## IOC
 
 TBD
