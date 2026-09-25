@@ -26,6 +26,11 @@ from agentic_threat_investigator.api.dto.geoint import (
 from agentic_threat_investigator.api.dto.geolocation import (
     InvestigationGeolocationResponse,
 )
+from agentic_threat_investigator.api.dto.graph import (
+    GraphEdgeResponse,
+    GraphNeighborhoodResponse,
+    GraphNodeResponse,
+)
 from agentic_threat_investigator.api.dto.history import HistoryRecordResponse
 from agentic_threat_investigator.api.dto.investigation import (
     CreateInvestigationResponse,
@@ -61,6 +66,11 @@ from agentic_threat_investigator.app.query.geoint import (
 )
 from agentic_threat_investigator.app.query.geolocation import (
     InvestigationGeolocationItem,
+)
+from agentic_threat_investigator.app.query.graph import (
+    GraphEdge,
+    GraphNode,
+    GraphResult,
 )
 from agentic_threat_investigator.app.query.history import DomainObjectHistoryRecord
 from agentic_threat_investigator.app.query.relationships import (
@@ -284,6 +294,57 @@ def to_relationship_response(
         source_entity_id=relationship.source_entity_id,
         target_entity_id=relationship.target_entity_id,
         type=relationship.type,
+    )
+
+
+def to_graph_node_response(node: GraphNode) -> GraphNodeResponse:
+    """Map one graph node projection exactly.
+
+    The canonical Entity identity/type/value and the optional display name
+    are copied field-for-field; Entity persistence internals (``version``,
+    ``deleted_at``, ``content_hash``, ``attributes``) never cross the
+    public boundary.
+    """
+    return GraphNodeResponse(
+        entity_id=node.entity_id,
+        entity_type=node.entity_type,
+        value=node.value,
+        display_name=node.display_name,
+    )
+
+
+def to_graph_edge_response(edge: GraphEdge) -> GraphEdgeResponse:
+    """Map one graph edge projection exactly.
+
+    Canonical Relationship identity/topology/type and the application
+    observation summary (``observation_count``, ``first_observed_at``,
+    ``last_observed_at``) are copied field-for-field without recomputation,
+    substitution, or aggregation.
+    """
+    return GraphEdgeResponse(
+        relationship_id=edge.relationship_id,
+        source_entity_id=edge.source_entity_id,
+        target_entity_id=edge.target_entity_id,
+        relationship_type=edge.relationship_type,
+        observation_count=edge.observation_count,
+        first_observed_at=edge.first_observed_at,
+        last_observed_at=edge.last_observed_at,
+    )
+
+
+def to_graph_neighborhood_response(
+    result: GraphResult,
+) -> GraphNeighborhoodResponse:
+    """Map one graph result to its public neighborhood DTO.
+
+    The mapper preserves the service's node/edge ordering and the truthful
+    ``truncated`` flag exactly; it sorts nothing, deduplicates nothing, and
+    adds no cursor or page metadata.
+    """
+    return GraphNeighborhoodResponse(
+        nodes=tuple(to_graph_node_response(node) for node in result.nodes),
+        edges=tuple(to_graph_edge_response(edge) for edge in result.edges),
+        truncated=result.truncated,
     )
 
 

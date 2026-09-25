@@ -86,19 +86,22 @@ access paths; no schema migration was required.
 This PR provides the efficient primitive used by interactive expansion; it
 does not yet add recursive traversal or a UI.
 
-## PR 31C — Graph API
+## PR 31C — Graph API [DONE]
 
 Expose the graph read model through a frontend-independent FastAPI surface.
-Provide an Entity-neighborhood endpoint with direction and relationship-type
-filters and a Relationship detail endpoint suitable for later evidence
-drill-down.
+Delivered: an Entity-neighborhood endpoint
+(`GET /api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighborhood`)
+with direction and relationship-type filters plus a bounded limit.
 
-Keep wire DTOs explicit and versionable. Do not expose database rows, recursive
-SQL concepts, or Cytoscape/Sigma/React Flow-specific structures through the
-application contract.
+Relationship detail for later evidence drill-down already exists on main
+(`GET /relationships/{relationship_id}` and the `relationship_id`-filtered
+RelationshipObservation listing), so PR 31C reuses those endpoints rather
+than adding a duplicate graph Relationship resource; graph edge
+`relationship_id` values resolve through them.
 
-After PR 31C, ATI has a complete backend vertical slice for one-hop graph
-exploration.
+Wire DTOs are explicit and versionable. Database rows, recursive SQL
+concepts, and Cytoscape/Sigma/React Flow-specific structures never cross
+the application contract.
 
 ## PR 31D — Basic interactive graph UI
 

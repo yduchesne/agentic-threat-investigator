@@ -104,6 +104,7 @@ def test_openapi_operation_ids_are_explicit() -> None:
         "list_investigation_geoint_location_entities",
         "list_investigation_geoint_location_observations",
         "get_investigation_geoint_observation",
+        "get_graph_entity_neighborhood",
         "list_relationships",
         "get_relationship",
         "list_relationship_observations",
@@ -153,3 +154,55 @@ def test_openapi_public_dtos_only() -> None:
         "DomainObjectHistoryRecord",
     }
     assert not (schemas & forbidden)
+
+
+def test_openapi_graph_contract_is_public_and_scoped() -> None:
+    """The graph operation exposes public response DTOs only.
+
+    The neighborhood endpoint carries the graph tag, cookie-session
+    security, canonical direction/type enum parameters, and the explicit
+    neighborhood response schema; internal ``GraphNode``/``GraphEdge``/
+    ``GraphResult``/``GraphNeighborhoodQuery`` application models and any
+    persistence/PostgreSQL concepts never appear in the schema.
+    """
+    schema = create_app(Settings()).openapi()
+    operation = schema["paths"][
+        "/api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighborhood"
+    ]["get"]
+    assert operation["operationId"] == "get_graph_entity_neighborhood"
+    assert operation["tags"] == ["graph"]
+    assert operation["security"] == [{"cookieSession": []}]
+    response_ref = operation["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]
+    assert response_ref["$ref"].endswith("/GraphNeighborhoodResponse")
+
+    schemas = schema["components"]["schemas"]
+    public = {"GraphNodeResponse", "GraphEdgeResponse", "GraphNeighborhoodResponse"}
+    assert public <= set(schemas)
+    internal = {name for name in schemas if "Graph" in name and name not in public}
+    assert not internal
+    assert "GraphNeighborhoodQuery" not in schemas
+    assert "GraphResult" not in schemas
+
+
+def test_openapi_graph_is_investigation_scoped_with_no_cursor() -> None:
+    """The graph endpoint is Investigation-scoped and cursor-free."""
+    schema = create_app(Settings()).openapi()
+    path = (
+        "/api/v1/investigations/{investigation_id}/graph/entities/"
+        "{entity_id}/neighborhood"
+    )
+    parameters = schema["paths"][path]["get"]["parameters"]
+    names = {parameter["name"] for parameter in parameters}
+    assert "investigation_id" in names
+    assert "entity_id" in names
+    assert "direction" in names
+    assert "relationship_type" in names
+    assert "limit" in names
+    assert "cursor" not in names
+    direction = next(p for p in parameters if p["name"] == "direction")
+    assert direction["schema"]["default"] == "either"
+    response_dto = schema["components"]["schemas"]["GraphNeighborhoodResponse"]
+    assert "next_cursor" not in response_dto["properties"]
+    assert set(response_dto["properties"]) == {"nodes", "edges", "truncated"}

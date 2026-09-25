@@ -1148,7 +1148,8 @@ Entity / Relationship / RelationshipObservation
     / InvestigationEvidence / EvidenceObservationEntity  (authoritative relational domain)
     -> GraphQueryService (app/query/graph.py)             (application graph read contract)
     -> PostgresGraphQueryService (infrastructure/persistence/query/graph.py)
-    -> later graph API functions                          (PR 31C)
+    -> FastAPI graph route (api/routes/graph.py)          (PR 31C thin HTTP projection)
+    -> explicit graph API DTOs (api/dto/graph.py)
     -> later visualization                                (PR 31D+)
 ```
 
@@ -1209,6 +1210,44 @@ semantics, and production composition wires the concrete service into
 - **no cursor, no traversal**: PR 31B is a bounded one-hop read with no
   cursor pagination, depth, recursive CTEs, path finding, or graph
   analytics.
+
+#### PR 31C API read boundary
+
+PR 31C exposes the PR 31A/31B read contract through FastAPI as a thin,
+frontend-independent HTTP projection. The route builds exactly one
+`GraphNeighborhoodQuery`, delegates graph semantics entirely to
+`QueryServiceBundle.graph.neighborhood`, and maps the `GraphResult` to
+explicit public DTOs:
+
+```text
+GET /api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighborhood
+    -> GraphNeighborhoodQuery
+    -> QueryServiceBundle.graph.neighborhood
+    -> GraphResult | None
+    -> GraphNodeResponse / GraphEdgeResponse / GraphNeighborhoodResponse
+```
+
+- **Investigation scope is mandatory**: every graph request is scoped by
+  the path Investigation UUID; there is no global graph endpoint, and a
+  missing/deleted/not-visible focal Entity maps to one scoped 404
+  (`graph_entity_not_found`) without any global Entity probe;
+- **explicit wire DTOs only**: `api/dto/graph.py` defines frozen
+  `extra="forbid"` response DTOs. Canonical `entity_id` /
+  `relationship_id` identities and the exact observation summaries
+  (`observation_count`, `first_observed_at`, `last_observed_at`) cross the
+  wire unchanged; Entity persistence internals, raw Evidence payloads,
+  aggregate confidence, layout coordinates, and frontend-library `data`
+  structures never do;
+- **`truncated`, not a cursor**: the response is `nodes`/`edges`/
+  `truncated`; it is not a page and carries no cursor or total;
+- **no graph DB and no graph Relationship resource**: the endpoint reads
+  ATI's relational model through the existing service, and existing
+  Relationship detail / RelationshipObservation listing (filtered by
+  `relationship_id`) remain the canonical drill-down seam for PR 31F;
+- **bounds**: an omitted `limit` uses the configured query default size;
+  `QueryLimits` remains authoritative for the maximum, and an oversized
+  caller limit is a stable 400 `invalid_request`, never a silent clamp;
+  a visible isolated focal Entity is a successful 200.
 
 ### API and asynchronous submission (PR 23C)
 
