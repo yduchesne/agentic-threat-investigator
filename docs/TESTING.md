@@ -181,6 +181,26 @@ Agent/LLM behavioral evaluation may use additional markers but its contracts and
 Unit tests should be fast, deterministic, and isolated from network/database
 dependencies unless the tested unit specifically requires them.
 
+### Graph read-contract unit tests (PR 31A)
+
+``tests/unit/app/query/test_graph.py`` validates the PR 31A application
+graph contract without any database:
+
+- **identity closure**: entity IDs unique, relationship IDs unique, every
+  edge source/target endpoint present in the nodes, self-relationships
+  require exactly one node;
+- **uniqueness and boundedness**: distinct canonical identities, positive
+  ``observation_count``, explicit positive query ``limit``;
+- **temporal validation**: UTC-aware ``first_observed_at`` /
+  ``last_observed_at`` summaries (naive timestamps fail), well-ordered
+  summary pair, null summaries accepted;
+- **query model**: Investigation scope, focal entity, ``EITHER`` default
+  direction, optional relationship-type filter;
+- **service semantics**: a tiny concrete test double satisfies
+  ``GraphQueryService``; an isolated focal-node result is distinct from
+  ``None`` (missing/not-visible focal entity);
+- no PostgreSQL vertical slice exists until PR 31B.
+
 ### Deterministic telemetry unit tests (PR 29A)
 
 Telemetry tests are deterministic and fully offline; they never contact

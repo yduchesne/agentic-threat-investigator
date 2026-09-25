@@ -36,7 +36,7 @@ requirements justify the additional persistence dependency.
 
 | PR | Scope | Principal result |
 |---|---|---|
-| **31A** | Graph read model and repository contract | Stable frontend-independent graph-query boundary over existing ATI domain identities |
+| **31A** | Graph read model and repository contract | Stable frontend-independent graph-query boundary over existing ATI domain identities [DONE] |
 | **31B** | PostgreSQL one-hop graph queries | Efficient incoming/outgoing neighborhood reads with relationship observation summaries |
 | **31C** | Graph API | REST surface for graph neighborhoods and relationship detail |
 | **31D** | Basic interactive graph UI | First Maltego-like visualization with pan/zoom/layout and node/edge selection |
@@ -48,7 +48,7 @@ requirements justify the additional persistence dependency.
 | **31J** | Temporal graph exploration | Explore topology through RelationshipObservation time semantics |
 | **31K** | Graph-driven investigation actions | Launch ATI research/investigation actions directly from graph entities |
 
-## PR 31A — Graph read model and repository contract
+## PR 31A — Graph read model and repository contract [DONE]
 
 Define the application-facing graph contract without changing ATI persistence.
 Introduce stable graph node, edge, and graph-result types whose identities map

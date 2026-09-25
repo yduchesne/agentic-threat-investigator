@@ -1136,6 +1136,43 @@ Division of responsibility:
   SQL or query behavior, and no route imports concrete PostgreSQL
   repositories.
 
+### Graph exploration read boundary (PR 31A)
+
+The v0.5 graph-exploration experience is a read projection over ATI's
+authoritative relational domain, delivered through the same analyst
+read/query path as PR 23A:
+
+```text
+Entity / Relationship / RelationshipObservation  (authoritative relational domain)
+    -> GraphQueryService (app/query/graph.py)    (application graph read contract)
+    -> later graph API functions                  (PR 31C)
+    -> later visualization                        (PR 31D+)
+```
+
+Architectural decisions:
+
+- **read projections only**: `GraphNode`, `GraphEdge` and `GraphResult` are
+  immutable application read models, never new domain aggregates and never
+  persisted objects;
+- **ATI identity stays canonical**: `GraphNode.entity_id` is `Entity.id`,
+  `GraphEdge.relationship_id` is `Relationship.id`, and graph edge endpoints
+  are `Relationship.source_entity_id` / `target_entity_id`. No graph-local
+  identities are invented;
+- **RelationshipObservation remains provenance/history**: a rendered edge
+  represents one canonical Relationship, never one observation, and
+  observation summaries never claim relationship lifetime;
+- **one-hop, Investigation-scoped contract**: `GraphNeighborhoodQuery` is
+  bounded, reuses `RelationshipDirection` / `RelationshipType`, and keeps
+  the missing/not-visible focal Entity distinct from an isolated valid node
+  (`GraphResult | None`);
+- **no graph database**: the contract is satisfiable directly from ATI's
+  PostgreSQL relational model; no AGE/Cypher/Neo4j abstraction is
+  introduced;
+- PR 31A is contract-only; PR 31B implements the PostgreSQL one-hop graph
+  reads (reconciling the existing `PostgresRelationshipQueryService`
+  semantics) and then production composition may add the service to the
+  query bundle.
+
 ### API and asynchronous submission (PR 23C)
 
 The delivered `/api/v1` boundary is FastAPI
