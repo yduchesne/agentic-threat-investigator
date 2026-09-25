@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 23A query-plan/index eligibility tests (23A-P01..P12, 23A-I03).
+"""PR 23A/31B query-plan/index eligibility tests (23A-P01..P12, 23A-I03).
 
 Every representative statement mirrors the exact shape of the production
 query contract it backs. Tests assert that the intended index appears in the
@@ -579,3 +579,165 @@ async def test_p12_observation_entity_join_uses_investigation_retrieved_index(
             {"entity_id": source, "relationship_id": edge.id},
             ("evidence_observation_entity_entity_idx",),
         )
+
+
+# ---------------------------------------------------------------------------
+# PR 31B graph neighborhood plan eligibility (P31B-01..02 / G31B-X01..X04)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_x01_graph_source_neighborhood_uses_adjacency_index(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """P31B-01: the source-side graph edge selection can use the adjacency index.
+
+    The statement mirrors the graph edge selection's relationship access
+    path: the source-entity predicate of the default (untyped) neighborhood
+    is served by ``relationship_adjacency_idx`` through its leading column
+    (the optional type filter is served by the second column).
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        focal = await seed_entity(uow, value="example.com")
+        target = await seed_entity(uow, value="192.0.2.1")
+        edge = await seed_relationship(
+            uow, source_entity_id=focal, target_entity_id=target
+        )
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=focal
+        )
+        await seed_observation(
+            uow,
+            investigation_id=investigation_id,
+            relationship=edge,
+            evidence_observation_id=evidence,
+        )
+        await _assert_uses_index(
+            uow,
+            "SELECT r.id FROM ati.relationship r "
+            "WHERE r.source_entity_id = :entity_id AND r.deleted_at IS NULL "
+            "ORDER BY r.id ASC LIMIT 51",
+            {"entity_id": focal},
+            "relationship_adjacency_idx",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_x02_graph_target_neighborhood_uses_reverse_adjacency_index(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """P31B-02: the target-side graph edge selection can use the reverse index.
+
+    The statement mirrors the graph edge selection's relationship access
+    path for the TARGET neighborhood: the target-entity predicate of the
+    default (untyped) neighborhood is served by
+    ``relationship_target_adjacency_idx`` through its leading column (the
+    optional type filter is served by the second column).
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        focal = await seed_entity(uow, value="192.0.2.1")
+        source = await seed_entity(uow, value="example.com")
+        edge = await seed_relationship(
+            uow, source_entity_id=source, target_entity_id=focal
+        )
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=focal
+        )
+        await seed_observation(
+            uow,
+            investigation_id=investigation_id,
+            relationship=edge,
+            evidence_observation_id=evidence,
+        )
+        await _assert_uses_index(
+            uow,
+            "SELECT r.id FROM ati.relationship r "
+            "WHERE r.target_entity_id = :entity_id AND r.deleted_at IS NULL "
+            "ORDER BY r.id ASC LIMIT 51",
+            {"entity_id": focal},
+            "relationship_target_adjacency_idx",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_x03_graph_focal_visibility_uses_entity_association_index(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """P31B-03: the focal visibility probe uses the entity association index.
+
+    The exact PR 31B focal visibility rule (live Entity with an admitted
+    associated EvidenceObservation) is served by
+    ``evidence_observation_entity_entity_idx`` and the InvestigationEvidence
+    admission index(es).
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        focal = await seed_entity(uow, value="example.com")
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=focal
+        )
+        found = await _plan_indexes(
+            uow,
+            "SELECT e.id FROM ati.entity e "
+            "WHERE e.id = :entity_id AND e.deleted_at IS NULL AND EXISTS ("
+            "  SELECT 1 FROM ati.evidence_observation_entity eoe "
+            "  JOIN ati.investigation_evidence ie "
+            "    ON ie.evidence_observation_id = eoe.evidence_observation_id "
+            "  WHERE eoe.entity_id = e.id "
+            "    AND ie.investigation_id = :investigation_id"
+            ")",
+            {"entity_id": focal, "investigation_id": investigation_id},
+        )
+        assert found & {
+            "evidence_observation_entity_entity_idx",
+            "investigation_evidence_pkey",
+            "investigation_evidence_observation_idx",
+        }, f"plan used none of the focal visibility indexes: {sorted(found)}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_x04_graph_admission_join_uses_admission_index(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """P31B-04: the edge admission join uses an InvestigationEvidence index.
+
+    The Observation -> Investigation admission join of the graph edge
+    selection resolves through the InvestigationEvidence admission index
+    (primary-key or observation-led composite according to the planner's
+    join direction).
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        source = await seed_entity(uow, value="example.com")
+        target = await seed_entity(uow, value="192.0.2.1")
+        edge = await seed_relationship(
+            uow, source_entity_id=source, target_entity_id=target
+        )
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
+        await seed_observation(
+            uow,
+            investigation_id=investigation_id,
+            relationship=edge,
+            evidence_observation_id=evidence,
+        )
+        found = await _plan_indexes(
+            uow,
+            "SELECT ro.id FROM ati.relationship_observation ro "
+            "JOIN ati.investigation_evidence ie "
+            "  ON ie.evidence_observation_id = ro.evidence_observation_id "
+            "WHERE ie.investigation_id = :investigation_id "
+            "  AND ro.relationship_id = :relationship_id",
+            {"investigation_id": investigation_id, "relationship_id": edge.id},
+        )
+        assert found & {
+            "investigation_evidence_pkey",
+            "investigation_evidence_observation_idx",
+        }, f"plan used none of the admission indexes: {sorted(found)}"

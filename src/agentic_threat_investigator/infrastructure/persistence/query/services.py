@@ -19,6 +19,7 @@ from agentic_threat_investigator.app.query.geolocation import (
     DEFAULT_MAX_MAP_GEOLOCATION_ITEMS,
     InvestigationGeolocationQueryService,
 )
+from agentic_threat_investigator.app.query.graph import GraphQueryService
 from agentic_threat_investigator.app.query.history import DomainHistoryQueryService
 from agentic_threat_investigator.app.query.investigations import (
     InvestigationQueryService,
@@ -37,6 +38,7 @@ from .assessments import PostgresAssessmentQueryService
 from .evidence import PostgresEvidenceQueryService
 from .geoint import PostgresGeointQueryService
 from .geolocation import PostgresInvestigationGeolocationQueryService
+from .graph import PostgresGraphQueryService
 from .history import PostgresDomainHistoryQueryService
 from .investigations import PostgresInvestigationQueryService
 from .relationships import (
@@ -68,11 +70,12 @@ class PostgresQueryServices(QueryServiceBundle):
         module-standard summary bound.
         """
         self._session = session
+        query_limits = limits or QueryLimits()
         self.investigations: InvestigationQueryService = (
-            PostgresInvestigationQueryService(session, limits or QueryLimits())
+            PostgresInvestigationQueryService(session, query_limits)
         )
         self.evidence: EvidenceQueryService = PostgresEvidenceQueryService(
-            session, limits or QueryLimits()
+            session, query_limits
         )
         self.geolocations: InvestigationGeolocationQueryService = (
             PostgresInvestigationGeolocationQueryService(
@@ -84,33 +87,32 @@ class PostgresQueryServices(QueryServiceBundle):
         )
         self.geoint: GeointQueryService = PostgresGeointQueryService(
             session,
-            limits or QueryLimits(),
+            query_limits,
             geoint_summary_top_locations
             if geoint_summary_top_locations is not None
             else DEFAULT_GEONT_SUMMARY_TOP_LOCATIONS,
         )
+        self.graph: GraphQueryService = PostgresGraphQueryService(session, query_limits)
         self.relationships: RelationshipQueryService = PostgresRelationshipQueryService(
-            session, limits or QueryLimits()
+            session, query_limits
         )
         self.relationship_observations: RelationshipObservationQueryService = (
-            PostgresRelationshipObservationQueryService(
-                session, limits or QueryLimits()
-            )
+            PostgresRelationshipObservationQueryService(session, query_limits)
         )
         self.research_results: ResearchResultQueryService = (
-            PostgresResearchResultQueryService(session, limits or QueryLimits())
+            PostgresResearchResultQueryService(session, query_limits)
         )
         self.assessments: AssessmentQueryService = PostgresAssessmentQueryService(
-            session, limits or QueryLimits()
+            session, query_limits
         )
         self.reports: ReportQueryService = PostgresReportQueryService(
-            session, limits or QueryLimits()
+            session, query_limits
         )
         self.timeline_events: TimelineQueryService = PostgresTimelineQueryService(
-            session, limits or QueryLimits()
+            session, query_limits
         )
         self.domain_history: DomainHistoryQueryService = (
-            PostgresDomainHistoryQueryService(session, limits or QueryLimits())
+            PostgresDomainHistoryQueryService(session, query_limits)
         )
 
     async def close(self) -> None:

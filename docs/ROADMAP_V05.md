@@ -65,20 +65,26 @@ PR 31A establishes the architectural rule for the whole series: ATI's
 relational model remains authoritative and graph exploration is a read-side
 projection of that model.
 
-## PR 31B — PostgreSQL one-hop graph queries
+## PR 31B — PostgreSQL one-hop graph queries [DONE]
 
-Implement the PR 31A graph repository against PostgreSQL using ATI stored
-functions and the existing `Entity`, `Relationship`, and
-`RelationshipObservation` model. Support incoming, outgoing, and bidirectional
-one-hop neighborhoods plus relationship-type filtering.
+Implement the PR 31A graph read contract against PostgreSQL using the
+existing analyst-facing direct SQLAlchemy query-service architecture (not
+stored functions; the pre-v0.5 roadmap wording is stale relative to
+current-main analyst read queries) and the existing `Entity`,
+`Relationship`, and `RelationshipObservation` model, plus the exact
+`InvestigationEvidence` / `EvidenceObservationEntity` admission primitives.
+Support incoming, outgoing, and bidirectional one-hop neighborhoods plus
+relationship-type filtering.
 
-Return useful edge summary metadata derived from observations, including
-observation count and first/last observed timestamps where semantically valid.
-Review and add only the indexes demonstrated necessary for the graph access
-patterns, especially source/target Entity and relationship-type lookups.
+Edges carry Investigation-scoped observation summaries, including
+observation count and first/last observed timestamps where semantically
+valid. Focal Entity visibility, edge visibility, and edge observation
+summaries all derive from exact InvestigationEvidence admission. Existing
+indexes cover the SOURCE/TARGET adjacency, entity-association, and admission
+access paths; no schema migration was required.
 
-This PR provides the efficient primitive used by interactive expansion; it does
-not yet add recursive traversal or a UI.
+This PR provides the efficient primitive used by interactive expansion; it
+does not yet add recursive traversal or a UI.
 
 ## PR 31C — Graph API
 

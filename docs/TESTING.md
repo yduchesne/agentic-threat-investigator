@@ -199,7 +199,47 @@ graph contract without any database:
 - **service semantics**: a tiny concrete test double satisfies
   ``GraphQueryService``; an isolated focal-node result is distinct from
   ``None`` (missing/not-visible focal entity);
-- no PostgreSQL vertical slice exists until PR 31B.
+- no PostgreSQL vertical slice existed before PR 31B; PR 31B adds it below.
+
+### PostgreSQL graph vertical slice (PR 31B)
+
+``tests/integration/test_query_graph.py`` exercises the real schema and the
+production query service (``PostgresGraphQueryService`` through
+``PostgresQueryServices.graph``) with the shared synthetic seeding helpers
+(no fake graph database, no fake query service):
+
+- **Investigation isolation**: missing focal Entity, focal visible in one
+  Investigation but not another, soft-deleted focal, visible isolated focal
+  Entity returning a one-node graph;
+- **direction and topology**: SOURCE / TARGET / EITHER relative to the
+  focal Entity, self-relationships, repeated counterparties, relationship
+  type filtering, soft-deleted Relationships and soft-deleted endpoint
+  Entities;
+- **aggregation**: repeated admitted observations collapse to one canonical
+  edge, cross-Investigation summary isolation, first/last observed ignoring
+  nulls, all-null observed-at summaries, one EvidenceObservation shared by
+  two Investigations counting once in each, and edges whose observations
+  are never admitted to the requested Investigation;
+- **bounds and determinism**: exact-limit and ``limit + 1`` truncation
+  behavior, oversized limits rejected by ``QueryLimits`` before SQL, node
+  ordering (focal first, then Entity ID), and edge ordering (Relationship
+  ID);
+- **projection**: display name/canonical fields, canonical
+  ``RelationshipType`` mapping, and endpoint closure.
+
+PR 31B also adds query-plan/index eligibility tests to
+``tests/integration/test_query_indexes.py`` (G31B-X01..X04 / P31B-01..02):
+the source neighborhood uses ``relationship_adjacency_idx``, the target
+neighborhood uses ``relationship_target_adjacency_idx``, the focal
+visibility probe uses ``evidence_observation_entity_entity_idx`` and the
+InvestigationEvidence admission indexes, and the edge admission join uses
+an ``investigation_evidence`` index. These assert only index eligibility
+under ``SET LOCAL enable_seqscan = off``, never costs, plan tree shapes, or
+wall-clock latencies.
+
+No PR 31B test requires live internet, API keys, or any external service;
+the vertical slice runs entirely against the isolated PostgreSQL integration
+fixtures.
 
 ### Deterministic telemetry unit tests (PR 29A)
 

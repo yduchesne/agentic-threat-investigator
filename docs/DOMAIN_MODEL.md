@@ -390,7 +390,18 @@ immutable application read projections owned by ``app/query/graph.py``:
   edge whose ``observation_count`` / first/last observed summaries are
   descriptive metadata;
 - observation summaries never imply relationship lifetime, and missing
-  ``observed_at`` values are never replaced with ``retrieved_at``.
+  ``observed_at`` values are never replaced with ``retrieved_at``;
+- graph edge summaries are Investigation-scoped: ``observation_count`` and
+  the first/last observed summaries are computed only from
+  ``RelationshipObservation`` records whose exact supporting
+  ``EvidenceObservation`` is admitted to the requested Investigation.
+  Observations admitted only to another Investigation never affect a
+  graph query's edge summaries;
+- a focal Entity is graph-visible to an Investigation when a
+  ``EvidenceObservationEntity`` association links it to an
+  ``EvidenceObservation`` admitted to that Investigation; this is the
+  evidence-admission-based read rule, never an inference from
+  Relationship endpoint membership alone.
 
 ## Assessment
 
