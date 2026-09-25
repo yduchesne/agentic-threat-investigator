@@ -527,7 +527,7 @@ inv-s01-malicious-multi-source@1
 
 ###### 3. `specification`
 
-The specification explains why the scenario exists. It isn't the machine-verifiable assertion section. Rather, it provides evaluation intent and traceability. It also provides executable evaluation data (TBD: what does this mean?).
+The specification explains why the scenario exists. It isn't the machine-verifiable assertion section. Rather, it provides human-readable evaluation specification and traceability metadata.
 
 ```JSON
 "specification": {

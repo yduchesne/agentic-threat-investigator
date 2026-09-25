@@ -6,11 +6,6 @@ This page describes concepts that are fundamental to understanding the rest of t
 
 - [Data Sources](DATA_SOURCES.md): Presents core concepts such as `Entity`, `Evidence`, etc.
 
-
-## IOC
-
-TBD
-
 ## Entity
 
 An `Entity` is a canonical object that can be "interesting" in the context of CTI:
@@ -49,9 +44,47 @@ Threat intelligence data concerns maliciousness: "Has this IP adress been used t
 
 Infrastructure data on its own does not assess maliciousness.
 
+## IOC
+
+IOC stands for "Indicator of Compromise". It is an observable artifact that may indicate malicious activity or that a system has been compromised. Common IOC types include:
+
+| IOC type | Example | What it might indicate |
+|---|---|---|
+| IP address | `203.0.113.42` | Known command-and-control or scanning infrastructure |
+| Domain | `update-example.xyz` | Phishing, malware delivery, or C2 infrastructure |
+| URL | `https://example.xyz/payload.exe` | Malware download location |
+| File hash | SHA-256 hash | Known malicious executable |
+| Email address | `attacker@example.com` | Phishing or threat-actor infrastructure |
+
+For ATI, the distinction between an `IOC` and an `Entity` is important.
+
+An ATI `Entity` such as:
+
+```python
+Entity(
+    type=IP_ADDRESS,
+    value="203.0.113.42"
+)
+```
+
+does not mean the IP is an IOC. It merely means ATI knows about that IP address.
+
+A data source like `ThreatFox` (see next section for a primer on data sources) might then provide evidence saying that the IP has been observed as malicious infrastructure:
+
+```
+Entity: 203.0.113.42
+        │
+        ▼
+ThreatFox Evidence
+        │
+        └── reported as malware/C2 infrastructure
+```
+
+That evidence can support treating the entity as an IOC in the analytical sense. The next section delves deeper into the notion of evidence.
+
 ## Evidence
 
-As was briefly mentioned in the previous section, data gathered from data sources is internally used to produce (and persist) `Evidence`. 
+As mentioned earlier, data gathered from data sources is internally used to produce (and persist) `Evidence`. 
 
 In ATI, evidence represents an intelligence record about an entity,
 __at one point in time__. It is source-backed information about an entity such as a domain name or an IP address.
@@ -128,7 +161,7 @@ EvidenceObservationEntity              EvidenceObservationEntity
 
 ## Relationship
 
-On top of creating `Evidence` from facts provided by data sources, ATI also creates relationships, where those make sense in a CTI context. For example, given the `203.0.113.42`IP address, the Google DNS data source provides `evil.com` as the domain. ATI, in this case, creates a `Relationship` and `RelationshipObservation`, accordingly, on top of the `Evidence`/`EvidenceObservation` records that the data source provides.
+On top of creating `Evidence` from facts provided by data sources, ATI also creates relationships, where those make sense in a CTI context. For example, given the `203.0.113.42` IP address, the Google DNS data source provides `evil.com` as the domain. ATI, in this case, creates a `Relationship` and `RelationshipObservation`, accordingly, on top of the `Evidence`/`EvidenceObservation` records that the data source provides.
 
 Similarly to `Evidence`/`EvidenceObservation`, `Relationship` and `RelationshipObservation` reflect a current vs historical state:
 
@@ -155,8 +188,7 @@ Also, `observed_at` and `retrieved_at` are not the same thing:
 - `observed_at`: When the relationship was observed, according to the data source.
 - `retrieved_at`: When ATI retrieved that data.
 
-Suppose ATI obtains successive Google DNS evidence data, on Monday, Tuesday and Friday: `evil.example 203.0.113.42`.
-This results in the following:
+Suppose ATI obtains successive Google DNS evidence data, on Monday, Tuesday and Friday: `evil.example 203.0.113.42`. This results in the following:
 
 ```
                          Relationship
@@ -351,11 +383,11 @@ The following presents a more schematized view of the above:
 
 ## GEOINT
 
-ATI leverages PostGIS for providing geospatial data. Relationships between "cyber entities" and geospatial entities are not hard-coded: rather, at analysis time, PostGIS's geospatial operators are used to resolve IP addresses to cities (among others).
+ATI leverages PostGIS for providing geospatial data. Relationships between "cyber entities" and geospatial entities are not hard-coded: rather, at analysis time, PostGIS's geospatial operators are used to resolve IP addresses to cities (for example).
 
 ### `Location` -- Canonical geography
 
-A `Location` object represents an canonical, administrative geospatial entity. ATI keeps such entities separate from cyber entities (in short, there is no `Entity(type=LOCATION)`).
+A `Location` object represents a canonical, administrative geospatial entity. ATI keeps such entities separate from cyber entities (in short, there is no `Entity(type=LOCATION)`).
 
 The following illustrate `Locations` that represent different administrative levels:
 
@@ -374,8 +406,8 @@ Location
     └── geometry = <PostGIS geometry>
 ```
 
-Between `Location` records, Geographical containment is not "hard-coded"
-(i.e.: represented through a self-referential  foreign key). Rather, it is resolved dynamically through PostGIS geospatial functions:
+Between `Location` records, Geographical containment is not hard-coded
+(i.e.: it is not modeled as a self-referential foreign keys). Rather, it is resolved dynamically through PostGIS geospatial functions:
 
 ```
 Seattle geometry
@@ -403,7 +435,7 @@ EntityLocation
 
 The chosen `Location` is the most specific (from a geospatial-administrative standpoint) that could be resolved (int this case `Seattle` was picked even though `Washington` is also true).
 
-Having `EntityLocation` makes it possible to find "all IPs in Bucarest that were linked to Bayrob trojan" or to discover any geographical clusters associated to a certain attack campaign.
+Having `EntityLocation` makes it possible to find "all IPs in Bucarest that were linked to the Bayrob trojan" or to discover any geographical clusters associated to a certain attack campaign.
 
 ### `EntityLocationObservation`
 
@@ -480,3 +512,9 @@ EntityLocation
 containing Locations
 (city → region → country)
 ```
+
+## Pivoting
+
+Pivoting is done in the context of investigations. An investigation is initiated for a given `Entity`, such as a domain (e.g.: `evil.com`). Investigating that domain involves, among others, determining the IP address it resolves to (ultimately, this is done using ATI's knowledge graph: `evil.com --RESOLVES-TO --> 203.0.113.42`). Then, that IP address may in turn be investigated: it is "pivoted on", and becomes the current `Entity` under investigation.
+
+As can be understood from the above, pivoting is, in essence, graph traversal, starting from a given root `Entity`.
