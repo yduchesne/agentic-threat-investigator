@@ -5,7 +5,7 @@ As of this writing, ATI comprises more than 5,000 unit tests, and around 800 int
 - [Core Concepts](CORE_CONCEPTS.md): Presents core concepts such as `Entity`, `Evidence`, etc.
 - [Investigations](INVESTIGATIONS.md): Goes over the investigation workflow, especially the notion of __pivoting__.
 - [Agentic Architecture](AGENTIC.md): Goes deeper than this document in the details of the different agents and the use of `LangChain`/`LangGraph`.
-- [LangSmith](LANGSMITH.md): Documents specifically how LangSmith is used in the context of observability and evaluation. This goes further into how evals are structure and how they have infrastructure in common with integration tests.
+- [LangSmith](LANGSMITH.md): Documents specifically how `LangSmith` is used in the context of observability and evaluation. This goes further into how evals are structure and how they have infrastructure in common with integration tests.
 
 ## Unit Testing
 

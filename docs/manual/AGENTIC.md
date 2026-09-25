@@ -12,6 +12,8 @@ ATI uses AI agents for specialized tasks in the context of cyber threat intellig
 
 - [Core Concepts](CORE_CONCEPTS.md): Presents core concepts such as `Entity`, `Evidence`, etc.
 - [Investigations](INVESTIGATIONS.md): Goes over the investigation workflow, especially the notion of __pivoting__.
+- [Testing](TESTING.md): Describes the different forms of testing in ATI (including agent evals).
+- [LangSmith](LANGSMITH.md): Documents specifically how `LangSmith` is used in the context of observability and evaluation.
 
 ## Architecture at a Glance
 

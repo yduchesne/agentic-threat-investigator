@@ -30,11 +30,11 @@ ATI integrates various types of data sources. Ultimately, all data sources are m
 
 ### Live vs Batch Data Sources
 
-A live data source (more precisely named "live evidence provider" within ATI) corresponds to an external API that is queried in the course of an investigation, or a RAG call made internally against ATI's vector database: it is called "on the fly", for a given `Entity`.
+A live data source (more precisely named `EvidenceProvider` within ATI) corresponds to an external API that is queried in the course of an investigation, or a RAG call made internally against ATI's vector database: it is called "on the fly", for a given `Entity`.
 
 On the other hand, a batch data source is called out-of-band, outside of the execution of an investigation. An example is the MITRE ATT&CK data source, which is used to populate ATI's RAG database. 
 
-> Note that, in theory, a batch data source could eventually have a live evidence provider peer: the batch data source could produce `Evidence` that is later queried by an `EvidenceProvider`. Such case doesn't exist yet in the system. 
+> Note that, in theory, a batch data source could eventually have a live evidence provider peer: the batch data source could produce `Evidence` that is later queried by an `EvidenceProvider`. Such a case doesn't exist in the system, as of this writing. 
 
 ### Infrastructure vs Threat Intelligence
 
@@ -184,7 +184,7 @@ value = evil.example                                value = 203.0.113.42
        │                                                   │
 EvidenceObservationEntity                      EvidenceObservationEntity
        │                                                   │
-       │ evidence_observation_id                           │ evidence_observation_id
+  evidence_observation_id                        evidence_observation_id
        │                                                   │
        └──────────────────────┐   ┌────────────────────────┘
                               │   │
@@ -346,14 +346,11 @@ The following presents a more schematized view of the above:
 
 ## GEOINT
 
-ATI leverages PostGIS for providing geospatial data. Relationships between "cyber entities"
-and geospatial entities are not hard-coded: rather, at analysis time, PostGIS's geospatial
-operators are used to resolve IP addresses to cities (among others).
+ATI leverages PostGIS for providing geospatial data. Relationships between "cyber entities" and geospatial entities are not hard-coded: rather, at analysis time, PostGIS's geospatial operators are used to resolve IP addresses to cities (among others).
 
 ### `Location` -- Canonical geography
 
-A `Location` object represents an canonical, administrative geospatial entity. ATI keeps
-such entities separate from cyber entities (in short, there is no `Entity(type=LOCATION)`).
+A `Location` object represents an canonical, administrative geospatial entity. ATI keeps such entities separate from cyber entities (in short, there is no `Entity(type=LOCATION)`).
 
 The following illustrate `Locations` that represent different administrative levels:
 
@@ -373,8 +370,7 @@ Location
 ```
 
 Between `Location` records, Geographical containment is not "hard-coded"
-(i.e.: represented through a self-referential  foreign key). Rather, it is resolved dynamically
-through PostGIS geospatial functions:
+(i.e.: represented through a self-referential  foreign key). Rather, it is resolved dynamically through PostGIS geospatial functions:
 
 ```
 Seattle geometry
@@ -392,8 +388,7 @@ There will NOT be such a `Relationship`: `Seattle --IS-WITHIN-->Washington`.
 
 ### `EntityLocation`
 
-The geospatial relationship between `Entity` (say, IP address `203.0.113.2`) and `Location` (say, `Seattle`) is resolved
-asynchronously by a background task and kept in `EntityLocation`, which would yield, conceptually:
+The geospatial relationship between `Entity` (say, IP address `203.0.113.2`) and `Location` (say, `Seattle`) is resolved asynchronously by a background task and kept in `EntityLocation`, which would yield, conceptually:
 
 ```
 EntityLocation
@@ -401,20 +396,17 @@ EntityLocation
 └── location_id = LOC-SEATTLE
 ```
 
-The chosen `Location` is the most specific (from a geospatial-administrative standpoint) that could be
-resolved (int this case `Seattle` was picked even though `Washington` is also true).
+The chosen `Location` is the most specific (from a geospatial-administrative standpoint) that could be resolved (int this case `Seattle` was picked even though `Washington` is also true).
 
-Having `EntityLocation` makes it possible to find "all IPs in Bucarest that were linked to Bayrob trojan"
-or to discover any geographical clusters associated to a certain attack campaign.
+Having `EntityLocation` makes it possible to find "all IPs in Bucarest that were linked to Bayrob trojan" or to discover any geographical clusters associated to a certain attack campaign.
 
 ### `EntityLocationObservation`
 
-In a manner similar to `Relationship` vs `RelationshipObservation`, `EntityLocationObservation` provides us
-with provenance or temporality.
+In a manner similar to `Relationship` vs `RelationshipObservation`, `EntityLocationObservation` provides us with provenance or temporality.
 
 GEOINT starts from evidence, as well (so, an `EntityLocationObservation` record should link to an `Evidence` one).
-Suppsed the the `DB-IP` data source tells us: `203.0.113.42 → Seattle`, that constitutes evidence, from which we can
-infer a geospatial association. In summary:
+
+Suppose the `DB-IP` data source tells us: `203.0.113.42 → Seattle`, that constitutes evidence, from which we can infer a geospatial association. In summary:
 
 ```
 DB-IP
@@ -431,9 +423,7 @@ EvidenceObservation
     longitude = ...
 ```
 
-As mentioned earler, geospatial resolution is done asynchronously. The `EvidenceObservation` table has `resolution_status`
-field whose value is originally `pending`. The table below indicates the values that the field may take, besides
-`pending`, depending on the processing stage:
+As mentioned earler, geospatial resolution is done asynchronously. The `EvidenceObservation` table has a `resolution_status` field, whose value is originally `pending`. The table below indicates the values that the field may take, besides `pending`, depending on the processing stage:
 
 | Value          | Meaning                                                                              |
 | -------------- | ------------------------------------------------------------------------------------ |
@@ -443,12 +433,12 @@ field whose value is originally `pending`. The table below indicates the values 
 | `unresolvable` | ATI determined that the geographic claim cannot be resolved to a canonical location. |
 | `failed`       | Resolution processing failed operationally.                                          |
 
-To be more precise, `GeoResolution` corresponds to a queue table that is used to track the geo resolution state,
-for `EvidenceObservation` records.
+To be more precise, `GeoResolution` corresponds to a queue table that is used to track the geo resolution state, for `EvidenceObservation` records.
 
 ### Parallel Organization
 
 In summary, geography constitutes an organization that is parallel to the `Entity`/`Relationship` one.
+
 What joins them are geospatial relationships, which are discovered through PostGIS' geospatial funtions:
 
 ```
