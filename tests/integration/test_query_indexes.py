@@ -9,6 +9,16 @@ cardinalities, or wall-clock latencies.
 ``SET LOCAL enable_seqscan = off`` is used only inside these plan-eligibility
 assertions so tiny fixture sizes cannot make a sequential scan rational; no
 production session setting disables sequential scans.
+
+The PR 31B graph coverage is deliberately two-level: the G31B-X01/X02
+adjacency primitives prove the per-direction Relationship adjacency indexes
+are eligible for the underlying SOURCE/TARGET predicates, while the
+G31B1-X01/X02 production-statement plans prove the full
+``PostgresGraphQueryService._edge_statement()`` shape (RelationshipObservation
+join, InvestigationEvidence admission predicate, endpoint joins, live-row
+filters, grouping, observation aggregation, ``relationship.id`` ordering and
+the ``limit + 1`` probe) stays served by legitimate index families without
+prescribing PostgreSQL's join order.
 """
 
 from __future__ import annotations
@@ -16,11 +26,14 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import Select, text
 
+from agentic_threat_investigator.app.query.graph import GraphNeighborhoodQuery
+from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.domain.assessment import (
     Assessment,
     AssessmentConfidence,
@@ -32,10 +45,16 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
-from agentic_threat_investigator.domain.relationships import RelationshipType
+from agentic_threat_investigator.domain.relationships import (
+    RelationshipDirection,
+    RelationshipType,
+)
 from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
+)
+from agentic_threat_investigator.infrastructure.persistence.query.graph import (
+    PostgresGraphQueryService,
 )
 from tests.support.query_fixtures import (
     FIXED_TIME,
@@ -77,6 +96,69 @@ async def _plan_indexes(
     found: set[str] = set()
     _index_names(payload, found)
     return found
+
+
+async def _plan_indexes_for_statement(
+    uow: PostgresUnitOfWork,
+    stmt: Select[Any],
+) -> set[str]:
+    """EXPLAIN one SQLAlchemy Select and return the index names in its plan.
+
+    Production query services build their statements as SQLAlchemy ``Select``
+    objects; this helper EXPLAINs the compiled statement under the same
+    ``SET LOCAL enable_seqscan = off`` plan-eligibility convention as
+    :func:`_plan_indexes`. Bound values stay real bind parameters through the
+    compiled statement (never literal interpolation), so the plan matches the
+    executed production statement.
+    """
+    assert uow.session is not None
+    compiled = stmt.compile()
+    await uow.session.execute(text("SET LOCAL enable_seqscan = off"))
+    result = await uow.session.execute(
+        text("EXPLAIN (FORMAT JSON) " + compiled.string),
+        dict(compiled.params),
+    )
+    payload = result.scalar_one()
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    found: set[str] = set()
+    _index_names(payload, found)
+    return found
+
+
+# Accepted index families for the production graph edge statement plans. The
+# planner is free to drive from either side of the joins, so each access path
+# is accepted through any of its legitimate index families (mirroring the
+# X03/X04 membership style) instead of a single prescribed topology.
+_RELATIONSHIP_ACCESS_INDEXES = frozenset(
+    {
+        "relationship_adjacency_idx",
+        "relationship_target_adjacency_idx",
+        "relationship_pkey",
+    }
+)
+_OBSERVATION_ACCESS_INDEXES = frozenset(
+    {
+        "relationship_observation_relationship_retrieved_idx",
+        "relationship_observation_evidence_observation_idx",
+    }
+)
+_ADMISSION_ACCESS_INDEXES = frozenset(
+    {
+        "investigation_evidence_pkey",
+        "investigation_evidence_observation_idx",
+    }
+)
+
+
+def _assert_index_family_served(
+    found: set[str], family: frozenset[str], access: str
+) -> None:
+    """Assert at least one legitimate index family member serves an access."""
+    assert found & family, (
+        f"{access} uses none of the legitimate indexes {sorted(family)}: "
+        f"{sorted(found)}"
+    )
 
 
 async def _assert_uses_index(
@@ -582,7 +664,9 @@ async def test_p12_observation_entity_join_uses_investigation_retrieved_index(
 
 
 # ---------------------------------------------------------------------------
-# PR 31B graph neighborhood plan eligibility (P31B-01..02 / G31B-X01..X04)
+# PR 31B/31B-1 graph neighborhood plan eligibility:
+# adjacency primitives (P31B-01..02 / G31B-X01..X04) and the production
+# _edge_statement() plans (G31B1-X01..X02)
 # ---------------------------------------------------------------------------
 
 
@@ -660,6 +744,111 @@ async def test_x02_graph_target_neighborhood_uses_reverse_adjacency_index(
             "ORDER BY r.id ASC LIMIT 51",
             {"entity_id": focal},
             "relationship_target_adjacency_idx",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_g31b1_x01_production_source_statement_index_served(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G31B1-X01: the production SOURCE edge statement stays index-served.
+
+    The complete ``PostgresGraphQueryService._edge_statement()`` SOURCE shape
+    is EXPLAINed as executed: RelationshipObservation join,
+    InvestigationEvidence admission predicate, source/target endpoint joins,
+    live-row filters, grouping, count/min/max observation aggregation, the
+    SOURCE predicate, ``relationship.id`` ordering and the ``limit + 1``
+    probe. PostgreSQL is free to choose any join order and driving side, so
+    each access path is accepted through its legitimate index family rather
+    than a single prescribed topology; the SOURCE adjacency primitive itself
+    is covered separately by G31B-X01.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        focal = await seed_entity(uow, value="example.com")
+        target = await seed_entity(uow, value="192.0.2.1")
+        edge = await seed_relationship(
+            uow, source_entity_id=focal, target_entity_id=target
+        )
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=focal
+        )
+        await seed_observation(
+            uow,
+            investigation_id=investigation_id,
+            relationship=edge,
+            evidence_observation_id=evidence,
+        )
+        assert uow.session is not None
+        service = PostgresGraphQueryService(uow.session, QueryLimits())
+        query = GraphNeighborhoodQuery(
+            investigation_id=investigation_id,
+            entity_id=focal,
+            direction=RelationshipDirection.SOURCE,
+            limit=50,
+        )
+        stmt = service._edge_statement(query, 50)
+        found = await _plan_indexes_for_statement(uow, stmt)
+        _assert_index_family_served(
+            found, _RELATIONSHIP_ACCESS_INDEXES, "SOURCE edge relationship"
+        )
+        _assert_index_family_served(
+            found, _OBSERVATION_ACCESS_INDEXES, "SOURCE edge observation"
+        )
+        _assert_index_family_served(
+            found, _ADMISSION_ACCESS_INDEXES, "SOURCE edge admission"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_g31b1_x02_production_target_statement_index_served(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """G31B1-X02: the production TARGET edge statement stays index-served.
+
+    The TARGET mirror of :func:`test_g31b1_x01_production_source_statement_index_served`
+    EXPLAINs the same production ``_edge_statement()`` structure with the
+    TARGET predicate; relationship, observation, and admission access paths
+    must each resolve through a legitimate index family without prescribing
+    the join order. The TARGET adjacency primitive itself is covered
+    separately by G31B-X02.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        focal = await seed_entity(uow, value="192.0.2.1")
+        source = await seed_entity(uow, value="example.com")
+        edge = await seed_relationship(
+            uow, source_entity_id=source, target_entity_id=focal
+        )
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=focal
+        )
+        await seed_observation(
+            uow,
+            investigation_id=investigation_id,
+            relationship=edge,
+            evidence_observation_id=evidence,
+        )
+        assert uow.session is not None
+        service = PostgresGraphQueryService(uow.session, QueryLimits())
+        query = GraphNeighborhoodQuery(
+            investigation_id=investigation_id,
+            entity_id=focal,
+            direction=RelationshipDirection.TARGET,
+            limit=50,
+        )
+        stmt = service._edge_statement(query, 50)
+        found = await _plan_indexes_for_statement(uow, stmt)
+        _assert_index_family_served(
+            found, _RELATIONSHIP_ACCESS_INDEXES, "TARGET edge relationship"
+        )
+        _assert_index_family_served(
+            found, _OBSERVATION_ACCESS_INDEXES, "TARGET edge observation"
+        )
+        _assert_index_family_served(
+            found, _ADMISSION_ACCESS_INDEXES, "TARGET edge admission"
         )
 
 
