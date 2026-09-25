@@ -1,28 +1,22 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Relationship Evolution + Graph workspace (PR 24E §9, §13, §20, §28).
+// Relationship Evolution + Graph workspace (PR 24E §9, §13, §20, §28; 31D).
 //
 // Route-independent first-class entity-centric surface. The focal entity
 // must be present in the URL; without it the workspace renders an
 // instructional empty state and never queries observations. Evolution is a
 // bounded server-scoped view of RelationshipObservation rows joined to
-// their stable Relationship; Graph is a bounded one-hop neighborhood of the
-// Relationships collection. ``view`` switches the workspace without losing
-// entity/filter context; observed-range filters stay in the URL while
-// Graph (correctly) does not apply them to stable edges. Cursor is opaque
-// and bound to the exact filter context; changing any semantic filter
-// resets it. No infinite recursion, no client-side global history.
+// their stable Relationship; Graph is a bounded one-hop neighborhood from
+// the canonical PR 31C graph endpoint (never the Relationships page).
+// ``view`` switches the workspace without losing entity/filter context;
+// observed-range/source/counterparty filters stay in the URL while Graph
+// (correctly) sends only entity/direction/relationship type. Cursor is
+// opaque and bound to the exact filter context; changing any semantic
+// filter resets it. No infinite recursion, no client-side global history.
 
-import {
-  Alert,
-  Box,
-  Button,
-  ToggleButton,
-  ToggleButtonGroup,
-  Typography,
-} from "@mui/material";
+import { Alert, Box, Button, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import type { ReactElement } from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 
@@ -49,14 +43,14 @@ import { CompactId } from "../components/CompactId";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { observationActions } from "../pivots/pivot-capabilities";
 import { relationshipTypeKey } from "../relationships/labels";
-import { useObservationsPage, useRelationshipsPage } from "../relationships/relationships-queries";
+import { useObservationsPage } from "../relationships/relationships-queries";
 import {
   emptyObservationFilters,
-  emptyRelationshipFilters,
-  type RelationshipFilters,
 } from "../relationships/relationships-filters";
 import { RelationshipGraph } from "../relationship-graph/RelationshipGraph";
+import { useGraphNeighborhood } from "../relationship-graph/graph-queries";
 import { buildGraphModel } from "../relationship-graph/relationship-graph-model";
+import { entityTypeLabelKey } from "../relationship-graph/relationship-graph-presentation";
 import { RelationshipEvolutionTimeline } from "./RelationshipEvolutionTimeline";
 import {
   RelationshipEvolutionFilters as RelationshipEvolutionFiltersToolbar,
@@ -123,29 +117,22 @@ export function RelationshipEvolutionWorkspace({
     view === "evolution" && observationFilters !== null,
   );
 
-  const graphFilters: RelationshipFilters | null = useMemo(() => {
-    if (filters === null) {
-      return null;
-    }
-    return {
-      ...emptyRelationshipFilters(),
-      entityId: filters.entityId,
-      relationshipType: filters.relationshipType,
-    };
-  }, [filters]);
-  const graphRelationships = useRelationshipsPage(
+  const graphNeighborhood = useGraphNeighborhood(
     investigationId,
-    graphFilters ?? emptyRelationshipFilters(),
-    undefined,
-    view === "graph" && graphFilters !== null,
+    filters === null ? undefined : filters.entityId,
+    filters === null ? "either" : filters.direction,
+    filters === null ? undefined : filters.relationshipType,
+    view === "graph" && filters !== null,
   );
 
   const graphModel = useMemo(
     () =>
       filters === null
         ? null
-        : buildGraphModel(filters.entityId, graphRelationships.page?.items ?? []),
-    [filters, graphRelationships.page],
+        : graphNeighborhood.neighborhood === null
+          ? null
+          : buildGraphModel(filters.entityId, graphNeighborhood.neighborhood),
+    [filters, graphNeighborhood.neighborhood],
   );
   const evolutionModel = useMemo(
     () =>
@@ -250,6 +237,18 @@ export function RelationshipEvolutionWorkspace({
     }
     commit(setEvolutionView(searchParams, nextView));
   };
+
+  // Stable label functions: the graph keeps its own local node state, and an
+  // unstable label identity would reset dragged positions on unrelated
+  // re-renders.
+  const relationshipTypeLabel = useCallback(
+    (type: string) => tRelationships(relationshipTypeKey(type)),
+    [tRelationships],
+  );
+  const graphEntityTypeLabel = useCallback(
+    (type: string) => t(entityTypeLabelKey(type)),
+    [t],
+  );
 
   const openSelection = (id: string): void => {
     commit(setSelectedParam(searchParams, id));
@@ -419,35 +418,35 @@ export function RelationshipEvolutionWorkspace({
         </Box>
       ) : (
         <Box>
-          {graphModel !== null ? (
-            <RelationshipGraph
-              investigationId={investigationId}
-              focalEntityId={filters.entityId}
-              model={graphModel}
-              rows={graphRelationships.page?.items ?? []}
-              hasNext={
-                graphRelationships.page !== null &&
-                graphRelationships.page.next_cursor !== null &&
-                graphRelationships.page.next_cursor !== undefined
-              }
-              typeLabel={(type) => tRelationships(relationshipTypeKey(type))}
-            />
+          {graphNeighborhood.isLoading && graphNeighborhood.neighborhood === null ? (
+            <Alert severity="info" role="status" sx={{ mt: 1 }}>
+              {t("graph.loading")}
+            </Alert>
           ) : null}
-          {graphRelationships.error !== null && graphRelationships.page === null ? (
+          {graphNeighborhood.error !== null && graphNeighborhood.neighborhood === null ? (
             <Box sx={{ mt: 1 }}>
               <Alert severity="error" role="alert">
-                {t("error.message")}
+                {t("graph.error.message")}
               </Alert>
               <Box sx={{ display: "flex", gap: 1, mt: 1 }}>
                 <Button
                   size="small"
                   variant="outlined"
-                  onClick={() => graphRelationships.refetch()}
+                  onClick={() => graphNeighborhood.refetch()}
                 >
                   {t("error.retry")}
                 </Button>
               </Box>
             </Box>
+          ) : null}
+          {graphModel !== null ? (
+            <RelationshipGraph
+              investigationId={investigationId}
+              focalEntityId={filters.entityId}
+              model={graphModel}
+              typeLabel={relationshipTypeLabel}
+              entityTypeLabel={graphEntityTypeLabel}
+            />
           ) : null}
         </Box>
       )}

@@ -21,19 +21,22 @@ const START_ANGLE = -Math.PI / 2;
 /**
  * Deterministic radial positions for one focal + N counterparties.
  *
- * ``counterpartyIds`` must be passed in a stable (sorted) order; positions
- * are derived purely from that order. Returns the focal position and one
- * position per counterparty id.
+ * Positions depend only on the identity set, never on the input order or on
+ * server ordering: the counterparty ids are sorted internally before angles
+ * are assigned, so the same identities always produce the same initial
+ * positions (G31D-M12). A new focal or neighborhood may re-run this layout;
+ * the result is presentation-only and never persisted.
  */
 export function radialPositions(
   focalId: string,
   counterpartyIds: readonly string[],
 ): { focal: GraphPosition; counterparties: ReadonlyMap<string, GraphPosition> } {
   const counterparties = new Map<string, GraphPosition>();
-  const count = counterpartyIds.length;
+  const ordered = [...counterpartyIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const count = ordered.length;
   if (count > 0) {
     const step = (2 * Math.PI) / count;
-    counterpartyIds.forEach((id, index) => {
+    ordered.forEach((id, index) => {
       const angle = START_ANGLE + step * index;
       counterparties.set(id, {
         x: Math.cos(angle) * RADIUS,

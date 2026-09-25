@@ -1,107 +1,112 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Relationship Graph pure derived model (PR 24E §22, §24, §63-73).
+// Canonical Relationship Graph presentation model (PR 31D).
 //
-// The graph is a bounded one-hop visualization of stable Relationships
-// currently known to ATI for one focal entity in one Investigation. Nodes
-// and edges are navigation aids backed by exact Entity/Relationship IDs;
-// nothing here discovers edges, infers hidden relationships, scores
-// maliciousness, or represents temporal validity.
+// The graph is a bounded one-hop visualization of the PR 31C
+// ``GraphNeighborhoodResponse``: Entity nodes and Relationship edges are
+// copied exactly from the server (canonical identities, type/value/display
+// name for nodes, observation summaries for edges) and rendered without
+// inventing missing, reverse, or transitive edges; one Relationship is one
+// rendered edge; RelationshipObservations are provenance/temporal support,
+// never graph edges. Nothing here infers topology, lifetimes,
+// maliciousness, or ownership, and no N+1 Entity resolution happens.
 
 import type {
-  Relationship,
+  EntityTypeName,
+  GraphNeighborhood,
   RelationshipTypeName,
 } from "../api/schema-types";
 
-/** One graph node backed by an exact Entity ID. */
+/** One canonical Entity projected as a graph node. */
 export interface RelationshipGraphNode {
   entityId: string;
-  role: "focal" | "counterparty";
-  /** Bounded analyst-facing label (compact ID unless a free value is
-   * already present in the DTO — never an N+1 Entity resolution). */
+  entityType: EntityTypeName;
+  value: string;
+  displayName: string | null;
+  /** Analyst-facing label: non-empty ``display_name``, else ``value``. */
   label: string;
+  /** Focal/counterparty role determined by the request Entity ID. */
+  role: "focal" | "counterparty";
 }
 
-/** One graph edge backed by an exact Relationship ID. */
+/** One canonical Relationship projected as a graph edge. */
 export interface RelationshipGraphEdge {
   relationshipId: string;
   sourceEntityId: string;
   targetEntityId: string;
   relationshipType: RelationshipTypeName;
+  /** Copied exactly from the server; never recomputed client-side. */
+  observationCount: number;
+  firstObservedAt: string | null;
+  lastObservedAt: string | null;
 }
 
-/** The bounded one-hop graph model of one loaded Relationships page. */
+/** The bounded one-hop graph model over one GraphNeighborhood. */
 export interface RelationshipGraphModel {
+  /** Focal node (server node with the request Entity ID). */
   focal: RelationshipGraphNode;
+  /** All server nodes, in server order (focal first in practice). */
+  nodes: readonly RelationshipGraphNode[];
+  /** Non-focal server nodes, in server order. */
   counterparties: readonly RelationshipGraphNode[];
+  /** All server edges, in server order (one Relationship = one edge). */
   edges: readonly RelationshipGraphEdge[];
-  /** True when a self-loop edge exists (focal -> focal). */
+  /** True when a self-loop edge exists (source === target). */
   hasSelfEdge: boolean;
-}
-
-/** Short stable compact entity label ("Entity a1b2c3d4…"). */
-export function graphEntityLabel(entityId: string): string {
-  return `Entity ${entityId.slice(0, 8)}`;
+  /** Truthful boundedness flag copied from the server payload. */
+  truncated: boolean;
 }
 
 /**
- * Build the one-hop graph model from one bounded page.
+ * Build the one-hop graph model from one canonical neighborhood.
  *
- * Counterparties are deduplicated by exact Entity ID (deterministically
- * sorted); a self-relationship produces exactly one self-loop edge and
- * never duplicates the focal node. Multiple relationship types between the
- * same entity pair stay distinct edges.
+ * Every node/edge is copied exactly from the server payload: canonical
+ * Entity/Relationship IDs, Entity metadata, edge summaries, server ordering
+ * and the ``truncated`` flag are preserved. The focal node is the server
+ * node whose ``entity_id`` equals the request Entity ID (never inferred
+ * from edge direction); a self-loop contributes one node/one edge and never
+ * duplicates the focal node.
  */
 export function buildGraphModel(
   focalEntityId: string,
-  relationships: readonly Relationship[],
+  neighborhood: GraphNeighborhood,
 ): RelationshipGraphModel {
-  const counterpartyIds = new Map<string, RelationshipGraphNode>();
-  const edges: RelationshipGraphEdge[] = [];
-  let hasSelfEdge = false;
-
-  for (const relationship of relationships) {
-    edges.push({
-      relationshipId: relationship.id,
-      sourceEntityId: relationship.source_entity_id,
-      targetEntityId: relationship.target_entity_id,
-      relationshipType: relationship.type,
-    });
-    if (
-      relationship.source_entity_id === focalEntityId &&
-      relationship.target_entity_id === focalEntityId
-    ) {
-      hasSelfEdge = true;
-      continue;
-    }
-    const counterparty =
-      relationship.source_entity_id === focalEntityId
-        ? relationship.target_entity_id
-        : relationship.source_entity_id;
-    if (counterparty === focalEntityId) {
-      continue;
-    }
-    if (!counterpartyIds.has(counterparty)) {
-      counterpartyIds.set(counterparty, {
-        entityId: counterparty,
-        role: "counterparty",
-        label: graphEntityLabel(counterparty),
-      });
-    }
-  }
-
-  const counterparties = [...counterpartyIds.values()].sort((a, b) =>
-    a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0,
-  );
-
+  const nodes: RelationshipGraphNode[] = neighborhood.nodes.map((node) => ({
+    entityId: node.entity_id,
+    entityType: node.entity_type,
+    value: node.value,
+    displayName: node.display_name ?? null,
+    label: nodeLabel(node.display_name ?? null, node.value),
+    role: node.entity_id === focalEntityId ? "focal" : "counterparty",
+  }));
+  const focal =
+    nodes.find((node) => node.entityId === focalEntityId) ??
+    // The server guarantees the focal node; this fallback keeps the model
+    // total without inventing topology.
+    nodes[0];
+  const counterparties = nodes.filter((node) => node.entityId !== focalEntityId);
+  const edges: RelationshipGraphEdge[] = neighborhood.edges.map((edge) => ({
+    relationshipId: edge.relationship_id,
+    sourceEntityId: edge.source_entity_id,
+    targetEntityId: edge.target_entity_id,
+    relationshipType: edge.relationship_type,
+    observationCount: edge.observation_count,
+    firstObservedAt: edge.first_observed_at ?? null,
+    lastObservedAt: edge.last_observed_at ?? null,
+  }));
   return {
-    focal: {
-      entityId: focalEntityId,
-      role: "focal",
-      label: graphEntityLabel(focalEntityId),
-    },
+    focal,
+    nodes,
     counterparties,
     edges,
-    hasSelfEdge,
+    hasSelfEdge: edges.some(
+      (edge) => edge.sourceEntityId === edge.targetEntityId,
+    ),
+    truncated: neighborhood.truncated,
   };
+}
+
+/** Analyst-facing node label: non-empty display name, else canonical value. */
+export function nodeLabel(displayName: string | null, value: string): string {
+  return displayName !== null && displayName.trim() !== "" ? displayName : value;
 }

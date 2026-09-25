@@ -104,7 +104,7 @@ export function evidenceColumns(t: (key: string) => string): Column<Evidence>[] 
       render: (evidence) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {evidence.subject_value}
+            {evidence.subject_value ?? "—"}
           </Typography>
           <PivotMenu
             actions={evidenceSubjectActions(evidence, "table_cell")}
@@ -112,7 +112,7 @@ export function evidenceColumns(t: (key: string) => string): Column<Evidence>[] 
           />
         </Box>
       ),
-      exportValue: (evidence) => evidence.subject_value,
+      exportValue: (evidence) => evidence.subject_value ?? "",
     },
     {
       id: "evidenceType",
@@ -208,7 +208,7 @@ export function EvidenceWorkspace({
       t("columns.sourceUrl"),
     ];
     const rows = page.items.map((evidence) => [
-      evidence.subject_value,
+      evidence.subject_value ?? "",
       t(evidenceTypeKey(evidence.type)),
       evidence.source,
       evidence.observed_at ?? "",

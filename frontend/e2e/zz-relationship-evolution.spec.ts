@@ -145,18 +145,121 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await page.getByRole("dialog", { name: "Observation" }).dispatchEvent("keydown", { key: "Escape" });
     await expect(page).not.toHaveURL(/selected=/);
 
-    // Switch to the bounded one-hop Graph: stable edges + accessible list.
+    // Switch to the bounded one-hop Graph (G31D-E01/E02/E08): the canvas and
+    // the accessible non-spatial list render from the canonical PR 31C graph
+    // endpoint, and pan/zoom/fit controls are available. The request
+    // observer is registered before the switch so the initial neighborhood
+    // request is captured.
+    const graphNeighborhoodRequests: string[] = [];
+    const relationshipsListRequests: string[] = [];
+    const observationRequests: string[] = [];
+    page.on("request", (request) => {
+      const url = request.url();
+      if (url.includes("/api/v1/") && url.includes("/graph/entities/")) {
+        graphNeighborhoodRequests.push(url);
+      }
+      if (url.includes("/api/v1/") && url.includes("/relationships?")) {
+        relationshipsListRequests.push(url);
+      }
+      if (url.includes("/api/v1/") && url.includes("/relationship-observations")) {
+        observationRequests.push(url);
+      }
+    });
     await page.getByRole("button", { name: "Graph" }).click();
     await expect(page).toHaveURL(/view=graph/);
+    const graphCanvas = page.getByRole("group", {
+      name: "Relationship graph (one-hop)",
+    });
+    await expect(graphCanvas).toBeVisible({ timeout: 20_000 });
+    const graphList = page.getByRole("table", {
+      name: "Relationship list (this page)",
+    });
+    await expect(graphList).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("rf__controls")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Zoom In" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Zoom Out" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Fit View" })).toBeVisible();
+
+    // Node/edge semantics from the graph API (G31D-E02/E03): the focal node
+    // carries its exact value and a visible non-color Entity-type cue, and
+    // the canvas edge carries the translated Relationship label.
     await expect(
-      page.getByRole("table", { name: "Relationship list (this page)" }),
+      graphCanvas.getByText("Domain", { exact: true }).first(),
     ).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("Resolves to", { exact: true }).first()).toBeVisible({
+    await expect(
+      graphCanvas.getByText("Resolves to", { exact: true }).first(),
+    ).toBeVisible({ timeout: 20_000 });
+    const canvasNode = graphCanvas.locator(".react-flow__node").first();
+    await expect(canvasNode).toBeVisible({ timeout: 20_000 });
+    const canvasEdge = graphCanvas.locator(".react-flow__edge").first();
+    await expect(canvasEdge).toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => graphNeighborhoodRequests.length).toBeGreaterThan(0);
+    expect(relationshipsListRequests).toEqual([]);
+    expect(observationRequests).toEqual([]);
+    expect(new URL(graphNeighborhoodRequests[0]).pathname).toMatch(
+      /\/api\/v1\/investigations\/[0-9a-f-]+\/graph\/entities\/[0-9a-f-]+\/neighborhood$/,
+    );
+    const graphRequestCount = graphNeighborhoodRequests.length;
+
+    // Select the focal node (G31D-E06): canonical Entity identity/value/type
+    // appear in the selection detail, and no second graph request happens
+    // (read-only, no expansion — G31D-E07/E10). The Display-name row is
+    // rendered only when the server supplies one (unit-covered); the fake
+    // world's Entities carry values without display names.
+    await canvasNode.click();
+    const nodeDetail = page.getByText(/^Entity: .+/).first();
+    await expect(nodeDetail).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Entity type", { exact: true })).toBeVisible();
+    await expect(page.getByText("Value", { exact: true })).toBeVisible();
+    await expect(page.getByText("Entity ID", { exact: true }).first()).toBeVisible();
+
+    // Select the canvas edge (G31D-E04): exact Relationship type + observation
+    // summary (count, first/last observed) render as observational metadata.
+    // The first canvas edge's type label comes from the graph API, so the
+    // heading is asserted structurally, never hard-coded to one fake-world
+    // type.
+    await canvasEdge.click();
+    // The heading lives directly inside the edge-selection panel box; scope
+    // the summary assertions to that box (the list below repeats the same
+    // column headings).
+    const edgePanelHeading = page.getByText(/^Relationship: /);
+    await expect(edgePanelHeading).toBeVisible({
       timeout: 20_000,
     });
+    const edgePanel = edgePanelHeading.locator("xpath=..");
+    await expect(
+      edgePanel.getByText("Supporting observations", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      edgePanel.getByText("First observed", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      edgePanel.getByText("Last observed", { exact: true }),
+    ).toBeVisible();
+
+    // Drag smoke (G31D-E09): the node really moves and nothing is persisted
+    // or re-fetched.
+    const nodeBox = await canvasNode.boundingBox();
+    await page.mouse.move(
+      (nodeBox?.x ?? 0) + (nodeBox?.width ?? 0) / 2,
+      (nodeBox?.y ?? 0) + (nodeBox?.height ?? 0) / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      (nodeBox?.x ?? 0) + (nodeBox?.width ?? 0) / 2 + 140,
+      (nodeBox?.y ?? 0) + (nodeBox?.height ?? 0) / 2 + 70,
+      { steps: 6 },
+    );
+    await page.mouse.up();
+    const movedBox = await canvasNode.boundingBox();
+    expect(movedBox !== null && nodeBox !== null).toBe(true);
+    expect(Math.abs((movedBox?.x ?? 0) - (nodeBox?.x ?? 0)) + Math.abs((movedBox?.y ?? 0) - (nodeBox?.y ?? 0))).toBeGreaterThan(60);
+    expect(graphNeighborhoodRequests.length).toBe(graphRequestCount);
+    expect(relationshipsListRequests).toEqual([]);
+    // Selection/drag are presentation only: no investigation mutation.
+    await expect(page.getByText("FAKE DATA")).toBeVisible();
 
     // Graph edge -> exact Relationship table context (bounded, no recursion).
-    const graphList = page.getByRole("table", { name: "Relationship list (this page)" });
     const firstEdgeRow = graphList.getByRole("row").nth(1);
     const relationshipLink = firstEdgeRow.getByRole("link", { name: "View", exact: true });
     await relationshipLink.click();

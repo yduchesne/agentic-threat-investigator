@@ -39,7 +39,7 @@ requirements justify the additional persistence dependency.
 | **31A** | Graph read model and repository contract | Stable frontend-independent graph-query boundary over existing ATI domain identities [DONE] |
 | **31B** | PostgreSQL one-hop graph queries | Efficient incoming/outgoing neighborhood reads with relationship observation summaries |
 | **31C** | Graph API | REST surface for graph neighborhoods and relationship detail |
-| **31D** | Basic interactive graph UI | First Maltego-like visualization with pan/zoom/layout and node/edge selection |
+| **31D** | Basic interactive graph UI | First Maltego-like visualization with pan/zoom/layout, Functional node dragging, and node/edge selection over the canonical graph API [DONE] |
 | **31E** | Interactive graph expansion | Analyst-driven incremental expansion of already-known graph relationships |
 | **31F** | Evidence drill-down | Relationship -> observation -> evidence navigation from the graph |
 | **31G** | Filtering and investigation context | Manage larger graphs without confusing global knowledge with investigation provenance |
@@ -103,18 +103,39 @@ Wire DTOs are explicit and versionable. Database rows, recursive SQL
 concepts, and Cytoscape/Sigma/React Flow-specific structures never cross
 the application contract.
 
-## PR 31D — Basic interactive graph UI
+## PR 31D — Basic interactive graph UI [DONE]
 
-Add the first interactive graph visualization over the PR 31C API. Support
-pan, zoom, fit-to-screen, node/edge selection, dragging, suitable graph
-layouts, entity-type differentiation, and relationship labels.
+PR 24E supplied an earlier Relations-page-backed interactive graph
+(`RelationshipGraph` over `@xyflow/react`, see `docs/ARCHITECTURE.md`);
+31D migrated and completed that surface over the canonical v0.5 graph API
+instead of creating a second graph screen.
 
-Selecting an Entity shows its basic ATI identity and metadata. Selecting a
-Relationship shows its type and observation summary. The visualization remains
-read-only: this PR does not launch investigations or mutate graph/domain state.
+The Graph view is now a faithful, read-only client of the PR 31C endpoint
+(`GET /api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighborhood`):
 
-The frontend library must remain an implementation detail behind ATI-owned
-graph DTOs and UI components.
+- one bounded ``GraphNeighborhoodResponse`` is the sole topology payload;
+  the Relationships page never feeds the canvas;
+- nodes carry exact server Entity metadata (``entity_id``, ``entity_type``,
+  ``value``, ``display_name``) with entity-type differentiation that is never
+  color-only;
+- one ``GraphEdgeResponse`` is one rendered edge with its exact observation
+  summary (count, first/last observed; null values stay unavailable and are
+  never substituted with retrieval times);
+- pan, zoom, fit-to-screen, node/edge selection, Relationship labels, and the
+  accessible non-spatial edge list are preserved;
+- node dragging is functional through React Flow's controlled change path,
+  stays browser-local, and is never persisted;
+- the API ``truncated`` flag drives the bounded-neighborhood notice; an
+  isolated focal Entity renders as a successful focal-only graph;
+- graph failures offer Retry without any Relationships-list fallback;
+- direction, relationship type and limit map onto the canonical query;
+  Evolution-only filters never reach the graph endpoint;
+- expansion (PR 31E), Evidence drill-down (PR 31F), provider/acquisition
+  behavior, saved layouts, and graph persistence remain out of scope.
+
+Canonical Entity/Relationship IDs remain authoritative; React Flow node/edge
+IDs, coordinates, selection, and drag positions are browser-only presentation
+state.
 
 ## PR 31E — Interactive graph expansion
 

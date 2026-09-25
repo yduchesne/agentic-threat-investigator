@@ -30,10 +30,13 @@ export function EvidenceDetail({ evidence }: { evidence: Evidence }): ReactEleme
     <Box>
       <DetailRows
         rows={[
-          { label: t("detail.subject"), value: evidence.subject_value },
+          {
+            label: t("detail.subject"),
+            value: evidence.subject_value ?? nullish,
+          },
           {
             label: t("detail.subjectType"),
-            value: evidence.subject_type,
+            value: evidence.subject_type ?? nullish,
           },
           { label: t("detail.evidenceType"), value: t(evidenceTypeKey(evidence.type)) },
           { label: t("detail.source"), value: evidence.source },
