@@ -3262,25 +3262,50 @@ Frontend coverage (`frontend/src/relationship-evolution/`,
   honest no-results wording, running-Investigation notice, error Retry
   preserving context, keyboard-accessible points, and the tabular
   alternative;
-- graph (`relationship-graph-model.test.ts` + `relationship-graph.test.tsx`,
-  E-G01..E-G11): focal node identity, deduplicated counterparties,
-  self-edge purity, distinct multi-type edges, compact labels without
-  entity N+1, deterministic radial layout, honest bounded-neighborhood
-  notice, empty state, and the always-available edge-list navigation
-  (relationship + evolution routes carrying exact IDs); the jsdom test
-  environment stubs `ResizeObserver` for `@xyflow/react` (documented in
-  `src/test/setup.ts`); no pixel/layout snapshots are asserted;
+- graph (`relationship-graph-model.test.ts` + `relationship-graph.test.tsx` +
+  `graph-queries.test.tsx`, PR 24E E-G01..E-G11 then PR 31D G31D-M01..M12,
+  G31D-Q01..Q10, G31D-U01..U20): the model is a faithful one-hop projection
+  of the canonical `GraphNeighborhoodResponse` (focal/counterparty roles by
+  request ID, exact server Entity metadata and edge observation summaries,
+  self-loop one-node/one-edge, distinct multi-edge pairs, preserved server
+  ordering and truncation, null times staying null, deterministic radial
+  layout keyed by identity set); the API/query seam requests exactly the
+  PR 31C neighborhood path with only `direction`/`relationship_type`/
+  `limit`, never sends cursors or Evolution-only filters, propagates
+  AbortSignal, keys off semantic inputs, disables without a focal Entity,
+  and surfaces typed `ApiError` values without Relationships fallback; the
+  workspace tests assert the graph endpoint (not the Relationships list)
+  carries direction/type and omits `observed_from`-style filters, node
+  selection exposes canonical ID/type/value/display name, loading/error/
+  Retry, truncated notice from the API flag, isolated-focal success,
+  pane-click deselection, and the controlled node-change path
+  (jsdom cannot run React Flow pointer drags, so the draggable wiring and
+  SELECT-change round-trip are unit-tested and the real browser drag is the
+  E2E drag smoke); the jsdom test environment stubs `ResizeObserver` for
+  `@xyflow/react` (documented in `src/test/setup.ts`); no pixel/layout
+  snapshots and no exact canvas-coordinate assertions are made;
+- PR 31D frontend tests use deterministic MSW graph fixtures/builders
+  (`graphNeighborhoodHandler` recording path/direction/type/limit) and the
+  existing `renderAtPath`/user-event/jest-dom harness; `schema.generated.ts`
+  is regenerated from the committed OpenAPI snapshot and `npm run api:check`
+  stays green;
 - real-stack E23 (`frontend/e2e/zz-relationship-evolution.spec.ts`):
   completed F03 fake-world Investigation (`logistics-corp.test`),
   Relationships -> source entity -> Relationship Evolution, temporal
   points driven by `observed_at` with distinct `retrieved_at` tooltips,
   `Earliest shown on this page`, observation activation -> exact
   observation detail, observation -> Evidence exact navigation through
-  the PR 24D pivot workspace, switch to Graph -> accessible relationship
-  list -> exact Relationship table context, route refresh preserving
-  Evolution filters/entity, browser Back/Forward preserving focal entity
-  identity, `FAKE DATA` visible, clean console;
-- PR 24E adds no speculative second graph/visualization dependency and
+  the PR 24D pivot workspace, switch to Graph -> canonical graph endpoint
+  (observed requests prove `/graph/entities/…/neighborhood`, never a
+  Relationships or observations page), entity semantics (server
+  value/type cue), canvas edge label + edge selection showing the
+  observation summary (count/first/last observed), node selection showing
+  canonical Entity identity, pan/zoom/fit controls, a node drag smoke that
+  proves the moved position without any additional graph request (read-only), ->
+  accessible relationship list -> exact Relationship table context, route
+  refresh preserving Evolution filters/entity, browser Back/Forward
+  preserving focal entity identity, `FAKE DATA` visible, clean console;
+- PR 24E/31D add no speculative second graph/visualization dependency and
   no new fake-world fixture: the F03 world's repeated observed-at stamps
   drive the browser slice.
 

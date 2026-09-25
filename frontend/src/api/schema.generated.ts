@@ -185,7 +185,11 @@ export interface paths {
         };
         /**
          * List Evidence
-         * @description List Evidence observations of one Investigation (PR 23A contract).
+         * @description List Evidence observations of one Investigation (PR 23A/28B contract).
+         *
+         *     ``subject_entity_id`` is the retained public filter name; it implements
+         *     PR 28B association semantics (the exact observation is associated with
+         *     the Entity) — there is no privileged subject.
          */
         get: operations["list_evidence"];
         put?: never;
@@ -382,6 +386,35 @@ export interface paths {
          *     arbitrary facts or raw payloads.
          */
         get: operations["list_investigation_geolocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighborhood": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Graph Entity Neighborhood
+         * @description Return the bounded one-hop neighborhood of one focal Entity.
+         *
+         *     ``direction`` defaults to ``either`` relative to the focal Entity;
+         *     ``relationship_type`` filters the canonical Relationship URN; an omitted
+         *     ``limit`` uses the configured default page size while the service-owned
+         *     maximum is never clamped -- an oversized caller limit is a stable 400
+         *     ``invalid_request``. Scoped absence (missing, soft-deleted, or
+         *     not-visible focal Entity) maps to one 404 ``graph_entity_not_found``;
+         *     every other graph result, including a visible isolated focal Entity,
+         *     maps to 200.
+         */
+        get: operations["get_graph_entity_neighborhood"];
         put?: never;
         post?: never;
         delete?: never;
@@ -892,7 +925,14 @@ export interface components {
         EntityType: "domain" | "ip_address" | "url" | "network_prefix" | "asn" | "organization" | "malware" | "attack_technique" | "vulnerability";
         /**
          * EvidenceResponse
-         * @description One immutable Evidence observation, normalized facts only.
+         * @description One exact admitted EvidenceObservation, normalized facts only (PR 28B).
+         *
+         *     ``id`` is the exact EvidenceObservation identity, never the stable
+         *     Evidence ID. The legacy ``subject_*`` field names are retained for wire
+         *     compatibility: they resolve to the observation's first associated Entity
+         *     in deterministic order (or ``None`` when the observation has none). They
+         *     are presentation compatibility only; there is no privileged Evidence
+         *     subject and no role semantics.
          */
         EvidenceResponse: {
             /** Facts */
@@ -917,14 +957,11 @@ export interface components {
             source_record_id: string | null;
             /** Source Url */
             source_url: string | null;
-            /**
-             * Subject Entity Id
-             * Format: uuid
-             */
-            subject_entity_id: string;
-            subject_type: components["schemas"]["EntityType"];
+            /** Subject Entity Id */
+            subject_entity_id?: string | null;
+            subject_type?: components["schemas"]["EntityType"] | null;
             /** Subject Value */
-            subject_value: string;
+            subject_value?: string | null;
             type: components["schemas"]["EvidenceType"];
         };
         /**
@@ -1164,6 +1201,66 @@ export interface components {
             location: components["schemas"]["GeointLocationResponse"];
             /** Scoped Entity Count */
             scoped_entity_count: number;
+        };
+        /**
+         * GraphEdgeResponse
+         * @description One canonical Relationship projected as a graph edge.
+         *
+         *     ``observation_count``, ``first_observed_at`` and ``last_observed_at``
+         *     are copied exactly from the application ``GraphEdge`` summary; the wire
+         *     never recomputes or substitutes lifetimes or retrieval times.
+         */
+        GraphEdgeResponse: {
+            /** First Observed At */
+            first_observed_at?: string | null;
+            /** Last Observed At */
+            last_observed_at?: string | null;
+            /** Observation Count */
+            observation_count: number;
+            /**
+             * Relationship Id
+             * Format: uuid
+             */
+            relationship_id: string;
+            relationship_type: components["schemas"]["RelationshipType"];
+            /**
+             * Source Entity Id
+             * Format: uuid
+             */
+            source_entity_id: string;
+            /**
+             * Target Entity Id
+             * Format: uuid
+             */
+            target_entity_id: string;
+        };
+        /**
+         * GraphNeighborhoodResponse
+         * @description One bounded Investigation-scoped one-hop neighborhood projection.
+         */
+        GraphNeighborhoodResponse: {
+            /** Edges */
+            edges: components["schemas"]["GraphEdgeResponse"][];
+            /** Nodes */
+            nodes: components["schemas"]["GraphNodeResponse"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * GraphNodeResponse
+         * @description One canonical Entity projected as a graph node.
+         */
+        GraphNodeResponse: {
+            /** Display Name */
+            display_name?: string | null;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            entity_type: components["schemas"]["EntityType"];
+            /** Value */
+            value: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1872,6 +1969,9 @@ export type GeointObservationResponse = components['schemas']['GeointObservation
 export type GeointPrecisionCountsResponse = components['schemas']['GeointPrecisionCountsResponse'];
 export type GeointSummaryResponse = components['schemas']['GeointSummaryResponse'];
 export type GeointTopLocationResponse = components['schemas']['GeointTopLocationResponse'];
+export type GraphEdgeResponse = components['schemas']['GraphEdgeResponse'];
+export type GraphNeighborhoodResponse = components['schemas']['GraphNeighborhoodResponse'];
+export type GraphNodeResponse = components['schemas']['GraphNodeResponse'];
 export type HttpValidationError = components['schemas']['HTTPValidationError'];
 export type HistoryOperation = components['schemas']['HistoryOperation'];
 export type HistoryRecordResponse = components['schemas']['HistoryRecordResponse'];
@@ -3213,6 +3313,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvestigationGeolocationCollectionResponse"];
+                };
+            };
+            /** @description Invalid request. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Access forbidden. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_graph_entity_neighborhood: {
+        parameters: {
+            query?: {
+                direction?: components["schemas"]["RelationshipDirection"];
+                relationship_type?: components["schemas"]["RelationshipType"] | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                investigation_id: string;
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphNeighborhoodResponse"];
                 };
             };
             /** @description Invalid request. */

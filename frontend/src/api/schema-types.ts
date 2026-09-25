@@ -28,6 +28,9 @@ import type {
   GeointPrecisionCountsResponse,
   GeointSummaryResponse,
   GeointTopLocationResponse,
+  GraphEdgeResponse,
+  GraphNeighborhoodResponse,
+  GraphNodeResponse,
   HistoryOperation,
   HistoryRecordResponse,
   IndicatorRequest,
@@ -216,6 +219,15 @@ export type InvestigationGeolocationCollection = InvestigationGeolocationCollect
 
 /** The exact v0.1 geolocation precision vocabulary (PR 25A). */
 export type GeoPrecisionName = GeoPrecision;
+
+/** One canonical Entity projected as a graph node (PR 31C). */
+export type GraphNode = GraphNodeResponse;
+
+/** One canonical Relationship projected as a graph edge (PR 31C). */
+export type GraphEdge = GraphEdgeResponse;
+
+/** One bounded Investigation-scoped one-hop neighborhood (PR 31C). */
+export type GraphNeighborhood = GraphNeighborhoodResponse;
 
 /** One bounded cursor page of history rows (PR 24C). */
 export type HistoryPage = PageResponseHistoryRecordResponse;

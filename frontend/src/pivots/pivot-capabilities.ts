@@ -151,16 +151,24 @@ export function entityActions(
   ];
 }
 
-/** Evidence subject identity -> the entity actions (value as label). */
+/**
+ * Evidence subject identity -> the entity actions (value as label).
+ *
+ * PR 28B association semantics make the subject fields presentation
+ * compatibility only: when the exact observation has no associated Entity,
+ * there is no subject to pivot from and the action list is empty.
+ */
 export function evidenceSubjectActions(
   evidence: Pick<Evidence, "subject_entity_id" | "subject_value">,
   sourceKind: PivotSourceKind,
 ): PivotAction[] {
-  return entityActions(
-    evidence.subject_entity_id,
-    evidence.subject_value,
-    sourceKind,
-  );
+  return evidence.subject_entity_id === undefined || evidence.subject_entity_id === null
+    ? []
+    : entityActions(
+        evidence.subject_entity_id,
+        evidence.subject_value ?? evidence.subject_entity_id,
+        sourceKind,
+      );
 }
 
 /** Relationship identity -> all observations for that relationship. */

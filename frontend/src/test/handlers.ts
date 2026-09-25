@@ -22,6 +22,9 @@ import type {
   GeointObservationDetail,
   GeointSummary,
   GeointTopLocation,
+  GraphEdge,
+  GraphNeighborhood,
+  GraphNode,
   HistoryOperationName,
   HistoryRecord,
   Investigation,
@@ -286,6 +289,10 @@ export function evolutionObservationsHandler<T>({
  *
  * Serves one-hop pages for ``entity_id``-filtered Relationship queries and
  * records every exact parameter (entity/source/target/type/cursor/limit).
+ *
+ * @deprecated The canonical graph canvas now consumes the PR 31C graph
+ *   endpoint (graphNeighborhoodHandler); this Relationships-list handler
+ *   remains only for tests that still exercise the Relationships table.
  */
 export function graphRelationshipsHandler({
   pages,
@@ -317,6 +324,102 @@ export function graphRelationshipsHandler({
 export const relationshipObservationsNetworkErrorHandler = http.get(
   "*/api/v1/investigations/:id/relationship-observations",
   () => HttpResponse.error(),
+);
+
+// PR 31C/31D canonical graph fixtures + handler ------------------------------
+
+/** One deterministic graph node for a canonical Entity. */
+export function buildGraphNode(
+  overrides: Partial<GraphNode> = {},
+): GraphNode {
+  return {
+    entity_id: uuidAt(101),
+    entity_type: "domain",
+    value: "update-package.test",
+    display_name: "update-package.test",
+    ...overrides,
+  };
+}
+
+/** One deterministic graph edge for a canonical Relationship. */
+export function buildGraphEdge(
+  overrides: Partial<GraphEdge> = {},
+): GraphEdge {
+  return {
+    relationship_id: uuidAt(21),
+    source_entity_id: uuidAt(101),
+    target_entity_id: uuidAt(102),
+    relationship_type: "urn:ati:relationship:dns:resolves_to" as RelationshipTypeName,
+    observation_count: 1,
+    first_observed_at: "2026-06-01T09:00:00Z",
+    last_observed_at: "2026-06-01T09:05:00Z",
+    ...overrides,
+  };
+}
+
+/** One deterministic bounded graph neighborhood. */
+export function buildGraphNeighborhood(
+  overrides: Partial<GraphNeighborhood> = {},
+): GraphNeighborhood {
+  const focal = buildGraphNode();
+  const counterparty = buildGraphNode({
+    entity_id: uuidAt(102),
+    entity_type: "ip_address",
+    value: "203.0.113.10",
+    display_name: "203.0.113.10",
+  });
+  return {
+    nodes: [focal, counterparty],
+    edges: [
+      buildGraphEdge({
+        source_entity_id: focal.entity_id,
+        target_entity_id: counterparty.entity_id,
+      }),
+    ],
+    truncated: false,
+    ...overrides,
+  };
+}
+
+/**
+ * Canonical PR 31C graph-neighborhood handler.
+ *
+ * Serves one ``GraphNeighborhood`` per request (there is no cursor) and
+ * records every exact query parameter: ``entity_id`` (path), ``direction``,
+ * ``relationship_type`` and ``limit``. Never serves a Relationships page.
+ */
+export function graphNeighborhoodHandler({
+  neighborhood,
+  recorder,
+}: {
+  neighborhood: GraphNeighborhood;
+  recorder: { requests: ResourceListRequestRecord[] };
+}) {
+  return http.get(
+    "*/api/v1/investigations/:id/graph/entities/:entityId/neighborhood",
+    ({ request, params }) => {
+      const url = new URL(request.url);
+      recorder.requests.push({
+        cursor: null,
+        limit: url.searchParams.get("limit"),
+        params: {
+          entity_id: String(params.entityId),
+          ...Object.fromEntries(url.searchParams.entries()),
+        },
+      });
+      return jsonResponse(neighborhood as JsonBodyType);
+    },
+  );
+}
+
+export const graphNeighborhoodNetworkErrorHandler = http.get(
+  "*/api/v1/investigations/:id/graph/entities/:entityId/neighborhood",
+  () => HttpResponse.error(),
+);
+
+export const graphNeighborhoodNotFoundHandler = http.get(
+  "*/api/v1/investigations/:id/graph/entities/:entityId/neighborhood",
+  () => errorResponse(404, "graph_entity_not_found"),
 );
 
 export function listRequestRecorder() {

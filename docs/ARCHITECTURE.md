@@ -337,6 +337,12 @@ Architectural decisions:
   recursive traversal, no inference, no maliciousness scoring, no
   validity reasoning, and an always-available non-spatial edge list with
   exact navigation links;
+
+  > **PR 31D migration**: the graph canvas now consumes the canonical v0.5
+  > graph API (Section "Graph exploration read boundary" / "Canonical graph
+  > UI") instead of the Relationships `entity_id` page — the Relationships
+  > list remains the data source for the Relationships table and detail, not
+  > for the graph topology.
 - Evolution/Graph interactions drill into the existing PR 24C detail
   surfaces and PR 24D pivot/provenance paths. PR 24F closed the
   documented Report -> exact RelationshipObservation residual with a
@@ -1150,7 +1156,9 @@ Entity / Relationship / RelationshipObservation
     -> PostgresGraphQueryService (infrastructure/persistence/query/graph.py)
     -> FastAPI graph route (api/routes/graph.py)          (PR 31C thin HTTP projection)
     -> explicit graph API DTOs (api/dto/graph.py)
-    -> later visualization                                (PR 31D+)
+    -> TanStack Query graph client (frontend graph-queries.ts)   (PR 31D)
+    -> ATI graph presentation model (relationship-graph-model.ts)
+    -> React Flow one-hop graph (RelationshipGraph.tsx)    (presentation-only)
 ```
 
 Architectural decisions:
@@ -1248,6 +1256,65 @@ GET /api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighbo
   `QueryLimits` remains authoritative for the maximum, and an oversized
   caller limit is a stable 400 `invalid_request`, never a silent clamp;
   a visible isolated focal Entity is a successful 200.
+
+### Canonical graph UI (PR 31D)
+
+PR 31D migrates the PR 24E interactive graph to the canonical v0.5 graph API
+and completes the basic graph UX. The delivered data path is:
+
+```text
+React Flow (RelationshipGraph.tsx)   presentation-only canvas + accessible list
+  -> ATI graph presentation model (relationship-graph-model.ts)
+  -> TanStack Query graph client (graph-queries.ts / graph-api.ts)
+  -> GET /investigations/{id}/graph/entities/{entity_id}/neighborhood  (PR 31C)
+  -> FastAPI graph route -> GraphQueryService -> PostgreSQL
+```
+
+Architectural decisions:
+
+- **`GraphNeighborhoodResponse` is the sole graph-topology payload**: the
+  canvas never reconstructs topology from a Relationships page, never
+  iterates cursors, and never fetches extra pages to "recover" truncated
+  edges;
+- **canonical IDs remain authoritative**: React Flow node/edge IDs such as
+  `n:<uuid>` / `e:<uuid>`, coordinates, selection, and drag positions are
+  browser-only presentation state, never persisted, never sent to FastAPI,
+  and never added to URL/domain state. A refresh may restore the
+  deterministic radial initial layout;
+- **node semantics come from `GraphNode`**: `entity_type`, `value` and
+  `display_name` are rendered exactly as returned (label = non-empty
+  `display_name`, else `value`); no N+1 Entity requests and no type
+  inference from values or Relationship types. Entity types are
+  differentiated with visible text, never color alone;
+- **one `GraphEdgeResponse` = one rendered edge**: `observation_count`,
+  `first_observed_at` and `last_observed_at` are copied exactly; null
+  observed times render unavailable and `retrieved_at` is never
+  substituted. RelationshipObservation records are provenance/temporal
+  support, never additional edges, lifetimes, or start/end claims;
+- **read-only one-hop surface**: pan/zoom/fit, node/edge selection,
+  Relationship labels, and functional node dragging (through React Flow's
+  controlled change path) are local UI state. Selection never expands the
+  graph (PR 31E) and never triggers provider/acquisition work (PR 31K);
+- **honest boundedness**: the API `truncated` flag drives the
+  bounded-neighborhood notice; an isolated focal Entity (`nodes=[focal]`,
+  `edges=[]`, `truncated=false`) renders as success; a
+  `graph_entity_not_found` response is a graph-load error with Retry and no
+  Relationships-list fallback;
+- **non-spatial accessibility preserved**: the always-loaded edge list shows
+  human-readable Entity values with exact canonical identity access and
+  Relationship navigation, so canvas interaction is never required to
+  inspect or navigate the graph;
+- **graph filters**: only `entity_id` (focal), `direction` and
+  `relationship_type` are sent; observation/retrieval-time, provider/source
+  and counterparty filters remain Evolution-only and never reach the graph
+  endpoint;
+- **Evolution stays independent**: `view=evolution` continues to use
+  RelationshipObservation queries; the graph endpoint has no Evolution
+  filter semantics forced onto it.
+
+Expansion/merge (31E), Evidence drill-down (31F), multi-hop traversal
+(31H), path finding (31I), temporal topology exploration (31J), and
+acquisition (31K) are intentionally not pre-implemented here.
 
 ### API and asynchronous submission (PR 23C)
 
