@@ -241,6 +241,40 @@ No PR 31B test requires live internet, API keys, or any external service;
 the vertical slice runs entirely against the isolated PostgreSQL integration
 fixtures.
 
+### Graph API route/DTO tests (PR 31C)
+
+PR 31C test coverage spans three layers over the existing PR 31A/31B graph
+read contract:
+
+- **fake-service route contract tests** (`tests/unit/api/test_graph_routes.py`,
+  G31C-R01..R17): pure HTTP tests with `FakeQueryBundle` +
+  `FakeGraphService`. They assert the exact public projection (canonical
+  IDs, observation summaries, no cursor/page/raw/UI fields), that exactly
+  one `GraphNeighborhoodQuery` is built from the path/query parameters
+  (direction defaults to `either`, omitted `limit` uses the configured
+  `query_default_page_size`), scoped 404 semantics (service `None` maps to
+  `graph_entity_not_found`; a visible isolated focal is 200), 422 on
+  malformed UUIDs/enums, 400 `invalid_request` on an oversized limit, and
+  401/403 authentication behavior;
+- **DTO/mapper tests** (`tests/unit/api/test_graph_dto.py`, G31C-D01..D07):
+  the public response DTOs are frozen `extra="forbid"` allowlists, mapping
+  preserves service ordering/truncation and never substitutes null
+  observation times;
+- **real HTTP -> PostgreSQL vertical slice**
+  (`tests/integration/test_api_graph.py`, G31C-I01..I10): real FastAPI,
+  real authentication, request-scoped `PostgresQueryServices`, the
+  PostgreSQL graph query, and the existing seed helpers (no fake
+  GraphQueryService). It covers visible focal + admitted edge, SOURCE /
+  TARGET direction, `RelationshipType` filtering, cross-Investigation
+  scoped 404, isolated focal 200, observation aggregation summaries,
+  Relationship detail handoff by graph `relationship_id`, the same ID
+  filtering the Observation list, and `truncated=true` with no cursor.
+
+OpenAPI remains pinned to `tests/fixtures/openapi_v1.json`; the PR 31C
+addition (operation `get_graph_entity_neighborhood`, graph tag, cookie
+security, and the public graph response DTOs only) is intentional and
+reviewed through `tests/unit/api/test_openapi.py`.
+
 ### Deterministic telemetry unit tests (PR 29A)
 
 Telemetry tests are deterministic and fully offline; they never contact

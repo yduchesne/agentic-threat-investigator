@@ -71,6 +71,7 @@ class ApiErrorCode(str, Enum):
     REPORT_NOT_FOUND = "report_not_found"
     GEOINT_ENTITY_NOT_FOUND = "geoint_entity_not_found"
     GEOINT_OBSERVATION_NOT_FOUND = "geoint_observation_not_found"
+    GRAPH_ENTITY_NOT_FOUND = "graph_entity_not_found"
     INVALID_CURSOR = "invalid_cursor"
     CURSOR_QUERY_MISMATCH = "cursor_query_mismatch"
     CURSOR_FILTER_MISMATCH = "cursor_filter_mismatch"

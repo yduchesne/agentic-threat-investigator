@@ -849,6 +849,134 @@
         "title": "GeointTopLocationResponse",
         "type": "object"
       },
+      "GraphEdgeResponse": {
+        "additionalProperties": false,
+        "description": "One canonical Relationship projected as a graph edge.\n\n``observation_count``, ``first_observed_at`` and ``last_observed_at``\nare copied exactly from the application ``GraphEdge`` summary; the wire\nnever recomputes or substitutes lifetimes or retrieval times.",
+        "properties": {
+          "first_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Observed At"
+          },
+          "last_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Observed At"
+          },
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "relationship_id": {
+            "format": "uuid",
+            "title": "Relationship Id",
+            "type": "string"
+          },
+          "relationship_type": {
+            "$ref": "#/components/schemas/RelationshipType"
+          },
+          "source_entity_id": {
+            "format": "uuid",
+            "title": "Source Entity Id",
+            "type": "string"
+          },
+          "target_entity_id": {
+            "format": "uuid",
+            "title": "Target Entity Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relationship_id",
+          "source_entity_id",
+          "target_entity_id",
+          "relationship_type",
+          "observation_count"
+        ],
+        "title": "GraphEdgeResponse",
+        "type": "object"
+      },
+      "GraphNeighborhoodResponse": {
+        "additionalProperties": false,
+        "description": "One bounded Investigation-scoped one-hop neighborhood projection.",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdgeResponse"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "truncated"
+        ],
+        "title": "GraphNeighborhoodResponse",
+        "type": "object"
+      },
+      "GraphNodeResponse": {
+        "additionalProperties": false,
+        "description": "One canonical Entity projected as a graph node.",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "entity_type",
+          "value"
+        ],
+        "title": "GraphNodeResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4574,6 +4702,156 @@
         "summary": "List Investigation Geolocations",
         "tags": [
           "geolocation"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighborhood": {
+      "get": {
+        "description": "Return the bounded one-hop neighborhood of one focal Entity.\n\n``direction`` defaults to ``either`` relative to the focal Entity;\n``relationship_type`` filters the canonical Relationship URN; an omitted\n``limit`` uses the configured default page size while the service-owned\nmaximum is never clamped -- an oversized caller limit is a stable 400\n``invalid_request``. Scoped absence (missing, soft-deleted, or\nnot-visible focal Entity) maps to one 404 ``graph_entity_not_found``;\nevery other graph result, including a visible isolated focal Entity,\nmaps to 200.",
+        "operationId": "get_graph_entity_neighborhood",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RelationshipDirection",
+              "default": "either"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relationship_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RelationshipType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Relationship Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphNeighborhoodResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "Get Graph Entity Neighborhood",
+        "tags": [
+          "graph"
         ]
       }
     },
