@@ -1316,6 +1316,72 @@ Expansion/merge (31E), Evidence drill-down (31F), multi-hop traversal
 (31H), path finding (31I), temporal topology exploration (31J), and
 acquisition (31K) are intentionally not pre-implemented here.
 
+#### Incremental graph expansion (PR 31E)
+
+PR 31E turns the bounded one-hop graph into an analyst-driven exploration
+tool without changing the backend. The delivered flow is:
+
+```text
+root one-hop GraphNeighborhood (TanStack Query, PR 31D)
+        ↓
+selected graph Entity
+        ↓
+PivotMenu local Expand action
+        ↓
+GET .../graph/entities/{selected_entity_id}/neighborhood  (same PR 31C endpoint)
+        ↓
+canonical-ID client merge (graph-expansion-model.ts)
+        ↓
+accumulated interactive React Flow graph
+```
+
+Architectural decisions:
+
+- **expansion reveals already-known topology only**: expansion is a
+  read-only exploration operation over relationships already admitted to
+  the current Investigation. It never queries providers, creates
+  ProviderWorkItems, calls the Coordinator/Dispatcher, acquires Evidence,
+  or starts/restarts an Investigation (acquisition is PR 31K);
+- **the same one-hop endpoint is reused**: every expansion request is
+  `GET /api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighborhood`
+  with the existing `GRAPH_NEIGHBORHOOD_LIMIT`; there is no expansion
+  endpoint, no recursive server traversal, no cursor iteration, and no
+  `depth > 1` (multi-hop traversal is PR 31H);
+- **canonical IDs define merge identity**: Entity -> `entity_id`,
+  Relationship -> `relationship_id`. Duplicate canonical nodes/edges are
+  impossible by construction; the newest successful response wins duplicate
+  field values (observation counts are never summed client-side); existing
+  canonical order is preserved and genuinely new objects append in
+  server-return order;
+- **expansion is explicit and bounded**: only an explicit analyst action
+  starts a request; one action produces at most one request; one expansion
+  is in flight at a time; a completed `(entity_id, direction)` expansion
+  never refetches; the response's `truncated` flag marks that expanded
+  Entity as having additional known relationships not shown;
+- **directions are exact and selected-Entity-relative**: `Expand known
+  relationships` -> `either`, `Expand outgoing relationships` -> `source`,
+  `Expand incoming relationships` -> `target`, never inheriting the
+  workspace focal's original direction filter. The workspace
+  `relationship_type` filter is preserved for type-consistent expansion;
+- **the original focal Entity remains the root**: expansion anchors are
+  never new semantic roots; a root semantic change (investigation, focal,
+  direction, relationship type) aborts/reset accumulated state, and stale
+  late results can never cross root contexts;
+- **local graph actions are not PivotSteps**: the existing `PivotMenu`
+  hosts explicit local/context actions beside URL-backed navigation pivots.
+  Local actions close the menu and invoke a callback — they never create a
+  `PivotResource`/`PivotStep`, never mutate the `pivot=` URL, are never
+  blocked by `MAX_PIVOT_STEPS`, and are never no-op suppressed. URL pivots
+  retain their exact depth/no-op semantics;
+- **expansion and layout are ephemeral**: expanded topology, positions,
+  viewport, and selection are browser-local exploration state; nothing is
+  URL-serialized or persisted, and a refresh returns to the root one-hop
+  graph. Existing (dragged) node positions survive expansion; only
+  genuinely new Entities receive deterministic anchor-relative positions;
+- **no graph database and no server recursion**: the merge is pure
+  client-side composition of PR 31C responses over ATI's canonical
+  relational identities.
+
 ### API and asynchronous submission (PR 23C)
 
 The delivered `/api/v1` boundary is FastAPI

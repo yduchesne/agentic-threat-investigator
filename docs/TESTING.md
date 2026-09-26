@@ -3309,6 +3309,65 @@ Frontend coverage (`frontend/src/relationship-evolution/`,
   no new fake-world fixture: the F03 world's repeated observed-at stamps
   drive the browser slice.
 
+#### Incremental graph expansion tests (PR 31E)
+
+PR 31E testing is deterministic and fully offline (MSW + synthetic
+fixtures; no live Internet, providers, or LLM):
+
+- **pure merge contract** (`graph-expansion-model.test.ts`, G31E-M01..M15):
+  canonical Entity/Relationship identity merge, overlapping responses
+  producing exactly one node/edge, newer responses replacing duplicate
+  fields (observation counts never summed), self-loop containment, distinct
+  source/target/either completion keys, exact-key truncation tracking,
+  deterministic order (existing canonical order first, new objects in
+  server-return order), preserved root focal, root refresh overlays that
+  keep expansions, and no persisted/presentation state;
+- **incremental placement** (`relationship-graph-layout.test.ts`, G31E-L01..L08):
+  deterministic anchor-ring positions for one/many new Entities, repeat
+  calculation identity, empty-set safety, collision avoidance, and never
+  repositioning existing nodes;
+- **PivotMenu local-action regression matrix** (`PivotMenu.test.tsx`,
+  G31E-P01..P14): existing URL pivots unchanged, single/mixed local-action
+  rendering, local selection changing no URL/pivot state, navigation pivots
+  still pushing exact PivotSteps, local actions surviving `MAX_PIVOT_STEPS`
+  and no-op suppression, disabled locals never executing, keyboard Arrow
+  navigation skipping disabled items, Escape/outside-pointer close, the
+  non-modal Portal/Paper architecture, and no-trigger when no actions
+  exist;
+- **expansion controller** (`use-graph-expansion.test.tsx`, G31E-Q01..Q16,
+  MSW with the existing graph endpoint): exact selected Entity + direction
+  mapping, forwarded root Relationship type + `GRAPH_NEIGHBORHOOD_LIMIT`,
+  one action -> one request, idempotent completed expansions, overlap
+  safety, failure preserving the accumulated graph with exact Retry,
+  one-in-flight guarding, root-change abort/stale-result exclusion,
+  cancellation as non-failure, truncation state, and no Relationships-list
+  fallback;
+- **graph component/workspace** (`relationship-graph.test.tsx`, G31E-U01..U25):
+  the selected-node menu exposes the three expansion actions with existing
+  navigation pivots, expansion requests the canonical selected Entity,
+  accumulated nodes/edges render with originals preserved exactly once,
+  the accessible list reflects accumulated edges, existing and dragged
+  positions survive while only new nodes are placed near the expanded
+  anchor, completed expansions are disabled without refetch, in-flight
+  actions are disabled, failure keeps the graph with Retry, truncation
+  shows a bounded notice, a different root context renders only its own
+  topology, local expansion never mutates the pivot URL, and selection
+  alone never expands;
+- **real-stack E23 extension** (`frontend/e2e/zz-relationship-evolution.spec.ts`):
+  select a non-focal Entity -> Pivot menu -> Expand known relationships,
+  exactly one bounded graph-neighborhood request for the selected Entity
+  (`direction=either`, `limit=25`), no Relationships-list or
+  RelationshipObservation traffic, the dragged focal node's position
+  preserved across expansion, the completed expansion disabled and never
+  refetched, navigation pivots still present, no `pivot=` URL mutation,
+  `FAKE DATA` visible, clean console. When the deterministic fake world
+  cannot guarantee second-hop growth, the E2E asserts the real request,
+  merge safety, and retained topology instead of hard-coding a node-count
+  increase (unit/MSW tests own guaranteed-growth cases);
+- no pixel-perfect graph assertions anywhere; coordinates are asserted
+  only structurally (deterministic placement helpers) or in the real
+  browser via bounding-box stability.
+
 ## PR 26 GEOINT testing strategy
 
 PR 26 testing must preserve the production-path principle: deterministic tests fake true external/non-deterministic boundaries, not ATI's persistence, canonicalization, PostGIS, resolver state machine, or query contracts.

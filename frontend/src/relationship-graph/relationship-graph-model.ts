@@ -13,9 +13,12 @@
 
 import type {
   EntityTypeName,
+  GraphEdge,
   GraphNeighborhood,
+  GraphNode,
   RelationshipTypeName,
 } from "../api/schema-types";
+import type { AccumulatedGraph } from "./graph-expansion-model";
 
 /** One canonical Entity projected as a graph node. */
 export interface RelationshipGraphNode {
@@ -71,21 +74,56 @@ export function buildGraphModel(
   focalEntityId: string,
   neighborhood: GraphNeighborhood,
 ): RelationshipGraphModel {
-  const nodes: RelationshipGraphNode[] = neighborhood.nodes.map((node) => ({
+  const nodes: RelationshipGraphNode[] = neighborhood.nodes.map((node) =>
+    projectNode(focalEntityId, node),
+  );
+  const edges: RelationshipGraphEdge[] = neighborhood.edges.map(projectEdge);
+  return assembleGraphModel(focalEntityId, nodes, edges, neighborhood.truncated);
+}
+
+/**
+ * Build the presentation model from the accumulated expansion graph.
+ *
+ * The accumulated graph is server-canonical state (PR 31E): the workspace
+ * focal Entity stays ``accumulated.rootEntityId`` (expansion never changes
+ * the root), accumulated nodes/edges are overlaid in canonical order, and
+ * the root truncation flag drives the bounded notice. Per-expansion
+ * truncation and success state live in the graph expansion controller, not
+ * in this presentation model.
+ */
+export function buildGraphModelFromAccumulated(
+  accumulated: AccumulatedGraph,
+): RelationshipGraphModel {
+  const nodes: RelationshipGraphNode[] = accumulated.nodes.map((node) =>
+    projectNode(accumulated.rootEntityId, node),
+  );
+  const edges: RelationshipGraphEdge[] = accumulated.edges.map(projectEdge);
+  return assembleGraphModel(
+    accumulated.rootEntityId,
+    nodes,
+    edges,
+    accumulated.rootTruncated,
+  );
+}
+
+function projectNode(
+  focalEntityId: string,
+  node: GraphNode,
+): RelationshipGraphNode {
+  return {
     entityId: node.entity_id,
     entityType: node.entity_type,
     value: node.value,
     displayName: node.display_name ?? null,
     label: nodeLabel(node.display_name ?? null, node.value),
     role: node.entity_id === focalEntityId ? "focal" : "counterparty",
-  }));
-  const focal =
-    nodes.find((node) => node.entityId === focalEntityId) ??
-    // The server guarantees the focal node; this fallback keeps the model
-    // total without inventing topology.
-    nodes[0];
-  const counterparties = nodes.filter((node) => node.entityId !== focalEntityId);
-  const edges: RelationshipGraphEdge[] = neighborhood.edges.map((edge) => ({
+  };
+}
+
+function projectEdge(
+  edge: GraphEdge,
+): RelationshipGraphEdge {
+  return {
     relationshipId: edge.relationship_id,
     sourceEntityId: edge.source_entity_id,
     targetEntityId: edge.target_entity_id,
@@ -93,7 +131,21 @@ export function buildGraphModel(
     observationCount: edge.observation_count,
     firstObservedAt: edge.first_observed_at ?? null,
     lastObservedAt: edge.last_observed_at ?? null,
-  }));
+  };
+}
+
+function assembleGraphModel(
+  focalEntityId: string,
+  nodes: readonly RelationshipGraphNode[],
+  edges: readonly RelationshipGraphEdge[],
+  truncated: boolean,
+): RelationshipGraphModel {
+  const focal =
+    nodes.find((node) => node.entityId === focalEntityId) ??
+    // The server guarantees the focal node; this fallback keeps the model
+    // total without inventing topology.
+    nodes[0];
+  const counterparties = nodes.filter((node) => node.entityId !== focalEntityId);
   return {
     focal,
     nodes,
@@ -102,7 +154,7 @@ export function buildGraphModel(
     hasSelfEdge: edges.some(
       (edge) => edge.sourceEntityId === edge.targetEntityId,
     ),
-    truncated: neighborhood.truncated,
+    truncated,
   };
 }
 

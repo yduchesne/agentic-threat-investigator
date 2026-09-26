@@ -49,7 +49,10 @@ import {
 } from "../relationships/relationships-filters";
 import { RelationshipGraph } from "../relationship-graph/RelationshipGraph";
 import { useGraphNeighborhood } from "../relationship-graph/graph-queries";
-import { buildGraphModel } from "../relationship-graph/relationship-graph-model";
+import {
+  buildGraphModelFromAccumulated,
+} from "../relationship-graph/relationship-graph-model";
+import { useGraphExpansion } from "../relationship-graph/use-graph-expansion";
 import { entityTypeLabelKey } from "../relationship-graph/relationship-graph-presentation";
 import { RelationshipEvolutionTimeline } from "./RelationshipEvolutionTimeline";
 import {
@@ -125,14 +128,23 @@ export function RelationshipEvolutionWorkspace({
     view === "graph" && filters !== null,
   );
 
+  // PR 31E: accumulated expansion state is owned by this controller; the
+  // root neighborhood seeds it and every explicit expansion reuses the
+  // same PR 31C one-hop endpoint. Root semantic changes reset it.
+  const graphExpansion = useGraphExpansion({
+    investigationId,
+    rootEntityId: filters === null ? undefined : filters.entityId,
+    rootDirection: filters === null ? "either" : filters.direction,
+    relationshipType: filters === null ? undefined : filters.relationshipType,
+    rootNeighborhood: graphNeighborhood.neighborhood,
+  });
+
   const graphModel = useMemo(
     () =>
-      filters === null
+      graphExpansion.graph === null
         ? null
-        : graphNeighborhood.neighborhood === null
-          ? null
-          : buildGraphModel(filters.entityId, graphNeighborhood.neighborhood),
-    [filters, graphNeighborhood.neighborhood],
+        : buildGraphModelFromAccumulated(graphExpansion.graph),
+    [graphExpansion.graph],
   );
   const evolutionModel = useMemo(
     () =>
@@ -442,10 +454,12 @@ export function RelationshipEvolutionWorkspace({
           {graphModel !== null ? (
             <RelationshipGraph
               investigationId={investigationId}
+              rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${filters.relationshipType ?? ""}`}
               focalEntityId={filters.entityId}
               model={graphModel}
               typeLabel={relationshipTypeLabel}
               entityTypeLabel={graphEntityTypeLabel}
+              expansion={graphExpansion}
             />
           ) : null}
         </Box>

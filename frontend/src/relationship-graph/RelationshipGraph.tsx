@@ -30,18 +30,25 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { ReactElement } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 import { CompactId } from "../components/CompactId";
 import { Timestamp } from "../components/Timestamp";
 import { DetailRows } from "../analyst-table/DetailRows";
-import { PivotMenu } from "../pivots/PivotMenu";
+import { PivotMenu, type PivotLocalAction } from "../pivots/PivotMenu";
 import { entityActions } from "../pivots/pivot-capabilities";
 import { relationshipObservationsAction } from "../pivots/pivot-capabilities";
+import type { RelationshipDirectionName } from "../api/schema-types";
 import type { RelationshipGraphModel, RelationshipGraphNode } from "./relationship-graph-model";
-import { radialPositions, layoutSize } from "./relationship-graph-layout";
+import {
+  layoutSize,
+  positionsForExpandedNodes,
+  radialPositions,
+  type GraphPosition,
+} from "./relationship-graph-layout";
+import type { GraphExpansionController } from "./use-graph-expansion";
 
 /** One custom React Flow node backed by an exact Entity ID. */
 export type EvolutionNodeData = {
@@ -96,21 +103,28 @@ function EvolutionGraphNode({ data }: NodeProps): ReactElement {
 
 export interface RelationshipGraphProps {
   investigationId: string;
+  /** Root graph context key (investigation/focal/direction/type); a change
+   * resets the deterministic root layout and dropped expansion state. */
+  rootGraphKey: string;
   focalEntityId: string;
   model: RelationshipGraphModel;
   /** Relationship type URN -> analyst label. */
   typeLabel: (type: string) => string;
   /** Entity type -> analyst label (exact text, non-color differentiation). */
   entityTypeLabel: (type: string) => string;
+  /** PR 31E analyst-driven expansion controller (owned by the workspace). */
+  expansion: GraphExpansionController;
 }
 
-/** The bounded one-hop graph surface with an always-available list path. */
+/** The bounded accumulated graph surface with an always-available list path. */
 export function RelationshipGraph({
   investigationId,
+  rootGraphKey,
   focalEntityId,
   model,
   typeLabel,
   entityTypeLabel,
+  expansion,
 }: RelationshipGraphProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
   const [selection, setSelection] = useState<
@@ -155,12 +169,82 @@ export function RelationshipGraph({
 
   // Functional dragging: React Flow stays controlled through the standard
   // node-change path. Drag positions are local browser state only; a new
-  // neighborhood/focal (or a refresh/refetch) resets the deterministic
-  // initial layout, and coordinates are never persisted or sent to the API.
+  // root graph context (or a refresh/refetch of that context) resets the
+  // deterministic initial layout, and coordinates are never persisted or
+  // sent to the API. Within one root context, expansion merges preserve
+  // every existing position (including dragged ones) and assign
+  // deterministic positions only to genuinely new Entities.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<EvolutionNodeData>>(initialNodes);
+  const nodesRef = useRef(nodes);
   useEffect(() => {
-    setNodes(initialNodes);
-  }, [setNodes, initialNodes]);
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  // Root context change -> deterministic radial reset; same context +
+  // accumulated topology change -> in-place merge with position retention.
+  const rootKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = rootGraphKey;
+    const rootChanged = rootKeyRef.current !== key;
+    rootKeyRef.current = key;
+    if (rootChanged) {
+      setNodes(initialNodes);
+      return;
+    }
+    // Same root graph context (PR 31E §6): keep every existing React Flow
+    // node by canonical Entity ID with its current position, refresh
+    // presentation data when server metadata changed, and create nodes
+    // only for genuinely new Entities, placed deterministically near the
+    // expanded anchor (falling back to the focal when a root overlay added
+    // topology without an expansion).
+    const currentNodes = nodesRef.current;
+    const currentIds = new Set<string>();
+    for (const rfNode of currentNodes) {
+      const id = entityIdFromNodeId(rfNode.id);
+      if (id !== null) {
+        currentIds.add(id);
+      }
+    }
+    const newEntityIds = model.nodes
+      .filter((node) => !currentIds.has(node.entityId))
+      .map((node) => node.entityId);
+    const anchorEntityId =
+      expansion.lastExpansion?.entityId ?? model.focal.entityId;
+    const anchorNode = currentNodes.find(
+      (node) => node.id === nodeId(anchorEntityId),
+    );
+    const anchorPosition: GraphPosition =
+      anchorNode?.position ?? { x: 0, y: 0 };
+    const occupied = new Map<string, GraphPosition>(
+      currentNodes.map((node) => [node.id, node.position]),
+    );
+    const newPositions = positionsForExpandedNodes(
+      anchorPosition,
+      newEntityIds,
+      occupied,
+    );
+    setNodes((prev) => {
+      const byId = new Map(prev.map((node) => [node.id, node]));
+      return model.nodes.map((node) => {
+        const id = nodeId(node.entityId);
+        const data: EvolutionNodeData = {
+          label: node.label,
+          role: node.role,
+          entityTypeText: entityTypeLabel(node.entityType),
+        };
+        const existing = byId.get(id);
+        if (existing === undefined) {
+          return {
+            id,
+            type: "evolutionNode",
+            position: newPositions.get(node.entityId) ?? { x: 0, y: 0 },
+            data,
+          };
+        }
+        return { ...existing, data: { ...existing.data, ...data } };
+      });
+    });
+  }, [setNodes, rootGraphKey, initialNodes, model, expansion.lastExpansion, entityTypeLabel]);
 
   const edges: Edge[] = useMemo(
     () =>
@@ -197,6 +281,23 @@ export function RelationshipGraph({
     return id === null ? null : (nodeById.get(id) ?? null);
   }, [selection, nodeById]);
 
+  const truncatedEntities = useMemo(() => {
+    const seen = new Set<string>();
+    const result: { entityId: string; label: string }[] = [];
+    for (const key of expansion.truncated) {
+      if (seen.has(key.entityId)) {
+        continue;
+      }
+      seen.add(key.entityId);
+      const node = nodeById.get(key.entityId);
+      result.push({
+        entityId: key.entityId,
+        label: node?.label ?? graphLabel(key.entityId),
+      });
+    }
+    return result;
+  }, [expansion.truncated, nodeById]);
+
   return (
     <Box>
       {model.truncated ? (
@@ -204,6 +305,34 @@ export function RelationshipGraph({
           {t("graph.boundedNotice")}
         </Alert>
       ) : null}
+      {expansion.inFlight !== null ? (
+        <Alert severity="info" role="status" sx={{ mb: 1 }}>
+          {t("graph.expansion.loading")}
+        </Alert>
+      ) : null}
+      {expansion.failed !== null ? (
+        <Alert severity="error" role="alert" sx={{ mb: 1 }}>
+          {t("graph.expansion.error")}
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => expansion.retry()}
+            sx={{ ml: 1, textTransform: "none" }}
+          >
+            {t("error.retry")}
+          </Button>
+        </Alert>
+      ) : null}
+      {truncatedEntities.map((entry) => (
+        <Alert
+          key={entry.entityId}
+          severity="info"
+          role="status"
+          sx={{ mb: 1 }}
+        >
+          {t("graph.expansion.truncated", { label: entry.label })}
+        </Alert>
+      ))}
       <Box sx={{ mb: 1 }}>
         <Link
           href={`/investigations/${investigationId}/relationships?entity_id=${model.focal.entityId}`}
@@ -264,6 +393,11 @@ export function RelationshipGraph({
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
             <PivotMenu
               actions={entityActions(selectedNode.entityId, selectedNode.label, "detail_field")}
+              localActions={expansionLocalActions(
+                t as never,
+                selectedNode.entityId,
+                expansion,
+              )}
               ariaLabel={t("graph.pivotAria", { label: selectedNode.label })}
             />
             <Button
@@ -399,6 +533,39 @@ export function relationshipIdFromEdgeId(id: string): string | null {
 /** Fallback compact graph label when a node is not on the page. */
 function graphLabel(entityId: string): string {
   return `Entity ${entityId.slice(0, 8)}`;
+}
+
+/**
+ * The three bounded local graph-expansion commands (PR 31E §19-§20).
+ *
+ * Expansion directions are relative to the selected Entity: known/all maps
+ * to ``either``, outgoing to ``source``, incoming to ``target``. The exact
+ * (entity, direction) expansion hides/disabled once completed and every
+ * expansion action is disabled while another expansion is in flight. These
+ * are local UI commands — never PivotSteps, never stored in the URL, never
+ * depth-limited or no-op-suppressed by the pivot stack.
+ */
+function expansionLocalActions(
+  t: TFunction,
+  entityId: string,
+  expansion: GraphExpansionController,
+): PivotLocalAction[] {
+  const inFlight = expansion.inFlight !== null;
+  const make = (
+    key: string,
+    labelKey: string,
+    direction: RelationshipDirectionName,
+  ): PivotLocalAction => ({
+    key,
+    label: t(labelKey),
+    disabled: inFlight || expansion.isExpanded(entityId, direction),
+    onSelect: () => expansion.expand(entityId, direction),
+  });
+  return [
+    make("graph-expand-either", "graph.expand.known", "either"),
+    make("graph-expand-source", "graph.expand.outgoing", "source"),
+    make("graph-expand-target", "graph.expand.incoming", "target"),
+  ];
 }
 
 /** The evolution route link for one entity. */

@@ -40,7 +40,7 @@ requirements justify the additional persistence dependency.
 | **31B** | PostgreSQL one-hop graph queries | Efficient incoming/outgoing neighborhood reads with relationship observation summaries |
 | **31C** | Graph API | REST surface for graph neighborhoods and relationship detail |
 | **31D** | Basic interactive graph UI | First Maltego-like visualization with pan/zoom/layout, Functional node dragging, and node/edge selection over the canonical graph API [DONE] |
-| **31E** | Interactive graph expansion | Analyst-driven incremental expansion of already-known graph relationships |
+| **31E** | Interactive graph expansion | Analyst-driven expansion of already-known graph relationships via the same one-hop endpoint, canonical client merge, PivotMenu local actions [DONE] |
 | **31F** | Evidence drill-down | Relationship -> observation -> evidence navigation from the graph |
 | **31G** | Filtering and investigation context | Manage larger graphs without confusing global knowledge with investigation provenance |
 | **31H** | Bounded multi-hop traversal | Depth-limited recursive exploration using PostgreSQL recursive CTEs |
@@ -137,18 +137,26 @@ Canonical Entity/Relationship IDs remain authoritative; React Flow node/edge
 IDs, coordinates, selection, and drag positions are browser-only presentation
 state.
 
-## PR 31E — Interactive graph expansion
+## PR 31E — Interactive graph expansion [DONE]
 
-Turn the visualization into an exploration tool. Allow an analyst to expand a
-selected Entity by all, incoming, outgoing, or selected relationship types.
-Each expansion requests an incremental one-hop neighborhood and merges the
-returned nodes and edges into the current client-side graph without duplicating
-canonical identities.
+Turn the visualization into an exploration tool. Allow an analyst to
+select an Entity in the existing Pivot menu and expand by known,
+outgoing, or incoming one-hop relationships. Each expansion requests an
+incremental one-hop neighborhood through the same PR 31C graph endpoint
+and merges the returned nodes and edges into the current client-side
+graph by canonical Entity/Relationship IDs without duplicating canonical
+identities, replacing stale duplicate field values, and preserving the
+original focal Entity and existing (dragged) node positions.
 
-Expansion means "show more of ATI's already-known graph"; it does not perform
-provider acquisition or start a new investigation. Preserve deterministic
-merge/selection behavior and place reasonable client/server limits around
-expansion size.
+Expansion means "show more of ATI's already-known graph"; it does not
+perform provider acquisition or start a new investigation. The expansion
+actions are explicit local/context commands hosted by the existing
+Pivot menu — never PivotSteps, never URL-serialized, never blocked by
+Pivot depth — while URL-backed navigation pivots keep their exact
+semantics. Deterministic merge/selection behavior is preserved, one
+request runs per explicit action with the existing neighborhood limit,
+and failures/truncation are surfaced honestly without falling back to
+Relationships APIs.
 
 ## PR 31F — Relationship observation and Evidence drill-down
 
