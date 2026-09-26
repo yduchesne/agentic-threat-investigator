@@ -15,12 +15,16 @@
 // (zz-analyst-tables.spec.ts -> test-results/analyst-session.json); the
 // backend login rate limit is therefore never exceeded.
 //
-// Canonical slice (PR 24E §38):
+// Canonical slice (PR 24E §38 + PR 31E):
 //   completed Investigation -> Relationships -> source entity ->
 //   Relationship Evolution -> temporal observations (observed_at drives
 //   placement; retrieved_at distinct) -> activate observation ->
 //   Evidence/provenance -> switch to Graph -> edge/table navigation ->
-//   refresh preserves filters -> Back/Forward preserves entity identity.
+//   select a non-focal Entity -> Pivot menu Expand known relationships ->
+//   one bounded graph request for that Entity -> accumulated graph with
+//   original topology/dragged positions intact -> no fallback/provenance
+//   traffic -> no PivotStep in the URL -> refresh preserves filters ->
+//   Back/Forward preserves entity identity.
 //
 // The fake world's per-run entity/relationship identities vary between
 // seeds, so assertions match structural text (headings, "observed …",
@@ -258,6 +262,68 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     expect(relationshipsListRequests).toEqual([]);
     // Selection/drag are presentation only: no investigation mutation.
     await expect(page.getByText("FAKE DATA")).toBeVisible();
+
+    // PR 31E: analyst-driven expansion of a selected non-focal Entity
+    // (G31E-E01..E12). The focal node stays the root; expansion reuses the
+    // same bounded one-hop endpoint and merges by canonical identity.
+    const counterpartyNode = graphCanvas.locator(".react-flow__node").nth(1);
+    await expect(counterpartyNode).toBeVisible({ timeout: 20_000 });
+    const requestCountBeforeExpansion = graphNeighborhoodRequests.length;
+    const draggedFocalBox = await canvasNode.boundingBox();
+    await counterpartyNode.click();
+    await expect(page.getByText(/^Entity: /).first()).toBeVisible({ timeout: 20_000 });
+    // The selected-node menu exposes the three local graph-expansion actions
+    // alongside the existing navigation pivots (G31E-E01/E09).
+    await activate(page, page.getByRole("button", { name: /Pivot actions/ }).first());
+    await expect(
+      page.getByRole("menuitem", { name: "Expand known relationships" }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByRole("menuitem", { name: "Expand outgoing relationships" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: "Expand incoming relationships" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: "Evidence for this entity" }),
+    ).toBeVisible();
+    await activate(page, page.getByRole("menuitem", { name: "Expand known relationships" }));
+    // Exactly one bounded one-hop graph request for the selected Entity with
+    // direction=either (G31E-E02/E03) and no fallback/provenance traffic.
+    await expect
+      .poll(() => graphNeighborhoodRequests.length)
+      .toBe(requestCountBeforeExpansion + 1);
+    const expansionRequest = graphNeighborhoodRequests[graphNeighborhoodRequests.length - 1];
+    expect(new URL(expansionRequest).searchParams.get("direction")).toBe("either");
+    expect(new URL(expansionRequest).searchParams.get("limit")).toBe("25");
+    expect(relationshipsListRequests).toEqual([]);
+    expect(observationRequests).toEqual([]);
+    // Expansion is additive: the dragged focal node keeps its exact position
+    // (drag + expand, G31E-E11) and the accessible list still reflects the
+    // accumulated graph (G31E-E06/E07).
+    const focalBoxAfterExpansion = await canvasNode.boundingBox();
+    expect(focalBoxAfterExpansion !== null && draggedFocalBox !== null).toBe(true);
+    expect(Math.abs((focalBoxAfterExpansion?.x ?? 0) - (draggedFocalBox?.x ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs((focalBoxAfterExpansion?.y ?? 0) - (draggedFocalBox?.y ?? 0))).toBeLessThanOrEqual(2);
+    await expect(
+      page.getByRole("table", { name: "Relationship list (this page)" }),
+    ).toBeVisible({ timeout: 20_000 });
+    // The completed expansion is disabled and never refetches (G31E-E08).
+    await activate(page, page.getByRole("button", { name: /Pivot actions/ }).first());
+    const completedExpansionItem = page.getByRole("menuitem", {
+      name: "Expand known relationships",
+    });
+    await expect(completedExpansionItem).toBeDisabled({ timeout: 20_000 });
+    await expect(
+      page.getByRole("menuitem", { name: "Relationships where source" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).not.toBeVisible();
+    await expect.poll(() => graphNeighborhoodRequests.length).toBe(requestCountBeforeExpansion + 1);
+    // Local expansion never becomes a PivotStep (G31E-E10).
+    expect(new URL(page.url()).searchParams.has("pivot")).toBe(false);
+    await expect(page.getByText("FAKE DATA")).toBeVisible();
+
 
     // Graph edge -> exact Relationship table context (bounded, no recursion).
     const firstEdgeRow = graphList.getByRole("row").nth(1);
