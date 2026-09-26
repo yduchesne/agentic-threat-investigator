@@ -41,7 +41,7 @@ requirements justify the additional persistence dependency.
 | **31C** | Graph API | REST surface for graph neighborhoods and relationship detail |
 | **31D** | Basic interactive graph UI | First Maltego-like visualization with pan/zoom/layout, Functional node dragging, and node/edge selection over the canonical graph API [DONE] |
 | **31E** | Interactive graph expansion | Analyst-driven expansion of already-known graph relationships via the same one-hop endpoint, canonical client merge, PivotMenu local actions [DONE] |
-| **31F** | Evidence drill-down | Relationship -> observation -> evidence navigation from the graph |
+| **31F** | Evidence drill-down | Relationship -> observation -> evidence navigation from the graph [DONE] |
 | **31G** | Filtering and investigation context | Manage larger graphs without confusing global knowledge with investigation provenance |
 | **31H** | Bounded multi-hop traversal | Depth-limited recursive exploration using PostgreSQL recursive CTEs |
 | **31I** | Path finding | Bounded connection discovery between analyst-selected entities |
@@ -158,20 +158,24 @@ request runs per explicit action with the existing neighborhood limit,
 and failures/truncation are surfaced honestly without falling back to
 Relationships APIs.
 
-## PR 31F — Relationship observation and Evidence drill-down
+## PR 31F — Relationship observation and Evidence drill-down [DONE]
 
 Connect graph topology to ATI's evidence-backed semantics. From a selected
-Relationship, allow the analyst to inspect the ordered
-`RelationshipObservation` records supporting it and navigate from each
-observation to the exact Evidence/EvidenceObservation provenance already
-maintained by ATI.
+Relationship (``GraphEdge.relationship_id``), the analyst inspects the
+Investigation-scoped Relationship, browses one bounded page of immutable
+`RelationshipObservation` records supporting it, selects an exact
+observation (`RelationshipObservation.id`), and navigates from that
+observation to the exact Evidence/EvidenceObservation provenance
+(`observation.evidence_id`) already maintained by ATI.
 
-Reuse existing Evidence APIs and presentation capabilities where practical
-rather than inventing a parallel evidence representation. The graph should
-answer not only "what is connected?" but also "why does ATI believe this
-relationship exists, when was it observed, and what evidence supports it?"
+Reuse existing Evidence APIs and presentation capabilities rather than
+inventing a parallel evidence representation. The graph answers not only
+"what is connected?" but also "why does ATI believe this relationship
+exists, when was it observed, and what evidence supports it?" without
+adding backend or API changes.
 
-PR 31F is the first complete investigation-grade graph-exploration milestone.
+PR 31F is the first complete investigation-grade graph-exploration
+milestone.
 
 ## PR 31G — Graph filtering and investigation context
 

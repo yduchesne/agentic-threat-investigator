@@ -15,7 +15,7 @@
 // (zz-analyst-tables.spec.ts -> test-results/analyst-session.json); the
 // backend login rate limit is therefore never exceeded.
 //
-// Canonical slice (PR 24E §38 + PR 31E):
+// Canonical slice (PR 24E §38 + PR 31E + PR 31F):
 //   completed Investigation -> Relationships -> source entity ->
 //   Relationship Evolution -> temporal observations (observed_at drives
 //   placement; retrieved_at distinct) -> activate observation ->
@@ -23,7 +23,10 @@
 //   select a non-focal Entity -> Pivot menu Expand known relationships ->
 //   one bounded graph request for that Entity -> accumulated graph with
 //   original topology/dragged positions intact -> no fallback/provenance
-//   traffic -> no PivotStep in the URL -> refresh preserves filters ->
+//   traffic -> no PivotStep in the URL -> graph edge provenance
+//   drill-down (exact relationship_id -> bounded observations -> exact
+//   observation -> exact Evidence by observation.evidence_id) -> graph
+//   topology/position preserved -> refresh preserves filters ->
 //   Back/Forward preserves entity identity.
 //
 // The fake world's per-run entity/relationship identities vary between
@@ -322,6 +325,125 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect.poll(() => graphNeighborhoodRequests.length).toBe(requestCountBeforeExpansion + 1);
     // Local expansion never becomes a PivotStep (G31E-E10).
     expect(new URL(page.url()).searchParams.has("pivot")).toBe(false);
+    await expect(page.getByText("FAKE DATA")).toBeVisible();
+
+    // PR 31F: graph-native Relationship provenance drill-down (G31F-E01..E15).
+    // Select a canvas edge, open its provenance, inspect the one bounded
+    // page of immutable observations, select an exact observation, and open
+    // its exact supporting Evidence on an explicit action; then return to
+    // the graph with its expanded topology and dragged position intact.
+    // Identities are captured dynamically from the DOM/request URLs — never
+    // hard-coded run-specific UUIDs.
+    const provenanceObservationRequests: string[] = [];
+    const provenanceEvidenceRequests: string[] = [];
+    page.on("request", (request) => {
+      const url = request.url();
+      if (url.includes("/api/v1/") && url.includes("/relationship-observations?")) {
+        provenanceObservationRequests.push(url);
+      }
+      // The exact Evidence GET is a UUID path segment without a query.
+      if (/\/api\/v1\/investigations\/[0-9a-f-]+\/evidence\/[0-9a-f-]+$/.test(url)) {
+        provenanceEvidenceRequests.push(url);
+      }
+    });
+    const expandedCanvasEdge = graphCanvas.locator(".react-flow__edge").first();
+    await expect(expandedCanvasEdge).toBeVisible({ timeout: 20_000 });
+    await expandedCanvasEdge.click();
+    const edgeSelectionPanel = page.getByText(/^Relationship: /).first().locator("xpath=..");
+    await expect(
+      edgeSelectionPanel.getByRole("button", { name: "Inspect observations" }),
+    ).toBeVisible({ timeout: 20_000 });
+    const nodesBefore31F = await graphCanvas.locator(".react-flow__node").count();
+    const draggedFocalBefore31F = await canvasNode.boundingBox();
+    const graphRequestsBefore31F = graphNeighborhoodRequests.length;
+    await activate(
+      page,
+      edgeSelectionPanel.getByRole("button", { name: "Inspect observations" }),
+    );
+    const provenance = page.getByRole("region", {
+      name: "Relationship provenance",
+    });
+    await expect(provenance).toBeVisible({ timeout: 20_000 });
+    // Exact Investigation-scoped Relationship detail (G31F-E01): the edge
+    // panel's canonical relationship identity matches the observations
+    // request.
+    await expect(
+      provenance.getByText("Relationship ID", { exact: true }).first(),
+    ).toBeVisible({ timeout: 20_000 });
+    // One bounded observation page filtered by the exact relationship_id
+    // (G31F-E02/E03): limit present, no cursor, no fan-out.
+    await expect.poll(() => provenanceObservationRequests.length).toBe(1);
+    const observationsUrl = new URL(provenanceObservationRequests[0]);
+    const relationshipId = observationsUrl.searchParams.get("relationship_id");
+    expect(relationshipId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(observationsUrl.searchParams.get("limit")).toBe("25");
+    expect(observationsUrl.searchParams.get("cursor")).toBeNull();
+    const viewRelationshipHref = await edgeSelectionPanel
+      .getByRole("link", { name: "View relationship" })
+      .getAttribute("href");
+    expect(viewRelationshipHref).toContain(`selected=${relationshipId}`);
+    // Provenance reads never touch the graph: zero topology requests.
+    expect(graphNeighborhoodRequests.length).toBe(graphRequestsBefore31F);
+    // observed_at / retrieved_at distinction visible (G31F-E04).
+    const obsTable = provenance.getByRole("table", {
+      name: "Supporting observations",
+    });
+    await expect(obsTable).toBeVisible({ timeout: 20_000 });
+    // Select one observation -> exact observation identity visible, and no
+    // Evidence request happens before the explicit action (G31F-E05/E06).
+    await activate(
+      page,
+      obsTable.getByRole("button", { name: "View observation", exact: true }).first(),
+    );
+    await expect(
+      provenance.getByRole("button", { name: "View supporting evidence" }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      provenance.locator('code[aria-label="Observation ID"]').first(),
+    ).toBeVisible();
+    expect(provenanceEvidenceRequests).toEqual([]);
+    // The exact Evidence identity is public on the selected observation.
+    const detailEvidenceId = await provenance
+      .locator('code[aria-label="Evidence ID"]')
+      .first()
+      .getAttribute("title");
+    expect(detailEvidenceId).toMatch(/^[0-9a-f-]{36}$/);
+    // Explicit action -> exactly one exact Evidence GET whose path equals
+    // the selected observation's evidence_id (G31F-E07/E08), rendered
+    // through the safe canonical Evidence detail (G31F-E09/E10).
+    await activate(
+      page,
+      provenance.getByRole("button", { name: "View supporting evidence" }),
+    );
+    await expect.poll(() => provenanceEvidenceRequests.length).toBe(1);
+    expect(new URL(provenanceEvidenceRequests[0]).pathname).toContain(
+      detailEvidenceId as string,
+    );
+    await expect(
+      provenance.getByRole("heading", { name: "Supporting evidence" }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(provenance.getByText("Subject", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/raw payload|raw_payload/i)).toHaveCount(0);
+    // Back to the observation, then back to the graph (G31F-E11).
+    await activate(
+      page,
+      provenance.getByRole("button", { name: "Back to observation" }),
+    );
+    await expect(
+      provenance.getByRole("button", { name: "View supporting evidence" }),
+    ).toBeVisible({ timeout: 20_000 });
+    await activate(page, provenance.getByRole("button", { name: "Close provenance" }));
+    await expect(provenance).not.toBeVisible({ timeout: 20_000 });
+    // Graph intact: expanded topology and the dragged focal position are
+    // retained with zero new topology requests (G31F-E12/E13); no
+    // acquisition happens (G31F-E14).
+    expect(graphNeighborhoodRequests.length).toBe(graphRequestsBefore31F);
+    const nodesAfter31F = await graphCanvas.locator(".react-flow__node").count();
+    expect(nodesAfter31F).toBe(nodesBefore31F);
+    const focalAfter31F = await canvasNode.boundingBox();
+    expect(focalAfter31F !== null && draggedFocalBefore31F !== null).toBe(true);
+    expect(Math.abs((focalAfter31F?.x ?? 0) - (draggedFocalBefore31F?.x ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs((focalAfter31F?.y ?? 0) - (draggedFocalBefore31F?.y ?? 0))).toBeLessThanOrEqual(2);
     await expect(page.getByText("FAKE DATA")).toBeVisible();
 
 

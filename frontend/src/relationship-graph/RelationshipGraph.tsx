@@ -49,6 +49,7 @@ import {
   type GraphPosition,
 } from "./relationship-graph-layout";
 import type { GraphExpansionController } from "./use-graph-expansion";
+import { GraphRelationshipProvenance } from "./GraphRelationshipProvenance";
 
 /** One custom React Flow node backed by an exact Entity ID. */
 export type EvolutionNodeData = {
@@ -130,6 +131,17 @@ export function RelationshipGraph({
   const [selection, setSelection] = useState<
     { kind: "node"; nodeId: string } | { kind: "edge"; edgeId: string } | null
   >(null);
+  // PR 31F: the canonical Relationship whose provenance panel is open.
+  // Drill-down is transient presentation state local to the graph; it
+  // never touches nodes/positions/expansion state and never mutates the
+  // URL. A selection change closes it so provenance never survives the
+  // edge context that opened it.
+  const [provenanceRelationshipId, setProvenanceRelationshipId] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    setProvenanceRelationshipId(null);
+  }, [selection]);
 
   const counterpartyIds = useMemo(
     () => model.counterparties.map((node) => node.entityId),
@@ -483,8 +495,30 @@ export function RelationshipGraph({
               actions={[relationshipObservationsAction(selectedEdge.relationshipId, "detail_field")]}
               ariaLabel={t("graph.observationsAria")}
             />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() =>
+                setProvenanceRelationshipId(
+                  provenanceRelationshipId === selectedEdge.relationshipId
+                    ? null
+                    : selectedEdge.relationshipId,
+                )
+              }
+              sx={{ textTransform: "none" }}
+            >
+              {t("graph.provenance.inspect")}
+            </Button>
           </Box>
         </Box>
+      ) : null}
+
+      {provenanceRelationshipId !== null ? (
+        <GraphRelationshipProvenance
+          investigationId={investigationId}
+          relationshipId={provenanceRelationshipId}
+          onClose={() => setProvenanceRelationshipId(null)}
+        />
       ) : null}
 
       {model.edges.length === 0 ? (
@@ -504,6 +538,9 @@ export function RelationshipGraph({
           model={model}
           nodeById={nodeById}
           typeLabel={typeLabel}
+          onInspectObservations={(relationshipId) =>
+            setProvenanceRelationshipId(relationshipId)
+          }
         />
       </Box>
     </Box>
@@ -597,6 +634,7 @@ function EdgeList({
   model,
   nodeById,
   typeLabel,
+  onInspectObservations,
 }: {
   t: TFunction;
   investigationId: string;
@@ -604,6 +642,8 @@ function EdgeList({
   model: RelationshipGraphModel;
   nodeById: Map<string, RelationshipGraphNode>;
   typeLabel: (type: string) => string;
+  /** PR 31F: open the graph-local provenance panel for one canonical edge. */
+  onInspectObservations: (relationshipId: string) => void;
 }): ReactElement {
   return (
     <Box sx={{ overflowX: "auto" }}>
@@ -678,6 +718,14 @@ function EdgeList({
                     sx={{ textTransform: "none" }}
                   >
                     {t("graph.list.viewEvolution")}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => onInspectObservations(edge.relationshipId)}
+                    sx={{ textTransform: "none" }}
+                  >
+                    {t("graph.provenance.inspect")}
                   </Button>
                 </td>
               </tr>

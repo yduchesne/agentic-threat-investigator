@@ -3368,6 +3368,61 @@ fixtures; no live Internet, providers, or LLM):
   only structurally (deterministic placement helpers) or in the real
   browser via bounding-box stability.
 
+#### Graph provenance drill-down tests (PR 31F)
+
+PR 31F testing is deterministic and fully offline (MSW + synthetic
+fixtures; no live Internet, providers, or LLM), with the real-stack slice
+extending the existing relationship-evolution scenario. The exact identity
+chain under test is
+`GraphEdge.relationship_id -> Relationship -> bounded RelationshipObservations -> RelationshipObservation.id -> RelationshipObservation.evidence_id -> EvidenceObservation`:
+
+- **provenance component** (`GraphRelationshipProvenance.test.tsx`, G31F-U01..U37):
+  the exact Investigation-scoped Relationship request and canonical stable
+  fields; bounded loading; scoped 404 and error + Retry repeating the exact
+  Relationship request; the observation first page filtered by the exact
+  `relationship_id` with the existing bounded page size and opaque cursor
+  (Next -> exactly one next-page request, Previous restores the prior page
+  through the browser-local back stack, Next disabled without
+  `next_cursor`); `observed_at`/`retrieved_at` kept distinct with null
+  `observed_at` never replaced by retrieved time; Relationship change
+  resetting cursor/back stack/observation/Evidence; observation selection
+  by `observation.id` (on-page rows render directly, off-page selections
+  resolve through exactly one exact observation GET — never a cursor
+  scan); scoped observation 404/error with Retry; existing observation
+  provenance pivot actions preserved; zero Evidence requests before the
+  explicit action (no fan-out); the explicit `View supporting evidence`
+  action requesting exactly `observation.evidence_id`; canonical
+  `EvidenceDetail` with distinct timestamps; scoped Evidence 404 and
+  Retry; closing Evidence retaining the selected observation; a new
+  observation clearing the prior Evidence selection; and only public
+  Evidence DTO fields rendering (hostile `raw_payload`/internal fields
+  never surface);
+- **graph isolation** (G31F-U32..U37, in the same component test file,
+  exercised through the accessible edge list because canvas-edge
+  selection is not jsdom-renderable): opening the provenance, paginating
+  its observations, and opening Evidence issue zero graph-neighborhood
+  requests and change no node count or positions; prior expansion state
+  (completed expansion menu item stays disabled) and dragged positions
+  survive closing the provenance; provenance reads never rebuild graph
+  topology (G31F-Q08);
+- **real-stack E23 extension** (`frontend/e2e/zz-relationship-evolution.spec.ts`):
+  canvas-edge selection -> `Inspect observations` -> the provenance region
+  with the exact Relationship detail; exactly one bounded
+  RelationshipObservation request filtered by the canonical
+  `relationship_id` (limit=25, no cursor, no fan-out, and the request
+  identity matches the edge panel's `selected=` link); the
+  observed/retrieved distinction visible; observation selection showing
+  the exact observation identity with no Evidence traffic yet; the
+  explicit View-supporting-evidence action issuing exactly one Evidence
+  GET whose UUID path equals the selected observation's `evidence_id`
+  (captured dynamically from the DOM); safe canonical Evidence fields
+  with no raw-payload surface; return to the graph with the expanded
+  topology and the dragged focal position retained (tolerance 2px) and
+  zero new topology requests; `FAKE DATA` visible; clean console;
+- no hard-coded run-specific UUIDs anywhere: identities are captured
+  dynamically from DOM elements and request URLs (run-seeded fake-world
+  identities vary between seeds).
+
 ## PR 26 GEOINT testing strategy
 
 PR 26 testing must preserve the production-path principle: deterministic tests fake true external/non-deterministic boundaries, not ATI's persistence, canonicalization, PostGIS, resolver state machine, or query contracts.

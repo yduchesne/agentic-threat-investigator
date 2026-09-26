@@ -374,7 +374,7 @@ function observationDetailBody(
 }
 
 /** One exact list-DTO observation detail (shared by page row and GET). */
-function observationDetailRows(
+export function observationDetailRows(
   t: (key: string) => string,
   observation: RelationshipObservation,
 ): ReactElement {
