@@ -1382,6 +1382,77 @@ Architectural decisions:
   client-side composition of PR 31C responses over ATI's canonical
   relational identities.
 
+#### Graph provenance drill-down (PR 31F)
+
+PR 31F wires the selected graph edge to ATI's existing Relationship,
+RelationshipObservation and Evidence surfaces, closing the analyst loop:
+"see topology -> expand topology -> inspect why an edge exists -> inspect
+exact supporting Evidence". The delivered identity chain reuses only
+canonical Investigation-scoped resources — no graph-specific backend
+resource, DTO, query key, or Evidence surface is created:
+
+```text
+GraphEdge.relationship_id
+  -> Relationship (GET /investigations/{id}/relationships/{relationship_id})
+  -> bounded RelationshipObservations (relationship_id filter, one page)
+  -> RelationshipObservation.id  (exact selection identity)
+  -> RelationshipObservation.evidence_id
+  -> EvidenceObservation (GET /investigations/{id}/evidence/{evidence_id})
+```
+
+Architectural decisions:
+
+- **canonical identity starts the drill-down**: `GraphEdge.relationship_id`
+  is the only entry point; the edge is never identified by endpoints/type/
+  React Flow ID/label, and no global existence probe ever runs;
+- **edge aggregates are summaries, not provenance records**: the graph's
+  `observation_count` / `first_observed_at` / `last_observed_at` never
+  identify observations or Evidence; the analyst reads the bounded
+  RelationshipObservation page filtered by `relationship_id`;
+- **exact Evidence identity is public**: `observation.id` is the
+  RelationshipObservation identity and `observation.evidence_id` is the
+  exact EvidenceObservation identity admitted by the Evidence API — nothing
+  is reconstructed client-side from source/Entity/timestamp, and
+  observations that share one EvidenceObservation are never deduplicated;
+- **everything stays Investigation-scoped**: all reads use the current
+  Investigation path; scoped 404 means "not found or not accessible";
+- **temporal semantics are preserved**: `observed_at` and `retrieved_at`
+  are displayed independently, null `observed_at` stays unavailable and is
+  never replaced by retrieved time, and no Relationship
+  start/end/removal/continuous-validity is inferred from observation
+  history;
+- **observation history stays bounded**: one page at a time through the
+  existing opaque `next_cursor` contract and `OBSERVATION_PAGE_SIZE`; a
+  selected row already on the loaded page renders from the page, any other
+  selection resolves through the exact Investigation-scoped observation
+  GET (never a cursor scan); previous pages come from a browser-local back
+  stack;
+- **Evidence is explicit, never fan-out**: listing or selecting
+  observations performs zero Evidence requests; the exact Evidence loads
+  only on the explicit `View supporting evidence` action of one selected
+  observation;
+- **the public Evidence DTO is the security boundary**: only public
+  `EvidenceResponse` fields render through the existing safe `EvidenceDetail`
+  surface — never `raw_payload`, internal hashes, deleted/version internals
+  or secrets;
+- **provenance reads never mutate graph topology**: no nodes/edges are
+  added/removed/updated from Relationship/observation/Evidence responses;
+  PR 31E accumulated graph state and all dragged positions remain
+  authoritative and untouched;
+- **drill-down is transient presentation/navigation state only**: cursor,
+  back stack and selections live in component state (never URL-serialized,
+  never persisted); failures are isolated by level (Relationship failure
+  leaves the graph intact, observation failure keeps Relationship context,
+  Evidence failure keeps the selected observation) with Retry at the
+  failing level only;
+- **reuse over duplication**: `useRelationshipDetail`, `useObservationsPage`,
+  `useObservationDetail`, `useEvidenceDetail`, `EvidenceDetail`,
+  `DetailRows`, `DrawerLoading/Error/NotFound`, `PivotMenu` (with the
+  existing observation provenance actions) and the canonical TanStack keys
+  are reused; graph provenance renders the canonical stable Relationship
+  fields with `DetailRows` so Relationship detail's bounded preview and the
+  graph's observation page never run together for the same Relationship.
+
 ### API and asynchronous submission (PR 23C)
 
 The delivered `/api/v1` boundary is FastAPI
