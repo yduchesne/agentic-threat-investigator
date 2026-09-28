@@ -4,7 +4,7 @@
 // analyst-table routes, the secondary History access and scoped 404
 // (PR 24B U20-U27, U43-U49; PR 24C workspace integration).
 
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -185,5 +185,96 @@ describe("Investigation workspace routes", () => {
       await screen.findByText(/Investigation still running; the timeline may change/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+  });
+});
+describe("Investigation workspace More menu (PR 31F-1 U34..U37)", () => {
+  function renderOverview(stopReason: string | null): { navigate: (url: string) => void } {
+    setHttpHandlers(
+      ...AUTH,
+      investigationDetailHandler(
+        buildInvestigation({
+          id: INVESTIGATION_ID,
+          status: "completed",
+          completed_at: "2026-06-01T12:00:00Z",
+          stop_reason: stopReason,
+        }),
+      ),
+      http.get("*/api/v1/investigations/:id/history", () =>
+        jsonResponse({ items: [], next_cursor: null })),
+    );
+    const { router } = renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
+    return { navigate: (url: string) => void router.navigate(url) };
+  }
+
+  it("opens an anchored menu at the trigger and closes on Escape without navigation (U34/U36)", async () => {
+    renderOverview("fatal_error");
+    const trigger = await screen.findByRole("button", { name: "More" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(trigger);
+    const menu = await screen.findByRole("menu", {}, { timeout: 3000 });
+    expect(menu).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByRole("menuitem", { name: "History" })).toBeInTheDocument();
+    // Escape closes the menu without navigating.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("History closes the menu and navigates (U35)", async () => {
+    renderOverview("fatal_error");
+    await userEvent.click(await screen.findByRole("button", { name: "More" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "History" }));
+    expect(
+      await screen.findByRole("heading", { name: "History" }),
+    ).toBeInTheDocument();
+    await screen.findByText("No history rows");
+  });
+
+  it("is keyboard-operable through the trigger button (U37)", async () => {
+    renderOverview("fatal_error");
+    const trigger = await screen.findByRole("button", { name: "More" });
+    trigger.focus();
+    await userEvent.keyboard("{Enter}");
+    await screen.findByRole("menuitem", { name: "History" });
+    await userEvent.keyboard("{Escape}");
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+});
+
+describe("Investigation header stop reason (PR 31F-1 U32/U33)", () => {
+  it("shows the human label for a known stop reason and the raw value for unknown", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      investigationDetailHandler(
+        buildInvestigation({
+          id: INVESTIGATION_ID,
+          status: "completed",
+          completed_at: "2026-06-01T12:00:00Z",
+          stop_reason: "fatal_error",
+        }),
+      ),
+    );
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
+    expect((await screen.findAllByText("Stop reason: Fatal error")).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Stop reason: fatal_error/)).not.toBeInTheDocument();
+
+    setHttpHandlers(
+      ...AUTH,
+      investigationDetailHandler(
+        buildInvestigation({
+          id: INVESTIGATION_ID,
+          status: "completed",
+          completed_at: "2026-06-01T12:00:00Z",
+          stop_reason: "future_unknown_reason",
+        }),
+      ),
+    );
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
+    expect(
+      (await screen.findAllByText("Stop reason: future_unknown_reason")).length,
+    ).toBeGreaterThan(0);
   });
 });

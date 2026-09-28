@@ -172,8 +172,40 @@ test.describe("PR 24C real-stack analyst browsing", () => {
     await expect(page).toHaveURL(/event_type=evidence_persisted/);
     await expect(page.getByText("Evidence persisted").first()).toBeVisible({ timeout: 30_000 });
 
-    // History: secondary via More -> History, exact-version detail.
-    await page.getByRole("button", { name: "More" }).click();
+    // PR 31F-1: Timeline detail drawer closes by close button, Escape and
+    // backdrop while the URL-backed event filter stays intact, and reopening
+    // works without a reload.
+    const timelineDrawer = page.getByRole("dialog", { name: "Timeline event" });
+    await page.getByRole("button", { name: /^View / }).first().dispatchEvent("click");
+    await expect(timelineDrawer).toBeVisible({ timeout: 20_000 });
+    await timelineDrawer.getByLabel("Close detail").dispatchEvent("click");
+    await expect(timelineDrawer).not.toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/event_type=evidence_persisted/);
+    await page.getByRole("button", { name: /^View / }).first().dispatchEvent("click");
+    await expect(timelineDrawer).toBeVisible({ timeout: 20_000 });
+    await timelineDrawer.dispatchEvent("keydown", { key: "Escape" });
+    await expect(timelineDrawer).not.toBeVisible({ timeout: 20_000 });
+    await page.getByRole("button", { name: /^View / }).first().dispatchEvent("click");
+    await expect(timelineDrawer).toBeVisible({ timeout: 20_000 });
+    await timelineDrawer.evaluate((dialog) => {
+      // The fixed backdrop is the first child of the drawer's root box.
+      const backdrop = dialog.parentElement?.firstElementChild as HTMLElement;
+      backdrop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect(timelineDrawer).not.toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(/event_type=evidence_persisted/);
+
+    // History: secondary via More -> History, exact-version detail. PR 31F-1
+    // additionally verifies the menu is anchored at its trigger.
+    const moreTrigger = page.getByRole("button", { name: "More" });
+    await moreTrigger.click();
+    await expect(moreTrigger).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("menu")).toBeVisible();
+    const moreBox = await moreTrigger.boundingBox();
+    const menuBox = await page.getByRole("menu").boundingBox();
+    expect(moreBox !== null && menuBox !== null).toBe(true);
+    // The menu opens at the trigger (not the viewport origin).
+    expect(Math.abs((menuBox?.x ?? 0) - (moreBox?.x ?? 0))).toBeLessThan(120);
     await page.getByRole("menuitem", { name: "History" }).click();
     await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
     await expect(page.getByText("Updated").first()).toBeVisible({ timeout: 30_000 });

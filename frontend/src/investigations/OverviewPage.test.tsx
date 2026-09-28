@@ -153,6 +153,7 @@ describe("Overview route", () => {
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
 
     expect(await screen.findByText("This investigation failed.")).toBeInTheDocument();
+    // Unknown stop reasons still fall back to the raw value (never prettified).
     expect(
       screen.getAllByText("Stop reason: budget_exhausted").length,
     ).toBeGreaterThan(0);
@@ -160,6 +161,36 @@ describe("Overview route", () => {
     expect(
       screen.queryByText("Unable to load the current Report"),
     ).not.toBeInTheDocument();
+  });
+
+  it("maps a known stop reason to its human label (F1-U32/U33)", async () => {
+    const failed = buildInvestigation({
+      id: INVESTIGATION_ID,
+      status: "failed",
+      completed_at: "2026-06-01T10:06:00Z",
+      stop_reason: "fatal_error",
+    });
+    setHttpHandlers(...AUTH, detailHandler(failed), reportCurrent404Handler);
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
+    await screen.findByText("This investigation failed.");
+    // The lifecycle line shows the translated label, not the raw enum.
+    expect(
+      screen.getAllByText("Stop reason: Fatal error").length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/Stop reason: fatal_error/)).not.toBeInTheDocument();
+
+    // Unknown values fail safe with the raw value.
+    const unknown = buildInvestigation({
+      id: INVESTIGATION_ID,
+      status: "failed",
+      completed_at: "2026-06-01T10:06:00Z",
+      stop_reason: "future_reason_9",
+    });
+    setHttpHandlers(...AUTH, detailHandler(unknown), reportCurrent404Handler);
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
+    expect(
+      (await screen.findAllByText("Stop reason: future_reason_9")).length,
+    ).toBeGreaterThan(0);
   });
 
   it("renders a visible partial warning plus the Report (U36)", async () => {

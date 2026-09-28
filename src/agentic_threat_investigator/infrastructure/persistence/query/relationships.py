@@ -11,6 +11,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from agentic_threat_investigator.app.query.models import QueryLimits, QueryPage
 from agentic_threat_investigator.app.query.pagination import (
@@ -30,6 +31,7 @@ from agentic_threat_investigator.app.query.relationships import (
     relationship_observation_sort_values,
     relationship_sort_values,
 )
+from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipDirection,
@@ -38,6 +40,7 @@ from agentic_threat_investigator.domain.relationships import (
 )
 
 from ..postgresql.models import (
+    EntityRow,
     InvestigationEvidenceRow,
     RelationshipObservationRow,
     RelationshipRow,
@@ -65,6 +68,16 @@ def _observation_from_row(row: RelationshipObservationRow) -> RelationshipObserv
         source=row.source,
         confidence=row.confidence,
     )
+
+
+def _entity_type_or_none(row: EntityRow | None) -> EntityType | None:
+    """Project the canonical Entity type of an endpoint row, if present."""
+    return None if row is None else EntityType(row.entity_type)
+
+
+def _entity_value_or_none(row: EntityRow | None) -> str | None:
+    """Project the canonical Entity value of an endpoint row, if present."""
+    return None if row is None else row.canonical_value
 
 
 class PostgresRelationshipQueryService(RelationshipQueryService):
@@ -196,11 +209,15 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
         Every observation is joined to its stable Relationship so entity,
         direction, counterparty and relationship-type filters run in SQL and
         the joined source/target/type semantics ship with the page (no one
-        Relationship GET per observation). Self-relationships satisfy both
-        OR branches but the row is unique by id, so nothing is duplicated.
-        At least one scope (investigation or relationship) is required by
-        the contract; ``observed_at`` ranges filter independently and never
-        enter the cursor.
+        Relationship GET per observation). PR 31F-1 also joins the
+        source/target Entity rows (outer joins, so a missing endpoint row can
+        never drop an immutable observation) to expose the endpoint Entity
+        type/value as bounded read-side presentation metadata — never a
+        persisted duplicate and never a second query per row. Self-
+        relationships satisfy both OR branches but the row is unique by id,
+        so nothing is duplicated. At least one scope (investigation or
+        relationship) is required by the contract; ``observed_at`` ranges
+        filter independently and never enter the cursor.
         """
         limit = self._limits.validate_limit(query.limit)
         envelope = require_cursor_for_query(
@@ -214,13 +231,40 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
             else parse_relationship_observation_cursor(envelope)
         )
 
-        stmt = select(RelationshipObservationRow, RelationshipRow).join(
-            RelationshipRow,
-            # The stable Relationship resource has no investigation_id
-            # column (visibility derives from observations), so the join is
-            # by edge identity only and Investigation isolation is enforced
-            # by the observation's own investigation_id predicate below.
-            RelationshipRow.id == RelationshipObservationRow.relationship_id,
+        # One bounded read projection: the observation, its stable edge, and
+        # the endpoint Entity presentation rows (PR 31F-1). Two aliases keep
+        # the source/target endpoint metadata independent in one query.
+        source_entity = aliased(EntityRow)
+        target_entity = aliased(EntityRow)
+
+        stmt = (
+            select(
+                RelationshipObservationRow,
+                RelationshipRow,
+                source_entity,
+                target_entity,
+            )
+            .join(
+                RelationshipRow,
+                # The stable Relationship resource has no investigation_id
+                # column (visibility derives from observations), so the join is
+                # by edge identity only and Investigation isolation is enforced
+                # by the observation's own investigation_id predicate below.
+                RelationshipRow.id == RelationshipObservationRow.relationship_id,
+            )
+            .join(
+                # Endpoint Entity presentation metadata (PR 31F-1): outer joins
+                # so a missing/deferred endpoint row never drops the immutable
+                # observation; the type/value are read-side presentation only.
+                source_entity,
+                source_entity.id == RelationshipRow.source_entity_id,
+                isouter=True,
+            )
+            .join(
+                target_entity,
+                target_entity.id == RelationshipRow.target_entity_id,
+                isouter=True,
+            )
         )
         if query.investigation_id is not None:
             stmt = stmt.join(
@@ -316,11 +360,15 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
                 investigation_id=query.investigation_id,
                 relationship_source_entity_id=relationship_row.source_entity_id,
                 relationship_target_entity_id=relationship_row.target_entity_id,
+                relationship_source_entity_type=_entity_type_or_none(source_row),
+                relationship_source_entity_value=_entity_value_or_none(source_row),
+                relationship_target_entity_type=_entity_type_or_none(target_row),
+                relationship_target_entity_value=_entity_value_or_none(target_row),
                 relationship_type=RelationshipType(
                     relationship_row.relationship_type_urn
                 ),
             )
-            for observation_row, relationship_row in page
+            for observation_row, relationship_row, source_row, target_row in page
         )
         next_cursor: str | None = None
         if len(rows) > limit:
@@ -344,17 +392,35 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
         One exact joined read: identity predicate plus the observation's
         own ``investigation_id`` (the same Investigation isolation the
         list enforces) joined to the stable Relationship by edge identity
-        only, mapping through the exact list projection — no cursor, no
-        generic History, no N+1. Missing and cross-Investigation IDs both
-        fail closed with ``None`` so the HTTP layer maps them to one safe
-        scoped 404.
+        only and to the endpoint Entity presentation rows (outer joins, so
+        the immutable observation survives a missing endpoint row), mapping
+        through the exact list projection — no cursor, no generic History,
+        no N+1. Missing and cross-Investigation IDs both fail closed with
+        ``None`` so the HTTP layer maps them to one safe scoped 404.
         """
+        source_entity = aliased(EntityRow)
+        target_entity = aliased(EntityRow)
         row = (
             await self._session.execute(
-                select(RelationshipObservationRow, RelationshipRow)
+                select(
+                    RelationshipObservationRow,
+                    RelationshipRow,
+                    source_entity,
+                    target_entity,
+                )
                 .join(
                     RelationshipRow,
                     RelationshipRow.id == RelationshipObservationRow.relationship_id,
+                )
+                .join(
+                    source_entity,
+                    source_entity.id == RelationshipRow.source_entity_id,
+                    isouter=True,
+                )
+                .join(
+                    target_entity,
+                    target_entity.id == RelationshipRow.target_entity_id,
+                    isouter=True,
                 )
                 .join(
                     InvestigationEvidenceRow,
@@ -369,11 +435,15 @@ class PostgresRelationshipObservationQueryService(RelationshipObservationQuerySe
         ).one_or_none()
         if row is None:
             return None
-        observation_row, relationship_row = row
+        observation_row, relationship_row, source_row, target_row = row
         return RelationshipObservationItem.from_observation(
             _observation_from_row(observation_row),
             investigation_id=investigation_id,
             relationship_source_entity_id=relationship_row.source_entity_id,
             relationship_target_entity_id=relationship_row.target_entity_id,
+            relationship_source_entity_type=_entity_type_or_none(source_row),
+            relationship_source_entity_value=_entity_value_or_none(source_row),
+            relationship_target_entity_type=_entity_type_or_none(target_row),
+            relationship_target_entity_value=_entity_value_or_none(target_row),
             relationship_type=RelationshipType(relationship_row.relationship_type_urn),
         )

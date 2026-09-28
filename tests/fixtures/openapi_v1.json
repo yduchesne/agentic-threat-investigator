@@ -1760,7 +1760,7 @@
       },
       "RelationshipObservationResponse": {
         "additionalProperties": false,
-        "description": "One immutable historical relationship observation.\n\n``observed_at`` is the source observation time when known; ``retrieved_at``\nis ATI's retrieval time and the canonical cursor key.\n\n``relationship_source_entity_id``, ``relationship_target_entity_id`` and\n``relationship_type`` are stable denormalized fields sourced from the\njoined Relationship row (PR 24E) \u2014 they are response projections only,\nnever persisted duplicates. They are ``null`` only when the join cannot\nresolve the edge, which cannot happen for normally written data.",
+        "description": "One immutable historical relationship observation.\n\n``observed_at`` is the source observation time when known; ``retrieved_at``\nis ATI's retrieval time and the canonical cursor key.\n\n``relationship_source_entity_id``, ``relationship_target_entity_id`` and\n``relationship_type`` are stable denormalized fields sourced from the\njoined Relationship row (PR 24E) \u2014 they are response projections only,\nnever persisted duplicates. ``relationship_source_entity_type/value``\nand ``relationship_target_entity_type/value`` (PR 31F-1) are endpoint\nEntity presentation metadata sourced from the joined source/target\nEntity rows \u2014 read-side projections only, never persisted duplicates\nand never a substitute for canonical Entity identity. Joined fields are\n``null`` only when a join cannot resolve the row, which cannot happen\nfor normally written data.",
         "properties": {
           "confidence": {
             "anyOf": [
@@ -1824,6 +1824,27 @@
             ],
             "title": "Relationship Source Entity Id"
           },
+          "relationship_source_entity_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relationship_source_entity_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Source Entity Value"
+          },
           "relationship_target_entity_id": {
             "anyOf": [
               {
@@ -1835,6 +1856,27 @@
               }
             ],
             "title": "Relationship Target Entity Id"
+          },
+          "relationship_target_entity_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relationship_target_entity_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Target Entity Value"
           },
           "relationship_type": {
             "anyOf": [

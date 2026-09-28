@@ -10,9 +10,9 @@
 // are keyboard-reachable controls opening the observation detail and its
 // Evidence provenance.
 
-import { screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
 
 import type { RelationshipObservation } from "../api/schema-types";
 import { renderAtPath } from "../test/render";
@@ -348,5 +348,120 @@ describe("Relationship Evolution workspace", () => {
     });
     expect(within(table).getByText("fake-dns")).toBeInTheDocument();
     expect(within(table).getByText("Resolves to")).toBeInTheDocument();
+  });
+});
+describe("Relationship Evolution counterparty presentation (PR 31F-1)", () => {
+  function obsWithMetadata(): RelationshipObservation {
+    return buildObservation({
+      relationship_source_entity_id: FOCAL,
+      relationship_target_entity_id: COUNTERPARTY,
+      relationship_source_entity_type: "domain",
+      relationship_source_entity_value: "update-package.test",
+      relationship_target_entity_type: "ip_address",
+      relationship_target_entity_value: "192.0.2.1",
+      observed_at: "2026-06-01T09:00:00Z",
+    });
+  }
+
+  it("F1-U17/U21: an outbound lane shows the counterparty Entity type/value and includes it in accessibility", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsWithMetadata()]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    // Lane heading renders the counterparty Entity type/value text.
+    expect(await screen.findByText("IP address 192.0.2.1")).toBeInTheDocument();
+    // Compact technical identity stays available as secondary metadata.
+    expect(
+      screen.getByRole("button", { name: /Copy ID/ }),
+    ).toBeInTheDocument();
+    // The point aria label carries the semantic counterparty.
+    expect(
+      screen.getByRole("button", {
+        name: /Outbound, Resolves to, IP address 192\.0\.2\.1, observed 2026-06-01/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("F1-U22: the table alternative renders the human-readable counterparty with canonical identity", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsWithMetadata()]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    await screen.findByRole("button", { name: /observed 2026-06-01/ });
+    await userEvent.click(screen.getByRole("button", { name: "View as table" }));
+    const table = await screen.findByRole("table", {
+      name: "Relationship observations (this page)",
+    });
+    expect(within(table).getByText("IP address 192.0.2.1")).toBeInTheDocument();
+    // Canonical identity is retained through the compact ID control.
+    expect(within(table).getAllByRole("button", { name: /Copy ID/ }).length).toBeGreaterThan(0);
+    // No invented value when the counterparty id column text is empty.
+    expect(within(table).queryByText(`Entity ${COUNTERPARTY.slice(0, 8)}`)).not.toBeInTheDocument();
+  });
+
+  it("F1-U20: missing endpoint metadata falls back to the compact technical identity", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    // buildObservation carries no endpoint type/value -> technical fallback.
+    expect(
+      await screen.findByRole("button", {
+        name: /Outbound, Resolves to, Entity 40000000, observed 2026-06-01/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("F1-U23: the CSV export prefers semantic endpoint fields and keeps the canonical identity", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsWithMetadata()]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    await screen.findByRole("button", { name: /observed 2026-06-01/ });
+    let captured = "";
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    const originalClick = HTMLAnchorElement.prototype.click;
+    try {
+      // Stub both halves of the object-URL API: jsdom lacks it natively, and
+      // downloadCsv must not throw on a partial shim either.
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        value: (blob: Blob) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            captured = String(reader.result ?? "");
+          };
+          reader.readAsText(blob);
+          return "blob:mock";
+        },
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        value: (objectUrl: string) => {
+          void objectUrl;
+        },
+      });
+      HTMLAnchorElement.prototype.click = () => undefined;
+      fireEvent.click(screen.getByRole("button", { name: "Export current page" }));
+      await waitFor(() => expect(captured).toContain("Counterparty type"));
+      expect(captured).toContain("Counterparty value");
+      expect(captured).toContain("Counterparty ID");
+      expect(captured).toContain("ip_address");
+      expect(captured).toContain("192.0.2.1");
+      expect(captured).toContain(COUNTERPARTY);
+    } finally {
+      Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreate });
+      Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevoke });
+      HTMLAnchorElement.prototype.click = originalClick;
+    }
   });
 });

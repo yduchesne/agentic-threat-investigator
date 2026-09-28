@@ -65,9 +65,10 @@ export function exportFilename(
 /**
  * Start a browser download of one UTF-8 CSV document.
  *
- * The object URL is revoked after the click; environments without
- * ``URL.createObjectURL`` (unit tests) yield the document content for
- * assertions instead of failing.
+ * The object URL is revoked after the click (a best-effort cleanup; test
+ * environments may shim ``URL.createObjectURL`` without the revoke
+ * counterpart). Environments without ``URL.createObjectURL`` (unit tests)
+ * yield the document content for assertions instead of failing.
  */
 export function downloadCsv(filename: string, content: string): void {
   const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
@@ -82,5 +83,7 @@ export function downloadCsv(filename: string, content: string): void {
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+  if (typeof URL.revokeObjectURL === "function") {
+    URL.revokeObjectURL(url);
+  }
 }

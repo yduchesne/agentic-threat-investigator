@@ -24,6 +24,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { Timestamp } from "../components/Timestamp";
 import { InvestigationStatusBadge } from "./InvestigationStatusBadge";
 import { statusLabelKey } from "./investigation-status";
+import { stopReasonLabelKey } from "./investigation-stop-reason";
 import {
   isPointerRace404,
   useCurrentAssessment,
@@ -59,7 +60,7 @@ function LifecycleBlock({ investigation }: { investigation: Investigation }): Re
       {investigation.stop_reason !== null ? (
         <Typography variant="body2">
           {t("overview.lifecycle.stopReason", {
-            reason: investigation.stop_reason,
+            reason: t(stopReasonLabelKey(investigation.stop_reason)),
           })}
         </Typography>
       ) : null}

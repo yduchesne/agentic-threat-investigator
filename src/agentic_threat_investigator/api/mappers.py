@@ -354,9 +354,10 @@ def to_relationship_observation_response(
     """Map one immutable observation item, preserving observed/retrieved times.
 
     The joined Relationship semantics (source entity, target entity, type)
-    are projected from the read item alongside the observation; they are
-    response projections sourced from the joined edge, never separate
-    Relationship GETs and never persisted duplicates.
+    and the endpoint Entity presentation metadata (source/target type and
+    value) are projected from the read item alongside the observation; they
+    are response projections sourced from the joined rows, never separate
+    Relationship/Entity GETs and never persisted duplicates.
     """
     return RelationshipObservationResponse(
         id=item.id,
@@ -369,6 +370,10 @@ def to_relationship_observation_response(
         confidence=item.confidence,
         relationship_source_entity_id=item.relationship_source_entity_id,
         relationship_target_entity_id=item.relationship_target_entity_id,
+        relationship_source_entity_type=item.relationship_source_entity_type,
+        relationship_source_entity_value=item.relationship_source_entity_value,
+        relationship_target_entity_type=item.relationship_target_entity_type,
+        relationship_target_entity_value=item.relationship_target_entity_value,
         relationship_type=item.relationship_type,
     )
 

@@ -18,6 +18,7 @@ from agentic_threat_investigator.app.query.models import QueryPage
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationItem,
 )
+from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.relationships import (
     RelationshipDirection,
     RelationshipType,
@@ -41,6 +42,10 @@ def _observation_item() -> RelationshipObservationItem:
         confidence=0.9,
         relationship_source_entity_id=UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
         relationship_target_entity_id=UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+        relationship_source_entity_type=EntityType.DOMAIN,
+        relationship_source_entity_value="update-package.test",
+        relationship_target_entity_type=EntityType.IP_ADDRESS,
+        relationship_target_entity_value="192.0.2.1",
         relationship_type=RelationshipType.RESOLVES_TO,
     )
 
@@ -214,6 +219,12 @@ def test_observation_response_exposes_joined_relationship_semantics() -> None:
         _observation_item().relationship_target_entity_id
     )
     assert item["relationship_type"] == RelationshipType.RESOLVES_TO.value
+    # PR 31F-1: endpoint Entity presentation metadata rides the same bounded
+    # projection (never a separate Entity GET per observation).
+    assert item["relationship_source_entity_type"] == EntityType.DOMAIN.value
+    assert item["relationship_source_entity_value"] == "update-package.test"
+    assert item["relationship_target_entity_type"] == EntityType.IP_ADDRESS.value
+    assert item["relationship_target_entity_value"] == "192.0.2.1"
     assert item["observed_at"] == "2026-01-01T00:00:00Z"
     assert item["retrieved_at"] == "2026-01-02T00:00:00Z"
     # No hidden operational fields leak through the joined projection.
