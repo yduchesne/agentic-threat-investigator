@@ -562,6 +562,10 @@ class InvestigationTimelineEventRow(Base):
             "error_code IS NULL OR error_code ~ '^[a-z][a-z0-9_]{0,63}$'",
             name="investigation_timeline_event_error_code_check",
         ),
+        CheckConstraint(
+            "error_message IS NULL OR char_length(error_message) <= 4096",
+            name="investigation_timeline_event_error_message_check",
+        ),
         {"schema": "ati"},
     )
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -580,6 +584,7 @@ class InvestigationTimelineEventRow(Base):
         ARRAY(PGUUID(as_uuid=True)), default=list
     )
     error_code: Mapped[str | None] = mapped_column(String)
+    error_message: Mapped[str | None] = mapped_column(String)
     pivot_depth: Mapped[int | None] = mapped_column(Integer)
     reason_code: Mapped[str | None] = mapped_column(String)
     provider_calls_used: Mapped[int | None] = mapped_column(BigInteger)

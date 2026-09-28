@@ -452,6 +452,18 @@ async def test_timeline_schema_contract() -> None:
                     )
                 )
             }
+            columns = {
+                (row[0], row[1])
+                for row in await connection.execute(
+                    text(
+                        "SELECT column_name, is_nullable "
+                        "FROM information_schema.columns "
+                        "WHERE table_schema = 'ati' "
+                        "AND table_name = 'investigation_timeline_event' "
+                        "AND column_name = 'error_message'"
+                    )
+                )
+            }
     finally:
         await engine.dispose()
     # Both the event-type check and the error-code grammar/length check exist;
@@ -462,6 +474,14 @@ async def test_timeline_schema_contract() -> None:
     assert any(
         "'^[a-z][a-z0-9_]{0,63}$'" in definition for definition in checks.values()
     )
+    # PR 31F-2 adds the nullable bounded diagnostic message CHECK.
+    assert "investigation_timeline_event_error_message_check" in checks
+    assert any(
+        "char_length(error_message) <= 4096" in definition
+        for definition in checks.values()
+    )
+    # The diagnostic column is nullable and never indexed.
+    assert columns == {("error_message", "YES")}
     # The sequence is owned by its table column.
     assert sequence_owner == "ati.investigation_timeline_event_seq"
     # No application routine updates, deletes, or upserts timeline events.
@@ -646,6 +666,64 @@ async def test_timeline_migration_downgrade_and_re_upgrade() -> None:
             "investigation_timeline_event_error_code_check",
         } <= checks
         assert count == 1
+    finally:
+        command.upgrade(alembic_cfg, "head")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_timeline_error_message_migration_downgrade_and_re_upgrade() -> None:
+    """Migration 0034 downgrades cleanly and re-upgrades (PR 31F-2).
+
+    The downgrade removes only the new column and its length constraint; the
+    re-upgrade restores both. The database is always returned to head in the
+    finally block so later tests do not depend on test order.
+    """
+    alembic_cfg = Config("alembic.ini")
+
+    async def column_state() -> tuple[str, str | None, bool]:
+        """Return (data_type, is_nullable, check_exists)."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                result = await connection.execute(
+                    text(
+                        "SELECT data_type, is_nullable "
+                        "FROM information_schema.columns "
+                        "WHERE table_schema = 'ati' "
+                        "AND table_name = 'investigation_timeline_event' "
+                        "AND column_name = 'error_message'"
+                    )
+                )
+                row = result.first()
+                check = await connection.scalar(
+                    text(
+                        "SELECT con.conname FROM pg_constraint con "
+                        "JOIN pg_class rel ON rel.oid = con.conrelid "
+                        "JOIN pg_namespace ns ON ns.oid = rel.relnamespace "
+                        "WHERE ns.nspname = 'ati' "
+                        "AND rel.relname = 'investigation_timeline_event' "
+                        "AND con.conname = "
+                        "'investigation_timeline_event_error_message_check'"
+                    )
+                )
+        finally:
+            await engine.dispose()
+        if row is None:
+            return "", None, check is not None
+        return str(row[0]), str(row[1]), check is not None
+
+    try:
+        command.downgrade(alembic_cfg, "0033_datasource_log_published")
+        data_type, is_nullable, check_exists = await column_state()
+        assert data_type == ""
+        assert not check_exists
+
+        command.upgrade(alembic_cfg, "head")
+        data_type, is_nullable, check_exists = await column_state()
+        assert data_type == "text"
+        assert is_nullable == "YES"
+        assert check_exists
     finally:
         command.upgrade(alembic_cfg, "head")
 

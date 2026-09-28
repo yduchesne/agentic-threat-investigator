@@ -46,6 +46,7 @@ def _event_from_row(row: InvestigationTimelineEventRow) -> InvestigationTimeline
         entity_ids=tuple(row.entity_ids),
         relationship_ids=tuple(row.relationship_ids),
         error_code=row.error_code,
+        error_message=row.error_message,
         pivot_depth=row.pivot_depth,
         reason_code=row.reason_code,
         provider_calls_used=row.provider_calls_used,

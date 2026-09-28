@@ -2437,6 +2437,17 @@
             ],
             "title": "Error Code"
           },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
           "evidence_ids": {
             "items": {
               "format": "uuid",
@@ -2544,6 +2555,7 @@
           "entity_ids",
           "relationship_ids",
           "error_code",
+          "error_message",
           "pivot_depth",
           "reason_code",
           "provider_calls_used",

@@ -564,6 +564,7 @@ def to_timeline_event_response(
         entity_ids=event.entity_ids,
         relationship_ids=event.relationship_ids,
         error_code=event.error_code,
+        error_message=event.error_message,
         pivot_depth=event.pivot_depth,
         reason_code=event.reason_code,
         provider_calls_used=event.provider_calls_used,

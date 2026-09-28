@@ -105,7 +105,15 @@ class TimelineActionService(ABC):
         stop_reason: StopReason,
         state: InvestigationState,
     ) -> InvestigationTimelineEvent:
-        """Build INVESTIGATION_STOPPED carrying the stable stop reason."""
+        """Build INVESTIGATION_STOPPED carrying the stable stop reason.
+
+        For ``StopReason.FATAL_ERROR`` the event additionally carries the
+        stable ``error_code`` and bounded sanitized ``error_message`` of the
+        authoritative last ``InvestigationError`` already recorded on
+        ``state.errors`` (PR 31F-2). The diagnostic is supplied by the state,
+        never derived from a raw exception. Other stop reasons carry neither
+        field.
+        """
 
 
 class DeterministicTimelineActionService(TimelineActionService):
@@ -219,14 +227,25 @@ class DeterministicTimelineActionService(TimelineActionService):
         stop_reason: StopReason,
         state: InvestigationState,
     ) -> InvestigationTimelineEvent:
-        """Build INVESTIGATION_STOPPED carrying the stable stop reason."""
+        """Build INVESTIGATION_STOPPED carrying the stable stop reason.
+
+        A ``fatal_error`` stop carries the authoritative last fatal error's
+        stable code and sanitized message when one is recorded on the state;
+        no diagnostic is invented when the state has none. Non-fatal stops
+        never carry error_code or error_message.
+        """
+        update: dict[str, object] = dict(self._counters(state))
+        if stop_reason is StopReason.FATAL_ERROR and state.errors:
+            fatal_error = state.errors[-1]
+            update["error_code"] = fatal_error.code
+            update["error_message"] = fatal_error.message
         return InvestigationTimelineEvent(
             id=uuid4(),
             investigation_id=state.investigation_id,
             type=InvestigationTimelineEventType.INVESTIGATION_STOPPED,
             occurred_at=self._clock(),
             reason_code=stop_reason.value,
-        ).model_copy(update=self._counters(state))
+        ).model_copy(update=update)
 
 
 def _utc_now() -> datetime:

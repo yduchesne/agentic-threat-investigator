@@ -47,6 +47,8 @@ requirements justify the additional persistence dependency.
 | **31I** | Path finding | Bounded connection discovery between analyst-selected entities |
 | **31J** | Temporal graph exploration | Explore topology through RelationshipObservation time semantics |
 | **31K** | Graph-driven investigation actions | Launch ATI research/investigation actions directly from graph entities |
+| **31F-1** | UI correctness and human-readable analyst presentation | Analyst-facing i18n labels before raw codes on Timeline/relationship surfaces [DONE] |
+| **31F-2** | Investigation failure diagnostics | Bounded, sanitized root-cause `error_message` on failure Timeline events, fatal-stop propagation, safe detail presentation [DONE] |
 
 ## PR 31A — Graph read model and repository contract [DONE]
 
@@ -289,3 +291,44 @@ A graph database can be reconsidered later if concrete measured requirements
 such as large-scale arbitrary pattern matching, community detection, centrality
 analysis, or path workloads prove materially awkward or inefficient with the
 relational model.
+
+## PR 31F-2 — Investigation failure diagnostics [DONE]
+
+Follow-on to the PR 31F Evidence drill-down and the PR 31F-1 human-readable
+presentation work. Delivers safe analyst-facing diagnostics for failed
+investigations.
+
+Final scope:
+
+- adds a bounded (4096 char) nullable `error_message` to the append-only
+  investigation Timeline domain, migration `0034` (+ SQL API `v0029`),
+  repository/query mappings, the public Timeline DTO, and the generated
+  frontend schema — on failure-bearing event shapes only
+  (`PROVIDER_WORK_FAILED`, mixed partial `PROVIDER_WORK_COMPLETED` with a
+  retained `error_code`, and `INVESTIGATION_STOPPED` with
+  `reason_code == fatal_error`);
+- centralizes ATI-owned root-cause traversal
+  (`app/error_messages.py`): explicit `__cause__` first, applicable
+  unsuppressed `__context__`, `from None` suppression, cycle/depth
+  defense;
+- centralizes deterministic secret/control-character redaction and
+  truncation (before persistence), with independent unit tests;
+- threads the sanitizer through the existing orchestration composition so
+  every graph fatal catch keeps its stable `error_code` while persisting
+  the sanitized root-cause diagnostic through the existing
+  `FatalStopService`;
+- exposes the stable fatal code and sanitized message on the final
+  `INVESTIGATION_STOPPED` Timeline event and renders it as plain text in
+  the existing Timeline event-detail drawer;
+- preserves invariants: Timeline append-only/order/cursor/isolation
+  unchanged; persistence failures and cancellation propagate as before;
+  no tracebacks, raw provider payloads, prompts, hidden reasoning, or
+  unsanitized secrets are persisted; environment variables remain the
+  ultimate configuration override.
+
+Provider work failures intentionally remain code-only (the provider
+boundary retains no safe free-form message); `error_message` for provider
+failure events therefore stays `NULL` and provider-wide redesign is out of
+scope. The standard fake-world investigation completes successfully, so no
+real-browser fatal E2E was manufactured; the fatal path is proven by the
+deterministic integration vertical slice and component tests.

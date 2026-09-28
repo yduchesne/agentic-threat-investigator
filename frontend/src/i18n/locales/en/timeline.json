@@ -34,6 +34,7 @@
   "detail.replans": "Replans used",
   "detail.errorCode": "Error code",
   "detail.reasonCode": "Reason code",
+  "detail.errorMessage": "Error message",
   "detail.eventId": "Event ID",
   "detail.nullable": "—",
   "detail.noReference": "—",
