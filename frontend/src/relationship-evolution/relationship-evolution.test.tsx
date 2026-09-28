@@ -428,8 +428,11 @@ describe("Relationship Evolution counterparty presentation (PR 31F-1)", () => {
     await screen.findByRole("button", { name: /observed 2026-06-01/ });
     let captured = "";
     const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
     const originalClick = HTMLAnchorElement.prototype.click;
     try {
+      // Stub both halves of the object-URL API: jsdom lacks it natively, and
+      // downloadCsv must not throw on a partial shim either.
       Object.defineProperty(URL, "createObjectURL", {
         configurable: true,
         value: (blob: Blob) => {
@@ -439,6 +442,12 @@ describe("Relationship Evolution counterparty presentation (PR 31F-1)", () => {
           };
           reader.readAsText(blob);
           return "blob:mock";
+        },
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        value: (objectUrl: string) => {
+          void objectUrl;
         },
       });
       HTMLAnchorElement.prototype.click = () => undefined;
@@ -451,6 +460,7 @@ describe("Relationship Evolution counterparty presentation (PR 31F-1)", () => {
       expect(captured).toContain(COUNTERPARTY);
     } finally {
       Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreate });
+      Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevoke });
       HTMLAnchorElement.prototype.click = originalClick;
     }
   });
