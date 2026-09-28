@@ -46,11 +46,18 @@ def test_operating_mode_unknown_fails_closed(monkeypatch: MonkeyPatch) -> None:
         Settings()
 
 
-def test_operating_mode_blank_fails_closed(monkeypatch: MonkeyPatch) -> None:
-    """Blank mode values fail validation like other invalid values."""
+def test_operating_mode_blank_falls_back_to_safe_default(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Blank mode values are treated as unset and default to production.
+
+    An empty ``ATI_OPERATING_MODE`` never switches the runtime to fake
+    intelligence: it falls back to the safe production default (the same
+    posture as an unset variable), while a non-blank invalid value still
+    fails validation (``test_operating_mode_unknown_fails_closed``).
+    """
     monkeypatch.setenv("ATI_OPERATING_MODE", "")
-    with pytest.raises(ValidationError):
-        Settings()
+    assert Settings().operating_mode is OperatingMode.PRODUCTION
 
 
 def test_profile_and_operating_mode_are_orthogonal(

@@ -19,6 +19,9 @@
 # login/home page, everything else shows host:port or "internal".
 #
 #   ./start.sh            start (or verify) the full local stack
+#   ./start.sh --rebuild  rebuild all project images (backend + frontend)
+#                         and recreate their containers so code changes
+#                         take effect, then start the stack as usual
 #   ./start.sh --teardown tear down all stack containers, delete their
 #                         stored data (PostgreSQL, Prometheus, Loki,
 #                         Grafana), then start a fresh stack
@@ -41,6 +44,10 @@ repairs unhealthy ones when possible, logs every decision, and prints the
 reachable endpoints when done.
 
 Options:
+  -r, --rebuild   Rebuild every project image (backend, PostgreSQL, and
+                  frontend) and recreate their containers so source-code
+                  changes take effect, then start the stack as usual. Use
+                  after editing Python, migration, or frontend sources.
   -t, --teardown  Tear down all running stack containers and delete their
                   stored data (PostgreSQL data, Prometheus/Loki/Grafana
                   observability data), then start a fresh stack.
@@ -53,11 +60,17 @@ case "${1:-}" in
     usage
     exit 0
     ;;
+  -r | --rebuild)
+    REBUILD=1
+    TEARDOWN=0
+    ;;
   -t | --teardown)
     TEARDOWN=1
+    REBUILD=0
     ;;
   "")
     TEARDOWN=0
+    REBUILD=0
     ;;
   *)
     echo "Unknown option: $1" >&2
@@ -616,6 +629,29 @@ print_summary() {
 DAEMON_SERVICES=(postgres redpanda api worker geo-resolver frontend otel-collector prometheus jaeger loki grafana postgres-exporter)
 ONE_SHOT_SERVICES=(migrate fake-data-bootstrap scheduler)
 
+# rebuild_images: rebuild every project image, then drop the containers
+# backed by those images so the create phase recreates them from the new
+# images. Containers are removed leaves-first: podman refuses to remove a
+# container while its compose dependants still exist (frontend depends on
+# api, api/worker/geo-resolver on fake-data-bootstrap, alike on migrate and
+# postgres). Persistent volumes and bind mounts (data, datasets) survive.
+rebuild_images() {
+  step "rebuild requested: building backend, PostgreSQL, and frontend images"
+  note "This builds the backend (api/worker/geo-resolver + one-shots), the project PostgreSQL image, and the frontend; expect several minutes on the first run."
+  if ! compose_cmd build > /tmp/ati-start-build.log 2>&1; then
+    err "image build failed; see /tmp/ati-start-build.log, check podman and the sources"
+    exit 1
+  fi
+  ok "all project images rebuilt"
+  for service in frontend api worker geo-resolver scheduler fake-data-bootstrap migrate postgres; do
+    cid=$(cid_for "$service") || true
+    if [[ -n "$cid" ]]; then
+      podman rm -f "$cid" >/dev/null 2>&1 || true
+      log "removed $service container; it will be recreated from the rebuilt image"
+    fi
+  done
+}
+
 # stack_already_up: true when every daemon is running and every one-shot
 # has already completed -- the fully idempotent no-op case, where the start
 # phase is skipped entirely and nothing is disturbed.
@@ -635,6 +671,10 @@ if ((TEARDOWN)); then
   step "teardown requested: removing stack and stored data before starting"
   note "Teardown stops every container with a 30s grace period each; allow up to ~2 minutes, plus data deletion."
   tear_down
+fi
+
+if ((REBUILD)); then
+  rebuild_images
 fi
 
 ensure_data_dirs

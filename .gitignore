@@ -156,6 +156,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env.bak
 
 # Spyder project settings
 .spyderproject
@@ -210,7 +211,8 @@ frontend/test-results/
 frontend/playwright-report/
 
 # Locally acquired third-party dataset artifacts
-/data/datasets/
+data/
+out/
 
 # Ruff stuff:
 .ruff_cache/

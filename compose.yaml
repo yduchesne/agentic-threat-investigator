@@ -71,6 +71,10 @@ services:
       # keeps the process offline/fail-open with no Collector requirement.
       ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # First-run bootstrap administrator (docs/CONFIGURATION.md). Seeded only
+      # while the user table is empty; never resets an existing account.
+      ATI_BOOTSTRAP_ADMIN_USERNAME: ${ATI_BOOTSTRAP_ADMIN_USERNAME:-}
+      ATI_BOOTSTRAP_ADMIN_PASSWORD: ${ATI_BOOTSTRAP_ADMIN_PASSWORD:-}
     command: ["uvicorn", "agentic_threat_investigator.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       fake-data-bootstrap: { condition: service_completed_successfully }
