@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from langgraph.graph.state import CompiledStateGraph
 
+from agentic_threat_investigator.app.error_messages import ErrorMessageSanitizer
 from agentic_threat_investigator.app.extraction.extractor import extract
 from agentic_threat_investigator.app.investigation_timeline import (
     UnitOfWorkInvestigationTimelineSink,
@@ -168,6 +169,7 @@ def build_provider_investigation_graph(
     status_writer: InvestigationStatusWriter | None = None,
     timeline_action_service: TimelineActionService | None = None,
     fatal_stop_service: FatalStopService | None = None,
+    error_message_sanitizer: ErrorMessageSanitizer | None = None,
 ) -> CompiledStateGraph[
     OrchestrationGraphState, None, OrchestrationGraphState, OrchestrationGraphState
 ]:
@@ -248,5 +250,6 @@ def build_provider_investigation_graph(
         ),
         research_executor=research_executor,
         research_reconciler=effective_reconciler,
+        error_message_sanitizer=error_message_sanitizer,
         expected_investigation_id=context.investigation_id,
     )

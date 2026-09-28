@@ -29,6 +29,7 @@ class TimelineEventResponse(BaseModel):
     entity_ids: tuple[UUID, ...]
     relationship_ids: tuple[UUID, ...]
     error_code: str | None
+    error_message: str | None
     pivot_depth: int | None
     reason_code: str | None
     provider_calls_used: int | None

@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from agentic_threat_investigator.app.error_messages import ErrorMessageSanitizer
 from agentic_threat_investigator.app.llm import LlmError, LlmErrorCode
 from agentic_threat_investigator.app.orchestration.coordinator import (
     CoordinatorAction,
@@ -371,6 +372,7 @@ async def _run_node(
         service,
         DeterministicTimelineActionService(clock=lambda: _FIXED_TS),
         fatal,
+        ErrorMessageSanitizer(),
         graph_state,
     )
     recorded = result["investigation"]

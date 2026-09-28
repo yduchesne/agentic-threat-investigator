@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+# Gitleaks configuration for the pre-commit `gitleaks` hook (v8.24.2).
+#
+# PR 31F-2 allowlist: the `ErrorMessageSanitizer` unit fixtures in
+# `tests/unit/app/test_error_messages.py` are deliberately secret-shaped so
+# the redaction pipeline is proven against the exact credential shapes it
+# must redact and redacts-before-persistence is verified. Every value is
+# test-only synthetic material — the AWS documentation example
+# access-key/secret pair, a fake three-segment JWT, and a fake PEM
+# private-key body — never a real credential; the tests assert the sanitizer
+# removes exactly these values. The suppression is narrowly scoped to the
+# exact fixture regexes, not a blanket path exclusion.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "PR 31F-2 sanitizer redaction fixtures: synthetic AWS-docs example credentials, fake JWT segments, and a fake PEM private-key body in tests/unit/app/test_error_messages.py (test-only, never real secrets)"
+regexes = [
+  "AKIAIOSFODNN7EXAMPLE",
+  "wJalrXUtnFEMI/K7MDENG/bPxRfiCY",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.*eyJwYXQiOiJ9.*eyJmbXQiOiJmbXQiOiJ9",
+  "BEGIN PRIVATE KEY",
+]

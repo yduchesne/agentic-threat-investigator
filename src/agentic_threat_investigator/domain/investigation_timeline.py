@@ -16,9 +16,17 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.investigation import StopReason
 
 _ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 """Stable bounded error-code grammar: lowercase snake-case, at most 64 chars."""
+
+MAX_TIMELINE_ERROR_MESSAGE_LENGTH = 4096
+"""Maximum persisted length of one Timeline diagnostic message (PR 31F-2).
+
+The bound is enforced in the domain model, at the database boundary, and by
+the application sanitizer before persistence and truncation.
+"""
 
 
 class InvestigationTimelineEventType(str, Enum):
@@ -42,9 +50,11 @@ class InvestigationTimelineEvent(BaseModel):
     """One append-only, analyst-facing workflow timeline event.
 
     Events carry typed identifiers and a stable event type only: no free-form
-    reason text, raw payloads, stack traces, prompts, or hidden reasoning.
-    Presentation prose, where required later, is derived deterministically
-    from the event type and fields.
+    reason prose, raw payloads, stack traces, prompts, or hidden reasoning.
+    The one bounded exception (PR 31F-2) is ``error_message``, a nullable
+    sanitized human diagnostic permitted only on failure-bearing event shapes
+    (see the shape contract below). Presentation prose, where required, is
+    derived deterministically from the event type and fields.
 
     Event-shape contract (enforced by ``_validate_shape``):
 
@@ -84,6 +94,16 @@ class InvestigationTimelineEvent(BaseModel):
     ``error_code`` is bounded to 64 ASCII characters matching
     ``^[a-z][a-z0-9_]{0,63}$``; leading/trailing whitespace is rejected, never
     stripped or normalized.
+
+    ``error_message`` (PR 31F-2) is a bounded, nullable, sanitized human
+    diagnostic for failure-bearing event shapes only:
+    ``PROVIDER_WORK_FAILED``, ``PROVIDER_WORK_COMPLETED`` with a retained
+    ``error_code`` (mixed partial result), and ``INVESTIGATION_STOPPED`` with
+    ``reason_code == fatal_error``. It never carries tracebacks, raw payloads,
+    prompts, hidden reasoning, or secrets: sanitization happens at the
+    application boundary before model construction, and the length bound
+    (:data:`MAX_TIMELINE_ERROR_MESSAGE_LENGTH`) is enforced here so no
+    over-limit value can reach persistence.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -98,6 +118,7 @@ class InvestigationTimelineEvent(BaseModel):
     entity_ids: tuple[UUID, ...] = ()
     relationship_ids: tuple[UUID, ...] = ()
     error_code: str | None = None
+    error_message: str | None = None
     pivot_depth: int | None = None
     reason_code: str | None = None
     provider_calls_used: int | None = None
@@ -156,6 +177,29 @@ class InvestigationTimelineEvent(BaseModel):
             )
         return value
 
+    @field_validator("error_message")
+    @classmethod
+    def validate_error_message(cls, value: str | None) -> str | None:
+        """Bound the persisted diagnostic and normalize blanks to ``None``.
+
+        A diagnostic longer than :data:`MAX_TIMELINE_ERROR_MESSAGE_LENGTH`
+        is a contract failure and is rejected; a message that is entirely
+        whitespace is normalized to ``None`` so no blank diagnostic is ever
+        persisted. Internal text (including newlines and surrounding
+        whitespace) is preserved exactly: sanitization/redaction happens at
+        the application boundary before model construction.
+        """
+        if value is None:
+            return None
+        if len(value) > MAX_TIMELINE_ERROR_MESSAGE_LENGTH:
+            raise ValueError(
+                "timeline error_message must not exceed "
+                f"{MAX_TIMELINE_ERROR_MESSAGE_LENGTH} characters"
+            )
+        if not value.strip():
+            return None
+        return value
+
     @model_validator(mode="after")
     def _validate_shape(self) -> "InvestigationTimelineEvent":
         """Enforce the per-event-type field-shape contract deterministically.
@@ -169,6 +213,15 @@ class InvestigationTimelineEvent(BaseModel):
         event_type = self.type
         has_provider = self.provider is not None
         has_target = self.target_entity_id is not None
+        has_error_message = self.error_message is not None
+        if has_error_message and event_type not in {
+            InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+            InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
+            InvestigationTimelineEventType.INVESTIGATION_STOPPED,
+        }:
+            raise ValueError(
+                f"{event_type.value} events carry no error_message failure diagnostic"
+            )
         if event_type is InvestigationTimelineEventType.INVESTIGATION_STARTED:
             if has_provider or has_target or self.error_code is not None:
                 raise ValueError(
@@ -255,10 +308,9 @@ class InvestigationTimelineEvent(BaseModel):
                 )
             return self
         if event_type is InvestigationTimelineEventType.INVESTIGATION_STOPPED:
-            if has_provider or has_target or self.error_code is not None:
+            if has_provider or has_target:
                 raise ValueError(
-                    "investigation_stopped events carry no provider, target, "
-                    "or error_code"
+                    "investigation_stopped events carry no provider or target"
                 )
             if self.evidence_ids or self.entity_ids or self.relationship_ids:
                 raise ValueError(
@@ -270,6 +322,13 @@ class InvestigationTimelineEvent(BaseModel):
                 raise ValueError(
                     "investigation_stopped events require a reason_code "
                     "(the stable stop reason value)"
+                )
+            if (self.error_code is not None or has_error_message) and (
+                self.reason_code != StopReason.FATAL_ERROR.value
+            ):
+                raise ValueError(
+                    "investigation_stopped events carry error_code and "
+                    "error_message only for the fatal_error stop reason"
                 )
             return self
         # Every remaining event type requires provider and target.
@@ -305,9 +364,12 @@ class InvestigationTimelineEvent(BaseModel):
                     "evidence_persisted events"
                 )
             return self
-        # PROVIDER_WORK_COMPLETED: aggregate tuples may be empty; error_code
-        # may carry the retained first provider error (mixed partial result).
         if event_type is InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED:
+            if self.error_message is not None and self.error_code is None:
+                raise ValueError(
+                    "provider_work_completed events carry an error_message "
+                    "only with a retained error_code (mixed partial result)"
+                )
             return self
         # Unknown event type reaches here and is accepted only if it is a
         # provider-work family event; new event types must be handled

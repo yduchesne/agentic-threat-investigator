@@ -272,4 +272,88 @@ describe("Timeline page", () => {
     const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
     expect(within(dialog).getByText("future_error_code_42")).toBeInTheDocument();
   });
+
+  it("renders the persisted sanitized diagnostic as plain text (F2-U27/U28)", async () => {
+    const multiline = "provider refused the request\nline two of the diagnostic <b>not html</b>";
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/timeline",
+        pages: [
+          [
+            buildTimelineEvent({
+              id: "40000000-0000-4000-8000-000000000116",
+              type: "provider_work_failed",
+              error_code: "provider_unreachable",
+              error_message: multiline,
+            }),
+          ],
+        ],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(BASE);
+    await screen.findByText("Provider work failed");
+    await userEvent.click(screen.getByRole("button", { name: /view/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
+    const messageRow = within(dialog).getByLabelText("Error message detail");
+    // Multiline text is preserved (rendered inside one pre-wrap surface).
+    expect(messageRow.textContent).toContain(multiline);
+    // Markup-looking text is rendered as text, never parsed as HTML.
+    expect(dialog.querySelector("b")).toBeNull();
+    // The bounded scrollable presentation is applied (jsdom computes styles).
+    const style = window.getComputedStyle(messageRow);
+    expect(style.whiteSpace).toBe("pre-wrap");
+    expect(style.overflowWrap).toBe("anywhere");
+    expect(style.overflowY).toBe("auto");
+    expect(style.maxHeight).toBe("192px");
+  });
+
+  it("shows the localized unavailable marker when the diagnostic is null (F2-U26)", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/timeline",
+        pages: [[buildTimelineEvent()]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(BASE);
+    await screen.findByText("Provider work completed");
+    await userEvent.click(screen.getByRole("button", { name: /view/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
+    // The label row exists; the null diagnostic shows the localized marker.
+    expect(within(dialog).getByText("Error message")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("keeps the localized code label and raw code with a diagnostic (F2-U29)", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/timeline",
+        pages: [
+          [
+            buildTimelineEvent({
+              id: "40000000-0000-4000-8000-000000000117",
+              type: "provider_work_failed",
+              error_code: "provider_unavailable",
+              error_message: "the provider is unavailable",
+            }),
+          ],
+        ],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(BASE);
+    await screen.findByText("Provider work failed");
+    await userEvent.click(screen.getByRole("button", { name: /view/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
+    // Translated label primary + raw code secondary stays intact.
+    expect(within(dialog).getByText("Provider unavailable (provider_unavailable)")).toBeInTheDocument();
+    expect(within(dialog).getByText("the provider is unavailable")).toBeInTheDocument();
+  });
 });

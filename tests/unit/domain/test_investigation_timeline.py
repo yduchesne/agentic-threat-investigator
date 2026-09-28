@@ -434,6 +434,111 @@ class TestResearchRequestedTimelineEvent:
         assert "failure" not in payload
 
 
+class TestErrorMessageDiagnosticContract:
+    """PR 31F-2 bounded ``error_message`` event-shape contract."""
+
+    def test_provider_work_failed_accepts_bounded_message(self) -> None:
+        """F2-U14: PROVIDER_WORK_FAILED may carry a bounded diagnostic."""
+        event = _event(
+            type=InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+            error_code="provider_error",
+            error_message="provider refused the request",
+        )
+        assert event.error_message == "provider refused the request"
+
+    def test_fatal_stop_accepts_code_and_message(self) -> None:
+        """F2-U15: a fatal stop may carry the stable code plus the message."""
+        event = _event(
+            type=InvestigationTimelineEventType.INVESTIGATION_STOPPED,
+            provider=None,
+            target_entity_id=None,
+            reason_code="fatal_error",
+            error_code="analysis_execution_error",
+            error_message="analysis could not complete safely",
+        )
+        assert event.error_code == "analysis_execution_error"
+        assert event.error_message == "analysis could not complete safely"
+
+    def test_normal_stop_rejects_error_message(self) -> None:
+        """F2-U16: a non-fatal stop rejects a diagnostic message."""
+        with pytest.raises(ValidationError, match="only for the fatal_error"):
+            _event(
+                type=InvestigationTimelineEventType.INVESTIGATION_STOPPED,
+                provider=None,
+                target_entity_id=None,
+                reason_code="sufficient_evidence",
+                error_message="everything is fine now",
+            )
+
+    def test_success_event_rejects_error_message(self) -> None:
+        """F2-U17: ordinary success/informational events reject the field."""
+        with pytest.raises(ValidationError, match="no error_message"):
+            _event(error_message="unexpected diagnostic")
+        with pytest.raises(ValidationError, match="no error_message"):
+            _event(
+                type=InvestigationTimelineEventType.EVIDENCE_PERSISTED,
+                evidence_ids=(uuid4(),),
+                error_message="unexpected diagnostic",
+            )
+        with pytest.raises(ValidationError, match="no error_message"):
+            _event(
+                type=InvestigationTimelineEventType.ASSESSMENT_REQUESTED,
+                provider=None,
+                target_entity_id=None,
+                error_message="unexpected diagnostic",
+            )
+
+    def test_over_limit_message_rejected(self) -> None:
+        """F2-U18: an over-limit message is rejected before persistence."""
+        from agentic_threat_investigator.domain.investigation_timeline import (
+            MAX_TIMELINE_ERROR_MESSAGE_LENGTH,
+        )
+
+        with pytest.raises(ValidationError, match="must not exceed"):
+            _event(
+                type=InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+                error_code="provider_error",
+                error_message="x" * (MAX_TIMELINE_ERROR_MESSAGE_LENGTH + 1),
+            )
+
+    def test_at_limit_message_accepted(self) -> None:
+        """A message exactly at the bound is accepted and preserved."""
+        from agentic_threat_investigator.domain.investigation_timeline import (
+            MAX_TIMELINE_ERROR_MESSAGE_LENGTH,
+        )
+
+        payload = "x" * MAX_TIMELINE_ERROR_MESSAGE_LENGTH
+        event = _event(
+            type=InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+            error_code="provider_error",
+            error_message=payload,
+        )
+        assert event.error_message == payload
+
+    def test_blank_message_normalized_to_none(self) -> None:
+        """Whitespace-only messages normalize to ``None``, never a blank string."""
+        event = _event(
+            type=InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+            error_code="provider_error",
+            error_message="  \n\t ",
+        )
+        assert event.error_message is None
+
+    def test_mixed_completion_requires_retained_error_code(self) -> None:
+        """A completion diagnostic requires the retained error code."""
+        with pytest.raises(ValidationError, match="only with a retained error_code"):
+            _event(
+                type=InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
+                error_message="partial result with no retained code",
+            )
+        event = _event(
+            type=InvestigationTimelineEventType.PROVIDER_WORK_COMPLETED,
+            error_code="timeout",
+            error_message="one provider call timed out",
+        )
+        assert event.error_message == "one provider call timed out"
+
+
 class TestUnitOfWorkTimelineSink:
     """The UoW-backed sink appends exactly once per event."""
 

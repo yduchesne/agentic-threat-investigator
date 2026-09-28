@@ -189,3 +189,55 @@ async def test_timeline_occurred_range_and_isolation(
             TimelineListQuery(investigation_id=investigation_id, limit=10),
         )
         assert other_event.id not in isolated
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_timeline_error_message_round_trip_unchanged(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """F2-I05/I03: the sanitized message round-trips without cursor changes.
+
+    The nullable diagnostic is returned exactly (Unicode/multiline preserved)
+    while the established chronological ordering and cursor semantics are
+    unchanged.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        failed = InvestigationTimelineEvent(
+            id=uuid4(),
+            investigation_id=investigation_id,
+            type=InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+            occurred_at=_EVENT_TIME,
+            provider=SourceId("urn:ati:source:google_public_dns"),
+            target_entity_id=uuid4(),
+            error_code="provider_error",
+            error_message="provider refused the request\nsecond line — détails",
+        )
+        started = timeline_event_factory(
+            investigation_id,
+            event_type=InvestigationTimelineEventType.INVESTIGATION_STARTED,
+            occurred_at=_EVENT_TIME + timedelta(minutes=1),
+        )
+        await uow.timeline_events.append(failed)
+        await uow.timeline_events.append(started)
+
+        assert uow.session is not None
+        services = PostgresQueryServices(
+            uow.session, QueryLimits(default_page_size=50, max_page_size=200)
+        )
+        collected = await _collect_event_ids(
+            services,
+            TimelineListQuery(investigation_id=investigation_id, limit=10),
+        )
+        # Chronological order first, then sequence — unchanged by the new column.
+        assert collected == [failed.id, started.id]
+
+    # A separate reader confirms the exact persisted message.
+    async with uow_factory() as uow:
+        events = await uow.timeline_events.list_by_investigation(investigation_id)
+    by_id = {event.id: event for event in events}
+    assert by_id[failed.id].error_message == (
+        "provider refused the request\nsecond line — détails"
+    )
+    assert by_id[started.id].error_message is None

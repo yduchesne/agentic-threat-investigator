@@ -1869,6 +1869,8 @@ export interface components {
             entity_ids: string[];
             /** Error Code */
             error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
             /** Evidence Ids */
             evidence_ids: string[];
             /**

@@ -775,6 +775,7 @@ export function buildTimelineEvent(overrides: Partial<TimelineEvent> = {}): Time
     replans_used: 0,
     error_code: null,
     reason_code: null,
+    error_message: null,
     ...overrides,
   };
 }

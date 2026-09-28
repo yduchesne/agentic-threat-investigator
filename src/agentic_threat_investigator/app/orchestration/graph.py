@@ -27,6 +27,7 @@ from uuid import UUID
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from agentic_threat_investigator.app.error_messages import ErrorMessageSanitizer
 from agentic_threat_investigator.app.orchestration.coordinator import (
     AnalysisExecutor,
     CoordinatorAction,
@@ -243,6 +244,7 @@ async def coordinator_node(
     policy: CoordinatorPolicy,
     context_loader: CoordinatorContextLoader,
     fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer,
     state: OrchestrationGraphState,
 ) -> OrchestrationGraphState:
     """Decide the next deterministic investigative action.
@@ -250,7 +252,9 @@ async def coordinator_node(
     Loads the policy context, applies the coordinator policy, and stores the
     complete CoordinatorDecision for routing and execution. An unrecoverable
     context failure (cross-Investigation or stale-version context) is mapped
-    to a bounded fatal stop rather than escaping the graph.
+    to a bounded fatal stop rather than escaping the graph; the stable fatal
+    code is preserved and the sanitized root-cause diagnostic replaces the
+    generic loss-of-cause message.
     """
     investigation = state["investigation"]
     try:
@@ -270,7 +274,7 @@ async def coordinator_node(
             InvestigationError(
                 source="orchestration",
                 code="coordinator_context_error",
-                message="coordinator policy context could not be loaded",
+                message=error_message_sanitizer.from_exception(exc),
                 recoverable=False,
             ),
             expected_version=_require_version(investigation),
@@ -367,6 +371,7 @@ async def select_work(
     transition_service: CoordinatorTransitionService,
     timeline_action_service: TimelineActionService,
     fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer,
     state: OrchestrationGraphState,
 ) -> OrchestrationGraphState:
     """Select the next FIFO work item and persist the selection atomically.
@@ -406,13 +411,13 @@ async def select_work(
         selected_state = select_provider_work(investigation)
         updated = apply_work_selection(selected_state)
         validated = InvestigationState.model_validate(updated.model_dump())
-    except ValueError, TypeError:
+    except (ValueError, TypeError) as exc:
         fatal = await fatal_stop_service.fatalize(
             investigation.investigation_id,
             InvestigationError(
                 source="orchestration",
                 code="provider_selection_error",
-                message="provider work selection could not complete safely",
+                message=error_message_sanitizer.from_exception(exc),
                 recoverable=False,
             ),
             expected_version=_require_version(investigation),
@@ -449,6 +454,7 @@ async def execute_work(
     dispatcher: TaskDispatcher,
     state: OrchestrationGraphState,
     fatal_stop_service: FatalStopService | None = None,
+    error_message_sanitizer: ErrorMessageSanitizer | None = None,
 ) -> OrchestrationGraphState:
     """Execute provider work, fatalizing only unexpected execution failures."""
     investigation = state["investigation"]
@@ -464,12 +470,17 @@ async def execute_work(
     except Exception as exc:
         if _persistence_error(exc) or fatal_stop_service is None:
             raise
+        sanitizer = (
+            error_message_sanitizer
+            if error_message_sanitizer is not None
+            else ErrorMessageSanitizer()
+        )
         fatal = await fatal_stop_service.fatalize(
             investigation.investigation_id,
             InvestigationError(
                 source="orchestration",
                 code="provider_dispatch_error",
-                message="provider dispatch could not complete safely",
+                message=sanitizer.from_exception(exc),
                 recoverable=False,
             ),
             expected_version=_require_version(investigation),
@@ -543,6 +554,7 @@ async def analyze(
     transition_service: CoordinatorTransitionService,
     timeline_action_service: TimelineActionService,
     fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer,
     state: OrchestrationGraphState,
 ) -> OrchestrationGraphState:
     """Run the Evidence Analyst and adopt the authoritative persisted state.
@@ -599,7 +611,7 @@ async def analyze(
             InvestigationError(
                 source="evidence_analyst",
                 code="analysis_execution_error",
-                message="evidence analysis could not complete safely",
+                message=error_message_sanitizer.from_exception(exc),
                 recoverable=False,
             ),
             expected_version=_require_version(latest),
@@ -752,6 +764,7 @@ async def research_node(
     transition_service: CoordinatorTransitionService,
     timeline_action_service: TimelineActionService,
     fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer,
     state: OrchestrationGraphState,
 ) -> OrchestrationGraphState:
     """Execute one due research context as a bounded durable synchronization point.
@@ -810,7 +823,7 @@ async def research_node(
                 InvestigationError(
                     source="orchestration",
                     code="research_request_error",
-                    message="research request could not be persisted safely",
+                    message=error_message_sanitizer.from_exception(exc),
                     recoverable=False,
                 ),
                 expected_version=_require_version(investigation),
@@ -848,6 +861,7 @@ async def research_node(
             return await _resolve_research_outcome(
                 transition_service,
                 fatal_stop_service,
+                error_message_sanitizer,
                 investigation.investigation_id,
                 planned,
                 outcome=None,
@@ -865,7 +879,7 @@ async def research_node(
             InvestigationError(
                 source="orchestration",
                 code="research_reconciliation_error",
-                message="research reconciliation could not complete safely",
+                message=error_message_sanitizer.from_exception(exc),
                 recoverable=False,
             ),
             expected_version=_require_version(persisted),
@@ -900,6 +914,7 @@ async def research_node(
                 return await _resolve_research_outcome(
                     transition_service,
                     fatal_stop_service,
+                    error_message_sanitizer,
                     investigation.investigation_id,
                     planned,
                     outcome=None,
@@ -910,7 +925,7 @@ async def research_node(
                 InvestigationError(
                     source="research",
                     code="research_execution_error",
-                    message="contextual research could not complete safely",
+                    message=error_message_sanitizer.from_exception(exc),
                     recoverable=False,
                 ),
                 expected_version=_require_version(latest),
@@ -926,6 +941,7 @@ async def research_node(
     return await _resolve_research_outcome(
         transition_service,
         fatal_stop_service,
+        error_message_sanitizer,
         investigation.investigation_id,
         planned,
         outcome=outcome,
@@ -936,6 +952,7 @@ async def research_node(
 async def _resolve_research_outcome(
     transition_service: CoordinatorTransitionService,
     fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer,
     investigation_id: UUID,
     planned: PlannedResearchRequest,
     *,
@@ -992,7 +1009,7 @@ async def _resolve_research_outcome(
             InvestigationError(
                 source="orchestration",
                 code="research_outcome_error",
-                message="research outcome could not be recorded safely",
+                message=error_message_sanitizer.from_exception(exc),
                 recoverable=False,
             ),
             expected_version=_require_version(authoritative),
@@ -1203,6 +1220,7 @@ def build_investigation_graph(
     status_writer: InvestigationStatusWriter,
     timeline_action_service: TimelineActionService,
     fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer | None = None,
     research_executor: ResearchExecutor | None = None,
     research_reconciler: ResearchExecutionReconciler | None = None,
     expected_investigation_id: UUID | None = None,
@@ -1218,6 +1236,12 @@ def build_investigation_graph(
     construction. The legacy PR 19A topology is available only through
     :func:`build_legacy_investigation_graph` for isolated mechanics tests.
 
+    ``error_message_sanitizer`` bounds, redacts, and root-cause-selects the
+    caught orchestration failures before they become ``InvestigationError``
+    values (PR 31F-2). A plain sanitizer is used when none is injected;
+    callers supply one with configured known secret values when those are
+    available at composition.
+
     Binding derivation: when the dispatcher exposes a bound investigation
     identity, that identity is adopted automatically as the graph's binding
     even when the caller omits the explicit argument, so direct public
@@ -1228,6 +1252,11 @@ def build_investigation_graph(
     ID during ``initialize`` and raises :class:`InvestigationGraphContextMismatchError`
     on mismatch, before work selection and every I/O seam.
     """
+    effective_sanitizer = (
+        error_message_sanitizer
+        if error_message_sanitizer is not None
+        else ErrorMessageSanitizer()
+    )
     dispatcher_investigation_id = dispatcher.bound_investigation_id
     if (
         expected_investigation_id is not None
@@ -1287,6 +1316,7 @@ def build_investigation_graph(
             transition_service,
             timeline_action_service,
             fatal_stop_service,
+            effective_sanitizer,
             state,
         )
 
@@ -1295,7 +1325,9 @@ def build_investigation_graph(
     async def execute_work_node(
         state: OrchestrationGraphState,
     ) -> OrchestrationGraphState:
-        return await execute_work(dispatcher, state, fatal_stop_service)
+        return await execute_work(
+            dispatcher, state, fatal_stop_service, effective_sanitizer
+        )
 
     builder.add_node("execute_work", execute_work_node)
 
@@ -1317,7 +1349,7 @@ def build_investigation_graph(
                 InvestigationError(
                     source="orchestration",
                     code="provider_outcome_error",
-                    message="provider outcome could not be recorded safely",
+                    message=effective_sanitizer.from_exception(exc),
                     recoverable=False,
                 ),
                 expected_version=_require_version(investigation),
@@ -1336,7 +1368,11 @@ def build_investigation_graph(
         state: OrchestrationGraphState,
     ) -> OrchestrationGraphState:
         return await coordinator_node(
-            coordinator_policy, context_loader, fatal_stop_service, state
+            coordinator_policy,
+            context_loader,
+            fatal_stop_service,
+            effective_sanitizer,
+            state,
         )
 
     builder.add_node("coordinator", coord_node)
@@ -1359,7 +1395,7 @@ def build_investigation_graph(
                 InvestigationError(
                     source="orchestration",
                     code="pivot_authorization_error",
-                    message="pivot authorization could not complete safely",
+                    message=effective_sanitizer.from_exception(exc),
                     recoverable=False,
                 ),
                 expected_version=_require_version(investigation),
@@ -1382,6 +1418,7 @@ def build_investigation_graph(
             transition_service,
             timeline_action_service,
             fatal_stop_service,
+            effective_sanitizer,
             state,
         )
 
@@ -1397,6 +1434,7 @@ def build_investigation_graph(
             transition_service,
             timeline_action_service,
             fatal_stop_service,
+            effective_sanitizer,
             state,
         )
 

@@ -2900,6 +2900,63 @@ PR 31F-1 adds the following real-browser regression coverage
   list shows no per-row Entity/Relationship lookups and no fallback
   topology requests.
 
+### Failure-diagnostic coverage (PR 31F-2)
+
+PR 31F-2 is verified through deterministic unit, migration/repository,
+API, and production-path vertical-slice coverage; it never requires live
+Internet, a live provider, or a live LLM.
+
+- **Root-cause traversal** (`tests/unit/app/test_error_messages.py`):
+  explicit `__cause__` wins, implicit unsuppressed `__context__` is
+  followed, `raise ... from None` never reveals the suppressed context,
+  both cause-and-context follows the explicit branch, cycles and excessive
+  depth terminate deterministically, and an empty root message falls back
+  to a safe type-based text.
+- **Sanitizer**: configured known secret values (conspicuous synthetic
+  sentinels only, never real credentials) are redacted; Bearer/JWT/
+  `password=`-style assignment/AWS access-key/PEM private-key/
+  `user:password@` credential-URL shapes are redacted; terminal/control
+  characters are normalized; Unicode and multiline text survive; SQL- and
+  HTML-looking ordinary text is preserved as text; redaction happens
+  before truncation and the final value never exceeds the persisted
+  maximum (4096).
+- **Domain/action contract** (`tests/unit/domain/test_investigation_timeline.py`,
+  `tests/unit/app/orchestration/test_fatal_diagnostics.py`):
+  `error_message` is accepted only on the failure-bearing shapes
+  (PROVIDER_WORK_FAILED, mixed PROVIDER_WORK_COMPLETED, fatal
+  INVESTIGATION_STOPPED), over-limit and blank values are rejected or
+  normalized, a fatal stop exposes the exact stable code plus sanitized
+  message, and non-fatal stops carry neither field.
+- **Graph fatal boundaries**: a caught nested exception keeps its stable
+  `error_code` while the sanitized root-cause message replaces the generic
+  text; persistence failures still propagate (never fatalized);
+  `asyncio.CancelledError` still propagates untouched.
+- **Migration/repository/query** (real PostgreSQL): the nullable bounded
+  column/constraint installs and downgrades cleanly, existing rows keep
+  `NULL`, Unicode/multiline messages round-trip exactly, the database
+  bound rejects over-limit direct inserts, and the bounded Timeline query
+  returns the message without changing ordering or cursor semantics.
+- **Production fatal vertical slice**
+  (`tests/integration/test_fatal_diagnostics.py`): a controlled nested
+  exception at the (faked) analysis boundary flows through the real
+  coordinator graph, the real `FatalStopService`, and real Timeline
+  persistence into a `fatal_error` INVESTIGATION_STOPPED event carrying
+  the stable code and sanitized message; the secret sentinel never
+  appears in the persisted row, the Investigation state, or the API
+  response.
+- **UI** (`frontend/src/timeline/TimelinePage.test.tsx`): the persisted
+  diagnostic renders in the detail drawer as plain pre-wrap text with
+  wrap-anywhere, a bounded height with vertical scrolling, a localized
+  unavailable marker for `null`, no HTML parsing of markup-like values,
+  and the PR 31F-1 translated-label + raw-code presentation intact.
+
+PR 31F-2 does not add a real-browser E2E for the fatal diagnostic: the
+standard E2E fake world terminates successfully, and manufacturing a fatal
+outcome would require changing fake-world data (prohibited). The real-FastAPI/
+real-PostgreSQL fatal path is instead covered by the deterministic
+integration vertical slice above, and the analyst-visible presentation by
+component tests.
+
 ### Cross-resource pivots and provenance navigation (PR 24D)
 
 Separate generated-schema-projected pivot steps from router-backed page

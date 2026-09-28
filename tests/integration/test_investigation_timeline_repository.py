@@ -201,6 +201,84 @@ async def test_database_rejects_invalid_error_code_even_if_model_bypassed(
         await uow.rollback()
 
 
+async def test_error_message_round_trips_exactly(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """F2-I03: a sanitized Unicode/multiline message round-trips exactly."""
+    from agentic_threat_investigator.domain.investigation_timeline import (
+        InvestigationTimelineEventType,
+    )
+
+    message = "provider refused request\nsecond line — détails\tpreserved"
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        failed = InvestigationTimelineEvent(
+            id=uuid4(),
+            investigation_id=investigation_id,
+            type=InvestigationTimelineEventType.PROVIDER_WORK_FAILED,
+            occurred_at=_RETRIEVED_AT,
+            provider=SourceId.GOOGLE_PUBLIC_DNS,
+            target_entity_id=uuid4(),
+            error_code="provider_error",
+            error_message=message,
+        )
+        await uow.timeline_events.append(failed)
+        await uow.commit()
+
+    async with uow_factory() as reader:
+        events = await reader.timeline_events.list_by_investigation(investigation_id)
+    assert [event.error_message for event in events] == [message]
+
+
+async def test_database_enforces_error_message_length_bound(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """F2-I04: the database bound rejects an over-limit direct insert."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    from agentic_threat_investigator.domain.investigation_timeline import (
+        MAX_TIMELINE_ERROR_MESSAGE_LENGTH,
+    )
+
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        with pytest.raises(IntegrityError):
+            await uow.session.execute(  # type: ignore[union-attr]
+                text(
+                    "INSERT INTO ati.investigation_timeline_event "
+                    "(id, investigation_id, event_type, occurred_at, "
+                    " provider, target_entity_id, error_code, error_message) "
+                    "VALUES (:id, :investigation_id, 'provider_work_failed', "
+                    " :occurred_at, :provider, :target_entity_id, "
+                    " 'provider_error', :error_message)"
+                ),
+                {
+                    "id": uuid4(),
+                    "investigation_id": investigation_id,
+                    "occurred_at": _RETRIEVED_AT,
+                    "provider": SourceId.GOOGLE_PUBLIC_DNS.value,
+                    "target_entity_id": uuid4(),
+                    "error_message": "x" * (MAX_TIMELINE_ERROR_MESSAGE_LENGTH + 1),
+                },
+            )
+        await uow.rollback()
+
+
+async def test_error_message_defaults_null_for_existing_rows(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """F2-I02: rows written without a diagnostic read back as ``None``."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        event = timeline_event(investigation_id, _RETRIEVED_AT)
+        await uow.timeline_events.append(event)
+        await uow.commit()
+    async with uow_factory() as reader:
+        events = await reader.timeline_events.list_by_investigation(investigation_id)
+    assert events[0].error_message is None
+
+
 async def test_closed_uow_clears_timeline_repository_and_reopens_fresh(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:

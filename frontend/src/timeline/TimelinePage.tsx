@@ -346,11 +346,55 @@ function detailBody(
           ),
         },
         {
+          label: t("detail.errorMessage"),
+          value: <ErrorMessageValue message={event.error_message} unavailable={t("detail.nullable")} />,
+        },
+        {
           label: t("detail.eventId"),
           value: <ShortId id={event.id} />,
         },
       ]}
     />
+  );
+}
+
+/**
+ * Read-only persisted failure diagnostic (PR 31F-2).
+ *
+ * Renders the persisted sanitized value as plain text — never HTML —
+ * preserving multiline text, wrapping long lines, bounding the visual
+ * height with vertical scrolling when needed, and showing a localized
+ * unavailable marker when null. The value is never re-sanitized or
+ * modified client-side.
+ */
+function ErrorMessageValue({
+  message,
+  unavailable,
+}: {
+  message: string | null;
+  unavailable: string;
+}): ReactElement {
+  if (message === null) {
+    return <Typography variant="body2">{unavailable}</Typography>;
+  }
+  return (
+    <Box
+      tabIndex={0}
+      aria-label="Error message detail"
+      sx={{
+        maxHeight: 192,
+        overflowY: "auto",
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
+        userSelect: "text",
+        py: 0.5,
+        pr: 0.5,
+      }}
+    >
+      <Typography variant="body2" component="div">
+        {message}
+      </Typography>
+    </Box>
   );
 }
 
