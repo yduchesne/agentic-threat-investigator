@@ -5,7 +5,11 @@ The adapter depends on an injected LangChain ``BaseChatModel``; it never
 constructs a provider-specific model, reads configuration or environment
 variables, persists anything, or retries hidden behind the documented policy.
 Structured output uses the framework's native ``with_structured_output``
-path; manual prose JSON parsing is deliberately never used.
+path with explicit ``method="function_calling"`` steering (never OpenAI
+native ``json_schema`` mode): the analyst schema uses ``oneOf`` across
+complex nested items, which native structured outputs reject on
+OpenAI-compatible providers while function calling is accepted. Manual
+prose JSON parsing is deliberately never used.
 
 Provider/framework failures are mapped to the bounded ``LlmError`` taxonomy
 with safe, content-free messages: prompts, model output, raw exception text,
@@ -122,8 +126,17 @@ class LangChainLlmClient(LlmClient):
             # message list and model outputs; PR 20B has no approved
             # content-capture opt-in, so the invocation runs with tracing
             # disabled at the framework level. Safe metadata stays local.
+            # Structured outputs use explicit function-calling steering
+            # (``method="function_calling"``), not the OpenAI native
+            # ``json_schema`` mode that became the langchain-openai 0.3+
+            # default: the analyst schema uses ``oneOf`` across complex
+            # nested items, which native structured outputs reject (400)
+            # on OpenAI-compatible providers, while function calling is
+            # rejected by neither OpenAI nor OpenRouter-compatible vendors.
             with tracing_context(enabled=False):
-                runnable = self._chat_model.with_structured_output(response_model)
+                runnable = self._chat_model.with_structured_output(
+                    response_model, method="function_calling"
+                )
                 result = await runnable.ainvoke(
                     [
                         SystemMessage(content=system_prompt),

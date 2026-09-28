@@ -366,14 +366,28 @@ must be logged as:
 
 `ATI_CONFIG_PROFILE` selects the source-controlled profile.
 
-Profile values are passed as constructor values to the typed `Settings` bridge
-(`settings_from_config`), so a profile key pins that setting for the process.
-Fields not defined by a profile remain injectable through `ATI_*` environment
-variables (or `.env`) according to the typed settings model. Profiles never
-contain secrets; therefore `config_default` pins only stable,
-non-deployment-tunable values and deployment values such as credentials remain
-externally provisioned. `get_settings()` loads this bridge once during process
-bootstrap and returns the cached settings instance.
+Effective configuration precedence, from highest to lowest, is:
+
+1. process environment variables (`ATI_*`);
+2. the `.env` dotenv file (read from the process working directory);
+3. source-controlled profile values (`config_<profile>.py`);
+4. typed field defaults on the `Settings` model.
+
+Environment variables therefore take precedence over every other
+configuration mechanism: an `ATI_*` environment variable (or an equivalent
+`.env` entry) always wins over a profile key for the same setting, and a
+process environment variable wins over the identical `.env` entry.
+`settings_from_config` applies this order explicitly because
+pydantic-settings would otherwise rank constructor arguments above the
+environment. Blank or empty values are treated as unset everywhere
+(`env_ignore_empty`): an empty `ATI_*` variable or `.env` entry never
+overrides a profile value or a typed default, so `ATI_SESSION_IDLE_TIMEOUT_SECONDS=`
+falls back to the profile/typed default instead of failing validation.
+Profiles never contain secrets; profile keys supply stable fallbacks for
+exactly the fields the deployment environment leaves unset, while
+credentials and other deployment values remain externally provisioned.
+`get_settings()` loads this bridge once during process bootstrap and
+returns the cached settings instance.
 
 The optional `import_module` argument to `load_config` defaults to
 `importlib.import_module` and is an injectable test seam for malformed or

@@ -580,6 +580,7 @@ The delivered command surface is a pair of repository-root scripts (and
 
 ```bash
 ./start.sh             # start (or verify) the full local stack
+./start.sh --rebuild   # rebuild all images and recreate their containers
 ./stop.sh              # stop the local stack (containers + data kept)
 ./stop.sh --teardown   # stop, remove containers and stored data
 ```
@@ -594,7 +595,13 @@ for container-internal services), unhealthy services receive at most one
 repair attempt (re-run/restart/re-create) before being reported, every
 decision is logged, and the final summary prints the reachable endpoints
 (with HTTP URLs for HTTP services) and exits non-zero when any service
-stays unhealthy. ``./start.sh --teardown`` first removes all stack
+stays unhealthy. Because the script builds images only when they are
+missing and never recreates healthy containers, source-code changes are
+**not** picked up automatically: run ``./start.sh --rebuild`` after
+editing Python, migration, or frontend sources to rebuild every project
+image (backend, PostgreSQL, frontend) and recreate the corresponding
+containers (persistent volumes and datasets survive) before the normal
+start/health-check flow. ``./start.sh --teardown`` first removes all stack
 containers and the service-managed stored data (PostgreSQL data and
 Prometheus/Loki/Grafana observability data), then starts a fresh stack.
 

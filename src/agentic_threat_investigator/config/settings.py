@@ -9,7 +9,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic._internal._utils import deep_update
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    SettingsConfigDict,
+)
 
 from agentic_threat_investigator.config.config_utils import Config, load_config
 from agentic_threat_investigator.domain.datasource import (
@@ -170,7 +176,7 @@ class Settings(BaseSettings):
     """Typed settings for the local development runtime."""
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_prefix="ATI_", extra="ignore"
+        env_file=".env", env_prefix="ATI_", extra="ignore", env_ignore_empty=True
     )
 
     app_name: str = "Agentic Threat Investigator"
@@ -829,11 +835,48 @@ def ensure_test_database_safe(
         )
 
 
-def settings_from_config(config: Config) -> Settings:
-    """Build typed settings from profile values and runtime environment.
+def _environment_layer() -> dict[str, object]:
+    """Return the effective environment/.env values keyed by Settings field.
 
-    Profile values are constructor arguments and therefore take precedence over
-    environment variables. Unknown profile values remain available for future
+    pydantic-settings ranks constructor arguments above environment sources,
+    so typed defaults cannot be passed as ``Settings(**profile)`` if the
+    environment must win. This helper independently reads the two sources
+    the ``Settings`` model config declares (process ``ATI_*`` environment and
+    the ``.env`` dotenv file) and overlays them so the process environment
+    beats the dotenv file; ``settings_from_config`` then merges that layer
+    above the profile values. Empty values are skipped on both sources
+    (``env_ignore_empty``), so a blank entry never overrides a profile value
+    or a typed default.
+    """
+    model_config = Settings.model_config
+    dotenv = DotEnvSettingsSource(
+        Settings,
+        env_file=model_config.get("env_file", ".env"),
+        env_prefix=model_config.get("env_prefix"),
+        case_sensitive=model_config.get("case_sensitive", False),
+        env_ignore_empty=model_config.get("env_ignore_empty", False),
+        env_nested_delimiter=model_config.get("env_nested_delimiter"),
+    )()
+    process_env = EnvSettingsSource(
+        Settings,
+        env_prefix=model_config.get("env_prefix"),
+        case_sensitive=model_config.get("case_sensitive", False),
+        env_ignore_empty=model_config.get("env_ignore_empty", False),
+        env_nested_delimiter=model_config.get("env_nested_delimiter"),
+    )()
+    return deep_update(dotenv, process_env)
+
+
+def settings_from_config(config: Config) -> Settings:
+    """Build typed settings with environment precedence over profiles.
+
+    Precedence from highest to lowest is: process environment variables
+    (``ATI_*``), the ``.env`` dotenv file, source-controlled profile values,
+    then typed field defaults. Profile values therefore never override an
+    environment value; they supply fallbacks for exactly the fields the
+    environment leaves unset. Blank/empty environment values are treated as
+    unset (``env_ignore_empty``), so they never override a profile value or
+    a typed default. Unknown profile values remain available for future
     wiring and are reported without preventing startup.
     """
     field_names = set(Settings.model_fields)
@@ -843,7 +886,8 @@ def settings_from_config(config: Config) -> Settings:
         logging.getLogger(__name__).warning(
             "unrecognized configuration keys keys=%s", unknown
         )
-    return Settings(**recognized)
+    effective = deep_update(recognized, _environment_layer())
+    return Settings(**effective)
 
 
 @lru_cache

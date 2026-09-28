@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Tests for typed configuration injection and caching."""
 
+from pathlib import Path
+
 import pytest
 from _pytest.logging import LogCaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
@@ -18,12 +20,67 @@ from agentic_threat_investigator.config import (
 )
 
 
-def test_profile_values_pin_fields_over_environment(
+def test_environment_variables_take_precedence_over_profile_values(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Constructor-injected profile values win over ATI environment values."""
+    """ATI environment values win over the same profile keys."""
     monkeypatch.setenv("ATI_LOG_LEVEL", "WARNING")
+    assert settings_from_config({"log_level": "DEBUG"}).log_level == "WARNING"
+
+
+def test_profile_values_apply_when_environment_absent() -> None:
+    """Fields unset by the environment fall back to profile values."""
     assert settings_from_config({"log_level": "DEBUG"}).log_level == "DEBUG"
+
+
+def test_dotenv_file_overrides_profile_values(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """A ``.env`` entry beats a profile key for the same field."""
+    tmp_path.joinpath(".env").write_text("ATI_LOG_LEVEL=ERROR\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert settings_from_config({"log_level": "DEBUG"}).log_level == "ERROR"
+
+
+def test_process_environment_wins_over_dotenv_file(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Process ``ATI_*`` variables beat the same ``.env`` entry."""
+    tmp_path.joinpath(".env").write_text("ATI_LOG_LEVEL=ERROR\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ATI_LOG_LEVEL", "WARNING")
+    assert settings_from_config({"log_level": "DEBUG"}).log_level == "WARNING"
+
+
+def test_blank_environment_value_does_not_override_profile_or_default(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Empty ``ATI_*`` variables are treated as unset (env_ignore_empty)."""
+    monkeypatch.setenv("ATI_LOG_LEVEL", "")
+    assert settings_from_config({"log_level": "DEBUG"}).log_level == "DEBUG"
+    assert settings_from_config({}).log_level == "INFO"
+
+
+def test_blank_dotenv_value_does_not_override_profile_or_default(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Empty ``.env`` entries are treated as unset (env_ignore_empty)."""
+    tmp_path.joinpath(".env").write_text(
+        "ATI_LOG_LEVEL=\nATI_SESSION_IDLE_TIMEOUT_SECONDS=\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    assert settings_from_config({"log_level": "DEBUG"}).log_level == "DEBUG"
+    assert settings_from_config({}).session_idle_timeout_seconds is None
+
+
+def test_blank_environment_value_loses_to_nonblank_dotenv(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """A blank process variable does not mask a non-blank ``.env`` entry."""
+    tmp_path.joinpath(".env").write_text("ATI_LOG_LEVEL=ERROR\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ATI_LOG_LEVEL", "")
+    assert settings_from_config({"log_level": "DEBUG"}).log_level == "ERROR"
 
 
 def test_unpinned_fields_remain_environment_injectable(
