@@ -11,10 +11,12 @@ from __future__ import annotations
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
 import datetime
+import os
 import pathlib
 import uuid
 
 import pytest
+from _pytest.monkeypatch import MonkeyPatch
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -66,14 +68,28 @@ class _StaticSecretsResolver(SecretsResolver):
 async def _composed(
     tmp_path: pathlib.Path, artifact: bytes | None
 ) -> ProviderComposition:
-    """Compose the full provider stack over a written synthetic artifact."""
+    """Compose the full provider stack over a written synthetic artifact.
+
+    ``settings_from_config`` gives the environment precedence over profile
+    values, so the fixture ``data_dir``/artifact URI would be overridden by
+    an ambient ``ATI_DATA_DIR`` (the integration harness exports one) or by
+    a repo-root ``.env``. The settings are therefore built from a working
+    directory without a dotenv file and with those process variables
+    removed (see ``_isolate_fixture_settings``), keeping the fixture values
+    authoritative.
+    """
     uri = f"file://{tmp_path}/datasets/dbip-city-lite/city-lite.mmdb"
     store = FileSystemObjectStore(pathlib.Path(tmp_path) / "datasets")
     if artifact is not None:
         await store.write(uri, artifact)
-    settings = settings_from_config(
-        {"data_dir": str(tmp_path), "dbip_city_lite_artifact_uri": uri}
-    )
+    cwd = pathlib.Path.cwd()
+    os.chdir(tmp_path)
+    try:
+        settings = settings_from_config(
+            {"data_dir": str(tmp_path), "dbip_city_lite_artifact_uri": uri}
+        )
+    finally:
+        os.chdir(cwd)
     return await ProviderComposition.create(settings, secrets=_StaticSecretsResolver())
 
 
@@ -88,6 +104,19 @@ async def _lookup(composition: ProviderComposition, value: str) -> "ProviderResu
 
 class TestDbIpCityLiteIntegration:
     """End-to-end local geolocation lookups over the synthetic MMDB."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_fixture_settings(self, monkeypatch: MonkeyPatch) -> None:
+        """Prevent ambient data-dir settings from overriding fixture values.
+
+        The integration harness exports ``ATI_DATA_DIR`` for its Compose
+        bind mounts and a developer ``.env`` may set it too; under the
+        env-first configuration bridge the fixture ``data_dir`` would
+        otherwise lose and the synthetic artifact would appear to escape
+        the object-store root.
+        """
+        monkeypatch.delenv("ATI_DATA_DIR", raising=False)
+        monkeypatch.delenv("ATI_DBIP_CITY_LITE_ARTIFACT_URI", raising=False)
 
     @pytest.mark.asyncio
     async def test_ipv4_city_hit(self, tmp_path: pathlib.Path) -> None:
