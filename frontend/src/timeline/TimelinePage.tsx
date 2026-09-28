@@ -29,7 +29,7 @@ import { TableToolbar } from "../analyst-table/TableToolbar";
 import { Timestamp } from "../components/Timestamp";
 import { ShortId } from "../components/ShortId";
 import type { WorkspaceOutletContext } from "../investigations/InvestigationWorkspace";
-import { timelineEventTypeKey, TIMELINE_EVENT_TYPES } from "./labels";
+import { timelineEventTypeKey, timelineErrorCodeKey, timelineReasonCodeKey, TIMELINE_EVENT_TYPES } from "./labels";
 import { useTimelinePage } from "./timeline-queries";
 import {
   emptyTimelineFilters,
@@ -90,10 +90,10 @@ function eventSummary(t: Translate, event: TimelineEvent): string {
     parts.push(t("summary.entities", { count: String(event.entity_count) }));
   }
   if (event.error_code !== null) {
-    parts.push(`${t("summary.error")} ${event.error_code}`);
+    parts.push(`${t("summary.error")} ${t(timelineErrorCodeKey(event.error_code))}`);
   }
   if (event.reason_code !== null) {
-    parts.push(`${t("summary.reason")} ${event.reason_code}`);
+    parts.push(`${t("summary.reason")} ${t(timelineReasonCodeKey(event.reason_code))}`);
   }
   if (event.pivot_depth !== null) {
     parts.push(t("summary.pivotDepth", { depth: String(event.pivot_depth) }));
@@ -329,11 +329,21 @@ function detailBody(
         },
         {
           label: t("detail.errorCode"),
-          value: event.error_code ?? t("detail.nullable"),
+          value: (
+            <CodeValue
+              label={codeLabel(t, timelineErrorCodeKey, event.error_code)}
+              raw={event.error_code}
+            />
+          ),
         },
         {
           label: t("detail.reasonCode"),
-          value: event.reason_code ?? t("detail.nullable"),
+          value: (
+            <CodeValue
+              label={codeLabel(t, timelineReasonCodeKey, event.reason_code)}
+              raw={event.reason_code}
+            />
+          ),
         },
         {
           label: t("detail.eventId"),
@@ -342,6 +352,35 @@ function detailBody(
       ]}
     />
   );
+}
+
+/** Translated code label primary; raw code as secondary technical detail. */
+function CodeValue({
+  label,
+  raw,
+}: {
+  label: string;
+  raw: string | null;
+}): ReactElement {
+  if (raw === null) {
+    return <Typography variant="body2">—</Typography>;
+  }
+  const secondary = raw !== label ? ` (${raw})` : "";
+  return (
+    <Typography variant="body2" component="span" title={raw}>
+      {label}
+      {secondary}
+    </Typography>
+  );
+}
+
+/** Translated code label for one nullable code field. */
+function codeLabel(
+  t: (key: string) => string,
+  key: (code: string) => string,
+  code: string | null,
+): string {
+  return code === null ? "" : t(key(code));
 }
 
 /** The filter form controls (apply on Apply/Enter, not keystrokes). */
@@ -391,6 +430,7 @@ export function TimelineFiltersForm({
         value={draft.occurredFrom}
         onChange={(event) => form.setDraft({ ...draft, occurredFrom: event.target.value })}
         onKeyDown={enter}
+        slotProps={{ inputLabel: { shrink: true } }}
       />
       <TextField
         type="datetime-local"
@@ -399,6 +439,7 @@ export function TimelineFiltersForm({
         value={draft.occurredTo}
         onChange={(event) => form.setDraft({ ...draft, occurredTo: event.target.value })}
         onKeyDown={enter}
+        slotProps={{ inputLabel: { shrink: true } }}
       />
     </Box>
   );

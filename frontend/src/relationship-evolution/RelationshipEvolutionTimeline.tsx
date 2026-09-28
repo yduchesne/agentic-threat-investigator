@@ -64,8 +64,77 @@ export interface RelationshipEvolutionTimelineProps {
   /** Translated labels (including relationshipType via formatter). */
   labels: EvolutionTimelineLabels;
   typeLabel: (type: string) => string;
+  /** Translated Entity-type label (unknown values -> raw safe fallback). */
+  entityTypeLabel: (type: string) => string;
   hasNext: boolean;
   onActivate: (observationId: string) => void;
+}
+
+/**
+ * Analyst-facing semantic counterparty text of one lane.
+ *
+ * Human-readable first: the authoritative Entity type and value when the
+ * bounded read projection supplied them; a bare value without a type is
+ * still safe; missing metadata falls back to the compact technical identity
+ * (never an invented value).
+ */
+export function counterpartyText(
+  entityTypeLabel: (type: string) => string,
+  lane: {
+    counterpartyEntityType: string | null;
+    counterpartyEntityValue: string | null;
+    counterpartyEntityId: string | null;
+    relationshipId: string;
+  },
+): string {
+  const value =
+    lane.counterpartyEntityValue !== null && lane.counterpartyEntityValue.trim() !== ""
+      ? lane.counterpartyEntityValue
+      : null;
+  if (lane.counterpartyEntityType !== null) {
+    const typeText = entityTypeLabel(lane.counterpartyEntityType);
+    return value === null ? typeText : `${typeText} ${value}`;
+  }
+  if (value !== null) {
+    return value;
+  }
+  return `Entity ${shortUuid(lane.counterpartyEntityId ?? lane.relationshipId)}`;
+}
+
+/**
+ * Focal-relative endpoint presentation of one observation row (table path).
+ *
+ * Mirrors the lane-level :func:`counterpartyText`: authoritative entity
+ * type/value first, compact technical identity only as a fallback.
+ */
+function counterpartyRowText(
+  entityTypeLabel: (type: string) => string,
+  focalEntityId: string,
+  row: RelationshipObservation,
+): { text: string; id: string } {
+  const sourceId = row.relationship_source_entity_id ?? null;
+  const targetId = row.relationship_target_entity_id ?? null;
+  const id =
+    sourceId !== null && sourceId !== focalEntityId
+      ? sourceId
+      : targetId !== null && targetId !== focalEntityId
+        ? targetId
+        : (sourceId ?? targetId ?? row.relationship_id);
+  const sourceIsCounterparty = sourceId !== null && sourceId !== focalEntityId;
+  const type = sourceIsCounterparty
+    ? (row.relationship_source_entity_type ?? null)
+    : (row.relationship_target_entity_type ?? null);
+  const value = sourceIsCounterparty
+    ? (row.relationship_source_entity_value ?? null)
+    : (row.relationship_target_entity_value ?? null);
+  const cleanValue = value !== null && value.trim() !== "" ? value : null;
+  if (type !== null) {
+    return { text: cleanValue === null ? entityTypeLabel(type) : `${entityTypeLabel(type)} ${cleanValue}`, id };
+  }
+  if (cleanValue !== null) {
+    return { text: cleanValue, id };
+  }
+  return { text: `Entity ${shortUuid(id)}`, id };
 }
 
 /** The swimlane temporal surface plus an accessible table alternative. */
@@ -77,6 +146,7 @@ export function RelationshipEvolutionTimeline({
   rows,
   labels,
   typeLabel,
+  entityTypeLabel,
   hasNext,
   onActivate,
 }: RelationshipEvolutionTimelineProps): ReactElement {
@@ -92,12 +162,11 @@ export function RelationshipEvolutionTimeline({
     return labels.directionEither;
   };
   const counterpartyLabel = (lane: {
+    counterpartyEntityType: string | null;
+    counterpartyEntityValue: string | null;
     counterpartyEntityId: string | null;
     relationshipId: string;
-  }): string => {
-    const id = lane.counterpartyEntityId ?? lane.relationshipId;
-    return `Entity ${shortUuid(id)}`;
-  };
+  }): string => counterpartyText(entityTypeLabel, lane);
 
   return (
     <Box>
@@ -123,6 +192,7 @@ export function RelationshipEvolutionTimeline({
           rows={rows}
           labels={labels}
           typeLabel={typeLabel}
+          entityTypeLabel={entityTypeLabel}
           onActivate={onActivate}
         />
       ) : (
@@ -187,12 +257,14 @@ function ObservationTable({
   rows,
   labels,
   typeLabel,
+  entityTypeLabel,
   onActivate,
 }: {
   focalEntityId: string;
   rows: readonly RelationshipObservation[];
   labels: EvolutionTimelineLabels;
   typeLabel: (type: string) => string;
+  entityTypeLabel: (type: string) => string;
   onActivate: (observationId: string) => void;
 }): ReactElement {
   return (
@@ -233,7 +305,12 @@ function ObservationTable({
               </td>
               <td style={{ padding: 6 }}>{directionLabelFor(focalEntityId, row)}</td>
               <td style={{ padding: 6 }}>
-                <CompactId id={counterpartyIdFor(row)} label="Counterparty" />
+                <CounterpartyCell
+                  entityTypeLabel={entityTypeLabel}
+                  focalEntityId={focalEntityId}
+                  row={row}
+                  counterpartyColumn={labels.tableColumns.counterparty}
+                />
               </td>
               <td style={{ padding: 6 }}>{row.source}</td>
               <td style={{ padding: 6 }}>
@@ -273,7 +350,23 @@ function directionLabelFor(
   );
 }
 
-/** Best-effort counterparty of one row (labels only; may be a compact id). */
-function counterpartyIdFor(row: RelationshipObservation): string {
-  return row.relationship_target_entity_id ?? row.relationship_id;
+/** Semantic counterparty text + canonical identity in one table cell. */
+function CounterpartyCell({
+  entityTypeLabel,
+  focalEntityId,
+  row,
+  counterpartyColumn,
+}: {
+  entityTypeLabel: (type: string) => string;
+  focalEntityId: string;
+  row: RelationshipObservation;
+  counterpartyColumn: string;
+}): ReactElement {
+  const { text, id } = counterpartyRowText(entityTypeLabel, focalEntityId, row);
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+      <Box component="span">{text}</Box>
+      <CompactId id={id} label={counterpartyColumn} />
+    </Box>
+  );
 }

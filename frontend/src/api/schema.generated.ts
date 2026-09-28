@@ -1575,8 +1575,13 @@ export interface components {
          *     ``relationship_source_entity_id``, ``relationship_target_entity_id`` and
          *     ``relationship_type`` are stable denormalized fields sourced from the
          *     joined Relationship row (PR 24E) — they are response projections only,
-         *     never persisted duplicates. They are ``null`` only when the join cannot
-         *     resolve the edge, which cannot happen for normally written data.
+         *     never persisted duplicates. ``relationship_source_entity_type/value``
+         *     and ``relationship_target_entity_type/value`` (PR 31F-1) are endpoint
+         *     Entity presentation metadata sourced from the joined source/target
+         *     Entity rows — read-side projections only, never persisted duplicates
+         *     and never a substitute for canonical Entity identity. Joined fields are
+         *     ``null`` only when a join cannot resolve the row, which cannot happen
+         *     for normally written data.
          */
         RelationshipObservationResponse: {
             /** Confidence */
@@ -1602,8 +1607,14 @@ export interface components {
             relationship_id: string;
             /** Relationship Source Entity Id */
             relationship_source_entity_id?: string | null;
+            relationship_source_entity_type?: components["schemas"]["EntityType"] | null;
+            /** Relationship Source Entity Value */
+            relationship_source_entity_value?: string | null;
             /** Relationship Target Entity Id */
             relationship_target_entity_id?: string | null;
+            relationship_target_entity_type?: components["schemas"]["EntityType"] | null;
+            /** Relationship Target Entity Value */
+            relationship_target_entity_value?: string | null;
             relationship_type?: components["schemas"]["RelationshipType"] | null;
             /**
              * Retrieved At

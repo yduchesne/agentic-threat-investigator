@@ -54,6 +54,61 @@ describe("Relationship Evolution derived model", () => {
     expect(model.unavailable).toHaveLength(0);
   });
 
+  it("F1-U17: an outbound lane carries the counterparty Entity type/value", () => {
+    const model = buildEvolutionModel(FOCAL, [
+      outbound({
+        relationship_source_entity_type: "domain",
+        relationship_source_entity_value: "update-package.test",
+        relationship_target_entity_type: "ip_address",
+        relationship_target_entity_value: "192.0.2.1",
+      }),
+    ]);
+    expect(model.lanes[0].counterpartyEntityId).toBe(COUNTERPARTY);
+    expect(model.lanes[0].counterpartyEntityType).toBe("ip_address");
+    expect(model.lanes[0].counterpartyEntityValue).toBe("192.0.2.1");
+    expect(model.lanes[0].points[0].relationshipSourceEntityType).toBe("domain");
+    expect(model.lanes[0].points[0].relationshipTargetEntityValue).toBe("192.0.2.1");
+  });
+
+  it("F1-U18: an inbound lane projects the source Entity as counterparty", () => {
+    const model = buildEvolutionModel(FOCAL, [
+      inbound({
+        relationship_source_entity_type: "malware",
+        relationship_source_entity_value: "loader.test",
+        relationship_target_entity_type: "domain",
+        relationship_target_entity_value: "update-package.test",
+      }),
+    ]);
+    expect(model.lanes[0].direction).toBe("target");
+    expect(model.lanes[0].counterpartyEntityId).toBe(COUNTERPARTY);
+    expect(model.lanes[0].counterpartyEntityType).toBe("malware");
+    expect(model.lanes[0].counterpartyEntityValue).toBe("loader.test");
+  });
+
+  it("F1-U19: a self lane uses the focal endpoint metadata", () => {
+    const model = buildEvolutionModel(FOCAL, [
+      buildObservation({
+        relationship_source_entity_id: FOCAL,
+        relationship_target_entity_id: FOCAL,
+        relationship_source_entity_type: "domain",
+        relationship_source_entity_value: "update-package.test",
+        relationship_target_entity_type: "domain",
+        relationship_target_entity_value: "update-package.test",
+      }),
+    ]);
+    expect(model.lanes[0].direction).toBe("either");
+    expect(model.lanes[0].counterpartyEntityId).toBe(FOCAL);
+    expect(model.lanes[0].counterpartyEntityType).toBe("domain");
+    expect(model.lanes[0].counterpartyEntityValue).toBe("update-package.test");
+  });
+
+  it("F1-U20: missing endpoint metadata falls back without invented values", () => {
+    const model = buildEvolutionModel(FOCAL, [outbound()]);
+    expect(model.lanes[0].counterpartyEntityId).toBe(COUNTERPARTY);
+    expect(model.lanes[0].counterpartyEntityType).toBeNull();
+    expect(model.lanes[0].counterpartyEntityValue).toBeNull();
+  });
+
   it("E-D02: a target-focal observation forms an inbound lane", () => {
     const model = buildEvolutionModel(FOCAL, [inbound()]);
     expect(model.lanes[0].direction).toBe("target");

@@ -11,6 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 
@@ -34,8 +35,13 @@ class RelationshipObservationResponse(BaseModel):
     ``relationship_source_entity_id``, ``relationship_target_entity_id`` and
     ``relationship_type`` are stable denormalized fields sourced from the
     joined Relationship row (PR 24E) — they are response projections only,
-    never persisted duplicates. They are ``null`` only when the join cannot
-    resolve the edge, which cannot happen for normally written data.
+    never persisted duplicates. ``relationship_source_entity_type/value``
+    and ``relationship_target_entity_type/value`` (PR 31F-1) are endpoint
+    Entity presentation metadata sourced from the joined source/target
+    Entity rows — read-side projections only, never persisted duplicates
+    and never a substitute for canonical Entity identity. Joined fields are
+    ``null`` only when a join cannot resolve the row, which cannot happen
+    for normally written data.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -50,4 +56,8 @@ class RelationshipObservationResponse(BaseModel):
     confidence: float | None
     relationship_source_entity_id: UUID | None = None
     relationship_target_entity_id: UUID | None = None
+    relationship_source_entity_type: EntityType | None = None
+    relationship_source_entity_value: str | None = None
+    relationship_target_entity_type: EntityType | None = None
+    relationship_target_entity_value: str | None = None
     relationship_type: RelationshipType | None = None

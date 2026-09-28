@@ -20,6 +20,7 @@ import {
   Background,
   Controls,
   Handle,
+  MarkerType,
   Position,
   ReactFlow,
   useNodesState,
@@ -41,7 +42,11 @@ import { PivotMenu, type PivotLocalAction } from "../pivots/PivotMenu";
 import { entityActions } from "../pivots/pivot-capabilities";
 import { relationshipObservationsAction } from "../pivots/pivot-capabilities";
 import type { RelationshipDirectionName } from "../api/schema-types";
-import type { RelationshipGraphModel, RelationshipGraphNode } from "./relationship-graph-model";
+import type {
+  RelationshipGraphEdge,
+  RelationshipGraphModel,
+  RelationshipGraphNode,
+} from "./relationship-graph-model";
 import {
   layoutSize,
   positionsForExpandedNodes,
@@ -53,16 +58,29 @@ import { GraphRelationshipProvenance } from "./GraphRelationshipProvenance";
 
 /** One custom React Flow node backed by an exact Entity ID. */
 export type EvolutionNodeData = {
-  label: string;
-  role: "focal" | "counterparty";
+  /** Canonical Entity value (never synthesized from a UUID). */
+  entityValue: string;
   /** Visible entity-type cue (never a color-only differentiation). */
   entityTypeText: string;
+  /** Optional server display name; rendered only when distinct from value. */
+  displayName: string | null;
+  role: "focal" | "counterparty";
 } & Record<string, unknown>;
+
+/** The edge marker color matches React Flow's default edge stroke. */
+const EDGE_MARKER_COLOR = "#b1b1b7";
 
 const nodeTypes: NodeTypes = { evolutionNode: EvolutionGraphNode };
 
 function EvolutionGraphNode({ data }: NodeProps): ReactElement {
   const nodeData = data as EvolutionNodeData;
+  const value = nodeData.entityValue.trim();
+  const displayName =
+    nodeData.displayName !== null &&
+    nodeData.displayName.trim() !== "" &&
+    nodeData.displayName.trim() !== value
+      ? nodeData.displayName.trim()
+      : null;
   return (
     <Box
       sx={{
@@ -81,8 +99,20 @@ function EvolutionGraphNode({ data }: NodeProps): ReactElement {
         textOverflow: "ellipsis",
       }}
     >
-      <Handle type="target" position={Position.Top} />
-      {nodeData.label}
+      {/* Handle slots: canonical edge routing anchors (PR 31F-1). Each
+       * canonical Relationship gets a deterministic slot so parallel
+       * Relationships between the same endpoint pair draw visibly separated
+       * paths, and a canonical self-loop draws a visible arc instead of a
+       * zero-length sliver. Slot handles reuse the historical bottom/top
+       * idiom with distinct x offsets. */}
+      <Handle type="target" id="target-top-0" position={Position.Top} style={{ left: "50%" }} />
+      <Handle type="target" id="target-top-1" position={Position.Top} style={{ left: "25%" }} />
+      <Handle type="target" id="target-top-2" position={Position.Top} style={{ left: "75%" }} />
+      <Handle type="target" id="target-loop" position={Position.Top} style={{ left: "80%" }} />
+      <Handle type="source" id="source-bottom-0" position={Position.Bottom} style={{ left: "50%" }} />
+      <Handle type="source" id="source-bottom-1" position={Position.Bottom} style={{ left: "25%" }} />
+      <Handle type="source" id="source-bottom-2" position={Position.Bottom} style={{ left: "75%" }} />
+      <Handle type="source" id="source-loop" position={Position.Bottom} style={{ left: "20%" }} />
       <Box
         component="span"
         aria-label="Entity type"
@@ -97,7 +127,15 @@ function EvolutionGraphNode({ data }: NodeProps): ReactElement {
       >
         {nodeData.entityTypeText}
       </Box>
-      <Handle type="source" position={Position.Bottom} />
+      {value}
+      {displayName !== null ? (
+        <Box
+          component="span"
+          sx={{ display: "block", fontSize: 10, fontFamily: "sans-serif", opacity: 0.85 }}
+        >
+          {displayName}
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -160,9 +198,10 @@ export function RelationshipGraph({
         type: "evolutionNode",
         position: positions.focal,
         data: {
-          label: model.focal.label,
+          entityValue: model.focal.value,
           role: "focal",
           entityTypeText: entityTypeLabel(model.focal.entityType),
+          displayName: model.focal.displayName,
         },
       },
       ...model.counterparties.map((node) => ({
@@ -170,9 +209,10 @@ export function RelationshipGraph({
         type: "evolutionNode" as const,
         position: positions.counterparties.get(node.entityId) ?? { x: 0, y: 0 },
         data: {
-          label: node.label,
+          entityValue: node.value,
           role: node.role,
           entityTypeText: entityTypeLabel(node.entityType),
+          displayName: node.displayName,
         },
       })),
     ],
@@ -240,9 +280,10 @@ export function RelationshipGraph({
       return model.nodes.map((node) => {
         const id = nodeId(node.entityId);
         const data: EvolutionNodeData = {
-          label: node.label,
+          entityValue: node.value,
           role: node.role,
           entityTypeText: entityTypeLabel(node.entityType),
+          displayName: node.displayName,
         };
         const existing = byId.get(id);
         if (existing === undefined) {
@@ -259,14 +300,7 @@ export function RelationshipGraph({
   }, [setNodes, rootGraphKey, initialNodes, model, expansion.lastExpansion, entityTypeLabel]);
 
   const edges: Edge[] = useMemo(
-    () =>
-      model.edges.map((edge) => ({
-        id: edgeId(edge.relationshipId),
-        source: nodeId(edge.sourceEntityId),
-        target: nodeId(edge.targetEntityId),
-        label: typeLabel(edge.relationshipType),
-        type: "default",
-      })),
+    () => buildSlottedEdges(model.edges, typeLabel),
     [model.edges, typeLabel],
   );
 
@@ -565,6 +599,70 @@ export function edgeId(relationshipId: string): string {
 /** Reverse the edge id scheme; null for foreign ids. */
 export function relationshipIdFromEdgeId(id: string): string | null {
   return id.startsWith("e:") ? id.slice(2) : null;
+}
+
+/**
+ * Map every canonical Relationship to one explicitly routed React Flow edge.
+ *
+ * One canonical Relationship stays one edge. Edges sharing an endpoint pair
+ * (parallel Relationships, or a canonical self-loop) are separated through
+ * deterministic handle slots so every path is visibly rendered and each
+ * edge keeps an exact source/target node; slot 0 is the historical center
+ * route. A self-loop routes between distinct same-node handles so it draws a
+ * visible arc instead of a zero-length path. The deterministic arrow marker
+ * communicates direction without alternate topology.
+ */
+export function buildSlottedEdges(
+  edges: readonly RelationshipGraphEdge[],
+  typeLabel: (type: string) => string,
+): Edge[] {
+  const groups = new Map<string, RelationshipGraphEdge[]>();
+  for (const edge of edges) {
+    const key =
+      edge.sourceEntityId === edge.targetEntityId
+        ? `self:${edge.sourceEntityId}`
+        : [edge.sourceEntityId, edge.targetEntityId].sort().join("|");
+    const list = groups.get(key) ?? [];
+    list.push(edge);
+    groups.set(key, list);
+  }
+  const result: Edge[] = [];
+  for (const group of groups.values()) {
+    const ordered = [...group].sort((a, b) =>
+      a.relationshipId < b.relationshipId
+        ? -1
+        : a.relationshipId > b.relationshipId
+          ? 1
+          : 0,
+    );
+    ordered.forEach((edge, index) => {
+      if (edge.sourceEntityId === edge.targetEntityId) {
+        result.push({
+          id: edgeId(edge.relationshipId),
+          source: nodeId(edge.sourceEntityId),
+          target: nodeId(edge.targetEntityId),
+          sourceHandle: "source-loop",
+          targetHandle: "target-loop",
+          label: typeLabel(edge.relationshipType),
+          type: "default",
+          markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_MARKER_COLOR },
+        });
+        return;
+      }
+      const slot = index % 3;
+      result.push({
+        id: edgeId(edge.relationshipId),
+        source: nodeId(edge.sourceEntityId),
+        target: nodeId(edge.targetEntityId),
+        sourceHandle: slot === 0 ? "source-bottom-0" : slot === 1 ? "source-bottom-1" : "source-bottom-2",
+        targetHandle: slot === 0 ? "target-top-0" : slot === 1 ? "target-top-1" : "target-top-2",
+        label: typeLabel(edge.relationshipType),
+        type: "default",
+        markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_MARKER_COLOR },
+      });
+    });
+  }
+  return result;
 }
 
 /** Fallback compact graph label when a node is not on the page. */

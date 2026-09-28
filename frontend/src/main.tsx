@@ -9,7 +9,7 @@
 import { StrictMode, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { useTranslation } from "react-i18next";
-import { RouterProvider } from "react-router";
+import { RouterProvider } from "react-router/dom";
 
 import { AppProviders } from "./app/AppProviders";
 import { router } from "./app/router";
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     <StrictMode>
       <RootBoundary>
         <AppProviders>
-          <RouterProvider router={router} />
+          <RouterProvider router={router} useTransitions={false} />
         </AppProviders>
       </RootBoundary>
     </StrictMode>,

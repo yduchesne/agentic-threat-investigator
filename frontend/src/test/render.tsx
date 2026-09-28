@@ -46,7 +46,7 @@ export function renderAtPath(
   return {
     result: render(
       <AppProviders queryClient={queryClient}>
-        <RouterProvider router={routeTable} />
+        <RouterProvider router={routeTable} useTransitions={false} />
       </AppProviders>,
     ),
     queryClient,

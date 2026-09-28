@@ -40,24 +40,32 @@ export function isInvestigationNotFound(error: ApiError): boolean {
 /** Secondary workspace menu: History is not a primary tab (PR 24C §12). */
 function MoreMenu({ investigationId }: { investigationId: string }): ReactElement {
   const { t } = useTranslation("investigations");
-  const [open, setOpen] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const open = anchorEl !== null;
+  const close = (): void => setAnchorEl(null);
   return (
     <Box sx={{ display: "inline-block" }}>
       <Button
         size="small"
         variant="text"
-        onClick={() => setOpen(true)}
+        onClick={(event) => setAnchorEl(event.currentTarget)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? "investigation-more-menu" : undefined}
         sx={{ textTransform: "none", mr: 1 }}
       >
         {t("more.label")}
       </Button>
-      <Menu open={open} anchorEl={undefined} onClose={() => setOpen(false)}>
+      <Menu
+        id="investigation-more-menu"
+        open={open}
+        anchorEl={anchorEl}
+        onClose={close}
+      >
         <MenuItem
           component={RouterLink}
           to={`/investigations/${investigationId}/history`}
-          onClick={() => setOpen(false)}
+          onClick={close}
         >
           {t("more.history")}
         </MenuItem>

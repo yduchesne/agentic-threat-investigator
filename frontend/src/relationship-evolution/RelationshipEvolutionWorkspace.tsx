@@ -222,21 +222,30 @@ export function RelationshipEvolutionWorkspace({
       t("timeline.table.type"),
       t("timeline.table.direction"),
       t("timeline.table.counterparty"),
+      t("timeline.table.counterpartyType"),
+      t("timeline.table.counterpartyValue"),
+      t("timeline.table.counterpartyId"),
       t("timeline.table.source"),
       t("timeline.table.observedAt"),
       t("timeline.table.retrievedAt"),
       t("timeline.table.evidence"),
     ];
-    const rows = page.items.map((observation) => [
-      observation.id,
-      observation.relationship_type ?? "",
-      edgeDirectionName(filters.entityId, observation),
-      counterpartyIdOf(filters.entityId, observation),
-      observation.source,
-      observation.observed_at ?? "",
-      observation.retrieved_at,
-      observation.evidence_id,
-    ]);
+    const rows = page.items.map((observation) => {
+      const counterparty = counterpartyOfRow(filters.entityId, observation);
+      return [
+        observation.id,
+        observation.relationship_type ?? "",
+        edgeDirectionName(filters.entityId, observation),
+        counterparty.semantic,
+        counterparty.type ?? "",
+        counterparty.value ?? "",
+        counterparty.id,
+        observation.source,
+        observation.observed_at ?? "",
+        observation.retrieved_at,
+        observation.evidence_id,
+      ];
+    });
     downloadCsv(
       exportFilename("relationship-evolution", investigationId),
       buildCsv(header, rows),
@@ -400,6 +409,7 @@ export function RelationshipEvolutionWorkspace({
                     : t("empty.observations.title"),
                 }}
                 typeLabel={(type) => tRelationships(relationshipTypeKey(type))}
+                entityTypeLabel={graphEntityTypeLabel}
                 hasNext={hasNext}
                 onActivate={openSelection}
               />
@@ -646,4 +656,38 @@ function counterpartyIdOf(
     return target;
   }
   return source ?? target ?? observation.relationship_id;
+}
+
+/**
+ * One row's focal-relative counterparty: semantic type/value when the
+ * bounded projection supplied them, plus the canonical identity.
+ *
+ * ``semantic`` is the analyst-facing text (type + value, value, or the
+ * compact technical identity fallback); ``type``/``value`` carry the raw
+ * endpoint presentation fields for spreadsheets and ``id`` is the canonical
+ * counterparty UUID so no identity is lost in the export.
+ */
+function counterpartyOfRow(
+  focalEntityId: string,
+  observation: RelationshipObservation,
+): { id: string; type: string | null; value: string | null; semantic: string } {
+  const id = counterpartyIdOf(focalEntityId, observation);
+  const source = observation.relationship_source_entity_id ?? null;
+  const sourceIsCounterparty = source !== null && source !== focalEntityId;
+  const type = sourceIsCounterparty
+    ? (observation.relationship_source_entity_type ?? null)
+    : (observation.relationship_target_entity_type ?? null);
+  const value = sourceIsCounterparty
+    ? (observation.relationship_source_entity_value ?? null)
+    : (observation.relationship_target_entity_value ?? null);
+  if (type !== null && value !== null && value.trim() !== "") {
+    return { id, type, value, semantic: `${type} ${value}` };
+  }
+  if (type !== null) {
+    return { id, type, value, semantic: type };
+  }
+  if (value !== null && value.trim() !== "") {
+    return { id, type, value, semantic: value };
+  }
+  return { id, type, value, semantic: id };
 }

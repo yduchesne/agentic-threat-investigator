@@ -112,6 +112,15 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     const points = page.getByRole("button", { name: /observed 2026-/ });
     const pointCount = await points.count();
     expect(pointCount).toBeGreaterThanOrEqual(2);
+    // PR 31F-1: lane headings show the authoritative counterparty Entity
+    // type/value (the bounded read projection), never only a compact UUID.
+    const laneHeadings = page.locator("section[aria-label*=\"counterparty \"]");
+    const firstLaneAria = await laneHeadings.first().getAttribute("aria-label");
+    expect(firstLaneAria).toMatch(/counterparty (Domain|IP address|Malware|URL|ASN|Organization|Network prefix|Attack technique|Vulnerability) /);
+    // The raw compact identity remains secondary (copy control present).
+    await expect(
+      laneHeadings.first().getByRole("button", { name: /Copy ID/ }),
+    ).toBeVisible();
     // Retrieval time is secondary metadata on the same point, never merged.
     const firstPoint = points.first();
     await expect(firstPoint).toHaveAttribute(
@@ -200,6 +209,24 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(canvasNode).toBeVisible({ timeout: 20_000 });
     const canvasEdge = graphCanvas.locator(".react-flow__edge").first();
     await expect(canvasEdge).toBeVisible({ timeout: 20_000 });
+    // PR 31F-1: every canonical Relationship is a visibly rendered edge in a
+    // real browser — edge count matches the accessible list and each SVG path
+    // has real geometry (jsdom cannot measure React Flow).
+    const renderedEdges = await graphCanvas.locator(".react-flow__edge").count();
+    const listedRows = await graphList.locator("tbody tr").count();
+    expect(renderedEdges).toBe(listedRows);
+    const pathGeometries = await graphCanvas.evaluate((canvas) =>
+      Array.from(canvas.querySelectorAll(".react-flow__edge-path")).map((p) => p.getAttribute("d")),
+    );
+    expect(pathGeometries.length).toBe(listedRows);
+    for (const d of pathGeometries) {
+      expect(d).not.toBeNull();
+      expect((d ?? "").trim().length).toBeGreaterThan(0);
+    }
+    // Duplicate relationships between one endpoint pair must not collapse
+    // into one overlapping path: every rendered path is geometrically
+    // distinct.
+    expect(new Set(pathGeometries).size).toBe(listedRows);
     await expect.poll(() => graphNeighborhoodRequests.length).toBeGreaterThan(0);
     expect(relationshipsListRequests).toEqual([]);
     expect(observationRequests).toEqual([]);

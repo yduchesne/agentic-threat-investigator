@@ -25,6 +25,7 @@ from agentic_threat_investigator.app.query.pagination import (
     CursorEnvelope,
     filter_fingerprint,
 )
+from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipDirection,
@@ -207,9 +208,14 @@ class RelationshipObservationItem(BaseModel):
     immutable ``RelationshipObservation`` fields stay authoritative while
     ``relationship_source_entity_id``, ``relationship_target_entity_id`` and
     ``relationship_type`` are denormalized response fields sourced from the
-    joined stable ``Relationship`` row. They are ``None`` only when the join
-    could not resolve the edge, which cannot happen through the FK for
-    normally written data.
+    joined stable ``Relationship`` row. PR 31F-1 additionally joins the
+    source/target ``Entity`` rows so the analyst-facing Evolution surface can
+    present the endpoint Entity type/value without N+1 lookups; those
+    ``relationship_source_entity_*`` / ``relationship_target_entity_*``
+    fields are read-side presentation metadata only, never persisted
+    duplicates and never a substitute for the canonical Entity identity. All
+    joined fields are ``None`` only when a join could not resolve the row,
+    which cannot happen through the FKs for normally written data.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -224,6 +230,10 @@ class RelationshipObservationItem(BaseModel):
     confidence: float | None = None
     relationship_source_entity_id: UUID | None = None
     relationship_target_entity_id: UUID | None = None
+    relationship_source_entity_type: EntityType | None = None
+    relationship_source_entity_value: str | None = None
+    relationship_target_entity_type: EntityType | None = None
+    relationship_target_entity_value: str | None = None
     relationship_type: RelationshipType | None = None
 
     @classmethod
@@ -234,6 +244,10 @@ class RelationshipObservationItem(BaseModel):
         investigation_id: UUID | None = None,
         relationship_source_entity_id: UUID | None,
         relationship_target_entity_id: UUID | None,
+        relationship_source_entity_type: EntityType | None = None,
+        relationship_source_entity_value: str | None = None,
+        relationship_target_entity_type: EntityType | None = None,
+        relationship_target_entity_value: str | None = None,
         relationship_type: RelationshipType | None,
     ) -> "RelationshipObservationItem":
         """Build the joined read item from one observation and its edge.
@@ -257,6 +271,10 @@ class RelationshipObservationItem(BaseModel):
             confidence=observation.confidence,
             relationship_source_entity_id=relationship_source_entity_id,
             relationship_target_entity_id=relationship_target_entity_id,
+            relationship_source_entity_type=relationship_source_entity_type,
+            relationship_source_entity_value=relationship_source_entity_value,
+            relationship_target_entity_type=relationship_target_entity_type,
+            relationship_target_entity_value=relationship_target_entity_value,
             relationship_type=relationship_type,
         )
 

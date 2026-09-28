@@ -13,6 +13,7 @@
 // ``retrieved_at`` timestamp.
 
 import type {
+  EntityTypeName,
   RelationshipDirectionName,
   RelationshipObservation,
   RelationshipTypeName,
@@ -31,6 +32,11 @@ export interface EvolutionPoint {
   /** Joined stable Relationship semantics from the same page row. */
   relationshipSourceEntityId: string | null;
   relationshipTargetEntityId: string | null;
+  /** Endpoint Entity presentation metadata (PR 31F-1 read projection). */
+  relationshipSourceEntityType: EntityTypeName | null;
+  relationshipSourceEntityValue: string | null;
+  relationshipTargetEntityType: EntityTypeName | null;
+  relationshipTargetEntityValue: string | null;
   relationshipType: RelationshipTypeName | null;
 }
 
@@ -40,6 +46,9 @@ export interface EvolutionLane {
   relationshipId: string;
   relationshipType: RelationshipTypeName | null;
   counterpartyEntityId: string | null;
+  /** Endpoint presentation of the focal-relative counterparty (PR 31F-1). */
+  counterpartyEntityType: EntityTypeName | null;
+  counterpartyEntityValue: string | null;
   /** Direction of the lane relative to the focal entity. */
   direction: RelationshipDirectionName;
   points: EvolutionPoint[];
@@ -82,6 +91,10 @@ export function toEvolutionPoint(
     source: observation.source,
     relationshipSourceEntityId: observation.relationship_source_entity_id ?? null,
     relationshipTargetEntityId: observation.relationship_target_entity_id ?? null,
+    relationshipSourceEntityType: observation.relationship_source_entity_type ?? null,
+    relationshipSourceEntityValue: observation.relationship_source_entity_value ?? null,
+    relationshipTargetEntityType: observation.relationship_target_entity_type ?? null,
+    relationshipTargetEntityValue: observation.relationship_target_entity_value ?? null,
     relationshipType: observation.relationship_type ?? null,
   };
 }
@@ -148,10 +161,13 @@ export function buildEvolutionModel(
         point.relationshipSourceEntityId,
         point.relationshipTargetEntityId,
       );
+      const counterpartyMeta = counterpartyMetadata(focalEntityId, point);
       lane = {
         relationshipId: observation.relationship_id,
         relationshipType: observation.relationship_type ?? null,
         counterpartyEntityId: counterparty,
+        counterpartyEntityType: counterpartyMeta.type,
+        counterpartyEntityValue: counterpartyMeta.value,
         direction: edgeDirection(
           focalEntityId,
           point.relationshipSourceEntityId,
@@ -199,6 +215,47 @@ function counterpartyFor(
   // Self edge (or missing joined semantics): the only endpoint is the focal
   // entity itself — a deterministic single lane, never a synthesized value.
   return source ?? target;
+}
+
+/**
+ * Endpoint Entity presentation metadata of the focal-relative counterparty.
+ *
+ * The metadata matches the endpoint selected by :func:`counterpartyFor`:
+ * source side first, then target side, and the source-side metadata for a
+ * self edge (source and target are the same endpoint). Missing optional
+ * metadata falls back to ``null`` so renderers can fall back to the
+ * technical identity without inventing a value.
+ */
+function counterpartyMetadata(
+  focalEntityId: string,
+  point: EvolutionPoint,
+): { type: EntityTypeName | null; value: string | null } {
+  const source = point.relationshipSourceEntityId;
+  const target = point.relationshipTargetEntityId;
+  if (source !== null && source !== focalEntityId) {
+    return {
+      type: point.relationshipSourceEntityType,
+      value: point.relationshipSourceEntityValue,
+    };
+  }
+  if (target !== null && target !== focalEntityId) {
+    return {
+      type: point.relationshipTargetEntityType,
+      value: point.relationshipTargetEntityValue,
+    };
+  }
+  if (source !== null) {
+    // Self edge: source is the only endpoint (== focal); its metadata is
+    // the focal metadata.
+    return {
+      type: point.relationshipSourceEntityType,
+      value: point.relationshipSourceEntityValue,
+    };
+  }
+  return {
+    type: point.relationshipTargetEntityType,
+    value: point.relationshipTargetEntityValue,
+  };
 }
 
 /** Stable ordering of optional UUID strings (null sorts last). */

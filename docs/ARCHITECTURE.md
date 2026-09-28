@@ -138,6 +138,21 @@ backed by i18next/react-i18next (English first). Investment in Investigation
 workflow (PR 24B), analyst tables (PR 24C), pivots (PR 24D) and relationship
 visualization (PR 24E) builds on this foundation.
 
+**Human-readable-first presentation (PR 31F-1).** Analyst-facing surfaces
+present semantic values and translated labels before canonical IDs and raw
+codes. Known backend/generated enums (Entity types, Relationship types,
+Timeline event types, stop reasons, pivot rejection reasons, provider error
+codes) map through explicit i18next keys inside feature namespaces — never
+through mechanical underscore replacement or generic prettifiers.
+Unknown/future values fail safe by rendering the raw value. Canonical
+UUIDs and raw enum strings remain available on explicit detail/inspection
+surfaces (for example `Fatal error (fatal_error)`, compact copyable
+identifiers). The browser never synthesizes a human-readable Entity value
+from a UUID, and the router runs with synchronous commits
+(`RouterProvider useTransitions={false}` from `react-router/dom`) so
+URL-backed drawer/menu navigation re-renders deterministically in real
+browsers.
+
 ### Server-driven analyst browsing (PR 24C)
 
 PR 24C adds one reusable server-driven tabular browsing and detail
@@ -306,6 +321,16 @@ Architectural decisions:
   (`relationship_source_entity_id`, `relationship_target_entity_id`,
   `relationship_type`) as public projection fields — there is no N+1
   Relationship detail loading;
+- PR 31F-1 adds the endpoint Entity presentation metadata to that same
+  read projection: `relationship_source_entity_type/value` and
+  `relationship_target_entity_type/value` come from the joined source/target
+  Entity rows (explicit SQLAlchemy aliases in the one bounded query), so the
+  Evolution lanes, table alternative and CSV can present the authoritative
+  counterparty Entity type/value without N+1 Entity lookups and without
+  persisted duplicates. The projection is read-side only: no migration, no
+  domain change, and no new endpoint; missing endpoint rows leave the
+  metadata `null` (renderers fall back to the compact technical identity,
+  never an invented value);
 - cursor identity includes the new semantic filters; changing any
   Evolution filter resets the cursor, and a cursor from another focal
   entity/direction/type fails with the existing
@@ -1282,15 +1307,22 @@ Architectural decisions:
   and never added to URL/domain state. A refresh may restore the
   deterministic radial initial layout;
 - **node semantics come from `GraphNode`**: `entity_type`, `value` and
-  `display_name` are rendered exactly as returned (label = non-empty
-  `display_name`, else `value`); no N+1 Entity requests and no type
-  inference from values or Relationship types. Entity types are
+  `display_name` are rendered exactly as returned; the canvas node shows the
+  translated Entity type, the canonical value, and the display name only
+  when it is non-empty and distinct from the value (PR 31F-1: explicit node
+  data `entityValue`/`entityTypeText`/`displayName`; no N+1 Entity requests
+  and no type inference from values or Relationship types). Entity types are
   differentiated with visible text, never color alone;
 - **one `GraphEdgeResponse` = one rendered edge**: `observation_count`,
   `first_observed_at` and `last_observed_at` are copied exactly; null
   observed times render unavailable and `retrieved_at` is never
   substituted. RelationshipObservation records are provenance/temporal
-  support, never additional edges, lifetimes, or start/end claims;
+  support, never additional edges, lifetimes, or start/end claims. PR 31F-1
+  routes every canonical Relationship to its own React Flow edge through
+  deterministic handle slots, so parallel Relationships between the same
+  endpoint pair render visibly separated paths and a canonical self-loop
+  draws a visible arc; the arrow marker communicates direction without
+  alternate topology;
 - **read-only one-hop surface**: pan/zoom/fit, node/edge selection,
   Relationship labels, and functional node dragging (through React Flow's
   controlled change path) are local UI state. Selection never expands the

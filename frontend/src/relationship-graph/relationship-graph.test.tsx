@@ -34,7 +34,8 @@ import {
   uuidAt,
 } from "../test/handlers";
 import { entityTypeLabelKey } from "./relationship-graph-presentation";
-import { nodeId } from "./RelationshipGraph";
+import { buildSlottedEdges, edgeId, nodeId, relationshipIdFromEdgeId } from "./RelationshipGraph";
+import { buildGraphModel } from "./relationship-graph-model";
 
 useHttp();
 
@@ -837,5 +838,147 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     fireEvent.click(screen.getByRole("table", { name: "Relationship list (this page)" }));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(rendered.recorder.length).toBe(rootRequestCount);
+  });
+});
+
+describe("Relationship Graph edge routing (PR 31F-1 F1-U28/U29)", () => {
+  const FOCAL_2 = "40000000-0000-4000-8000-000000000201";
+  const B_2 = "40000000-0000-4000-8000-000000000202";
+  const C_2 = "40000000-0000-4000-8000-000000000203";
+  const R_1 = "40000000-0000-4000-8000-000000000031";
+  const R_2 = "40000000-0000-4000-8000-000000000032";
+  const R_3 = "40000000-0000-4000-8000-000000000033";
+
+  /** Project server-shaped edges through the canonical model mapper. */
+  function projectEdges(raw: Parameters<typeof buildGraphEdge>[0][]) {
+    const edges = raw.map((override) => buildGraphEdge(override));
+    const model = buildGraphModel(FOCAL_2, buildGraphNeighborhood({ nodes: [], edges }));
+    return model.edges;
+  }
+
+  it("maps every canonical Relationship to one edge with the exact source/target node ids and a direction marker", () => {
+    const edges = buildSlottedEdges(
+      projectEdges([
+        buildGraphEdge({
+          relationship_id: R_1,
+          source_entity_id: FOCAL_2,
+          target_entity_id: B_2,
+        }),
+        buildGraphEdge({
+          relationship_id: R_2,
+          source_entity_id: B_2,
+          target_entity_id: C_2,
+        }),
+      ]),
+      (type) => type,
+    );
+    expect(edges).toHaveLength(2);
+    const first = edges.find((edge) => edge.id === edgeId(R_1));
+    expect(first?.source).toBe(`n:${FOCAL_2}`);
+    expect(first?.target).toBe(`n:${B_2}`);
+    expect(first?.sourceHandle).toBe("source-bottom-0");
+    expect(first?.targetHandle).toBe("target-top-0");
+    const second = edges.find((edge) => edge.id === edgeId(R_2));
+    expect(second?.source).toBe(`n:${B_2}`);
+    expect(second?.target).toBe(`n:${C_2}`);
+    // Every non-self edge carries an arrow marker for direction.
+    expect(first?.markerEnd).toBeDefined();
+    expect(second?.markerEnd).toBeDefined();
+  });
+
+  it("separates parallel Relationships between one endpoint pair into distinct handle slots (F1-U28)", () => {
+    const edges = buildSlottedEdges(
+      projectEdges([
+        buildGraphEdge({ relationship_id: R_1, source_entity_id: FOCAL_2, target_entity_id: B_2 }),
+        buildGraphEdge({ relationship_id: R_2, source_entity_id: FOCAL_2, target_entity_id: B_2 }),
+        buildGraphEdge({ relationship_id: R_3, source_entity_id: FOCAL_2, target_entity_id: B_2 }),
+      ]),
+      (type) => type,
+    );
+    expect(edges).toHaveLength(3);
+    const handles = edges.map((edge) => `${edge.sourceHandle ?? ""}>${edge.targetHandle ?? ""}`);
+    expect(new Set(handles).size).toBe(3);
+    // Deterministic: sorted by relationship id, slot 0 is the center route.
+    expect(handles[0]).toBe("source-bottom-0>target-top-0");
+  });
+
+  it("routes a canonical self-loop through distinct same-node handles (F1-U28)", () => {
+    const edges = buildSlottedEdges(
+      projectEdges([
+        buildGraphEdge({ relationship_id: R_1, source_entity_id: FOCAL_2, target_entity_id: FOCAL_2 }),
+      ]),
+      (type) => type,
+    );
+    expect(edges).toHaveLength(1);
+    expect(edges[0].source).toBe(`n:${FOCAL_2}`);
+    expect(edges[0].target).toBe(`n:${FOCAL_2}`);
+    expect(edges[0].sourceHandle).toBe("source-loop");
+    expect(edges[0].targetHandle).toBe("target-loop");
+    expect(edges[0].markerEnd).toBeDefined();
+  });
+
+  it("keeps selection resolvable to the canonical Relationship id (F1-U29)", () => {
+    const edges = buildSlottedEdges(
+      projectEdges([
+        buildGraphEdge({ relationship_id: R_1, source_entity_id: FOCAL_2, target_entity_id: B_2 }),
+      ]),
+      (type) => type,
+    );
+    expect(relationshipIdFromEdgeId(edges[0].id)).toBe(R_1);
+  });
+});
+
+describe("Relationship Graph node presentation (PR 31F-1 F1-U24..U26, U31)", () => {
+  const DISPLAY_VALUE = "update-package.test";
+
+  it("F1-U26: a distinct display name renders alongside the canonical value and type", async () => {
+    const neighborsCall = buildGraphNeighborhood({
+      nodes: [
+        buildGraphNode({
+          entity_id: FOCAL,
+          entity_type: "domain",
+          value: DISPLAY_VALUE,
+          display_name: "Update Package Service",
+        }),
+        buildGraphNode({
+          entity_id: B,
+          entity_type: "ip_address",
+          value: "203.0.113.10",
+          display_name: "203.0.113.10",
+        }),
+      ],
+      edges: [
+        buildGraphEdge({
+          relationship_id: RELATIONSHIP,
+          source_entity_id: FOCAL,
+          target_entity_id: B,
+          observation_count: 1,
+        }),
+      ],
+    });
+    setHttpHandlers(
+      authMeSuccess,
+      runtimeFake,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      graphNeighborhoodHandler({
+        neighborhood: neighborsCall,
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(graphEntry());
+    const canvas = await screen.findByRole("group", { name: "Relationship graph (one-hop)" });
+    // Hierarchy: translated type + canonical value + distinct display name.
+    expect(await within(canvas).findByText("Domain")).toBeInTheDocument();
+    expect(within(canvas).getByText("update-package.test")).toBeInTheDocument();
+    expect(within(canvas).getByText("Update Package Service")).toBeInTheDocument();
+    // A display name equal to the value is deduplicated (not rendered twice).
+    expect(within(canvas).getAllByText("203.0.113.10")).toHaveLength(1);
+    expect(within(canvas).getByText("IP address")).toBeInTheDocument();
+  });
+
+  it("F1-U31: an unknown Entity type fails safely to the raw value", async () => {
+    expect(entityTypeLabelKey("future_entity_type" as never)).toBe("future_entity_type");
   });
 });

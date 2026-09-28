@@ -48,7 +48,7 @@ export interface RelationshipEvolutionLaneProps {
   directionLabel: string;
   /** Translated relationship type label (unknown -> raw URN fallback). */
   typeLabel: string;
-  /** Bounded analyst-facing counterparty label (value or compact ID). */
+  /** Analyst-facing counterparty text (Entity type/value or ID fallback). */
   counterpartyLabel: string;
   onActivate: (observationId: string) => void;
 }
@@ -82,7 +82,13 @@ export function RelationshipEvolutionLane({
         <Box component="span" sx={{ mr: 1 }}>
           {typeLabel}
         </Box>
-        <CompactId id={lane.counterpartyEntityId ?? lane.relationshipId} label={counterpartyLabel} />
+        <Box component="span" sx={{ mr: 1 }}>
+          {counterpartyLabel}
+        </Box>
+        <CompactId
+          id={lane.counterpartyEntityId ?? lane.relationshipId}
+          label={counterpartyLabel}
+        />
         <Box component="span" sx={{ ml: 1, color: "text.secondary" }}>
           {lane.points.length}
         </Box>

@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import type { Investigation } from "../api/schema-types";
 import { Timestamp } from "../components/Timestamp";
 import { InvestigationStatusBadge } from "./InvestigationStatusBadge";
+import { stopReasonLabelKey } from "./investigation-stop-reason";
 
 export interface InvestigationHeaderProps {
   investigation: Investigation | null;
@@ -80,7 +81,9 @@ export function InvestigationHeader({
         ) : null}
         {investigation.stop_reason !== null ? (
           <Typography variant="body2">
-            {t("header.stopReason", { reason: investigation.stop_reason })}
+            {t("header.stopReason", {
+              reason: t(stopReasonLabelKey(investigation.stop_reason)),
+            })}
           </Typography>
         ) : null}
         <Availability

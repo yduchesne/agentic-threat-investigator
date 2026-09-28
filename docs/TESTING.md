@@ -2876,6 +2876,30 @@ deterministic offline LLM boundary. PR 24C coverage (frontend/e2e):
   (`test-results/analyst-session.json`) that the PR 24D suite reuses
   without an additional login.
 
+PR 31F-1 adds the following real-browser regression coverage
+(`frontend/e2e/zz-relationship-evolution.spec.ts`):
+
+- **Timeline/relations drawer close**: opening an event/observation detail
+  from the analyst table and closing it through `✕`, Escape and the
+  backdrop each removes `selected`, preserves the active filters and page,
+  and reopening works — the URL-backed drawer never reloads and never
+  re-fetches the list;
+- **graph edges are visibly rendered in Chromium**: for the canonical
+  fake-world multi-node neighborhood, every `.react-flow__edge` SVG path
+  connects its exact source/target node (count matches the loaded edge
+  list), the translated Relationship label and direction arrow are
+  visible, and selecting an edge resolves its exact canonical
+  Relationship with provenance preserved. jsdom alone is insufficient
+  (React Flow needs a real layout engine), so the check lives in the
+  real-browser suite;
+- **Firefox datetime controls**: the native `datetime-local` filter labels
+  stay visually separate (shrunk) both empty and populated, and the native
+  controls remain usable; the same assertion covers Chromium;
+- **no-N+1 Evolution invariant**: the Evolution workspace issues exactly
+  the bounded observation page for its endpoint metadata — the request
+  list shows no per-row Entity/Relationship lookups and no fallback
+  topology requests.
+
 ### Cross-resource pivots and provenance navigation (PR 24D)
 
 Separate generated-schema-projected pivot steps from router-backed page
