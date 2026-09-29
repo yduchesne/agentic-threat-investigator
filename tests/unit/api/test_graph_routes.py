@@ -21,6 +21,9 @@ from agentic_threat_investigator.app.query.graph import (
     GraphNode,
     GraphResult,
 )
+from agentic_threat_investigator.app.query.relationships import (
+    RelationshipReadItem,
+)
 from agentic_threat_investigator.config import Settings
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.relationships import (
@@ -429,7 +432,15 @@ def test_g31c_r16_graph_relationship_id_works_with_existing_detail() -> None:
         type=RelationshipType.RESOLVES_TO,
     )
     bundle.graph.result = _result()
-    bundle.relationships.gets[(INVESTIGATION, edge.relationship_id)] = relationship
+    bundle.relationships.gets[(INVESTIGATION, edge.relationship_id)] = (
+        RelationshipReadItem(
+            relationship=relationship,
+            source_entity_type=EntityType.DOMAIN,
+            source_entity_value="update-package.test",
+            target_entity_type=EntityType.MALWARE,
+            target_entity_value="malware.badloader_v2",
+        )
+    )
     with build_test_app(bundle=bundle) as client:
         login_client(client)
         graph_response = client.get(

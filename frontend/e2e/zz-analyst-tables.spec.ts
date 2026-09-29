@@ -99,10 +99,13 @@ test.describe("PR 24C real-stack analyst browsing", () => {
     const investigationId = await completeF02Investigation(page);
     const base = `/investigations/${investigationId}`;
 
-    // Evidence: bounded server table with the persisted rows.
+    // Evidence: bounded server table with the persisted rows. PR 31F-5
+    // journey 4: the Subject cell shows the canonical value with the
+    // translated Entity type adjacent (UUIDs are never the primary text).
     await page.getByRole("tab", { name: "Evidence" }).click();
     await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible();
     await expect(page.getByText(F02_ROOT_DOMAIN).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Domain").first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Observed at", { exact: true }).first()).toBeVisible();
 
     // A real exact filter applied through the URL-backed contract; the
@@ -125,12 +128,15 @@ test.describe("PR 24C real-stack analyst browsing", () => {
     await page.goto(evidenceUrl);
     await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10_000 });
 
-    // Relationships: stable edges with analyst labels.
+    // Relationships: stable edges with analyst labels. PR 31F-5 journey 4:
+    // source/target cells lead with value/type, never the compact UUID.
     await page.getByRole("tab", { name: "Relationships" }).click();
     await expect(
       page.getByRole("heading", { name: "Relationships" }),
     ).toBeVisible();
     await expect(page.getByText("Resolves to").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Domain").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Malware").first()).toBeVisible({ timeout: 30_000 });
 
     // Detail: the stable edge plus a bounded observation preview.
     await page.getByRole("button", { name: /View / }).first().click();

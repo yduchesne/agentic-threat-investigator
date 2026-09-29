@@ -170,6 +170,9 @@ function ActionMenu({
         (position - 1 + enabledIndices.length) % enabledIndices.length
       ];
     } else if (event.key === "Escape" || event.key === "Tab") {
+      // Topmost-only dismissal: consume the key so an enclosing detail
+      // drawer and PivotWorkspace never also close (PR 31F-5 ND02).
+      event.stopPropagation();
       event.preventDefault();
       setOpen(false);
       triggerRef.current?.focus();

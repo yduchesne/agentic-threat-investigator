@@ -16,13 +16,26 @@ from agentic_threat_investigator.domain.relationships import RelationshipType
 
 
 class RelationshipResponse(BaseModel):
-    """One stable relationship edge visible to an Investigation."""
+    """One stable relationship edge visible to an Investigation.
+
+    ``source_entity_type``/``source_entity_value`` and
+    ``target_entity_type``/``target_entity_value`` (PR 31F-5) are endpoint
+    Entity presentation metadata sourced from the joined source/target
+    Entity rows — read-side projections only, never persisted duplicates
+    and never a substitute for the canonical Entity identity. Joined
+    fields are ``null`` only when a join could not resolve the row, which
+    cannot happen for normally written data.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: UUID
     source_entity_id: UUID
+    source_entity_type: EntityType | None = None
+    source_entity_value: str | None = None
     target_entity_id: UUID
+    target_entity_type: EntityType | None = None
+    target_entity_value: str | None = None
     type: RelationshipType
 
 

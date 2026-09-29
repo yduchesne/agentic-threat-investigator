@@ -70,6 +70,12 @@ describe("Relationships page", () => {
     );
     renderAtPath(REL_BASE);
     await screen.findByText("Resolves to");
+    // PR 31F-5 EP03: source/target show value + translated type before the
+    // compact UUID; both ends use identical organization.
+    expect(screen.getByText("update-package.test")).toBeInTheDocument();
+    expect(screen.getByText("Domain")).toBeInTheDocument();
+    expect(screen.getByText("malware.badloader_v2")).toBeInTheDocument();
+    expect(screen.getByText("Malware")).toBeInTheDocument();
     // Compact entity ids with the full value in the tooltip.
     expect(screen.getByTitle("40000000-0000-4000-8000-000000000101")).toBeInTheDocument();
     expect(screen.getByTitle("40000000-0000-4000-8000-000000000102")).toBeInTheDocument();
@@ -124,6 +130,10 @@ describe("Relationships page", () => {
     renderAtPath(REL_BASE);
     await screen.findByText("Resolves to");
     await userEvent.click(screen.getByRole("button", { name: /View 40000000/ }));
+    // PR 31F-5 EP04: detail presents value/type before the canonical IDs.
+    expect(await screen.findByRole("heading", { name: "Source entity" })).toBeInTheDocument();
+    expect(screen.getAllByText("update-package.test").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Malware").length).toBeGreaterThan(0);
     expect(await screen.findByText(/Observations \(first page\)/)).toBeInTheDocument();
     expect(
       screen.getByTitle("2026-06-01T09:00:00Z"),

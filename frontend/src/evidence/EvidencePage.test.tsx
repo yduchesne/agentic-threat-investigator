@@ -69,7 +69,10 @@ describe("Evidence page", () => {
       pagedResourceHandler({ path: "*/api/v1/investigations/:id/evidence", pages: [[evidenceA()]], recorder }),
     );
     renderAtPath(BASE);
+    // PR 31F-5 EP01: the Subject cell shows value + translated Entity type
+    // immediately adjacent (no separate type column, no UUID as primary).
     expect(await screen.findByText("update-package.test")).toBeInTheDocument();
+    expect(screen.getByText("Domain")).toBeInTheDocument();
     expect(screen.getByText("DNS")).toBeInTheDocument();
     expect(screen.getByText("fake-dns")).toBeInTheDocument();
     expect(screen.getByTitle("2026-06-01T09:00:00Z")).toBeInTheDocument();

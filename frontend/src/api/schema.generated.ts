@@ -570,7 +570,9 @@ export interface paths {
          *     ``entity_id`` (PR 24E) selects the bounded one-hop neighborhood of one
          *     focal entity: source-or-target OR semantics applied on the server, and
          *     it intersects normally with the other filters. Soft-deleted edges stay
-         *     excluded exactly as before.
+         *     excluded exactly as before. Response rows additionally carry the
+         *     joined endpoint Entity presentation metadata (source/target type and
+         *     value, PR 31F-5) so the browser never issues one Entity GET per edge.
          */
         get: operations["list_relationships"];
         put?: never;
@@ -591,6 +593,10 @@ export interface paths {
         /**
          * Get Relationship
          * @description Return one Relationship visible to the path Investigation.
+         *
+         *     The response carries the same joined endpoint Entity presentation
+         *     metadata (source/target type and value, PR 31F-5) as the list; missing
+         *     and cross-Investigation IDs map to the same stable scoped 404.
          */
         get: operations["get_relationship"];
         put?: never;
@@ -718,6 +724,31 @@ export interface paths {
         get: operations["get_research_result"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/investigations/{investigation_id}/support-presentations/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Support Presentations
+         * @description Resolve one bounded set of support IDs into presentation metadata.
+         *
+         *     Investigation scope is mandatory: every requested ID resolves only
+         *     through exact admission into the path Investigation, so
+         *     cross-Investigation IDs fail closed (absent) and the raw provider
+         *     payload never crosses the API boundary.
+         */
+        post: operations["resolve_support_presentations"];
         delete?: never;
         options?: never;
         head?: never;
@@ -963,6 +994,25 @@ export interface components {
             /** Subject Value */
             subject_value?: string | null;
             type: components["schemas"]["EvidenceType"];
+        };
+        /**
+         * EvidenceSupportPresentationResponse
+         * @description One Evidence support presentation (semantic description first).
+         */
+        EvidenceSupportPresentationResponse: {
+            /**
+             * Evidence Observation Id
+             * Format: uuid
+             */
+            evidence_observation_id: string;
+            evidence_type: components["schemas"]["EvidenceType"];
+            /** Source */
+            source: string;
+            /** Subject Entity Id */
+            subject_entity_id?: string | null;
+            subject_entity_type?: components["schemas"]["EntityType"] | null;
+            /** Subject Entity Value */
+            subject_entity_value?: string | null;
         };
         /**
          * EvidenceType
@@ -1625,8 +1675,51 @@ export interface components {
             source: string;
         };
         /**
+         * RelationshipObservationSupportPresentationResponse
+         * @description One RelationshipObservation support presentation (semantic edge first).
+         */
+        RelationshipObservationSupportPresentationResponse: {
+            /** Observed At */
+            observed_at?: string | null;
+            /**
+             * Relationship Id
+             * Format: uuid
+             */
+            relationship_id: string;
+            /**
+             * Relationship Observation Id
+             * Format: uuid
+             */
+            relationship_observation_id: string;
+            relationship_type: components["schemas"]["RelationshipType"];
+            /**
+             * Source Entity Id
+             * Format: uuid
+             */
+            source_entity_id: string;
+            source_entity_type?: components["schemas"]["EntityType"] | null;
+            /** Source Entity Value */
+            source_entity_value?: string | null;
+            /**
+             * Target Entity Id
+             * Format: uuid
+             */
+            target_entity_id: string;
+            target_entity_type?: components["schemas"]["EntityType"] | null;
+            /** Target Entity Value */
+            target_entity_value?: string | null;
+        };
+        /**
          * RelationshipResponse
          * @description One stable relationship edge visible to an Investigation.
+         *
+         *     ``source_entity_type``/``source_entity_value`` and
+         *     ``target_entity_type``/``target_entity_value`` (PR 31F-5) are endpoint
+         *     Entity presentation metadata sourced from the joined source/target
+         *     Entity rows — read-side projections only, never persisted duplicates
+         *     and never a substitute for the canonical Entity identity. Joined
+         *     fields are ``null`` only when a join could not resolve the row, which
+         *     cannot happen for normally written data.
          */
         RelationshipResponse: {
             /**
@@ -1639,11 +1732,17 @@ export interface components {
              * Format: uuid
              */
             source_entity_id: string;
+            source_entity_type?: components["schemas"]["EntityType"] | null;
+            /** Source Entity Value */
+            source_entity_value?: string | null;
             /**
              * Target Entity Id
              * Format: uuid
              */
             target_entity_id: string;
+            target_entity_type?: components["schemas"]["EntityType"] | null;
+            /** Target Entity Value */
+            target_entity_value?: string | null;
             type: components["schemas"]["RelationshipType"];
         };
         /**
@@ -1859,6 +1958,32 @@ export interface components {
             operating_mode: string;
         };
         /**
+         * SupportPresentationRequest
+         * @description The finite requested support-ID sets of one loaded artifact.
+         */
+        SupportPresentationRequest: {
+            /** Evidence Observation Ids */
+            evidence_observation_ids?: string[];
+            /** Relationship Observation Ids */
+            relationship_observation_ids?: string[];
+        };
+        /**
+         * SupportPresentationResponse
+         * @description The resolved presentation map keyed by request (indexed by ID).
+         */
+        SupportPresentationResponse: {
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["EvidenceSupportPresentationResponse"][];
+            /**
+             * Relationship Observations
+             * @default []
+             */
+            relationship_observations: components["schemas"]["RelationshipObservationSupportPresentationResponse"][];
+        };
+        /**
          * TimelineEventResponse
          * @description One safe observable workflow event.
          */
@@ -1967,6 +2092,7 @@ export type CreateInvestigationRequest = components['schemas']['CreateInvestigat
 export type CreateInvestigationResponse = components['schemas']['CreateInvestigationResponse'];
 export type EntityType = components['schemas']['EntityType'];
 export type EvidenceResponse = components['schemas']['EvidenceResponse'];
+export type EvidenceSupportPresentationResponse = components['schemas']['EvidenceSupportPresentationResponse'];
 export type EvidenceType = components['schemas']['EvidenceType'];
 export type FindingCategory = components['schemas']['FindingCategory'];
 export type FindingDisposition = components['schemas']['FindingDisposition'];
@@ -2010,6 +2136,7 @@ export type PageResponseResearchResultResponse = components['schemas']['PageResp
 export type PageResponseTimelineEventResponse = components['schemas']['PageResponse_TimelineEventResponse_'];
 export type RelationshipDirection = components['schemas']['RelationshipDirection'];
 export type RelationshipObservationResponse = components['schemas']['RelationshipObservationResponse'];
+export type RelationshipObservationSupportPresentationResponse = components['schemas']['RelationshipObservationSupportPresentationResponse'];
 export type RelationshipResponse = components['schemas']['RelationshipResponse'];
 export type RelationshipType = components['schemas']['RelationshipType'];
 export type ReportFindingResponse = components['schemas']['ReportFindingResponse'];
@@ -2020,6 +2147,8 @@ export type ResearchClaimRefResponse = components['schemas']['ResearchClaimRefRe
 export type ResearchClaimResponse = components['schemas']['ResearchClaimResponse'];
 export type ResearchResultResponse = components['schemas']['ResearchResultResponse'];
 export type RuntimeInfoResponse = components['schemas']['RuntimeInfoResponse'];
+export type SupportPresentationRequest = components['schemas']['SupportPresentationRequest'];
+export type SupportPresentationResponse = components['schemas']['SupportPresentationResponse'];
 export type TimelineEventResponse = components['schemas']['TimelineEventResponse'];
 export type UserRole = components['schemas']['UserRole'];
 export type ValidationError = components['schemas']['ValidationError'];
@@ -4447,6 +4576,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResearchResultResponse"];
+                };
+            };
+            /** @description Invalid request. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Access forbidden. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_support_presentations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investigation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportPresentationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportPresentationResponse"];
                 };
             };
             /** @description Invalid request. */

@@ -197,6 +197,7 @@ export function RelationshipEvolutionFilters({
           <TextField
             size="small"
             type="datetime-local"
+            slotProps={{ inputLabel: { shrink: true } }}
             label={t("filters.observedFrom.label")}
             value={draft.observedFrom}
             onChange={(event) => onSetDraft({ ...draft, observedFrom: event.target.value })}
@@ -205,6 +206,7 @@ export function RelationshipEvolutionFilters({
           <TextField
             size="small"
             type="datetime-local"
+            slotProps={{ inputLabel: { shrink: true } }}
             label={t("filters.observedTo.label")}
             value={draft.observedTo}
             onChange={(event) => onSetDraft({ ...draft, observedTo: event.target.value })}

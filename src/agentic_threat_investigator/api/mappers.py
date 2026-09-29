@@ -54,6 +54,11 @@ from agentic_threat_investigator.api.dto.research import (
     ResearchClaimResponse,
     ResearchResultResponse,
 )
+from agentic_threat_investigator.api.dto.support import (
+    EvidenceSupportPresentationResponse,
+    RelationshipObservationSupportPresentationResponse,
+    SupportPresentationResponse,
+)
 from agentic_threat_investigator.api.dto.timeline import TimelineEventResponse
 from agentic_threat_investigator.app.query.evidence import EvidenceReadItem
 from agentic_threat_investigator.app.query.geoint import (
@@ -75,6 +80,10 @@ from agentic_threat_investigator.app.query.graph import (
 from agentic_threat_investigator.app.query.history import DomainObjectHistoryRecord
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationItem,
+    RelationshipReadItem,
+)
+from agentic_threat_investigator.app.query.support_presentations import (
+    SupportPresentationResult,
 )
 from agentic_threat_investigator.domain.assessment import (
     AnalyticalFinding,
@@ -86,7 +95,6 @@ from agentic_threat_investigator.domain.investigation import InvestigationState
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
-from agentic_threat_investigator.domain.relationships import Relationship
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
@@ -285,15 +293,24 @@ def to_geolocation_response(
     )
 
 
-def to_relationship_response(
-    relationship: Relationship,
-) -> RelationshipResponse:
-    """Map one stable relationship edge."""
+def to_relationship_response(item: RelationshipReadItem) -> RelationshipResponse:
+    """Map one stable relationship edge with its endpoint presentation.
+
+    The canonical edge identity/topology/type stay authoritative while the
+    endpoint Entity presentation metadata (source/target type and value) is
+    projected from the read item — response projections sourced from the
+    joined Entity rows, never separate Entity GETs and never persisted
+    duplicates.
+    """
     return RelationshipResponse(
-        id=relationship.id,
-        source_entity_id=relationship.source_entity_id,
-        target_entity_id=relationship.target_entity_id,
-        type=relationship.type,
+        id=item.relationship.id,
+        source_entity_id=item.relationship.source_entity_id,
+        source_entity_type=item.source_entity_type,
+        source_entity_value=item.source_entity_value,
+        target_entity_id=item.relationship.target_entity_id,
+        target_entity_type=item.target_entity_type,
+        target_entity_value=item.target_entity_value,
+        type=item.relationship.type,
     )
 
 
@@ -570,6 +587,45 @@ def to_timeline_event_response(
         provider_calls_used=event.provider_calls_used,
         replans_used=event.replans_used,
         entity_count=event.entity_count,
+    )
+
+
+def to_support_presentation_response(
+    result: SupportPresentationResult,
+) -> SupportPresentationResponse:
+    """Map one resolved support presentation result to its public DTO.
+
+    Only allowlisted presentation fields are copied; raw provider payloads
+    and observation URLs never cross this boundary. The projection order is
+    preserved exactly so the frontend can index by ID.
+    """
+    return SupportPresentationResponse(
+        evidence=tuple(
+            EvidenceSupportPresentationResponse(
+                evidence_observation_id=item.evidence_observation_id,
+                evidence_type=item.evidence_type,
+                source=item.source,
+                subject_entity_id=item.subject_entity_id,
+                subject_entity_type=item.subject_entity_type,
+                subject_entity_value=item.subject_entity_value,
+            )
+            for item in result.evidence
+        ),
+        relationship_observations=tuple(
+            RelationshipObservationSupportPresentationResponse(
+                relationship_observation_id=item.relationship_observation_id,
+                relationship_id=item.relationship_id,
+                relationship_type=item.relationship_type,
+                source_entity_id=item.source_entity_id,
+                source_entity_type=item.source_entity_type,
+                source_entity_value=item.source_entity_value,
+                target_entity_id=item.target_entity_id,
+                target_entity_type=item.target_entity_type,
+                target_entity_value=item.target_entity_value,
+                observed_at=item.observed_at,
+            )
+            for item in result.relationship_observations
+        ),
     )
 
 

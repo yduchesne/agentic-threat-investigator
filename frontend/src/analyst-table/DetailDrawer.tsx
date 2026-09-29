@@ -5,18 +5,29 @@
 // The drawer is URL-addressable (``selected=<uuid>``) and closing it
 // preserves filters/cursor. Detail loading/error/not-found states render
 // inside the drawer while the list stays intact. Focus is deterministic:
-// the close control receives initial focus when the drawer opens, Escape
-// and a backdrop click close it.
+// the close control receives focus one tick after the drawer opens
+// (PR 31F-5 A1), Escape and a backdrop click close it, and a nested
+// drawer's Escape is consumed so the enclosing PivotWorkspace never also
+// closes (PR 31F-5 B/ND02, topmost-only Escape).
 //
 // Implemented with Material UI primitives (fixed-position paper + backdrop)
 // rather than the MUI Drawer modal chain, which spins the main thread on
 // pointer interaction under this React 19 / MUI 7 stack in real browsers.
 // The component contract (right-side panel, dialog semantics, aria labels,
 // close/backdrop behavior) is identical; jsdom and browser behavior agree.
+//
+// PR 31F-5 lifecycle rationale: ``autoFocus`` was removed from the close
+// control. Browser autofocus inside the very commit that mounts the drawer
+// races React's re-render with Chromium/Firefox focus fixup when a focused
+// node is removed on close (the freeze class documented by PR 24D/P24E).
+// Deterministic deferred focus (matched to the PivotMenu strategy) keeps
+// the close control focused for keyboard analysts without racing the mount
+// commit, and every close path drops focus before navigation so the
+// unmount never removes a focused node.
 
 import { Box, IconButton, Typography } from "@mui/material";
 import type { ReactElement, ReactNode } from "react";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -45,20 +56,52 @@ export function DetailDrawer({
 }: DetailDrawerProps): ReactElement {
   const { t } = useTranslation("common");
   const titleId = useId();
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  // Hooks stay unconditional (React rules) before the closed-state return.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    // Deterministic focus after mount: the MUI Portal/primitive materializes
+    // its content through its own state effect, so focusing during the very
+    // commit that flips ``open`` could target a not-yet-mounted node or race
+    // the mount commit; one deferred tick lands on the mounted close control
+    // (the same strategy PivotMenu uses for its menu items).
+    const focusTimer = window.setTimeout(() => {
+      closeRef.current?.focus();
+    }, 0);
+    return () => {
+      window.clearTimeout(focusTimer);
+    };
+  }, [open]);
+  const close = (): void => {
+    // Drop focus before any navigation closes this drawer (PR 31F-5 A1):
+    // the close control is usually the focused node and this commit removes
+    // it; blurring first keeps the unmount from deleting a focused node
+    // under the active pointer event, the focus-fixup race class that can
+    // wedge the real-browser main thread (same mitigation as PivotMenu).
+    (document.activeElement as HTMLElement | null)?.blur();
+    onClose();
+  };
+  const handleKeyDown = (event: { key: string; stopPropagation?: () => void }): void => {
+    if (event.key === "Escape") {
+      // Topmost-only Escape (PR 31F-5 ND02): a nested drawer consumes the
+      // key so the enclosing PivotWorkspace and breadcrumbs never also
+      // close; standalone drawers (Timeline/History) have no enclosing
+      // Escape handler to suppress.
+      event.stopPropagation?.();
+      close();
+    }
+  };
   if (!open) {
     return <></>;
   }
-  const handleKeyDown = (event: { key: string }): void => {
-    if (event.key === "Escape") {
-      onClose();
-    }
-  };
   return (
     <Box>
       <Box
         aria-hidden="true"
         tabIndex={-1}
-        onClick={onClose}
+        onClick={close}
         sx={{
           position: "fixed",
           inset: 0,
@@ -91,8 +134,10 @@ export function DetailDrawer({
             {title}
           </Typography>
           <IconButton
-            onClick={onClose}
-            autoFocus
+            ref={(node) => {
+              closeRef.current = node;
+            }}
+            onClick={close}
             aria-label={t("drawer.close")}
             size="small"
           >

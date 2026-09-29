@@ -28,6 +28,7 @@ import { runningNotice } from "../analyst-table/running";
 import { SafeJsonView } from "../analyst-table/SafeJsonView";
 import { TableToolbar } from "../analyst-table/TableToolbar";
 import { Timestamp } from "../components/Timestamp";
+import { EntityReference } from "../components/EntityReference";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { evidenceSubjectActions } from "../pivots/pivot-capabilities";
 import { EvidenceDetail } from "./EvidenceDetail";
@@ -95,17 +96,21 @@ function draftError(t: (key: string) => string, draft: EvidenceDraft): string | 
   return null;
 }
 
-/** Analyst-facing Evidence columns (server-driven; no sort affordances). */
+/** Analyst-facing Evidence columns (server-driven; no sort affordances).
+ *
+ * PR 31F-5 D2: the Subject cell renders the canonical Entity value primary
+ * with the translated Entity type immediately adjacent and the Pivot action
+ * right beside it in one wrapping Box — no separate Subject Type column and
+ * never a UUID as primary Subject text.
+ */
 export function evidenceColumns(t: (key: string) => string): Column<Evidence>[] {
   return [
     {
       id: "subject",
       header: t("columns.subject"),
       render: (evidence) => (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {evidence.subject_value ?? "—"}
-          </Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap", minWidth: 0 }}>
+          <EntityReference value={evidence.subject_value} type={evidence.subject_type} />
           <PivotMenu
             actions={evidenceSubjectActions(evidence, "table_cell")}
             ariaLabel={t("columns.subject")}
@@ -197,8 +202,12 @@ export function EvidenceWorkspace({
     if (page === null) {
       return;
     }
+    // PR 31F-5 D2: the CSV keeps human usefulness with the value/type/ID
+    // triple expanded; the raw UUID is never the primary column.
     const header = [
-      t("columns.subject"),
+      t("columns.subjectValue"),
+      t("columns.subjectType"),
+      t("columns.subjectEntityId"),
       t("columns.evidenceType"),
       t("columns.source"),
       t("columns.observedAt"),
@@ -209,6 +218,8 @@ export function EvidenceWorkspace({
     ];
     const rows = page.items.map((evidence) => [
       evidence.subject_value ?? "",
+      evidence.subject_type ?? "",
+      evidence.subject_entity_id ?? "",
       t(evidenceTypeKey(evidence.type)),
       evidence.source,
       evidence.observed_at ?? "",
@@ -365,6 +376,7 @@ export function EvidenceFiltersForm({
       </FormControl>
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.retrievedFrom.label")}
         value={form.draft.retrievedFrom}
@@ -374,6 +386,7 @@ export function EvidenceFiltersForm({
       />
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.retrievedTo.label")}
         value={form.draft.retrievedTo}

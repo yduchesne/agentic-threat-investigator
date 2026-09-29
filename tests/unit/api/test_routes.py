@@ -22,12 +22,14 @@ from agentic_threat_investigator.app.query.evidence import EvidenceReadItem
 from agentic_threat_investigator.app.query.models import QueryPage
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationItem,
+    RelationshipReadItem,
 )
 from agentic_threat_investigator.domain.assessment import (
     Assessment,
     AssessmentConfidence,
     Verdict,
 )
+from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import (
     Evidence,
     EvidenceObservation,
@@ -547,7 +549,7 @@ def test_evidence_detail_never_exposes_raw_payload() -> None:
 
 
 def test_relationship_detail_maps_stable_urn() -> None:
-    """Relationship detail exposes the stable type URN and edge identities."""
+    """Relationship detail exposes the stable URN, edge identities and endpoint presentation."""
     bundle = FakeQueryBundle()
     relationship = Relationship(
         id=uuid4(),
@@ -555,7 +557,13 @@ def test_relationship_detail_maps_stable_urn() -> None:
         target_entity_id=uuid4(),
         type=RelationshipType.RESOLVES_TO,
     )
-    bundle.relationships.gets[(INVESTIGATION, relationship.id)] = relationship
+    bundle.relationships.gets[(INVESTIGATION, relationship.id)] = RelationshipReadItem(
+        relationship=relationship,
+        source_entity_type=EntityType.DOMAIN,
+        source_entity_value="update-package.test",
+        target_entity_type=EntityType.MALWARE,
+        target_entity_value="malware.badloader_v2",
+    )
     with build_test_app(bundle=bundle) as client:
         login_client(client)
         response = client.get(
@@ -566,6 +574,10 @@ def test_relationship_detail_maps_stable_urn() -> None:
     body = response.json()
     assert body["type"] == "urn:ati:relationship:dns:resolves_to"
     assert body["source_entity_id"] == str(relationship.source_entity_id)
+    assert body["source_entity_value"] == "update-package.test"
+    assert body["source_entity_type"] == "domain"
+    assert body["target_entity_value"] == "malware.badloader_v2"
+    assert body["target_entity_type"] == "malware"
 
 
 def test_unknown_route_uses_stable_envelope() -> None:

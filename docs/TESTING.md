@@ -2774,6 +2774,32 @@ frontend) and are therefore resource-intensive:
    considering ATI performance work.
 8. No OS-level CPU affinity/throttling is used anywhere in the repository.
 
+### Real-browser overlay regression coverage (PR 31F-5)
+
+Browser lifecycle freezes in DetailDrawer/PivotMenu/PivotWorkspace are
+regression-guarded with interaction that proves both sides of the
+lifecycle, never visibility alone:
+
+- After opening a detail drawer or pivot workspace, interact inside it
+  (click, keyboard Escape) and then interact with the underlying table
+  again — a visible drawer is not proof that the overlay lifecycle is
+  sound.
+- Run the affected flows (Timeline/History `View`, Evidence/Relationships
+  `Pivot`, nested Evidence details inside a pivot workspace) in **both
+  Firefox and Chromium** with the repository `workers: 1`; Firefox
+  exercises the focus-fixup and pointer-event paths the Chromium suite
+  alone cannot prove.
+- Repeat open/close cycles (at least five) and assert exactly one close
+  per action (X, Escape, backdrop) with the enclosing PivotWorkspace
+  surviving a nested-close.
+- `frontend/src/pivots/PivotWorkspace.test.tsx` and the E2E journeys in
+  `frontend/e2e/zz-pivots.spec.ts` cover the nested Evidence detail close
+  (X and Escape) plus post-close table interaction contracts.
+- The shared lifecycle strategy is deterministic deferred focus + focus
+  drop before close navigation (no reload, no setTimeout magic beyond the
+  accepted tick-timer, no browser branch); any regression must respect
+  those invariants (see `docs/ARCHITECTURE.md`).
+
 ### Investigation workflow tests (PR 24B)
 
 Component tests (`frontend/src/investigations/`) cover the full matrix:

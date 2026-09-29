@@ -159,6 +159,14 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     await expect(page.getByText("Supports").first()).toBeVisible({ timeout: 30_000 });
     step("supports visible");
 
+    // PR 31F-5 E2E journey 5: the support references are semantic (the
+    // Evidence source/type/subject, never `Evidence <id>` primary text) and
+    // the IDs stay secondary technical identity.
+    await expect(
+      page.getByText(/urn:ati:source:[a-z_]+ · [A-Za-z ]+ · /).first(),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Evidence ID:/).first()).toBeVisible({ timeout: 30_000 });
+
     // Evidence support -> exact scoped Evidence pivot workspace.
     await page.getByRole("button", { name: "Open evidence" }).first().click();
     const evidenceDialog = page.getByRole("dialog", { name: /Evidence pivot workspace/i });
@@ -363,5 +371,78 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     for (const { tag, at } of stepTags) {
       console.log(`E22B-MARK ${tag} +${(at - stepTags[0].at) / 1000}s`);
     }
+  });
+
+  test("E22-ND nested Evidence detail closes by X/Escape without closing the workspace", async ({
+    page,
+  }) => {
+    const consoleErrors: string[] = [];
+    page.on("pageerror", (error) => consoleErrors.push(`pageerror: ${String(error)}`));
+    page.on("console", (message) => {
+      if (message.type === "error") {
+        consoleErrors.push(`console: ${message.text}`);
+      }
+    });
+
+    step("nd: start");
+    await page.goto("/investigations");
+    await expect(page.getByText("FAKE DATA")).toBeVisible();
+    const investigationId = await completeF02Investigation(page);
+    step("nd: F02 completed");
+
+    // Investigation -> Evidence -> Subject Pivot -> Relationships.
+    await page.getByRole("tab", { name: "Evidence" }).click();
+    await clickForce(page, page.getByRole("button", { name: "Subject" }).first());
+    await clickForce(
+      page,
+      page.getByRole("menuitem", { name: "Relationships where source" }),
+    );
+    const relationshipsDialog = page.getByRole("dialog", {
+      name: /Relationships pivot workspace/i,
+    });
+    await expect(relationshipsDialog).toBeVisible({ timeout: 30_000 });
+    step("nd: relationships workspace open");
+
+    // Relationship detail -> pivot source -> exact Evidence workspace.
+    await clickForce(
+      page,
+      relationshipsDialog.getByRole("button", { name: /^View / }).first(),
+    );
+    const relationshipDrawer = page.getByRole("dialog", { name: /^Relationships$/ });
+    await expect(relationshipDrawer).toBeVisible({ timeout: 30_000 });
+    await clickForce(
+      page,
+      relationshipDrawer.getByRole("button", { name: "Pivot actions Source entity" }),
+    );
+    await clickForce(page, page.getByRole("menuitem", { name: "Evidence for this entity" }));
+    const evidenceDialog = page.getByRole("dialog", { name: /Evidence pivot workspace/i });
+    await expect(evidenceDialog).toBeVisible({ timeout: 30_000 });
+    step("nd: evidence workspace open");
+
+    // View Evidence -> nested drawer -> X closes ONLY the drawer.
+    await clickForce(page, evidenceDialog.getByRole("button", { name: /^View / }).first());
+    const evidenceDrawer = page.getByRole("dialog", { name: /^Evidence$/ });
+    await expect(evidenceDrawer).toBeVisible({ timeout: 30_000 });
+    await clickForce(page, evidenceDrawer.getByRole("button", { name: "Close detail" }));
+    await expect(evidenceDrawer).not.toBeVisible({ timeout: 20_000 });
+    await expect(evidenceDialog).toBeVisible({ timeout: 20_000 });
+    step("nd: X closed nested only");
+
+    // Post-close table interaction: open another detail, then Escape closes
+    // only the nested drawer and the workspace survives.
+    await clickForce(page, evidenceDialog.getByRole("button", { name: /^View / }).first());
+    await expect(evidenceDrawer).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press("Escape");
+    await expect(evidenceDrawer).not.toBeVisible({ timeout: 20_000 });
+    await expect(evidenceDialog).toBeVisible({ timeout: 20_000 });
+    step("nd: Escape closed nested only");
+
+    // The workspace can then close normally and the base route is restored.
+    await clickForce(page, page.getByRole("button", { name: "Close pivot workspace" }));
+    await expect(page.getByRole("dialog", { name: /pivot workspace/i })).not.toBeVisible();
+    await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible();
+    expect(page.getByText("FAKE DATA")).toBeVisible();
+    expect(consoleErrors).toEqual([]);
+    void investigationId;
   });
 });

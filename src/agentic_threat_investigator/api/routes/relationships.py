@@ -73,7 +73,9 @@ async def list_relationships(
     ``entity_id`` (PR 24E) selects the bounded one-hop neighborhood of one
     focal entity: source-or-target OR semantics applied on the server, and
     it intersects normally with the other filters. Soft-deleted edges stay
-    excluded exactly as before.
+    excluded exactly as before. Response rows additionally carry the
+    joined endpoint Entity presentation metadata (source/target type and
+    value, PR 31F-5) so the browser never issues one Entity GET per edge.
     """
     page = await run_page_query(
         lambda: services.relationships.list(
@@ -105,15 +107,20 @@ async def get_relationship(
     services: QueryServices,
     _user: AnalystUser,
 ) -> RelationshipResponse:
-    """Return one Relationship visible to the path Investigation."""
-    relationship = await services.relationships.get(investigation_id, relationship_id)
-    if relationship is None:
+    """Return one Relationship visible to the path Investigation.
+
+    The response carries the same joined endpoint Entity presentation
+    metadata (source/target type and value, PR 31F-5) as the list; missing
+    and cross-Investigation IDs map to the same stable scoped 404.
+    """
+    item = await services.relationships.get(investigation_id, relationship_id)
+    if item is None:
         raise ApiError(
             ApiErrorCode.RELATIONSHIP_NOT_FOUND,
             "Relationship was not found for this investigation.",
             404,
         )
-    return to_relationship_response(relationship)
+    return to_relationship_response(item)
 
 
 @observations_router.get(

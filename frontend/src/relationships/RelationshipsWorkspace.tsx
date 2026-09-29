@@ -24,7 +24,7 @@ import { isUuidValue, parseUuidParam } from "../analyst-table/filters";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import { runningNotice } from "../analyst-table/running";
 import { TableToolbar } from "../analyst-table/TableToolbar";
-import { CompactId } from "../components/CompactId";
+import { EntityReference } from "../components/EntityReference";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { relationshipSourceActions, relationshipTargetActions } from "../pivots/pivot-capabilities";
 import { relationshipTypeKey, RELATIONSHIP_TYPES } from "./labels";
@@ -86,7 +86,12 @@ function draftError(t: (key: string) => string, draft: RelationshipDraft): strin
   return null;
 }
 
-/** Analyst-facing Relationship columns (server-driven; no sort affordances). */
+/** Analyst-facing Relationship columns (server-driven; no sort affordances).
+ *
+ * PR 31F-5 D4: Source and Target use identical organization — the endpoint
+ * Entity value/type precede every ID/action, the compact UUID never leads,
+ * and Copy/Pivot/Evolution keep consuming the canonical Entity ID.
+ */
 export function relationshipColumns(
   t: (key: string) => string,
   investigationId: string,
@@ -96,8 +101,13 @@ export function relationshipColumns(
       id: "sourceEntity",
       header: t("columns.sourceEntity"),
       render: (relationship) => (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <CompactId id={relationship.source_entity_id} label={t("columns.sourceEntity")} />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap", minWidth: 0 }}>
+          <EntityReference
+            value={relationship.source_entity_value}
+            type={relationship.source_entity_type}
+            id={relationship.source_entity_id}
+            label={t("columns.sourceEntity")}
+          />
           <PivotMenu
             actions={relationshipSourceActions(relationship, "table_cell")}
             ariaLabel={t("columns.sourceEntity")}
@@ -109,7 +119,7 @@ export function relationshipColumns(
           />
         </Box>
       ),
-      exportValue: (relationship) => relationship.source_entity_id,
+      exportValue: (relationship) => relationship.source_entity_value ?? "",
     },
     {
       id: "relationshipType",
@@ -125,8 +135,13 @@ export function relationshipColumns(
       id: "targetEntity",
       header: t("columns.targetEntity"),
       render: (relationship) => (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <CompactId id={relationship.target_entity_id} label={t("columns.targetEntity")} />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap", minWidth: 0 }}>
+          <EntityReference
+            value={relationship.target_entity_value}
+            type={relationship.target_entity_type}
+            id={relationship.target_entity_id}
+            label={t("columns.targetEntity")}
+          />
           <PivotMenu
             actions={relationshipTargetActions(relationship, "table_cell")}
             ariaLabel={t("columns.targetEntity")}
@@ -138,7 +153,7 @@ export function relationshipColumns(
           />
         </Box>
       ),
-      exportValue: (relationship) => relationship.target_entity_id,
+      exportValue: (relationship) => relationship.target_entity_value ?? "",
     },
   ];
 }
@@ -198,15 +213,24 @@ export function RelationshipsWorkspace({
     if (page === null) {
       return;
     }
+    // PR 31F-5 D4: human-useful CSV with value/type + canonical IDs.
     const header = [
-      t("columns.sourceEntity"),
+      t("columns.sourceEntityValue"),
+      t("columns.sourceEntityType"),
+      t("columns.sourceEntityId"),
       t("columns.relationshipType"),
-      t("columns.targetEntity"),
+      t("columns.targetEntityValue"),
+      t("columns.targetEntityType"),
+      t("columns.targetEntityId"),
       t("columns.relationshipId"),
     ];
     const rows = page.items.map((relationship) => [
+      relationship.source_entity_value ?? "",
+      relationship.source_entity_type ?? "",
       relationship.source_entity_id,
       t(relationshipTypeKey(relationship.type)),
+      relationship.target_entity_value ?? "",
+      relationship.target_entity_type ?? "",
       relationship.target_entity_id,
       relationship.id,
     ]);

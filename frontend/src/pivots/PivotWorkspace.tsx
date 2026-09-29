@@ -113,6 +113,7 @@ export function PivotWorkspace({
   const fullScreen = useMediaQuery("(max-width: 899px)");
   const titleId = useId();
   const rootRef = useRef<HTMLElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
   // Modal hygiene while open: scroll-lock the body and aria-hide the
   // underlying page from assistive tech (MUI ModalManager equivalent),
   // restoring both on unmount.
@@ -144,12 +145,32 @@ export function PivotWorkspace({
       hidden.forEach((element) => element.removeAttribute("aria-hidden"));
     };
   }, [open]);
+  // Deterministic focus after mount (PR 31F-5 A2): the workspace close
+  // control receives focus one tick after the modal mounts, never through
+  // browser autofocus inside the mount commit; keyboard analysts still land
+  // on an identified modal control (same strategy as PivotMenu/DetailDrawer).
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const focusTimer = window.setTimeout(() => {
+      closeRef.current?.focus();
+    }, 0);
+    return () => {
+      window.clearTimeout(focusTimer);
+    };
+  }, [open]);
   if (state === null) {
     return null;
   }
   const active = state.steps[state.steps.length - 1];
 
   const close = (): void => {
+    // Drop focus before the navigation unmounts this modal (PR 31F-5 A2):
+    // the close control is usually the focused node and this commit removes
+    // it; blurring first keeps the unmount from deleting a focused node
+    // under the active pointer event (the focus-fixup race class of PR 24D).
+    (document.activeElement as HTMLElement | null)?.blur();
     setSearchParams(clearPivotState(searchParams), { replace: false });
   };
   const truncate = (keep: number): void => {
@@ -204,8 +225,10 @@ export function PivotWorkspace({
               {t("modal.title", { resource: t(pivotResourceLabelKey(active.resource)) })}
             </Typography>
             <IconButton
+              ref={(node) => {
+                closeRef.current = node;
+              }}
               onClick={close}
-              autoFocus
               aria-label={t("modal.close")}
               size="small"
             >

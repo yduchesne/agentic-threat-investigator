@@ -138,12 +138,12 @@ backed by i18next/react-i18next (English first). Investment in Investigation
 workflow (PR 24B), analyst tables (PR 24C), pivots (PR 24D) and relationship
 visualization (PR 24E) builds on this foundation.
 
-**Human-readable-first presentation (PR 31F-1).** Analyst-facing surfaces
-present semantic values and translated labels before canonical IDs and raw
-codes. Known backend/generated enums (Entity types, Relationship types,
-Timeline event types, stop reasons, pivot rejection reasons, provider error
-codes) map through explicit i18next keys inside feature namespaces — never
-through mechanical underscore replacement or generic prettifiers.
+**Human-readable-first presentation (PR 31F-1 / PR 31F-5).** Analyst-facing
+surfaces present semantic values and translated labels before canonical IDs
+and raw codes. Known backend/generated enums (Entity types, Relationship
+types, Timeline event types, stop reasons, pivot rejection reasons, provider
+error codes) map through explicit i18next keys inside feature namespaces —
+never through mechanical underscore replacement or generic prettifiers.
 Unknown/future values fail safe by rendering the raw value. Canonical
 UUIDs and raw enum strings remain available on explicit detail/inspection
 surfaces (for example `Fatal error (fatal_error)`, compact copyable
@@ -152,6 +152,46 @@ from a UUID, and the router runs with synchronous commits
 (`RouterProvider useTransitions={false}` from `react-router/dom`) so
 URL-backed drawer/menu navigation re-renders deterministically in real
 browsers.
+
+**PR 31F-5 adds the human-readable-first Entity invariant.** The canonical
+Entity reference is always presented as value primary + translated type
+immediately adjacent (the shared no-fetch `EntityReference` primitive); the
+canonical UUID is secondary technical identity, copyable and used by
+Pivot/Evolution actions, but never the primary endpoint text. The shared
+Relationship read projection joins source/target Entity rows in the bounded
+query so no frontend N+1 entity resolution exists. Finding support
+references follow the same rule: the primary line is the semantic
+Evidence description (`source · type · subject`) or the semantic
+RelationshipObservation edge (`source → type → target`), delivered by one
+bounded Investigation-scoped batch resolution endpoint
+(`POST /api/v1/investigations/{id}/support-presentations/resolve`) that
+returns presentation projections only — an explicit read-model enrichment
+layer, never a persisted narrative and never raw provider payloads. The
+persisted support ID stays secondary and the exact scoped action is
+unchanged.
+
+**Overview vs Report (PR 31F-5).** The Investigation Overview is a concise
+landing/dashboard in a fixed section order (lifecycle, analytical outcome,
+executive summary, at-a-glance counts, first 3 findings, first 3 next
+actions, navigation/action row) and never renders the full Report; the
+secondary Report route renders the complete persisted Report (structured
+content, metadata, Markdown). No Overview content is synthesized by an LLM.
+
+**Nested analyst state stays URL-owned (PR 31F-5).** Filters, cursors and
+selections inside the PivotWorkspace live in the URL-backed pivot envelope
+(the active step serializes `selected`); there is no second drawer/pivot
+selection store. Timeline/History `View` and Evidence/Relationships
+`Pivot` share one detail/menu infrastructure, and Escape handling is
+topmost-only: a nested drawer consumes the key before the enclosing
+PivotWorkspace ever sees it.
+
+**Real-browser lifecycle hygiene (PR 31F-5 A).** The shared detail drawer
+and pivot workspace close controls use deterministic deferred focus (never
+browser `autoFocus` inside the mount commit), and every close path drops
+active focus before the URL navigation that unmounts the control — keeping
+keyboard accessibility while never removing a focused node under the live
+pointer event (the Chromium/Firefox focus-fixup stall class documented in
+PR 24D). No forced reload, browser branch, or arbitrary delay is used.
 
 **Semantic multi-theme presentation (PR 31F-4).** MUI is the single design
 system: one centralized theme factory/registry (`frontend/src/app/theme.ts`)

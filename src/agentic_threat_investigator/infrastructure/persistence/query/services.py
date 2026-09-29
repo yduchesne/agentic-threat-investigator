@@ -32,6 +32,9 @@ from agentic_threat_investigator.app.query.relationships import (
 from agentic_threat_investigator.app.query.reports import ReportQueryService
 from agentic_threat_investigator.app.query.research import ResearchResultQueryService
 from agentic_threat_investigator.app.query.services import QueryServiceBundle
+from agentic_threat_investigator.app.query.support_presentations import (
+    SupportPresentationQueryService,
+)
 from agentic_threat_investigator.app.query.timeline import TimelineQueryService
 
 from .assessments import PostgresAssessmentQueryService
@@ -47,6 +50,7 @@ from .relationships import (
 )
 from .reports import PostgresReportQueryService
 from .research import PostgresResearchResultQueryService
+from .support_presentations import PostgresSupportPresentationQueryService
 from .timeline import PostgresTimelineQueryService
 
 
@@ -98,6 +102,9 @@ class PostgresQueryServices(QueryServiceBundle):
         )
         self.relationship_observations: RelationshipObservationQueryService = (
             PostgresRelationshipObservationQueryService(session, query_limits)
+        )
+        self.support_presentations: SupportPresentationQueryService = (
+            PostgresSupportPresentationQueryService(session)
         )
         self.research_results: ResearchResultQueryService = (
             PostgresResearchResultQueryService(session, query_limits)

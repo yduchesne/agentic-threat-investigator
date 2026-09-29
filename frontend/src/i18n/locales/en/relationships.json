@@ -39,8 +39,6 @@
   "filters.time.invalid": "Enter a valid date and time.",
   "detail.loading": "Loading relationship…",
   "detail.loadError.title": "Unable to load this relationship",
-  "detail.notFound.title": "Resource not found or not accessible",
-  "detail.notFound.title": "Resource not found or not accessible",
   "detail.sourceEntity": "Source entity",
   "detail.relationshipType": "Relationship type",
   "detail.targetEntity": "Target entity",
@@ -84,5 +82,14 @@
   "types.usesTechnique": "Uses technique",
   "types.exploits": "Exploits",
   "detail.notOnPage.title": "Not on this page",
-  "detail.notOnPage.message": "This entry is not part of the currently loaded page. Adjust the filters or pagination to reach it."
+  "detail.notOnPage.message": "This entry is not part of the currently loaded page. Adjust the filters or pagination to reach it.",
+  "columns.sourceEntityValue": "Source entity value",
+  "columns.sourceEntityType": "Source entity type",
+  "columns.sourceEntityId": "Source entity ID",
+  "columns.targetEntityValue": "Target entity value",
+  "columns.targetEntityType": "Target entity type",
+  "columns.targetEntityId": "Target entity ID",
+  "detail.entityId": "Entity ID",
+  "detail.relationship": "Relationship",
+  "detail.notFound.title": "Resource not found or not accessible"
 }

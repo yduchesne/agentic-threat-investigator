@@ -451,6 +451,7 @@ export function ObservationFiltersForm({
       />
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.observedFrom.label")}
         value={draft.observedFrom}
@@ -459,6 +460,7 @@ export function ObservationFiltersForm({
       />
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.observedTo.label")}
         value={draft.observedTo}
@@ -467,6 +469,7 @@ export function ObservationFiltersForm({
       />
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.retrievedFrom.label")}
         value={draft.retrievedFrom}
@@ -475,6 +478,7 @@ export function ObservationFiltersForm({
       />
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.retrievedTo.label")}
         value={draft.retrievedTo}
