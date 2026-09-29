@@ -6,13 +6,16 @@
 // these tests never perform live tile requests and never depend on a
 // layout engine; the real path is exercised by the real-stack E24 spec.
 
-import { render, screen, type RenderResult } from "@testing-library/react";
+import { cleanup, render, screen, type RenderResult } from "@testing-library/react";
+import { ThemeProvider } from "@mui/material";
+import type { Theme } from "@mui/material/styles";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GeoPrecisionName, InvestigationGeolocation } from "../api/schema-types";
+import { ATI_THEMES } from "../app/theme";
 import { resetFakeLeafletMap, fakeLeafletMap } from "../test/react-leaflet-mock";
 import { InvestigationMap } from "./InvestigationMap";
 import { SINGLE_POINT_ZOOM } from "./geolocation-map-model";
@@ -44,9 +47,14 @@ function item(
 }
 
 
-/** Render one Map under a router so the popup Explore surface sees the URL. */
-function renderMap(children: ReactElement): RenderResult {
-  return render(<MemoryRouter>{children}</MemoryRouter>);
+/** Render one Map under a router and the given (default Light) theme (PR 31F-4
+ * ATI-owned map chrome consumes semantic theme tokens). */
+function renderMap(children: ReactElement, theme: Theme = ATI_THEMES.light): RenderResult {
+  return render(
+    <ThemeProvider theme={theme}>
+      <MemoryRouter>{children}</MemoryRouter>
+    </ThemeProvider>,
+  );
 }
 
 describe("InvestigationMap (B-F01..B-F08)", () => {
@@ -205,5 +213,62 @@ describe("InvestigationMap (B-F01..B-F08)", () => {
     expect(options.padding).toEqual([24, 24]);
     expect(options.maxZoom).toBe(SINGLE_POINT_ZOOM);
     expect(fakeLeafletMap.setView).not.toHaveBeenCalled();
+  });
+});
+/**
+ * PR 31F-4 map theming (M01..M04).
+ *
+ * Appearance switching is presentation-only for the map: coordinates,
+ * markers, tile URL and OSM attribution are identical in every theme;
+ * only ATI-owned chrome (container/control/overlay surfaces) changes.
+ */
+describe("InvestigationMap theming (PR 31F-4 M01..M04)", () => {
+  function renderMapWith(theme: Theme): void {
+    renderMap(
+      <InvestigationMap
+        investigationId={INVESTIGATION_ID}
+        items={[item(1), item(2, { latitude: 51.5074, longitude: -0.1278 })]}
+        onViewEvidence={vi.fn()}
+      />,
+      theme,
+    );
+  }
+
+  it("M01: markers/coordinates are identical under every appearance", () => {
+    for (const theme of Object.values(ATI_THEMES)) {
+      cleanup();
+      renderMapWith(theme);
+      const markers = screen.getAllByTestId("ati-marker");
+      expect(markers).toHaveLength(2);
+      expect(markers[0]).toHaveAttribute("data-position", JSON.stringify([47.6062, -122.3321]));
+      expect(markers[1]).toHaveAttribute("data-position", JSON.stringify([51.5074, -0.1278]));
+      expect(markers[0]).toHaveAttribute("data-alt", "203.0.113.1");
+      expect(markers[1]).toHaveAttribute("data-alt", "203.0.113.2");
+    }
+  });
+
+  it("M02/M03: the OSM tile URL and attribution are untouched by theming", () => {
+    for (const theme of Object.values(ATI_THEMES)) {
+      cleanup();
+      renderMapWith(theme);
+      const tile = screen.getByTestId("ati-tile-layer");
+      expect(tile).toHaveAttribute("data-url", TILE_URL);
+      expect(tile).toHaveAttribute("data-attribution", TILE_ATTRIBUTION);
+    }
+  });
+
+  it("M04: ATI-owned map chrome consumes the active theme's tokens", () => {
+    renderMapWith(ATI_THEMES["control-room"]);
+    const styles = Array.from(document.querySelectorAll("style")).map((style) => style.textContent).join("\n");
+    // The semantic map ground token is emitted for the ATI-owned container.
+    expect(styles).toContain(ATI_THEMES["control-room"].ati.map.container);
+  });
+
+  it("M04: every theme defines a legible map ground/overlay/border contract", () => {
+    for (const theme of Object.values(ATI_THEMES)) {
+      expect(theme.ati.map.container.length).toBeGreaterThan(0);
+      expect(theme.ati.map.overlay.length).toBeGreaterThan(0);
+      expect(theme.ati.map.border.length).toBeGreaterThan(0);
+    }
   });
 });

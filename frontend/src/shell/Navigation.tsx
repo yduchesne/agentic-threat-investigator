@@ -29,7 +29,10 @@ export function Navigation(): ReactElement {
               py: 0.5,
               borderRadius: 1,
               bgcolor: isActive ? "primary.main" : "transparent",
-              color: isActive ? "common.white" : "text.primary",
+              // PR 31F-4: use the theme-computed contrast text so every
+              // primary accent (steel blue, cyan display, phosphor green)
+              // keeps a readable active pill.
+              color: isActive ? "primary.contrastText" : "text.primary",
               fontWeight: isActive ? 700 : 500,
             }}
           >

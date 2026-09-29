@@ -8,5 +8,14 @@
   "role.admin": "Administrator",
   "fakeData.title": "FAKE DATA",
   "fakeData.message": "Running against deterministic local fake intelligence sources. No live external data is used.",
-  "loading.session": "Verifying session…"
+  "loading.session": "Verifying session…",
+  "preferences.open": "Preferences",
+  "preferences.dialogTitle": "Preferences",
+  "preferences.appearance.heading": "Appearance",
+  "preferences.appearance.light": "Light",
+  "preferences.appearance.dark": "Dark",
+  "preferences.appearance.wargames": "Wargames",
+  "preferences.appearance.controlRoom": "Control Room",
+  "preferences.save": "Save",
+  "preferences.cancel": "Cancel"
 }

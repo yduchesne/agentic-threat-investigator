@@ -20,18 +20,22 @@ function FakeDataSurface(): ReactElement {
   return (
     <Box
       role="status"
-      sx={{
+      sx={(theme) => ({
         width: "100%",
-        bgcolor: "#fff3d6",
+        // PR 31F-4: the warning surface consumes the active theme's warning
+        // semantics (alpha-blended for a readable banner ground) instead of
+        // hard-coded Light-only colors. The text, not color alone, carries
+        // the meaning.
+        bgcolor: theme.alpha(theme.ati.status.warning, 0.13),
         borderTop: "3px solid",
-        borderTopColor: "#8a5b00",
-        color: "#5c3d00",
+        borderTopColor: theme.ati.status.warning,
+        color: theme.ati.status.warning,
         px: 1.5,
         py: 0.75,
         display: "flex",
         alignItems: "center",
         gap: 1,
-      }}
+      })}
     >
       <Typography variant="overline" component="span" sx={{ fontWeight: 800, letterSpacing: "0.08em" }}>
         {t("fakeData.title")}

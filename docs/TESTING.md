@@ -2742,6 +2742,38 @@ ports, a throwaway named volume, and generated test-only credentials.
 Cleanup only touches resources the harness created; no live LLM is used
 and no normal developer data is touched.
 
+### Playwright resource control (PR 31F-4)
+
+Real-stack browser tests boot the whole production-path topology (PostgreSQL
+→ migrations → fake bootstrap → FastAPI → durable worker → Nginx → built
+frontend) and are therefore resource-intensive:
+
+1. Each Playwright **worker** is a separate browser process (plus its helper
+   processes) against that full stack — one worker per test-file slot.
+2. Raising `frontend/playwright.config.ts` `workers` above `1` runs several
+   full stacks concurrently; on a typical development machine this can
+   saturate the CPU and produce misleading slowdown/flake symptoms that look
+   like ATI defects but are pure resource contention.
+3. The repository default is deliberately `workers: 1` (see the config file)
+   and must stay bounded.
+4. Developers should not raise the worker count casually; any future CI
+   increase must be measured and deliberate, backed by benchmark evidence.
+5. Controlled local runs use the explicit bounded invocation:
+
+   ```bash
+   cd frontend && npx playwright test --workers=1
+   ```
+
+6. Suspected ATI performance problems must first be reproduced under a
+   single browser worker/session; only a controlled single-worker
+   reproduction establishes an ATI-specific defect.
+7. Playwright worker count is distinct from Firefox internal
+   process/thread counts and from ATI runtime performance. A slow Firefox
+   session on a busy machine is not by itself evidence of an ATI Timeline
+   issue — reproduce with one worker (and a clean machine) before
+   considering ATI performance work.
+8. No OS-level CPU affinity/throttling is used anywhere in the repository.
+
 ### Investigation workflow tests (PR 24B)
 
 Component tests (`frontend/src/investigations/`) cover the full matrix:

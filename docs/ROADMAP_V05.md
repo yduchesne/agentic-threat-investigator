@@ -49,6 +49,7 @@ requirements justify the additional persistence dependency.
 | **31K** | Graph-driven investigation actions | Launch ATI research/investigation actions directly from graph entities |
 | **31F-1** | UI correctness and human-readable analyst presentation | Analyst-facing i18n labels before raw codes on Timeline/relationship surfaces [DONE] |
 | **31F-2** | Investigation failure diagnostics | Bounded, sanitized root-cause `error_message` on failure Timeline events, fatal-stop propagation, safe detail presentation [DONE] |
+| **31F-4** | Appearance preferences and multi-theme analyst workbench | Browser-local Light/Dark/Wargames/Control Room appearances over centralized semantic MUI tokens; presentation only [DONE] |
 
 ## PR 31A — Graph read model and repository contract [DONE]
 
@@ -332,3 +333,54 @@ failure events therefore stays `NULL` and provider-wide redesign is out of
 scope. The standard fake-world investigation completes successfully, so no
 real-browser fatal E2E was manufactured; the fatal path is proven by the
 deterministic integration vertical slice and component tests.
+
+## PR 31F-4 — Appearance preferences and multi-theme analyst workbench [DONE]
+
+A deliberately bounded browser-local appearance preference evolves ATI's
+single MUI theme into a centralized semantic multi-theme system. Initial
+appearances: Light (default), Dark, Wargames, Control Room.
+
+Final scope:
+
+- a finite typed frontend model (`AppearancePreference`: exactly
+  `light` / `dark` / `wargames` / `control-room`; Light canonical default;
+  runtime validation; stable ATI storage key `ati.appearance`);
+- a safe localStorage adapter reading during provider initialization
+  (no first-render flash) and falling back to Light on absent/unknown/
+  corrupt/throwing storage; writes touch only the ATI appearance key and
+  never call `clear()`;
+- a centralized theme factory/registry (`frontend/src/app/theme.ts`) that
+  prebuilds the four stable themes once, with a typed semantic-token
+  contract (`theme.ati`) carried through MUI module augmentation
+  (`surface/text/accent/border/selection/status/graph/map/focus`);
+- one `AppearanceProvider` feeding the existing single MUI `ThemeProvider`
+  + `CssBaseline` (`AppProviders`), preserving one stable QueryClient;
+- a Preferences gear beside the authenticated user controls opening a
+  modal MUI Dialog: four human-readable choices, live preview, Save
+  persisting locally, Cancel/Escape restoring the committed appearance,
+  focus trapped and restored by the Dialog itself;
+- React Flow graph integration via the same semantic tokens: ATI-owned
+  canvas/node/edge/selection/controls styling only — topology, positions,
+  expansions, selection, provenance and requests are untouched, and
+  switching appearance never causes a graph refetch;
+- Leaflet integration theming only ATI-owned container/chrome/overlay
+  surfaces; `TILE_URL`, OSM attribution, coordinates and markers are
+  unchanged;
+- focus-visible and status surfaces consume semantic tokens in every
+  theme (keyboard focus and non-color status semantics retained);
+- all Preferences/theme strings go through i18next (`shell` namespace);
+- docs: `ARCHITECTURE.md` frontend presentation note, `TESTING.md`
+  Playwright worker/resource-control guidance, this roadmap entry;
+- Playwright remains `workers: 1` with controlled `npx playwright test
+  --workers=1` local runs.
+
+Presentation only: no backend preference model, no database migration, no
+API/OpenAPI change, no authorization/Investigation/Tenant change, and
+environment-variable configuration precedence is untouched.
+
+**PR 31F-3 status.** The previously discussed Timeline performance
+hardening is not an active prerequisite for 31F-4: the observed Firefox
+slowdown during manual testing was traced to excessive concurrent Firefox
+instances saturating the host CPU, not an established ATI Timeline defect.
+Reopen performance work only after a controlled single-browser/one-worker
+reproduction shows ATI-specific excessive resource use.
