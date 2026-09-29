@@ -4,7 +4,7 @@
 
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   assessmentCurrentHandler,
@@ -16,12 +16,22 @@ import {
   investigationLifecycleHandler,
   reportCurrentHandler,
   reportMarkdownHandler,
+  resolveSupportPresentationsHandler,
   runtimeFake,
 } from "../test/handlers";
+import { CSRF_COOKIE_NAME } from "../api/csrf";
 import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
 
 useHttp();
+
+beforeEach(() => {
+  // The double-submit CSRF cookie is set by the real login flow; tests that
+  // exercise state-changing requests (support presentation resolution) arm it
+  // exactly like the browser would (PR 31F-5 E).
+  document.cookie = `${CSRF_COOKIE_NAME}=test-csrf-token`;
+});
+
 
 const INVESTIGATION_ID = "20000000-0000-4000-8000-000000000001";
 
@@ -38,6 +48,7 @@ describe("Full Report route", () => {
       investigationLifecycleHandler([completed]),
       assessmentCurrentHandler(buildAssessment({ investigation_id: completed.id })),
       reportCurrentHandler(report),
+      resolveSupportPresentationsHandler(),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview/report`);
 
@@ -74,6 +85,7 @@ describe("Full Report route", () => {
       assessmentCurrentHandler(buildAssessment({ investigation_id: completed.id })),
       reportCurrentHandler(report),
       reportMarkdownHandler("# ATI deterministic investigation report\n\nMarkdown body."),
+      resolveSupportPresentationsHandler(),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview/report`);
 

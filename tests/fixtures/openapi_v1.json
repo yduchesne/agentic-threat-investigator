@@ -324,6 +324,64 @@
         "title": "EvidenceResponse",
         "type": "object"
       },
+      "EvidenceSupportPresentationResponse": {
+        "additionalProperties": false,
+        "description": "One Evidence support presentation (semantic description first).",
+        "properties": {
+          "evidence_observation_id": {
+            "format": "uuid",
+            "title": "Evidence Observation Id",
+            "type": "string"
+          },
+          "evidence_type": {
+            "$ref": "#/components/schemas/EvidenceType"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "subject_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Entity Id"
+          },
+          "subject_entity_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject_entity_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Entity Value"
+          }
+        },
+        "required": [
+          "evidence_observation_id",
+          "evidence_type",
+          "source"
+        ],
+        "title": "EvidenceSupportPresentationResponse",
+        "type": "object"
+      },
       "EvidenceType": {
         "description": "Stable ATI evidence type URNs.",
         "enum": [
@@ -1911,9 +1969,101 @@
         "title": "RelationshipObservationResponse",
         "type": "object"
       },
+      "RelationshipObservationSupportPresentationResponse": {
+        "additionalProperties": false,
+        "description": "One RelationshipObservation support presentation (semantic edge first).",
+        "properties": {
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "relationship_id": {
+            "format": "uuid",
+            "title": "Relationship Id",
+            "type": "string"
+          },
+          "relationship_observation_id": {
+            "format": "uuid",
+            "title": "Relationship Observation Id",
+            "type": "string"
+          },
+          "relationship_type": {
+            "$ref": "#/components/schemas/RelationshipType"
+          },
+          "source_entity_id": {
+            "format": "uuid",
+            "title": "Source Entity Id",
+            "type": "string"
+          },
+          "source_entity_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_entity_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Entity Value"
+          },
+          "target_entity_id": {
+            "format": "uuid",
+            "title": "Target Entity Id",
+            "type": "string"
+          },
+          "target_entity_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_entity_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Entity Value"
+          }
+        },
+        "required": [
+          "relationship_observation_id",
+          "relationship_id",
+          "relationship_type",
+          "source_entity_id",
+          "target_entity_id"
+        ],
+        "title": "RelationshipObservationSupportPresentationResponse",
+        "type": "object"
+      },
       "RelationshipResponse": {
         "additionalProperties": false,
-        "description": "One stable relationship edge visible to an Investigation.",
+        "description": "One stable relationship edge visible to an Investigation.\n\n``source_entity_type``/``source_entity_value`` and\n``target_entity_type``/``target_entity_value`` (PR 31F-5) are endpoint\nEntity presentation metadata sourced from the joined source/target\nEntity rows \u2014 read-side projections only, never persisted duplicates\nand never a substitute for the canonical Entity identity. Joined\nfields are ``null`` only when a join could not resolve the row, which\ncannot happen for normally written data.",
         "properties": {
           "id": {
             "format": "uuid",
@@ -1925,10 +2075,52 @@
             "title": "Source Entity Id",
             "type": "string"
           },
+          "source_entity_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_entity_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Entity Value"
+          },
           "target_entity_id": {
             "format": "uuid",
             "title": "Target Entity Id",
             "type": "string"
+          },
+          "target_entity_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_entity_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Entity Value"
           },
           "type": {
             "$ref": "#/components/schemas/RelationshipType"
@@ -2401,6 +2593,56 @@
           "operating_mode"
         ],
         "title": "RuntimeInfoResponse",
+        "type": "object"
+      },
+      "SupportPresentationRequest": {
+        "additionalProperties": false,
+        "description": "The finite requested support-ID sets of one loaded artifact.",
+        "properties": {
+          "evidence_observation_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Evidence Observation Ids",
+            "type": "array"
+          },
+          "relationship_observation_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Relationship Observation Ids",
+            "type": "array"
+          }
+        },
+        "title": "SupportPresentationRequest",
+        "type": "object"
+      },
+      "SupportPresentationResponse": {
+        "additionalProperties": false,
+        "description": "The resolved presentation map keyed by request (indexed by ID).",
+        "properties": {
+          "evidence": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EvidenceSupportPresentationResponse"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "relationship_observations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RelationshipObservationSupportPresentationResponse"
+            },
+            "title": "Relationship Observations",
+            "type": "array"
+          }
+        },
+        "title": "SupportPresentationResponse",
         "type": "object"
       },
       "TimelineEventResponse": {
@@ -5845,7 +6087,7 @@
     },
     "/api/v1/investigations/{investigation_id}/relationships": {
       "get": {
-        "description": "List distinct Relationships visible to one Investigation.\n\n``entity_id`` (PR 24E) selects the bounded one-hop neighborhood of one\nfocal entity: source-or-target OR semantics applied on the server, and\nit intersects normally with the other filters. Soft-deleted edges stay\nexcluded exactly as before.",
+        "description": "List distinct Relationships visible to one Investigation.\n\n``entity_id`` (PR 24E) selects the bounded one-hop neighborhood of one\nfocal entity: source-or-target OR semantics applied on the server, and\nit intersects normally with the other filters. Soft-deleted edges stay\nexcluded exactly as before. Response rows additionally carry the\njoined endpoint Entity presentation metadata (source/target type and\nvalue, PR 31F-5) so the browser never issues one Entity GET per edge.",
         "operationId": "list_relationships",
         "parameters": [
           {
@@ -6044,7 +6286,7 @@
     },
     "/api/v1/investigations/{investigation_id}/relationships/{relationship_id}": {
       "get": {
-        "description": "Return one Relationship visible to the path Investigation.",
+        "description": "Return one Relationship visible to the path Investigation.\n\nThe response carries the same joined endpoint Entity presentation\nmetadata (source/target type and value, PR 31F-5) as the list; missing\nand cross-Investigation IDs map to the same stable scoped 404.",
         "operationId": "get_relationship",
         "parameters": [
           {
@@ -6887,6 +7129,115 @@
         "summary": "Get Research Result",
         "tags": [
           "research"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/support-presentations/resolve": {
+      "post": {
+        "description": "Resolve one bounded set of support IDs into presentation metadata.\n\nInvestigation scope is mandatory: every requested ID resolves only\nthrough exact admission into the path Investigation, so\ncross-Investigation IDs fail closed (absent) and the raw provider\npayload never crosses the API boundary.",
+        "operationId": "resolve_support_presentations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportPresentationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportPresentationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "Resolve Support Presentations",
+        "tags": [
+          "investigations"
         ]
       }
     },

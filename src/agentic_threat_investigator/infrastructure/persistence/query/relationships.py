@@ -26,6 +26,7 @@ from agentic_threat_investigator.app.query.relationships import (
     RelationshipObservationListQuery,
     RelationshipObservationQueryService,
     RelationshipQueryService,
+    RelationshipReadItem,
     parse_relationship_cursor,
     parse_relationship_observation_cursor,
     relationship_observation_sort_values,
@@ -54,6 +55,21 @@ def _relationship_from_row(row: RelationshipRow) -> Relationship:
         source_entity_id=row.source_entity_id,
         target_entity_id=row.target_entity_id,
         type=RelationshipType(row.relationship_type_urn),
+    )
+
+
+def _relationship_read_item(
+    row: RelationshipRow,
+    source_entity: EntityRow | None,
+    target_entity: EntityRow | None,
+) -> RelationshipReadItem:
+    """Map one relationship row with its endpoint Entity presentation."""
+    return RelationshipReadItem(
+        relationship=_relationship_from_row(row),
+        source_entity_type=_entity_type_or_none(source_entity),
+        source_entity_value=_entity_value_or_none(source_entity),
+        target_entity_type=_entity_type_or_none(target_entity),
+        target_entity_value=_entity_value_or_none(target_entity),
     )
 
 
@@ -88,11 +104,17 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
         self._session = session
         self._limits = limits
 
-    async def list(self, query: RelationshipListQuery) -> QueryPage[Relationship]:
+    async def list(
+        self, query: RelationshipListQuery
+    ) -> QueryPage[RelationshipReadItem]:
         """Return distinct Relationships observed by the Investigation.
 
         Repeated observations never duplicate an edge; the canonical order is
-        the stable ``relationship.id ASC``.
+        the stable ``relationship.id ASC``. PR 31F-5 also joins the
+        source/target ``Entity`` rows (outer joins, so a missing endpoint
+        row can never drop a stable edge) so the analyst-facing endpoint
+        type/value ships with the page — never a second query per row and
+        never a frontend N+1.
         """
         limit = self._limits.validate_limit(query.limit)
         envelope = require_cursor_for_query(
@@ -102,8 +124,13 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
         )
         cursor = None if envelope is None else parse_relationship_cursor(envelope)
 
+        # Endpoint Entity presentation rows (PR 31F-5): two aliases keep the
+        # source/target metadata independent in one bounded query.
+        source_entity = aliased(EntityRow)
+        target_entity = aliased(EntityRow)
+
         stmt = (
-            select(RelationshipRow)
+            select(RelationshipRow, source_entity, target_entity)
             .join(
                 RelationshipObservationRow,
                 RelationshipObservationRow.relationship_id == RelationshipRow.id,
@@ -112,6 +139,16 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
                 InvestigationEvidenceRow,
                 InvestigationEvidenceRow.evidence_observation_id
                 == RelationshipObservationRow.evidence_observation_id,
+            )
+            .join(
+                source_entity,
+                source_entity.id == RelationshipRow.source_entity_id,
+                isouter=True,
+            )
+            .join(
+                target_entity,
+                target_entity.id == RelationshipRow.target_entity_id,
+                isouter=True,
             )
             .where(
                 InvestigationEvidenceRow.investigation_id == query.investigation_id,
@@ -143,33 +180,50 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
         if cursor is not None:
             stmt = stmt.where(RelationshipRow.id > cursor)
         stmt = stmt.distinct().order_by(RelationshipRow.id.asc()).limit(limit + 1)
-        rows = (await self._session.execute(stmt)).scalars().all()
+        rows = (await self._session.execute(stmt)).all()
         page = rows[:limit]
-        items = tuple(_relationship_from_row(row) for row in page)
+        items = tuple(
+            _relationship_read_item(relationship_row, source_row, target_row)
+            for relationship_row, source_row, target_row in page
+        )
         next_cursor: str | None = None
         if len(rows) > limit:
-            last = page[-1]
+            last_row = page[-1][0]
             next_cursor = encode_cursor(
                 CursorEnvelope(
                     query_kind=QueryKind.RELATIONSHIPS,
                     filter_fingerprint=query.fingerprint(),
-                    sort_values=relationship_sort_values(last.id),
+                    sort_values=relationship_sort_values(last_row.id),
                 )
             )
         return QueryPage(items=items, next_cursor=next_cursor)
 
     async def get(
         self, investigation_id: UUID, relationship_id: UUID
-    ) -> Relationship | None:
+    ) -> RelationshipReadItem | None:
         """Return one Relationship visible to the Investigation, if any.
 
         Visibility derives from RelationshipObservation correlation with the
         Investigation; a cross-Investigation lookup fails closed with
-        ``None``.
+        ``None``. The endpoint Entity presentation rows join in the same
+        bounded exact read (outer joins, PR 31F-5) so the analyst-facing
+        type/value needs no second query.
         """
+        source_entity = aliased(EntityRow)
+        target_entity = aliased(EntityRow)
         row = (
             await self._session.execute(
-                select(RelationshipRow)
+                select(RelationshipRow, source_entity, target_entity)
+                .join(
+                    source_entity,
+                    source_entity.id == RelationshipRow.source_entity_id,
+                    isouter=True,
+                )
+                .join(
+                    target_entity,
+                    target_entity.id == RelationshipRow.target_entity_id,
+                    isouter=True,
+                )
                 .where(
                     RelationshipRow.id == relationship_id,
                     RelationshipRow.deleted_at.is_(None),
@@ -189,8 +243,11 @@ class PostgresRelationshipQueryService(RelationshipQueryService):
                     .exists()
                 )
             )
-        ).scalar_one_or_none()
-        return None if row is None else _relationship_from_row(row)
+        ).one_or_none()
+        if row is None:
+            return None
+        relationship_row, source_row, target_row = row
+        return _relationship_read_item(relationship_row, source_row, target_row)
 
 
 class PostgresRelationshipObservationQueryService(RelationshipObservationQueryService):

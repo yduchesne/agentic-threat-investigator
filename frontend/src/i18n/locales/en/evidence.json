@@ -46,5 +46,8 @@
   "types.reputation": "Reputation",
   "types.threatIntelligence": "Threat intelligence",
   "types.vulnerability": "Vulnerability",
-  "types.threatResearch": "Threat research"
+  "types.threatResearch": "Threat research",
+  "columns.subjectValue": "Subject value",
+  "columns.subjectType": "Subject type",
+  "columns.subjectEntityId": "Subject entity ID"
 }

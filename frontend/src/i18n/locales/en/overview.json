@@ -29,6 +29,10 @@
   "disposition.unknown": "Finding",
   "support.title": "Supports",
   "support.evidence": "Evidence",
+  "support.evidenceId": "Evidence ID:",
+  "support.observationId": "Observation ID:",
+  "support.evidenceUnavailable": "Evidence details unavailable",
+  "support.observationUnavailable": "Relationship observation details unavailable",
   "support.relationshipObservation": "Relationship observation",
   "support.unknown": "Reference",
   "research.title": "Research context",
@@ -49,5 +53,12 @@
   "error.assessment.title": "Unable to load the current Assessment",
   "error.report.title": "Unable to load the current Report",
   "loading.assessment": "Loading current Assessment…",
-  "loading.report": "Loading current Report…"
+  "loading.report": "Loading current Report…",
+  "atAGlance.title": "At a glance",
+  "atAGlance.findings": "Findings",
+  "atAGlance.limitations": "Limitations",
+  "atAGlance.unresolved": "Unresolved questions",
+  "atAGlance.nextSteps": "Recommended next steps",
+  "findings.more": "+{{count}} more findings in full report",
+  "findings.moreUnlinked": "+{{count}} more findings recorded"
 }

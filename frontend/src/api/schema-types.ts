@@ -15,6 +15,7 @@ import type {
   EntityType,
   ErrorResponse,
   EvidenceResponse,
+  EvidenceSupportPresentationResponse,
   EvidenceType,
   FindingResponse,
   FindingSupportResponse,
@@ -52,6 +53,7 @@ import type {
   PageResponseResearchResultResponse,
   PageResponseTimelineEventResponse,
   RelationshipObservationResponse,
+  RelationshipObservationSupportPresentationResponse,
   RelationshipResponse,
   RelationshipDirection,
   RelationshipType,
@@ -62,6 +64,7 @@ import type {
   ResearchClaimResponse,
   ResearchResultResponse,
   RuntimeInfoResponse,
+  SupportPresentationResponse,
   TimelineEventResponse,
   UserRole,
   Verdict,
@@ -153,8 +156,21 @@ export type VerdictName = Verdict;
 /** One structured Assessment finding with typed support (PR 24B). */
 export type Finding = FindingResponse;
 
+/** One finding-like artifact row (Assessment finding or Report snapshot). */
+export type FindingLike = Finding | ReportFinding;
+
 /** One typed provenance reference of a Finding (PR 24B). */
 export type FindingSupportRef = FindingSupportResponse;
+
+/** One Evidence support presentation projection (PR 31F-5). */
+export type EvidenceSupportPresentation = EvidenceSupportPresentationResponse;
+
+/** One RelationshipObservation support presentation projection (PR 31F-5). */
+export type RelationshipObservationSupportPresentation =
+  RelationshipObservationSupportPresentationResponse;
+
+/** The bounded resolved support presentation map (PR 31F-5). */
+export type SupportPresentation = SupportPresentationResponse;
 
 /** One versioned structured InvestigationReport (PR 24B). */
 export type Report = ReportResponse;

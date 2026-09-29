@@ -17,6 +17,7 @@ import { EmptyState, LoadingState } from "../components/AsyncState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { Timestamp } from "../components/Timestamp";
 import { useCurrentReport, useReportMarkdown } from "./investigation-queries";
+import { useSupportPresentations } from "./support-presentations-queries";
 import type { WorkspaceOutletContext } from "./InvestigationWorkspace";
 import { ReportContent } from "./ReportView";
 
@@ -39,6 +40,12 @@ export function ReportPage(): ReactElement | null {
     investigationId,
     report?.id ?? "",
     showMarkdown && report !== null,
+  );
+  // PR 31F-5 E3: one bounded support resolution for the loaded Report.
+  const supports = useSupportPresentations(
+    investigation?.id ?? investigationId,
+    report?.findings ?? [],
+    reportEnabled && report !== null,
   );
 
   if (investigation === null) {
@@ -90,7 +97,7 @@ export function ReportPage(): ReactElement | null {
           {t("meta.version")} {report.version}
         </Typography>
       </Stack>
-      <ReportContent report={report} />
+      <ReportContent report={report} presentation={supports.presentation} />
       <Box>
         <Button
           variant="text"

@@ -109,6 +109,7 @@ def test_openapi_operation_ids_are_explicit() -> None:
         "get_relationship",
         "list_relationship_observations",
         "get_relationship_observation",
+        "resolve_support_presentations",
         "list_research_results",
         "get_research_result",
         "list_assessments",

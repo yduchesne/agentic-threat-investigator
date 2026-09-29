@@ -310,6 +310,7 @@ export function ResearchFiltersForm({
       />
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.createdFrom.label")}
         value={draft.createdFrom}
@@ -318,6 +319,7 @@ export function ResearchFiltersForm({
       />
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.createdTo.label")}
         value={draft.createdTo}

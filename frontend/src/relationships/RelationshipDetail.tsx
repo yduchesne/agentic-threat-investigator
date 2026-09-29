@@ -16,10 +16,11 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { Relationship } from "../api/schema-types";
-import { DetailRows, DetailSection } from "../analyst-table/DetailRows";
+import { DetailRows, DetailRow, DetailSection } from "../analyst-table/DetailRows";
 import { DrawerError, DrawerLoading } from "../analyst-table/DetailDrawer";
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
+import { EntityReference } from "../components/EntityReference";
 import { PivotMenu } from "../pivots/PivotMenu";
 import {
   relationshipObservationsAction,
@@ -37,7 +38,12 @@ export interface RelationshipDetailProps {
   embedded?: boolean;
 }
 
-/** The stable edge plus a bounded observation preview. */
+/** The stable edge plus a bounded observation preview.
+ *
+ * PR 31F-5 §3.3 order: Source entity (value/type, Entity ID + Copy, Pivot |
+ * View relationship evolution), Relationship (translated type + ID), Target
+ * entity (identical to Source), then the bounded observations preview.
+ */
 export function RelationshipDetail({
   investigationId,
   relationship,
@@ -48,72 +54,70 @@ export function RelationshipDetail({
 
   return (
     <Box>
-      <DetailRows
-        rows={[
-          {
-            label: t("detail.sourceEntity"),
-            value: <CompactId id={relationship.source_entity_id} label={t("detail.sourceEntity")} />,
-          },
-          {
-            label: t("detail.relationshipType"),
-            value: t(relationshipTypeKey(relationship.type)),
-          },
-          {
-            label: t("detail.targetEntity"),
-            value: <CompactId id={relationship.target_entity_id} label={t("detail.targetEntity")} />,
-          },
-          {
-            label: t("detail.relationshipId"),
-            value: <CompactId id={relationship.id} label={t("detail.relationshipId")} />,
-          },
-        ]}
-      />
-      <DetailSection title={t("evolution.detailHeading")}>
+      <DetailSection title={t("detail.sourceEntity")}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 0.5 }}>
+          <EntityReference
+            value={relationship.source_entity_value}
+            type={relationship.source_entity_type}
+            label={t("detail.sourceEntity")}
+          />
+          <DetailRow
+            label={t("detail.entityId")}
+            value={
+              <CompactId id={relationship.source_entity_id} label={t("detail.entityId")} />
+            }
+          />
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
+            <PivotMenu
+              actions={relationshipSourceActions(relationship, "detail_field")}
+              ariaLabel={`${t("detail.pivot.aria")} ${t("detail.sourceEntity")}`}
+            />
+            <EvolutionLink
+              investigationId={investigationId}
+              entityId={relationship.source_entity_id}
+              ariaLabel={t("evolution.sourceAria")}
+            />
+          </Box>
+        </Box>
+      </DetailSection>
+      <DetailSection title={t("detail.relationship")}>
+        <Box sx={{ mt: 0.5 }}>
           <DetailRows
             rows={[
               {
-                label: t("detail.sourceEntity"),
-                value: (
-                  <EvolutionLink
-                    investigationId={investigationId}
-                    entityId={relationship.source_entity_id}
-                    ariaLabel={t("evolution.sourceAria")}
-                  />
-                ),
+                label: t("detail.relationshipType"),
+                value: t(relationshipTypeKey(relationship.type)),
               },
               {
-                label: t("detail.targetEntity"),
-                value: (
-                  <EvolutionLink
-                    investigationId={investigationId}
-                    entityId={relationship.target_entity_id}
-                    ariaLabel={t("evolution.targetAria")}
-                  />
-                ),
+                label: t("detail.relationshipId"),
+                value: <CompactId id={relationship.id} label={t("detail.relationshipId")} />,
               },
             ]}
           />
         </Box>
       </DetailSection>
-      <DetailSection title={t("detail.pivot.title")}>
+      <DetailSection title={t("detail.targetEntity")}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 0.5 }}>
-          <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-            <Typography variant="caption" sx={{ flex: "0 0 150px", fontWeight: 600 }}>
-              {t("detail.sourceEntity")}
-            </Typography>
-            <PivotMenu
-              actions={relationshipSourceActions(relationship, "detail_field")}
-              ariaLabel={`${t("detail.pivot.aria")} ${t("detail.sourceEntity")}`}
-            />
-          </Box>
-          <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-            <Typography variant="caption" sx={{ flex: "0 0 150px", fontWeight: 600 }}>
-              {t("detail.targetEntity")}
-            </Typography>
+          <EntityReference
+            value={relationship.target_entity_value}
+            type={relationship.target_entity_type}
+            label={t("detail.targetEntity")}
+          />
+          <DetailRow
+            label={t("detail.entityId")}
+            value={
+              <CompactId id={relationship.target_entity_id} label={t("detail.entityId")} />
+            }
+          />
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
             <PivotMenu
               actions={relationshipTargetActions(relationship, "detail_field")}
               ariaLabel={`${t("detail.pivot.aria")} ${t("detail.targetEntity")}`}
+            />
+            <EvolutionLink
+              investigationId={investigationId}
+              entityId={relationship.target_entity_id}
+              ariaLabel={t("evolution.targetAria")}
             />
           </Box>
         </Box>

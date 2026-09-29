@@ -201,6 +201,29 @@ class RelationshipObservationListQuery(BaseModel):
         )
 
 
+class RelationshipReadItem(BaseModel):
+    """One stable Relationship edge with its endpoint Entity presentation.
+
+    PR 31F-5 read projection (never persisted and never a domain model):
+    the canonical ``Relationship`` stays authoritative while
+    ``source_entity_type``/``source_entity_value`` and
+    ``target_entity_type``/``target_entity_value`` are read-side
+    presentation metadata sourced from the joined source/target ``Entity``
+    rows — no N+1 lookup, no duplicate persisted columns, and never a
+    substitute for the canonical Entity identity. The endpoint fields are
+    ``None`` only when a join could not resolve the row, which cannot
+    happen through the FKs for normally written data.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    relationship: Relationship
+    source_entity_type: EntityType | None = None
+    source_entity_value: str | None = None
+    target_entity_type: EntityType | None = None
+    target_entity_value: str | None = None
+
+
 class RelationshipObservationItem(BaseModel):
     """One immutable observation with its joined stable Relationship semantics.
 
@@ -283,22 +306,27 @@ class RelationshipQueryService(ABC):
     """Analyst-facing Relationship read contract (PR 23A)."""
 
     @abstractmethod
-    async def list(self, query: RelationshipListQuery) -> QueryPage[Relationship]:
+    async def list(
+        self, query: RelationshipListQuery
+    ) -> QueryPage[RelationshipReadItem]:
         """Return distinct stable Relationships visible to the Investigation.
 
         Repeated observations never duplicate an edge; ordering is stable
-        ``relationship.id ASC`` with bound cursors.
+        ``relationship.id ASC`` with bound cursors. Every item carries the
+        joined endpoint Entity presentation metadata (source/target type and
+        value) delivered with the page — never one Entity GET per edge.
         """
 
     @abstractmethod
     async def get(
         self, investigation_id: UUID, relationship_id: UUID
-    ) -> Relationship | None:
+    ) -> RelationshipReadItem | None:
         """Return one Relationship visible to the Investigation, if any.
 
         Visibility derives from RelationshipObservation correlation; a
         cross-Investigation lookup returns ``None`` so the HTTP layer maps it
-        to a 404 without enumerating resources.
+        to a 404 without enumerating resources. The item carries the same
+        joined endpoint Entity presentation metadata as :meth:`list`.
         """
 
 

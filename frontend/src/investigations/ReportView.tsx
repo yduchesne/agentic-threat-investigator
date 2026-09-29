@@ -21,6 +21,7 @@ import type {
 } from "../api/schema-types";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { researchSupportAction } from "../pivots/pivot-capabilities";
+import type { SupportPresentationLookup } from "./support-presentations-queries";
 import { FindingList } from "./FindingList";
 
 const VERDICT_LABEL_KEYS: Record<VerdictName, string> = {
@@ -190,10 +191,17 @@ export function ResearchContextBlock({
 /**
  * The full structured persisted Report content.
  *
- * Used by the Overview report surface and the secondary full Report route.
- * Every string renders as escaped React text.
+ * Used by the secondary full Report route (the Overview renders the bounded
+ * PR 31F-5 summary instead). Every string renders as escaped React text.
+ * Optional support-presentation metadata enriches finding references.
  */
-export function ReportContent({ report }: { report: Report }): ReactElement {
+export function ReportContent({
+  report,
+  presentation = undefined,
+}: {
+  report: Report;
+  presentation?: SupportPresentationLookup | null;
+}): ReactElement {
   const { t } = useTranslation("overview");
   return (
     <Stack spacing={2.5}>
@@ -215,7 +223,7 @@ export function ReportContent({ report }: { report: Report }): ReactElement {
       <Box>
         <Typography variant="h2">{t("findings.title")}</Typography>
         <Box sx={{ mt: 0.5 }}>
-          <FindingList findings={report.findings} />
+          <FindingList findings={report.findings} presentation={presentation} />
         </Box>
       </Box>
       <Box>

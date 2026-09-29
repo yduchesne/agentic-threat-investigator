@@ -33,6 +33,10 @@ from agentic_threat_investigator.app.query.geolocation import (
 )
 from agentic_threat_investigator.app.query.models import QueryPage
 from agentic_threat_investigator.app.query.services import QueryServiceBundle
+from agentic_threat_investigator.app.query.support_presentations import (
+    SupportPresentationQuery,
+    SupportPresentationResult,
+)
 from agentic_threat_investigator.config import Settings
 from agentic_threat_investigator.domain.identity import User, UserRole
 from agentic_threat_investigator.domain.investigation import (
@@ -225,6 +229,22 @@ class FakeGeointService:
             raise error
 
 
+class FakeSupportPresentationService:
+    """Record support-resolution requests and return a configured result."""
+
+    def __init__(self, result: SupportPresentationResult | None = None) -> None:
+        """Bind the default empty result and an empty call log."""
+        self.result = result or SupportPresentationResult()
+        self.queries: list[Any] = []
+
+    async def resolve(
+        self, query: SupportPresentationQuery
+    ) -> SupportPresentationResult:
+        """Record one resolution query and return the configured result."""
+        self.queries.append(query)
+        return self.result
+
+
 class FakeQueryBundle:
     """One in-memory query bundle with per-collection fakes.
 
@@ -243,6 +263,7 @@ class FakeQueryBundle:
         self.graph = FakeGraphService()
         self.relationships = FakeCollectionService()
         self.relationship_observations = FakeCollectionService()
+        self.support_presentations = FakeSupportPresentationService()
         self.research_results = FakeCollectionService()
         self.assessments = FakeCollectionService()
         self.reports = FakeCollectionService()

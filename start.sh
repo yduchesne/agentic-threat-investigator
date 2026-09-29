@@ -481,6 +481,19 @@ daemon_deadline_seconds() {
   esac
 }
 
+# container_may_still_start <service>: whether waiting can plausibly make
+# this daemon healthy on its own. Only a ``running`` container can still be
+# booting; an exited/dead/created/configured container is in a closed
+# terminal state and will never transition by itself. The health gate uses
+# this to skip the cold-start wait for already-dead containers so the single
+# repair starts immediately instead of idling the full deadline.
+container_may_still_start() {
+  case "$(container_state "$1")" in
+    running) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # health_check_daemon <service>: wait (bounded) for the service to become
 # healthy, then attempt exactly ONE repair if it never did, wait a short
 # bounded grace period, and report success or failure. Repair loops are
@@ -488,13 +501,33 @@ daemon_deadline_seconds() {
 # example a missing required secret) must never be restarted forever.
 health_check_daemon() {
   local service="$1"
-  local deadline now
+  local deadline now start_time elapsed non_running_ticks last_heartbeat
+  start_time=$(date +%s)
   deadline=$(($(date +%s) + $(daemon_deadline_seconds "$service")))
+  non_running_ticks=0
+  last_heartbeat=$start_time
   # Phase 1: wait for readiness without repairing (a cold start may simply
-  # be slow: image startup, migrations, bootstrap).
+  # be slow: image startup, migrations, bootstrap). A container that is not
+  # in the running state cannot become healthy on its own: two consecutive
+  # non-running polls prove a stable closed state, so the wait is skipped
+  # and the single repair begins immediately.
   until daemon_healthy "$service"; do
+    if container_may_still_start "$service"; then
+      non_running_ticks=0
+    else
+      non_running_ticks=$((non_running_ticks + 1))
+      if ((non_running_ticks >= 2)); then
+        break
+      fi
+    fi
     now=$(date +%s)
     ((now < deadline)) || break
+    # Heartbeat: never let a long cold start look like a freeze.
+    if ((now - last_heartbeat >= 20)); then
+      elapsed=$((now - start_time))
+      note "$service: still starting (${elapsed}s of $(daemon_deadline_seconds "$service")s cold-start grace)"
+      last_heartbeat=$now
+    fi
     sleep 3
   done
   if daemon_healthy "$service"; then

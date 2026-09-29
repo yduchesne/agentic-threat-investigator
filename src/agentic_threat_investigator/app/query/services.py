@@ -28,6 +28,9 @@ from agentic_threat_investigator.app.query.relationships import (
 )
 from agentic_threat_investigator.app.query.reports import ReportQueryService
 from agentic_threat_investigator.app.query.research import ResearchResultQueryService
+from agentic_threat_investigator.app.query.support_presentations import (
+    SupportPresentationQueryService,
+)
 from agentic_threat_investigator.app.query.timeline import TimelineQueryService
 
 
@@ -47,6 +50,7 @@ class QueryServiceBundle(ABC):
     graph: GraphQueryService
     relationships: RelationshipQueryService
     relationship_observations: RelationshipObservationQueryService
+    support_presentations: SupportPresentationQueryService
     research_results: ResearchResultQueryService
     assessments: AssessmentQueryService
     reports: ReportQueryService

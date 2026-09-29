@@ -50,6 +50,7 @@ requirements justify the additional persistence dependency.
 | **31F-1** | UI correctness and human-readable analyst presentation | Analyst-facing i18n labels before raw codes on Timeline/relationship surfaces [DONE] |
 | **31F-2** | Investigation failure diagnostics | Bounded, sanitized root-cause `error_message` on failure Timeline events, fatal-stop propagation, safe detail presentation [DONE] |
 | **31F-4** | Appearance preferences and multi-theme analyst workbench | Browser-local Light/Dark/Wargames/Control Room appearances over centralized semantic MUI tokens; presentation only [DONE] |
+| **31F-5** | Investigation workspace UX correctness and human-readable analyst presentation | Shared detail/pivot lifecycle focus hygiene, topmost-only nested Escape, Overview/Report separation, human-readable Entity and support references, bounded support presentation resolver, date/time label shrink, Firefox + Chromium overlay journeys [DONE] |
 
 ## PR 31A — Graph read model and repository contract [DONE]
 
@@ -384,3 +385,52 @@ slowdown during manual testing was traced to excessive concurrent Firefox
 instances saturating the host CPU, not an established ATI Timeline defect.
 Reopen performance work only after a controlled single-browser/one-worker
 reproduction shows ATI-specific excessive resource use.
+
+## PR 31F-5 — Investigation workspace UX correctness and human-readable analyst presentation [DONE]
+
+Corrective work on fresh main after 31F-4 (no PR 31G scope). Final scope:
+
+- **Browser lifecycle (A).** The shared DetailDrawer and PivotWorkspace
+  close controls use deterministic deferred focus (never browser
+  `autoFocus` inside the mount commit) and every close path drops active
+  focus before the URL navigation unmounts the control; the shared
+  PivotMenu keeps its non-modal Portal and focus-safe navigation. No
+  forced reload, browser branch, arbitrary delay, or MUI modal chain was
+  introduced, and Playwright stays `workers: 1`.
+- **Nested Evidence detail (B).** X, Escape and backdrop each close only
+  the nested drawer inside the PivotWorkspace (topmost-only Escape:
+  `stopPropagation` on the drawer and the action menu), never the
+  workspace; filters/cursors/breadcrumbs and post-close table interaction
+  are preserved, with the URL-backed pivot step `selected` removed by
+  serialization.
+- **Overview vs Report (C).** The Overview is a concise dashboard in the
+  exact section order (lifecycle, analytical outcome, executive summary,
+  at-a-glance loaded-array counts, first 3 findings, first 3 next steps,
+  navigation/action row) and never renders the full `ReportContent`; the
+  full Report stays complete on its route.
+- **Entity presentation (D).** Shared no-fetch `EntityReference`
+  (value primary + translated type adjacent + optional technical ID);
+  the Evidence Subject cell, the Relationship source/target cells and
+  detail, and the Relationship CSV show value/type before UUIDs without a
+  frontend N+1 (the Relationship read projection now joins endpoint
+  Entities through the bounded query/API).
+- **Support presentation (E).** One bounded Investigation-scoped batch
+  resolver
+  (`POST /api/v1/investigations/{id}/support-presentations/resolve`,
+  set-oriented SQL, exact observation identity, cross-Investigation
+  fail-closed, per-kind request cap, projections only) feeds semantic
+  Finding support lines on the Overview and the full Report; IDs stay
+  secondary and actions stay exact.
+- **Date/time labels (F).** All native `datetime-local` fields use the
+  supported MUI shrink slot (`slotProps={{ inputLabel: { shrink: true } }}`);
+  no CSS offsets, filter/interval semantics unchanged.
+
+Threading: URL remains authoritative for filters/cursor/selection/pivot
+stack; no second drawer/pivot store; no reload/delay/browser branch; no
+LLM labels or Overview; no migration; no orchestration/provider change;
+no new analytical artifact; no weakening of QA gates.
+
+**Acceptance criteria.** Delivered only after backend `--qa`
+(unit + integration), frontend unit + lint, OpenAPI drift check, and the
+Firefox + Chromium overlay journeys (zz-pivots, zz-analyst-tables)
+pass with one Playwright worker.

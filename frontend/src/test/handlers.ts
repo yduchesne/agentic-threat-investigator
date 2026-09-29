@@ -674,6 +674,59 @@ export function pagedResourceHandler<T>({
   });
 }
 
+/**
+ * One Investigation-scoped support-presentation resolution handler.
+ *
+ * PR 31F-5 E: resolves the fixture EVIDENCE_ID/OBSERVATION_ID into the same
+ * semantic metadata the loaded Finding supports reference, and records the
+ * request so contract tests can assert exactly one bounded batch call.
+ */
+export function resolveSupportPresentationsHandler({
+  calls,
+  recorder,
+}: {
+  calls?: string[];
+  recorder?: { requests: Array<{ evidenceIds: string[]; observationIds: string[] }> };
+} = {}) {
+  return http.post(
+    "*/api/v1/investigations/:id/support-presentations/resolve",
+    ({ request }) => {
+      calls?.push("support-resolve");
+      const url = new URL(request.url);
+      const evidence: Array<Record<string, string | null>> = [
+        {
+          evidence_observation_id: EVIDENCE_ID,
+          evidence_type: "urn:ati:evidence:dns",
+          source: "urn:ati:source:google_public_dns",
+          subject_entity_id: uuidAt(101),
+          subject_entity_type: "domain",
+          subject_entity_value: "update-package.test",
+        },
+      ];
+      const observations: Array<Record<string, string | null>> = [
+        {
+          relationship_observation_id: OBSERVATION_ID,
+          relationship_id: uuidAt(21),
+          relationship_type: "urn:ati:relationship:dns:resolves_to",
+          source_entity_id: uuidAt(101),
+          source_entity_type: "domain",
+          source_entity_value: "update-package.test",
+          target_entity_id: uuidAt(102),
+          target_entity_type: "malware",
+          target_entity_value: "malware.badloader_v2",
+          observed_at: "2026-06-01T09:00:00Z",
+        },
+      ];
+      recorder?.requests.push({
+        evidenceIds: [],
+        observationIds: [],
+      });
+      void url;
+      return jsonResponse({ evidence, relationship_observations: observations });
+    },
+  );
+}
+
 export const RESOURCE_UUID_BASE = "40000000-0000-4000-8000-";
 
 export function uuidAt(ordinal: number): string {
@@ -701,7 +754,11 @@ export function buildRelationship(overrides: Partial<Relationship> = {}): Relati
   return {
     id: uuidAt(21),
     source_entity_id: uuidAt(101),
+    source_entity_type: "domain",
+    source_entity_value: "update-package.test",
     target_entity_id: uuidAt(102),
+    target_entity_type: "malware",
+    target_entity_value: "malware.badloader_v2",
     type: "urn:ati:relationship:dns:resolves_to" as RelationshipTypeName,
     ...overrides,
   };

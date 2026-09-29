@@ -9,7 +9,7 @@
 // network retry inside the modal, malformed pivot state, browser
 // Back/Forward, and refresh/deep-link restoration.
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -120,7 +120,8 @@ describe("pivot modal workspace", () => {
     expect(
       within(dialog).getByRole("navigation", { name: "Pivot breadcrumb" }),
     ).toBeInTheDocument();
-    expect(within(dialog).getByText("update-package.test")).toBeInTheDocument();
+    // The value appears in the breadcrumb label and the source cell now.
+    expect(within(dialog).getAllByText("update-package.test").length).toBeGreaterThan(0);
     // The breadcrumb ends at the reached resource; the base Investigation
     // segment anchors the path.
     expect(within(dialog).getByText("Investigation")).toBeInTheDocument();
@@ -269,6 +270,61 @@ describe("pivot modal workspace", () => {
       const last = evidenceRecorder.requests.at(-1);
       expect(last?.params.subject_entity_id).toBe(ENTITY_ID);
     });
+  });
+
+  it("closes the nested Evidence detail drawer without closing the workspace (31F-5 ND01/2/4/5/6)", async () => {
+    installFlowHandlers();
+    // Deep link: an Evidence pivot step with the exact detail selection and
+    // one bounded filter, exactly the state after Evidence -> Pivot -> View.
+    const steps: PivotStep[] = [
+      {
+        resource: "evidence",
+        filters: { subject_entity_id: ENTITY_ID },
+        selectedId: EVIDENCE_ID,
+        label: "update-package.test",
+        sourceKind: "table_cell",
+      },
+    ];
+    const pivot = serializePivotState({ steps });
+    expect(pivot).not.toBeNull();
+    const { router } = renderAtPath(`${BASE}/evidence?pivot=${pivot ?? ""}`);
+
+    const workspace = await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
+    const nested = await screen.findByRole("dialog", { name: "Evidence" });
+    expect(within(nested).getByText("update-package.test")).toBeInTheDocument();
+
+    // X closes ONLY the nested detail: the workspace must survive.
+    await userEvent.click(within(nested).getByRole("button", { name: "Close detail" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Evidence" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: /Evidence pivot workspace/i })).toBe(workspace);
+
+    // URL state transformation: same resource/filters/cursor, selected absent.
+    const current = readPivotState(new URLSearchParams(router.state.location.search));
+    expect(current?.steps).toHaveLength(1);
+    expect(current?.steps[0].resource).toBe("evidence");
+    expect(current?.steps[0].filters).toEqual({ subject_entity_id: ENTITY_ID });
+    expect(current?.steps[0].selectedId).toBeNull();
+
+    // Post-close table interaction still works: open another detail.
+    // Table-cell clicks use raw click dispatch here: userEvent's
+    // pointerdown/pre-focus triggers the TanStack row re-render which
+    // replaces the clicked node between pointerdown and click in jsdom — a
+    // simulation artifact that never occurs with real browser pointer input
+    // (covered by the real-browser E2E); the synthetic click exercises the
+    // same React onClick path a real click reaches.
+    fireEvent.click(screen.getByRole("button", { name: /^View / }));
+    await screen.findByRole("dialog", { name: "Evidence" });
+
+    // Escape closes only the nested drawer, never the workspace.
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Evidence" }), {
+      key: "Escape",
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Evidence" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: /Evidence pivot workspace/i })).toBe(workspace);
+
+    // The workspace can then close normally.
+    await userEvent.click(screen.getByRole("button", { name: "Close pivot workspace" }));
+    expect(screen.queryByRole("dialog", { name: /pivot workspace/i })).toBeNull();
   });
 
   it("suppresses further pivots at depth five and explains the limit textually", async () => {

@@ -4,7 +4,7 @@
 
 import { screen } from "@testing-library/react";
 import { http } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Assessment, Investigation, Report } from "../api/schema-types";
 import {
@@ -18,12 +18,22 @@ import {
   jsonResponse,
   reportCurrent404Handler,
   reportCurrentHandler,
+  resolveSupportPresentationsHandler,
   runtimeFake,
 } from "../test/handlers";
+import { CSRF_COOKIE_NAME } from "../api/csrf";
 import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
 
 useHttp();
+
+beforeEach(() => {
+  // The double-submit CSRF cookie is set by the real login flow; tests that
+  // exercise state-changing requests (support presentation resolution) arm it
+  // exactly like the browser would (PR 31F-5 E).
+  document.cookie = `${CSRF_COOKIE_NAME}=test-csrf-token`;
+});
+
 
 const AUTH = [authMeSuccess, runtimeFake];
 const INVESTIGATION_ID = "20000000-0000-4000-8000-000000000001";
@@ -59,9 +69,16 @@ function countingCurrentHandlers(assessment: Assessment, report: Report) {
       return jsonResponse({ items: [], next_cursor: null });
     },
   );
+  const supportResolve = resolveSupportPresentationsHandler({ calls });
   return {
     calls,
-    handlers: [assessmentCurrent, reportCurrent, assessmentsList, reportsList],
+    handlers: [
+      assessmentCurrent,
+      reportCurrent,
+      assessmentsList,
+      reportsList,
+      supportResolve,
+    ],
   };
 }
 
@@ -97,16 +114,27 @@ describe("Overview route", () => {
       screen.getByText(/Reputation • High confidence • Supporting/),
     ).toBeInTheDocument();
     expect(screen.getByText("Supports")).toBeInTheDocument();
-    expect(screen.getAllByText("Evidence").length).toBeGreaterThan(0);
+    // PR 31F-5 SP01: the support reference is the semantic description
+    // (source · type · subject value/type) with the ID secondary.
+    expect(
+      await screen.findByText(/urn:ati:source:google_public_dns · DNS · update-package\.test · Domain/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Evidence ID:/)).toBeInTheDocument();
     expect(screen.getByTitle("40000000-0000-4000-8000-000000000001")).toBeInTheDocument();
+
+    // At a glance counts derive from the loaded artifact arrays only.
+    expect(await screen.findByText("At a glance")).toBeInTheDocument();
+    expect(screen.getByText(/Findings: 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Recommended next steps: 1/)).toBeInTheDocument();
 
     // Full Report action + FAKE DATA.
     expect(screen.getByRole("link", { name: "View full report" })).toBeInTheDocument();
     expect(screen.getByText("FAKE DATA")).toBeInTheDocument();
 
-    // Only the /current endpoints were queried — no version lists.
+    // Only the /current endpoints and one bounded support resolution ran.
     expect(calls).toContain("assessment-current");
     expect(calls).toContain("report-current");
+    expect(calls).toContain("support-resolve");
     expect(calls).not.toContain("assessments-list");
     expect(calls).not.toContain("reports-list");
   });
@@ -124,6 +152,7 @@ describe("Overview route", () => {
       detailHandler(completed),
       assessmentCurrentHandler(assessment),
       reportCurrent404Handler,
+      resolveSupportPresentationsHandler(),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
 
@@ -140,6 +169,46 @@ describe("Overview route", () => {
     expect(
       screen.queryByText("ATI deterministic investigation report"),
     ).not.toBeInTheDocument();
+  });
+
+  it("bounds the Overview to the first 3 findings and next steps and links to the full Report (OV02/OV03)", async () => {
+    const completed = completedInvestigationFixture();
+    const manyFindings = Array.from({ length: 5 }, (_, index) => ({
+      assessment_finding_ordinal: index + 1,
+      category: "network" as const,
+      disposition: "supporting" as const,
+      confidence: "medium" as const,
+      statement: `Bounded finding number ${index + 1}.`,
+      support: [],
+    }));
+    const manySteps = Array.from({ length: 4 }, (_, index) => `Next step ${index + 1}.`);
+    const report = buildReport({
+      investigation_id: completed.id,
+      findings: manyFindings,
+      recommended_next_steps: manySteps,
+    });
+    const { calls, handlers } = countingCurrentHandlers(
+      buildAssessment({ investigation_id: completed.id }),
+      report,
+    );
+    setHttpHandlers(...AUTH, detailHandler(completed), ...handlers);
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
+
+    await screen.findByText("Bounded finding number 1.");
+    expect(screen.getByText("Bounded finding number 3.")).toBeInTheDocument();
+    expect(screen.queryByText("Bounded finding number 4.")).toBeNull();
+    // The remainder links to the full Report.
+    expect(
+      screen.getByRole("link", { name: "+2 more findings in full report" }),
+    ).toBeInTheDocument();
+    // Next steps bounded to the first 3.
+    expect(screen.getByText("Next step 1.")).toBeInTheDocument();
+    expect(screen.getByText("Next step 3.")).toBeInTheDocument();
+    expect(screen.queryByText("Next step 4.")).toBeNull();
+    // Counts reflect the loaded artifact arrays (not the rendered subset).
+    expect(screen.getByText(/Findings: 5/)).toBeInTheDocument();
+    expect(screen.getByText(/Recommended next steps: 4/)).toBeInTheDocument();
+    void calls;
   });
 
   it("renders the failed state without Report errors when no artifacts exist (U35)", async () => {
@@ -209,6 +278,9 @@ describe("Overview route", () => {
       assessmentCurrentHandler(assessment),
       reportCurrentHandler(report),
     );
+      resolveSupportPresentationsHandler(),
+      resolveSupportPresentationsHandler(),
+      resolveSupportPresentationsHandler(),
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
 
     expect(
@@ -258,6 +330,7 @@ describe("Overview route", () => {
         buildReport({ investigation_id: completed.id, verdict: "suspicious", confidence: "medium" }),
       ),
     );
+      resolveSupportPresentationsHandler(),
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
 
     expect(
@@ -308,16 +381,17 @@ describe("Overview route", () => {
         buildAssessment({ investigation_id: completed.id }),
       ),
       reportCurrentHandler(report),
+      resolveSupportPresentationsHandler(),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
 
-    expect(await screen.findByText("Research context")).toBeInTheDocument();
+    // PR 31F-5 §3.4: the Overview is concise — Research context (part of
+    // the full Report) no longer renders below the navigation/action row.
+    await screen.findByText("At a glance");
+    expect(screen.queryByText("Research context")).toBeNull();
     expect(
-      screen.getByText("Contextual research claims, not observed evidence."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Research claim about the malware delivery association."),
-    ).toBeInTheDocument();
+      screen.queryByText("Research claim about the malware delivery association."),
+    ).toBeNull();
   });
 
   it("renders analytical text escaped, never as raw HTML (U52)", async () => {

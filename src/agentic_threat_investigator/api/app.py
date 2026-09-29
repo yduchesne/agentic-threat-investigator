@@ -34,6 +34,7 @@ from agentic_threat_investigator.api.routes import (
     reports,
     research,
     runtime,
+    support_presentations,
     timeline,
 )
 from agentic_threat_investigator.config import Settings
@@ -76,6 +77,7 @@ API_ROUTERS = (
     timeline.router,
     history.router,
     runtime.router,
+    support_presentations.support_presentations_router,
 )
 """Every /api/v1 router in a stable registration order."""
 

@@ -335,6 +335,7 @@ export function HistoryFiltersForm({
       </FormControl>
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.occurredFrom.label")}
         value={draft.occurredFrom}
@@ -343,6 +344,7 @@ export function HistoryFiltersForm({
       />
       <TextField
         type="datetime-local"
+        slotProps={{ inputLabel: { shrink: true } }}
         size="small"
         label={t("filters.occurredTo.label")}
         value={draft.occurredTo}

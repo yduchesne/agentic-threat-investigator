@@ -14,7 +14,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Report } from "../api/schema-types";
 import { renderAtPath } from "../test/render";
@@ -31,12 +31,22 @@ import {
   investigationLifecycleHandler,
   jsonResponse,
   reportCurrentHandler,
+  resolveSupportPresentationsHandler,
   runtimeFake,
   uuidAt,
 } from "../test/handlers";
+import { CSRF_COOKIE_NAME } from "../api/csrf";
 import { decodeBase64Url, readPivotState } from "./pivot-url";
 
 useHttp();
+
+beforeEach(() => {
+  // The double-submit CSRF cookie is set by the real login flow; tests that
+  // exercise state-changing requests (support presentation resolution) arm it
+  // exactly like the browser would (PR 31F-5 E).
+  document.cookie = `${CSRF_COOKIE_NAME}=test-csrf-token`;
+});
+
 
 const AUTH = [authMeSuccess, runtimeFake];
 const INVESTIGATION_ID = "20000000-0000-4000-8000-000000000001";
@@ -137,6 +147,7 @@ function baseOverviewHandlers(
     investigationLifecycleHandler([completed()]),
     assessmentCurrentHandler(assessmentLike()),
     reportCurrentHandler(report),
+    resolveSupportPresentationsHandler(),
     http.get("*/api/v1/investigations/:id/reports", () => {
       capture.reports += 1;
       return jsonResponse({ items: [], next_cursor: null });
@@ -278,6 +289,7 @@ describe("Report/Assessment provenance pivots", () => {
       investigationLifecycleHandler([completed()]),
       assessmentCurrentHandler(assessmentLike()),
       reportCurrentHandler(reportWithObservationSupport()),
+      resolveSupportPresentationsHandler(),
       http.get("*/api/v1/investigations/:id/reports", () =>
         jsonResponse({ items: [], next_cursor: null })),
       http.get("*/api/v1/investigations/:id/assessments", () =>
@@ -368,7 +380,9 @@ describe("Report/Assessment provenance pivots", () => {
   it("Research claim support opens the exact Research result selection", async () => {
     const capture = { reports: 0, assessments: 0 };
     setHttpHandlers(...baseOverviewHandlers(reportWithResearchContext(), capture));
-    const { router } = renderAtPath(`${BASE}/overview`);
+    // PR 31F-5 C: Research context is part of the full Report (the Overview
+    // is the concise surface), so the assertion starts on the Report route.
+    const { router } = renderAtPath(`${BASE}/overview/report`);
     await screen.findByText("Contextual research claim about the delivery infrastructure.");
 
     await userEvent.click(screen.getByRole("button", { name: "Open research result" }));
