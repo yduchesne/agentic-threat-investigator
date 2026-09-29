@@ -24,6 +24,11 @@ export default defineConfig({
   // A suite must still pass its final run; this never masks an
   // unconditional failure.
   retries: 1,
+  // Resource control (PR 31F-4): real-stack browser tests are
+  // resource-intensive and concurrent workers can saturate a development
+  // machine, producing misleading slowdowns. The repository default is one
+  // worker; controlled local runs use `npx playwright test --workers=1`.
+  // See docs/TESTING.md "Playwright resource control".
   workers: 1,
   reporter: [["list"]],
   use: {

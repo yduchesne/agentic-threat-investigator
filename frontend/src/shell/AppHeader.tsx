@@ -5,12 +5,14 @@
 
 import { AppBar, Box, Button, CircularProgress, Toolbar, Typography } from "@mui/material";
 import type { ReactElement } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
 import type { PublicUser, UserRoleName } from "../api/schema-types";
 import { useLogoutMutation } from "../auth/auth-queries";
 import { Navigation } from "./Navigation";
+import { PreferencesDialog } from "./PreferencesDialog";
 
 /** Bounded role label lookup; unknown roles stay invisible. */
 function roleLabel(role: UserRoleName | undefined, t: (key: string) => string): string | null {
@@ -31,6 +33,10 @@ export function AppHeader({ user }: { user: PublicUser }): ReactElement {
   const { run, isPending, error: logoutError } = useLogoutMutation(() => {
     navigate("/login");
   });
+
+  // PR 31F-4: the Preferences dialog is modal/non-navigational presentation
+  // state beside the authenticated user controls.
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
 
   const label = roleLabel(user.role, t);
 
@@ -59,6 +65,21 @@ export function AppHeader({ user }: { user: PublicUser }): ReactElement {
               </Typography>
             ) : null}
           </Box>
+          {/* Preferences gear: accessible button with an explicit text label;
+           * the gear glyph is decorative-only. Opens a modal dialog, never
+           * navigates or mutates the URL. */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setPreferencesOpen(true)}
+            aria-haspopup="dialog"
+            sx={{ textTransform: "none", whiteSpace: "nowrap" }}
+          >
+            <Box component="span" aria-hidden="true" sx={{ mr: 0.5 }}>
+              ⚙
+            </Box>
+            {t("preferences.open")}
+          </Button>
           <Button
             variant="outlined"
             size="small"
@@ -77,6 +98,10 @@ export function AppHeader({ user }: { user: PublicUser }): ReactElement {
           </Typography>
         </Box>
       ) : null}
+      <PreferencesDialog
+        open={preferencesOpen}
+        onClose={() => setPreferencesOpen(false)}
+      />
     </AppBar>
   );
 }

@@ -153,6 +153,25 @@ from a UUID, and the router runs with synchronous commits
 URL-backed drawer/menu navigation re-renders deterministically in real
 browsers.
 
+**Semantic multi-theme presentation (PR 31F-4).** MUI is the single design
+system: one centralized theme factory/registry (`frontend/src/app/theme.ts`)
+prebuilds the four bounded appearances — Light (default), Dark, Wargames,
+Control Room — once at module load. MUI module augmentation carries a typed
+semantic-token contract (`theme.ati`) through the public
+`@mui/material/styles` types; feature components consume those tokens and
+never branch on theme names. Exactly one MUI `ThemeProvider` + one
+`CssBaseline` wrap the tree (`AppProviders`); an AppearanceProvider owns the
+browser-local appearance preference (read synchronously at boot, validated
+against the finite set, Light fallback on any storage failure). React Flow
+and Leaflet consume the same semantic theme: the graph themes only
+ATI-owned canvas/node/edge/controls presentation (topology, positions,
+expansion and provenance state are untouched, and no theme-only refetch
+occurs), and the map themes only ATI-owned container/chrome/overlay
+surfaces — the OSM `TILE_URL`, attribution, coordinates and markers never
+change. Appearance is explicitly presentation-only local browser state:
+it is not backend configuration, not an Investigation/Tenant/Organization
+model, and environment-variable configuration precedence is unchanged.
+
 ### Server-driven analyst browsing (PR 24C)
 
 PR 24C adds one reusable server-driven tabular browsing and detail

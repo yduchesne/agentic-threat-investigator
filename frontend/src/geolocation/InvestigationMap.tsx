@@ -123,7 +123,16 @@ export function InvestigationMap({
     <Box
       role="region"
       aria-label={t("map.ariaLabel")}
-      sx={{ position: "relative", zIndex: 0, height: MAP_HEIGHT_PX, width: "100%" }}
+      sx={(theme) => ({
+        position: "relative",
+        zIndex: 0,
+        height: MAP_HEIGHT_PX,
+        width: "100%",
+        // PR 31F-4: ATI-owned map chrome consumes the active theme's map
+        // ground so a slow/absent tile load never flashes an untethered
+        // color. Tile URL, attribution, coordinates and data never change.
+        bgcolor: theme.ati.map.container,
+      })}
     >
       <MapContainer
         key={investigationId}

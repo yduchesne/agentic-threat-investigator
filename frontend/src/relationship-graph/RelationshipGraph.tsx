@@ -16,6 +16,7 @@
 // rendered, so canvas exploration is never required.
 
 import { Alert, Box, Button, Link, Typography } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import {
   Background,
   Controls,
@@ -30,12 +31,13 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 import { CompactId } from "../components/CompactId";
+import type { AtiSemanticTokens } from "../app/theme";
 import { Timestamp } from "../components/Timestamp";
 import { DetailRows } from "../analyst-table/DetailRows";
 import { PivotMenu, type PivotLocalAction } from "../pivots/PivotMenu";
@@ -66,9 +68,6 @@ export type EvolutionNodeData = {
   displayName: string | null;
   role: "focal" | "counterparty";
 } & Record<string, unknown>;
-
-/** The edge marker color matches React Flow's default edge stroke. */
-const EDGE_MARKER_COLOR = "#b1b1b7";
 
 const nodeTypes: NodeTypes = { evolutionNode: EvolutionGraphNode };
 
@@ -166,6 +165,11 @@ export function RelationshipGraph({
   expansion,
 }: RelationshipGraphProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
+  // PR 31F-4: the active theme's semantic graph tokens drive canvas, edge,
+  // node and control presentation. Topology/query/expansion semantics never
+  // read theme state: only the presentation boundary below consumes tokens.
+  const graphTokens = useTheme().ati.graph;
+  const graphFlowStyle = graphCssVariables(useTheme().ati);
   const [selection, setSelection] = useState<
     { kind: "node"; nodeId: string } | { kind: "edge"; edgeId: string } | null
   >(null);
@@ -300,8 +304,8 @@ export function RelationshipGraph({
   }, [setNodes, rootGraphKey, initialNodes, model, expansion.lastExpansion, entityTypeLabel]);
 
   const edges: Edge[] = useMemo(
-    () => buildSlottedEdges(model.edges, typeLabel),
-    [model.edges, typeLabel],
+    () => buildSlottedEdges(model.edges, typeLabel, graphTokens.edge.default),
+    [model.edges, typeLabel, graphTokens.edge.default],
   );
 
   const nodeById = useMemo(
@@ -389,6 +393,7 @@ export function RelationshipGraph({
       </Box>
       <Box
         sx={{ height: size.height, border: 1, borderColor: "divider", borderRadius: 1 }}
+        style={graphFlowStyle}
         aria-label={t("graph.canvasLabel")}
         role="group"
       >
@@ -602,6 +607,41 @@ export function relationshipIdFromEdgeId(id: string): string | null {
 }
 
 /**
+ * Map semantic graph tokens onto React Flow's public CSS-variable surface.
+ *
+ * Only ATI-owned presentation is themed (canvas, pattern, edges, edge
+ * labels, selection frame, handles, controls); topology, IDs, positions
+ * and expansion semantics never flow through here.
+ */
+export function graphCssVariables(tokens: AtiSemanticTokens): CSSProperties {
+  const variables = {
+    "--xy-background-color": tokens.graph.canvas,
+    "--xy-background-pattern-dots-color": tokens.graph.pattern,
+    "--xy-edge-stroke": tokens.graph.edge.default,
+    "--xy-edge-stroke-selected": tokens.graph.edge.selected,
+    "--xy-edge-label-background-color": tokens.graph.edge.label,
+    "--xy-edge-label-color": tokens.text.technical,
+    "--xy-node-border": `1px solid ${tokens.graph.node.border}`,
+    "--xy-node-background-color": tokens.graph.node.background,
+    "--xy-node-color": tokens.graph.node.text,
+    "--xy-node-boxshadow-selected": `0 0 0 1px ${tokens.graph.node.selected}`,
+    "--xy-node-boxshadow-hover": `0 0 0 1px ${tokens.graph.node.border}`,
+    "--xy-handle-background-color": tokens.graph.node.selected,
+    "--xy-handle-border-color": tokens.graph.node.border,
+    "--xy-selection-background-color": tokens.selection.background,
+    "--xy-selection-border": `1px dotted ${tokens.selection.border}`,
+    "--xy-controls-button-background-color": tokens.surface.elevated,
+    "--xy-controls-button-background-color-hover": tokens.surface.subtle,
+    "--xy-controls-button-color": tokens.text.primary,
+    "--xy-controls-button-color-hover": tokens.text.primary,
+    "--xy-controls-button-border-color": tokens.border.default,
+  } as const;
+  // The custom-property keys are intentionally not part of the standard
+  // CSSProperties index; the cast keeps the public React Flow API typed.
+  return variables as unknown as CSSProperties;
+}
+
+/**
  * Map every canonical Relationship to one explicitly routed React Flow edge.
  *
  * One canonical Relationship stays one edge. Edges sharing an endpoint pair
@@ -615,6 +655,8 @@ export function relationshipIdFromEdgeId(id: string): string | null {
 export function buildSlottedEdges(
   edges: readonly RelationshipGraphEdge[],
   typeLabel: (type: string) => string,
+  /** Semantic edge-stroke/arrow color from the active theme (PR 31F-4). */
+  markerColor: string,
 ): Edge[] {
   const groups = new Map<string, RelationshipGraphEdge[]>();
   for (const edge of edges) {
@@ -645,7 +687,7 @@ export function buildSlottedEdges(
           targetHandle: "target-loop",
           label: typeLabel(edge.relationshipType),
           type: "default",
-          markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_MARKER_COLOR },
+          markerEnd: { type: MarkerType.ArrowClosed, color: markerColor },
         });
         return;
       }
@@ -658,7 +700,7 @@ export function buildSlottedEdges(
         targetHandle: slot === 0 ? "target-top-0" : slot === 1 ? "target-top-1" : "target-top-2",
         label: typeLabel(edge.relationshipType),
         type: "default",
-        markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_MARKER_COLOR },
+        markerEnd: { type: MarkerType.ArrowClosed, color: markerColor },
       });
     });
   }

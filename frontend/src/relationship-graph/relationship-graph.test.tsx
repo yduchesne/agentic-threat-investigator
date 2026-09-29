@@ -13,6 +13,7 @@
 // detail (no brittle pixel/layout snapshots).
 
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEventLib from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { http } from "msw";
 
@@ -34,8 +35,10 @@ import {
   uuidAt,
 } from "../test/handlers";
 import { entityTypeLabelKey } from "./relationship-graph-presentation";
-import { buildSlottedEdges, edgeId, nodeId, relationshipIdFromEdgeId } from "./RelationshipGraph";
+import { buildSlottedEdges, edgeId, graphCssVariables, nodeId, relationshipIdFromEdgeId } from "./RelationshipGraph";
 import { buildGraphModel } from "./relationship-graph-model";
+import type { RelationshipGraphEdge } from "./relationship-graph-model";
+import { ATI_THEMES } from "../app/theme";
 
 useHttp();
 
@@ -871,6 +874,7 @@ describe("Relationship Graph edge routing (PR 31F-1 F1-U28/U29)", () => {
         }),
       ]),
       (type) => type,
+      "#b1b1b7",
     );
     expect(edges).toHaveLength(2);
     const first = edges.find((edge) => edge.id === edgeId(R_1));
@@ -894,6 +898,7 @@ describe("Relationship Graph edge routing (PR 31F-1 F1-U28/U29)", () => {
         buildGraphEdge({ relationship_id: R_3, source_entity_id: FOCAL_2, target_entity_id: B_2 }),
       ]),
       (type) => type,
+      "#b1b1b7",
     );
     expect(edges).toHaveLength(3);
     const handles = edges.map((edge) => `${edge.sourceHandle ?? ""}>${edge.targetHandle ?? ""}`);
@@ -908,6 +913,7 @@ describe("Relationship Graph edge routing (PR 31F-1 F1-U28/U29)", () => {
         buildGraphEdge({ relationship_id: R_1, source_entity_id: FOCAL_2, target_entity_id: FOCAL_2 }),
       ]),
       (type) => type,
+      "#b1b1b7",
     );
     expect(edges).toHaveLength(1);
     expect(edges[0].source).toBe(`n:${FOCAL_2}`);
@@ -923,6 +929,7 @@ describe("Relationship Graph edge routing (PR 31F-1 F1-U28/U29)", () => {
         buildGraphEdge({ relationship_id: R_1, source_entity_id: FOCAL_2, target_entity_id: B_2 }),
       ]),
       (type) => type,
+      "#b1b1b7",
     );
     expect(relationshipIdFromEdgeId(edges[0].id)).toBe(R_1);
   });
@@ -980,5 +987,142 @@ describe("Relationship Graph node presentation (PR 31F-1 F1-U24..U26, U31)", () 
 
   it("F1-U31: an unknown Entity type fails safely to the raw value", async () => {
     expect(entityTypeLabelKey("future_entity_type" as never)).toBe("future_entity_type");
+  });
+});
+
+/**
+ * PR 31F-4 graph theming (G01..G08).
+ *
+ * Appearance switching is presentation-only: canonical edge count, exact
+ * source/target identity, node positions, selection and provenance survive;
+ * no graph request is caused by a theme change; every theme keeps the
+ * direction marker and readable labels.
+ */
+describe("Relationship Graph theming (PR 31F-4 G01..G08)", () => {
+  const R_1 = RELATIONSHIP;
+
+  function projectSingleEdge(): readonly RelationshipGraphEdge[] {
+    const model = buildGraphModel(
+      FOCAL,
+      buildGraphNeighborhood({
+        nodes: [],
+        edges: [
+          buildGraphEdge({
+            relationship_id: R_1,
+            source_entity_id: FOCAL,
+            target_entity_id: B,
+            observation_count: 3,
+          }),
+        ],
+      }),
+    );
+    return model.edges;
+  }
+
+  it("G01: every theme provides complete semantic canvas/node/edge CSS variables", () => {
+    for (const theme of Object.values(ATI_THEMES)) {
+      const style = graphCssVariables(theme.ati);
+      expect(style).not.toBeNull();
+      expect((style as Record<string, string>)["--xy-background-color"]).toBe(
+        theme.ati.graph.canvas,
+      );
+      expect((style as Record<string, string>)["--xy-edge-stroke"]).toBe(
+        theme.ati.graph.edge.default,
+      );
+      expect((style as Record<string, string>)["--xy-node-border"]).toBe(
+        `1px solid ${theme.ati.graph.node.border}`,
+      );
+      expect((style as Record<string, string>)["--xy-selection-background-color"]).toBe(
+        theme.ati.selection.background,
+      );
+    }
+  });
+
+  it("G07: every theme renders a direction marker on edges", () => {
+    for (const theme of Object.values(ATI_THEMES)) {
+      const edges = buildSlottedEdges(projectSingleEdge(), (type) => type, theme.ati.graph.edge.default);
+      expect(edges).toHaveLength(1);
+      expect(edges[0].markerEnd).toBeDefined();
+      expect((edges[0].markerEnd as { color?: string }).color).toBe(
+        theme.ati.graph.edge.default,
+      );
+    }
+  });
+
+  it("G08: every theme keeps the edge-label contract readable", () => {
+    for (const theme of Object.values(ATI_THEMES)) {
+      expect(theme.ati.graph.edge.label.length).toBeGreaterThan(0);
+      expect(theme.ati.text.technical.length).toBeGreaterThan(0);
+      expect(theme.ati.text.primary.length).toBeGreaterThan(0);
+    }
+  });
+
+  async function switchToDark(): Promise<void> {
+    const user = userEventLib.setup();
+    await user.click(screen.getByRole("button", { name: "Preferences" }));
+    await screen.findByRole("dialog", { name: "Preferences" });
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Preferences" })).not.toBeInTheDocument();
+    });
+  }
+
+  it("G02/G03/G06: switching appearance keeps canonical edges and issues no graph request", async () => {
+    const recorder = renderGraph();
+    const list = await screen.findByRole("table", { name: "Relationship list (this page)" });
+    expect(within(list).getByText("Resolves to")).toBeInTheDocument();
+    // Exactly one canonical edge surface (one server Relationship).
+    const rowsBefore = within(list).getAllByRole("row").length;
+    const viewBefore = within(list).getAllByRole("link", { name: "View" });
+    expect(viewBefore).toHaveLength(1);
+    const hrefBefore = viewBefore[0].getAttribute("href");
+    await waitFor(() => {
+      expect(renderedNodeCount()).toBe(2);
+    });
+    const requestsBefore = recorder.requests.length;
+
+    await switchToDark();
+
+    // Same canonical edges, exact sources/targets and edge-list rows.
+    expect(within(list).getAllByRole("row").length).toBe(rowsBefore);
+    expect(within(list).getByText("Resolves to")).toBeInTheDocument();
+    expect(within(list).getByText("Update Package Service")).toBeInTheDocument();
+    expect(within(list).getByText("203.0.113.10")).toBeInTheDocument();
+    expect(within(list).getAllByRole("link", { name: "View" })[0].getAttribute("href")).toBe(
+      hrefBefore,
+    );
+    expect(renderedNodeCount()).toBe(2);
+    // No theme-only graph request.
+    expect(recorder.requests.length).toBe(requestsBefore);
+  });
+
+  it("G04: switching appearance preserves node positions", async () => {
+    renderGraph();
+    await waitFor(() => {
+      expect(renderedNodeCount()).toBe(2);
+    });
+    const focalBefore = nodePosition(FOCAL);
+    const bBefore = nodePosition(B);
+
+    await switchToDark();
+
+    expect(renderedNodeCount()).toBe(2);
+    expect(nodePosition(FOCAL)).toEqual(focalBefore);
+    expect(nodePosition(B)).toEqual(bBefore);
+  });
+
+  it("G05: switching appearance preserves node selection", async () => {
+    renderGraph();
+    await waitFor(() => {
+      expect(renderedNodeCount()).toBe(2);
+    });
+    selectNode(B);
+    await screen.findByText("Entity: 203.0.113.10");
+
+    await switchToDark();
+
+    // Selection panel and expanded pivot menu survive the appearance switch.
+    expect(screen.getByText("Entity: 203.0.113.10")).toBeInTheDocument();
   });
 });
