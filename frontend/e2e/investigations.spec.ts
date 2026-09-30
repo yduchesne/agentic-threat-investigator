@@ -122,7 +122,10 @@ test.describe("PR 24B real-stack investigation workflow", () => {
     await expect(
       page.getByText(/The investigation concluded .* malicious delivery/i),
     ).toBeVisible();
-    await expect(page.getByText("Findings")).toBeVisible();
+    // The Findings heading (the Assessment summary also renders a
+    // "Findings: N" recap line, so the text selector is ambiguous — A6
+    // classification: C3 stale selector).
+    await expect(page.getByRole("heading", { name: "Findings" })).toBeVisible();
     await expect(
       page.getByText(/Threat-intelligence and reputation sources/),
     ).toBeVisible();

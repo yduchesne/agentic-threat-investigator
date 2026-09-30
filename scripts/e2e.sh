@@ -121,6 +121,12 @@ pick_port() {
 cleanup_stale_ati_test_containers
 FRONTEND_PORT=$(pick_port "$FRONTEND_PORT_LOW" "$FRONTEND_PORT_HIGH")
 POSTGRES_PORT=$(pick_port "$HOST_PORT_LOW" "$HOST_PORT_HIGH")
+# The API host port follows the postgres pattern: the E2E stack never
+# touches the port the developer stack binds, so the harness can coexist
+# with a running local stack. Nothing in the suite reaches the API on its
+# host port (nginx proxies /api inside the isolated network) — any free
+# port works.
+API_PORT=$(pick_port "$HOST_PORT_LOW" "$HOST_PORT_HIGH")
 BOOTSTRAP_PASSWORD="e2e-$(uv run python -c 'import secrets; print(secrets.token_urlsafe(18))')"
 
 export COMPOSE_PROJECT_NAME="$E2E_ID"
@@ -128,6 +134,7 @@ export POSTGRES_DB="$E2E_ID"
 export POSTGRES_USER=ati
 export POSTGRES_PASSWORD=ati-e2e-test-only
 export ATI_POSTGRES_HOST_PORT="$POSTGRES_PORT"
+export ATI_API_HOST_PORT="$API_PORT"
 # The static frontend host port is variable-driven (compose.yaml), mirroring
 # the postgres port pattern.
 export ATI_FRONTEND_HOST_PORT="$FRONTEND_PORT"
@@ -188,14 +195,39 @@ volumes:
   ati_e2e_postgres_data: {}
 OVERRIDE
 
+# PR 31F-6 A6: podman-compose 1.0.6 reads the repo ``.env`` when resolving
+# ``${VAR:-default}`` interpolations and its values override exported
+# variables, which breaks the harness's random host-port isolation on
+# machines whose ``.env`` pins dev-stack ports. An explicit alternate
+# environment file (``--env-file``) replaces that file entirely, so the
+# harness stays isolated with NO manual ``.env`` dance while the dev stack
+# (and its own ``.env``) remain untouched.
+E2E_ENV_FILE=$(mktemp --suffix=.env)
+cat >"$E2E_ENV_FILE" <<ENVEOF
+COMPOSE_PROJECT_NAME=${E2E_ID}
+POSTGRES_DB=${POSTGRES_DB}
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+ATI_POSTGRES_HOST_PORT=${POSTGRES_PORT}
+ATI_API_HOST_PORT=${API_PORT}
+ATI_FRONTEND_HOST_PORT=${FRONTEND_PORT}
+ATI_DATA_DIR=${ATI_DATA_DIR}
+ATI_PUBLIC_BASE_URL=http://127.0.0.1:${FRONTEND_PORT}
+ATI_OPERATING_MODE=${ATI_OPERATING_MODE}
+ATI_CONFIG_PROFILE=${ATI_CONFIG_PROFILE}
+ATI_LLM_DRIVER=${ATI_LLM_DRIVER}
+ATI_BOOTSTRAP_ADMIN_USERNAME=${ATI_BOOTSTRAP_ADMIN_USERNAME}
+ATI_BOOTSTRAP_ADMIN_PASSWORD=${E2E_BOOTSTRAP_PASSWORD}
+ENVEOF
+
 cleanup() {
-  "${COMPOSE[@]}" -f compose.yaml -f "$E2E_OVERRIDE" -p "$E2E_ID" down -v --remove-orphans >/dev/null 2>&1 || true
-  rm -f "$E2E_OVERRIDE"
+  "${COMPOSE[@]}" --env-file "$E2E_ENV_FILE" -f compose.yaml -f "$E2E_OVERRIDE" -p "$E2E_ID" down -v --remove-orphans >/dev/null 2>&1 || true
+  rm -f "$E2E_OVERRIDE" "$E2E_ENV_FILE"
 }
 trap cleanup EXIT
 
 echo "== Building and creating isolated E2E stack ($E2E_ID) =="
-"${COMPOSE[@]}" -f compose.yaml -f "$E2E_OVERRIDE" -p "$E2E_ID" up --no-start --build \
+"${COMPOSE[@]}" --env-file "$E2E_ENV_FILE" -f compose.yaml -f "$E2E_OVERRIDE" -p "$E2E_ID" up --no-start --build \
   postgres migrate fake-data-bootstrap api worker frontend
 
 echo "== Starting E2E containers =="
@@ -254,6 +286,10 @@ if [[ ! -d "${HOME}/.cache/ms-playwright/chromium-"* ]]; then
 fi
 
 echo "== Running Playwright E2E specs =="
-(cd frontend && npm run test:e2e)
+if [ "$#" -gt 0 ]; then
+  (cd frontend && npm run test:e2e -- "$@")
+else
+  (cd frontend && npm run test:e2e)
+fi
 
 echo "E2E suite passed."

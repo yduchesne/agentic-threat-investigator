@@ -1,11 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// PivotMenu behavior tests (PR 24D §8, §22, §24-§25).
+// PivotMenu behavior tests (PR 24D §8, §22, §24-§25; PR 31E §13;
+// PR 31F-6 amendment 2 A2-PM01..14).
 //
 // The trigger renders a direct accessible action for one legal target and
-// an accessible menu for several; no-op actions against the active step
-// are suppressed; at the maximum pivot depth the trigger is omitted; and
-// the action pushes a valid URL-backed step that opens the modal.
+// a compact in-flow action bar for several; no-op actions against the
+// active step are suppressed; at the maximum pivot depth URL-backed
+// navigation pivots are omitted; and the action pushes a valid URL-backed
+// step that opens the modal. Expanding choices changes only transient
+// local presentation state — no Portal/Menu/Popover/backdrop/document
+// pointer listener exists, and Cancel collapses without navigating.
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -83,34 +87,43 @@ function observationRowRoute(): string {
   return `${BASE}/relationships/observations`;
 }
 
+/** The expanded in-flow action region. */
+function actionBar(): HTMLElement {
+  return screen.getByRole("group", { name: "Pivot actions" });
+}
+
 describe("PivotMenu", () => {
-  it("renders a direct accessible action for a single legal target", async () => {
+  it("A2-PM01/02: the trigger starts collapsed and expands an in-flow bar", async () => {
     installHandlers();
     renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
-    // Evidence subject exposes four actions -> a menu trigger.
     const trigger = screen.getByRole("button", { name: "Subject" });
-    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull();
     await userEvent.click(trigger);
-    expect(await screen.findByRole("menuitem", { name: "Evidence for this entity" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("menuitem", { name: "Research for this entity" }));
-    const dialog = await screen.findByRole("dialog", { name: /Research pivot workspace/i });
-    expect(dialog).toBeInTheDocument();
+    const bar = actionBar();
+    expect(bar).toBeInTheDocument();
+    // Ordinary buttons, not menu items.
+    expect(screen.getByRole("button", { name: "Evidence for this entity" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Research for this entity" })).toBeInTheDocument();
   });
 
-  it("pushes the exact target filters and keeps them reachable in the URL", async () => {
+  it("A2-PM04/PM05: selecting a URL action pushes the exact PivotStep and collapses", async () => {
     installHandlers();
     const { router } = renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
     await userEvent.click(screen.getByRole("button", { name: "Subject" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Relationships where source" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Relationships where source" }));
     const state = readPivotState(new URLSearchParams(router.state.location.search));
     expect(state?.steps).toHaveLength(1);
     expect(decodeBase64Url(new URLSearchParams(router.state.location.search).get("pivot") ?? ""))
       .toContain('"source_entity_id"');
+    // The bar collapses after the action handoff.
+    await waitFor(() => {
+      expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull();
+    });
   });
 
-  it("suppresses no-op targets matching the active step context", async () => {
+  it("A2-PM12: no-op targets matching the active step context are suppressed", async () => {
     const evidenceStep: PivotStep = {
       resource: "evidence",
       filters: { subject_entity_id: ENTITY_ID },
@@ -121,16 +134,16 @@ describe("PivotMenu", () => {
     const pivot = serializePivotState({ steps: [evidenceStep] });
     installHandlers();
     renderAtPath(`${BASE}/evidence?pivot=${pivot ?? ""}`);
-    await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
+    await screen.findByTestId("pivot-workbench");
     // The active evidence step renders its table; the same-resource no-op
     // actions are suppressed, so no pivot trigger is present at all.
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Subject" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Pivot actions" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Pivot" })).toBeNull();
     });
   });
 
-  it("omits the trigger entirely at the maximum pivot depth", async () => {
+  it("A2-PM13: the trigger is omitted entirely at the maximum pivot depth", async () => {
     const steps: PivotStep[] = Array.from({ length: MAX_PIVOT_STEPS }, (_, index) =>
       ({
         resource: "evidence",
@@ -142,36 +155,29 @@ describe("PivotMenu", () => {
     const pivot = serializePivotState({ steps });
     installHandlers();
     renderAtPath(`${BASE}/evidence?pivot=${pivot ?? ""}`);
-    await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
+    await screen.findByTestId("pivot-workbench");
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Subject" })).toBeNull();
     });
   });
 
-  it("renders a direct action label for a single observation target", async () => {
+  it("A2-PM03: a single observation target renders a direct action label", async () => {
     installHandlers();
     renderAtPath(observationRowRoute());
-    // Each row cell exposes the two observation actions through an
-    // accessible menu trigger; wait for the loaded row first.
     await waitFor(() => {
       expect(screen.queryAllByRole("button", { name: "Evidence" }).length).toBeGreaterThan(0);
     });
     const evidenceCellButton = screen.getAllByRole("button", { name: "Evidence" })[0];
     await userEvent.click(evidenceCellButton);
-    expect(await screen.findByRole("menuitem", { name: "Observations for this relationship" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("menuitem", { name: "Open evidence" }));
-    await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
+    expect(await screen.findByRole("button", { name: "Observations for this relationship" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open evidence" }));
+    await screen.findByTestId("pivot-workbench");
   });
 });
 
-// PR 31E §13: PivotMenu regression matrix for explicit local/context actions.
-//
-// Local actions are UI commands (graph expansion in 31E), not Pivot
-// resources: they never become PivotSteps, never mutate ``pivot=``, are
-// never no-op suppressed, and are never blocked by Pivot depth. URL-backed
-// PivotActions keep their exact semantics alongside them.
-
-describe("PivotMenu local actions (PR 31E)", () => {
+// PR 31E §13 + PR 31F-6 amendment 2: PivotMenu regression matrix for
+// explicit local/context actions and the in-flow action bar.
+describe("PivotMenu action bar (PR 31E + amendment 2)", () => {
   const LOCAL = {
     key: "graph-expand-either",
     label: "Expand known relationships",
@@ -211,46 +217,43 @@ describe("PivotMenu local actions (PR 31E)", () => {
     return { result, router };
   }
 
-  it("G31E-P02: a single local action renders as a direct action and executes", async () => {
+  it("A2-PM06: a single local action renders as a direct action and executes without a PivotStep", async () => {
     const local = localActions()[0];
     renderMenu("/", { actions: [], localActions: [local] });
     const button = screen.getByRole("button", { name: "Expand known relationships" });
-    expect(button).not.toHaveAttribute("aria-haspopup");
     await userEvent.click(button);
     expect(local.onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it("G31E-P03/P04: local + PivotActions render one combined accessible menu; a local selection changes no URL or pivot state", async () => {
+  it("A2-PM03/PM06: local + PivotActions expand one combined in-flow bar; a local selection changes no URL or pivot state", async () => {
     const local = localActions()[0];
     const { router } = renderMenu("/", {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
       localActions: [local],
     });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions" }));
-    const menu = await screen.findByRole("menu");
-    expect(menu).toBeInTheDocument();
-    // Local command + the four URL navigation pivots, one accessible menu.
-    expect(screen.getByRole("menuitem", { name: "Expand known relationships" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Evidence for this entity" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Research for this entity" })).toBeInTheDocument();
-    // Locals first, grouped from navigation pivots by a separator.
-    expect(screen.getByRole("separator")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    const bar = actionBar();
+    expect(bar).toBeInTheDocument();
+    // Local command + the four URL navigation pivots in one ordinary bar.
+    expect(screen.getByRole("button", { name: "Expand known relationships" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Evidence for this entity" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Research for this entity" })).toBeInTheDocument();
     const before = router.state.location.search;
-    await userEvent.click(screen.getByRole("menuitem", { name: "Expand known relationships" }));
+    await userEvent.click(screen.getByRole("button", { name: "Expand known relationships" }));
     expect(local.onSelect).toHaveBeenCalledTimes(1);
     // No PivotStep, no pivot= URL mutation.
     expect(router.state.location.search).toBe(before);
     expect(readPivotState(new URLSearchParams(router.state.location.search))).toBeNull();
   });
 
-  it("G31E-P05: selecting a navigation Pivot next to locals still pushes the exact PivotStep", async () => {
+  it("A2-PM05: selecting a navigation Pivot next to locals still pushes the exact PivotStep", async () => {
     const local = localActions()[0];
     const { router } = renderMenu("/", {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
       localActions: [local],
     });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Research for this entity" }));
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Research for this entity" }));
     const state = readPivotState(new URLSearchParams(router.state.location.search));
     expect(state?.steps).toHaveLength(1);
     expect(state?.steps[0].resource).toBe("research");
@@ -260,7 +263,7 @@ describe("PivotMenu local actions (PR 31E)", () => {
     expect(local.onSelect).not.toHaveBeenCalled();
   });
 
-  it("G31E-P06: at MAX_PIVOT_STEPS navigation pivots disappear but local actions remain", async () => {
+  it("A2-PM13: at MAX_PIVOT_STEPS navigation pivots disappear but local actions remain", async () => {
     const steps: PivotStep[] = Array.from({ length: MAX_PIVOT_STEPS }, (_, index) =>
       ({
         resource: "evidence",
@@ -275,14 +278,14 @@ describe("PivotMenu local actions (PR 31E)", () => {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
       localActions: locals,
     });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions" }));
-    await screen.findByRole("menu");
-    expect(screen.getByRole("menuitem", { name: "Expand known relationships" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    actionBar();
+    expect(screen.getByRole("button", { name: "Expand known relationships" })).toBeInTheDocument();
     // Navigation pivots are depth-suppressed at the maximum depth.
-    expect(screen.queryByRole("menuitem", { name: "Evidence for this entity" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Evidence for this entity" })).toBeNull();
   });
 
-  it("G31E-P07: a URL no-op pivot is suppressed but local actions remain", async () => {
+  it("A2-PM12: a URL no-op pivot is suppressed but local actions remain", async () => {
     const step: PivotStep = {
       resource: "evidence",
       filters: { subject_entity_id: ENTITY_ID },
@@ -296,92 +299,99 @@ describe("PivotMenu local actions (PR 31E)", () => {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
       localActions: [local],
     });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions" }));
-    await screen.findByRole("menu");
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    actionBar();
     // Evidence-for-this-entity is the no-op here; relationships/research remain.
-    expect(screen.queryByRole("menuitem", { name: "Evidence for this entity" })).toBeNull();
-    expect(screen.getByRole("menuitem", { name: "Relationships where source" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Expand known relationships" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Evidence for this entity" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Relationships where source" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand known relationships" })).toBeInTheDocument();
   });
 
-  it("G31E-P08: a disabled local action can never execute", async () => {
+  it("A2-PM05: a disabled local action can never execute", async () => {
     const local = localActions([{ disabled: true }]);
     renderMenu("/", {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
       localActions: local,
     });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions" }));
-    const item = await screen.findByRole("menuitem", { name: "Expand known relationships" });
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    const item = await screen.findByRole("button", { name: "Expand known relationships" });
     expect(item).toBeDisabled();
     // The disabled item is inert: a raw click event never reaches onClick.
     fireEvent.click(item);
     expect(local[0].onSelect).not.toHaveBeenCalled();
   });
 
-  it("G31E-P09: ArrowDown/ArrowUp navigate only the legal enabled items, skipping disabled ones", async () => {
-    const locals = localActions([{ disabled: true }]);
-    renderMenu("/", {
-      actions: [],
-      localActions: locals,
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions" }));
-    await screen.findByRole("menu");
-    // The second (enabled) item receives focus on open; disabled must be skipped.
-    await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: "Expand outgoing relationships" })).toHaveFocus();
-    });
-    await userEvent.keyboard("{ArrowDown}");
-    // Wraps back to the only enabled item.
-    expect(screen.getByRole("menuitem", { name: "Expand outgoing relationships" })).toHaveFocus();
-    await userEvent.keyboard("{ArrowUp}");
-    expect(screen.getByRole("menuitem", { name: "Expand outgoing relationships" })).toHaveFocus();
-  });
-
-  it("G31E-P10: Escape closes the menu and returns focus to the trigger", async () => {
+  it("A2-PM10: ordinary buttons keep natural Tab order and Enter/Space activation", async () => {
     const local = localActions()[0];
     renderMenu("/", {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
       localActions: [local],
     });
-    const trigger = screen.getByRole("button", { name: "Pivot actions" });
-    await userEvent.click(trigger);
-    await screen.findByRole("menu");
-    await userEvent.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(screen.queryByRole("menu")).toBeNull();
-    });
-    expect(trigger).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    const bar = actionBar();
+    const buttons = Array.from(bar.querySelectorAll("button")).filter(
+      (b) => (b as HTMLButtonElement).disabled === false,
+    );
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+    // Natural document order; keyboard activation on the first action runs it.
+    (buttons[0] as HTMLButtonElement).focus();
+    await userEvent.keyboard("{Enter}");
+    expect(local.onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it("G31E-P11: an outside pointer press closes the menu", async () => {
+  it("A2-PM04: Cancel collapses the bar without navigating", async () => {
+    const local = localActions()[0];
+    const { router } = renderMenu("/", {
+      actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
+      localActions: [local],
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    actionBar();
+    const before = router.state.location.search;
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull();
+    });
+    expect(local.onSelect).not.toHaveBeenCalled();
+    expect(router.state.location.search).toBe(before);
+  });
+
+  it("A2-PM08: stale expansion resets when the hosting Pivot context changes", async () => {
+    const local = localActions()[0];
+    const { router } = renderMenu("/", {
+      actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
+      localActions: [local],
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    actionBar();
+    // A navigation push (any PivotStep) resets the presentation-only bar.
+    await userEvent.click(screen.getByRole("button", { name: "Relationships where source" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull();
+    });
+    expect(router.state.location.search).toContain("pivot=");
+  });
+
+  it("A2-PM09/A2-PM14: the bar is ordinary in-flow DOM — no Portal/Menu/Popover/separator", async () => {
     const local = localActions()[0];
     renderMenu("/", {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
       localActions: [local],
     });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions" }));
-    await screen.findByRole("menu");
-    await userEvent.click(document.body);
-    await waitFor(() => {
-      expect(screen.queryByRole("menu")).toBeNull();
-    });
+    await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
+    const bar = actionBar();
+    expect(bar).toHaveAttribute("role", "group");
+    expect(bar.closest("body")).not.toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    expect(screen.queryByRole("separator")).toBeNull();
+    // Graph local actions remain local and never serialize into the URL.
+    expect(new URLSearchParams(window.location.search).has("pivot")).toBe(false);
+    expect(local.onSelect).not.toHaveBeenCalled();
   });
 
-  it("G31E-P12: the combined menu keeps the non-modal Portal/Paper architecture", async () => {
-    const local = localActions()[0];
-    renderMenu("/", {
-      actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
-      localActions: [local],
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions" }));
-    const menu = await screen.findByRole("menu");
-    // The menu lives in a Portal (document.body), not in a MUI Modal/Menu.
-    expect(document.body.contains(menu)).toBe(true);
-    expect(menu).toHaveAttribute("role", "menu");
-  });
-
-  it("G31E-P13: no actions and no local actions produces no trigger", () => {
+  it("A2-PM13: no actions and no local actions produces no trigger", () => {
     renderMenu("/", { actions: [] });
-    expect(screen.queryByRole("button", { name: "Pivot actions" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pivot" })).toBeNull();
   });
 });

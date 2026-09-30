@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Generic key/value detail presentation (PR 24C §8).
 //
-// Drawer content shares one deterministic label/value layout. Values are
-// React-rendered (auto-escaped); nothing here ever builds raw HTML.
+// list/detail content shares one deterministic label/value
+// layout. Values are React-rendered (auto-escaped); nothing here ever
+// builds raw HTML.
 
 import { Box, Typography } from "@mui/material";
 import type { ReactElement, ReactNode } from "react";
@@ -48,7 +49,7 @@ export function DetailRows({ rows }: DetailRowsProps): ReactElement {
   );
 }
 
-/** One section heading inside a detail drawer. */
+/** One section heading inside shared detail content. */
 export function DetailSection({
   title,
   children,

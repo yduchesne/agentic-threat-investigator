@@ -21,7 +21,6 @@ import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 
 import type { Investigation, RelationshipObservation } from "../api/schema-types";
-import { DetailDrawer } from "../analyst-table/DetailDrawer";
 import { DetailRows } from "../analyst-table/DetailRows";
 import { isUuidValue } from "../analyst-table/filters";
 import { useFilterForm } from "../analyst-table/filter-form";
@@ -36,6 +35,7 @@ import {
   popBackStack,
   pushNextStack,
 } from "../analyst-table/cursor-stack";
+import { ResourceDetailView } from "../analyst-table/ResourceDetailView";
 import { runningNotice } from "../analyst-table/running";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { Timestamp } from "../components/Timestamp";
@@ -298,7 +298,7 @@ export function RelationshipEvolutionWorkspace({
     selectedId === null
       ? null
       : observations.page?.items.find((row) => row.id === selectedId) ?? null;
-  const drawerOpen = selectedId !== null && view === "evolution";
+  const inspectorOpen = selectedId !== null && view === "evolution";
   const hasNext =
     observations.page !== null &&
     observations.page.next_cursor !== null &&
@@ -331,8 +331,31 @@ export function RelationshipEvolutionWorkspace({
         ) : null}
       </Box>
 
-      {view === "evolution" ? (
-        <Box>
+      {view === "evolution" && inspectorOpen ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("title") })}
+          heading={t("detail.title")}
+          onBack={closeSelection}
+        >
+          {selectedObservation !== null ? (
+            <ObservationDetailBody
+              t={t as never}
+              investigationId={investigationId}
+              observation={selectedObservation}
+            />
+          ) : (
+            <Box role="status" sx={{ py: 2, textAlign: "center" }}>
+              <Typography variant="body1">{t("detail.notOnPage.title")}</Typography>
+              <Typography variant="caption" component="div" sx={{ mt: 0.5 }}>
+                {t("detail.notOnPage.message")}
+              </Typography>
+            </Box>
+          )}
+        </ResourceDetailView>
+      ) : (
+        <>
+        {view === "evolution" ? (
+          <Box>
           <RelationshipEvolutionFiltersToolbar
             t={t as never}
             tCommon={tCommon as never}
@@ -438,9 +461,9 @@ export function RelationshipEvolutionWorkspace({
             </Box>
           ) : null}
         </Box>
-      ) : (
-        <Box>
-          {graphNeighborhood.isLoading && graphNeighborhood.neighborhood === null ? (
+        ) : (
+          <Box>
+            {graphNeighborhood.isLoading && graphNeighborhood.neighborhood === null ? (
             <Alert severity="info" role="status" sx={{ mt: 1 }}>
               {t("graph.loading")}
             </Alert>
@@ -461,38 +484,21 @@ export function RelationshipEvolutionWorkspace({
               </Box>
             </Box>
           ) : null}
-          {graphModel !== null ? (
-            <RelationshipGraph
-              investigationId={investigationId}
-              rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${filters.relationshipType ?? ""}`}
-              focalEntityId={filters.entityId}
-              model={graphModel}
-              typeLabel={relationshipTypeLabel}
-              entityTypeLabel={graphEntityTypeLabel}
-              expansion={graphExpansion}
-            />
-          ) : null}
-        </Box>
+            {graphModel !== null ? (
+              <RelationshipGraph
+                investigationId={investigationId}
+                rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${filters.relationshipType ?? ""}`}
+                focalEntityId={filters.entityId}
+                model={graphModel}
+                typeLabel={relationshipTypeLabel}
+                entityTypeLabel={graphEntityTypeLabel}
+                expansion={graphExpansion}
+              />
+            ) : null}
+          </Box>
+        )}
+        </>
       )}
-
-      <DetailDrawer open={drawerOpen} title={t("detail.title")} onClose={closeSelection}>
-        {drawerOpen ? (
-          selectedObservation !== null ? (
-            <ObservationDetailBody
-              t={t as never}
-              investigationId={investigationId}
-              observation={selectedObservation}
-            />
-          ) : (
-            <Box role="status" sx={{ py: 2, textAlign: "center" }}>
-              <Typography variant="body1">{t("detail.notOnPage.title")}</Typography>
-              <Typography variant="caption" component="div" sx={{ mt: 0.5 }}>
-                {t("detail.notOnPage.message")}
-              </Typography>
-            </Box>
-          )
-        ) : null}
-      </DetailDrawer>
     </Box>
   );
 }

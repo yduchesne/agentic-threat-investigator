@@ -2774,31 +2774,185 @@ frontend) and are therefore resource-intensive:
    considering ATI performance work.
 8. No OS-level CPU affinity/throttling is used anywhere in the repository.
 
-### Real-browser overlay regression coverage (PR 31F-5)
+### Real-browser list/detail regression coverage (PR 31F-6)
 
-Browser lifecycle freezes in DetailDrawer/PivotMenu/PivotWorkspace are
-regression-guarded with interaction that proves both sides of the
-lifecycle, never visibility alone:
+PR 31F-6 replaced the overlay resource-detail drawers (and the interim
+side Inspectors) with a conservative list/detail workspace: the exact
+selected detail is the main in-flow workspace content, `Back to
+<resource>` restores the bounded list, and Pivot actions stay inline in
+the detail. The regressions prove that lifecycle in a real browser,
+never with visibility alone:
 
-- After opening a detail drawer or pivot workspace, interact inside it
-  (click, keyboard Escape) and then interact with the underlying table
-  again — a visible drawer is not proof that the overlay lifecycle is
-  sound.
-- Run the affected flows (Timeline/History `View`, Evidence/Relationships
-  `Pivot`, nested Evidence details inside a pivot workspace) in **both
-  Firefox and Chromium** with the repository `workers: 1`; Firefox
-  exercises the focus-fixup and pointer-event paths the Chromium suite
-  alone cannot prove.
-- Repeat open/close cycles (at least five) and assert exactly one close
-  per action (X, Escape, backdrop) with the enclosing PivotWorkspace
-  surviving a nested-close.
-- `frontend/src/pivots/PivotWorkspace.test.tsx` and the E2E journeys in
-  `frontend/e2e/zz-pivots.spec.ts` cover the nested Evidence detail close
-  (X and Escape) plus post-close table interaction contracts.
-- The shared lifecycle strategy is deterministic deferred focus + focus
-  drop before close navigation (no reload, no setTimeout magic beyond the
-  accepted tick-timer, no browser branch); any regression must respect
-  those invariants (see `docs/ARCHITECTURE.md`).
+- The workspace is proven with interaction on BOTH sides of the
+  lifecycle: `View` replaces the bounded list with the full-width
+  detail, and Back restores the list with its committed
+  filters/order/cursor intact. The list and detail are ALTERNATIVE
+  views — the table is never rendered under/beside the detail (no
+  interactive side panel exists). Assertions also pin the semantics:
+  the detail is ordinary in-flow content with a human-readable heading
+  (never a dialog with `aria-modal`, never `position: fixed`, no
+  backdrop/Portal/body lock).
+- Repeated same-page cycles are mandatory: at least **five**
+  View/detail/Back cycles in the same page/browser process (no
+  reloads) for each critical surface — Evidence, Timeline, History,
+  and Evidence inside PivotWorkspace (Relationships: three). After
+  every Back an action on the list must prove the browser is still
+  alive; asserting that the Back button received a click is
+  insufficient. The lifecycle regression lives in
+  `frontend/e2e/zz-list-detail.spec.ts`.
+- The raw-pointer evidence slice is the acceptance authority:
+  `frontend/e2e/zz-pointer-acceptance.spec.ts` drives the complete
+  Evidence journey (Investigation -> list -> RAW View -> full-width
+  detail -> RAW inline Pivot trigger -> RAW Cancel -> RAW Back ->
+  list returns -> RAW another ordinary list control) five times in ONE
+  page/browser process. Every critical raw interaction is
+  geometry-proved first (connected, visible, width > 0, height > 0 —
+  PR 31F-6 §17), every operation is bounded by a short wedge guard,
+  and the journey must pass on the FIRST attempt (``--retries=0``).
+- The exact motivating freeze class is automated and sandboxed: the
+  final uncontaminated control (native bubble-phase no-op Close) still
+  produced a 0x0 next-Pivot-target in both engines (record:
+  `out/PR31F6_A4_CONTROL_EXPERIMENT.md`), which authorized the
+  list/detail migration. Amendment 5 then replaced the fixed
+  PivotWorkspace overlay with an ordinary in-flow workbench; the former
+  in-overlay raw View wedge is regression-guarded by
+  `frontend/e2e/zz-pivot-acceptance.spec.ts`,
+  which proves the same raw `View` press completes cleanly first attempt
+  in both engines (healthy geometry, five same-process cycles per
+  engine, `--retries=0`, synthetic clicks are not acceptance evidence).
+  The raw-pointer geometry assertions guard every critical transition.
+- **Firefox is a merge requirement.** The list/detail lifecycle and the
+  raw-pointer acceptance journey must run in both Chromium and Firefox
+  with the repository `workers: 1` because both engines reproduce the
+  motivating freeze class. Playwright runs them in Chromium (default
+  project) and in the scoped `inspector-firefox` project; run them
+  with:
+
+  ```bash
+  cd frontend && npx playwright test zz-pointer-acceptance.spec.ts zz-list-detail.spec.ts zz-pivot-acceptance.spec.ts --project=chromium --workers=1 --retries=0
+  cd frontend && npx playwright test zz-pointer-acceptance.spec.ts zz-list-detail.spec.ts zz-pivot-acceptance.spec.ts --project=inspector-firefox --workers=1 --retries=0
+  ```
+
+- Closing clears the existing selection only: filters/cursors/back stack
+  survive, and deep-linked `selected=<uuid>` opens the detail directly.
+  `frontend/src/analyst-table/list-detail.test.tsx` covers the
+  A4-LD matrix (alternative views, human-readable heading, semantic
+  Back, URL/browser-history restoration, exact scoped read, no
+  simultaneous list/detail fetch, one durable selected identity,
+  inline Pivot/Cancel, keyboard-operable Back, no Portal/modal/body
+  masking), and `frontend/src/pivots/PivotWorkspace.test.tsx` covers
+  the nested detail Back without closing the workspace.
+- Resource detail is ordinary layout content: no Escape listener, no
+  deferred focus, no backdrop click — do not reintroduce overlay
+  machinery for resource detail. The remaining overlay lifecycle
+  (PivotWorkspace modal + PivotMenu) keeps its own focus/Escape
+  strategy (see `docs/ARCHITECTURE.md`).
+- Real-browser pointer dispatch on this stack can hang
+  Playwright/Chromium's composite ``locator.click`` mid-gesture
+  (``performing click action``) regardless of application code — the
+  identical hang reproduces with the pre-31F-6 production app on the
+  real stack (A/B-verified in the PR 31F-6 record). The raw-pointer
+  helpers therefore drive interaction through ``page.mouse``
+  (move/down/up) over geometry-proved targets with a bounded wedge
+  guard, and the multi-surface lifecycle spec uses the same physical-
+  pointer path. Do not treat ``locator.click`` hangs on this stack as
+  list/detail regressions without the A/B control against the base
+  app.
+
+### Frontend wedge-testing methodology
+
+When testing for frontend wedges (browser main-thread lockups), the
+goal is to detect a stall in **seconds**, never to sit waiting on
+JavaScript events for minutes. Follow this procedure for every wedge
+hunt — new E2E regression, manual reproduction, or bisection:
+
+1. **Instrument progress up front.** Every step of the probe must emit a
+   progress marker with an elapsed-time stamp (for example
+   ``[+1240ms] step name``); no step is ever silent. Before the probe
+   starts, install the debugging sinks that will be needed later:
+   ``page.on("pageerror")``, ``page.on("console")`` for errors, and a
+   captured ``lastUrl`` that is refreshed after every navigation. Every
+   assertion runs against the real rendered DOM.
+2. **Bound every operation with a short timeout.** A wedge is a stalled
+   main thread, not a slow action. Give every JavaScript-backed
+   operation (``page.evaluate``, pointer events, dispatches) a bounded
+   per-operation timeout of a few seconds (for example 5000 ms), and
+   use a heartbeat probe — ``page.evaluate("1+1", undefined,
+   { timeout: 3000 })`` — after each interaction to classify the page
+   as alive or wedged. Detecting a wedge must never require waiting
+   minutes on JS events.
+3. **Fail fast and switch to troubleshooting.** The moment the heartbeat
+   times out or any bounded operation exceeds its cap, stop the probe
+   immediately, dump the triage context (last step marker, last URL,
+   captured errors, heartbeat result), and switch to diagnosis —
+   browser trace/console, crash dumps, and a minimal repro. Do not
+   let the harness keep spinning while the browser is unresponsive.
+4. **A/B against the base app before blaming code.** This stack's
+   overlay/pointer machinery can wedge independent of any application
+   change: build a byte-identical base app (``git archive HEAD
+   frontend`` -> ``npm ci`` -> ``npm run build``) and run the same
+   probe against a swapped-in base ``dist`` before attributing a wedge
+   to a change. If base reproduces it, the wedge is pre-existing; do
+   not treat ``locator.click``/raw-pointer stalls as regressions
+   without this control.
+5. **Distinguish the input path before diagnosing the app.** On the
+   real stack, DOM-dispatched clicks (``dispatchEvent("click")``) drive
+   the same React handlers as pointer input but do not reproduce
+   pointer-path freezes. A wedge on raw pointer events with clean
+   dispatch behavior points at the browser's pointer/overlay machinery
+   (fixed modal/backdrop/portal scroll and hit-test bookkeeping), not
+   at the application's click handlers. The former PivotWorkspace
+   fixed-overlay freeze site was removed in PR 31F-6 amendment 5
+   (in-flow workbench; raw-pointer acceptance in
+   `zz-pivot-acceptance.spec.ts`); no fixed overlay remains in the
+   resource/pivot analyst path.
+
+- **Navigation commits defer past the native pointer event.** A
+  synchronous router commit (`setSearchParams`) with the live TanStack
+  Query re-rendering inside a native click hard-freezes the browser main
+  thread (both engines; minimal in-harness reproduction in the PR
+  record: the same table/query/selection click freezes when the commit
+  is synchronous and is clean when it is deferred one macrotask). The
+  resource-table commit, PivotMenu push and PivotWorkspace
+  close/truncate/step commits therefore schedule the URL transition
+  after the originating event completes. This is architecturally
+  justified: the navigation must not run inside native pointer dispatch;
+  it is the same bounded deferred scheduling the app already uses for
+  focus. Do not regress these commits back to synchronous without the
+  raw-pointer control.
+- The former fixed-overlay freeze (the second, engine-level pointer-hit
+  class documented in the PR 31F-6 record) is addressed architecturally:
+  the Pivot workbench is ordinary in-flow content and the raw-pointer
+  acceptance journey proves the former in-overlay View press and the
+  breadcrumb/Close/list-detail transitions first-attempt in both
+  engines. Synchronous router commits inside native pointer events
+  remain prohibited (the deferred-commit boundary is enforced by the
+  resource-table/PivotMenu/PivotWorkspace commits); treat any NEW
+  freeze as its own touching-path bisect and never reintroduce
+  side-pane/overlay detail.
+
+### Manual Firefox verification (PR 31F-6 merge requirement)
+
+Because the motivating defect was a real-browser freeze, E2E alone is
+insufficient: before merging PR 31F-6, manually verify the list/detail
+workspace against a real local stack in Firefox and record, per
+surface: Firefox version, ATI commit, surface, cycle count and result.
+Minimum cycles:
+
+| Surface | Cycles |
+| ------- | ------ |
+| Evidence (normal route) | 5 |
+| Evidence inside the in-flow Pivot workbench | 5 |
+| Timeline | 5 |
+| History | 5 |
+| Relationships | 3 |
+| Relationship Observations | 3 |
+| Research | 3 |
+| GEOINT | 3 |
+
+Each cycle is open detail -> verify -> Back -> verify the list is
+restored -> interact with the primary surface. Confirm visually that no
+resource-detail backdrop/side-pane exists at any point.
 
 ### Investigation workflow tests (PR 24B)
 
@@ -2914,7 +3068,8 @@ deterministic offline LLM boundary. PR 24C coverage (frontend/e2e):
 
 - E20 completed-Investigation browsing: bounded Evidence table with a real
   exact filter (evidence type DNS) surviving URL round-trip reload, the
-  authoritative scoped detail drawer with distinct Observed at / Retrieved
+  authoritative scoped list/detail Evidence detail with distinct Observed at /
+  Retrieved
   at, Relationship analyst-label rows with detail and a bounded
   relationship-scoped observation preview, first-class
   `/relationships/observations`, Research context (visible separation),
@@ -3003,7 +3158,7 @@ Internet, a live provider, or a live LLM.
   appears in the persisted row, the Investigation state, or the API
   response.
 - **UI** (`frontend/src/timeline/TimelinePage.test.tsx`): the persisted
-  diagnostic renders in the detail drawer as plain pre-wrap text with
+  diagnostic renders in the detail as plain pre-wrap text with
   wrap-anywhere, a bounded height with vertical scrolling, a localized
   unavailable marker for `null`, no HTML parsing of markup-like values,
   and the PR 31F-1 translated-label + raw-code presentation intact.
@@ -3056,20 +3211,32 @@ resource query/filter/table/detail machinery (`frontend/src/pivots/`,
   (F-P10). Report/Research free text never enters the URL;
 - real-stack E22 (`frontend/e2e/zz-pivots.spec.ts`): overall completing
   F02 Investigation, Evidence support → exact Evidence workspace →
-  subject pivot Relationships where source → open Relationship →
-  RelationshipObservations → observation Evidence → Evidence; breadcrumb
-  path mirrors the sequence; browser Back/Forward traverse pivot states;
-  breadcrumb truncation restores the Relationships step; reload restores
-  the active modal; Close restores the underlying Overview route; `FAKE
-  DATA` and a clean browser console throughout. Interactions inside the
-  pivot overlay use the raw pointer path (`page.mouse`) because the
-  Playwright/Chromium composite locator hit-test can hang the browser
-  main thread while a full-viewport fixed layer is open (DIAG-verified:
-  raw events dispatch and the page stays responsive; identical events
-  dispatched through the composite path do not). The same raw events can
-  intermittently wedge the Chromium pointer dispatch on this stack
-  (environment-specific; the identical interaction passes on retry and
-  passed whole-suite runs), so CI retries E22 once before failing;
+  subject pivot Relationships (the typed direction with the real edge
+  set — the fake world's domain is only ever a Relationship SOURCE and
+  its malware only ever a TARGET, and report-support evidence ordering
+  is run-variable, so the test drives the direction from the evidence
+  subject type) → open Relationship → RelationshipObservations →
+  observation Evidence → Evidence; breadcrumb path mirrors the
+  sequence; browser Back/Forward traverse pivot states; breadcrumb
+  truncation restores the Relationships step; reload restores the
+  active workbench; Close restores the underlying Overview route;
+  `FAKE DATA` and a clean browser console throughout. The observation
+  Evidence action is a single-entry inline PivotMenu button (accessible
+  name "Evidence" with visible text "Open evidence") and is selected by
+  EXACT name — substring "Evidence" would hit the breadcrumb's "Return
+  to Evidence" truncation buttons (A6 classification: C3 stale-selector
+  trap). Interactions use the raw pointer path (`page.mouse`) because
+  the Playwright/Chromium composite locator hit-test can hang the
+  browser main thread while a full-viewport fixed layer is open
+  (DIAG-verified). Two controls use the documented dispatch convention
+  where the raw press deterministically misses on the real stack
+  (A6 E22-diag: the single-entry PivotMenu inside the async-loaded
+  detail preview): that does not weaken A4/A5 raw-pointer authority,
+  which lives in `zz-pointer-acceptance` / `zz-pivot-acceptance`.
+  The same raw events can intermittently wedge the Chromium pointer
+  dispatch on this stack (environment-specific; the identical
+  interaction passes on retry and passed whole-suite runs), so CI
+  retries E22 once before failing;
 - real-stack E22-B (`frontend/e2e/zz-pivots.spec.ts`, PR 24F): benign/
   dead-end pivot path against the deterministic F01 fake-world
   Investigation — a legal typed pivot (Evidence subject -> Research for
@@ -3447,6 +3614,73 @@ Frontend coverage (`frontend/src/relationship-evolution/`,
 - PR 24E/31D add no speculative second graph/visualization dependency and
   no new fake-world fixture: the F03 world's repeated observed-at stamps
   drive the browser slice.
+
+#### PR 31F-6 amendment-6 broader-suite classifications (A6)
+
+Every material broader-suite failure raised by the amendment-5 report was
+classified before any edit (amendment-6 record `out/PR31F6_A6_IMPLEMENTATION_REPORT.md`):
+
+- **E20 More menu — C3 (test) + C2 (deferred menu defect).** Opening the
+  fixed-Portal MUI More menu and idling ~1.5 s wedges the Playwright
+  browser main thread in Chromium AND Firefox (A6 diagnostic: dispatched
+  open -> heartbeat alive -> first menu probe unresolvable -> heartbeat
+  dead; zero application/console errors; the immediate-navigation pattern
+  used by the lifecycle spec's History section completes repeatedly). The
+  menu itself is untouched by PR 31F-6 and the identical Portal/overlay
+  wedge class is A/B-verified against the pre-31F-6 app (the A4 control
+  experiment record), so the parent defect is deferred (framework follow-up
+  in the A6 record). E20 now opens More and activates its History entry
+  back-to-back and asserts the user-visible contract (History reachable,
+  single activation, Investigation intact) — Portal existence/geometry is
+  not a product contract.
+- **E20 History "Diff" — C3 (data-dependent first-row contract).** The
+  fake world's newest investigation UPDATE frequently carries an EMPTY
+  diff (worker budget/status updates vary per run), so Diff presence on
+  the first History row was run-dependent. E20 now deep-links the newest
+  event that actually carries a diff (authoritative history API) and
+  asserts the same exact-version safe rendering; the deep link exercises
+  the list/detail deep-link contract.
+- **E22 legacy Pivot — C3 (stale contracts) + C4 (report evidence
+  readiness).** (1) The fake world creates NO malware-source edges — the
+  report-support evidence is the malware evidence, whose "Relationships
+  where source" is legitimately empty forever; the direction is now
+  driven by the evidence subject type (domain→source, malware→target),
+  preserving the typed-pivot slice over real data. (2) The observation
+  Evidence action is a single-entry inline PivotMenu whose accessible name
+  is the column aria-label ("Evidence", visible text "Open evidence") and
+  is reached by EXACT name; substring "Evidence" hits the breadcrumb's
+  "Return to Evidence" truncation buttons and silently rewound the stack
+  (diagnosed via the URL-backed stack at each step). (3) The report
+  evidence button on the Overview is worker-admitted asynchronously and
+  is now waited on explicitly. (4) Two controls inside async-loaded detail
+  content use the documented dispatch convention where the raw press
+  deterministically misses on this stack (E22-diag; the A4/A5 raw-pointer
+  authority is untouched).
+- **E23 React Flow drag — C3 (screen≠flow coordinates).** The graph's
+  in-flow chrome (the expansion-in-flight Alert above the canvas) shifts
+  the canvas on screen without moving nodes, so absolute screen-box
+  retention reads a phantom ~56 px Y drift. Retention assertions now
+  compare canvas-relative flow coordinates (node box − canvas box);
+  drag-moved, topology and request assertions unchanged.
+- **Intermittent raw-input misses — C5 (harness/environment).** See the
+  wedge-testing methodology above: byte-identical trees alternate pass/
+  fail, the failure press varies per run and engine, gestures complete
+  (RAW-OK) with a live heartbeat and proved geometry, and the page never
+  freezes. Never treat these as application regressions without the
+  pre-31F-6 A/B control.
+- **`.env`/E2E isolation — bounded harness fix.** podman-compose 1.0.6
+  reads the repo `.env` and its values override exported variables, which
+  defeated the harness's random host-port isolation on machines whose
+  `.env` pins dev ports. `scripts/e2e.sh` now writes a throwaway alternate
+  environment file and passes `--env-file` to every compose invocation, so
+  the isolated stack needs no manual `.env` move; ATI runtime config
+  precedence (environment variables as ultimate override) is unchanged.
+- **Component-suite load flake — bounded sync.** Real-route component
+  tests under full-suite parallel load exceeded the testing-library
+  default 1 s async wait (varying subset per run; every test passes in
+  isolation). `src/test/setup.ts` sets `configure({ asyncUtilTimeout:
+  10_000 })` — a semantics-keyed poll for real rendered elements, never a
+  sleep, assertions unchanged.
 
 #### Incremental graph expansion tests (PR 31E)
 

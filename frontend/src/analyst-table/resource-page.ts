@@ -5,7 +5,7 @@
 // Every PR 24C resource page follows the same contract:
 //
 //   URL search parameters -> validated filters -> bounded server query ->
-//   opaque cursor page -> rows -> selection -> detail drawer
+//   opaque cursor page -> rows -> selection -> full-width detail (list/detail)
 //
 // This hook owns generic mechanics only: URL-backed filters, opaque-cursor
 // Previous/Next over a browser-local back stack, cursor reset on semantic
@@ -90,7 +90,16 @@ export function useResourceTable<F>(
   const [backStack, setBackStack] = useState<string[]>(() => initialBackStack(cursor));
 
   const commit = (next: URLSearchParams): void => {
-    setSearchParams(next, { replace: false });
+    // PR 31F-6: navigation commits are scheduled AFTER the originating
+    // native pointer event completes (next macrotask). A synchronous
+    // router commit + app-scale re-render inside a native pointer event
+    // hard-freezes the browser main thread in both engines (minimal
+    // in-harness reproduction in the PR record: the same table, query and
+    // selection click freeze synchronously and are clean when the commit
+    // is deferred). The URL/history state transition therefore must run
+    // after native pointer dispatch; this is the same bounded deferred
+    // scheduling already used for focus in PivotMenu/PivotWorkspace.
+    window.setTimeout(() => setSearchParams(next, { replace: false }), 0);
   };
 
   const applyFilters = (next: F): void => {

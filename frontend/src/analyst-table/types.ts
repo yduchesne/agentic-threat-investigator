@@ -49,7 +49,7 @@ export interface AnalystTableInput<T> {
   /** Whether any filter is active (empty state offers ``Clear filters``). */
   hasActiveFilters: boolean;
   onClearFilters: () => void;
-  /** Row action opening the authoritative detail drawer. */
+  /** Row action opening the authoritative detail (list/detail). */
   onView: (row: T) => void;
   /** Translated ``View`` action label. */
   viewLabel: string;

@@ -24,8 +24,13 @@ import type {
 } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DetailDrawer, DrawerError, DrawerLoading, DrawerNotFound } from "../analyst-table/DetailDrawer";
 import { DetailRows } from "../analyst-table/DetailRows";
+import {
+  DetailError,
+  DetailLoading,
+  DetailNotFound,
+  ResourceDetailView,
+} from "../analyst-table/ResourceDetailView";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, localDateTimeToIso, parseUuidParam } from "../analyst-table/filters";
@@ -213,7 +218,7 @@ export function RelationshipObservationsWorkspace({
     committedKey: filtersKey(table.filters),
   });
 
-  const drawerOpen = table.selection !== null;
+  const detailOpen = table.selection !== null;
   const filtersActive = observationFiltersActive(table.filters);
   // One exact Investigation-scoped read for the open selection (PR 24F):
   // the persisted observation id resolves through the scoped GET, so
@@ -222,7 +227,7 @@ export function RelationshipObservationsWorkspace({
   // page row (the cached exact read stays ready for any other selection).
   const detail = useObservationDetail(
     investigationId,
-    drawerOpen ? (table.selection ?? "") : null,
+    detailOpen ? (table.selection ?? "") : null,
   );
 
   const goNext = (): void => {
@@ -266,67 +271,72 @@ export function RelationshipObservationsWorkspace({
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      {!embedded ? (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-          <Typography variant="h2" sx={{ mr: 1 }}>
-            {t("observations.title")}
-          </Typography>
-          <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
-            <Link to={`/investigations/${investigationId}/relationships`} style={{ textDecoration: "none" }}>
-              {t("nav.relationships")}
-            </Link>
-          </Typography>
-        </Box>
-      ) : null}
-      {!embedded ? (
-        <Typography variant="caption" component="div" sx={{ mb: 1 }}>
-          {t("observations.intro")}
-        </Typography>
-      ) : null}
-      <TableToolbar
-        filters={<ObservationFiltersForm t={t} form={filterForm} />}
-        onApply={filterForm.apply}
-        onClear={filterForm.clear}
-        onExport={exportCurrentPage}
-        hasActiveFilters={filtersActive}
-      />
-      {filterForm.error !== null ? (
-        <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
-          {filterForm.error}
-        </Typography>
-      ) : null}
-      <AnalystTable<RelationshipObservation>
-        columns={observationColumns(t)}
-        rows={page?.items ?? []}
-        getRowId={(observation) => observation.id}
-        ariaLabel={t("observations.title")}
-        isLoading={isLoading && page === null}
-        error={error}
-        errorTitle={t("list.error.title")}
-        onRetry={refetch}
-        emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
-        emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
-        hasActiveFilters={filtersActive}
-        onClearFilters={table.clearFilters}
-        onView={(observation) => table.openSelection(observation.id)}
-        viewLabel={t("row.view")}
-        navigation={{
-          canGoPrevious: table.canGoPrevious,
-          canGoNext: hasNext(page),
-          onPrevious: table.goPrevious,
-          onNext: goNext,
-        }}
-        loadingLabel={t("list.loading")}
-        staleErrorTitle={t("list.error.stale")}
-        onReturnToFirstPage={table.returnToFirstPage}
-      />
-      <DetailDrawer
-        open={drawerOpen}
-        title={t("observations.detail.title")}
-        onClose={table.closeSelection}
-      >
-        {drawerOpen ? observationDetailBody(t, page, detail, table.selection ?? "") : null}
-      </DetailDrawer>
+      {detailOpen ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("observations.title") })}
+          heading={t("observations.detail.title")}
+          onBack={table.closeSelection}
+        >
+          {observationDetailBody(t, page, detail, table.selection ?? "")}
+        </ResourceDetailView>
+      ) : (
+        <>
+          {!embedded ? (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+              <Typography variant="h2" sx={{ mr: 1 }}>
+                {t("observations.title")}
+              </Typography>
+              <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
+                <Link to={`/investigations/${investigationId}/relationships`} style={{ textDecoration: "none" }}>
+                  {t("nav.relationships")}
+                </Link>
+              </Typography>
+            </Box>
+          ) : null}
+          {!embedded ? (
+            <Typography variant="caption" component="div" sx={{ mb: 1 }}>
+              {t("observations.intro")}
+            </Typography>
+          ) : null}
+          <TableToolbar
+            filters={<ObservationFiltersForm t={t} form={filterForm} />}
+            onApply={filterForm.apply}
+            onClear={filterForm.clear}
+            onExport={exportCurrentPage}
+            hasActiveFilters={filtersActive}
+          />
+          {filterForm.error !== null ? (
+            <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
+              {filterForm.error}
+            </Typography>
+          ) : null}
+          <AnalystTable<RelationshipObservation>
+            columns={observationColumns(t)}
+            rows={page?.items ?? []}
+            getRowId={(observation) => observation.id}
+            ariaLabel={t("observations.title")}
+            isLoading={isLoading && page === null}
+            error={error}
+            errorTitle={t("list.error.title")}
+            onRetry={refetch}
+            emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
+            emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
+            hasActiveFilters={filtersActive}
+            onClearFilters={table.clearFilters}
+            onView={(observation) => table.openSelection(observation.id)}
+            viewLabel={t("row.view")}
+            navigation={{
+              canGoPrevious: table.canGoPrevious,
+              canGoNext: hasNext(page),
+              onPrevious: table.goPrevious,
+              onNext: goNext,
+            }}
+            loadingLabel={t("list.loading")}
+            staleErrorTitle={t("list.error.stale")}
+            onReturnToFirstPage={table.returnToFirstPage}
+          />
+        </>
+      )}
     </Box>
   );
 }
@@ -350,15 +360,15 @@ function observationDetailBody(
     return observationDetailRows(t, row);
   }
   if (detail.isLoading && detail.observation === null) {
-    return <DrawerLoading label={t("detail.loading")} />;
+    return <DetailLoading label={t("detail.loading")} />;
   }
   if (detail.isError && detail.observation === null) {
     if (detail.error !== null && isNotFound404(detail.error)) {
       // The exact Investigation-scoped read reports the observation is
       // not visible here: keep the workspace open and state exactly that.
-      return <DrawerNotFound title={t("detail.notFound.title")} />;
+      return <DetailNotFound title={t("detail.notFound.title")} />;
     }
-    return <DrawerError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
+    return <DetailError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
   }
   if (detail.observation === null) {
     return (

@@ -1,13 +1,17 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pivot modal workspace route tests (PR 24D §26).
+// In-flow Pivot workbench route tests (PR 24D §26; PR 31F-6 amendment 5).
 //
-// Real route rendering over MSW: open, breadcrumbs, pre-applied exact
-// server filters, PR 24C table reuse inside the modal, detail drawer in
-// the modal, nested pivots in one dialog, breadcrumb truncation, Close
-// preserving the base route state, depth-five suppression, target 404 and
-// network retry inside the modal, malformed pivot state, browser
-// Back/Forward, and refresh/deep-link restoration.
+// Real route rendering over MSW: the normal Investigation workbench and
+// the URL-selected in-flow Pivot workbench are ALTERNATIVE primary views.
+// When the bounded ``pivot`` URL state is non-empty the Pivot workbench is
+// the page's only main content (A5-PW02/03) and is ordinary in-flow
+// content — no Portal, fixed overlay, backdrop, modal/``aria-modal``,
+// body scroll lock or document pointer filter (A5-PW04..09, PW25). The
+// Pivot domain contract is unchanged: URL stack authority, breadcrumbs,
+// truncate, Close, Back/Forward, depth-five suppression, malformed-state
+// recovery, list/detail inside the active step, inline Pivot actions, and
+// bounded error/loading presentation.
 
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -72,7 +76,7 @@ function observationRows() {
   ];
 }
 
-/** Install the canonical modal-flow handlers (evidence + relationships). */
+/** Install the canonical pivot-flow handlers (evidence + relationships). */
 function installFlowHandlers() {
   const evidenceRecorder = resourceListRecorder();
   const relationshipRecorder = resourceListRecorder();
@@ -104,104 +108,117 @@ function installFlowHandlers() {
 /** Drill: subject cell Pivot menu -> one entity action. */
 async function pivotSubjectCell(actionName: string): Promise<void> {
   await userEvent.click(screen.getByRole("button", { name: "Subject" }));
-  await userEvent.click(await screen.findByRole("menuitem", { name: actionName }));
+  await userEvent.click(await screen.findByRole("button", { name: actionName }));
 }
 
-describe("pivot modal workspace", () => {
-  it("opens the modal with breadcrumbs and pre-applied exact server filters", async () => {
-    const { relationshipRecorder } = installFlowHandlers();
+/** The in-flow Pivot workbench section (PR 31F-6 A5). */
+async function workbench(): Promise<HTMLElement> {
+  return screen.findByTestId("pivot-workbench");
+}
+
+/** Await the workbench heading for a reached resource. */
+async function workbenchHeading(name: RegExp): Promise<HTMLElement> {
+  const wb = await workbench();
+  return within(wb).findByRole("heading", { name });
+}
+
+describe("Pivot workbench (in-flow; PR 31F-6 A5)", () => {
+  it("A5-PW01: with empty pivot state the normal Investigation workbench renders", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/evidence",
+        pages: [[evidenceA()]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(`${BASE}/evidence`);
+    expect(await screen.findByText("update-package.test")).toBeInTheDocument();
+    expect(screen.queryByTestId("pivot-workbench")).toBeNull();
+    // The normal workbench (resource tabs) is present.
+    expect(screen.getByRole("tab", { name: "Evidence" })).toBeInTheDocument();
+  });
+
+  it("A5-PW02/03: an active Pivot step makes the Pivot workbench the primary content; the normal workbench is not interactive underneath", async () => {
+    installFlowHandlers();
     renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
-
     await pivotSubjectCell("Relationships where source");
 
-    const dialog = await screen.findByRole("dialog", { name: /pivot workspace/i });
-    expect(within(dialog).getByText("Relationships")).toBeInTheDocument();
-    expect(
-      within(dialog).getByRole("navigation", { name: "Pivot breadcrumb" }),
-    ).toBeInTheDocument();
-    // The value appears in the breadcrumb label and the source cell now.
-    expect(within(dialog).getAllByText("update-package.test").length).toBeGreaterThan(0);
-    // The breadcrumb ends at the reached resource; the base Investigation
-    // segment anchors the path.
-    expect(within(dialog).getByText("Investigation")).toBeInTheDocument();
-
-    // The PR 24C table is reused: the row renders through the same table.
+    await workbenchHeading(/Relationships pivot workspace/);
+    // The core Investigation body is NOT simultaneously mounted (no tabs /
+    // resource outlet behind an overlay).
+    expect(screen.queryByRole("tab", { name: "Evidence" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Relationships" })).toBeNull();
+    // The active step's list renders through the workbench.
     expect(await screen.findByText("Resolves to")).toBeInTheDocument();
-
-    await waitFor(() => {
-      const last = relationshipRecorder.requests.at(-1);
-      expect(last?.params.source_entity_id).toBe(ENTITY_ID);
-    });
   });
 
-  it("opens the Evidence detail drawer inside the modal and pivots again in one dialog", async () => {
+  it("A5-PW04..09: presentation is ordinary in-flow content — no Portal, fixed overlay, backdrop, modal/dialog semantics, body lock or pointer filter", async () => {
     installFlowHandlers();
     renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
     await pivotSubjectCell("Relationships where source");
-    await screen.findByRole("dialog", { name: /Relationships pivot workspace/i });
+    await workbenchHeading(/Relationships pivot workspace/);
 
-    // Open the relationship row detail drawer inside the modal.
-    await userEvent.click(screen.getByRole("button", { name: /^View / }));
-    const drawer = await screen.findByRole("dialog", { name: "Relationships" });
-    expect(within(drawer).getByText("Resolves to")).toBeInTheDocument();
-
-    // Pivot the drawer's source entity: the same dialog hosts the new step.
-    await userEvent.click(
-      within(drawer).getByRole("button", { name: "Pivot actions Source entity" }),
-    );
-    await userEvent.click(
-      await screen.findByRole("menuitem", { name: "Evidence for this entity" }),
-    );
-
-    const evidenceDialog = await screen.findByRole("dialog", {
-      name: /Evidence pivot workspace/i,
-    });
-    expect(evidenceDialog).toBeInTheDocument();
-    // At most one modal dialog exists for the nested stack.
-    expect(screen.getAllByRole("dialog", { name: /pivot workspace/i })).toHaveLength(1);
-    await within(evidenceDialog).findByText("DNS", { exact: true });
+    const wb = await workbench();
+    // In-flow: contained inside the app container, not a Portal to body.
+    expect(wb.isConnected).toBe(true);
+    // No dialog/modal semantics.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(wb.getAttribute("aria-modal")).toBeNull();
+    expect(wb.getAttribute("role")).not.toBe("dialog");
+    // No body scroll lock and no body-child aria-hidden.
+    expect(document.body.style.overflow).toBe("");
+    expect(
+      Array.from(document.body.children).some(
+        (node) => node.getAttribute("aria-hidden") === "true",
+      ),
+    ).toBe(false);
+    // No viewport backdrop element.
+    expect(wb.closest("[aria-hidden='true']")).toBeNull();
   });
 
-  it("truncates the stack from an earlier breadcrumb and restores that step", async () => {
+  it("A5-PW10/11: the active step and breadcrumb truncate semantics are preserved", async () => {
     installFlowHandlers();
     renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
     await pivotSubjectCell("Relationships where source");
-    await screen.findByRole("dialog", { name: /Relationships pivot workspace/i });
-    await userEvent.click(screen.getByRole("button", { name: /^View / }));
-    await screen.findByRole("dialog", { name: "Relationships" });
+    const relHeading = await workbenchHeading(/Relationships pivot workspace/);
 
-    // Nested push from the drawer, then truncate back through the first
-    // resource segment of the first step.
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions Source entity" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Evidence for this entity" }));
-    await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
-
-    const dialog = await screen.findByRole("dialog", { name: /pivot workspace/i });
+    // Nested push -> Evidence step, then truncate back to Relationships.
+    const wb = await workbench();
+    await userEvent.click(within(wb).getByRole("button", { name: /^View / }));
+    await within(wb).findByRole("heading", { name: "Relationships details" });
     await userEvent.click(
-      within(dialog).getByRole("button", { name: "Return to Relationships" }),
+      await within(wb).findByRole("button", { name: "Pivot actions Source entity" }),
     );
-    await screen.findByRole("dialog", { name: /Relationships pivot workspace/i });
-    // Later steps are gone; the restored step keeps its selection drawer.
-    expect(screen.queryByRole("dialog", { name: /Evidence pivot workspace/i })).toBeNull();
+    await userEvent.click(await screen.findByRole("button", { name: "Evidence for this entity" }));
+    await workbenchHeading(/Evidence pivot workspace/);
+
+    await userEvent.click(
+      within(await workbench()).getByRole("button", { name: "Return to Relationships" }),
+    );
+    await workbenchHeading(/Relationships pivot workspace/);
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Evidence pivot workspace" })).toBeNull(),
+    );
+    void relHeading;
   });
 
-  it("keeps the base route filters and closes to the same base state", async () => {
+  it("A5-PW12/13: Close clears the pivot URL and restores the normal Investigation workbench", async () => {
     const { relationshipRecorder } = installFlowHandlers();
     const { router } = renderAtPath(`${BASE}/evidence?type=urn%3Aati%3Aevidence%3Adns`);
     await screen.findByText("update-package.test");
 
     await pivotSubjectCell("Relationships where source");
-    const dialog = await screen.findByRole("dialog", { name: /Relationships pivot workspace/i });
-    await within(dialog).findByText("Resolves to");
+    await workbenchHeading(/Relationships pivot workspace/);
 
     await userEvent.click(screen.getByRole("button", { name: "Close pivot workspace" }));
-    expect(screen.queryByRole("dialog", { name: /pivot workspace/i })).toBeNull();
-    // The base evidence rows and URL filter state survived untouched
-    // (cursor preservation is a unit-level property of the pivot helpers,
-    // which never touch non-pivot parameters).
+    await waitFor(() => expect(screen.queryByTestId("pivot-workbench")).toBeNull());
+    // The normal workbench (tabs + resource rows) returns; base filters intact.
+    expect(screen.getByRole("tab", { name: "Evidence" })).toBeInTheDocument();
     expect(screen.getAllByText("update-package.test").length).toBeGreaterThan(0);
     const search = new URLSearchParams(router.state.location.search.slice(1));
     expect(search.get("type")).toBe("urn:ati:evidence:dns");
@@ -209,22 +226,17 @@ describe("pivot modal workspace", () => {
     expect(relationshipRecorder.requests.length).toBeGreaterThan(0);
   });
 
-  it("restores prior and later stacks through browser Back/Forward (URL state)", async () => {
-    // The URL is the authoritative pivot state (PR 24D §1.7): browser Back
-    // and Forward must restore the exact prior/later stacks. The memory
-    // router restores the committed search; the rendered restoration of a
-    // parsed URL is covered by the deep-link test and by the real-browser
-    // E2E (POP re-rendering happens in the browser via popstate).
+  it("A5-PW14: browser Back/Forward restores prior and later stack states", async () => {
     installFlowHandlers();
     const { router } = renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
     await pivotSubjectCell("Relationships where source");
-    await screen.findByRole("dialog", { name: /Relationships pivot workspace/i });
-    await userEvent.click(screen.getByRole("button", { name: /^View / }));
-    await screen.findByRole("dialog", { name: "Relationships" });
-    await userEvent.click(screen.getByRole("button", { name: "Pivot actions Source entity" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Evidence for this entity" }));
-    await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
+    const wb = await workbench();
+    await userEvent.click(within(wb).getByRole("button", { name: /^View / }));
+    await within(wb).findByRole("heading", { name: "Relationships details" });
+    await userEvent.click(await within(wb).findByRole("button", { name: "Pivot actions Source entity" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Evidence for this entity" }));
+    await workbenchHeading(/Evidence pivot workspace/);
     const current = new URLSearchParams(router.state.location.search);
     expect(readPivotState(current)?.steps.map((step) => step.resource)).toEqual([
       "relationships",
@@ -244,7 +256,7 @@ describe("pivot modal workspace", () => {
     ]);
   });
 
-  it("restores the modal from a refresh deep link (validated parser path)", async () => {
+  it("A5-PW14b: a refresh deep link restores the Pivot workbench (validated parser path)", async () => {
     const { evidenceRecorder } = installFlowHandlers();
     const steps: PivotStep[] = [
       {
@@ -265,17 +277,15 @@ describe("pivot modal workspace", () => {
     const pivot = serializePivotState({ steps });
     expect(pivot).not.toBeNull();
     renderAtPath(`${BASE}/evidence?type=urn%3Aati%3Aevidence%3Adns&pivot=${pivot ?? ""}`);
-    await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
+    await workbenchHeading(/Evidence pivot workspace/);
     await waitFor(() => {
       const last = evidenceRecorder.requests.at(-1);
       expect(last?.params.subject_entity_id).toBe(ENTITY_ID);
     });
   });
 
-  it("closes the nested Evidence detail drawer without closing the workspace (31F-5 ND01/2/4/5/6)", async () => {
+  it("A5-PW15/16/17: inside the active step, selected absent -> list; selected present -> detail; resource Back restores the same step's list", async () => {
     installFlowHandlers();
-    // Deep link: an Evidence pivot step with the exact detail selection and
-    // one bounded filter, exactly the state after Evidence -> Pivot -> View.
     const steps: PivotStep[] = [
       {
         resource: "evidence",
@@ -289,45 +299,45 @@ describe("pivot modal workspace", () => {
     expect(pivot).not.toBeNull();
     const { router } = renderAtPath(`${BASE}/evidence?pivot=${pivot ?? ""}`);
 
-    const workspace = await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
-    const nested = await screen.findByRole("dialog", { name: "Evidence" });
-    expect(within(nested).getByText("update-package.test")).toBeInTheDocument();
-
-    // X closes ONLY the nested detail: the workspace must survive.
-    await userEvent.click(within(nested).getByRole("button", { name: "Close detail" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Evidence" })).toBeNull());
-    expect(screen.getByRole("dialog", { name: /Evidence pivot workspace/i })).toBe(workspace);
-
-    // URL state transformation: same resource/filters/cursor, selected absent.
+    await workbenchHeading(/Evidence pivot workspace/);
+    const wb = await workbench();
+    // Selected present -> detail instead of list.
+    await within(wb).findByRole("heading", { name: "Evidence details" });
     const current = readPivotState(new URLSearchParams(router.state.location.search));
     expect(current?.steps).toHaveLength(1);
-    expect(current?.steps[0].resource).toBe("evidence");
-    expect(current?.steps[0].filters).toEqual({ subject_entity_id: ENTITY_ID });
-    expect(current?.steps[0].selectedId).toBeNull();
+    expect(current?.steps[0].selectedId).toBe(EVIDENCE_ID);
 
-    // Post-close table interaction still works: open another detail.
-    // Table-cell clicks use raw click dispatch here: userEvent's
-    // pointerdown/pre-focus triggers the TanStack row re-render which
-    // replaces the clicked node between pointerdown and click in jsdom — a
-    // simulation artifact that never occurs with real browser pointer input
-    // (covered by the real-browser E2E); the synthetic click exercises the
-    // same React onClick path a real click reaches.
-    fireEvent.click(screen.getByRole("button", { name: /^View / }));
-    await screen.findByRole("dialog", { name: "Evidence" });
-
-    // Escape closes only the nested drawer, never the workspace.
-    fireEvent.keyDown(screen.getByRole("dialog", { name: "Evidence" }), {
-      key: "Escape",
-    });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Evidence" })).toBeNull());
-    expect(screen.getByRole("dialog", { name: /Evidence pivot workspace/i })).toBe(workspace);
-
-    // The workspace can then close normally.
-    await userEvent.click(screen.getByRole("button", { name: "Close pivot workspace" }));
-    expect(screen.queryByRole("dialog", { name: /pivot workspace/i })).toBeNull();
+    // Resource Back clears selection only; the SAME PivotStep list returns.
+    await userEvent.click(within(wb).getByRole("button", { name: "Back to Evidence" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Evidence details" })).toBeNull(),
+    );
+    await within(wb).findByRole("table", { name: "Evidence" });
+    const after = readPivotState(new URLSearchParams(router.state.location.search));
+    expect(after?.steps).toHaveLength(1);
+    expect(after?.steps[0].selectedId).toBeNull();
   });
 
-  it("suppresses further pivots at depth five and explains the limit textually", async () => {
+  it("A5-PW18/19/20: inline Pivot actions push exactly once; local actions/semantics are unchanged", async () => {
+    installFlowHandlers();
+    const { router } = renderAtPath(`${BASE}/evidence`);
+    await screen.findByText("update-package.test");
+    await pivotSubjectCell("Relationships where source");
+    await workbenchHeading(/Relationships pivot workspace/);
+    const wb = await workbench();
+    // In the Relationships step's list, the source cell Pivot menu yields
+    // the exact `Evidence for this entity` action (push transitions the
+    // same in-flow workbench to an Evidence step).
+    await userEvent.click(within(wb).getByRole("button", { name: /^View / }));
+    await within(wb).findByRole("heading", { name: "Relationships details" });
+    await userEvent.click(await within(wb).findByRole("button", { name: "Pivot actions Source entity" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Evidence for this entity" }));
+    await workbenchHeading(/Evidence pivot workspace/);
+    const state = readPivotState(new URLSearchParams(router.state.location.search));
+    expect(state?.steps.map((step) => step.resource)).toEqual(["relationships", "evidence"]);
+  });
+
+  it("A5-PW21: further pivots are suppressed at depth five with the textual explanation", async () => {
     const { evidenceRecorder } = installFlowHandlers();
     const steps: PivotStep[] = Array.from({ length: MAX_PIVOT_STEPS }, (_, index) =>
       ({
@@ -340,14 +350,29 @@ describe("pivot modal workspace", () => {
     const pivot = serializePivotState({ steps });
     renderAtPath(`${BASE}/evidence?pivot=${pivot ?? ""}`);
 
-    const dialog = await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
-    expect(within(dialog).getByText(/Maximum pivot depth/)).toBeInTheDocument();
-    // The active evidence step renders its table and no pivot triggers.
+    await workbenchHeading(/Evidence pivot workspace/);
+    expect(within(await workbench()).getByText(/Maximum pivot depth/)).toBeInTheDocument();
     await waitFor(() => expect(evidenceRecorder.requests.length).toBeGreaterThan(0));
     expect(screen.queryByRole("button", { name: "Pivot actions" })).toBeNull();
   });
 
-  it("keeps the modal context on a target 404 (bounded not-found)", async () => {
+  it("A5-PW23: a malformed pivot parameter leaves the normal workbench usable", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/evidence",
+        pages: [[evidenceA()]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(`${BASE}/evidence?pivot=%21%21not-base64%21%21`);
+    expect(await screen.findByText("update-package.test")).toBeInTheDocument();
+    expect(screen.queryByTestId("pivot-workbench")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Evidence" })).toBeInTheDocument();
+  });
+
+  it("A5-PW24a: target 404 surfaces bounded not-found inside the Pivot workbench", async () => {
     setHttpHandlers(
       ...AUTH,
       workspaceHandler(),
@@ -372,16 +397,15 @@ describe("pivot modal workspace", () => {
     });
     renderAtPath(`${BASE}/evidence?pivot=${pivot ?? ""}`);
 
-    const dialog = await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
-    expect(dialog).toBeInTheDocument();
+    await workbenchHeading(/Evidence pivot workspace/);
     expect(
-      await within(dialog).findByText("Resource not found or not accessible"),
+      await within(await workbench()).findByText("Resource not found or not accessible"),
     ).toBeInTheDocument();
-    // The modal and its list stay intact.
-    expect(await within(dialog).findByText("update-package.test")).toBeInTheDocument();
+    // A5-PW03: the normal Investigation workbench is not mounted underneath.
+    expect(screen.queryByRole("tab", { name: "Evidence" })).toBeNull();
   });
 
-  it("keeps modal context on a network failure and allows Retry inside it", async () => {
+  it("A5-PW24b: a network failure surfaces bounded Retry inside the Pivot workbench", async () => {
     const failing = http.get("*/api/v1/investigations/:id/evidence", () =>
       errorResponse(500, "internal_error"));
     const recorder = resourceListRecorder();
@@ -395,8 +419,6 @@ describe("pivot modal workspace", () => {
         recorder,
       }),
     );
-    // NOTE: two identical-path evidence handlers would be ambiguous; the
-    // failing handler stays first and is replaced before the Retry click.
     const pivot = serializePivotState({
       steps: [
         {
@@ -409,10 +431,10 @@ describe("pivot modal workspace", () => {
       ],
     });
     renderAtPath(`${BASE}/evidence?pivot=${pivot ?? ""}`);
-    const dialog = await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
-    await within(dialog).findByText("Unable to load Evidence");
-    expect(within(dialog).getByRole("button", { name: "Retry" })).toBeInTheDocument();
-    // Replace the failing surface, then retry inside the modal.
+    await workbenchHeading(/Evidence pivot workspace/);
+    const wb = await workbench();
+    await within(wb).findByText("Unable to load Evidence");
+    expect(within(wb).getByRole("button", { name: "Retry" })).toBeInTheDocument();
     setHttpHandlers(
       ...AUTH,
       workspaceHandler(),
@@ -422,50 +444,62 @@ describe("pivot modal workspace", () => {
         recorder,
       }),
     );
-    await userEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
-    expect(await within(dialog).findByText("DNS", { exact: true })).toBeInTheDocument();
-    expect(within(dialog).queryByText("Unable to load Evidence")).toBeNull();
+    await userEvent.click(within(wb).getByRole("button", { name: "Retry" }));
+    expect(await within(wb).findByText("DNS", { exact: true })).toBeInTheDocument();
+    expect(within(wb).queryByText("Unable to load Evidence")).toBeNull();
   });
 
-  it("leaves the base page usable with a malformed pivot parameter", async () => {
-    setHttpHandlers(
-      ...AUTH,
-      workspaceHandler(),
-      pagedResourceHandler({
-        path: "*/api/v1/investigations/:id/evidence",
-        pages: [[evidenceA()]],
-        recorder: resourceListRecorder(),
-      }),
+  it("A5-PW25: Escape does not dismiss the in-flow workbench (no modal-only handler)", async () => {
+    installFlowHandlers();
+    renderAtPath(`${BASE}/evidence`);
+    await screen.findByText("update-package.test");
+    await pivotSubjectCell("Relationships where source");
+    await workbenchHeading(/Relationships pivot workspace/);
+
+    fireEvent.keyDown(await workbench(), { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("pivot-workbench")).not.toBeNull(),
     );
-    renderAtPath(`${BASE}/evidence?pivot=%21%21not-base64%21%21`);
-    expect(await screen.findByText("update-package.test")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: /pivot workspace/i })).toBeNull();
+    expect(
+      within(await workbench()).getByRole("heading", { name: "Relationships pivot workspace" }),
+    ).toBeInTheDocument();
   });
 
-  it("keeps the modal open and reuses the list DTO inside RelationshipObservations pivots", async () => {
+  it("A5-PW26: the Pivot workbench exposes a meaningful heading and semantic Close control", async () => {
+    installFlowHandlers();
+    renderAtPath(`${BASE}/evidence`);
+    await screen.findByText("update-package.test");
+    await pivotSubjectCell("Relationships where source");
+    const heading = await workbenchHeading(/Relationships pivot workspace/);
+    expect(heading.textContent).toContain("Relationships");
+    expect(
+      within(await workbench()).getByRole("button", { name: "Close pivot workspace" }),
+    ).toBeInTheDocument();
+    expect(
+      within(await workbench()).getByRole("navigation", { name: "Pivot breadcrumb" }),
+    ).toBeInTheDocument();
+  });
+
+  it("A5-PW10/PW11b: the Pivot workbench reuses the RelationshipObservations list DTO in an observations step", async () => {
     const { observationRecorder } = installFlowHandlers();
     renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
     await pivotSubjectCell("Relationships where source");
-    await screen.findByRole("dialog", { name: /Relationships pivot workspace/i });
-    await userEvent.click(screen.getByRole("button", { name: /^View / }));
-    const drawer = await screen.findByRole("dialog", { name: "Relationships" });
+    const wb = await workbench();
+    await workbenchHeading(/Relationships pivot workspace/);
+    await userEvent.click(within(wb).getByRole("button", { name: /^View / }));
+    await within(wb).findByRole("heading", { name: "Relationships details" });
 
-    // The drawer's in-modal observation affordance pushes an observations
-    // step inside the same dialog.
     await userEvent.click(
-      within(drawer).getByRole("button", { name: "Observations for this relationship" }),
+      await within(wb).findByRole("button", { name: "Observations for this relationship" }),
     );
-    const obsDialog = await screen.findByRole("dialog", {
-      name: /Relationship observations pivot workspace/i,
-    });
-    expect(obsDialog).toBeInTheDocument();
+    await workbenchHeading(/Relationship observations pivot workspace/);
     await waitFor(() => {
       const last = observationRecorder.requests.at(-1);
       expect(last?.params.relationship_id).toBe(RELATIONSHIP_ID);
     });
     expect(
-      await within(obsDialog).findByText("Observed at", { exact: true }),
+      await within(await workbench()).findByText("Observed at", { exact: true }),
     ).toBeInTheDocument();
   });
 });

@@ -256,20 +256,21 @@ describe("Relationship Evolution workspace", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: /observed 2026-06-01/ }),
     );
-    const drawer = await screen.findByRole("dialog", { name: "Observation" });
+    const heading = await screen.findByRole("heading", { name: "Observation" });
+    const drawer = heading.parentNode as HTMLElement;
     expect(within(drawer).getByText("Relationship ID")).toBeInTheDocument();
     expect(within(drawer).getByText("Source entity")).toBeInTheDocument();
     expect(within(drawer).getByText("Target entity")).toBeInTheDocument();
     expect(within(drawer).getByText("Observed at")).toBeInTheDocument();
     expect(within(drawer).getByText("Retrieved at")).toBeInTheDocument();
-    // Evidence provenance action exists in the drawer.
+    // Evidence provenance action exists in the detail.
     expect(
       within(drawer).getByRole("button", { name: "Observation provenance actions" }),
     ).toBeInTheDocument();
     await userEvent.click(
       within(drawer).getByRole("button", { name: "Observation provenance actions" }),
     );
-    expect(await screen.findByRole("menuitem", { name: "Open evidence" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Open evidence" })).toBeInTheDocument();
   });
 
   it("E-U14: honest no-results wording, never an existence claim", async () => {
@@ -330,7 +331,7 @@ describe("Relationship Evolution workspace", () => {
     expect(point).toHaveFocus();
     await userEvent.keyboard("{Enter}");
     expect(
-      await screen.findByRole("dialog", { name: "Observation" }),
+      await screen.findByRole("heading", { name: "Observation" }),
     ).toBeInTheDocument();
   });
 

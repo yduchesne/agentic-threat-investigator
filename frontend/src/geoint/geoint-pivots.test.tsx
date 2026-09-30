@@ -100,36 +100,39 @@ describe("GEOINT pivot workspace (PV10..PV13, PV17, PV18)", () => {
     ]);
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview?pivot=${pivot}`);
     // One modal workspace only.
-    const workspace = await screen.findByRole("dialog", {
-      name: "Entity geographic context pivot workspace",
-    });
+    const workspace = await screen.findByTestId("pivot-workbench");
     await within(workspace).findByText("Current in this Investigation");
     await within(workspace).findByText("Seattle");
-    expect(await screen.findAllByRole("dialog")).toHaveLength(1);
+    expect(await screen.findAllByTestId("pivot-workbench")).toHaveLength(1);
     expect(locationEntitiesCalls).toBe(0);
 
     // Open the current context Explore menu: opening the menu alone must
     // not prefetch the location surface.
     await userEvent.click(within(workspace).getByRole("button", { name: /Explore/ }));
-    const menu = screen.getByRole("menu");
+    const menu = screen.getByRole("group", { name: "Pivot actions" });
     expect(within(menu).getByText("Entities at this location")).toBeVisible();
     await waitFor(() => expect(locationEntitiesCalls).toBe(0));
 
     // Push the Location Entities step: only now is the bounded page fetched,
     // and the same single modal swaps content (active-step-only mounting).
     await userEvent.click(within(menu).getByText("Entities at this location"));
-    const locationWorkspace = await screen.findByRole("dialog", {
-      name: "Entities by location pivot workspace",
-    });
+    const locationWorkspace = await screen.findByTestId("pivot-workbench");
     await waitFor(() =>
       expect(
         within(locationWorkspace).getAllByText("203.0.113.10").length,
       ).toBeGreaterThan(0),
     );
     expect(locationEntitiesCalls).toBe(1);
-    expect(await screen.findAllByRole("dialog")).toHaveLength(1);
+    expect(await screen.findAllByTestId("pivot-workbench")).toHaveLength(1);
+    // The single in-flow workbench now shows the pushed Location step; the
+    // previous step's resource heading is gone (active-step-only mounting).
+    await within(await screen.findByTestId("pivot-workbench")).findByRole("heading", {
+      name: "Entities by location pivot workspace",
+    });
     expect(
-      screen.queryByRole("dialog", { name: "Entity geographic context pivot workspace" }),
+      within(await screen.findByTestId("pivot-workbench")).queryByRole("heading", {
+        name: "Entity geographic context pivot workspace",
+      }),
     ).toBeNull();
   });
 
@@ -161,9 +164,7 @@ describe("GEOINT pivot workspace (PV10..PV13, PV17, PV18)", () => {
       },
     ]);
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview?pivot=${pivot}`);
-    const workspace = await screen.findByRole("dialog", {
-      name: "Entity geographic context pivot workspace",
-    });
+    const workspace = await screen.findByTestId("pivot-workbench");
     const nav = within(workspace).getByRole("navigation", {
       name: "Pivot breadcrumb",
     });

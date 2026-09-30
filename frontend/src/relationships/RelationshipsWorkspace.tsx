@@ -5,8 +5,9 @@
 // Route-independent PR 24C Relationships surface over the URL-backed
 // resource table controller: stable semantic edges only, entity labels
 // never fabricated or N+1-resolved, compact copyable IDs when the DTO
-// exposes only UUIDs, and detail with a bounded observation preview.
-// The normal route and the PR 24D pivot modal share this one component.
+// exposes only UUIDs, and a full-width list/detail surface with a bounded
+// observation preview (PR 31F-6 amendment 4). The normal route and the
+// PR 24D pivot modal share this one component.
 
 import { Box, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
@@ -16,8 +17,13 @@ import { Link } from "react-router";
 import type { Investigation, Relationship, RelationshipTypeName } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DetailDrawer, DrawerError, DrawerLoading, DrawerNotFound } from "../analyst-table/DetailDrawer";
 import { isNotFound404 } from "../analyst-table/detail-error";
+import {
+  DetailError,
+  DetailLoading,
+  DetailNotFound,
+  ResourceDetailView,
+} from "../analyst-table/ResourceDetailView";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, parseUuidParam } from "../analyst-table/filters";
@@ -199,7 +205,6 @@ export function RelationshipsWorkspace({
   });
 
   const detail = useRelationshipDetail(investigationId, table.selection);
-  const drawerOpen = table.selection !== null;
   const filtersActive = relationshipFiltersActive(table.filters);
 
   const goNext = (): void => {
@@ -248,61 +253,70 @@ export function RelationshipsWorkspace({
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      {!embedded ? (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-          <Typography variant="h2">{t("title")}</Typography>
-          <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
-            <Link to={`/investigations/${investigationId}/relationships/observations`} style={{ textDecoration: "none" }}>
-              {t("nav.observations")}
-            </Link>
-          </Typography>
-        </Box>
-      ) : null}
-      <TableToolbar
-        filters={<RelationshipFiltersForm t={t} tCommon={tCommon} form={filterForm} />}
-        onApply={filterForm.apply}
-        onClear={filterForm.clear}
-        onExport={exportCurrentPage}
-        hasActiveFilters={filtersActive}
-      />
-      {filterForm.error !== null ? (
-        <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
-          {filterForm.error}
-        </Typography>
-      ) : null}
-      <AnalystTable<Relationship>
-        columns={relationshipColumns(t, investigationId)}
-        rows={page?.items ?? []}
-        getRowId={(relationship) => relationship.id}
-        ariaLabel={t("title")}
-        isLoading={isLoading && page === null}
-        error={error}
-        errorTitle={t("list.error.title")}
-        onRetry={refetch}
-        emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
-        emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
-        hasActiveFilters={filtersActive}
-        onClearFilters={table.clearFilters}
-        onView={(relationship) => table.openSelection(relationship.id)}
-        viewLabel={t("row.view")}
-        navigation={{
-          canGoPrevious: table.canGoPrevious,
-          canGoNext: hasNext(page),
-          onPrevious: table.goPrevious,
-          onNext: goNext,
-        }}
-        loadingLabel={t("list.loading")}
-        staleErrorTitle={t("list.error.stale")}
-        onReturnToFirstPage={table.returnToFirstPage}
-      />
-      <DetailDrawer open={drawerOpen} title={t("title")} onClose={table.closeSelection}>
-        {drawerOpen ? detailBody(t, detail, investigationId, embedded) : null}
-      </DetailDrawer>
+      {table.selection !== null ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("title") })}
+          heading={tCommon("detail.title", { resource: t("title") })}
+          onBack={table.closeSelection}
+        >
+          {detailBody(t, detail, investigationId, embedded)}
+        </ResourceDetailView>
+      ) : (
+        <>
+          {!embedded ? (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+              <Typography variant="h2">{t("title")}</Typography>
+              <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
+                <Link to={`/investigations/${investigationId}/relationships/observations`} style={{ textDecoration: "none" }}>
+                  {t("nav.observations")}
+                </Link>
+              </Typography>
+            </Box>
+          ) : null}
+          <TableToolbar
+            filters={<RelationshipFiltersForm t={t} tCommon={tCommon} form={filterForm} />}
+            onApply={filterForm.apply}
+            onClear={filterForm.clear}
+            onExport={exportCurrentPage}
+            hasActiveFilters={filtersActive}
+          />
+          {filterForm.error !== null ? (
+            <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
+              {filterForm.error}
+            </Typography>
+          ) : null}
+          <AnalystTable<Relationship>
+            columns={relationshipColumns(t, investigationId)}
+            rows={page?.items ?? []}
+            getRowId={(relationship) => relationship.id}
+            ariaLabel={t("title")}
+            isLoading={isLoading && page === null}
+            error={error}
+            errorTitle={t("list.error.title")}
+            onRetry={refetch}
+            emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
+            emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
+            hasActiveFilters={filtersActive}
+            onClearFilters={table.clearFilters}
+            onView={(relationship) => table.openSelection(relationship.id)}
+            viewLabel={t("row.view")}
+            navigation={{
+              canGoPrevious: table.canGoPrevious,
+              canGoNext: hasNext(page),
+              onPrevious: table.goPrevious,
+              onNext: goNext,
+            }}
+            loadingLabel={t("list.loading")}
+            staleErrorTitle={t("list.error.stale")}
+            onReturnToFirstPage={table.returnToFirstPage}
+          />
+        </>
+      )}
     </Box>
   );
 }
 
-/** The drawer body with the stable edge + bounded observations preview. */
+/** The detail body with the stable edge + bounded observations preview. */
 function detailBody(
   t: (key: string) => string,
   detail: ReturnType<typeof useRelationshipDetail>,
@@ -310,16 +324,16 @@ function detailBody(
   embedded: boolean,
 ): ReactElement {
   if (detail.isLoading && detail.relationship === null) {
-    return <DrawerLoading label={t("detail.loading")} />;
+    return <DetailLoading label={t("detail.loading")} />;
   }
   if (detail.isError && detail.relationship === null) {
     if (detail.error !== null && isNotFound404(detail.error)) {
-      return <DrawerNotFound title={t("detail.notFound.title")} />;
+      return <DetailNotFound title={t("detail.notFound.title")} />;
     }
-    return <DrawerError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
+    return <DetailError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
   }
   if (detail.relationship === null) {
-    return <DrawerLoading label={t("detail.loading")} />;
+    return <DetailLoading label={t("detail.loading")} />;
   }
   return (
     <RelationshipDetail

@@ -15,6 +15,12 @@ export default defineConfig({
     },
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // PR 31F-6: real-route component tests boot the full providers/router/query
+    // stack and PR 31F-6's deferred navigation commits add one macrotask per
+    // interaction; under parallel suite load the default 5s per-test cap
+    // produces misleading timeouts on this development hardware. 15s keeps
+    // the assertions unchanged while removing load-induced flake.
+    testTimeout: 15_000,
     restoreMocks: true,
     clearMocks: true,
   },

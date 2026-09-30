@@ -186,11 +186,9 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     await scrollTriggerIntoView(page, rowA);
     await rowA.getByRole("button", { name: /Explore/ }).click();
     await page
-      .getByRole("menuitem", { name: "Evidence for this entity" })
+      .getByRole("button", { name: "Evidence for this entity" })
       .dispatchEvent("click");
-    const workspace = page.getByRole("dialog", {
-      name: "Evidence pivot workspace",
-    });
+    const workspace = page.getByTestId("pivot-workbench");
     await expect(workspace).toBeVisible({ timeout: 30_000 });
     await expect(workspace.getByText("203.0.113.10").first()).toBeVisible();
     // Server-filtered target: the seeded GEOLOCATION Evidence row resolves.
@@ -219,11 +217,9 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     await scrollTriggerIntoView(page, rowB);
     await rowB.getByRole("button", { name: /Explore/ }).click();
     await page
-      .getByRole("menuitem", { name: "Relationships where source" })
+      .getByRole("button", { name: "Relationships where source" })
       .dispatchEvent("click");
-    const relationshipsWorkspace = page.getByRole("dialog", {
-      name: "Relationships pivot workspace",
-    });
+    const relationshipsWorkspace = page.getByTestId("pivot-workbench");
     await expect(relationshipsWorkspace).toBeVisible({ timeout: 30_000 });
     await expect(
       relationshipsWorkspace.getByText("203.0.113.20").first(),
@@ -244,12 +240,12 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     // Exact Evidence drill-down still works through the non-map row.
     const evidenceButton = rowA.getByRole("button", { name: "View Evidence" });
     await evidenceButton.click();
-    const drawer = page.getByRole("dialog", { name: "Evidence" });
-    await expect(drawer).toBeVisible({ timeout: 30_000 });
-    await expect(drawer.getByText("203.0.113.10")).toBeVisible();
-    await expect(drawer.getByText("Geolocation")).toBeVisible();
-    await page.getByRole("button", { name: "Close detail" }).dispatchEvent("click");
-    await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();
+    const heading = page.getByRole("heading", { name: "Evidence" });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("203.0.113.10").first()).toBeVisible();
+    await expect(page.getByText("Geolocation", { exact: true }).first()).toBeVisible();
+    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     expect(page.getByText("FAKE DATA")).toBeVisible();
     expect(consoleErrors).toEqual([]);
@@ -302,33 +298,31 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
 
     // Exact Evidence actions are distinct per row.
     await rowA.getByRole("button", { name: "View Evidence" }).click();
-    const drawerA = page.getByRole("dialog", { name: "Evidence" });
-    await expect(drawerA).toBeVisible({ timeout: 30_000 });
-    await expect(drawerA.getByText("203.0.113.10")).toBeVisible();
-    await page.getByRole("button", { name: "Close detail" }).dispatchEvent("click");
-    await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();
+    const headingA = page.getByRole("heading", { name: "Evidence" });
+    await expect(headingA).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("203.0.113.10").first()).toBeVisible();
+    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     await rowB.getByRole("button", { name: "View Evidence" }).click();
-    const drawerB = page.getByRole("dialog", { name: "Evidence" });
-    await expect(drawerB).toBeVisible({ timeout: 30_000 });
-    await expect(drawerB.getByText("198.51.100.30")).toBeVisible();
-    await page.getByRole("button", { name: "Close detail" }).dispatchEvent("click");
-    await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();
+    const headingB = page.getByRole("heading", { name: "Evidence" });
+    await expect(headingB).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("198.51.100.30").first()).toBeVisible();
+    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
-    // Both Explore triggers open the identical menu of entity actions
-    // (keyboard operable trigger with an accessible IP context).
+    // Both Explore triggers expand the identical in-flow action bar of
+    // entity actions (keyboard operable trigger with an accessible IP
+    // context).
     await rowA.getByRole("button", { name: /Explore/ }).click();
-    const menu = page.getByRole("menu");
-    await expect(menu).toBeVisible({ timeout: 30_000 });
+    const actionBar = page.getByRole("group", { name: "Pivot actions" });
+    await expect(actionBar).toBeVisible({ timeout: 30_000 });
     await expect(
-      page.getByRole("menuitem", { name: "Evidence for this entity" }),
+      page.getByRole("button", { name: "Evidence for this entity" }),
     ).toBeVisible();
-    // Escape on the focused item closes the menu (keyboard operability).
-    await page
-      .getByRole("menuitem", { name: "Evidence for this entity" })
-      .focus();
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("menu")).not.toBeVisible({ timeout: 30_000 });
+    // Cancel collapses the ordinary in-flow bar (no popup/menu exists).
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(actionBar).not.toBeVisible({ timeout: 30_000 });
 
     expect(page.getByText("FAKE DATA")).toBeVisible();
     expect(consoleErrors).toEqual([]);
@@ -365,22 +359,20 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
 
     // Exact Evidence drill-down works for the coordinate-less item.
     await row.getByRole("button", { name: "View Evidence" }).click();
-    const drawer = page.getByRole("dialog", { name: "Evidence" });
-    await expect(drawer).toBeVisible({ timeout: 30_000 });
-    await expect(drawer.getByText("192.0.2.40")).toBeVisible();
-    await expect(drawer.getByText("Geolocation")).toBeVisible();
-    await page.getByRole("button", { name: "Close detail" }).dispatchEvent("click");
-    await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();
+    const heading = page.getByRole("heading", { name: "Evidence" });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("192.0.2.40").first()).toBeVisible();
+    await expect(page.getByText("Geolocation", { exact: true }).first()).toBeVisible();
+    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     // A legal Explore action works; an empty target is honestly empty.
     await scrollTriggerIntoView(page, row);
     await row.getByRole("button", { name: /Explore/ }).click();
     await page
-      .getByRole("menuitem", { name: "Research for this entity" })
+      .getByRole("button", { name: "Research for this entity" })
       .dispatchEvent("click");
-    const researchWorkspace = page.getByRole("dialog", {
-      name: "Research pivot workspace",
-    });
+    const researchWorkspace = page.getByTestId("pivot-workbench");
     await expect(researchWorkspace).toBeVisible({ timeout: 30_000 });
     await expect(researchWorkspace.getByText("192.0.2.40").first()).toBeVisible();
     await expect(

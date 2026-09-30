@@ -750,9 +750,9 @@ describe("GraphRelationshipProvenance exact observation selection (PR 31F U16-U2
       name: "Observation provenance actions",
     });
     fireEvent.click(trigger);
-    await screen.findByRole("menuitem", { name: "Open evidence" });
+    await screen.findByRole("button", { name: "Open evidence" });
     expect(
-      screen.getByRole("menuitem", { name: "Observations for this relationship" }),
+      screen.getByRole("button", { name: "Observations for this relationship" }),
     ).toBeInTheDocument();
   });
 });
@@ -1168,7 +1168,7 @@ describe("GraphRelationshipProvenance graph isolation (PR 31F U32-U37, Q08)", ()
       screen.getByRole("button", { name: "Pivot actions for 203.0.113.10" }),
     );
     fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Expand known relationships" }),
+      await screen.findByRole("button", { name: "Expand known relationships" }),
     );
     await waitFor(() => {
       expect(graphNodeCount()).toBe(3);
@@ -1266,7 +1266,7 @@ describe("GraphRelationshipProvenance graph isolation (PR 31F U32-U37, Q08)", ()
       screen.getByRole("button", { name: "Pivot actions for 203.0.113.10" }),
     );
     expect(
-      screen.getByRole("menuitem", { name: "Expand known relationships" }),
+      screen.getByRole("button", { name: "Expand known relationships" }),
     ).toBeDisabled();
     expect(graphRecorder.requests.length).toBe(graphRequestsBefore);
   });

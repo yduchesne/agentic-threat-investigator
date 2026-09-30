@@ -4,7 +4,7 @@
 // before any render, per-test DOM/cookie/global cleanup.
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 
 import { afterEach, beforeAll, vi } from "vitest";
 
@@ -13,6 +13,14 @@ import { initI18n } from "../i18n";
 beforeAll(async () => {
   await initI18n();
 });
+
+// PR 31F-6: real-route component tests boot the full providers/router/query
+// stack; under full-suite parallel load the testing-library default 1s async
+// wait is too short and a varying-by-run subset then fails while every one of
+// them passes in isolation (and within it). 10s keeps every `findBy*` poll
+// semantics-keyed (a real rendered element, never a sleep) while removing
+// load-induced flake; isolated runs complete in well under a second.
+configure({ asyncUtilTimeout: 10_000 });
 
 /**
  * Minimal ResizeObserver stub for jsdom.

@@ -4,7 +4,7 @@
 //
 // Timeline answers: what did ATI do during this Investigation? Events come
 // in the API's canonical chronological order; the table never sorts or
-// re-orders. The detail drawer shows every safe public DTO field using
+// re-orders. The detail shows every safe public DTO field using
 // the exact list DTO (no single-GET endpoint exists).
 //
 // Timeline is deliberately distinct from Relationship Evolution: no
@@ -18,7 +18,6 @@ import { useOutletContext, useParams } from "react-router";
 import type { TimelineEvent, TimelineEventTypeName } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DetailDrawer } from "../analyst-table/DetailDrawer";
 import { DetailRows } from "../analyst-table/DetailRows";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
@@ -26,6 +25,7 @@ import { localDateTimeToIso } from "../analyst-table/filters";
 import { useResourceTable } from "../analyst-table/resource-page";
 import { runningNotice } from "../analyst-table/running";
 import { TableToolbar } from "../analyst-table/TableToolbar";
+import { ResourceDetailView } from "../analyst-table/ResourceDetailView";
 import { Timestamp } from "../components/Timestamp";
 import { ShortId } from "../components/ShortId";
 import type { WorkspaceOutletContext } from "../investigations/InvestigationWorkspace";
@@ -171,7 +171,7 @@ export function TimelinePage(): ReactElement {
     committedKey: filtersKey(table.filters),
   });
 
-  const drawerOpen = table.selection !== null;
+  const detailOpen = table.selection !== null;
   const filtersActive = timelineFiltersActive(table.filters);
 
   const goNext = (): void => {
@@ -213,58 +213,63 @@ export function TimelinePage(): ReactElement {
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      <Box>
-        <Typography variant="h2" sx={{ mb: 0.25 }}>
-          {t("title")}
-        </Typography>
-        <Typography variant="caption" component="div" role="note">
-          {t("intro")}
-        </Typography>
-      </Box>
-      <TableToolbar
-        filters={<TimelineFiltersForm t={t} tCommon={tCommon} form={filterForm} />}
-        onApply={filterForm.apply}
-        onClear={filterForm.clear}
-        onExport={exportCurrentPage}
-        hasActiveFilters={filtersActive}
-      />
-      {filterForm.error !== null ? (
-        <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
-          {filterForm.error}
-        </Typography>
-      ) : null}
-      <AnalystTable<TimelineEvent>
-        columns={timelineColumns(t)}
-        rows={page?.items ?? []}
-        getRowId={(event) => event.id}
-        ariaLabel={t("title")}
-        isLoading={isLoading && page === null}
-        error={error}
-        errorTitle={t("list.error.title")}
-        onRetry={refetch}
-        emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
-        emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
-        hasActiveFilters={filtersActive}
-        onClearFilters={table.clearFilters}
-        onView={(event) => table.openSelection(event.id)}
-        viewLabel={t("row.view")}
-        navigation={{
-          canGoPrevious: table.canGoPrevious,
-          canGoNext: hasNext(page),
-          onPrevious: table.goPrevious,
-          onNext: goNext,
-        }}
-        loadingLabel={t("list.loading")}
-        staleErrorTitle={t("list.error.stale")}
-        onReturnToFirstPage={table.returnToFirstPage}
-      />
-      <DetailDrawer
-        open={drawerOpen}
-        title={t("detail.title")}
-        onClose={table.closeSelection}
-      >
-        {drawerOpen ? detailBody(t, page, table.selection ?? "") : null}
-      </DetailDrawer>
+      {detailOpen ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("title") })}
+          heading={tCommon("detail.title", { resource: t("title") })}
+          onBack={table.closeSelection}
+        >
+          {detailBody(t, page, table.selection ?? "")}
+        </ResourceDetailView>
+      ) : (
+        <>
+          <Box>
+            <Typography variant="h2" sx={{ mb: 0.25 }}>
+              {t("title")}
+            </Typography>
+            <Typography variant="caption" component="div" role="note">
+              {t("intro")}
+            </Typography>
+          </Box>
+          <TableToolbar
+            filters={<TimelineFiltersForm t={t} tCommon={tCommon} form={filterForm} />}
+            onApply={filterForm.apply}
+            onClear={filterForm.clear}
+            onExport={exportCurrentPage}
+            hasActiveFilters={filtersActive}
+          />
+          {filterForm.error !== null ? (
+            <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
+              {filterForm.error}
+            </Typography>
+          ) : null}
+          <AnalystTable<TimelineEvent>
+            columns={timelineColumns(t)}
+            rows={page?.items ?? []}
+            getRowId={(event) => event.id}
+            ariaLabel={t("title")}
+            isLoading={isLoading && page === null}
+            error={error}
+            errorTitle={t("list.error.title")}
+            onRetry={refetch}
+            emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
+            emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
+            hasActiveFilters={filtersActive}
+            onClearFilters={table.clearFilters}
+            onView={(event) => table.openSelection(event.id)}
+            viewLabel={t("row.view")}
+            navigation={{
+              canGoPrevious: table.canGoPrevious,
+              canGoNext: hasNext(page),
+              onPrevious: table.goPrevious,
+              onNext: goNext,
+            }}
+            loadingLabel={t("list.loading")}
+            staleErrorTitle={t("list.error.stale")}
+            onReturnToFirstPage={table.returnToFirstPage}
+          />
+        </>
+      )}
     </Box>
   );
 }
