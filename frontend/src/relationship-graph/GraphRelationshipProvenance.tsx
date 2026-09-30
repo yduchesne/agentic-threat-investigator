@@ -33,7 +33,11 @@ import type { TFunction } from "i18next";
 
 import type { Relationship, RelationshipObservation } from "../api/schema-types";
 import { DetailRows, DetailSection } from "../analyst-table/DetailRows";
-import { DrawerError, DrawerLoading, DrawerNotFound } from "../analyst-table/DetailDrawer";
+import {
+  DetailError,
+  DetailLoading,
+  DetailNotFound,
+} from "../analyst-table/ResourceDetailView";
 import { isNotFound404 } from "../analyst-table/detail-error";
 import { hasPrevious, popBackStack, pushNextStack } from "../analyst-table/cursor-stack";
 import { Timestamp } from "../components/Timestamp";
@@ -167,13 +171,13 @@ export function GraphRelationshipProvenance({
 
       <DetailSection title={t("graph.provenance.relationship")}>
         {relationshipDetail.isLoading && relationshipDetail.relationship === null ? (
-          <DrawerLoading label={t("graph.provenance.loading.relationship")} />
+          <DetailLoading label={t("graph.provenance.loading.relationship")} />
         ) : null}
         {relationshipDetail.isError && relationshipDetail.relationship === null ? (
           isNotFound404(relationshipDetail.error) ? (
-            <DrawerNotFound title={t("graph.provenance.notFound.relationship")} />
+            <DetailNotFound title={t("graph.provenance.notFound.relationship")} />
           ) : (
-            <DrawerError
+            <DetailError
               title={t("graph.provenance.error.relationship")}
               onRetry={relationshipDetail.refetch}
             />
@@ -191,10 +195,10 @@ export function GraphRelationshipProvenance({
 
       <DetailSection title={t("graph.provenance.observations")}>
         {list.isLoading && page === null ? (
-          <DrawerLoading label={t("graph.provenance.loading.observations")} />
+          <DetailLoading label={t("graph.provenance.loading.observations")} />
         ) : null}
         {list.isError && page === null ? (
-          <DrawerError
+          <DetailError
             title={t("graph.provenance.error.observations")}
             onRetry={list.refetch}
           />
@@ -323,15 +327,15 @@ export function GraphRelationshipProvenance({
           {activeObservation === null &&
           observationDetail.isLoading &&
           exactObservation === null ? (
-            <DrawerLoading label={t("graph.provenance.loading.observation")} />
+            <DetailLoading label={t("graph.provenance.loading.observation")} />
           ) : null}
           {activeObservation === null &&
           observationDetail.isError &&
           exactObservation === null ? (
             isNotFound404(observationDetail.error) ? (
-              <DrawerNotFound title={t("graph.provenance.notFound.observation")} />
+              <DetailNotFound title={t("graph.provenance.notFound.observation")} />
             ) : (
-              <DrawerError
+              <DetailError
                 title={t("graph.provenance.error.observation")}
                 onRetry={observationDetail.refetch}
               />
@@ -340,7 +344,7 @@ export function GraphRelationshipProvenance({
           {activeObservation === null &&
           !observationDetail.isLoading &&
           !observationDetail.isError ? (
-            <DrawerLoading label={t("graph.provenance.loading.observation")} />
+            <DetailLoading label={t("graph.provenance.loading.observation")} />
           ) : null}
         </DetailSection>
       ) : null}
@@ -348,13 +352,13 @@ export function GraphRelationshipProvenance({
       {selectedEvidenceId !== null ? (
         <DetailSection title={t("graph.provenance.evidence")}>
           {evidenceDetail.isLoading && evidenceDetail.evidence === null ? (
-            <DrawerLoading label={t("graph.provenance.loading.evidence")} />
+            <DetailLoading label={t("graph.provenance.loading.evidence")} />
           ) : null}
           {evidenceDetail.isError && evidenceDetail.evidence === null ? (
             isNotFound404(evidenceDetail.error) ? (
-              <DrawerNotFound title={t("graph.provenance.notFound.evidence")} />
+              <DetailNotFound title={t("graph.provenance.notFound.evidence")} />
             ) : (
-              <DrawerError
+              <DetailError
                 title={t("graph.provenance.error.evidence")}
                 onRetry={evidenceDetail.refetch}
               />

@@ -1,18 +1,22 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Investigation workspace (PR 24B §14, §15, §17, §18; PR 24C §12).
+// Investigation workspace (PR 24B §14, §15, §17, §18; PR 24C §12;
+// PR 31F-6 amendment 5).
 //
 // The workspace route owns the authoritative Investigation detail query
-// (with bounded polling), the persistent header, the workspace tabs and
-// the secondary ``More -> History`` access, and provides the detail state
-// to child routes through the router outlet context so children never
-// duplicate the polling query.
+// (with bounded polling), the persistent header, and — as ALTERNATIVE
+// primary views — the normal Investigation workbench (tabs + resource
+// outlet) OR the URL-selected in-flow Pivot workbench. When the bounded
+// ``pivot`` URL state is non-empty the Pivot workbench is the page's only
+// main content: the normal workbench is not mounted underneath (no
+// simultaneous interactive layer), and no durable ``pivotOpen`` state
+// exists. The persistent header stays shared in both modes.
 
 import { Box, Button, Menu, MenuItem } from "@mui/material";
 import type { ReactElement } from "react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Outlet, Link as RouterLink, useParams } from "react-router";
+import { Outlet, Link as RouterLink, useParams, useSearchParams } from "react-router";
 
 import type { ApiError } from "../api/errors";
 import type { Investigation } from "../api/schema-types";
@@ -22,6 +26,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { useInvestigationDetail } from "./investigation-queries";
 import { InvestigationHeader } from "./InvestigationHeader";
 import { InvestigationTabs } from "./InvestigationTabs";
+import { readPivotState } from "../pivots/pivot-url";
 import { PivotWorkspace } from "../pivots/PivotWorkspace";
 
 /** Detail state shared with workspace child routes via the outlet. */
@@ -78,6 +83,7 @@ function MoreMenu({ investigationId }: { investigationId: string }): ReactElemen
 export function InvestigationWorkspace(): ReactElement {
   const { t } = useTranslation("investigations");
   const { investigationId = "" } = useParams();
+  const [searchParams] = useSearchParams();
   const { investigation, isLoading, isError, error, refetch } =
     useInvestigationDetail(investigationId);
 
@@ -90,6 +96,12 @@ export function InvestigationWorkspace(): ReactElement {
     }),
     [investigation, isLoading, error, refetch],
   );
+
+  // The bounded pivot URL state is the sole authority: a valid non-empty
+  // stack activates the in-flow Pivot workbench as the primary content;
+  // otherwise the normal Investigation workbench renders. No durable
+  // ``pivotOpen`` state exists (PR 31F-6 amendment 5).
+  const pivotActive = readPivotState(searchParams) !== null;
 
   // Initial load (no previous data yet).
   if (isLoading && investigation === null) {
@@ -127,17 +139,22 @@ export function InvestigationWorkspace(): ReactElement {
         </Box>
       ) : null}
       <InvestigationHeader investigation={investigation} />
-      <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0.5 }}>
-        <InvestigationTabs investigationId={investigationId} />
-        <MoreMenu investigationId={investigationId} />
-      </Box>
-      <Box component="section" sx={{ mt: 2 }}>
-        <Outlet context={outletContext} />
-      </Box>
-      <PivotWorkspace
-        investigationId={investigationId}
-        investigation={investigation}
-      />
+      {pivotActive ? (
+        <PivotWorkspace
+          investigationId={investigationId}
+          investigation={investigation}
+        />
+      ) : (
+        <>
+          <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0.5 }}>
+            <InvestigationTabs investigationId={investigationId} />
+            <MoreMenu investigationId={investigationId} />
+          </Box>
+          <Box component="section" sx={{ mt: 2 }}>
+            <Outlet context={outletContext} />
+          </Box>
+        </>
+      )}
     </Box>
   );
 }

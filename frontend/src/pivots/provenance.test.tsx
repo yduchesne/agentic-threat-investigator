@@ -214,12 +214,14 @@ describe("Report/Assessment provenance pivots", () => {
     await screen.findByText(REPORT_STATEMENT);
 
     await userEvent.click(screen.getByRole("button", { name: "Open evidence" }));
-    const dialog = await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
+    const dialog = await screen.findByTestId("pivot-workbench");
     expect(dialog).toBeInTheDocument();
-    // The exact selection opens the scoped detail drawer with the value
-    // (the detail handler above also asserts the exact id in the URL).
+    // The exact selection opens the scoped detail as the main content of
+    // the active step (the detail handler above also asserts the exact id
+    // in the URL).
+    await within(dialog).findByRole("heading", { name: "Evidence details" });
     await waitFor(() => {
-      expect(within(dialog).getAllByText("update-package.test").length).toBeGreaterThan(1);
+      expect(within(dialog).getAllByText("update-package.test").length).toBeGreaterThan(0);
     });
 
     // Report free text never enters the pivot URL; the step carries the
@@ -244,23 +246,22 @@ describe("Report/Assessment provenance pivots", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "View relationship observation" }),
     );
-    const dialog = await screen.findByRole("dialog", {
-      name: /Relationship observations pivot workspace/i,
-    });
+    const dialog = await screen.findByTestId("pivot-workbench");
     expect(dialog).toBeInTheDocument();
 
     // The exact persisted observation id drives the scoped GET (never a
     // list scan): the list page above serves a different row, yet the
-    // drawer renders the exact observation's source from the GET response.
-    const drawer = await screen.findByRole("dialog", {
+    // detail renders the exact observation's source from the GET response.
+    const dialogHeading = await screen.findByRole("heading", {
       name: "Relationship observation detail",
     });
+    const drawer = dialogHeading.parentNode as HTMLElement;
     await within(drawer).findByText("exact-dns");
     await expect(observationDetail.requests).toHaveLength(1);
     expect(observationDetail.requests[0]).toContain(
       `/relationship-observations/${OBSERVATION_ID}`,
     );
-    // The drawer keeps exact Evidence identity and distinct times.
+    // The detail keeps exact Evidence identity and distinct times.
     await within(drawer).findByText("Observed at");
     await within(drawer).findByText("Retrieved at");
     expect(within(drawer).getAllByText("Evidence ID").length).toBeGreaterThan(0);
@@ -309,10 +310,8 @@ describe("Report/Assessment provenance pivots", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "View relationship observation" }),
     );
-    const dialog = await screen.findByRole("dialog", {
-      name: /Relationship observations pivot workspace/i,
-    });
-    // The pivot workspace stays open; the drawer states the scoped
+    const dialog = await screen.findByTestId("pivot-workbench");
+    // The pivot workspace stays open; the detail states the scoped
     // not-found without inventing a substitute observation.
     await within(dialog).findByText("Resource not found or not accessible");
     const pivotParam = new URLSearchParams(router.state.location.search).get("pivot");
@@ -331,21 +330,20 @@ describe("Report/Assessment provenance pivots", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "View relationship observation" }),
     );
-    const drawer = await screen.findByRole("dialog", {
+    const dialogHeading = await screen.findByRole("heading", {
       name: "Relationship observation detail",
     });
+    const drawer = dialogHeading.parentNode as HTMLElement;
     await within(drawer).findByText("exact-dns");
 
-    // The drawer's provenance menu carries the exact Evidence target.
+    // The Inspector's provenance menu carries the exact Evidence target.
     await userEvent.click(
       within(drawer).getByRole("button", {
         name: "Observation provenance actions",
       }),
     );
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Open evidence" }));
-    const evidenceDialog = await screen.findByRole("dialog", {
-      name: /Evidence pivot workspace/i,
-    });
+    await userEvent.click(await screen.findByRole("button", { name: "Open evidence" }));
+    const evidenceDialog = await await screen.findByTestId("pivot-workbench");;
     // The exact Evidence detail opens with its subject value.
     await waitFor(() => {
       expect(
@@ -367,13 +365,11 @@ describe("Report/Assessment provenance pivots", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "View relationship observation" }),
     );
-    await screen.findByRole("dialog", {
-      name: /Relationship observations pivot workspace/i,
-    });
+    await await screen.findByTestId("pivot-workbench");;
     await userEvent.click(screen.getByRole("button", { name: "Close pivot workspace" }));
     await screen.findByText("Reported by two independent observation sources.");
     expect(
-      screen.queryByRole("dialog", { name: /pivot workspace/i }),
+      screen.queryByTestId("pivot-workbench"),
     ).toBeNull();
   });
 
@@ -386,9 +382,7 @@ describe("Report/Assessment provenance pivots", () => {
     await screen.findByText("Contextual research claim about the delivery infrastructure.");
 
     await userEvent.click(screen.getByRole("button", { name: "Open research result" }));
-    const dialog = await screen.findByRole("dialog", {
-      name: /Research pivot workspace/i,
-    });
+    const dialog = await screen.findByTestId("pivot-workbench");
     expect(dialog).toBeInTheDocument();
     const state = readPivotState(new URLSearchParams(router.state.location.search));
     expect(state?.steps[0].resource).toBe("research");
@@ -444,7 +438,7 @@ describe("Report/Assessment provenance pivots", () => {
     renderAtPath(`${BASE}/overview`);
     await screen.findByText("Supports");
     await userEvent.click(screen.getByRole("button", { name: "Open evidence" }));
-    await screen.findByRole("dialog", { name: /Evidence pivot workspace/i });
+    await screen.findByTestId("pivot-workbench");
     await userEvent.click(screen.getByRole("button", { name: "Close pivot workspace" }));
     await screen.findByText("Supports");
     // The current Report/Assessment queries were fetched exactly once each;

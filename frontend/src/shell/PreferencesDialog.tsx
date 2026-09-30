@@ -8,7 +8,7 @@
 // persistence, and Cancel/Escape restoring the committed appearance.
 // Focus is trapped and restored by the MUI Dialog/Modal itself; all text
 // is i18next-backed from the shell namespace. This dialog deliberately
-// does not touch the custom Timeline DetailDrawer or any other existing
+// does not touch the analyst resource list/detail workspaces or any other existing
 // surface.
 
 import {

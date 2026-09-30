@@ -90,9 +90,11 @@ describe("Timeline page", () => {
     await userEvent.type(screen.getByLabelText("Occurred from"), "2026-06-01T00:00");
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
     await screen.findByText("Provider work completed");
-    const last = recorder.requests.at(-1);
-    expect(last?.params.event_type).toBe("evidence_persisted");
-    expect(last?.params.occurred_from).toMatch(/2026-06-01T\d{2}:\d{2}:\d{2}Z/);
+    await waitFor(() => {
+      const last = recorder.requests.at(-1);
+      expect(last?.params.event_type).toBe("evidence_persisted");
+      expect(last?.params.occurred_from).toMatch(/2026-06-01T\d{2}:\d{2}:\d{2}Z/);
+    });
   });
 
   it("falls back safely on an unknown future event type (L04)", async () => {
@@ -131,7 +133,7 @@ describe("Timeline page", () => {
     expect(screen.queryByText(/relationship evolution/i)).not.toBeInTheDocument();
   });
 
-  it("closes the detail drawer by close button, Escape and backdrop (F1-U01..U05)", { timeout: 15_000 }, async () => {
+  it("list/detail: Back is the semantic close; no Escape/backdrop; list never re-fetches (F1-U01..U05, A4)", { timeout: 15_000 }, async () => {
     const recorder = resourceListRecorder();
     setHttpHandlers(
       ...AUTH,
@@ -145,55 +147,58 @@ describe("Timeline page", () => {
     const { router } = renderAtPath(BASE);
     await screen.findByText("Provider work completed");
     const requestsBefore = recorder.requests.length;
-    const open = (): void => {
-      // Plain DOM click (the repository E2E convention): the full pointer
-      // sequence can wedge jsdom after a fixed-overlay drawer unmounts.
+    // The open click commits the selection through the deferred navigation
+    // (PR 31F-6), so the row must be awaited between cycles.
+    const open = async (): Promise<void> => {
+      await screen.findByRole("button", { name: /view/i });
       fireEvent.click(screen.getByRole("button", { name: /view/i }));
     };
 
-    // Open once (URL-addressable selection), then close via the ✕ control.
-    open();
-    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close detail" }));
+    // Open once (URL-addressable selection), then Back via the semantic control.
+    await open();
+    await screen.findByRole("heading", { name: "Timeline details" });
+    // The list is an alternative view: not rendered under/beside the detail.
+    expect(screen.queryByRole("table", { name: "Timeline" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Timeline" }));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Timeline event" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Timeline details" })).not.toBeInTheDocument();
     }, { timeout: 3000 });
     expect(router.state.location.search).not.toContain("selected=");
 
-    // Reopen (reopening works) and close via Escape.
-    open();
-    const dialog2 = await screen.findByRole("dialog", { name: "Timeline event" });
-    fireEvent.keyDown(dialog2, { key: "Escape" });
+    // Reopen (reopening works) and Back again in the same page process.
+    await open();
+    await screen.findByRole("heading", { name: "Timeline details" });
+    fireEvent.click(screen.getByRole("button", { name: "Back to Timeline" }));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Timeline event" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Timeline details" })).not.toBeInTheDocument();
     }, { timeout: 3000 });
     expect(router.state.location.search).not.toContain("selected=");
 
-    // Reopen and close via the backdrop.
-    open();
-    await screen.findByRole("dialog", { name: "Timeline event" });
-    const dialog3 = screen.getByRole("dialog", { name: "Timeline event" });
-    const backdrop = dialog3.parentElement?.firstElementChild;
-    expect(backdrop).not.toBeNull();
-    fireEvent.click(backdrop as Element);
+    // Reopen and verify the detail is ordinary in-flow layout content: never
+    // a dialog/backdrop/Portal surface.
+    await open();
+    const detail3 = await screen.findByRole("heading", { name: "Timeline details" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("presentation")).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Back to Timeline" }));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Timeline event" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Timeline details" })).not.toBeInTheDocument();
     }, { timeout: 3000 });
     expect(router.state.location.search).not.toContain("selected=");
+    void detail3;
 
-    // Drawer open/close never re-fetches the list (no extra Timeline fetch).
+    // Detail open/close never re-fetches the list (no extra Timeline fetch).
     expect(recorder.requests.length).toBe(requestsBefore);
 
-    // Filters + cursor are preserved across a close.
+    // Filters + cursor are preserved across a Back.
     await userEvent.type(screen.getByLabelText("Occurred from"), "2026-06-01T00:00");
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
-    open();
-    await screen.findByRole("dialog", { name: "Timeline event" });
-    fireEvent.keyDown(screen.getByRole("dialog", { name: "Timeline event" }), {
-      key: "Escape",
-    });
+    await open();
+    await screen.findByRole("heading", { name: "Timeline details" });
+    fireEvent.click(screen.getByRole("button", { name: "Back to Timeline" }));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Timeline event" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Timeline details" })).not.toBeInTheDocument();
     }, { timeout: 3000 });
     expect(router.state.location.search).toContain("occurred_from");
   });
@@ -244,8 +249,8 @@ describe("Timeline page", () => {
     // Table summary uses the translated label, not the raw enum.
     expect(await screen.findByText(/reason Fatal error/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /view/i }));
-    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
-    expect(within(dialog).getByText("Fatal error (fatal_error)")).toBeInTheDocument();
+    const inspector = await screen.findByRole("heading", { name: "Timeline details" });
+    expect(within(inspector.parentNode as HTMLElement).getByText("Fatal error (fatal_error)")).toBeInTheDocument();
   });
 
   it("falls back to the raw code for unknown codes without crashing (F1-U10)", async () => {
@@ -269,8 +274,8 @@ describe("Timeline page", () => {
     renderAtPath(BASE);
     expect(await screen.findByText(/error future_error_code_42/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /view/i }));
-    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
-    expect(within(dialog).getByText("future_error_code_42")).toBeInTheDocument();
+    const inspector = await screen.findByRole("heading", { name: "Timeline details" });
+    expect(within(inspector.parentNode as HTMLElement).getByText("future_error_code_42")).toBeInTheDocument();
   });
 
   it("renders the persisted sanitized diagnostic as plain text (F2-U27/U28)", async () => {
@@ -296,12 +301,12 @@ describe("Timeline page", () => {
     renderAtPath(BASE);
     await screen.findByText("Provider work failed");
     await userEvent.click(screen.getByRole("button", { name: /view/i }));
-    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
-    const messageRow = within(dialog).getByLabelText("Error message detail");
+    const inspector = await screen.findByRole("heading", { name: "Timeline details" });
+    const messageRow = within(inspector.parentNode as HTMLElement).getByLabelText("Error message detail");
     // Multiline text is preserved (rendered inside one pre-wrap surface).
     expect(messageRow.textContent).toContain(multiline);
     // Markup-looking text is rendered as text, never parsed as HTML.
-    expect(dialog.querySelector("b")).toBeNull();
+    expect(inspector.querySelector("b")).toBeNull();
     // The bounded scrollable presentation is applied (jsdom computes styles).
     const style = window.getComputedStyle(messageRow);
     expect(style.whiteSpace).toBe("pre-wrap");
@@ -323,10 +328,11 @@ describe("Timeline page", () => {
     renderAtPath(BASE);
     await screen.findByText("Provider work completed");
     await userEvent.click(screen.getByRole("button", { name: /view/i }));
-    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
+    const inspectorHeading = await screen.findByRole("heading", { name: "Timeline details" });
+    const inspector = inspectorHeading.parentNode as HTMLElement;
     // The label row exists; the null diagnostic shows the localized marker.
-    expect(within(dialog).getByText("Error message")).toBeInTheDocument();
-    expect(within(dialog).getAllByText("—").length).toBeGreaterThan(0);
+    expect(within(inspector).getByText("Error message")).toBeInTheDocument();
+    expect(within(inspector).getAllByText("—").length).toBeGreaterThan(0);
   });
 
   it("keeps the localized code label and raw code with a diagnostic (F2-U29)", async () => {
@@ -351,9 +357,10 @@ describe("Timeline page", () => {
     renderAtPath(BASE);
     await screen.findByText("Provider work failed");
     await userEvent.click(screen.getByRole("button", { name: /view/i }));
-    const dialog = await screen.findByRole("dialog", { name: "Timeline event" });
+    const inspectorHeading = await screen.findByRole("heading", { name: "Timeline details" });
+    const inspector = inspectorHeading.parentNode as HTMLElement;
     // Translated label primary + raw code secondary stays intact.
-    expect(within(dialog).getByText("Provider unavailable (provider_unavailable)")).toBeInTheDocument();
-    expect(within(dialog).getByText("the provider is unavailable")).toBeInTheDocument();
+    expect(within(inspector).getByText("Provider unavailable (provider_unavailable)")).toBeInTheDocument();
+    expect(within(inspector).getByText("the provider is unavailable")).toBeInTheDocument();
   });
 });

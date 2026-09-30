@@ -42,18 +42,38 @@ const SHARED_SESSION_STATE = "test-results/analyst-session.json";
 /**
  * Activate one overlay control through a direct click-event dispatch.
  *
- * Raw pointer events inside open fixed-position overlays (detail drawers,
- * pivot modals) can intermittently wedge the Chromium pointer dispatch on
- * this stack (see zz-pivots.spec.ts), and keyboard activation races the
- * overlay autoFocus (a nested drawer's close button steals focus before
- * Enter lands). Dispatch of the DOM `click` event drives React's synthetic
- * onClick directly without pointer coordinates and without focus
- * dependence — robust on this stack and representative of an analyst
- * activating the control.
+ * Raw pointer events inside open fixed-position overlays (the pivot
+ * modal) can intermittently wedge the Chromium pointer dispatch on this
+ * stack (see zz-pivots.spec.ts), and keyboard activation races the
+ * overlay autoFocus (a nested control). Dispatch of the DOM `click`
+ * event drives React's synthetic onClick directly without pointer
+ * coordinates and without focus dependence — robust on this stack and
+ * representative of an analyst activating the control.
  */
 async function activate(page: Page, target: Locator): Promise<void> {
   await expect(target).toBeVisible({ timeout: 30_000 });
   await target.dispatchEvent("click");
+}
+
+/**
+ * Layout-immune node position: the React Flow node's box relative to its
+ * graph canvas. In-flow chrome (the expansion-in-flight Alert, the node/edge
+ * selection panels) shifts the canvas on screen without moving the node in
+ * flow/pane coordinates; comparing SCREEN boxes across such mutations reads
+ * a phantom ~56 px Y drift (PR 31F-6 A6 E23 classification: C3 — screen
+ * coordinates were equated with flow positions). Relative offsets keep the
+ * retention semantics (node did not move) exact.
+ */
+async function nodeOffsetInCanvas(
+  canvas: Locator,
+  node: Locator,
+): Promise<{ x: number; y: number }> {
+  const nodeBox = await node.boundingBox();
+  const canvasBox = await canvas.boundingBox();
+  return {
+    x: Math.round((nodeBox?.x ?? 0) - (canvasBox?.x ?? 0)),
+    y: Math.round((nodeBox?.y ?? 0) - (canvasBox?.y ?? 0)),
+  };
 }
 
 test.describe("PR 24E real-stack relationship evolution and graph", () => {
@@ -134,31 +154,33 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
 
     // Activate one observation -> exact observation detail surface.
     await firstPoint.click();
-    const observationDrawer = page.getByRole("dialog", { name: "Observation" });
-    await expect(observationDrawer).toBeVisible({ timeout: 20_000 });
-    await expect(observationDrawer.getByText("Relationship ID", { exact: true })).toBeVisible();
-    await expect(observationDrawer.getByText("Observed at", { exact: true })).toBeVisible();
-    await expect(observationDrawer.getByText("Retrieved at", { exact: true })).toBeVisible();
+    const observationHeading = page.getByRole("heading", { name: "Observation" });
+    await expect(observationHeading).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Relationship ID", { exact: true })).toBeVisible();
+    await expect(page.getByText("Observed at", { exact: true })).toBeVisible();
+    await expect(page.getByText("Retrieved at", { exact: true })).toBeVisible();
 
     // Observation -> Evidence exact navigation (PR 24D pivot workspace).
     await activate(
       page,
-      observationDrawer.getByRole("button", { name: "Observation provenance actions" }),
+      page.getByRole("button", { name: "Observation provenance actions" }),
     );
-    await activate(page, page.getByRole("menuitem", { name: "Open evidence" }));
-    const evidenceDialog = page.getByRole("dialog", { name: /Evidence pivot workspace/i });
+    await activate(page, page.getByRole("button", { name: "Open evidence" }));
+    const evidenceDialog = page.getByTestId("pivot-workbench");
     await expect(evidenceDialog).toBeVisible({ timeout: 20_000 });
+    // PR 31F-6: the exact Evidence renders as the active step's list/detail
+    // content — never a nested detail overlay dialog.
     await expect(
-      evidenceDialog.getByRole("dialog", { name: /^Evidence$/ }),
+      evidenceDialog.getByRole("heading", { name: "Evidence details" }),
     ).toBeVisible({ timeout: 20_000 });
     // Close the pivot workspace through the modal's own Escape handler
     // (keydown dispatch on the dialog box: no pointer coordinates, no
     // focus/autoFocus races, and immune to the raw-pointer wedge).
-    await evidenceDialog.dispatchEvent("keydown", { key: "Escape" });
+    await page.getByRole("button", { name: "Close pivot workspace" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/pivot=/);
-    await expect(page.getByRole("dialog", { name: /pivot workspace/i })).not.toBeVisible();
-    // Close the underlying observation drawer the same way.
-    await page.getByRole("dialog", { name: "Observation" }).dispatchEvent("keydown", { key: "Escape" });
+    await expect(page.getByTestId("pivot-workbench")).not.toBeVisible();
+    // Close the underlying observation detail via its Back control.
+    await page.getByRole("button", { name: "Back to Relationship evolution" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);
 
     // Switch to the bounded one-hop Graph (G31D-E01/E02/E08): the canvas and
@@ -299,25 +321,25 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     const counterpartyNode = graphCanvas.locator(".react-flow__node").nth(1);
     await expect(counterpartyNode).toBeVisible({ timeout: 20_000 });
     const requestCountBeforeExpansion = graphNeighborhoodRequests.length;
-    const draggedFocalBox = await canvasNode.boundingBox();
+    const draggedFocalBox = await nodeOffsetInCanvas(graphCanvas, canvasNode);
     await counterpartyNode.click();
     await expect(page.getByText(/^Entity: /).first()).toBeVisible({ timeout: 20_000 });
     // The selected-node menu exposes the three local graph-expansion actions
     // alongside the existing navigation pivots (G31E-E01/E09).
     await activate(page, page.getByRole("button", { name: /Pivot actions/ }).first());
     await expect(
-      page.getByRole("menuitem", { name: "Expand known relationships" }),
+      page.getByRole("button", { name: "Expand known relationships" }),
     ).toBeVisible({ timeout: 20_000 });
     await expect(
-      page.getByRole("menuitem", { name: "Expand outgoing relationships" }),
+      page.getByRole("button", { name: "Expand outgoing relationships" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("menuitem", { name: "Expand incoming relationships" }),
+      page.getByRole("button", { name: "Expand incoming relationships" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("menuitem", { name: "Evidence for this entity" }),
+      page.getByRole("button", { name: "Evidence for this entity" }),
     ).toBeVisible();
-    await activate(page, page.getByRole("menuitem", { name: "Expand known relationships" }));
+    await activate(page, page.getByRole("button", { name: "Expand known relationships" }));
     // Exactly one bounded one-hop graph request for the selected Entity with
     // direction=either (G31E-E02/E03) and no fallback/provenance traffic.
     await expect
@@ -329,26 +351,28 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     expect(relationshipsListRequests).toEqual([]);
     expect(observationRequests).toEqual([]);
     // Expansion is additive: the dragged focal node keeps its exact position
-    // (drag + expand, G31E-E11) and the accessible list still reflects the
+    // (drag + expand, G31E-E11; positions compared in canvas-relative flow
+    // coordinates, immune to the in-flight expansion Alert shifting the
+    // canvas on screen) and the accessible list still reflects the
     // accumulated graph (G31E-E06/E07).
-    const focalBoxAfterExpansion = await canvasNode.boundingBox();
-    expect(focalBoxAfterExpansion !== null && draggedFocalBox !== null).toBe(true);
-    expect(Math.abs((focalBoxAfterExpansion?.x ?? 0) - (draggedFocalBox?.x ?? 0))).toBeLessThanOrEqual(2);
-    expect(Math.abs((focalBoxAfterExpansion?.y ?? 0) - (draggedFocalBox?.y ?? 0))).toBeLessThanOrEqual(2);
+    const focalBoxAfterExpansion = await nodeOffsetInCanvas(graphCanvas, canvasNode);
+    expect(Math.abs(focalBoxAfterExpansion.x - draggedFocalBox.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(focalBoxAfterExpansion.y - draggedFocalBox.y)).toBeLessThanOrEqual(2);
     await expect(
       page.getByRole("table", { name: "Relationship list (this page)" }),
     ).toBeVisible({ timeout: 20_000 });
     // The completed expansion is disabled and never refetches (G31E-E08).
     await activate(page, page.getByRole("button", { name: /Pivot actions/ }).first());
-    const completedExpansionItem = page.getByRole("menuitem", {
+    const completedExpansionItem = page.getByRole("button", {
       name: "Expand known relationships",
     });
     await expect(completedExpansionItem).toBeDisabled({ timeout: 20_000 });
     await expect(
-      page.getByRole("menuitem", { name: "Relationships where source" }),
+      page.getByRole("button", { name: "Relationships where source" }),
     ).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("menu")).not.toBeVisible();
+    // Collapse the in-flow action bar with Cancel (no popup/menu exists).
+    await activate(page, page.getByRole("button", { name: "Cancel" }));
+    await expect(page.getByRole("group", { name: "Pivot actions" })).not.toBeVisible();
     await expect.poll(() => graphNeighborhoodRequests.length).toBe(requestCountBeforeExpansion + 1);
     // Local expansion never becomes a PivotStep (G31E-E10).
     expect(new URL(page.url()).searchParams.has("pivot")).toBe(false);
@@ -381,7 +405,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       edgeSelectionPanel.getByRole("button", { name: "Inspect observations" }),
     ).toBeVisible({ timeout: 20_000 });
     const nodesBefore31F = await graphCanvas.locator(".react-flow__node").count();
-    const draggedFocalBefore31F = await canvasNode.boundingBox();
+    const draggedFocalBefore31F = await nodeOffsetInCanvas(graphCanvas, canvasNode);
     const graphRequestsBefore31F = graphNeighborhoodRequests.length;
     await activate(
       page,
@@ -463,14 +487,15 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(provenance).not.toBeVisible({ timeout: 20_000 });
     // Graph intact: expanded topology and the dragged focal position are
     // retained with zero new topology requests (G31F-E12/E13); no
-    // acquisition happens (G31F-E14).
+    // acquisition happens (G31F-E14). Positions are canvas-relative flow
+    // coordinates, so the provenance region's in-flow mount/unmount cannot
+    // read as a phantom screen drift.
     expect(graphNeighborhoodRequests.length).toBe(graphRequestsBefore31F);
     const nodesAfter31F = await graphCanvas.locator(".react-flow__node").count();
     expect(nodesAfter31F).toBe(nodesBefore31F);
-    const focalAfter31F = await canvasNode.boundingBox();
-    expect(focalAfter31F !== null && draggedFocalBefore31F !== null).toBe(true);
-    expect(Math.abs((focalAfter31F?.x ?? 0) - (draggedFocalBefore31F?.x ?? 0))).toBeLessThanOrEqual(2);
-    expect(Math.abs((focalAfter31F?.y ?? 0) - (draggedFocalBefore31F?.y ?? 0))).toBeLessThanOrEqual(2);
+    const focalAfter31F = await nodeOffsetInCanvas(graphCanvas, canvasNode);
+    expect(Math.abs(focalAfter31F.x - draggedFocalBefore31F.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(focalAfter31F.y - draggedFocalBefore31F.y)).toBeLessThanOrEqual(2);
     await expect(page.getByText("FAKE DATA")).toBeVisible();
 
 
@@ -480,9 +505,9 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await relationshipLink.click();
     await expect(page).toHaveURL(/\/relationships\?selected=/);
     await expect(
-      page.getByRole("dialog", { name: "Relationships" }),
+      page.getByRole("heading", { name: "Relationships details" }),
     ).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("dialog", { name: "Relationships" }).dispatchEvent("keydown", { key: "Escape" });
+    await page.getByRole("button", { name: "Back to Relationships" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);
 
     // Refresh preserves the URL-backed Evolution filter/entity state.

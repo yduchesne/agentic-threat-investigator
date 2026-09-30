@@ -209,7 +209,7 @@ describe("Entity GEOINT current/history (U14..U19)", () => {
       name: "Entity geographic observation history",
     });
     await userEvent.click(within(table).getAllByRole("button", { name: "View Evidence" })[0]);
-    const drawer = await screen.findByRole("dialog", { name: "Evidence" });
+    const drawer = await screen.findByRole("heading", { name: "Evidence" });
     expect(drawer).toBeVisible();
     expect(seenEvidenceId).toBe(EVIDENCE_ID);
   });
@@ -315,12 +315,13 @@ describe("observation detail + provenance (U26..U28)", () => {
         />
       </MemoryRouter>,
     );
-    const drawer = await screen.findByRole("dialog", { name: "Geographic observation" });
+    const drawer = await screen.findByRole("heading", { name: "Geographic observation" });
     expect(drawer).toBeVisible();
-    await within(drawer).findByText(/Seattle/);
-    expect(within(drawer).getByText(/City-level context/)).toBeVisible();
+    const drawerBody = drawer.parentNode as HTMLElement;
+    await within(drawerBody).findByText(/Seattle/);
+    expect(within(drawerBody).getByText(/City-level context/)).toBeVisible();
     expect(
-      within(drawer).getByText("Resolved through canonical reference geography"),
+      within(drawerBody).getByText("Resolved through canonical reference geography"),
     ).toBeVisible();
   });
 
@@ -374,10 +375,11 @@ describe("observation detail + provenance (U26..U28)", () => {
         />
       </MemoryRouter>,
     );
-    const drawer = await screen.findByRole("dialog", { name: "Geographic observation" });
-    await within(drawer).findByText(/some_future_method_v9/);
+    const drawer = await screen.findByRole("heading", { name: "Geographic observation" });
+    const drawerBody = drawer.parentNode as HTMLElement;
+    await within(drawerBody).findByText(/some_future_method_v9/);
     for (const forbidden of ["DB-IP", "provider:"]) {
-      expect(within(drawer).queryByText(forbidden, { exact: false })).toBeNull();
+      expect(within(drawerBody).queryByText(forbidden, { exact: false })).toBeNull();
     }
   });
 });

@@ -18,15 +18,17 @@
 // window and the PR 24C suite already performed the single login.
 //
 // Interaction notes:
-// - While a detail drawer (a full-viewport ``position: fixed`` layer) is
-//   open, Playwright/Chromium's composite locator hit-test path can hang
-//   the browser main thread; raw pointer input is not affected (DIAG
-//   probes against both the minimal browser-level repro and the real
-//   stack: mouse.down/up dispatch events and the page stays responsive).
-//   Real analyst input follows the raw path and is not affected; the
-//   spec therefore resolves each target's box and clicks it through
-//   ``page.mouse`` inside the pivot workspace (dialog + drawers + menus +
-//   breadcrumbs), waiting for visibility first.
+// - The pivot workspace modal (fixed-position overlay) and its PivotMenu
+//   can make Playwright/Chromium's composite locator hit-test path hang the
+//   browser main thread; raw pointer input is not affected (DIAG probes
+//   against both the minimal browser-level repro and the real stack:
+//   mouse.down/up dispatch events and the page stays responsive). Real
+//   analyst input follows the raw path and is not affected; the spec
+//   therefore resolves each target's box and clicks it through
+//   ``page.mouse`` inside the pivot workspace (dialog + menus +
+//   breadcrumbs), waiting for visibility first. Ordinary resource
+//   list/detail content (PR 31F-6) is in-flow and uses the same raw path
+//   in the pointer-acceptance journey.
 // - The fake world's per-run entity/relationship identities and edge
 //   analyst labels vary between Investigation seeds; assertions match
 //   structural text (titles, "Observed at", support labels) and regex
@@ -69,16 +71,33 @@ function step(tag: string): void {
 }
 
 /**
- * Click a target inside the pivot overlay via the raw pointer path.
- *
- * Playwright/Chromium's composite locator hit-test path can hang the
- * browser main thread while a full-viewport ``position: fixed`` layer
- * (detail drawer) is open; raw CDP pointer input (what a real analyst's
- * mouse produces) is not affected and demonstrably keeps the page
- * responsive (DIAG probes against both the minimal browser-level repro
- * and the real stack). The locator resolves the target's box (with a
- * bounded retry for any in-flight render), then ``page.mouse`` dispatches
- * the gesture at its center.
+ * Dispatch-activated workbench control (PR 31F-6 A6 E22 diag): the raw
+ * pointer press on this single-entry PivotMenu deterministically misses on
+ * the real stack (gesture completes; the detail's async-loaded observation
+ * preview re-renders under the stale gesture box; the URL stack never gains
+ * the step — reproduced repeatedly). The spec's established dispatch
+ * convention (same as E22-ND's "Pivot actions Source entity" and the
+ * evolution spec) drives React's onClick directly; this broader lifecycle
+ * test is about stack/navigation semantics, not physical pointer delivery
+ * (the raw-pointer authority lives in the A4/A5 acceptance specs).
+ */
+async function dispatchWorkbench(page: Page, target: Locator): Promise<void> {
+  await expect(target).toBeVisible({ timeout: 30_000 });
+  await target.dispatchEvent("click");
+}
+
+/** The in-flow Pivot workbench (PR 31F-6 A5). */
+function pivotWorkbench(page: Page): Locator {
+  return page.getByTestId("pivot-workbench");
+}
+
+/**
+/**
+ * Click a workbench target via the raw pointer path (mouse at the target
+ * center). The Pivot workbench is ordinary in-flow content (PR 31F-6 A5);
+ * the raw-input convention keeps every assertion on the real pointer * path. The locator resolves the target's box (with a bounded retry for
+ * any in-flight render), then ``page.mouse`` dispatches the gesture at its
+ * center.
  */
 async function clickForce(page: Page, target: Locator): Promise<void> {
   await expect(target).toBeVisible({ timeout: 30_000 });
@@ -167,14 +186,28 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/Evidence ID:/).first()).toBeVisible({ timeout: 30_000 });
 
-    // Evidence support -> exact scoped Evidence pivot workspace.
+    // Evidence support -> exact scoped Evidence pivot workspace. The report
+    // evidence (and its action) is worker-admitted asynchronously: wait on
+    // the real button instead of assuming it exists right after the support
+    // summary (C4 semantic readiness; A6 first-run failure mode).
+    await expect(
+      page.getByRole("button", { name: "Open evidence" }).first(),
+    ).toBeVisible({ timeout: 120_000 });
     await page.getByRole("button", { name: "Open evidence" }).first().click();
-    const evidenceDialog = page.getByRole("dialog", { name: /Evidence pivot workspace/i });
+    const evidenceDialog = pivotWorkbench(page);
     await expect(evidenceDialog).toBeVisible({ timeout: 30_000 });
-    // The exact supporting Evidence opens its detail drawer in the modal.
-    const evidenceDrawer = page.getByRole("dialog", { name: /^Evidence$/ });
+    // PR 31F-6: the exact supporting Evidence opens as the active step's
+    // list/detail content — never a nested overlay dialog.
+    const evidenceDrawer = page.getByRole("heading", { name: "Evidence details" });
     await expect(evidenceDrawer).toBeVisible({ timeout: 30_000 });
-    await expect(evidenceDrawer.getByText(F02_ROOT_DOMAIN).first()).toBeVisible({ timeout: 30_000 });
+    await expect(evidenceDialog.getByText(F02_ROOT_DOMAIN).first()).toBeVisible({ timeout: 30_000 });
+    // A5: no modal at all — the in-flow workbench is the only primary
+    // content (no nested detail overlay).
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const detailPosition = await evidenceDrawer.evaluate((node) =>
+      getComputedStyle(node as HTMLElement).position,
+    );
+    expect(detailPosition).not.toBe("fixed");
     // Breadcrumb anchors the exploration: Investigation / value / Evidence.
     const breadcrumb = evidenceDialog.getByRole("navigation", { name: "Pivot breadcrumb" });
     await expect(breadcrumb.getByText("Investigation")).toBeVisible();
@@ -183,49 +216,85 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     ).toBeVisible();
     step("evidence workspace open");
 
-    // Pivot the Evidence subject -> Relationships where source.
-    await clickForce(page, evidenceDrawer.getByRole("button", { name: "Pivot actions" }));
-    await clickForce(page, page.getByRole("menuitem", { name: "Relationships where source" }));
-    const relationshipsDialog = page.getByRole("dialog", { name: /Relationships pivot workspace/i });
+    // Pivot the Evidence subject -> the Relationships direction with the
+    // real edge set. The report-support "Open evidence" can be the malware
+    // evidence OR the domain evidence depending on per-run report finding
+    // ordering (A6 classification: C3 — the direction must not be baked in).
+    // The fake world's orientation is deterministic: the domain is always a
+    // relationship SOURCE (never a target) and the malware always a TARGET
+    // (never a source), so the subject's entity type selects the typed
+    // pivot with data.
+    // Normalize inter-node whitespace: DetailRows renders label/value as
+    // separate DOM nodes, so textContent() alone can yield "Subject
+    // typemalware".
+    const evidenceDetailText =
+      ((await evidenceDialog.textContent()) ?? "").replace(/\s+/g, " ");
+    // DetailRows renders label/value as adjacent DOM nodes, so the raw
+    // textContent may contain "Subject typemalware" (no inter-node
+    // separator); accept both spellings.
+    const subjectIsMalware =
+      evidenceDetailText.includes("Subject type malware") ||
+      evidenceDetailText.includes("Subject typemalware");
+    const pivotDirection = subjectIsMalware ? "Relationships where target" : "Relationships where source";
+    const pivotFilterLabel = subjectIsMalware ? "Target entity ID" : "Source entity ID";
+    await clickForce(page, evidenceDialog.getByRole("button", { name: "Pivot actions" }));
+    await clickForce(page, page.getByRole("button", { name: pivotDirection }));
+    const relationshipsDialog = pivotWorkbench(page);
     await expect(relationshipsDialog).toBeVisible({ timeout: 30_000 });
-    // Pre-applied source filter + a rendered edge row.
+    // Pre-applied {pivotFilterLabel} filter + a rendered edge row. The
+    // bounded expect IS the semantic readiness poll — no sleep, no reload,
+    // no same-key cache issue (this is the first query).
     await expect(
-      relationshipsDialog.getByRole("textbox", { name: "Source entity ID" }),
+      relationshipsDialog.getByRole("textbox", { name: pivotFilterLabel }),
     ).toHaveValue(/^[0-9a-f-]{36}$/);
     await expect(
       relationshipsDialog.getByRole("table", { name: "Relationships" }),
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible({ timeout: 60_000 });
     step("relationships workspace open");
 
-    // Open the Relationship draw, then pivot to its observations.
+    // Open the Relationship detail, then pivot to its observations.
     await clickForce(
       page,
       relationshipsDialog.getByRole("button", { name: /^View / }).first(),
     );
-    const relationshipDrawer = page.getByRole("dialog", { name: /^Relationships$/ });
+    const relationshipDrawer = page.getByRole("heading", { name: "Relationships details" });
     await expect(relationshipDrawer).toBeVisible({ timeout: 30_000 });
-    step("relationship drawer open");
-    await clickForce(
+    step("relationship detail open");
+    await dispatchWorkbench(
       page,
-      relationshipDrawer.getByRole("button", { name: "Observations for this relationship" }),
+      relationshipsDialog.getByRole("button", { name: "Observations for this relationship" }),
     );
-    const observationsDialog = page.getByRole("dialog", {
-      name: /Relationship observations pivot workspace/i,
-    });
+    const observationsDialog = pivotWorkbench(page);
     await expect(observationsDialog).toBeVisible({ timeout: 30_000 });
+    // The REAL observations step marker: its own filter bar (the
+    // relationships detail ALSO shows "Observed at" in its preview, so that
+    // text alone cannot prove the step pushed).
     await expect(
-      observationsDialog.getByText("Observed at", { exact: true }).first(),
+      observationsDialog.getByRole("textbox", { name: "Relationship ID" }),
     ).toBeVisible({ timeout: 30_000 });
     step("observations workspace open");
 
-    // Pivot an observation's Evidence identity -> exact Evidence step.
-    await clickForce(
+    // Pivot an observation's Evidence identity -> the exact Evidence step.
+    // The observation row's evidence action renders as a SINGLE-entry
+    // PivotMenu button: its accessible name is the column aria-label
+    // "Evidence" (visible text "Open evidence"), and pressing it IS the
+    // exact-Evidence action — no separate menu item exists in the in-flow
+    // model. The name must be exact: substring matching on "Evidence" also
+    // hits the breadcrumb's "Return to Evidence" truncation buttons (A6
+    // E22-diag: such a press truncates the stack back to the entry
+    // evidence).
+    await dispatchWorkbench(
       page,
-      observationsDialog.getByRole("button", { name: "Evidence" }).first(),
+      observationsDialog.getByRole("button", { name: "Evidence", exact: true }).first(),
     );
-    await clickForce(page, page.getByRole("menuitem", { name: "Open evidence" }));
-    const nestedEvidenceDialog = page.getByRole("dialog", { name: /Evidence pivot workspace/i });
+    const nestedEvidenceDialog = pivotWorkbench(page);
     await expect(nestedEvidenceDialog).toBeVisible({ timeout: 30_000 });
+    await expect(
+      nestedEvidenceDialog.getByRole("heading", { name: "Evidence details" }),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      nestedEvidenceDialog.getByText(F02_ROOT_DOMAIN).first(),
+    ).toBeVisible({ timeout: 30_000 });
     await expect(
       nestedEvidenceDialog
         .getByRole("navigation", { name: "Pivot breadcrumb" })
@@ -237,36 +306,40 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     // the Evidence step again.
     await page.goBack();
     await expect(
-      page.getByRole("dialog", { name: /Relationship observations pivot workspace/i }),
+      pivotWorkbench(page),
     ).toBeVisible({ timeout: 20_000 });
     await page.goForward();
     await expect(
-      page.getByRole("dialog", { name: /Evidence pivot workspace/i }),
+      pivotWorkbench(page),
     ).toBeVisible({ timeout: 20_000 });
     step("Back/Forward restored");
 
-    // Breadcrumb truncation restores the Relationships step.
-    const truncatedBreadcrumb = page
-      .getByRole("dialog", { name: /Evidence pivot workspace/i })
+    // Breadcrumb truncation restores the Relationships step. The
+    // Relationships step's breadcrumb entity is the pivot subject — the
+    // malware for the target pivot, the domain for the source pivot (A6
+    // data-driven direction above) — so the truncation target is
+    // data-driven too.
+    const pivotEntityLabel = subjectIsMalware ? "malware.badloader_v2" : F02_ROOT_DOMAIN;
+    const truncatedBreadcrumb = pivotWorkbench(page)
       .getByRole("navigation", { name: "Pivot breadcrumb" });
     await clickForce(
       page,
-      truncatedBreadcrumb.getByRole("button", { name: "Return to update-package.test" }),
+      truncatedBreadcrumb.getByRole("button", { name: `Return to ${pivotEntityLabel}` }),
     );
     await expect(
-      page.getByRole("dialog", { name: /Relationships pivot workspace/i }),
+      pivotWorkbench(page),
     ).toBeVisible({ timeout: 20_000 });
     step("truncation restored relationships");
 
     // Refresh restores the active (truncated) modal from the URL state.
     await page.reload();
     await expect(
-      page.getByRole("dialog", { name: /Relationships pivot workspace/i }),
+      pivotWorkbench(page),
     ).toBeVisible({ timeout: 20_000 });
 
     // Close restores the underlying Overview route with no modal.
     await clickForce(page, page.getByRole("button", { name: "Close pivot workspace" }));
-    await expect(page.getByRole("dialog", { name: /pivot workspace/i })).not.toBeVisible();
+    await expect(pivotWorkbench(page)).not.toBeVisible();
     await expect(page.getByRole("heading", { name: OBJECTIVE })).toBeVisible();
     await expect(page.getByText("Supports").first()).toBeVisible();
     expect(page.getByText("FAKE DATA")).toBeVisible();
@@ -309,20 +382,18 @@ test.describe("PR 24D real-stack pivot exploration", () => {
       page.getByText(F01_ROOT_DOMAIN, { exact: true }).first(),
     ).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: /^View / }).first().click();
-    const drawer = page.getByRole("dialog", { name: "Evidence" });
+    const drawer = page.getByRole("heading", { name: "Evidence details" });
     await expect(drawer).toBeVisible({ timeout: 30_000 });
-    step("dead: evidence drawer open");
+    step("dead: evidence detail open");
 
     // Legal pivot: Evidence subject -> Research for this entity. The exact
     // subject id is carried by the typed action (never derived or scanned).
-    await clickForce(page, drawer.getByRole("button", { name: "Pivot actions" }));
+    await clickForce(page, page.getByRole("button", { name: "Pivot actions" }));
     await clickForce(
       page,
-      page.getByRole("menuitem", { name: "Research for this entity" }),
+      page.getByRole("button", { name: "Research for this entity" }),
     );
-    const researchDialog = page.getByRole("dialog", {
-      name: /Research pivot workspace/i,
-    });
+    const researchDialog = pivotWorkbench(page);
     await expect(researchDialog).toBeVisible({ timeout: 30_000 });
     step("dead: research workspace open");
 
@@ -356,7 +427,7 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     // Close returns safely to the base Evidence route; no modal remains.
     await clickForce(page, page.getByRole("button", { name: "Close pivot workspace" }));
     await expect(
-      page.getByRole("dialog", { name: /pivot workspace/i }),
+      pivotWorkbench(page),
     ).not.toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Evidence" }),
@@ -373,7 +444,7 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     }
   });
 
-  test("E22-ND nested Evidence detail closes by X/Escape without closing the workspace", async ({
+  test("E22-ND nested Evidence detail Back closes only the detail; the workbench survives", async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -390,17 +461,38 @@ test.describe("PR 24D real-stack pivot exploration", () => {
     const investigationId = await completeF02Investigation(page);
     step("nd: F02 completed");
 
-    // Investigation -> Evidence -> Subject Pivot -> Relationships.
+    // Investigation -> Evidence -> Subject Pivot -> Relationships. The
+    // FIRST evidence row is the ThreatFox malware evidence (subject
+    // malware.badloader_v2), and the fake world creates NO malware-source
+    // edges — a source pivot there deterministically returns an empty edge
+    // set (A6 classification: C3). Select the canonical DOMAIN evidence row
+    // (the same row the acceptance journey pivots) whose subject
+    // update-package.test IS a relationship source, so the nested slice's
+    // rows are deterministic.
     await page.getByRole("tab", { name: "Evidence" }).click();
-    await clickForce(page, page.getByRole("button", { name: "Subject" }).first());
+    await expect(page.getByText(F02_ROOT_DOMAIN).first()).toBeVisible({ timeout: 30_000 });
     await clickForce(
       page,
-      page.getByRole("menuitem", { name: "Relationships where source" }),
+      page
+        .getByRole("row")
+        .filter({ hasText: F02_ROOT_DOMAIN })
+        .first()
+        .getByRole("button", { name: "Subject" }),
     );
-    const relationshipsDialog = page.getByRole("dialog", {
-      name: /Relationships pivot workspace/i,
-    });
+    await clickForce(
+      page,
+      page.getByRole("button", { name: "Relationships where source" }),
+    );
+    const relationshipsDialog = pivotWorkbench(page);
     await expect(relationshipsDialog).toBeVisible({ timeout: 30_000 });
+    // Pre-applied source filter + a rendered edge row (the bounded expect
+    // is the semantic readiness poll — no sleep, no reload).
+    await expect(
+      relationshipsDialog.getByRole("textbox", { name: "Source entity ID" }),
+    ).toHaveValue(/^[0-9a-f-]{36}$/);
+    await expect(
+      relationshipsDialog.getByRole("table", { name: "Relationships" }),
+    ).toBeVisible({ timeout: 60_000 });
     step("nd: relationships workspace open");
 
     // Relationship detail -> pivot source -> exact Evidence workspace.
@@ -408,38 +500,54 @@ test.describe("PR 24D real-stack pivot exploration", () => {
       page,
       relationshipsDialog.getByRole("button", { name: /^View / }).first(),
     );
-    const relationshipDrawer = page.getByRole("dialog", { name: /^Relationships$/ });
+    const relationshipDrawer = page.getByRole("heading", { name: "Relationships details" });
     await expect(relationshipDrawer).toBeVisible({ timeout: 30_000 });
     await clickForce(
       page,
-      relationshipDrawer.getByRole("button", { name: "Pivot actions Source entity" }),
+      relationshipsDialog.getByRole("button", { name: "Pivot actions Source entity" }),
     );
-    await clickForce(page, page.getByRole("menuitem", { name: "Evidence for this entity" }));
-    const evidenceDialog = page.getByRole("dialog", { name: /Evidence pivot workspace/i });
+    await clickForce(page, page.getByRole("button", { name: "Evidence for this entity" }));
+    const evidenceDialog = pivotWorkbench(page);
     await expect(evidenceDialog).toBeVisible({ timeout: 30_000 });
     step("nd: evidence workspace open");
 
-    // View Evidence -> nested drawer -> X closes ONLY the drawer.
+    // View Evidence -> Back closes ONLY the nested detail.
     await clickForce(page, evidenceDialog.getByRole("button", { name: /^View / }).first());
-    const evidenceDrawer = page.getByRole("dialog", { name: /^Evidence$/ });
+    const evidenceDrawer = page.getByRole("heading", { name: "Evidence details" });
     await expect(evidenceDrawer).toBeVisible({ timeout: 30_000 });
-    await clickForce(page, evidenceDrawer.getByRole("button", { name: "Close detail" }));
+    // PR 31F-6 Step 17: no viewport backdrop, no nested detail overlay —
+    // the ONLY dialog is the pivot workspace itself, and the detail is
+    // never fixed-positioned. The list is an alternative view (no table
+    // under/beside the detail).
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const detailPosition = await evidenceDrawer.evaluate((node) =>
+      getComputedStyle(node as HTMLElement).position,
+    );
+    expect(detailPosition).not.toBe("fixed");
+    await expect(
+      evidenceDialog.getByRole("table", { name: "Evidence" }),
+    ).not.toBeVisible({ timeout: 10_000 });
+    // Pivot breadcrumbs stay visible in the same workspace.
+    await expect(
+      evidenceDialog.getByRole("navigation", { name: "Pivot breadcrumb" }),
+    ).toBeVisible();
+    await clickForce(page, evidenceDialog.getByRole("button", { name: "Back to Evidence" }));
     await expect(evidenceDrawer).not.toBeVisible({ timeout: 20_000 });
     await expect(evidenceDialog).toBeVisible({ timeout: 20_000 });
-    step("nd: X closed nested only");
+    step("nd: Back closed nested only");
 
-    // Post-close table interaction: open another detail, then Escape closes
-    // only the nested drawer and the workspace survives.
+    // Post-Back list interaction: open another detail, Back again, and the
+    // workspace survives (repeated same-page lifecycle).
     await clickForce(page, evidenceDialog.getByRole("button", { name: /^View / }).first());
     await expect(evidenceDrawer).toBeVisible({ timeout: 30_000 });
-    await page.keyboard.press("Escape");
+    await clickForce(page, evidenceDialog.getByRole("button", { name: "Back to Evidence" }));
     await expect(evidenceDrawer).not.toBeVisible({ timeout: 20_000 });
     await expect(evidenceDialog).toBeVisible({ timeout: 20_000 });
-    step("nd: Escape closed nested only");
+    step("nd: Back closed nested again");
 
     // The workspace can then close normally and the base route is restored.
     await clickForce(page, page.getByRole("button", { name: "Close pivot workspace" }));
-    await expect(page.getByRole("dialog", { name: /pivot workspace/i })).not.toBeVisible();
+    await expect(pivotWorkbench(page)).not.toBeVisible();
     await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible();
     expect(page.getByText("FAKE DATA")).toBeVisible();
     expect(consoleErrors).toEqual([]);

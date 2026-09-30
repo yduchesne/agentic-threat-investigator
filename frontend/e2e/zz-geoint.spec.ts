@@ -144,8 +144,8 @@ async function exploreLocation(page: Page, name: string): Promise<Locator> {
   const row = topLocationsTable(page).locator("tbody tr", { hasText: name });
   await row.scrollIntoViewIfNeeded();
   await row.getByRole("button", { name: /Explore/ }).click();
-  await page.getByRole("menuitem", { name: "Entities at this location" }).dispatchEvent("click");
-  const workspace = page.getByRole("dialog", { name: "Entities by location pivot workspace" });
+  await page.getByRole("button", { name: "Entities at this location" }).dispatchEvent("click");
+  const workspace = page.getByTestId("pivot-workbench");
   await expect(workspace).toBeVisible({ timeout: 30_000 });
   return workspace;
 }
@@ -158,11 +158,9 @@ async function exploreEntityGeoint(page: Page, workspace: Locator, entityValue: 
   await row.scrollIntoViewIfNeeded();
   await row.getByRole("button", { name: /Explore/ }).click();
   await page
-    .getByRole("menuitem", { name: "Geographic context for this entity" })
+    .getByRole("button", { name: "Geographic context for this entity" })
     .dispatchEvent("click");
-  const entityWorkspace = page.getByRole("dialog", {
-    name: "Entity geographic context pivot workspace",
-  });
+  const entityWorkspace = page.getByTestId("pivot-workbench");
   await expect(entityWorkspace).toBeVisible({ timeout: 30_000 });
   return entityWorkspace;
 }
@@ -238,12 +236,12 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
       .getByRole("button", { name: "View Evidence" })
       .first();
     await evidenceButton.click();
-    const drawer = page.getByRole("dialog", { name: "Evidence" });
-    await expect(drawer).toBeVisible({ timeout: 30_000 });
-    await expect(drawer.getByText("203.0.113.10")).toBeVisible();
-    await expect(drawer.getByText("Geolocation")).toBeVisible();
-    await page.getByRole("button", { name: "Close detail" }).dispatchEvent("click");
-    await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();
+    const heading = page.getByRole("heading", { name: "Evidence" });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    await expect(heading.parentElement?.parentElement?.textContent).toContain("203.0.113.10");
+    await expect(heading.parentElement?.parentElement?.textContent).toContain("Geolocation");
+    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     // Safe close of the whole pivot workspace.
     await clickForce(
@@ -294,11 +292,13 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
     for (const value of ["203.0.113.20", "203.0.113.30"]) {
       const row = table.locator("tbody tr", { hasText: value });
       await row.getByRole("button", { name: "View Evidence" }).first().click();
-      const drawer = page.getByRole("dialog", { name: "Evidence" });
-      await expect(drawer).toBeVisible({ timeout: 30_000 });
-      await expect(drawer.getByText(value)).toBeVisible();
-      await page.getByRole("button", { name: "Close detail" }).dispatchEvent("click");
-      await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();
+      const heading = page.getByRole("heading", { name: "Evidence" });
+      await expect(heading).toBeVisible({ timeout: 30_000 });
+      // The exact Evidence renders as the in-flow detail content: the exact
+      // subject value is visible in the detail rows.
+      await expect(page.getByText(value).first()).toBeVisible();
+      await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+      await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
     }
 
     await clickForce(
@@ -351,9 +351,7 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
     // The URL carries only the pivot-step identity state (base64 envelope);
     // refreshing restores the contained surface (URL-owned state).
     await page.reload();
-    const restored = page.getByRole("dialog", {
-      name: "Entities by location pivot workspace",
-    });
+    const restored = page.getByTestId("pivot-workbench");
     await expect(restored).toBeVisible({ timeout: 30_000 });
     await expect(
       restored.getByText("Contained Locations are included"),
@@ -480,10 +478,10 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
       .getByRole("button", { name: "View Evidence" })
       .first()
       .click();
-    const drawer = page.getByRole("dialog", { name: "Evidence" });
-    await expect(drawer).toBeVisible({ timeout: 30_000 });
-    await expect(drawer.getByText("203.0.113.70")).toBeVisible();
-    await page.getByRole("button", { name: "Close detail" }).dispatchEvent("click");
+    const heading = page.getByRole("heading", { name: "Evidence" });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    await expect(heading.parentElement?.parentElement?.textContent).toContain("203.0.113.70");
+    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
 
     await clickForce(
       page,
@@ -522,7 +520,7 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
       entityWorkspace.getByText("Current in this Investigation"),
     ).toBeVisible({ timeout: 30_000 });
 
-    // Evidence drawer.
+    // Evidence list/detail.
     const history = entityWorkspace.getByRole("table", {
       name: "Entity geographic observation history",
     });
@@ -532,15 +530,15 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
       .getByRole("button", { name: "View Evidence" })
       .first()
       .click();
-    const drawer = page.getByRole("dialog", { name: "Evidence" });
-    await expect(drawer).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Close detail" }).dispatchEvent("click");
-    await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();
+    const heading = page.getByRole("heading", { name: "Evidence" });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     // Browser Back walks the URL-backed stack to the Location step.
     await page.goBack();
     await expect(
-      page.getByRole("dialog", { name: "Entities by location pivot workspace" }),
+      page.getByTestId("pivot-workbench"),
     ).toBeVisible({ timeout: 30_000 });
     await page.goBack();
     await expect(

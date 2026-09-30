@@ -27,5 +27,6 @@
   "modal.close": "Close pivot workspace",
   "depthLimit.message": "Maximum pivot depth (5) reached. No further pivots are available from this step.",
   "detail.pivot.title": "Pivot",
-  "detail.pivot.aria": "Pivot actions"
+  "detail.pivot.aria": "Pivot actions",
+  "cancel": "Cancel"
 }

@@ -17,7 +17,10 @@ import { Link } from "react-router";
 
 import type { Relationship } from "../api/schema-types";
 import { DetailRows, DetailRow, DetailSection } from "../analyst-table/DetailRows";
-import { DrawerError, DrawerLoading } from "../analyst-table/DetailDrawer";
+import {
+  DetailError,
+  DetailLoading,
+} from "../analyst-table/ResourceDetailView";
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
 import { EntityReference } from "../components/EntityReference";
@@ -124,10 +127,10 @@ export function RelationshipDetail({
       </DetailSection>
       <DetailSection title={t("detail.observations.title")}>
         {preview.isLoading && preview.page === null ? (
-          <DrawerLoading label={t("detail.observations.loading")} />
+          <DetailLoading label={t("detail.observations.loading")} />
         ) : null}
         {preview.isError && preview.page === null ? (
-          <DrawerError title={t("detail.observations.error")} onRetry={preview.refetch} />
+          <DetailError title={t("detail.observations.error")} onRetry={preview.refetch} />
         ) : null}
         {preview.page !== null && preview.page.items.length === 0 ? (
           <Typography variant="body2">{t("detail.observations.none")}</Typography>

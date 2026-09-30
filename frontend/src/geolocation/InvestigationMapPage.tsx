@@ -9,12 +9,12 @@
 // geolocation lookup, and never renders an empty world map while the
 // authoritative PR 25A request is unresolved.
 //
-// Exact Evidence provenance reuses the PR 24C architecture: an
-// Investigation-scoped detail query feeding the shared DetailDrawer +
-// EvidenceDetail surface. The drawer opens from both the marker popup and
-// the non-map table with the exact persisted PR 25A ``evidence_id`` — no
-// lookup by IP, no Evidence list scan, no History substitution. The page's
-// URL state remains only the route itself.
+// Exact Evidence provenance (PR 24C architecture): an Investigation-scoped
+// detail query feeding the shared list/detail Evidence surface. The
+// detail opens from both the marker popup and the non-map table with the
+// exact persisted PR 25A ``evidence_id`` — no lookup by IP, no Evidence
+// list scan, no History substitution. The page's URL state remains only
+// the route itself.
 
 import { Alert, Box, Typography } from "@mui/material";
 import type { ReactElement } from "react";
@@ -23,11 +23,11 @@ import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 
 import {
-  DetailDrawer,
-  DrawerError,
-  DrawerLoading,
-  DrawerNotFound,
-} from "../analyst-table/DetailDrawer";
+  DetailError,
+  DetailLoading,
+  DetailNotFound,
+  ResourceDetailView,
+} from "../analyst-table/ResourceDetailView";
 import { DetailSection } from "../analyst-table/DetailRows";
 import { SafeJsonView } from "../analyst-table/SafeJsonView";
 import { isNotFound404 } from "../analyst-table/detail-error";
@@ -47,12 +47,15 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
 export function InvestigationMapPage(): ReactElement {
   const { t } = useTranslation("geolocation");
   const { t: tEvidence } = useTranslation("evidence");
+  const { t: tCommon } = useTranslation("common");
   const { investigationId = "" } = useParams();
   const { collection, isLoading, isError, error, refetch } =
     useInvestigationGeolocations(investigationId);
 
-  // Exact Evidence provenance drawer (PR 24C architecture): the precise
-  // persisted evidence_id resolves through the Investigation-scoped GET.
+  // Exact Evidence provenance list/detail (PR 24C architecture): the
+  // precise persisted evidence_id resolves through the Investigation-
+  // scoped GET like every resource detail, so exact provenance never scans
+  // cursor pages or substitutes Evidence by IP.
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const detail = useEvidenceDetail(investigationId, selectedEvidenceId);
   const openEvidence = (evidenceId: string): void => setSelectedEvidenceId(evidenceId);
@@ -118,72 +121,75 @@ export function InvestigationMapPage(): ReactElement {
           <Typography variant="body2">{t("truncated.message")}</Typography>
         </Alert>
       ) : null}
-      {model.mappableCount > 0 ? (
-        <>
-          {model.unlocatedCount > 0 ? (
-            <Typography variant="body2" role="note" sx={{ mt: 1 }}>
-              {t("mixed.notice", {
-                count: String(model.unlocatedCount),
-                total: String(model.totalCount),
-              })}
-            </Typography>
-          ) : null}
-          <Box sx={{ mt: 1 }}>
-            <InvestigationMap
-              investigationId={investigationId}
-              items={model.mappable}
-              onViewEvidence={openEvidence}
-            />
-          </Box>
-        </>
+      {selectedEvidenceId !== null ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("evidence.detailTitle") })}
+          heading={t("evidence.detailTitle")}
+          onBack={closeEvidence}
+        >
+          {evidenceDetailBody(t, tEvidence, detail)}
+        </ResourceDetailView>
       ) : (
-        <Box sx={{ mt: 1 }}>
-          {model.totalCount === 0 ? (
-            <EmptyState
-              title={t("empty.title")}
-              message={t("empty.message")}
-            />
+        <Box>
+          {model.mappableCount > 0 ? (
+            <>
+              {model.unlocatedCount > 0 ? (
+                <Typography variant="body2" role="note" sx={{ mt: 1 }}>
+                  {t("mixed.notice", {
+                    count: String(model.unlocatedCount),
+                    total: String(model.totalCount),
+                  })}
+                </Typography>
+              ) : null}
+              <Box sx={{ mt: 1 }}>
+                <InvestigationMap
+                  investigationId={investigationId}
+                  items={model.mappable}
+                  onViewEvidence={openEvidence}
+                />
+              </Box>
+            </>
           ) : (
-            <EmptyState
-              title={t("unlocated.title")}
-              message={t("unlocated.message")}
-            />
+            <Box sx={{ mt: 1 }}>
+              {model.totalCount === 0 ? (
+                <EmptyState
+                  title={t("empty.title")}
+                  message={t("empty.message")}
+                />
+              ) : (
+                <EmptyState
+                  title={t("unlocated.title")}
+                  message={t("unlocated.message")}
+                />
+              )}
+            </Box>
           )}
+          {collection !== null ? (
+            <GeolocationList items={collection.items} onViewEvidence={openEvidence} />
+          ) : null}
         </Box>
       )}
-      {collection !== null ? (
-        <GeolocationList items={collection.items} onViewEvidence={openEvidence} />
-      ) : null}
-      <DetailDrawer
-        open={selectedEvidenceId !== null}
-        title={t("evidence.drawerTitle")}
-        onClose={closeEvidence}
-      >
-        {selectedEvidenceId !== null
-          ? evidenceDrawerBody(t, tEvidence, detail)
-          : null}
-      </DetailDrawer>
     </Box>
   );
 }
 
-/** The exact-Evidence drawer body with its bounded states. */
-function evidenceDrawerBody(
+/** The exact-Evidence detail body with its bounded states. */
+function evidenceDetailBody(
   t: Translate,
   tEvidence: Translate,
   detail: ReturnType<typeof useEvidenceDetail>,
 ): ReactElement {
   if (detail.isLoading && detail.evidence === null) {
-    return <DrawerLoading label={t("evidence.loading")} />;
+    return <DetailLoading label={t("evidence.loading")} />;
   }
   if (detail.isError && detail.evidence === null) {
     if (detail.error !== null && isNotFound404(detail.error)) {
-      return <DrawerNotFound title={t("evidence.notFound.title")} />;
+      return <DetailNotFound title={t("evidence.notFound.title")} />;
     }
-    return <DrawerError title={t("evidence.loadError.title")} onRetry={detail.refetch} />;
+    return <DetailError title={t("evidence.loadError.title")} onRetry={detail.refetch} />;
   }
   if (detail.evidence === null) {
-    return <DrawerLoading label={t("evidence.loading")} />;
+    return <DetailLoading label={t("evidence.loading")} />;
   }
   return (
     <Box>

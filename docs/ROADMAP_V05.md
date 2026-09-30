@@ -51,6 +51,7 @@ requirements justify the additional persistence dependency.
 | **31F-2** | Investigation failure diagnostics | Bounded, sanitized root-cause `error_message` on failure Timeline events, fatal-stop propagation, safe detail presentation [DONE] |
 | **31F-4** | Appearance preferences and multi-theme analyst workbench | Browser-local Light/Dark/Wargames/Control Room appearances over centralized semantic MUI tokens; presentation only [DONE] |
 | **31F-5** | Investigation workspace UX correctness and human-readable analyst presentation | Shared detail/pivot lifecycle focus hygiene, topmost-only nested Escape, Overview/Report separation, human-readable Entity and support references, bounded support presentation resolver, date/time label shrink, Firefox + Chromium overlay journeys [DONE] |
+| **31F-6** | Conservative in-flow analyst resource list/detail + in-flow URL-backed Pivot workbench | Ordinary AnalystTable resources use list/detail alternative views; the Pivot workbench is ordinary in-flow content with inline Pivot actions and cross-browser physical-pointer coverage (acceptance-qualified, see PR report) [DONE] |
 
 ## PR 31A — Graph read model and repository contract [DONE]
 
@@ -434,3 +435,68 @@ no new analytical artifact; no weakening of QA gates.
 (unit + integration), frontend unit + lint, OpenAPI drift check, and the
 Firefox + Chromium overlay journeys (zz-pivots, zz-analyst-tables)
 pass with one Playwright worker.
+
+## PR 31F-6 — Conservative in-flow resource list/detail + Pivot workbench
+
+PR 31F-5 hardened the shared `DetailDrawer`, but manual Firefox
+verification on fresh main still reproduced the browser
+freeze/inability-to-close defect, and the failure was not
+Evidence-specific. PR 31F-6 replaced the overlay resource-detail drawers
+(and the interim side-Inspector) with a conservative in-flow **resource
+list/detail** model, and (amendment 5) replaced the fixed PivotWorkspace
+overlay with an ordinary in-flow **URL-backed Pivot workbench** — a
+presentation change only. Existing URL/Pivot selection remains
+authoritative; exact detail reads and Pivot domain semantics are
+unchanged.
+
+Final scope:
+
+- **List/detail (A4).** Ordinary AnalystTable resources use ALTERNATIVE
+  full-width in-flow views: `View` renders the exact scoped detail as
+  the main content (`ResourceDetailView`: semantic Back +
+  human-readable heading), and Back restores the bounded list context
+  (filters/order/cursor untouched). `selected=<uuid>` remains the sole
+  selection authority; no side Inspector, Portal, modal/drawer/backdrop,
+  focus trap, body masking, or second selection state exists.
+- **Pivot workbench (A5).** When the bounded `pivot` URL stack is
+  non-empty the route owner renders the in-flow Pivot workbench as the
+  PRIMARY content (never together with the normal Investigation
+  workbench): breadcrumbs + semantic Close + the active step's resource
+  list OR detail. No durable `pivotOpen` state; the Pivot model, stack,
+  `MAX_PIVOT_STEPS`, URL serialization, capability registry, push/
+  truncate/close, breadcrumbs, Back/Forward and no-op suppression are
+  unchanged. The already-proven next-macrotask navigation boundaries are
+  preserved.
+- **Migration (C).** Evidence, Relationships, Relationship Observations,
+  Research, History, Timeline, Relationship Evolution, GEOINT and the
+  Geolocation Map's exact Evidence all use the shared list/detail model;
+  resource steps inside the Pivot workbench use the same model.
+  `ResourceInspector`, `ResourceInspectorLayout`, `DetailDrawer`,
+  `GeointDetailDrawer` and the fixed-overlay PivotWorkspace are retired.
+- **Regressions (D).** Raw-pointer acceptance journeys run first-attempt
+  with `--retries=0` in Chromium AND Firefox (`zz-pointer-acceptance`,
+  `zz-pivot-acceptance`, `zz-list-detail` plus the scoped
+  `inspector-firefox` Playwright project): geometry-proved raw
+  interactions, >= 5 same-page cycles per engine, no synthetic click,
+  no reload, no retry dependence. Playwright stays `workers: 1`.
+
+Threading: selection stays in `table.selection/openSelection/
+closeSelection` and the Pivot state port; no second selected-resource
+state, no new routing/query parameter; PivotWorkspace navigation
+architecture (stack/URL/capabilities) unchanged; no
+backend/schema/persistence/graph change.
+
+**Status.** Implemented on `dev/new-ui-layout`; the A5 former-wedge
+checkpoint and the A4/A5 raw-pointer acceptance journeys pass first
+attempt (retries=0) in Chromium and Firefox, static/component gates pass
+(671/671), and the full broader-suite E2E classification is recorded in
+`out/PR31F6_A6_IMPLEMENTATION_REPORT.md` (amendment 6): the reported
+E20/E22/E23 items were corrected as stale-contract (C3) with deterministic
+coverage, the E24-E27 map/geolocation assertion bug from the A4-era
+spec migration was fixed (C1), the GEOINT-seeding and appearance-preview
+failures were classified C2 (pre-existing; PR31F-6 has zero
+backend/DB/theme diffs) with follow-ups, and the intermittent raw-input
+misses remain the documented C5 environment class (never a deterministic
+product failure; the critical raw-pointer authority passes in both
+engines). [DONE]
+manual Firefox verification matrix in `docs/TESTING.md`.

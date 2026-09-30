@@ -21,14 +21,12 @@ import { useParams } from "react-router";
 
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DetailDrawer, DrawerError, DrawerLoading, DrawerNotFound } from "../analyst-table/DetailDrawer";
-import { DetailSection } from "../analyst-table/DetailRows";
 import { isNotFound404 } from "../analyst-table/detail-error";
-import { SafeJsonView } from "../analyst-table/SafeJsonView";
+import { ResourceDetailView } from "../analyst-table/ResourceDetailView";
 import { EmptyState, LoadingState } from "../components/AsyncState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { useEvidenceDetail } from "../evidence/evidence-queries";
-import { EvidenceDetail } from "../evidence/EvidenceDetail";
+import { GeointEvidenceBody } from "./GeointDetailContent";
 import { PivotMenu } from "../pivots/PivotMenu";
 import {
   locationEntitiesAction,
@@ -154,11 +152,12 @@ function SummaryStat({
 /** The first-class GEOINT workspace route. */
 export function GeointPage(): ReactElement {
   const { t } = useTranslation("geoint");
+  const { t: tCommon } = useTranslation("common");
   const { investigationId = "" } = useParams();
   const { summary, isLoading, isError, error, refetch } =
     useGeointSummary(investigationId);
 
-  // Exact Evidence provenance drawer (PR 24C architecture) when a popup
+  // Exact Evidence provenance detail (PR 24C architecture) when a popup
   // item carries an exact evidence_id.
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const detail = useEvidenceDetail(investigationId, selectedEvidenceId);
@@ -216,8 +215,16 @@ export function GeointPage(): ReactElement {
             message={t("empty.message")}
           />
         </Box>
+      ) : selectedEvidenceId !== null ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("detail.evidence.detailTitle") })}
+          heading={t("detail.evidence.detailTitle")}
+          onBack={closeEvidence}
+        >
+          {GeointEvidenceBody(t, detail)}
+        </ResourceDetailView>
       ) : (
-        <>
+        <Box>
           {summary.truncated ? (
             <Alert severity="warning" sx={{ mt: 1 }}>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
@@ -326,50 +333,13 @@ export function GeointPage(): ReactElement {
             </Box>
           ) : null}
 
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="body2" role="note">
-              {t("summary.noInference")}
-            </Typography>
-          </Box>
-        </>
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="body2" role="note">
+                {t("summary.noInference")}
+              </Typography>
+            </Box>
+        </Box>
       )}
-
-      <DetailDrawer
-        open={selectedEvidenceId !== null}
-        title={t("detail.evidence.drawerTitle")}
-        onClose={closeEvidence}
-      >
-        {selectedEvidenceId !== null ? evidenceDrawerBody(t, detail) : null}
-      </DetailDrawer>
-    </Box>
-  );
-}
-
-/** The exact-Evidence drawer body with its bounded states. */
-function evidenceDrawerBody(
-  t: (key: string) => string,
-  detail: ReturnType<typeof useEvidenceDetail>,
-): ReactElement {
-  if (detail.isLoading && detail.evidence === null) {
-    return <DrawerLoading label={t("detail.evidence.loading")} />;
-  }
-  if (detail.isError && detail.evidence === null) {
-    if (detail.error !== null && isNotFound404(detail.error)) {
-      return <DrawerNotFound title={t("detail.evidence.notFound.title")} />;
-    }
-    return <DrawerError title={t("detail.evidence.loadError.title")} onRetry={detail.refetch} />;
-  }
-  if (detail.evidence === null) {
-    return <DrawerLoading label={t("detail.evidence.loading")} />;
-  }
-  return (
-    <Box>
-      <EvidenceDetail evidence={detail.evidence} />
-      {Object.keys(detail.evidence.facts ?? {}).length > 0 ? (
-        <DetailSection title={t("detail.evidence.facts")}>
-          <SafeJsonView data={detail.evidence.facts} label={t("detail.evidence.facts")} />
-        </DetailSection>
-      ) : null}
     </Box>
   );
 }

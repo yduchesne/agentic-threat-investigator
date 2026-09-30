@@ -232,4 +232,22 @@ default-groups = ["dev"]
 # interpreted as an integer or float" on Python 3.14. langchain-openai
 # accepts openai>=2.45,<4, so constrain the transitive SDK to the
 # plain-httpx 2.x line.
-constraint-dependencies = ["openai>=2.45,<3"]
+constraint-dependencies = [
+  "openai>=2.45,<3",
+  # Security gate (./build.sh --sec / pip-audit): transitive dev-tooling
+  # lines with CVEs. urllib3 2.7.0 (CVE-2026-9768x; fix 2.8.0 — pulled in
+  # by requests/semgrep) and virtualenv 21.7.8 (PYSEC-2026-4011..4014;
+  # fix 21.7.13 — pulled in by pre-commit) resolve within the declared
+  # ranges of their dependents, so a plain constraint suffices.
+  "urllib3>=2.8,<3",
+  "virtualenv>=21.7.13,<22",
+]
+# Security gate (./build.sh --sec / pip-audit): the whole semgrep >= 1.157
+# line pins pyjwt[crypto]~=2.13.0, and pyjwt 2.13.x has no patched release
+# for the 12 CVE-2026-10226x/10227x set (fixes ship in 2.14.0/2.15.0).
+# Keeping both semgrep 1.176.1 (the previously locked, newer scanner) and
+# the fixed pyjwt therefore requires overriding semgrep's exact-minor pin:
+# pyjwt 2.15.x is API-stable for pyjwt's jwt/crypto surface, and the
+# override is scoped to that package only (no transitive dependency is
+# widened). uv override-dependencies wins over the upstream requirement.
+override-dependencies = ["pyjwt>=2.15,<3"]

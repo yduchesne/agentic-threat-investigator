@@ -14,7 +14,7 @@ import type { ReactElement } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { DrawerError, DrawerLoading } from "../analyst-table/DetailDrawer";
+import { DetailError, DetailLoading } from "../analyst-table/ResourceDetailView";
 import { DetailRows, DetailSection } from "../analyst-table/DetailRows";
 import { isNotFound404 } from "../analyst-table/detail-error";
 import { SafeJsonView } from "../analyst-table/SafeJsonView";
@@ -48,7 +48,7 @@ export function HistoryDetail({
   );
   void showVersions;
 
-  // Bound the page: exact-version errors render as drawer errors; the
+  // Bound the page: exact-version errors render as detail/error states; the
   // versions list loads only after the explicit toggle.
   const versions = useObjectHistoryPage(
     investigationId,
@@ -58,7 +58,7 @@ export function HistoryDetail({
 
   const body = (): ReactElement => {
     if (exact.isLoading && exact.record === null) {
-      return <DrawerLoading label={t("detail.loading")} />;
+      return <DetailLoading label={t("detail.loading")} />;
     }
     if (exact.isError && exact.record === null) {
       if (exact.error !== null && isNotFound404(exact.error)) {
@@ -68,10 +68,10 @@ export function HistoryDetail({
           </Box>
         );
       }
-      return <DrawerError title={t("detail.loadError.title")} onRetry={exact.refetch} />;
+      return <DetailError title={t("detail.loadError.title")} onRetry={exact.refetch} />;
     }
     if (exact.record === null) {
-      return <DrawerLoading label={t("detail.loading")} />;
+      return <DetailLoading label={t("detail.loading")} />;
     }
     return renderRecord(t, exact.record);
   };
@@ -91,10 +91,10 @@ export function HistoryDetail({
       {showVersions ? (
         <DetailSection title={t("versions.title")}>
           {versions.isLoading && versions.page === null ? (
-            <DrawerLoading label={t("versions.loading")} />
+            <DetailLoading label={t("versions.loading")} />
           ) : null}
           {versions.isError && versions.page === null ? (
-            <DrawerError title={t("versions.error")} onRetry={versions.refetch} />
+            <DetailError title={t("versions.error")} onRetry={versions.refetch} />
           ) : null}
           {versions.page !== null && versions.page.items.length === 0 ? (
             <Typography variant="body2">{t("versions.none")}</Typography>

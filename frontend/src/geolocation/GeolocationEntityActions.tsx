@@ -4,12 +4,12 @@
 //
 // One Investigation Map item exposes two independent surfaces: exact
 // Evidence provenance (the PR 25A ``evidence_id`` through the existing
-// drawer) and entity exploration through the existing PR 24 typed pivot
-// capabilities. This component is the Explore surface used identically by
-// the marker popup and the non-map row: it registers the exact entity
-// actions with the single new ``map_entity`` source kind and keeps the
-// exact persisted Entity ID as the pivot identity. The first pivot label is
-// the IP display value, never the city/country/coordinates.
+// list/detail surface) and entity exploration through the existing PR 24 typed
+// pivot capabilities. This component is the Explore surface used
+// identically by the marker popup and the non-map row: it registers the
+// exact entity actions with the single new ``map_entity`` source kind and
+// keeps the exact persisted Entity ID as the pivot identity. The first
+// pivot label is the IP display value, never the city/country/coordinates.
 //
 // No client-side source-OR-target Relationship merge exists; no
 // coordinate-derived relationship is ever implied. ``entityActions``

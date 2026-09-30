@@ -25,7 +25,7 @@
 // (zz-analyst-tables.spec.ts -> test-results/analyst-session.json); the
 // backend login rate limit is therefore never exceeded.
 //
-// Interaction notes: while a detail drawer (a full-viewport fixed layer)
+// Interaction notes: while a detail drawer (a full-viewport fixed layer, pre-31F-6)
 // is open, the Chromium composite locator hit-test path can wedge the
 // browser main thread on this stack; raw pointer events are not affected.
 // Overlay controls therefore use the same direct click-event dispatch used
@@ -143,7 +143,7 @@ test.describe("PR 25B real-stack Investigation Map", () => {
     });
     expect(await page.locator(".leaflet-marker-icon").count()).toBeGreaterThan(0);
 
-    // Exact Evidence provenance through the non-map row action: the drawer
+    // Exact Evidence provenance through the non-map row action: the detail
     // resolves the exact persisted GEOLOCATION Evidence (subject IP + type +
     // source) — never an IP lookup or a substitute row. The provider appears
     // both in the source row and inside the normalized facts section.
@@ -152,17 +152,17 @@ test.describe("PR 25B real-stack Investigation Map", () => {
       .first()
       .getByRole("button", { name: "View Evidence" });
     await evidenceButton.click();
-    const drawer = page.getByRole("dialog", { name: "Evidence" });
-    await expect(drawer).toBeVisible({ timeout: 30_000 });
-    await expect(drawer.getByText("Subject").first()).toBeVisible();
-    await expect(drawer.getByText("203.0.113.10")).toBeVisible();
-    await expect(drawer.getByText("Geolocation")).toBeVisible();
-    await expect(
-      drawer.getByText("urn:ati:source:dbip_city_lite").first(),
-    ).toBeVisible();
+    const heading = page.getByRole("heading", { name: "Evidence" });
+    await expect(heading).toBeVisible({ timeout: 30_000 });
+    // The exact Evidence renders as the in-flow detail content: the
+    // subject/type/source of the exact persisted GEOLOCATION Evidence.
+    await expect(page.getByText("Subject", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("203.0.113.10").first()).toBeVisible();
+    await expect(page.getByText("Geolocation", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("urn:ati:source:dbip_city_lite").first()).toBeVisible();
     // Return safely to the Map.
-    await activate(page, page.getByRole("button", { name: "Close detail" }));
-    await expect(page.getByRole("dialog", { name: "Evidence" })).not.toBeVisible();
+    await activate(page, page.getByRole("button", { name: "Back to Evidence" }));
+    await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Investigation Map" }),
     ).toBeVisible();

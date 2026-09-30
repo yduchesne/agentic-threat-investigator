@@ -17,7 +17,7 @@ import { useOutletContext, useParams } from "react-router";
 import type { HistoryOperationName, HistoryRecord } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DetailDrawer, DrawerLoading } from "../analyst-table/DetailDrawer";
+import { DetailLoading, ResourceDetailView } from "../analyst-table/ResourceDetailView";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { localDateTimeToIso } from "../analyst-table/filters";
@@ -167,7 +167,7 @@ export function HistoryPage(): ReactElement {
     committedKey: filtersKey(table.filters),
   });
 
-  const drawerOpen = table.selection !== null;
+  const detailOpen = table.selection !== null;
   const filtersActive = historyFiltersActive(table.filters);
   const selectedRecord = page?.items.find((record) => record.id === table.selection);
 
@@ -214,63 +214,72 @@ export function HistoryPage(): ReactElement {
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      <Box>
-        <Typography variant="h2" sx={{ mb: 0.25 }}>
-          {t("title")}
-        </Typography>
-        <Typography variant="caption" component="div" role="note">
-          {t("intro")}
-        </Typography>
-      </Box>
-      <TableToolbar
-        filters={<HistoryFiltersForm t={t} tCommon={tCommon} form={filterForm} />}
-        onApply={filterForm.apply}
-        onClear={filterForm.clear}
-        onExport={exportCurrentPage}
-        hasActiveFilters={filtersActive}
-      />
-      {filterForm.error !== null ? (
-        <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
-          {filterForm.error}
-        </Typography>
-      ) : null}
-      <AnalystTable<HistoryRecord>
-        columns={historyColumns(t)}
-        rows={page?.items ?? []}
-        getRowId={(record) => record.id}
-        ariaLabel={t("title")}
-        isLoading={isLoading && page === null}
-        error={error}
-        errorTitle={t("list.error.title")}
-        onRetry={refetch}
-        emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
-        emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
-        hasActiveFilters={filtersActive}
-        onClearFilters={table.clearFilters}
-        onView={(record) => table.openSelection(record.id)}
-        viewLabel={t("row.view")}
-        navigation={{
-          canGoPrevious: table.canGoPrevious,
-          canGoNext: hasNext(page),
-          onPrevious: table.goPrevious,
-          onNext: goNext,
-        }}
-        loadingLabel={t("list.loading")}
-        staleErrorTitle={t("list.error.stale")}
-        onReturnToFirstPage={table.returnToFirstPage}
-      />
-      <DetailDrawer open={drawerOpen} title={t("detail.title")} onClose={table.closeSelection}>
-        {drawerOpen && selectedRecord !== undefined ? (
-          <HistoryDetail
-            investigationId={investigationId}
-            objectType={selectedRecord.object_type}
-            objectId={selectedRecord.object_id}
-            version={selectedRecord.version}
+      {detailOpen ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("title") })}
+          heading={tCommon("detail.title", { resource: t("title") })}
+          onBack={table.closeSelection}
+        >
+          {selectedRecord !== undefined ? (
+            <HistoryDetail
+              investigationId={investigationId}
+              objectType={selectedRecord.object_type}
+              objectId={selectedRecord.object_id}
+              version={selectedRecord.version}
+            />
+          ) : (
+            <DetailLoading label={t("detail.loading")} />
+          )}
+        </ResourceDetailView>
+      ) : (
+        <>
+          <Box>
+            <Typography variant="h2" sx={{ mb: 0.25 }}>
+              {t("title")}
+            </Typography>
+            <Typography variant="caption" component="div" role="note">
+              {t("intro")}
+            </Typography>
+          </Box>
+          <TableToolbar
+            filters={<HistoryFiltersForm t={t} tCommon={tCommon} form={filterForm} />}
+            onApply={filterForm.apply}
+            onClear={filterForm.clear}
+            onExport={exportCurrentPage}
+            hasActiveFilters={filtersActive}
           />
-        ) : drawerOpen ? (
-          <DrawerLoading label={t("detail.loading")} />
-        ) : null}
-      </DetailDrawer>
+          {filterForm.error !== null ? (
+            <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
+              {filterForm.error}
+            </Typography>
+          ) : null}
+          <AnalystTable<HistoryRecord>
+          columns={historyColumns(t)}
+          rows={page?.items ?? []}
+          getRowId={(record) => record.id}
+          ariaLabel={t("title")}
+          isLoading={isLoading && page === null}
+          error={error}
+          errorTitle={t("list.error.title")}
+          onRetry={refetch}
+          emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
+          emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
+          hasActiveFilters={filtersActive}
+          onClearFilters={table.clearFilters}
+          onView={(record) => table.openSelection(record.id)}
+          viewLabel={t("row.view")}
+          navigation={{
+            canGoPrevious: table.canGoPrevious,
+            canGoNext: hasNext(page),
+            onPrevious: table.goPrevious,
+            onNext: goNext,
+          }}
+          loadingLabel={t("list.loading")}
+          staleErrorTitle={t("list.error.stale")}
+          onReturnToFirstPage={table.returnToFirstPage}
+        />
+        </>
+      )}
     </Box>
   );
 }

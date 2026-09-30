@@ -150,7 +150,7 @@ surfaces (for example `Fatal error (fatal_error)`, compact copyable
 identifiers). The browser never synthesizes a human-readable Entity value
 from a UUID, and the router runs with synchronous commits
 (`RouterProvider useTransitions={false}` from `react-router/dom`) so
-URL-backed drawer/menu navigation re-renders deterministically in real
+URL-backed selection/menu navigation re-renders deterministically in real
 browsers.
 
 **PR 31F-5 adds the human-readable-first Entity invariant.** The canonical
@@ -179,19 +179,74 @@ content, metadata, Markdown). No Overview content is synthesized by an LLM.
 
 **Nested analyst state stays URL-owned (PR 31F-5).** Filters, cursors and
 selections inside the PivotWorkspace live in the URL-backed pivot envelope
-(the active step serializes `selected`); there is no second drawer/pivot
-selection store. Timeline/History `View` and Evidence/Relationships
+(the active step serializes `selected`); there is no second list/detail or
+pivot selection store. Timeline/History `View` and Evidence/Relationships
 `Pivot` share one detail/menu infrastructure, and Escape handling is
-topmost-only: a nested drawer consumes the key before the enclosing
-PivotWorkspace ever sees it.
+topmost-only: a non-modal action menu consumes the key before the
+enclosing PivotWorkspace ever sees it (resource details are ordinary
+layout content and register no Escape handler at all).
 
-**Real-browser lifecycle hygiene (PR 31F-5 A).** The shared detail drawer
-and pivot workspace close controls use deterministic deferred focus (never
-browser `autoFocus` inside the mount commit), and every close path drops
-active focus before the URL navigation that unmounts the control — keeping
+**Real-browser lifecycle hygiene (PR 31F-5 A).** The pivot workspace close
+control and the PivotMenu use deterministic deferred focus (never browser
+`autoFocus` inside the mount commit), and every close path drops active
+focus before the URL navigation that unmounts the control — keeping
 keyboard accessibility while never removing a focused node under the live
 pointer event (the Chromium/Firefox focus-fixup stall class documented in
 PR 24D). No forced reload, browser branch, or arbitrary delay is used.
+
+**Analyst resource detail is conservative list/detail (PR 31F-6).**
+Ordinary analyst resources use a list/detail workspace: the bounded
+AnalystTable list and the exact selected resource detail are ALTERNATIVE
+main-content views. `View` renders the exact Investigation-scoped detail
+as the full-width in-flow workspace content, and a semantic `Back to
+<resource>` control restores the bounded list context (filters, order/
+cursor, investigation scope, resource tab). The presentation contract is
+deliberately split:
+
+```text
+state      = existing resource-table selection or the Pivot state port
+             (table.selection / openSelection / closeSelection; the URL
+             ``selected=<uuid>`` keeps Back/Forward and deep links)
+data       = the existing exact Investigation-scoped detail queries
+             (Evidence/Relationship/Observation/Research/History/
+             Timeline/GEOINT; provenance semantics unchanged)
+presentation = ResourceDetailView (semantic Back + human-readable
+             ``{{resource}} details`` heading + detail content) in
+             ordinary document flow, full workspace width
+```
+
+There is no Portal, modal/drawer/Dialog, fixed viewport backdrop,
+`aria-modal`, focus trap, body scroll lock, global `aria-hidden`, document
+pointer handler, click-away machinery, or second selected-resource store.
+Back clears only the existing selection through the proven URL port —
+filters, cursors and backend state are untouched — and there is no
+document-level detail Escape listener. The list is never rendered
+underneath/beside the detail (they are alternative views) and narrow
+widths stay in ordinary flow (never a Drawer/Dialog). The proven
+next-macrotask deferred navigation boundary (see the resource-table
+commit in `resource-page.ts`) is preserved for View and Back.
+
+Pivot actions live inline in the detail and reuse the same PivotMenu/
+capability registry as the list cells. The Pivot workbench (PR 31F-6
+amendment 5) is the in-flow ALTERNATIVE primary view when the URL-backed
+pivot stack is non-empty: the route owner renders the normal Investigation
+workbench OR the Pivot workbench — never both — and the bounded ``pivot``
+URL state is the sole authority (no durable ``pivotOpen`` state exists).
+The Pivot workbench is ordinary in-flow content: breadcrumbs + semantic
+Close + the active step's resource list OR detail; no Portal, fixed
+viewport positioning, backdrop, modal/``aria-modal``, focus trap, body
+scroll lock, body-child ``aria-hidden``, document pointer/click-away
+filtering, or z-index competition. Inside the active step the same
+list/detail interaction applies (View -> full-width detail -> Back to the
+same step's list), and a detail selection is never a new PivotStep
+unless an explicit Pivot action says so. Evidence, Relationships,
+Relationship Observations, Research, History, Timeline, Relationship
+Evolution, GEOINT (observation <-> exact Evidence in place), and the
+Geolocation Map's exact Evidence all use the shared list/detail model;
+`ResourceInspector`, `ResourceInspectorLayout` and the legacy
+`DetailDrawer`/`GeointDetailDrawer` side-pane architecture are retired.
+The graph remains a specialized rich-interaction surface and is not
+redesigned.
 
 **Semantic multi-theme presentation (PR 31F-4).** MUI is the single design
 system: one centralized theme factory/registry (`frontend/src/app/theme.ts`)
@@ -224,7 +279,8 @@ workspace route
  -> opaque cursor page
  -> analyst table
  -> row selection
- -> authoritative resource detail drawer
+ -> full-width in-flow resource detail (list/detail)
+ -> Back to <resource> restores the bounded list
 ```
 
 The backend owns filter semantics, canonical ordering, cursor encoding,
@@ -236,7 +292,7 @@ accurately labeled bounded export.
 
 ```text
 URL                 resource filter values, the opaque cursor, and
-                    `selected=<uuid>` for the drawer (never JSON filter
+                    `selected=<uuid>` for the detail (never JSON filter
                     blobs or API responses)
 TanStack Query      one bounded page per committed filter/cursor, plus
                     detail queries enabled only on selection
@@ -274,10 +330,11 @@ Rules enforced by the architecture:
   formula-injection neutralization and filenames free of objective/IOC
   text.
 
-Cross-resource pivots and breadcrumb modal workspaces (PR 24D) reuse this
-table/detail architecture rather than creating a second one; Relationship
-Evolution and the bounded stable-relationship graph are delivered in PR
-24E below, and maps remain PR 25.
+Cross-resource pivots and the in-flow Pivot workbench (PR 24D;
+presentation finalized in PR 31F-6 amendment 5) reuse this table/detail
+architecture rather than creating a second one; Relationship Evolution
+and the bounded stable-relationship graph are delivered in PR 24E below,
+and maps remain PR 25.
 
 ### Cross-resource pivots and provenance navigation (PR 24D)
 
@@ -291,9 +348,9 @@ browser navigation.
 typed value / provenance reference
  -> explicit capability registry entry
  -> URL-backed pivot step (validated, versioned, bounded stack)
- -> one modal workspace -> active PR 24C resource view
+ -> one in-flow Pivot workbench -> active PR 24C resource step
  -> breadcrumbs preserve the exploration sequence
- -> next pivot replaces the modal content (never stacks dialogs)
+ -> next pivot replaces the workbench content (never stacks surfaces)
 ```
 
 Architectural decisions:
@@ -308,23 +365,20 @@ Architectural decisions:
   search parameter (`pivot-url.ts`), capped at five steps and a 4096-byte
   header budget; pushing replaces the query (removing a prior
   `selected=<uuid>`), truncation and Close restore prior/base state, and
-  browser Back/Forward plus refresh restore the active modal from the URL
-  — no client-side global pivot store;
+  browser Back/Forward plus refresh restore the active Pivot workbench
+  from the URL — no client-side global pivot store;
 - the route-independent workspaces extracted for PR 24D reuse the exact
   PR 24C query/filter/table/detail machinery through a thin search-params
   projection (`analyst-table/resource-page.ts`, `pivots/pivot-port.ts`):
-  one modal workspace hosts the active resource view, nested pivots key
-  the same modal by resource, and the URL continues to own all state.
-  The modal and the multi-target action menus are implemented with MUI
-  primitives (fixed paper/backdrop, Portal, WAI-ARIA menu semantics)
-  rather than the MUI Dialog/Menu/Modal chain: in material-ui 7 the Modal
-  focus trap, with the custom detail drawer mounted inside it, races the
-  drawer's unmount on an in-drawer pivot click and permanently
-  spins/crashes the Chromium main thread (real-stack E2E, PR 24D). The
-  component contracts (accessible dialog semantics, backdrop/Escape
-  close, body scroll lock, aria-hiding of the underlying page, roving
-  keyboard menus) are identical; jsdom and browser behavior agree;
-- the Investigation ID is immutable across the pivot stack, the modally
+  one in-flow Pivot workbench hosts the active resource step, nested
+  pivots key the same workbench by resource, and the URL continues to own
+  all state. The workbench is ordinary in-flow content (PR 31F-6
+  amendment 5): breadcrumbs + semantic Close + active-step list/detail,
+  with no Portal, fixed positioning, backdrop, modal/dialog semantics,
+  body scroll lock, document pointer filtering or z-index competition;
+  multi-target action menus remain non-modal in-flow bars, and the proven
+  next-macrotask navigation boundaries are preserved throughout;
+- the Investigation ID is immutable across the pivot stack, the in-flow
   hosted tables reuse the identical bounded server queries and detail
   endpoints, and pivoting changes navigation context only — it never
   alters Investigation orchestration, never creates Evidence, and never
@@ -1542,7 +1596,7 @@ Architectural decisions:
   failing level only;
 - **reuse over duplication**: `useRelationshipDetail`, `useObservationsPage`,
   `useObservationDetail`, `useEvidenceDetail`, `EvidenceDetail`,
-  `DetailRows`, `DrawerLoading/Error/NotFound`, `PivotMenu` (with the
+  `DetailRows`, `InspectorLoading/Error/NotFound`, `PivotMenu` (with the
   existing observation provenance actions) and the canonical TanStack keys
   are reused; graph provenance renders the canonical stable Relationship
   fields with `DetailRows` so Relationship detail's bounded preview and the
@@ -1837,7 +1891,7 @@ The Investigation Map is a pure presentation surface over the bounded PR 25A pro
 - Leaflet + react-leaflet are presentation only: one neutral marker per mappable returned item, conservative deterministic viewport (fixed zoom 8 for one point, capped `fitBounds` for many), locally bundled Leaflet CSS and inlined marker assets, standard credential-free OSM raster tiles with visible attribution defined in one `map-config.ts` module;
 - the map never reinterprets generic Evidence facts, never performs a geolocation lookup, never geocodes, never manufactures/clamps/centroid-substitutes missing coordinates, and derives no geographic relationship, risk, attribution, or maliciousness — markers carry no risk/confidence/severity coloring and no accuracy radius is fabricated;
 - coordinate-less (null/null) and defensively malformed items never reach Leaflet and remain fully visible in an always-available non-map table of every returned item; mixed and truncated states are stated honestly, and the server-owned bound is never bypassed;
-- exact Evidence provenance is retained: marker popups and non-map rows both open the shared PR 24C DetailDrawer/EvidenceDetail surface through the exact persisted PR 25A `evidence_id` (no lookup by IP, no list scan, no History substitution);
+- exact Evidence provenance is retained: marker popups and non-map rows both open the shared PR 31F-6 list/detail Evidence surface through the exact persisted PR 25A `evidence_id` (no lookup by IP, no list scan, no History substitution);
 - a persistent visible disclaimer states that IP geolocation is approximate network-address context and does not establish the physical location of an attacker, user, or device; observed/retrieved timestamps stay distinct.
 
 There is no map-time geolocation lookup, no spatial query, no PostGIS, no clustering/heat map/polygon, no cross-Investigation map, no historical movement, and no map state persisted in the URL, localStorage, or sessionStorage (the Map route's URL state is only the route itself).
@@ -1846,7 +1900,7 @@ There is no map-time geolocation lookup, no spatial query, no PostGIS, no cluste
 
 PR 25C completes the Map as a bounded analyst exploration surface without turning geography into an inference engine:
 
-- **typed entity pivots from the Map (PR 25C):** every returned Map item — marker popup and non-map row alike — exposes the exact persisted PR 25A `evidence_id` through the existing detail drawer **and** an Explore surface that reuses the PR 24 typed pivot capabilities via the exact `entityActions(item.entity_id, item.ip_address, "map_entity")` registry (`frontend/src/geolocation/GeolocationEntityActions.tsx`). The single new `map_entity` source kind is navigation provenance only: the target resources are the unchanged `evidence`/`relationships`/`research` workspaces with their existing server-backed filters (Evidence by exact subject, Relationships by source and by target as two independent actions, Research by exact subject). The first Map-origin breadcrumb label is the IP display value, never city/country/coordinates; the PivotWorkspace constraint set (typed resources, allowlisted filters, UUID/timestamp validation, bounded labels/cursors, URL serialization, no-op suppression, dead-end behavior, max depth 5, close/back) is untouched, and no Leaflet viewport/marker/popup state enters the pivot URL. Same-coordinate items remain individually inspectable through the accessible non-map rows with no jitter, clustering, or co-location/coordination inference; coordinate-less items stay fully actionable without a marker; empty projections stay honestly empty.
+- **typed entity pivots from the Map (PR 25C):** every returned Map item — marker popup and non-map row alike — exposes the exact persisted PR 25A `evidence_id` through the list/detail Evidence surface **and** an Explore surface that reuses the PR 24 typed pivot capabilities via the exact `entityActions(item.entity_id, item.ip_address, "map_entity")` registry (`frontend/src/geolocation/GeolocationEntityActions.tsx`). The single new `map_entity` source kind is navigation provenance only: the target resources are the unchanged `evidence`/`relationships`/`research` workspaces with their existing server-backed filters (Evidence by exact subject, Relationships by source and by target as two independent actions, Research by exact subject). The first Map-origin breadcrumb label is the IP display value, never city/country/coordinates; the PivotWorkspace constraint set (typed resources, allowlisted filters, UUID/timestamp validation, bounded labels/cursors, URL serialization, no-op suppression, dead-end behavior, max depth 5, close/back) is untouched, and no Leaflet viewport/marker/popup state enters the pivot URL. Same-coordinate items remain individually inspectable through the accessible non-map rows with no jitter, clustering, or co-location/coordination inference; coordinate-less items stay fully actionable without a marker; empty projections stay honestly empty.
 - **deterministic E2E seeding seam (PR 25C):** `tests/e2e_support/seed_geolocation.py` is harness-only test infrastructure. It materializes ordinary canonical IP Entities and immutable `GEOLOCATION` Evidence into the throwaway isolated E2E PostgreSQL through the normal application repositories/UnitOfWork (`investigations.get_by_id`, `entities.upsert`, `evidence.insert`) for an exact browser-created Investigation UUID and an allowlisted scenario name (`single_mappable`, `multi_ioc`, `non_mappable`, `same_location`). It is deterministic (uuid5-derived identities, fixed UTC retrieval epoch), idempotent/bounded (repeated invocation reuses the persisted rows), offline and non-LLM, and fail-closed unless both `ATI_OPERATING_MODE=fake` and the dedicated `ATI_E2E_SEEDING_ENABLED` flag are present. There is no seed HTTP endpoint, no browser database credential, and no product fake-world/DB-IP catalog change; production reads remain exclusively the PR 25A projection through the real `/geolocations` endpoint.
 
 ## GEOINT architecture (PR 26)
@@ -2169,7 +2223,7 @@ PR 26D /api/v1/investigations/{I}/geoint/*  (sole canonical GEOINT read boundary
 - **Current/history semantics.** Entity GEOINT shows "Current within this Investigation" (PR 26D Investigation-relative current, never the global `EntityLocation`) beside pageable immutable observation history. Observed/retrieved/resolved stay distinct; no movement path or ended/continuous inference is drawn, and current emphasis never implies historical observations were false.
 - **Containment is server-owned.** Location surfaces expose an Exact/Include-contained controller whose only effect is the `include_contained` boolean on the PR 26D request; `containment_applied` is rendered honestly (exact-only explanation when the server could not expand). No browser spatial calculation ever runs.
 - **Provenance.** Observation detail resolves through the exact `observation_id`; every Evidence action uses the exact returned `evidence_id` through the existing Evidence detail/pivot surface — no Evidence scanning, substitution, or History fallback. Provider is never fabricated: only the fixed `canonical_geography_v1` method is labelled; unknown identities render the raw bounded string.
-- **Typed pivots.** The existing PR 24 PivotWorkspace/capability registry/URL codec is extended with four explicit allowlisted resources (`geoint-entity`, `geoint-location-entities`, `geoint-location-observations`, `geoint-observation`) whose filters hold only stable IDs and the bounded containment boolean. Investigation immutability, max depth 5, one modal, active-step-only mounting, Back/Forward/refresh, Close restoration, and the 4096-byte URL cap are unchanged; no geometry, API payload, viewport, or marker state is ever serialized.
+- **Typed pivots.** The existing PR 24 PivotWorkspace/capability registry/URL codec is extended with four explicit allowlisted resources (`geoint-entity`, `geoint-location-entities`, `geoint-location-observations`, `geoint-observation`) whose filters hold only stable IDs and the bounded containment boolean. Investigation immutability, max depth 5, one in-flow workbench, active-step-only mounting, Back/Forward/refresh, Close restoration, and the 4096-byte URL cap are unchanged; no geometry, API payload, viewport, or marker state is ever serialized.
 - **Visual inference is forbidden.** No clustering, heat map, risk coloring, fabricated radius, movement path, or inferred route exists. Same-Location Entities stay individually inspectable with an explicit neutral note that shared geography is context only.
 
 ### Agentic GEOINT (PR 26F delivered)

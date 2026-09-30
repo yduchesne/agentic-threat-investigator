@@ -35,7 +35,7 @@ import { locationPrecisionKey, locationTypeKey, resolutionMethodKey } from "./ge
 export interface GeointObservationDetailBodyProps {
   /** One exact Investigation-scoped observation detail. */
   detail: GeointObservationDetail;
-  /** Exact Evidence action surface (drawer switch or pivot). */
+  /** Exact Evidence action surface (list/detail switch or pivot). */
   onViewEvidence?: (evidenceId: string) => void;
 }
 

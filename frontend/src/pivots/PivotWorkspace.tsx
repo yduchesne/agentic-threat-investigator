@@ -1,36 +1,39 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// One modal pivot workspace (PR 24D §1.4, §1.5, §9, §13, §16, §20).
+// In-flow Pivot workbench (PR 24D §1.4, §1.5, §9, §13, §16, §20;
+// PR 31F-6 amendment 5).
 //
-// The active pivot step renders inside one large modal workspace. Nested
-// pivots replace the active content in the same workspace — they never
-// stack dialogs — and PR 24C detail drawers open inside this one modal.
-// Only the active step is mounted; earlier steps are serialized state.
-// Browser Back/Forward, refresh, breadcrumb truncation, and Close all
-// operate through React Router search-param navigation: the URL is the
-// only owned state. Target/network errors surface inside the embedded
-// workspace while the breadcrumb/modal context stays intact.
+// When the URL-backed pivot stack is non-empty, this workbench is the
+// investigation's PRIMARY content: breadcrumbs + Close + the active step's
+// resource list OR resource detail, all ordinary in-flow document
+// content. The route owner (InvestigationWorkspace) renders the normal
+// Investigation workbench OR this workbench — never both.
 //
-// The modal is implemented with Material UI primitives (fixed-position
-// paper + backdrop) rather than the MUI Dialog/Modal chain. In this
-// material-ui 7 release the Modal focus trap, when the custom detail
-// drawer mounts inside it, races the drawer's unmount on an in-drawer
-// pivot click (a focused node dies under an active trap) and permanently
-// spins/crashes the Chromium main thread — reproduced on the real stack
-// (PR 24D E2E). The component contract (accessible dialog semantics,
-// backdrop close, Escape close, aria labels, body scroll lock) is
-// identical; jsdom and browser behavior agree.
+// Nested pivots replace the active content in the same workbench — they
+// never stack surfaces. Only the active step is mounted; earlier steps
+// are serialized state. Browser Back/Forward, refresh, breadcrumb
+// truncation and Close all operate through React Router search-param
+// navigation: the bounded ``pivot`` URL state is the only authority and no
+// durable ``pivotOpen``/``showPivotWorkspace`` state exists.
+//
+// There is no Portal, fixed viewport positioning, backdrop, modal/dialog
+// semantics, ``aria-modal``, focus trap, body scroll lock, body-child
+// ``aria-hidden``, document pointer/click-away filtering, anchor geometry
+// or z-index competition with the underlying Investigation content (the
+// normal workbench is unmounted while this one is active). The proven
+// next-macrotask deferred navigation boundaries are preserved; there is no
+// modal-only Escape handler (Escape existed solely to dismiss the removed
+// overlay).
 
-import { Alert, Box, IconButton, Portal, Typography } from "@mui/material";
-import { useMediaQuery } from "@mui/material";
+import { Alert, Box, IconButton, Typography } from "@mui/material";
 import type { ReactElement } from "react";
-import { useEffect, useId, useRef } from "react";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
 import type { ResourceFilterCodec } from "../analyst-table/resource-page";
 import { useResourceTable } from "../analyst-table/resource-page";
-import { DrawerError, DrawerLoading } from "../analyst-table/DetailDrawer";
+import { DetailError, DetailLoading } from "../analyst-table/ResourceDetailView";
 import { EmptyState } from "../components/AsyncState";
 import type { Investigation } from "../api/schema-types";
 import { EvidenceWorkspace } from "../evidence/EvidenceWorkspace";
@@ -99,7 +102,7 @@ export interface PivotWorkspaceProps {
 }
 
 /**
- * The single pivot workspace modal. Renders nothing when no valid pivot
+ * The in-flow Pivot workbench. Renders nothing when no valid pivot
  * state is present; malformed state never breaks the base route (the
  * parameter is simply ignored, matching PR 24D §20).
  */
@@ -109,150 +112,71 @@ export function PivotWorkspace({
 }: PivotWorkspaceProps): ReactElement | null {
   const { t } = useTranslation("pivots");
   const [searchParams, setSearchParams] = useSearchParams();
-  // Hooks stay unconditional; the state check happens after all hooks.
-  const fullScreen = useMediaQuery("(max-width: 899px)");
   const titleId = useId();
-  const rootRef = useRef<HTMLElement | null>(null);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
-  // Modal hygiene while open: scroll-lock the body and aria-hide the
-  // underlying page from assistive tech (MUI ModalManager equivalent),
-  // restoring both on unmount.
   const state = readPivotState(searchParams);
-  const open = state !== null;
-  // Modal hygiene while open: scroll-lock the body and aria-hide the
-  // underlying page from assistive tech (MUI ModalManager equivalent),
-  // restoring both on close. The portal root identifies itself with a
-  // data attribute because the ref is not resolved before the effect.
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const hidden: Array<Element> = [];
-    [].forEach.call(document.body.children, (child: Element) => {
-      if (
-        child.getAttribute("data-ati-pivot") === "1" ||
-        child.getAttribute("aria-hidden") === "true"
-      ) {
-        return;
-      }
-      child.setAttribute("aria-hidden", "true");
-      hidden.push(child);
-    });
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      hidden.forEach((element) => element.removeAttribute("aria-hidden"));
-    };
-  }, [open]);
-  // Deterministic focus after mount (PR 31F-5 A2): the workspace close
-  // control receives focus one tick after the modal mounts, never through
-  // browser autofocus inside the mount commit; keyboard analysts still land
-  // on an identified modal control (same strategy as PivotMenu/DetailDrawer).
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const focusTimer = window.setTimeout(() => {
-      closeRef.current?.focus();
-    }, 0);
-    return () => {
-      window.clearTimeout(focusTimer);
-    };
-  }, [open]);
   if (state === null) {
     return null;
   }
   const active = state.steps[state.steps.length - 1];
 
   const close = (): void => {
-    // Drop focus before the navigation unmounts this modal (PR 31F-5 A2):
-    // the close control is usually the focused node and this commit removes
-    // it; blurring first keeps the unmount from deleting a focused node
-    // under the active pointer event (the focus-fixup race class of PR 24D).
-    (document.activeElement as HTMLElement | null)?.blur();
-    setSearchParams(clearPivotState(searchParams), { replace: false });
+    // PR 31F-6: the workbench close navigation runs AFTER the native
+    // pointer event completes (next macrotask) — see resource-page commit().
+    window.setTimeout(() => {
+      setSearchParams(clearPivotState(searchParams), { replace: false });
+    }, 0);
   };
   const truncate = (keep: number): void => {
-    setSearchParams(truncatePivotSteps(searchParams, keep), { replace: false });
+    window.setTimeout(() => {
+      setSearchParams(truncatePivotSteps(searchParams, keep), { replace: false });
+    }, 0);
   };
   const commit = (next: PivotStep, replace: boolean): void => {
     const steps = [...state.steps];
     steps[steps.length - 1] = next;
-    setSearchParams(withPivotState(searchParams, { steps }), { replace });
+    // PR 31F-6: the in-workbench step commit also runs after the native
+    // pointer event completes.
+    window.setTimeout(() => {
+      setSearchParams(withPivotState(searchParams, { steps }), { replace });
+    }, 0);
   };
 
-  const handleKeyDown = (event: { key: string }): void => {
-    if (event.key === "Escape") {
-      close();
-    }
-  };
   return (
-    <Portal>
-      <Box ref={(node) => { rootRef.current = node as HTMLElement | null; }} data-ati-pivot="1" sx={{ minHeight: 0 }}>
-        <Box
-          aria-hidden="true"
-          tabIndex={-1}
+    <Box
+      component="section"
+      aria-labelledby={titleId}
+      data-ati-pivot="1"
+      data-testid="pivot-workbench"
+      sx={{ minWidth: 0, mt: 2 }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+        <Typography id={titleId} variant="h2">
+          {t("modal.title", { resource: t(pivotResourceLabelKey(active.resource)) })}
+        </Typography>
+        <IconButton
           onClick={close}
-          sx={{
-            position: "fixed",
-            inset: 0,
-            bgcolor: "rgba(0, 0, 0, 0.32)",
-            zIndex: 1249,
-          }}
-        />
-        <Box
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={titleId}
-          onKeyDown={handleKeyDown}
-          sx={(theme) => ({
-            position: "fixed",
-            ...(fullScreen
-              ? { inset: 0 }
-              : { top: 24, right: 24, bottom: 24, left: 24 }),
-            maxWidth: fullScreen ? "none" : "calc(100% - 48px)",
-            zIndex: 1250,
-            bgcolor: "background.paper",
-            border: 1,
-            borderColor: theme.palette.divider,
-            boxShadow: "0px 4px 16px rgba(0, 0, 0, 0.24)",
-            overflowY: "auto",
-          })}
+          aria-label={t("modal.close")}
+          size="small"
         >
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", p: 1.25 }}>
-            <Typography id={titleId} variant="h2">
-              {t("modal.title", { resource: t(pivotResourceLabelKey(active.resource)) })}
-            </Typography>
-            <IconButton
-              ref={(node) => {
-                closeRef.current = node;
-              }}
-              onClick={close}
-              aria-label={t("modal.close")}
-              size="small"
-            >
-              <CloseGlyph />
-            </IconButton>
-          </Box>
-          <Box sx={{ p: 1.25 }}>
-            <PivotBreadcrumbs steps={state.steps} onNavigate={truncate} />
-            {state.steps.length >= MAX_PIVOT_STEPS ? (
-              <Alert severity="info" role="status" sx={{ mb: 1 }}>
-                {t("depthLimit.message")}
-              </Alert>
-            ) : null}
-            <PivotStepHost
-              key={active.resource}
-              step={active}
-              onCommitStep={commit}
-              investigationId={investigationId}
-              investigation={investigation}
-            />
-          </Box>
-        </Box>
+          <CloseGlyph />
+        </IconButton>
       </Box>
-    </Portal>
+      <Box sx={{ mb: 1 }}>
+        <PivotBreadcrumbs steps={state.steps} onNavigate={truncate} />
+        {state.steps.length >= MAX_PIVOT_STEPS ? (
+          <Alert severity="info" role="status" sx={{ mt: 1 }}>
+            {t("depthLimit.message")}
+          </Alert>
+        ) : null}
+      </Box>
+      <PivotStepHost
+        key={active.resource}
+        step={active}
+        onCommitStep={commit}
+        investigationId={investigationId}
+        investigation={investigation}
+      />
+    </Box>
   );
 }
 
@@ -552,16 +476,16 @@ function ObservationPivotBody({
     return <EmptyState title={t("detail.observation.missing.title")} />;
   }
   if (isLoading && detail === null) {
-    return <DrawerLoading label={t("detail.observation.loading")} />;
+    return <DetailLoading label={t("detail.observation.loading")} />;
   }
   if (isError && detail === null && error !== null) {
     if (error.kind === "api" && error.status === 404) {
       return <Alert severity="info" role="status">{t("detail.observation.notFound.title")}</Alert>;
     }
-    return <DrawerError title={t("detail.observation.loadError.title")} onRetry={refetch} />;
+    return <DetailError title={t("detail.observation.loadError.title")} onRetry={refetch} />;
   }
   if (detail === null) {
-    return <DrawerLoading label={t("detail.observation.loading")} />;
+    return <DetailLoading label={t("detail.observation.loading")} />;
   }
   return <GeointObservationDetailBody detail={detail} />;
 }

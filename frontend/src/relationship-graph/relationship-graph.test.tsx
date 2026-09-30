@@ -545,13 +545,13 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     // No selection-time expansion request.
     const selectionRequestCount = rendered.recorder.length;
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    await screen.findByRole("menuitem", { name: "Expand known relationships" });
-    expect(screen.getByRole("menuitem", { name: "Expand outgoing relationships" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Expand incoming relationships" })).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Expand known relationships" });
+    expect(screen.getByRole("button", { name: "Expand outgoing relationships" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand incoming relationships" })).toBeInTheDocument();
     // Existing navigation pivots remain (U20).
-    expect(screen.getByRole("menuitem", { name: "Evidence for this entity" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Evidence for this entity" })).toBeInTheDocument();
     // Fire the local expansion action (U02: selected canonical B, either).
-    fireEvent.click(screen.getByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand known relationships" }));
     await waitFor(() => {
       expect(rendered.recorder.length).toBe(selectionRequestCount + 1);
     });
@@ -581,12 +581,12 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     selectNode(B);
     await screen.findByText("Entity: 203.0.113.10");
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand outgoing relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand outgoing relationships" }));
     await waitFor(() => {
       expect(rendered.recorder.some((r) => r.entity === B && r.direction === "source")).toBe(true);
     });
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand incoming relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand incoming relationships" }));
     await waitFor(() => {
       expect(rendered.recorder.some((r) => r.entity === B && r.direction === "target")).toBe(true);
     });
@@ -600,7 +600,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     selectNode(B);
     await screen.findByText("Entity: 203.0.113.10");
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand known relationships" }));
     await waitFor(() => {
       expect(renderedNodeCount()).toBe(4);
     });
@@ -627,7 +627,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     selectNode(B);
     await screen.findByText("Entity: 203.0.113.10");
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand known relationships" }));
     await waitFor(() => {
       expect(renderedNodeCount()).toBe(4);
     });
@@ -652,17 +652,17 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     selectNode(B);
     await screen.findByText("Entity: 203.0.113.10");
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand known relationships" }));
     await waitFor(() => {
       expect(renderedNodeCount()).toBe(4);
     });
     // Re-open the menu on the same node: the exact expansion is disabled.
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    const completed = await screen.findByRole("menuitem", { name: "Expand known relationships" });
+    const completed = await screen.findByRole("button", { name: "Expand known relationships" });
     expect(completed).toBeDisabled();
     // The other directions remain legal.
-    expect(screen.getByRole("menuitem", { name: "Expand outgoing relationships" })).not.toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Expand incoming relationships" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Expand outgoing relationships" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Expand incoming relationships" })).not.toBeDisabled();
     fireEvent.click(completed);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(rendered.recorder.filter((r) => r.entity === B && r.direction === "either")).toHaveLength(1);
@@ -684,14 +684,14 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     selectNode(B);
     await screen.findByText("Entity: 203.0.113.10");
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand known relationships" }));
     // In-flight: status shown and the three expansion actions are disabled.
     await screen.findByText(/Expanding known relationships/);
     await userEventClickMenu("Pivot actions for 203.0.113.10");
     await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: "Expand known relationships" })).toBeDisabled();
-      expect(screen.getByRole("menuitem", { name: "Expand outgoing relationships" })).toBeDisabled();
-      expect(screen.getByRole("menuitem", { name: "Expand incoming relationships" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Expand known relationships" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Expand outgoing relationships" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Expand incoming relationships" })).toBeDisabled();
     });
     // Release the gate: the expansion succeeds and merges.
     await actAsync(() => release(jsonResponse(bHop)));
@@ -719,7 +719,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     await screen.findByText("Entity: 203.0.113.10");
     const nodeCountBefore = renderedNodeCount();
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand known relationships" }));
     expect(await screen.findByText(/Unable to expand known relationships/)).toBeInTheDocument();
     expect(renderedNodeCount()).toBe(nodeCountBefore);
     // Retry repeats the exact expansion and merges on success (U16).
@@ -740,7 +740,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     selectNode(B);
     await screen.findByText("Entity: 203.0.113.10");
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand known relationships" }));
     expect(
       await screen.findByText(/Additional known relationships exist for 203.0.113.10/),
     ).toBeInTheDocument();
@@ -778,7 +778,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     selectNode(B);
     await screen.findByText("Entity: 203.0.113.10");
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand known relationships" }));
     await waitFor(() => {
       expect(renderedNodeCount()).toBe(4);
     });
@@ -814,7 +814,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     const searchBefore = new URLSearchParams(rendered.router.state.location.search);
     expect(searchBefore.has("pivot")).toBe(false);
     await userEventClickMenu("Pivot actions for 203.0.113.10");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Expand known relationships" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand known relationships" }));
     await waitFor(() => {
       expect(renderedNodeCount()).toBe(4);
     });

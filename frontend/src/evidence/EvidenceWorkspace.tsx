@@ -4,11 +4,12 @@
 //
 // Route-independent PR 24C Evidence surface: server-driven browsing with
 // URL-backed exact filters -> bounded keyset page -> opaque Previous/Next
-// -> row View -> authoritative Investigation-scoped detail drawer. The
-// normal route wraps this with the live router search params; the PR 24D
-// modal wraps the same component with the pivot-step port, so one table/
-// query/detail implementation serves both contexts. Empty evidence never
-// implies benign: the empty state says exactly what it is.
+// -> row View -> authoritative Investigation-scoped detail as the main
+// in-flow list/detail content (PR 31F-6 amendment 4). The normal route
+// wraps this with the live router search params; the PR 24D modal wraps
+// the same component with the pivot-step port, so one table/query/detail
+// implementation serves both contexts. Empty evidence never implies
+// benign: the empty state says exactly what it is.
 
 import { Box, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
@@ -17,13 +18,18 @@ import { useTranslation } from "react-i18next";
 import type { Evidence, EvidenceTypeName, Investigation } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DetailDrawer, DrawerError, DrawerLoading, DrawerNotFound } from "../analyst-table/DetailDrawer";
 import { DetailSection } from "../analyst-table/DetailRows";
 import { isNotFound404 } from "../analyst-table/detail-error";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, localDateTimeToIso, parseUuidParam } from "../analyst-table/filters";
 import type { ResourceTableState } from "../analyst-table/resource-page";
+import {
+  DetailError,
+  DetailLoading,
+  DetailNotFound,
+  ResourceDetailView,
+} from "../analyst-table/ResourceDetailView";
 import { runningNotice } from "../analyst-table/running";
 import { SafeJsonView } from "../analyst-table/SafeJsonView";
 import { TableToolbar } from "../analyst-table/TableToolbar";
@@ -188,7 +194,6 @@ export function EvidenceWorkspace({
   });
 
   const detail = useEvidenceDetail(investigationId, table.selection);
-  const drawerOpen = table.selection !== null;
   const filtersActive = evidenceFiltersActive(table.filters);
 
   const goNext = (): void => {
@@ -242,71 +247,80 @@ export function EvidenceWorkspace({
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      {!embedded ? (
-        <Typography variant="h2" sx={{ mb: 1 }}>
-          {t("title")}
-        </Typography>
-      ) : null}
-      <TableToolbar
-        filters={<EvidenceFiltersForm t={t} tCommon={tCommon} form={filterForm} />}
-        onApply={filterForm.apply}
-        onClear={filterForm.clear}
-        onExport={exportCurrentPage}
-        hasActiveFilters={filtersActive}
-      />
-      {filterForm.error !== null ? (
-        <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
-          {filterForm.error}
-        </Typography>
-      ) : null}
-      <AnalystTable<Evidence>
-        columns={evidenceColumns(t)}
-        rows={page?.items ?? []}
-        getRowId={(evidence) => evidence.id}
-        ariaLabel={t("title")}
-        isLoading={isLoading && page === null}
-        error={error}
-        errorTitle={t("list.error.title")}
-        onRetry={refetch}
-        emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
-        emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
-        hasActiveFilters={filtersActive}
-        onClearFilters={table.clearFilters}
-        onView={(evidence) => table.openSelection(evidence.id)}
-        viewLabel={t("row.view")}
-        navigation={{
-          canGoPrevious: table.canGoPrevious,
-          canGoNext: hasNext(page),
-          onPrevious: table.goPrevious,
-          onNext: goNext,
-        }}
-        loadingLabel={t("list.loading")}
-        staleErrorTitle={t("list.error.stale")}
-        onReturnToFirstPage={table.returnToFirstPage}
-      />
-      <DetailDrawer open={drawerOpen} title={t("title")} onClose={table.closeSelection}>
-        {drawerOpen ? detailBody(t, detail) : null}
-      </DetailDrawer>
+      {table.selection !== null ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("title") })}
+          heading={tCommon("detail.title", { resource: t("title") })}
+          onBack={table.closeSelection}
+        >
+          {detailBody(t, detail)}
+        </ResourceDetailView>
+      ) : (
+        <>
+          {!embedded ? (
+            <Typography variant="h2" sx={{ mb: 1 }}>
+              {t("title")}
+            </Typography>
+          ) : null}
+          <TableToolbar
+            filters={<EvidenceFiltersForm t={t} tCommon={tCommon} form={filterForm} />}
+            onApply={filterForm.apply}
+            onClear={filterForm.clear}
+            onExport={exportCurrentPage}
+            hasActiveFilters={filtersActive}
+          />
+          {filterForm.error !== null ? (
+            <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
+              {filterForm.error}
+            </Typography>
+          ) : null}
+          <AnalystTable<Evidence>
+            columns={evidenceColumns(t)}
+            rows={page?.items ?? []}
+            getRowId={(evidence) => evidence.id}
+            ariaLabel={t("title")}
+            isLoading={isLoading && page === null}
+            error={error}
+            errorTitle={t("list.error.title")}
+            onRetry={refetch}
+            emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
+            emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
+            hasActiveFilters={filtersActive}
+            onClearFilters={table.clearFilters}
+            onView={(evidence) => table.openSelection(evidence.id)}
+            viewLabel={t("row.view")}
+            navigation={{
+              canGoPrevious: table.canGoPrevious,
+              canGoNext: hasNext(page),
+              onPrevious: table.goPrevious,
+              onNext: goNext,
+            }}
+            loadingLabel={t("list.loading")}
+            staleErrorTitle={t("list.error.stale")}
+            onReturnToFirstPage={table.returnToFirstPage}
+          />
+        </>
+      )}
     </Box>
   );
 }
 
-/** The drawer body with its bounded states. */
+/** The detail body with its bounded states. */
 function detailBody(
   t: (key: string) => string,
   detail: ReturnType<typeof useEvidenceDetail>,
 ): ReactElement {
   if (detail.isLoading && detail.evidence === null) {
-    return <DrawerLoading label={t("detail.loading")} />;
+    return <DetailLoading label={t("detail.loading")} />;
   }
   if (detail.isError && detail.evidence === null) {
     if (detail.error !== null && isNotFound404(detail.error)) {
-      return <DrawerNotFound title={t("detail.notFound.title")} />;
+      return <DetailNotFound title={t("detail.notFound.title")} />;
     }
-    return <DrawerError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
+    return <DetailError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
   }
   if (detail.evidence === null) {
-    return <DrawerLoading label={t("detail.loading")} />;
+    return <DetailLoading label={t("detail.loading")} />;
   }
   return (
     <Box>

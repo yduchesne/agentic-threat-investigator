@@ -77,7 +77,7 @@ function workspace() {
   );
 }
 
-/** The exact Evidence detail endpoint used by the provenance drawer. */
+/** The exact Evidence detail endpoint used by the provenance Inspector. */
 function evidenceDetailHandler() {
   return http.get("*/api/v1/investigations/:id/evidence/:evidenceId", () =>
     jsonResponse(buildEvidence({ id: EVIDENCE_ID })));
@@ -274,7 +274,7 @@ describe("InvestigationMapPage states (B-U01..B-U17)", () => {
     expect(screen.getByText("Not observed")).toBeInTheDocument();
   });
 
-  it("B-U14: the Evidence action opens the exact evidence_id drawer", async () => {
+  it("B-U14: the Evidence action opens the exact evidence_id Inspector", async () => {
     const seen: string[] = [];
     await renderMap([
       geolocationsHandler(collection([geoItem(1, { evidence_id: EVIDENCE_ID })])),
@@ -285,9 +285,9 @@ describe("InvestigationMapPage states (B-U01..B-U17)", () => {
     ]);
     const viewButton = screen.getAllByRole("button", { name: "View Evidence" })[0];
     await userEvent.click(viewButton);
-    const drawer = screen.getByRole("dialog", { name: "Evidence" });
+    const inspector = screen.getByRole("heading", { name: "Evidence" });
     await waitFor(() =>
-      expect(drawer.textContent).toContain("update-package.test"),
+      expect(inspector.parentElement?.parentElement?.textContent).toContain("update-package.test"),
     );
     expect(seen).toHaveLength(1);
     expect(seen[0]).toContain(`/evidence/${EVIDENCE_ID}`);
@@ -343,15 +343,17 @@ describe("InvestigationMapPage provenance (B-P01..B-P06)", () => {
     await screen.findByTestId("ati-marker");
     const marker = screen.getByTestId("ati-marker");
     await userEvent.click(within(marker).getByRole("button", { name: "View Evidence" }));
-    const drawer = screen.getByRole("dialog", { name: "Evidence" });
-    await waitFor(() => expect(drawer.textContent).toContain("update-package.test"));
-    // Both surfaces expose the same exact item.
-    expect(
-      within(marker).getByRole("button", { name: "View Evidence" }),
-    ).toBeInTheDocument();
+    const inspector = screen.getByRole("heading", { name: "Evidence" });
+    await waitFor(() =>
+      expect(inspector.parentElement?.parentElement?.textContent).toContain("update-package.test"),
+    );
+    // List/detail: the map surface is not rendered while the detail is the
+    // main content (A4-LD03); Back restores the intact map.
+    await expect(screen.queryByTestId("ati-marker")).toBeNull();
+    void marker;
   });
 
-  it("B-P02: the non-map row carries the exact evidence_id to the drawer", async () => {
+  it("B-P02: the non-map row carries the exact evidence_id to the Inspector", async () => {
     await renderMap([
       geolocationsHandler(collection([geoItem(1, { evidence_id: EVIDENCE_ID })])),
       evidenceDetailHandler(),
@@ -367,7 +369,7 @@ describe("InvestigationMapPage provenance (B-P01..B-P06)", () => {
     );
     await userEvent.click(rowButton as HTMLElement);
     await waitFor(() =>
-      expect(screen.getByRole("dialog", { name: "Evidence" }).textContent).toContain(
+      expect(screen.getByRole("heading", { name: "Evidence" }).parentElement?.parentElement?.textContent).toContain(
         "update-package.test",
       ),
     );
@@ -391,7 +393,7 @@ describe("InvestigationMapPage provenance (B-P01..B-P06)", () => {
       .getAllByRole("button", { name: "View Evidence" })
       .find((button) => button.closest("[data-evidence-id]"));
     await userEvent.click(rowButton as HTMLElement);
-    await screen.findByRole("dialog", { name: "Evidence" });
+    await screen.findByRole("heading", { name: "Evidence" });
     expect(evidenceList).toHaveLength(0);
   });
 
@@ -408,13 +410,13 @@ describe("InvestigationMapPage provenance (B-P01..B-P06)", () => {
       .getAllByRole("button", { name: "View Evidence" })
       .find((button) => button.closest("[data-evidence-id]"));
     await userEvent.click(rowButton as HTMLElement);
-    await screen.findByRole("dialog", { name: "Evidence" });
+    await screen.findByRole("heading", { name: "Evidence" });
     expect(seen[0]).toContain(
       `/investigations/${INVESTIGATION_ID}/evidence/${EVIDENCE_ID}`,
     );
   });
 
-  it("B-P06: closing the drawer returns to the intact Map view", async () => {
+  it("B-P06: closing the Inspector returns to the intact Map view", async () => {
     await renderMap([
       geolocationsHandler(collection([geoItem(1, { evidence_id: EVIDENCE_ID })])),
       evidenceDetailHandler(),
@@ -423,9 +425,12 @@ describe("InvestigationMapPage provenance (B-P01..B-P06)", () => {
       .getAllByRole("button", { name: "View Evidence" })
       .find((button) => button.closest("[data-evidence-id]"));
     await userEvent.click(rowButton as HTMLElement);
-    await screen.findByRole("dialog", { name: "Evidence" });
-    await userEvent.click(screen.getByRole("button", { name: "Close detail" }));
-    expect(screen.queryByRole("dialog", { name: "Evidence" })).not.toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Evidence" });
+    const back = screen.getByRole("button", { name: "Back to Evidence" });
+    await userEvent.click(back);
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Evidence" })).not.toBeInTheDocument(),
+    );
     expect(
       screen.getByRole("heading", { name: "Investigation Map" }),
     ).toBeInTheDocument();

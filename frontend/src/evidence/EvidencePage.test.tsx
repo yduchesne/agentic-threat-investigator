@@ -3,8 +3,8 @@
 // Evidence page tests (PR 24C E01-E07, T10, T11, T14).
 //
 // Real route rendering over MSW: exact filter params, opaque cursors,
-// authoritative detail drawer, source-link safety, and current-page-only
-// export.
+// authoritative inline Inspector detail, source-link safety, and
+// current-page-only export.
 
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -130,7 +130,7 @@ describe("Evidence page", () => {
     expect(recorder.requests.at(-1)?.cursor).toBe("cursor-1");
   });
 
-  it("opens the authoritative scoped detail on View (E03, T09, T11)", async () => {
+  it("opens the authoritative scoped detail as the main content on View (E03, T09, T11, A4-LD02)", async () => {
     const detail = buildEvidence({
       id: "40000000-0000-4000-8000-000000000001",
       facts: { resolver: "8.8.8.8" },
@@ -144,14 +144,19 @@ describe("Evidence page", () => {
     renderAtPath(BASE);
     await screen.findByText("update-package.test");
     await userEvent.click(screen.getByRole("button", { name: "View 40000000-0000-4000-8000-000000000001" }));
-    await screen.findByRole("dialog");
+    // A4-LD02/LD04: the detail replaces the list as the main content with
+    // a human-readable heading; the table is not rendered underneath.
+    expect(await screen.findByRole("heading", { name: "Evidence details" })).toBeInTheDocument();
     expect(await screen.findByText("Normalized facts", { selector: "h3" })).toBeInTheDocument();
-    // Closing the drawer preserves the list.
-    await userEvent.click(screen.getByRole("button", { name: "Close detail" }));
-    expect(screen.getByText("update-package.test")).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Evidence" })).not.toBeInTheDocument();
+    // A4-LD05/LD06: semantic Back clears only the selection through the
+    // existing port and restores the bounded list.
+    await userEvent.click(screen.getByRole("button", { name: "Back to Evidence" }));
+    expect(await screen.findByText("update-package.test")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Evidence details" })).not.toBeInTheDocument();
   });
 
-  it("shows resource not found 404 inside the drawer while keeping the list (T12)", async () => {
+  it("shows resource not found 404 as the scoped detail while the list stays committed (T12, A4-LD09)", async () => {
     setHttpHandlers(
       ...AUTH,
       workspaceHandler(),
@@ -160,10 +165,15 @@ describe("Evidence page", () => {
         errorResponse(404, "evidence_not_found")),
     );
     renderAtPath(`${BASE}?selected=40000000-0000-4000-8000-000000000001`);
+    // Direct selected URL -> the exact scoped detail loads; not-found is
+    // the existing scoped presentation (list never renders beside it).
     expect(
       await screen.findByText("Resource not found or not accessible"),
     ).toBeInTheDocument();
-    expect(screen.getByText("update-package.test")).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Evidence" })).not.toBeInTheDocument();
+    // Back returns to the committed list context.
+    await userEvent.click(screen.getByRole("button", { name: "Back to Evidence" }));
+    expect(await screen.findByText("update-package.test")).toBeInTheDocument();
   });
 
   it("offers Return to first page on an invalid cursor (T08b)", async () => {

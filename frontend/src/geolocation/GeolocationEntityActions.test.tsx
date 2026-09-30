@@ -171,9 +171,9 @@ describe("map-origin entity actions (C-P01..C-P12)", () => {
     const row = within(rows).getAllByRole("row")[1];
     const viewButton = within(row).getByRole("button", { name: "View Evidence" });
     expect(viewButton).toHaveAttribute("data-evidence-id", item.evidence_id);
-    // The drawer opens through the Investigation-scoped exact Evidence GET.
+    // The detail opens through the Investigation-scoped exact Evidence GET.
     await userEvent.click(viewButton);
-    await screen.findByRole("dialog", { name: "Evidence" });
+    await screen.findByRole("heading", { name: "Evidence" });
     expect(requested).toEqual([item.evidence_id.toLowerCase()]);
   });
 
@@ -286,13 +286,14 @@ describe("map-origin entity actions (C-P01..C-P12)", () => {
     });
     const row = within(rows).getAllByRole("row")[1];
     await userEvent.click(within(row).getByRole("button", { name: /Explore/ }));
-    await screen.findByRole("menu");
+    await screen.findByRole("group", { name: "Pivot actions" });
     await userEvent.click(
-      screen.getByRole("menuitem", { name: "Evidence for this entity" }),
+      screen.getByRole("button", { name: "Evidence for this entity" }),
     );
-    await screen.findByRole("dialog", { name: "Evidence pivot workspace" });
+    await screen.findByTestId("pivot-workbench");
     // Breadcrumb preserves the IP identity of the Map-origin launch.
-    const dialog = screen.getByRole("dialog", { name: "Evidence pivot workspace" });
-    expect(within(dialog).getByText("203.0.113.1")).toBeVisible();
+    const workbench = screen.getByTestId("pivot-workbench");
+    await within(workbench).findByText("203.0.113.1");
+    expect(within(workbench).getByText("203.0.113.1")).toBeVisible();
   });
 });

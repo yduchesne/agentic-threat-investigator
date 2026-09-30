@@ -4,7 +4,7 @@
 //
 // Route-independent PR 24C Research surface: contextual knowledge, not
 // observed Evidence. Columns are metadata + counts from the exact list
-// DTO; the detail drawer renders structured claims/citations with
+// DTO; the list/detail surface renders structured claims/citations with
 // inspectable claim-to-citation closure. The normal route and the PR 24D
 // pivot modal share this one component. Claim text never pivots to
 // Evidence; only the typed subject entity does.
@@ -16,8 +16,13 @@ import { useTranslation } from "react-i18next";
 import type { Investigation, ResearchResult } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DetailDrawer, DrawerError, DrawerLoading, DrawerNotFound } from "../analyst-table/DetailDrawer";
 import { isNotFound404 } from "../analyst-table/detail-error";
+import {
+  DetailError,
+  DetailLoading,
+  DetailNotFound,
+  ResourceDetailView,
+} from "../analyst-table/ResourceDetailView";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, localDateTimeToIso, parseUuidParam } from "../analyst-table/filters";
@@ -169,7 +174,7 @@ export function ResearchWorkspace({
   });
 
   const detail = useResearchResultDetail(investigationId, table.selection);
-  const drawerOpen = table.selection !== null;
+  const detailOpen = table.selection !== null;
   const filtersActive = researchFiltersActive(table.filters);
 
   const goNext = (): void => {
@@ -211,76 +216,85 @@ export function ResearchWorkspace({
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      {!embedded ? (
-        <Box>
-          <Typography variant="h2" sx={{ mb: 0.25 }}>
-            {t("title")}
-          </Typography>
-          <Typography variant="caption" component="div" role="note">
-            {t("intro")}
-          </Typography>
-        </Box>
-      ) : null}
-      <TableToolbar
-        filters={<ResearchFiltersForm t={t} form={filterForm} />}
-        onApply={filterForm.apply}
-        onClear={filterForm.clear}
-        onExport={exportCurrentPage}
-        hasActiveFilters={filtersActive}
-      />
-      {filterForm.error !== null ? (
-        <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
-          {filterForm.error}
-        </Typography>
-      ) : null}
-      <AnalystTable<ResearchResult>
-        columns={researchColumns(t)}
-        rows={page?.items ?? []}
-        getRowId={(research) => research.id}
-        ariaLabel={t("title")}
-        isLoading={isLoading && page === null}
-        error={error}
-        errorTitle={t("list.error.title")}
-        onRetry={refetch}
-        emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
-        emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
-        hasActiveFilters={filtersActive}
-        onClearFilters={table.clearFilters}
-        onView={(research) => table.openSelection(research.id)}
-        viewLabel={t("row.view")}
-        navigation={{
-          canGoPrevious: table.canGoPrevious,
-          canGoNext: hasNext(page),
-          onPrevious: table.goPrevious,
-          onNext: goNext,
-        }}
-        loadingLabel={t("list.loading")}
-        staleErrorTitle={t("list.error.stale")}
-        onReturnToFirstPage={table.returnToFirstPage}
-      />
-      <DetailDrawer open={drawerOpen} title={t("title")} onClose={table.closeSelection}>
-        {drawerOpen ? detailBody(t, detail) : null}
-      </DetailDrawer>
+      {detailOpen ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", { resource: t("title") })}
+          heading={tCommon("detail.title", { resource: t("title") })}
+          onBack={table.closeSelection}
+        >
+          {detailBody(t, detail)}
+        </ResourceDetailView>
+      ) : (
+        <>
+          {!embedded ? (
+            <Box>
+              <Typography variant="h2" sx={{ mb: 0.25 }}>
+                {t("title")}
+              </Typography>
+              <Typography variant="caption" component="div" role="note">
+                {t("intro")}
+              </Typography>
+            </Box>
+          ) : null}
+          <TableToolbar
+            filters={<ResearchFiltersForm t={t} form={filterForm} />}
+            onApply={filterForm.apply}
+            onClear={filterForm.clear}
+            onExport={exportCurrentPage}
+            hasActiveFilters={filtersActive}
+          />
+          {filterForm.error !== null ? (
+            <Typography variant="caption" role="alert" color="error" sx={{ display: "block", mb: 0.5 }}>
+              {filterForm.error}
+            </Typography>
+          ) : null}
+          <AnalystTable<ResearchResult>
+            columns={researchColumns(t)}
+            rows={page?.items ?? []}
+            getRowId={(research) => research.id}
+            ariaLabel={t("title")}
+            isLoading={isLoading && page === null}
+            error={error}
+            errorTitle={t("list.error.title")}
+            onRetry={refetch}
+            emptyTitle={filtersActive ? t("list.empty.filtered.title") : t("list.empty.title")}
+            emptyMessage={filtersActive ? t("list.empty.filtered.message") : t("list.empty.message")}
+            hasActiveFilters={filtersActive}
+            onClearFilters={table.clearFilters}
+            onView={(research) => table.openSelection(research.id)}
+            viewLabel={t("row.view")}
+            navigation={{
+              canGoPrevious: table.canGoPrevious,
+              canGoNext: hasNext(page),
+              onPrevious: table.goPrevious,
+              onNext: goNext,
+            }}
+            loadingLabel={t("list.loading")}
+            staleErrorTitle={t("list.error.stale")}
+            onReturnToFirstPage={table.returnToFirstPage}
+          />
+        </>
+      )}
     </Box>
   );
 }
 
-/** The drawer body with its bounded states. */
+/** The detail body with its bounded states. */
 function detailBody(
   t: (key: string) => string,
   detail: ReturnType<typeof useResearchResultDetail>,
 ): ReactElement {
   if (detail.isLoading && detail.research === null) {
-    return <DrawerLoading label={t("detail.loading")} />;
+    return <DetailLoading label={t("detail.loading")} />;
   }
   if (detail.isError && detail.research === null) {
     if (detail.error !== null && isNotFound404(detail.error)) {
-      return <DrawerNotFound title={t("detail.notFound.title")} />;
+      return <DetailNotFound title={t("detail.notFound.title")} />;
     }
-    return <DrawerError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
+    return <DetailError title={t("detail.loadError.title")} onRetry={detail.refetch} />;
   }
   if (detail.research === null) {
-    return <DrawerLoading label={t("detail.loading")} />;
+    return <DetailLoading label={t("detail.loading")} />;
   }
   return <ResearchDetail research={detail.research} />;
 }

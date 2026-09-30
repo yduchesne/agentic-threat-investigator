@@ -24,8 +24,8 @@ import { useTranslation } from "react-i18next";
 
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
-import { DrawerError, DrawerLoading } from "../analyst-table/DetailDrawer";
 import { isNotFound404 } from "../analyst-table/detail-error";
+import { DetailError, DetailLoading, ResourceDetailView } from "../analyst-table/ResourceDetailView";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import { EmptyState } from "../components/AsyncState";
 import { formatDateTime } from "../components/Timestamp";
@@ -41,7 +41,7 @@ import type {
   GeointEntityLocation,
   GeointObservation,
 } from "../api/schema-types";
-import { GeointDetailDrawer } from "./GeointDetailDrawer";
+import { GeointDetailContent } from "./GeointDetailContent";
 import type { GeointLocationFilters } from "./geoint-filters";
 import { locationCanonicalLabel } from "./geoint-model";
 import { locationPrecisionKey, locationTypeKey } from "./geoint-labels";
@@ -92,6 +92,7 @@ export function LocationEntitiesView({
   table,
 }: LocationEntitiesViewProps): ReactElement {
   const { t } = useTranslation("geoint");
+  const { t: tCommon } = useTranslation("common");
   const locationId = table.filters.locationId ?? null;
   const includeContained = table.filters.includeContained ?? false;
 
@@ -109,8 +110,8 @@ export function LocationEntitiesView({
   );
 
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
-  const drawerOpen = table.selection !== null || evidenceId !== null;
-  const closeDrawer = (): void => {
+  const detailOpen = table.selection !== null || evidenceId !== null;
+  const closeDetail = (): void => {
     table.closeSelection();
     setEvidenceId(null);
   };
@@ -128,10 +129,10 @@ export function LocationEntitiesView({
     );
   }
   if (isLoading && page === null) {
-    return <DrawerLoading label={t("location.loading")} />;
+    return <DetailLoading label={t("location.loading")} />;
   }
   if (isError && page === null && error !== null && !isNotFound404(error)) {
-    return <DrawerError title={t("location.loadError.title")} onRetry={refetch} />;
+    return <DetailError title={t("location.loadError.title")} onRetry={refetch} />;
   }
   if (isError && page === null && error !== null) {
     return (
@@ -143,20 +144,44 @@ export function LocationEntitiesView({
 
   return (
     <Box>
-      <LocationScopeControls
-        includeContained={includeContained}
-        onToggle={() =>
-          table.applyFilters({
-            ...table.filters,
-            includeContained: !includeContained,
-          })
-        }
-        containmentApplied={page?.containment_applied ?? null}
-      />
-      <Alert severity="info" role="note" sx={{ mt: 1 }}>
-        {t("location.disclaimer")}
-      </Alert>
-      <AnalystTable<GeointEntityLocation>
+      {detailOpen ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", {
+            resource:
+              table.selection !== null
+                ? t("detail.observation.detailTitle")
+                : t("detail.evidence.detailTitle"),
+          })}
+          heading={
+            table.selection !== null
+              ? t("detail.observation.detailTitle")
+              : t("detail.evidence.detailTitle")
+          }
+          onBack={closeDetail}
+        >
+          <GeointDetailContent
+            investigationId={investigationId}
+            observationId={table.selection}
+            onViewEvidence={switchToEvidence}
+            evidenceId={evidenceId}
+          />
+        </ResourceDetailView>
+      ) : (
+        <Box>
+          <LocationScopeControls
+            includeContained={includeContained}
+            onToggle={() =>
+              table.applyFilters({
+                ...table.filters,
+                includeContained: !includeContained,
+              })
+            }
+            containmentApplied={page?.containment_applied ?? null}
+          />
+          <Alert severity="info" role="note" sx={{ mt: 1 }}>
+            {t("location.disclaimer")}
+          </Alert>
+          <AnalystTable<GeointEntityLocation>
         columns={locationEntitiesColumns(t, (evidenceIdValue) => setEvidenceId(evidenceIdValue))}
         rows={page?.items ?? []}
         getRowId={(item) => item.entity_id}
@@ -193,19 +218,8 @@ export function LocationEntitiesView({
         staleErrorTitle={t("location.entities.staleError")}
         onReturnToFirstPage={table.returnToFirstPage}
       />
-      <GeointDetailDrawer
-        open={drawerOpen}
-        title={
-          table.selection !== null
-            ? t("detail.observation.drawerTitle")
-            : t("detail.evidence.drawerTitle")
-        }
-        onClose={closeDrawer}
-        investigationId={investigationId}
-        observationId={table.selection}
-        onViewEvidence={switchToEvidence}
-        evidenceId={evidenceId}
-      />
+        </Box>
+      )}
     </Box>
   );
 }
@@ -221,6 +235,7 @@ export function LocationObservationsView({
   table,
 }: LocationObservationsViewProps): ReactElement {
   const { t } = useTranslation("geoint");
+  const { t: tCommon } = useTranslation("common");
   const locationId = table.filters.locationId ?? null;
   const includeContained = table.filters.includeContained ?? false;
 
@@ -238,8 +253,8 @@ export function LocationObservationsView({
   );
 
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
-  const drawerOpen = table.selection !== null || evidenceId !== null;
-  const closeDrawer = (): void => {
+  const detailOpen = table.selection !== null || evidenceId !== null;
+  const closeDetail = (): void => {
     table.closeSelection();
     setEvidenceId(null);
   };
@@ -257,10 +272,10 @@ export function LocationObservationsView({
     );
   }
   if (isLoading && page === null) {
-    return <DrawerLoading label={t("location.loading")} />;
+    return <DetailLoading label={t("location.loading")} />;
   }
   if (isError && page === null && error !== null && !isNotFound404(error)) {
-    return <DrawerError title={t("location.loadError.title")} onRetry={refetch} />;
+    return <DetailError title={t("location.loadError.title")} onRetry={refetch} />;
   }
   if (isError && page === null && error !== null) {
     return (
@@ -272,20 +287,44 @@ export function LocationObservationsView({
 
   return (
     <Box>
-      <LocationScopeControls
-        includeContained={includeContained}
-        onToggle={() =>
-          table.applyFilters({
-            ...table.filters,
-            includeContained: !includeContained,
-          })
-        }
-        containmentApplied={page?.containment_applied ?? null}
-      />
-      <Alert severity="info" role="note" sx={{ mt: 1 }}>
-        {t("location.disclaimer")}
-      </Alert>
-      <AnalystTable<GeointObservation>
+      {detailOpen ? (
+        <ResourceDetailView
+          backLabel={tCommon("backToList", {
+            resource:
+              table.selection !== null
+                ? t("detail.observation.detailTitle")
+                : t("detail.evidence.detailTitle"),
+          })}
+          heading={
+            table.selection !== null
+              ? t("detail.observation.detailTitle")
+              : t("detail.evidence.detailTitle")
+          }
+          onBack={closeDetail}
+        >
+          <GeointDetailContent
+            investigationId={investigationId}
+            observationId={table.selection}
+            onViewEvidence={switchToEvidence}
+            evidenceId={evidenceId}
+          />
+        </ResourceDetailView>
+      ) : (
+        <Box>
+          <LocationScopeControls
+            includeContained={includeContained}
+            onToggle={() =>
+              table.applyFilters({
+                ...table.filters,
+                includeContained: !includeContained,
+              })
+            }
+            containmentApplied={page?.containment_applied ?? null}
+          />
+          <Alert severity="info" role="note" sx={{ mt: 1 }}>
+            {t("location.disclaimer")}
+          </Alert>
+          <AnalystTable<GeointObservation>
         columns={locationObservationsColumns(t, (evidenceIdValue) => setEvidenceId(evidenceIdValue))}
         rows={page?.items ?? []}
         getRowId={(observation) => observation.observation_id}
@@ -318,19 +357,8 @@ export function LocationObservationsView({
         staleErrorTitle={t("location.observations.staleError")}
         onReturnToFirstPage={table.returnToFirstPage}
       />
-      <GeointDetailDrawer
-        open={drawerOpen}
-        title={
-          table.selection !== null
-            ? t("detail.observation.drawerTitle")
-            : t("detail.evidence.drawerTitle")
-        }
-        onClose={closeDrawer}
-        investigationId={investigationId}
-        observationId={table.selection}
-        onViewEvidence={switchToEvidence}
-        evidenceId={evidenceId}
-      />
+        </Box>
+      )}
     </Box>
   );
 }
