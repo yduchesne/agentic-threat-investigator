@@ -9,6 +9,7 @@
 // i18next-backed; no raw translation keys reach the analyst.
 
 import { Box, Button } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
@@ -211,5 +212,149 @@ describe("Preferences dialog behavior (P04..P08, P10, P11)", () => {
     const text = (document.body as HTMLElement).textContent ?? "";
     expect(text).not.toContain("preferences.");
     expect(text).not.toContain("APPEARANCE_LABEL_KEY");
+  });
+});
+
+describe("Appearance lifecycle over a rendered application surface (PR 31F-7 AP01..AP12)", () => {
+  /**
+   * Semantic rendered-surface probe: applies the active theme's paper
+   * token to a real element and exposes the resolved token value. The
+   * assertions prove the presentation surface re-themes, never just the
+   * provider/radio state (PR 31F-7 §10: "assert a rendered application
+   * surface/computed token"). The same tokens are asserted end-to-end by
+   * the real-browser computed-style probes.
+   */
+  function ThemeSurface(): ReactElement {
+    const theme = useTheme();
+    return <div data-testid="theme-surface" data-paper={theme.palette.background.paper} />;
+  }
+
+  function SurfaceHarness(): ReactElement {
+    const [open, setOpen] = useState(true);
+    return (
+      <Box>
+        <PreferencesDialog open={open} onClose={() => setOpen(false)} />
+        <ThemeSurface />
+      </Box>
+    );
+  }
+
+  function surfacePaper(): string | null {
+    return screen.getByTestId("theme-surface").getAttribute("data-paper");
+  }
+
+  it("AP01/AP06: every supported appearance live-previews the rendered surface before Save, and A->B switches immediately", async () => {
+    const user = userEvent.setup();
+    renderProviders(<SurfaceHarness />);
+    const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+    expect(surfacePaper()).toBe("#ffffff"); // Light baseline
+
+    await user.click(within(dialog).getByRole("radio", { name: "Dark" }));
+    expect(surfacePaper()).toBe("#1c2026");
+    await user.click(within(dialog).getByRole("radio", { name: "Wargames" }));
+    expect(surfacePaper()).toBe("#10150f");
+    await user.click(within(dialog).getByRole("radio", { name: "Control Room" }));
+    expect(surfacePaper()).toBe("#0f1a2c");
+    await user.click(within(dialog).getByRole("radio", { name: "Light" }));
+    expect(surfacePaper()).toBe("#ffffff");
+    // Previews never persist.
+    expect(globalThis.localStorage.getItem(APPEARANCE_STORAGE_KEY)).toBeNull();
+  });
+
+  it("AP02/AP07: Cancel after a preview restores the committed rendered surface", async () => {
+    const user = userEvent.setup();
+    globalThis.localStorage.setItem(APPEARANCE_STORAGE_KEY, "dark");
+    renderProviders(<SurfaceHarness />);
+    const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+    expect(surfacePaper()).toBe("#1c2026");
+
+    await user.click(within(dialog).getByRole("radio", { name: "Wargames" }));
+    expect(surfacePaper()).toBe("#10150f");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await expectDialogGone();
+    expect(surfacePaper()).toBe("#1c2026");
+    expect(globalThis.localStorage.getItem(APPEARANCE_STORAGE_KEY)).toBe("dark");
+  });
+
+  it("AP03/AP09: Save keeps the selected theme active, persists it, and never navigates", async () => {
+    const user = userEvent.setup();
+    const urlBefore = window.location.href;
+    renderProviders(<SurfaceHarness />);
+    const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+    await user.click(within(dialog).getByRole("radio", { name: "Control Room" }));
+    expect(surfacePaper()).toBe("#0f1a2c");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await expectDialogGone();
+    expect(surfacePaper()).toBe("#0f1a2c");
+    expect(globalThis.localStorage.getItem(APPEARANCE_STORAGE_KEY)).toBe("control-room");
+    expect(window.location.href).toBe(urlBefore);
+  });
+
+  it("AP04/AP05: after Save+reload the saved appearance is restored and the reopened dialog selects it", async () => {
+    globalThis.localStorage.setItem(APPEARANCE_STORAGE_KEY, "wargames");
+    renderProviders(<SurfaceHarness />);
+    const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+    expect(surfacePaper()).toBe("#10150f");
+    expect(within(dialog).getByRole("radio", { name: "Wargames" })).toBeChecked();
+    expect(within(dialog).getByRole("radio", { name: "Dark" })).not.toBeChecked();
+  });
+
+  it("AP08: open/close with no selection is a persistence no-op", async () => {
+    const user = userEvent.setup();
+    globalThis.localStorage.setItem(APPEARANCE_STORAGE_KEY, "dark");
+    renderProviders(<SurfaceHarness />);
+    const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await expectDialogGone();
+    expect(globalThis.localStorage.getItem(APPEARANCE_STORAGE_KEY)).toBe("dark");
+    expect(surfacePaper()).toBe("#1c2026");
+  });
+
+  it("AP11: repeated open/preview/cancel cycles leave no stale state", async () => {
+    const user = userEvent.setup();
+    globalThis.localStorage.setItem(APPEARANCE_STORAGE_KEY, "light");
+    function CycledHarness(): ReactElement {
+      const [open, setOpen] = useState(true);
+      return (
+        <Box>
+          <Button onClick={() => setOpen(true)}>open preferences</Button>
+          <PreferencesDialog open={open} onClose={() => setOpen(false)} />
+          <ThemeSurface />
+        </Box>
+      );
+    }
+    renderProviders(<CycledHarness />);
+    for (const [label, token] of [
+      ["Dark", "#1c2026"],
+      ["Wargames", "#10150f"],
+      ["Control Room", "#0f1a2c"],
+      ["Light", "#ffffff"],
+    ] as Array<[string, string]>) {
+      const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+      await user.click(within(dialog).getByRole("radio", { name: label }));
+      expect(surfacePaper()).toBe(token);
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Preferences" })).not.toBeInTheDocument();
+      });
+      // Reopen for the next cycle; nothing persisted from the previews.
+      await user.click(screen.getByRole("button", { name: "open preferences" }));
+    }
+    expect(globalThis.localStorage.getItem(APPEARANCE_STORAGE_KEY)).toBe("light");
+    const finalDialog = await screen.findByRole("dialog", { name: "Preferences" });
+    expect(within(finalDialog).getByRole("radio", { name: "Light" })).toBeChecked();
+    expect(surfacePaper()).toBe("#ffffff");
+  });
+
+  it("AP12: Dark save -> reload -> reopen -> Wargames previews immediately (never appearance-specific)", async () => {
+    const user = userEvent.setup();
+    globalThis.localStorage.setItem(APPEARANCE_STORAGE_KEY, "dark");
+    renderProviders(<SurfaceHarness />);
+    const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+    expect(surfacePaper()).toBe("#1c2026");
+    expect(within(dialog).getByRole("radio", { name: "Dark" })).toBeChecked();
+
+    await user.click(within(dialog).getByRole("radio", { name: "Wargames" }));
+    expect(surfacePaper()).toBe("#10150f");
   });
 });

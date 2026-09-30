@@ -2859,6 +2859,80 @@ never with visibility alone:
   list/detail regressions without the A/B control against the base
   app.
 
+### Secondary navigation and appearance lifecycle (PR 31F-7)
+
+PR 31F-7 closes the two remaining known analyst-facing UI-correctness
+follow-ups raised during the PR 31F-6 closure and proves them with
+real-browser critical acceptance.
+
+**More is an ordinary in-flow disclosure, not a Portal menu.** The
+Investigation workspace `More` control was the last fixed-Portal MUI
+`Menu` in the analyst navigation path (the A6 wedge record: idling with
+that Portal menu open stalled the browser main thread in Chromium AND
+Firefox). It is now a conservative in-flow secondary-navigation
+disclosure: a plain `Button` (`aria-expanded`/`aria-controls`) expands an
+ordinary `nav` region rendered in the workspace layout — no MUI
+Menu/Popover/Modal, no Portal, no backdrop/focus trap/body lock, no
+document-global dismissal listener, and no ARIA `menu/menuitem` roles.
+Open state is transient local React state only (never URL/global/server
+state). The History destination (the menu's only entry) is preserved
+verbatim as a semantic react-router link committing exactly one
+navigation; an explicit Close collapses the region. Keyboard behavior is
+native (Tab reaches the trigger and the region entries, Enter/Space
+toggles the trigger, Tab leaves the region — no trap). The old
+U34..U37 anchored-menu component tests were replaced by the PR 31F-7
+matrix M01..M12 in `frontend/src/investigations/InvestigationWorkspace.test.tsx`
+(collapsed initial state, in-flow expansion, close/toggle, preserved
+destination, single navigation, Tab/Enter/Space, no menu/Portal/modal
+contract, no body masking, Pivot context keeps More hidden).
+
+**Appearance live-preview is deterministic for every supported
+appearance.** PR 31F-7 documented the actual root cause of the E30-A6
+"Wargames preview never applies after Save/reload/reopen" failure: it was
+an E2E assertion artifact, not an appearance-engine defect. The MUI
+Preferences dialog is a genuine modal and correctly marks the rest of
+the page `aria-hidden` while it is open (the a11y-correct MUI Modal
+behavior), so the old `getByRole("banner")` poll resolved to nothing
+during the in-dialog preview step. The product state flow — one
+AppearanceProvider owning committed + transient preview state over the
+single stable prebuilt theme registry — was verified correct in a real
+browser for all four appearances; PR 31F-7 changes no appearance
+algorithm. The E2E probes now resolve the rendered header surface
+through the AppBar element as DOM (CSS locator, unaffected by the modal
+accessibility mask; the assertion contract is a rendered surface/token,
+never just the radio value), and the spec covers every supported
+appearance (Light/Dark/Wargames/Control Room) on the SAME generic path:
+select -> live render before Save; Cancel restores the committed
+appearance; Save persists across reload; reopen selects the committed
+value; no theme-only change alters the route or refetches the graph
+topology. No appearance-specific branch or workaround exists.
+
+**Critical real-stack acceptance.** `frontend/e2e/zz-pr31f7-critical.spec.ts`
+drives both journeys with physical-pointer-equivalent input
+(`mouse.move`/`down`/`up`) over geometry-proved targets, `--workers=1`,
+`--retries=0`, no recovery reload and no arbitrary sleeps:
+
+```bash
+cd frontend && npx playwright test zz-pr31f7-critical.spec.ts --project=chromium --workers=1 --retries=0
+cd frontend && npx playwright test zz-pr31f7-critical.spec.ts --project=inspector-firefox --workers=1 --retries=0
+```
+
+- **More journey:** five same-page cycles per engine — RAW open -> region
+  visible + page responsive (bounded heartbeat) + no `role=menu`/
+  modal/body-lock anywhere -> RAW toggle close -> RAW reopen -> RAW
+  History -> one navigation, History renders -> normal browser Back
+  restores the workspace -> another raw ordinary control proves the page
+  stayed live.
+- **Appearance journey (per engine):** preview Dark (rendered surface
+  BEFORE Save) -> Save -> reload -> Dark committed -> reopen -> preview
+  Wargames before Save -> Cancel -> Dark restored -> reopen -> preview
+  Control Room -> Save -> route unchanged -> reload -> Control Room
+  committed -> reopen -> preview Light -> Cancel -> Control Room restored.
+- `frontend/e2e/zz-list-detail.spec.ts` (both engines) and
+  `frontend/e2e/zz-analyst-tables.spec.ts` reach the History route through
+  the new in-flow disclosure; `frontend/e2e/zz-appearance.spec.ts` keeps
+  the comprehensive graph/route/no-refetch appearance slice in Chromium.
+
 ### Frontend wedge-testing methodology
 
 When testing for frontend wedges (browser main-thread lockups), the
@@ -3629,10 +3703,14 @@ classified before any edit (amendment-6 record `out/PR31F6_A6_IMPLEMENTATION_REP
   menu itself is untouched by PR 31F-6 and the identical Portal/overlay
   wedge class is A/B-verified against the pre-31F-6 app (the A4 control
   experiment record), so the parent defect is deferred (framework follow-up
-  in the A6 record). E20 now opens More and activates its History entry
-  back-to-back and asserts the user-visible contract (History reachable,
+  in the A6 record). E20 now opened More and activated its History entry
+  back-to-back and asserted the user-visible contract (History reachable,
   single activation, Investigation intact) — Portal existence/geometry is
-  not a product contract.
+  not a product contract. PR 31F-7 then REPLACED the Portal menu with the
+  ordinary in-flow disclosure (see the PR 31F-7 section below), closing
+  the deferred defect class: E20/E21, `zz-list-detail.spec.ts` and
+  `zz-pr31f7-critical.spec.ts` now interact with the in-flow region and
+  assert the same user-visible contract.
 - **E20 History "Diff" — C3 (data-dependent first-row contract).** The
   fake world's newest investigation UPDATE frequently carries an EMPTY
   diff (worker budget/status updates vary per run), so Diff presence on

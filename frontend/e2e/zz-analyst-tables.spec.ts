@@ -211,18 +211,18 @@ test.describe("PR 24C real-stack analyst browsing", () => {
     await expect(page).toHaveURL(/event_type=evidence_persisted/);
 
     // History: secondary via More -> History, exact-version detail.
+    // More is the PR 31F-7 in-flow secondary-navigation disclosure: a
+    // plain button expands an ordinary nav region in the workspace (no
+    // fixed-Portal MUI menu, no backdrop, no body lock, no idling-wedge
+    // class), and the History destination is a semantic link that commits
+    // one navigation. The Investigation state stays intact.
     const moreTrigger = page.getByRole("button", { name: "More" });
-    // The More menu is a fixed-Portal MUI popover. Leaving that Portal open on
-    // the idle real-stack browser wedges BOTH engines' main thread (A6
-    // diagnostic record: dispatched open + post-open heartbeat alive, then the
-    // first menu probe dies; no application/page error; opening and immediately
-    // navigating — the pattern proven repeatedly by the list-detail spec's
-    // History section — is clean). Portal geometry/existence is not a product
-    // contract; the contract is that More is operable and History stays
-    // reachable with the Investigation state intact, so the menu is opened and
-    // its History entry activated back-to-back without idling on the Portal.
-    await moreTrigger.dispatchEvent("click");
-    await page.getByRole("menuitem", { name: "History" }).dispatchEvent("click");
+    await moreTrigger.click();
+    const moreRegion = page.getByRole("navigation", {
+      name: "More investigation navigation",
+    });
+    await expect(moreRegion).toBeVisible();
+    await moreRegion.getByRole("link", { name: "History" }).click();
     await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
     await expect(page.getByText("Updated").first()).toBeVisible({ timeout: 30_000 });
     await page

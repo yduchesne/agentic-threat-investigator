@@ -216,12 +216,14 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
     // ---- History: 5 cycles (exact object_type+object_id+version) --------
     const moreTrigger = page.getByRole("button", { name: "More" });
     await rawPointer(page, moreTrigger, "history-more");
-    await page.getByRole("menuitem", { name: "History" }).dispatchEvent("click");
-    // The History route is reached through the More menu, a fixed-Portal
-    // MUI Menu whose exit layer can still overlay the page while the route
-    // content settles; synchronize on the menu's actual removal (DOM state,
-    // never a sleep) so the first raw press targets the list reliably.
-    await expect(page.getByRole("menu")).not.toBeVisible({ timeout: 10_000 });
+    // More is the PR 31F-7 in-flow secondary-navigation disclosure: the
+    // History destination is a semantic link inside an ordinary nav region
+    // (no Portal/menu layer to settle).
+    const moreRegion = page.getByRole("navigation", {
+      name: "More investigation navigation",
+    });
+    await expect(moreRegion).toBeVisible({ timeout: 10_000 });
+    await rawPointer(page, moreRegion.getByRole("link", { name: "History" }), "history-link");
     await expect(page.getByText("Updated").first()).toBeVisible({ timeout: 30_000 });
     for (let index = 0; index < 5; index += 1) {
       await listDetailCycle(

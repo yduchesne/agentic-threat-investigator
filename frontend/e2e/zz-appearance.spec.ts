@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Real-stack browser E2E: PR 31F-4 Appearance Preferences (E30).
+// Real-stack browser E2E: PR 31F-4 Appearance Preferences (E30)
+// + PR 31F-7 generic appearance-preview lifecycle.
 //
 // Runs against the production-path stack created by the repository E2E
 // harness (scripts/e2e.sh) after the PR 24A/24B/24C suites, reusing the
@@ -15,6 +16,26 @@
 //   Save -> route unchanged -> reload -> Dark restored (persistence) ->
 //   graph still usable -> preview Wargames -> Cancel -> Dark restored ->
 //   Save Control Room -> graph remains usable with no theme-only request.
+//
+// PR 31F-7 lifecycle guarantees, through ONE generic preview path and with
+// every supported appearance (Light/Dark/Wargames/Control Room):
+//   1. selecting an appearance live-previews the rendered application
+//      surface BEFORE Save;
+//   2. Cancel restores the previously committed appearance;
+//   3. Save commits and stays active;
+//   4. reload restores the committed appearance;
+//   5. route/URL and graph topology are untouched by theme-only changes.
+// The appearance engine itself is unchanged by PR 31F-7: the stable
+// prebuilt registry (theme.ts), the single provider and the existing
+// preview/commit/cancel state flow were verified present and correct. The
+// former "Wargames preview never applies after Save/reload/reopen"
+// E30-A6 failure was a browser-assertion artifact: the MUI Preferences
+// dialog is a genuine modal and correctly marks the rest of the page
+// ``aria-hidden`` while open, so the old ``getByRole("banner")`` poll
+// matched nothing during the in-dialog preview step. The rendered surface
+// is now resolved through the shell header element itself (CSS locator,
+// unaffected by the modal accessibility mask); the assertion contract
+// (rendered surface/token, never just the radio value) is unchanged.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -22,23 +43,35 @@ const OBJECTIVE = "PR 31F-4 assess appearance workbench";
 const F03_ROOT_DOMAIN = "logistics-corp.test";
 const SHARED_SESSION_STATE = "test-results/analyst-session.json";
 
-/** Dark surface token (theme.ts) used as an end-to-end computed-style proof. */
+/** Surface tokens (theme.ts) used as end-to-end computed-style proofs. */
+const LIGHT_PAPER_RGB = "rgb(255, 255, 255)";
 const DARK_PAPER_RGB = "rgb(28, 32, 38)";
-/** Wargames surface token (theme.ts). */
 const WARGAMES_PAPER_RGB = "rgb(16, 21, 15)";
-/** Control Room surface token (theme.ts). */
 const CONTROL_ROOM_PAPER_RGB = "rgb(15, 26, 44)";
 
-/** Resolve the AppBar (header) computed background color. */
+/**
+ * Resolve the shell header (AppBar) computed background color.
+ *
+ * PR 31F-7: the MUI Preferences dialog is a real modal and correctly sets
+ * ``aria-hidden`` on the rest of the page while it is open (the a11y-
+ * correct MUI Modal behavior), which excludes the header landmark from
+ * the accessibility tree — ``getByRole("banner")`` resolves to nothing
+ * during the live-preview steps. The rendered surface is therefore
+ * resolved through the AppBar element as DOM (CSS locator), which is
+ * unaffected by the modal mask while asserting the exact same semantic
+ * surface token.
+ */
 async function headerBackground(page: Page): Promise<string> {
-  return page.getByRole("banner").evaluate((el) => getComputedStyle(el).backgroundColor);
+  return page
+    .locator("header.MuiAppBar-root")
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
 }
 
-test.describe("PR 31F-4 real-stack appearance preference workflow", () => {
+test.describe("PR 31F-4/31F-7 real-stack appearance preference workflow", () => {
   test.describe.configure({ timeout: 300_000 });
   test.use({ storageState: SHARED_SESSION_STATE });
 
-  test("E30 login -> Investigation -> Dark saves locally and survives reload; Cancel restores; Control Room keeps the graph usable", async ({
+  test("every supported appearance live-previews before Save, Cancel restores, Save persists across reload, route/graph untouched", async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -91,43 +124,48 @@ test.describe("PR 31F-4 real-stack appearance preference workflow", () => {
     await expect(graphList).toBeVisible({ timeout: 20_000 });
     const graphRequestsAtOpen = graphNeighborhoodRequests;
 
-    // Preferences gear -> select Dark -> Save: route and URL stay stable.
+    // The committed baseline is Light (canonical default).
+    await expect.poll(headerBackground.bind(null, page)).toBe(LIGHT_PAPER_RGB);
+
+    // 1. Select Dark -> the rendered surface previews it BEFORE Save.
     const urlBeforeSave = page.url();
     await page.getByRole("button", { name: "Preferences" }).click();
     const dialog = page.getByRole("dialog", { name: "Preferences" });
     await expect(dialog).toBeVisible({ timeout: 20_000 });
+    await expect(dialog.getByRole("radio", { name: "Light" })).toBeChecked();
     await dialog.getByRole("radio", { name: "Dark" }).click();
+    await expect.poll(headerBackground.bind(null, page)).toBe(DARK_PAPER_RGB);
+    // Save: the preview becomes the committed appearance and the dialog closes.
     await dialog.getByRole("button", { name: "Save" }).click();
     await expect(dialog).not.toBeVisible();
     await expect(page).toHaveURL(urlBeforeSave);
     expect(graphNeighborhoodRequests).toBe(graphRequestsAtOpen);
-
-    // The theme is actually applied (semantic surface token -> computed style).
     await expect.poll(headerBackground.bind(null, page)).toBe(DARK_PAPER_RGB);
 
     // Reload: the committed appearance survives browser-local persistence.
     await page.reload();
     await expect(page).toHaveURL(/view=graph/);
     await expect(graphCanvas).toBeVisible({ timeout: 30_000 });
+    await expect.poll(headerBackground.bind(null, page)).toBe(DARK_PAPER_RGB);
     await page.getByRole("button", { name: "Preferences" }).click();
     const dialogAfterReload = page.getByRole("dialog", { name: "Preferences" });
     await expect(dialogAfterReload).toBeVisible({ timeout: 20_000 });
     await expect(dialogAfterReload.getByRole("radio", { name: "Dark" })).toBeChecked();
 
-    // Preview Wargames then Cancel: the committed Dark is restored.
+    // 2. Preview Wargames BEFORE Save, then Cancel: committed Dark restored.
     await dialogAfterReload.getByRole("radio", { name: "Wargames" }).click();
-    // Live preview applies while the dialog is still open.
     await expect.poll(headerBackground.bind(null, page)).toBe(WARGAMES_PAPER_RGB);
     await dialogAfterReload.getByRole("button", { name: "Cancel" }).click();
     await expect(dialogAfterReload).not.toBeVisible();
     await expect.poll(headerBackground.bind(null, page)).toBe(DARK_PAPER_RGB);
 
-    // Save Control Room: graph stays fully usable with no theme-only request.
+    // 3. Save Control Room: graph stays fully usable with no theme-only request.
     const graphRequestsBeforeControlRoom = graphNeighborhoodRequests;
     await page.getByRole("button", { name: "Preferences" }).click();
     const dialog3 = page.getByRole("dialog", { name: "Preferences" });
     await expect(dialog3).toBeVisible({ timeout: 20_000 });
     await dialog3.getByRole("radio", { name: "Control Room" }).click();
+    await expect.poll(headerBackground.bind(null, page)).toBe(CONTROL_ROOM_PAPER_RGB);
     await dialog3.getByRole("button", { name: "Save" }).click();
     await expect(dialog3).not.toBeVisible();
     await expect(page).toHaveURL(/view=graph/);
@@ -135,6 +173,26 @@ test.describe("PR 31F-4 real-stack appearance preference workflow", () => {
     await expect(graphCanvas).toBeVisible({ timeout: 20_000 });
     await expect(graphList).toBeVisible({ timeout: 20_000 });
     expect(graphNeighborhoodRequests).toBe(graphRequestsBeforeControlRoom);
+
+    // Reload: Control Room persists.
+    await page.reload();
+    await expect(page).toHaveURL(/view=graph/);
+    await expect(graphCanvas).toBeVisible({ timeout: 30_000 });
+    await expect.poll(headerBackground.bind(null, page)).toBe(CONTROL_ROOM_PAPER_RGB);
+
+    // 4. Reopen and preview Light (the fourth supported appearance) before
+    // Save, then Cancel: Control Room restored. Every supported appearance
+    // uses the SAME generic preview path (no Wargames-only or per-theme
+    // branch anywhere in the engine).
+    await page.getByRole("button", { name: "Preferences" }).click();
+    const dialog4 = page.getByRole("dialog", { name: "Preferences" });
+    await expect(dialog4).toBeVisible({ timeout: 20_000 });
+    await expect(dialog4.getByRole("radio", { name: "Control Room" })).toBeChecked();
+    await dialog4.getByRole("radio", { name: "Light" }).click();
+    await expect.poll(headerBackground.bind(null, page)).toBe(LIGHT_PAPER_RGB);
+    await dialog4.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog4).not.toBeVisible();
+    await expect.poll(headerBackground.bind(null, page)).toBe(CONTROL_ROOM_PAPER_RGB);
 
     // No console errors across the whole real-stack workflow.
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);

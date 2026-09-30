@@ -4,24 +4,31 @@
 // analyst-table routes, the secondary History access and scoped 404
 // (PR 24B U20-U27, U43-U49; PR 24C workspace integration).
 
-import { screen, waitFor } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
 
 import {
   authMeSuccess,
+  buildEvidence,
   buildInvestigation,
+  completedInvestigationFixture,
   investigationDetail404Handler,
   investigationDetailHandler,
   investigationDetailNetworkErrorHandler,
   investigationLifecycleHandler,
   jsonResponse,
   listRequestRecorder,
+  pagedResourceHandler,
+  resourceListRecorder,
   runtimeFake,
+  uuidAt,
 } from "../test/handlers";
 import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
+import { serializePivotState } from "../pivots/pivot-url";
+import type { PivotStep } from "../pivots/pivot-types";
 
 useHttp();
 
@@ -134,7 +141,10 @@ describe("Investigation workspace routes", () => {
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
     await screen.findByRole("heading", { name: "assess the update-package delivery domain" });
     await userEvent.click(screen.getByRole("button", { name: "More" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "History" }));
+    const nav = await screen.findByRole("navigation", {
+      name: "More investigation navigation",
+    });
+    await userEvent.click(within(nav).getByRole("link", { name: "History" }));
     expect(
       await screen.findByRole("heading", { name: "History" }),
     ).toBeInTheDocument();
@@ -187,8 +197,8 @@ describe("Investigation workspace routes", () => {
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
   });
 });
-describe("Investigation workspace More menu (PR 31F-1 U34..U37)", () => {
-  function renderOverview(stopReason: string | null): { navigate: (url: string) => void } {
+describe("Investigation workspace More navigation (PR 31F-7 M01..M12)", () => {
+  function renderOverview(): { navigate: (url: string) => void } {
     setHttpHandlers(
       ...AUTH,
       investigationDetailHandler(
@@ -196,51 +206,208 @@ describe("Investigation workspace More menu (PR 31F-1 U34..U37)", () => {
           id: INVESTIGATION_ID,
           status: "completed",
           completed_at: "2026-06-01T12:00:00Z",
-          stop_reason: stopReason,
+          stop_reason: "fatal_error",
         }),
       ),
       http.get("*/api/v1/investigations/:id/history", () =>
         jsonResponse({ items: [], next_cursor: null })),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/evidence",
+        pages: [[]],
+        recorder: resourceListRecorder(),
+      }),
     );
     const { router } = renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
     return { navigate: (url: string) => void router.navigate(url) };
   }
 
-  it("opens an anchored menu at the trigger and closes on Escape without navigation (U34/U36)", async () => {
-    renderOverview("fatal_error");
+  const MORE_REGION_LABEL = "More investigation navigation";
+
+  it("M01: starts collapsed with no in-flow region", async () => {
+    renderOverview();
     const trigger = await screen.findByRole("button", { name: "More" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
-    await userEvent.click(trigger);
-    const menu = await screen.findByRole("menu", {}, { timeout: 3000 });
-    expect(menu).toBeInTheDocument();
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(await screen.findByRole("menuitem", { name: "History" })).toBeInTheDocument();
-    // Escape closes the menu without navigating.
-    await userEvent.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    });
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).not.toHaveAttribute("aria-controls");
+    expect(
+      screen.queryByRole("navigation", { name: MORE_REGION_LABEL }),
+    ).not.toBeInTheDocument();
   });
 
-  it("History closes the menu and navigates (U35)", async () => {
-    renderOverview("fatal_error");
-    await userEvent.click(await screen.findByRole("button", { name: "More" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "History" }));
+  it("M02: activating More expands an ordinary in-flow disclosure region", async () => {
+    renderOverview();
+    const trigger = await screen.findByRole("button", { name: "More" });
+    await userEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("aria-controls", "investigation-more-region");
+    const nav = screen.getByRole("navigation", { name: MORE_REGION_LABEL });
+    expect(nav).toBeInTheDocument();
+    expect(nav.id).toBe("investigation-more-region");
+    // The region is a sibling of the trigger in the ordinary workspace
+    // layout (in place, never portaled to the end of <body>).
+    expect(trigger.parentElement).toBe(nav.parentElement);
+  });
+
+  it("M03: Close and the trigger toggle both collapse the disclosure", async () => {
+    renderOverview();
+    const trigger = await screen.findByRole("button", { name: "More" });
+    await userEvent.click(trigger);
+    const nav = screen.getByRole("navigation", { name: MORE_REGION_LABEL });
+    await userEvent.click(within(nav).getByRole("button", { name: "Close" }));
+    expect(
+      screen.queryByRole("navigation", { name: MORE_REGION_LABEL }),
+    ).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    // Toggling the trigger again expands and collapses without navigating.
+    await userEvent.click(trigger);
+    expect(
+      screen.getByRole("navigation", { name: MORE_REGION_LABEL }),
+    ).toBeInTheDocument();
+    await userEvent.click(trigger);
+    expect(
+      screen.queryByRole("navigation", { name: MORE_REGION_LABEL }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("M04/M05: the History destination is preserved with its exact route", async () => {
+    renderOverview();
+    const trigger = await screen.findByRole("button", { name: "More" });
+    await userEvent.click(trigger);
+    const nav = screen.getByRole("navigation", { name: MORE_REGION_LABEL });
+    const historyLink = within(nav).getByRole("link", { name: "History" });
+    expect(historyLink).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/history`,
+    );
+  });
+
+  it("M06: activating History causes exactly one navigation", async () => {
+    renderOverview();
+    const trigger = await screen.findByRole("button", { name: "More" });
+    await userEvent.click(trigger);
+    const nav = screen.getByRole("navigation", { name: MORE_REGION_LABEL });
+    const historyLink = within(nav).getByRole("link", { name: "History" });
+    await userEvent.click(historyLink);
     expect(
       await screen.findByRole("heading", { name: "History" }),
     ).toBeInTheDocument();
     await screen.findByText("No history rows");
   });
 
-  it("is keyboard-operable through the trigger button (U37)", async () => {
-    renderOverview("fatal_error");
+  it("M07: the Close action collapses without navigating", async () => {
+    renderOverview();
+    const trigger = await screen.findByRole("button", { name: "More" });
+    await userEvent.click(trigger);
+    const nav = screen.getByRole("navigation", { name: MORE_REGION_LABEL });
+    await userEvent.click(within(nav).getByRole("button", { name: "Close" }));
+    // Still on the Overview route: no navigation happened.
+    expect(
+      screen.queryByRole("heading", { name: "History" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "assess the update-package delivery domain" }),
+    ).toBeInTheDocument();
+  });
+
+  it("M08: Tab reaches the trigger and the region entries and can leave (no focus trap)", async () => {
+    renderOverview();
     const trigger = await screen.findByRole("button", { name: "More" });
     trigger.focus();
     await userEvent.keyboard("{Enter}");
-    await screen.findByRole("menuitem", { name: "History" });
-    await userEvent.keyboard("{Escape}");
+    const nav = screen.getByRole("navigation", { name: MORE_REGION_LABEL });
+    const historyLink = within(nav).getByRole("link", { name: "History" });
+    const close = within(nav).getByRole("button", { name: "Close" });
+
+    await userEvent.tab();
+    expect(historyLink).toHaveFocus();
+    await userEvent.tab();
+    expect(close).toHaveFocus();
+    // Tab can leave the region entirely (no focus trap).
+    await userEvent.tab();
+    expect(close).not.toHaveFocus();
+    expect(historyLink).not.toHaveFocus();
+  });
+
+  it("M09: native Enter and Space toggle the trigger", async () => {
+    renderOverview();
+    const trigger = await screen.findByRole("button", { name: "More" });
+    trigger.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(
+      screen.getByRole("navigation", { name: MORE_REGION_LABEL }),
+    ).toBeInTheDocument();
+    await userEvent.keyboard(" ");
+    expect(
+      screen.queryByRole("navigation", { name: MORE_REGION_LABEL }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("M10: the expanded disclosure keeps no menu/Portal/modal contract", async () => {
+    renderOverview();
+    const trigger = await screen.findByRole("button", { name: "More" });
+    await userEvent.click(trigger);
+    expect(screen.getByRole("navigation", { name: MORE_REGION_LABEL })).toBeInTheDocument();
+    // No ARIA menu/menuitem, no modal, no MUI Popover/Menu Portal anywhere.
     expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.querySelector('[role="menuitem"]')).toBeNull();
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(document.querySelector(".MuiPopover-root")).toBeNull();
+  });
+
+  it("M11: the normal workbench stays usable with no body masking", async () => {
+    renderOverview();
+    const trigger = await screen.findByRole("button", { name: "More" });
+    await userEvent.click(trigger);
+    expect(screen.getByRole("navigation", { name: MORE_REGION_LABEL })).toBeInTheDocument();
+    // No body lock / aria-hidden masking while the disclosure is open.
+    expect(document.body.getAttribute("aria-hidden")).toBeNull();
+    // A primary tab remains operable beside the open disclosure.
+    await userEvent.click(screen.getByRole("tab", { name: "Evidence" }));
+    expect(
+      await screen.findByRole("heading", { name: "Evidence" }),
+    ).toBeInTheDocument();
+  });
+
+  it("M12: the Pivot workbench keeps More hidden (existing visibility preserved)", async () => {
+    const recorder = resourceListRecorder();
+    const entityId = uuidAt(101);
+    setHttpHandlers(
+      ...AUTH,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/evidence",
+        pages: [
+          [
+            buildEvidence({
+              id: uuidAt(1),
+              subject_entity_id: entityId,
+              subject_value: "update-package.test",
+            }),
+          ],
+        ],
+        recorder,
+      }),
+    );
+    const steps: PivotStep[] = [
+      {
+        resource: "evidence",
+        filters: {},
+        selectedId: null,
+        label: "update-package.test",
+        sourceKind: "table_cell",
+      },
+    ];
+    const pivot = serializePivotState({ steps });
+    expect(pivot).not.toBeNull();
+    renderAtPath(
+      `/investigations/${INVESTIGATION_ID}/evidence?pivot=${pivot ?? ""}`,
+    );
+    await screen.findByRole("heading", { name: /pivot workspace/i });
+    // The normal workbench (tabs + More) is not mounted underneath.
+    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Overview" })).not.toBeInTheDocument();
   });
 });
 
