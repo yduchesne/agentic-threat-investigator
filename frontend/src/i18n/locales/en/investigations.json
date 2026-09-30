@@ -81,5 +81,7 @@
   "tabs.timeline": "Timeline",
   "more.label": "More",
   "more.history": "History",
+  "more.navigationLabel": "More investigation navigation",
+  "more.close": "Close",
   "tabs.graph": "Graph"
 }

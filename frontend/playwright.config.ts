@@ -45,7 +45,7 @@ export default defineConfig({
     {
       name: "inspector-firefox",
       use: { browserName: "firefox" },
-      testMatch: /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance)\.spec\.ts/,
+      testMatch: /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical)\.spec\.ts/,
     },
   ],
 });

@@ -12,7 +12,7 @@
 // simultaneous interactive layer), and no durable ``pivotOpen`` state
 // exists. The persistent header stays shared in both modes.
 
-import { Box, Button, Menu, MenuItem } from "@mui/material";
+import { Box, Button, Link } from "@mui/material";
 import type { ReactElement } from "react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -42,39 +42,70 @@ export function isInvestigationNotFound(error: ApiError): boolean {
   return error.kind === "api" && error.status === 404;
 }
 
-/** Secondary workspace menu: History is not a primary tab (PR 24C §12). */
-function MoreMenu({ investigationId }: { investigationId: string }): ReactElement {
+/**
+ * Secondary workspace navigation (PR 24C §12; PR 31F-7).
+ *
+ * History is not a primary tab. PR 31F-7 replaces the former fixed-Portal
+ * MUI Menu with this conservative in-flow disclosure: ordinary DOM layout
+ * only — no Portal, no MUI Menu/Popover/Modal, no backdrop, focus trap,
+ * body lock or document-global dismissal listener. The disclosure owns only
+ * transient local open state (never URL/global/server state); the sole
+ * destination is the History route, preserved verbatim as a semantic link,
+ * with an explicit Close affordance. Keyboard behavior is native: Tab
+ * reaches the trigger and the region entries, Enter/Space toggles the
+ * trigger, and Tab can always leave the region (no trap). The navigation
+ * path itself is unchanged from the replaced menu (react-router Link).
+ */
+function MoreNavigation({ investigationId }: { investigationId: string }): ReactElement {
   const { t } = useTranslation("investigations");
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const open = anchorEl !== null;
-  const close = (): void => setAnchorEl(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const close = (): void => setMoreOpen(false);
   return (
-    <Box sx={{ display: "inline-block" }}>
+    <Box component="span" sx={{ display: "inline-block" }}>
       <Button
         size="small"
         variant="text"
-        onClick={(event) => setAnchorEl(event.currentTarget)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? "investigation-more-menu" : undefined}
+        onClick={() => setMoreOpen((open) => !open)}
+        aria-expanded={moreOpen}
+        aria-controls={moreOpen ? "investigation-more-region" : undefined}
         sx={{ textTransform: "none", mr: 1 }}
       >
         {t("more.label")}
       </Button>
-      <Menu
-        id="investigation-more-menu"
-        open={open}
-        anchorEl={anchorEl}
-        onClose={close}
-      >
-        <MenuItem
-          component={RouterLink}
-          to={`/investigations/${investigationId}/history`}
-          onClick={close}
+      {moreOpen ? (
+        <Box
+          component="nav"
+          id="investigation-more-region"
+          aria-label={t("more.navigationLabel")}
+          sx={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 0.5,
+            px: 1,
+            py: 0.25,
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+            bgcolor: "background.paper",
+          }}
         >
-          {t("more.history")}
-        </MenuItem>
-      </Menu>
+          <Link
+            component={RouterLink}
+            to={`/investigations/${investigationId}/history`}
+            onClick={close}
+            sx={{ fontSize: "0.8125rem", fontWeight: 600 }}
+          >
+            {t("more.history")}
+          </Link>
+          <Button
+            size="small"
+            onClick={close}
+            sx={{ textTransform: "none", minWidth: 0, ml: 0.5 }}
+          >
+            {t("more.close")}
+          </Button>
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -148,7 +179,7 @@ export function InvestigationWorkspace(): ReactElement {
         <>
           <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0.5 }}>
             <InvestigationTabs investigationId={investigationId} />
-            <MoreMenu investigationId={investigationId} />
+            <MoreNavigation investigationId={investigationId} />
           </Box>
           <Box component="section" sx={{ mt: 2 }}>
             <Outlet context={outletContext} />

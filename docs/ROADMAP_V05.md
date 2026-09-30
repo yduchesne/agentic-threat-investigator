@@ -52,6 +52,7 @@ requirements justify the additional persistence dependency.
 | **31F-4** | Appearance preferences and multi-theme analyst workbench | Browser-local Light/Dark/Wargames/Control Room appearances over centralized semantic MUI tokens; presentation only [DONE] |
 | **31F-5** | Investigation workspace UX correctness and human-readable analyst presentation | Shared detail/pivot lifecycle focus hygiene, topmost-only nested Escape, Overview/Report separation, human-readable Entity and support references, bounded support presentation resolver, date/time label shrink, Firefox + Chromium overlay journeys [DONE] |
 | **31F-6** | Conservative in-flow analyst resource list/detail + in-flow URL-backed Pivot workbench | Ordinary AnalystTable resources use list/detail alternative views; the Pivot workbench is ordinary in-flow content with inline Pivot actions and cross-browser physical-pointer coverage (acceptance-qualified, see PR report) [DONE] |
+| **31F-7** | Non-overlay More navigation and reliable appearance preview | The investigation Workspace More control becomes an ordinary in-flow secondary-navigation disclosure (no Portal/menu overlay class); the generic appearance live-preview lifecycle is proven for every supported appearance (preview-before-Save, Cancel restore, Save/reload persistence, route/graph untouched) [DONE] |
 
 ## PR 31A — Graph read model and repository contract [DONE]
 
@@ -500,3 +501,51 @@ misses remain the documented C5 environment class (never a deterministic
 product failure; the critical raw-pointer authority passes in both
 engines). [DONE]
 manual Firefox verification matrix in `docs/TESTING.md`.
+
+## PR 31F-7 — Non-overlay More navigation and reliable appearance preview [DONE]
+
+Corrective UI follow-up owning the two remaining user-visible defects
+raised during the PR 31F-6 closure (A6 follow-ups #1 and #3). Final
+scope:
+
+- **More (A).** The Investigation workspace `More` interaction was the
+  last fixed-Portal MUI `Menu` in the analyst navigation path (A6 wedge
+  record: idling with the Portal menu open stalled the browser main
+  thread in Chromium AND Firefox). It is replaced by a conservative
+  in-flow secondary-navigation disclosure: a plain trigger with
+  `aria-expanded`/`aria-controls` expands an ordinary `nav` region in
+  the workspace layout. No MUI Menu/Popover/Modal, no Portal, no
+  backdrop/focus trap/body lock, no document-global dismissal listener,
+  no ARIA `menu/menuitem` roles, and transient local open state only.
+  The History destination (the only entry) is preserved verbatim as a
+  semantic react-router link with exactly one navigation per activation;
+  an explicit Close collapses the region. Keyboard behavior is native
+  (Tab reaches trigger and entries, Enter/Space toggles, no trap).
+- **Appearance (B).** The E30-A6 "Wargames preview does not apply after
+  Save/reload/reopen" failure was diagnosed as an E2E assertion
+  artifact: the MUI Preferences dialog is a genuine modal and correctly
+  marks the rest of the page `aria-hidden` while open, so the old
+  `getByRole("banner")` poll matched nothing during the in-dialog
+  preview step. The product state flow (single provider over the stable
+  prebuilt theme registry, committed + transient preview) was verified
+  correct in real browsers for all four appearances; no appearance
+  algorithm changed and no appearance-specific workaround exists. The
+  E2E probes now resolve the rendered header surface through the AppBar
+  element as DOM, and the appearance E2E covers every supported
+  appearance on the same generic path: preview before Save, Cancel
+  restores the committed appearance, Save persists across reload, reopen
+  selects the committed value, and theme-only changes never alter the
+  route or refetch graph topology.
+
+**Status.** Implemented on `fix/pr31f-7` over the accepted PR 31F-6
+baseline. The PR 31F-7 critical acceptance
+(`frontend/e2e/zz-pr31f7-critical.spec.ts`) passes first attempt
+(`--retries=0`, `workers=1`) in Chromium AND Firefox: five same-page raw
+More -> History cycles per engine with heartbeat/geometry proofs and no
+Portal/modal/body-lock, plus the four-appearance lifecycle journey per
+engine. E20/E21 and `zz-list-detail` reach History through the in-flow
+disclosure; the comprehensive graph/route/no-refetch appearance slice
+passes in Chromium. Component suite, typecheck, ESLint and Vite build are
+green; the full E2E classification is recorded in
+`out/PR31F7_IMPLEMENTATION_REPORT.md`. GEOINT seeding and backend/DB work
+remain outside this PR. [DONE]
