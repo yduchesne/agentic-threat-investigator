@@ -1,22 +1,34 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PostgreSQL one-hop graph neighborhood reads (PR 31B).
+"""PostgreSQL one-hop graph neighborhood reads (PR 31B; PR 31G).
 
 The concrete :class:`PostgresGraphQueryService` implements the PR 31A graph
 read contract on top of ATI's authoritative relational model. It never
 persists graph projections and never introduces a graph database: canonical
 ``Entity`` rows project to ``GraphNode`` items, canonical ``Relationship``
 rows project to ``GraphEdge`` items (one edge per Relationship, aggregated
-before materialization), and only ``RelationshipObservation`` rows whose
-exact ``EvidenceObservation`` is admitted to the requested Investigation
-through ``InvestigationEvidence`` contribute to edge visibility and to the
-``observation_count`` / first/last observed summaries.
+before materialization).
 
-Focal Entity visibility follows the same exact-admission rule through the
-``EvidenceObservationEntity`` association: the Entity exists, is not
-soft-deleted, and at least one associated EvidenceObservation is admitted to
-the requested Investigation. Missing or not-visible focal Entities return
-``None``; a visible isolated focal Entity returns a one-node
-``GraphResult``.
+PR 31G adds two scopes. ``investigation`` (the default) admits a
+Relationship only through ``RelationshipObservation`` rows whose exact
+``EvidenceObservation`` is admitted to the requested Investigation through
+``InvestigationEvidence``; ``known`` keeps that exact-admission rule only
+for the focal Entity, while edge observations are global live support for
+the canonical Relationship. Source is an exact
+``RelationshipObservation.source`` match and time is half-open over
+``observed_at`` (``retrieved_at`` is never substituted); both filter the
+active observation set before grouping. ``investigation_observation_count``
+is computed set-wise with a conditional aggregate (never by joining
+admissions, which could multiply rows); in investigation scope it equals
+``observation_count``, in known scope it reports how much matching support
+is admitted to the current Investigation.
+
+Focal Entity visibility follows the exact-admission rule through the
+``EvidenceObservationEntity`` association in BOTH scopes: the Entity
+exists, is not soft-deleted, and at least one associated EvidenceObservation
+is admitted to the requested Investigation. Known scope therefore never
+becomes arbitrary global Entity browsing. Missing or not-visible focal
+Entities return ``None``; a visible isolated focal Entity returns a
+one-node ``GraphResult``.
 
 The read path follows the established analyst-facing SQLAlchemy query-service
 architecture (no stored read functions). Bounds use the server-owned
@@ -31,7 +43,7 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Row, func, or_, select
+from sqlalchemy import Row, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
@@ -42,6 +54,7 @@ from agentic_threat_investigator.app.query.graph import (
     GraphNode,
     GraphQueryService,
     GraphResult,
+    GraphScope,
 )
 from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.domain.entities import EntityType
@@ -76,7 +89,7 @@ def _graph_node_from_row(row: EntityRow) -> GraphNode:
 
 
 class PostgresGraphQueryService(GraphQueryService):
-    """One bounded Investigation-scoped one-hop graph neighbor read."""
+    """One bounded one-hop graph neighborhood read over PostgreSQL."""
 
     def __init__(self, session: AsyncSession, limits: QueryLimits) -> None:
         """Bind the short-lived read session and the configured limits."""
@@ -88,10 +101,12 @@ class PostgresGraphQueryService(GraphQueryService):
 
         The read has three bounded SQL steps in one short-lived session:
         the focal visibility probe, the grouped canonical Relationship
-        selection with Investigation-scoped observation summaries, and one
-        bulk endpoint Entity projection. ``None`` means the focal Entity is
-        missing, soft-deleted, or not visible to the Investigation; a
-        visible isolated focal Entity yields a one-node unfiltered result.
+        selection with scope/source/time-filtered observation summaries and
+        the set-wise Investigation support count, and one bulk endpoint
+        Entity projection. ``None`` means the focal Entity is missing,
+        soft-deleted, or not visible to the Investigation (in both scopes);
+        a visible isolated focal Entity yields a one-node result even when
+        every filter removes all edges.
         """
         limit = self._limits.validate_limit(query.limit)
 
@@ -132,6 +147,7 @@ class PostgresGraphQueryService(GraphQueryService):
                 target_entity_id=row.target_entity_id,
                 relationship_type=RelationshipType(row.relationship_type_urn),
                 observation_count=row.observation_count,
+                investigation_observation_count=row.investigation_observation_count,
                 first_observed_at=row.first_observed_at,
                 last_observed_at=row.last_observed_at,
             )
@@ -143,15 +159,47 @@ class PostgresGraphQueryService(GraphQueryService):
     def _edge_statement(self, query: GraphNeighborhoodQuery, limit: int) -> Select[Any]:
         """Build the grouped, bounded canonical Relationship edge selection.
 
-        One row per live canonical Relationship whose endpoint Entities are
-        live and whose InvestigationEvidence-admitted observations survive
-        the direction/type filters; observation summaries are computed over
-        exactly those admitted observations. The ``limit + 1`` probe bounds
-        canonical Relationships (never raw observation rows) in
-        ``relationship.id ASC`` order.
+        Active RelationshipObservations are filtered by scope (investigation
+        scope additionally requires exact InvestigationEvidence admission),
+        exact source and half-open ``observed_at`` bounds before grouping;
+        one row per live canonical Relationship whose endpoint Entities are
+        live and whose active observations survive the direction/type/
+        counterparty-type filters. ``observation_count`` and first/last
+        summaries come from those active observations;
+        ``investigation_observation_count`` is a conditional aggregate over
+        the same rows (no admission-join row multiplication). The
+        ``limit + 1`` probe bounds canonical Relationships (never raw
+        observation rows) in ``relationship.id ASC`` order.
         """
         source_entity = aliased(EntityRow)
         target_entity = aliased(EntityRow)
+
+        observation_predicates: list[Any] = []
+        if query.source is not None:
+            observation_predicates.append(
+                RelationshipObservationRow.source == query.source
+            )
+        if query.observed_from is not None:
+            observation_predicates.append(
+                RelationshipObservationRow.observed_at >= query.observed_from
+            )
+        if query.observed_to is not None:
+            observation_predicates.append(
+                RelationshipObservationRow.observed_at < query.observed_to
+            )
+
+        admission = (
+            select(InvestigationEvidenceRow.evidence_observation_id)
+            .where(
+                InvestigationEvidenceRow.investigation_id == query.investigation_id,
+                InvestigationEvidenceRow.evidence_observation_id
+                == RelationshipObservationRow.evidence_observation_id,
+            )
+            .exists()
+        )
+        if query.scope is GraphScope.INVESTIGATION:
+            observation_predicates.append(admission)
+
         stmt = (
             select(
                 RelationshipRow.id.label("relationship_id"),
@@ -159,6 +207,9 @@ class PostgresGraphQueryService(GraphQueryService):
                 RelationshipRow.target_entity_id,
                 RelationshipRow.relationship_type_urn,
                 func.count(RelationshipObservationRow.id).label("observation_count"),
+                func.count(RelationshipObservationRow.id)
+                .filter(admission)
+                .label("investigation_observation_count"),
                 func.min(RelationshipObservationRow.observed_at).label(
                     "first_observed_at"
                 ),
@@ -170,15 +221,10 @@ class PostgresGraphQueryService(GraphQueryService):
                 RelationshipObservationRow,
                 RelationshipObservationRow.relationship_id == RelationshipRow.id,
             )
-            .join(
-                InvestigationEvidenceRow,
-                InvestigationEvidenceRow.evidence_observation_id
-                == RelationshipObservationRow.evidence_observation_id,
-            )
             .join(source_entity, source_entity.id == RelationshipRow.source_entity_id)
             .join(target_entity, target_entity.id == RelationshipRow.target_entity_id)
             .where(
-                InvestigationEvidenceRow.investigation_id == query.investigation_id,
+                *observation_predicates,
                 RelationshipRow.deleted_at.is_(None),
                 source_entity.deleted_at.is_(None),
                 target_entity.deleted_at.is_(None),
@@ -207,6 +253,25 @@ class PostgresGraphQueryService(GraphQueryService):
             stmt = stmt.where(
                 RelationshipRow.relationship_type_urn == query.relationship_type.value
             )
+        if query.entity_type is not None:
+            entity_type = query.entity_type.value
+            if query.direction is RelationshipDirection.SOURCE:
+                stmt = stmt.where(target_entity.entity_type == entity_type)
+            elif query.direction is RelationshipDirection.TARGET:
+                stmt = stmt.where(source_entity.entity_type == entity_type)
+            else:
+                stmt = stmt.where(
+                    or_(
+                        and_(
+                            RelationshipRow.source_entity_id == query.entity_id,
+                            target_entity.entity_type == entity_type,
+                        ),
+                        and_(
+                            RelationshipRow.target_entity_id == query.entity_id,
+                            source_entity.entity_type == entity_type,
+                        ),
+                    )
+                )
         return stmt
 
     async def _endpoint_nodes(

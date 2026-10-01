@@ -40,6 +40,9 @@ export interface RelationshipGraphEdge {
   relationshipType: RelationshipTypeName;
   /** Copied exactly from the server; never recomputed client-side. */
   observationCount: number;
+  /** Copied exactly from the server: matching observations admitted to the
+   * current Investigation (backend truth, PR 31G). */
+  investigationObservationCount: number;
   firstObservedAt: string | null;
   lastObservedAt: string | null;
 }
@@ -129,6 +132,7 @@ function projectEdge(
     targetEntityId: edge.target_entity_id,
     relationshipType: edge.relationship_type,
     observationCount: edge.observation_count,
+    investigationObservationCount: edge.investigation_observation_count,
     firstObservedAt: edge.first_observed_at ?? null,
     lastObservedAt: edge.last_observed_at ?? null,
   };

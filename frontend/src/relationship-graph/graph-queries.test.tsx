@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Canonical graph API + query tests (PR 31D G31D-Q01..Q10).
+// Canonical graph API + query tests (PR 31D G31D-Q01..Q10; PR 31G).
 //
 // The Graph seam requests exactly the PR 31C neighborhood endpoint with
-// only ``direction``, ``relationship_type`` and ``limit``; it never sends
-// cursors or Evolution-only filters, propagates AbortSignal, keys off the
-// semantic inputs, disables without a focal Entity, and surfaces typed
-// ApiError values without falling back to the Relationships list.
+// ``direction``, ``scope``, the canonical filters (connected Entity type,
+// Relationship type, exact observation source, half-open observed interval)
+// and ``limit``; it never sends cursors or retrieval-time filters,
+// propagates AbortSignal, keys off every semantic input, disables without a
+// focal Entity, and surfaces typed ApiError values without falling back to
+// the Relationships list.
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
@@ -19,6 +21,8 @@ import { errorResponse, jsonResponse, uuidAt } from "../test/handlers";
 import { setHttpHandlers, useHttp } from "../test/server";
 import type { GraphNeighborhood } from "../api/schema-types";
 import { fetchGraphNeighborhood, GRAPH_NEIGHBORHOOD_LIMIT } from "./graph-api";
+import type { GraphRequestContext } from "./graph-api";
+import { emptyGraphContext, type GraphContext } from "./graph-context-url";
 import { graphNeighborhoodKey } from "./graph-keys";
 import { useGraphNeighborhood } from "./graph-queries";
 
@@ -43,6 +47,14 @@ function neighborhoodBody(): GraphNeighborhood {
     ],
     edges: [],
     truncated: false,
+  };
+}
+
+/** A context with only a Relationship type set. */
+function typeContext(relationshipType: string | undefined): GraphRequestContext {
+  return {
+    ...emptyGraphContext(),
+    relationshipType: relationshipType as GraphRequestContext["relationshipType"],
   };
 }
 
@@ -75,7 +87,7 @@ describe("Graph API boundary", () => {
   it("G31D-Q01: the exact PR 31C neighborhood path is requested", async () => {
     const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
     setHttpHandlers(recordingHandler(recorder));
-    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", undefined);
+    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", emptyGraphContext());
     expect(recorder.requests).toHaveLength(1);
     expect(recorder.requests[0].url).toContain(
       `/investigations/${INVESTIGATION_ID}/graph/entities/${FOCAL}/neighborhood`,
@@ -85,8 +97,8 @@ describe("Graph API boundary", () => {
   it("G31D-Q02/Q03: SOURCE/TARGET directions map exactly", async () => {
     const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
     setHttpHandlers(recordingHandler(recorder));
-    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "source", undefined);
-    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "target", undefined);
+    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "source", emptyGraphContext());
+    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "target", emptyGraphContext());
     expect(recorder.requests[0].params.direction).toBe("source");
     expect(recorder.requests[1].params.direction).toBe("target");
   });
@@ -94,14 +106,25 @@ describe("Graph API boundary", () => {
   it("G31D-Q04: relationship type arrives as the exact URN", async () => {
     const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
     setHttpHandlers(recordingHandler(recorder));
-    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", CNAME);
+    await fetchGraphNeighborhood(
+      INVESTIGATION_ID,
+      FOCAL,
+      "either",
+      typeContext(CNAME),
+    );
     expect(recorder.requests[0].params.relationship_type).toBe(CNAME);
   });
 
   it("G31D-Q05: the request is explicitly bounded", async () => {
     const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
     setHttpHandlers(recordingHandler(recorder));
-    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", undefined, 25);
+    await fetchGraphNeighborhood(
+      INVESTIGATION_ID,
+      FOCAL,
+      "either",
+      emptyGraphContext(),
+      25,
+    );
     expect(recorder.requests[0].params.limit).toBe("25");
     expect(GRAPH_NEIGHBORHOOD_LIMIT).toBe(25);
   });
@@ -109,33 +132,58 @@ describe("Graph API boundary", () => {
   it("G31D-Q06: only graph-supported parameters are ever sent", async () => {
     const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
     setHttpHandlers(recordingHandler(recorder));
-    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", undefined);
-    // Only path identity + the two graph query parameters are present.
+    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", emptyGraphContext());
+    // Path identity + direction + scope + limit.
     expect(Object.keys(recorder.requests[0].params).sort()).toEqual([
       "direction",
       "entity_id",
       "investigation_id",
       "limit",
+      "scope",
     ]);
-    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", CNAME);
+    expect(recorder.requests[0].params.scope).toBe("investigation");
+    await fetchGraphNeighborhood(
+      INVESTIGATION_ID,
+      FOCAL,
+      "either",
+      typeContext(CNAME),
+    );
     expect(Object.keys(recorder.requests[1].params).sort()).toEqual([
       "direction",
       "entity_id",
       "investigation_id",
       "limit",
       "relationship_type",
+      "scope",
     ]);
-    // No cursor, depth, dates, source, or counterparty anywhere.
+    // No cursor, depth, retrieval dates, or counterparty identity anywhere.
     for (const request of recorder.requests) {
       expect(request.params.cursor).toBeUndefined();
       expect(request.params.depth).toBeUndefined();
-      expect(request.params.observed_from).toBeUndefined();
-      expect(request.params.observed_to).toBeUndefined();
       expect(request.params.retrieved_from).toBeUndefined();
       expect(request.params.retrieved_to).toBeUndefined();
-      expect(request.params.source).toBeUndefined();
       expect(request.params.counterparty_entity_id).toBeUndefined();
     }
+  });
+
+  it("G31G-Q20/G31G-Q21: every filter maps to the exact query parameter", async () => {
+    const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
+    setHttpHandlers(recordingHandler(recorder));
+    await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", {
+      scope: "known",
+      entityType: "ip_address",
+      relationshipType: CNAME,
+      source: "rdap",
+      observedFrom: "2026-01-01T00:00:00Z",
+      observedTo: "2026-02-01T00:00:00Z",
+    });
+    const params = recorder.requests[0].params;
+    expect(params.scope).toBe("known");
+    expect(params.entity_type).toBe("ip_address");
+    expect(params.relationship_type).toBe(CNAME);
+    expect(params.source).toBe("rdap");
+    expect(params.observed_from).toBe("2026-01-01T00:00:00Z");
+    expect(params.observed_to).toBe("2026-02-01T00:00:00Z");
   });
 
   it("G31D-Q07: AbortSignal propagates to the transport", async () => {
@@ -147,7 +195,7 @@ describe("Graph API boundary", () => {
       INVESTIGATION_ID,
       FOCAL,
       "either",
-      undefined,
+      emptyGraphContext(),
       GRAPH_NEIGHBORHOOD_LIMIT,
       controller.signal,
     );
@@ -162,7 +210,7 @@ describe("Graph API boundary", () => {
     );
     let captured: unknown = null;
     try {
-      await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", undefined);
+      await fetchGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", emptyGraphContext());
     } catch (error) {
       captured = error;
     }
@@ -173,23 +221,37 @@ describe("Graph API boundary", () => {
 
 describe("Graph query seam", () => {
   it("G31D-Q08: the stable key represents every semantic input", () => {
-    expect(graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "source", CNAME, 25)).toEqual([
+    const context = typeContext(CNAME);
+    expect(graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "source", context, 25)).toEqual([
       "graph",
       INVESTIGATION_ID,
       "neighborhood",
       FOCAL,
       "source",
+      "investigation",
+      null,
       CNAME,
+      null,
+      null,
+      null,
       25,
     ]);
     // Undefined relationship type stays distinct from any concrete value.
-    expect(graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "source", undefined, 25)).not.toEqual(
-      graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "source", CNAME, 25),
+    expect(
+      graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "source", emptyGraphContext(), 25),
+    ).not.toEqual(
+      graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "source", context, 25),
     );
-    // Direction differentiates keys.
-    expect(graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "source", undefined, 25)).not.toEqual(
-      graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "target", undefined, 25),
+    // Direction and scope both differentiate keys.
+    expect(
+      graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "source", emptyGraphContext(), 25),
+    ).not.toEqual(
+      graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "target", emptyGraphContext(), 25),
     );
+    const known = { ...emptyGraphContext(), scope: "known" as const };
+    expect(
+      graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "either", emptyGraphContext(), 25),
+    ).not.toEqual(graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "either", known, 25));
   });
 
   it("G31D-Q09: the query is disabled without a valid focal Entity", async () => {
@@ -201,7 +263,7 @@ describe("Graph query seam", () => {
           INVESTIGATION_ID,
           undefined,
           "either",
-          undefined,
+          emptyGraphContext(),
           true,
         ),
       { wrapper: hookWrapper() },
@@ -214,7 +276,8 @@ describe("Graph query seam", () => {
     const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
     setHttpHandlers(recordingHandler(recorder));
     const { result } = renderHook(
-      () => useGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", undefined),
+      () =>
+        useGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", emptyGraphContext()),
       { wrapper: hookWrapper() },
     );
     await waitFor(() => {
@@ -231,7 +294,8 @@ describe("Graph query seam", () => {
       http.get(NEIGHBORHOOD_PATH, () => HttpResponse.error()),
     );
     const { result } = renderHook(
-      () => useGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", undefined),
+      () =>
+        useGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", emptyGraphContext()),
       { wrapper: hookWrapper() },
     );
     await waitFor(() => {
@@ -247,5 +311,26 @@ describe("Graph query seam", () => {
       expect(recorder.requests.length).toBeGreaterThan(0);
     });
     expect(recorder.requests[0].params.limit).toBe("25");
+  });
+
+  it("G31G-Q22: a scope change issues a new request under a new key", async () => {
+    const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
+    setHttpHandlers(recordingHandler(recorder));
+    const { rerender } = renderHook(
+      ({ context }: { context: GraphContext }) =>
+        useGraphNeighborhood(INVESTIGATION_ID, FOCAL, "either", context),
+      {
+        wrapper: hookWrapper(),
+        initialProps: { context: emptyGraphContext() },
+      },
+    );
+    await waitFor(() => {
+      expect(recorder.requests).toHaveLength(1);
+    });
+    rerender({ context: { ...emptyGraphContext(), scope: "known" } });
+    await waitFor(() => {
+      expect(recorder.requests).toHaveLength(2);
+    });
+    expect(recorder.requests[1].params.scope).toBe("known");
   });
 });

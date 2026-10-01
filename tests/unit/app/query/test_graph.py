@@ -20,6 +20,7 @@ from agentic_threat_investigator.app.query.graph import (
     GraphNode,
     GraphQueryService,
     GraphResult,
+    GraphScope,
 )
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.relationships import (
@@ -52,16 +53,26 @@ def _edge(
     target_entity_id: UUID,
     relationship_type: RelationshipType = RelationshipType.RESOLVES_TO,
     observation_count: int = 1,
+    investigation_observation_count: int | None = None,
     first_observed_at: datetime | None = None,
     last_observed_at: datetime | None = None,
 ) -> GraphEdge:
-    """Build one valid GraphEdge projection for contract tests."""
+    """Build one valid GraphEdge projection for contract tests.
+
+    ``investigation_observation_count`` defaults to ``observation_count``
+    (the Investigation-scope invariant) unless an explicit value is given.
+    """
     return GraphEdge(
         relationship_id=relationship_id or uuid4(),
         source_entity_id=source_entity_id,
         target_entity_id=target_entity_id,
         relationship_type=relationship_type,
         observation_count=observation_count,
+        investigation_observation_count=(
+            observation_count
+            if investigation_observation_count is None
+            else investigation_observation_count
+        ),
         first_observed_at=first_observed_at,
         last_observed_at=last_observed_at,
     )
@@ -182,6 +193,53 @@ def test_e07_unknown_graph_edge_field_rejected() -> None:
         )
 
 
+# --- GraphEdge Investigation support count (GQ11, G31G-E) -----------------------
+
+
+def test_e08_zero_investigation_support_count_accepted() -> None:
+    """A known-scope edge may carry zero Investigation support."""
+    edge = _edge(
+        source_entity_id=uuid4(),
+        target_entity_id=uuid4(),
+        observation_count=3,
+        investigation_observation_count=0,
+    )
+    assert edge.investigation_observation_count == 0
+
+
+def test_e09_support_count_equal_to_total_accepted() -> None:
+    """Investigation scope requires equal counts (accepted by the contract)."""
+    edge = _edge(
+        source_entity_id=uuid4(),
+        target_entity_id=uuid4(),
+        observation_count=2,
+        investigation_observation_count=2,
+    )
+    assert edge.observation_count == edge.investigation_observation_count
+
+
+def test_gq11_investigation_support_exceeding_total_rejected() -> None:
+    """An edge whose Investigation support count exceeds its total is rejected."""
+    with pytest.raises(ValidationError, match="must not exceed"):
+        _edge(
+            source_entity_id=uuid4(),
+            target_entity_id=uuid4(),
+            observation_count=1,
+            investigation_observation_count=2,
+        )
+
+
+def test_gq11_negative_support_count_rejected() -> None:
+    """A negative Investigation support count is rejected."""
+    with pytest.raises(ValidationError):
+        _edge(
+            source_entity_id=uuid4(),
+            target_entity_id=uuid4(),
+            observation_count=1,
+            investigation_observation_count=-1,
+        )
+
+
 # --- GraphResult (G31A-R01..R09) -----------------------------------------------
 
 
@@ -299,6 +357,9 @@ def test_r09_truncated_true_accepted() -> None:
 # --- GraphNeighborhoodQuery (G31A-Q01..Q07) -----------------------------------
 
 
+# --- GraphNeighborhoodQuery scope/filters (GQ01..GQ10, GQ12) -------------------
+
+
 def test_q01_query_defaults_to_either() -> None:
     """The default direction is RelationshipDirection.EITHER."""
     query = GraphNeighborhoodQuery(
@@ -361,6 +422,130 @@ def test_q07_unknown_query_field_rejected() -> None:
             limit=10,
             depth=2,  # type: ignore[call-arg]  # traversal belongs to PR 31H/31I
         )
+
+
+def test_gq01_omitted_scope_defaults_to_investigation() -> None:
+    """Omitting scope keeps current-main Investigation behavior."""
+    query = GraphNeighborhoodQuery(
+        investigation_id=uuid4(), entity_id=uuid4(), limit=10
+    )
+    assert query.scope is GraphScope.INVESTIGATION
+
+
+def test_gq02_known_scope_accepted() -> None:
+    """The broader Known graph scope is an explicit accepted value."""
+    query = GraphNeighborhoodQuery(
+        investigation_id=uuid4(),
+        entity_id=uuid4(),
+        scope=GraphScope.KNOWN,
+        limit=10,
+    )
+    assert query.scope is GraphScope.KNOWN
+
+
+def test_gq03_invalid_scope_rejected() -> None:
+    """A scope value outside the two-value vocabulary is rejected."""
+    with pytest.raises(ValidationError):
+        GraphNeighborhoodQuery(
+            investigation_id=uuid4(),
+            entity_id=uuid4(),
+            scope="global",  # type: ignore[arg-type]  # third scope must not exist
+            limit=10,
+        )
+
+
+def test_gq04_blank_source_rejected() -> None:
+    """A blank source filter is rejected."""
+    with pytest.raises(ValidationError, match="must not be blank"):
+        GraphNeighborhoodQuery(
+            investigation_id=uuid4(),
+            entity_id=uuid4(),
+            source="   ",
+            limit=10,
+        )
+
+
+def test_gq05_one_sided_from_accepted() -> None:
+    """A one-sided lower observation bound is legal."""
+    query = GraphNeighborhoodQuery(
+        investigation_id=uuid4(),
+        entity_id=uuid4(),
+        observed_from=datetime(2026, 1, 1, tzinfo=UTC),
+        limit=10,
+    )
+    assert query.observed_from == datetime(2026, 1, 1, tzinfo=UTC)
+    assert query.observed_to is None
+
+
+def test_gq06_one_sided_to_accepted() -> None:
+    """A one-sided upper observation bound is legal."""
+    query = GraphNeighborhoodQuery(
+        investigation_id=uuid4(),
+        entity_id=uuid4(),
+        observed_to=datetime(2026, 2, 1, tzinfo=UTC),
+        limit=10,
+    )
+    assert query.observed_to == datetime(2026, 2, 1, tzinfo=UTC)
+    assert query.observed_from is None
+
+
+def test_gq07_valid_interval_accepted() -> None:
+    """A strictly ordered two-sided interval is accepted."""
+    query = GraphNeighborhoodQuery(
+        investigation_id=uuid4(),
+        entity_id=uuid4(),
+        observed_from=datetime(2026, 1, 1, tzinfo=UTC),
+        observed_to=datetime(2026, 2, 1, tzinfo=UTC),
+        limit=10,
+    )
+    assert query.observed_from == datetime(2026, 1, 1, tzinfo=UTC)
+    assert query.observed_to == datetime(2026, 2, 1, tzinfo=UTC)
+
+
+def test_gq08_equal_interval_rejected() -> None:
+    """An empty (equal-bounds) interval is rejected."""
+    with pytest.raises(ValidationError, match="earlier than"):
+        GraphNeighborhoodQuery(
+            investigation_id=uuid4(),
+            entity_id=uuid4(),
+            observed_from=datetime(2026, 1, 1, tzinfo=UTC),
+            observed_to=datetime(2026, 1, 1, tzinfo=UTC),
+            limit=10,
+        )
+
+
+def test_gq09_reversed_interval_rejected() -> None:
+    """A reversed two-sided interval is rejected."""
+    with pytest.raises(ValidationError, match="earlier than"):
+        GraphNeighborhoodQuery(
+            investigation_id=uuid4(),
+            entity_id=uuid4(),
+            observed_from=datetime(2026, 3, 1, tzinfo=UTC),
+            observed_to=datetime(2026, 1, 1, tzinfo=UTC),
+            limit=10,
+        )
+
+
+def test_gq10_naive_observed_bound_rejected() -> None:
+    """Naive timestamps keep the existing UTC contract: rejected."""
+    with pytest.raises(ValidationError):
+        GraphNeighborhoodQuery(
+            investigation_id=uuid4(),
+            entity_id=uuid4(),
+            observed_from=datetime(2026, 1, 1),
+            limit=10,
+        )
+
+
+def test_gq12_canonical_entity_type_accepted() -> None:
+    """A canonical EntityType filter is accepted on the query."""
+    query = GraphNeighborhoodQuery(
+        investigation_id=uuid4(),
+        entity_id=uuid4(),
+        entity_type=EntityType.IP_ADDRESS,
+        limit=10,
+    )
+    assert query.entity_type is EntityType.IP_ADDRESS
 
 
 # --- GraphQueryService (G31A-S01..S03) -----------------------------------------

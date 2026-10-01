@@ -57,6 +57,8 @@ export interface GraphRelationshipProvenanceProps {
   investigationId: string;
   /** The canonical Relationship identity of the selected graph edge. */
   relationshipId: string;
+  /** PR 31G: no matching support is admitted to this Investigation (known-only). */
+  knownOnly: boolean;
   /** Hide the provenance surface (graph/expansion state is untouched). */
   onClose: () => void;
 }
@@ -65,6 +67,7 @@ export interface GraphRelationshipProvenanceProps {
 export function GraphRelationshipProvenance({
   investigationId,
   relationshipId,
+  knownOnly,
   onClose,
 }: GraphRelationshipProvenanceProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
@@ -204,7 +207,11 @@ export function GraphRelationshipProvenance({
           />
         ) : null}
         {page !== null && page.items.length === 0 ? (
-          <Typography variant="body2">{t("graph.provenance.empty")}</Typography>
+          <Typography variant="body2">
+            {knownOnly
+              ? t("graph.provenance.noSupport")
+              : t("graph.provenance.empty")}
+          </Typography>
         ) : null}
         {page !== null && page.items.length > 0 ? (
           <Box>

@@ -1328,6 +1328,56 @@ Architectural decisions:
   the other query services. It never writes, never performs provider/LLM
   I/O, and never caches graph projections.
 
+PR 31G adds two explicit graph scopes without changing ATI's authoritative
+evidence model:
+
+```text
+investigation   Relationship visible only through a RelationshipObservation
+                whose exact EvidenceObservation is admitted to the Identity
+                requested Investigation
+known           broader globally known live Relationships around an
+                Investigation-visible focal Entity (global Relationship-
+                Observations support the edge; no InvestigationEvidence
+                admission is required for edge visibility)
+```
+
+Canonical Entities, Relationships, Evidence, EvidenceObservations and
+RelationshipObservations remain global objects; `InvestigationEvidence`
+remains exact admission context (`2.2`). Known scope never becomes
+arbitrary global Entity browsing: the focal Entity must still be admitted
+through an exact EvidenceObservation in both scopes. Investigation scope is
+the default and preserves current-main behavior.
+
+#### PR 31G scope and filter semantics
+
+- **per-edge Investigation support count**: the wire `GraphEdge` carries
+  `investigation_observation_count` — the same active observations whose
+  exact EvidenceObservation is admitted to the requested Investigation,
+  computed set-wise (conditional aggregate / correlated admission EXISTS;
+  never a row-multiplying admission join). Invariants:
+  `0 <= investigation_observation_count <= observation_count` and, in
+  Investigation scope, the two are equal;
+- **server-side filters before bounds**: connected (counterparty) Entity
+  type, canonical Relationship type, `RelationshipObservation.source` exact
+  match, and half-open `observed_at` interval (`[from, to)`, one-sided
+  intervals legal, equal/reversed two-sided intervals rejected; `retrieved_at`
+  is never substituted; a null `observed_at` fails an active time bound).
+  Filtering and grouping stay in PostgreSQL; the client never post-filters;
+- **entity type means counterparty**: for focal `F`, `entity_type=T` selects
+  the other endpoint relative to `F` (source-side edges filter the target;
+  target-side edges filter the source; a self-loop matches only when `F`
+  itself has type `T`);
+- **identical active context for root reads and expansions**: every one-hop
+  expansion inherits scope + entity type + relationship type + source +
+  observed interval; a scope/filter change aborts stale in-flight expansion
+  and resets accumulated graph state;
+- **edge summaries describe the filtered support set**: `observation_count`,
+  `first_observed_at`, `last_observed_at` and
+  `investigation_observation_count` are computed only from observations
+  surviving the active scope/filters;
+- **read-only**: filtering/expansion never invokes providers, the
+  Coordinator, the Research Agent, or persistence.
+
 PR 31B implements the PostgreSQL one-hop graph reads, reconciling the
 PR 24E `PostgresRelationshipQueryService` Investigation-visibility
 semantics, and production composition wires the concrete service into

@@ -168,6 +168,7 @@ function renderProvenance(relationshipId: string = RELATIONSHIP) {
     <GraphRelationshipProvenance
       investigationId={INVESTIGATION_ID}
       relationshipId={relationshipId}
+      knownOnly={false}
       onClose={() => {}}
     />,
   );
@@ -187,6 +188,7 @@ function ProvenanceHost(): ReactElement {
       <GraphRelationshipProvenance
         investigationId={INVESTIGATION_ID}
         relationshipId={relationshipId}
+        knownOnly={false}
         onClose={() => {}}
       />
     </div>

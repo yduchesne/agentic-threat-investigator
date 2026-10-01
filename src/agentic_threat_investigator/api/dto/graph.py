@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.relationships import RelationshipType
@@ -36,9 +36,13 @@ class GraphNodeResponse(BaseModel):
 class GraphEdgeResponse(BaseModel):
     """One canonical Relationship projected as a graph edge.
 
-    ``observation_count``, ``first_observed_at`` and ``last_observed_at``
-    are copied exactly from the application ``GraphEdge`` summary; the wire
-    never recomputes or substitutes lifetimes or retrieval times.
+    ``observation_count``, ``investigation_observation_count``,
+    ``first_observed_at`` and ``last_observed_at`` are copied exactly from
+    the application ``GraphEdge`` summary; the wire never recomputes or
+    substitutes lifetimes or retrieval times, and never infers Investigation
+    support. ``investigation_observation_count`` counts the same matching
+    observations whose exact EvidenceObservation is admitted to the current
+    Investigation and never exceeds ``observation_count``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -47,9 +51,20 @@ class GraphEdgeResponse(BaseModel):
     source_entity_id: UUID
     target_entity_id: UUID
     relationship_type: RelationshipType
-    observation_count: int
+    observation_count: int = Field(ge=1)
+    investigation_observation_count: int = Field(ge=0)
     first_observed_at: datetime | None = None
     last_observed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def support_within_total(self) -> "GraphEdgeResponse":
+        """Require Investigation support never to exceed the filtered total."""
+        if self.investigation_observation_count > self.observation_count:
+            raise ValueError(
+                "graph edge investigation_observation_count must not exceed "
+                "observation_count"
+            )
+        return self
 
 
 class GraphNeighborhoodResponse(BaseModel):

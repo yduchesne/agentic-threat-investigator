@@ -118,7 +118,12 @@ function baseInputs(
     investigationId: INVESTIGATION_ID,
     rootEntityId: FOCAL,
     rootDirection: "either",
+    scope: "investigation",
+    entityType: undefined,
     relationshipType: undefined,
+    source: undefined,
+    observedFrom: undefined,
+    observedTo: undefined,
     rootNeighborhood: rootNeighborhoodFake(),
     ...overrides,
   };
@@ -619,5 +624,207 @@ describe("useGraphExpansion (PR 31E Part 4)", () => {
     });
     expect(result.current.expanded).toHaveLength(0);
     expect(result.current.truncated).toHaveLength(0);
+  });
+
+  // --- PR 31G: expansion inherits the committed graph context (FE19..FE22) ---
+
+  interface FullRequest {
+    entity: string;
+    direction: string | null;
+    scope: string | null;
+    entityType: string | null;
+    relationshipType: string | null;
+    source: string | null;
+    observedFrom: string | null;
+    observedTo: string | null;
+  }
+
+  function fullRecordingHandler(
+    recorder: FullRequest[],
+    bodyFor: (entityId: string) => GraphNeighborhood,
+  ) {
+    return http.get(NEIGHBORHOOD_PATH, ({ request, params }) => {
+      const url = new URL(request.url);
+      recorder.push({
+        entity: String(params.entityId),
+        direction: url.searchParams.get("direction"),
+        scope: url.searchParams.get("scope"),
+        entityType: url.searchParams.get("entity_type"),
+        relationshipType: url.searchParams.get("relationship_type"),
+        source: url.searchParams.get("source"),
+        observedFrom: url.searchParams.get("observed_from"),
+        observedTo: url.searchParams.get("observed_to"),
+      });
+      return HttpResponse.json(bodyFor(String(params.entityId)));
+    });
+  }
+
+  it("FE19: an expansion inherits Known scope", async () => {
+    const recorder: FullRequest[] = [];
+    setHttpHandlers(fullRecordingHandler(recorder, (entityId) =>
+      entityId === B ? expandB() : rootNeighborhoodFake()));
+    const { result } = renderHook(({ inputs }: { inputs: GraphExpansionInputs }) =>
+      useGraphExpansion(inputs),
+      { initialProps: { inputs: baseInputs({ scope: "known" }) } },
+    );
+    await waitFor(() => {
+      expect(result.current.graph).not.toBeNull();
+    });
+    act(() => {
+      result.current.expand(B, "either");
+    });
+    await drainAct();
+    await waitFor(() => {
+      expect(result.current.inFlight).toBeNull();
+    });
+    expect(recorder[0].scope).toBe("known");
+  });
+
+  it("FE20: an expansion inherits every active filter", async () => {
+    const recorder: FullRequest[] = [];
+    setHttpHandlers(fullRecordingHandler(recorder, (entityId) =>
+      entityId === B ? expandB() : rootNeighborhoodFake()));
+    const { result } = renderHook(({ inputs }: { inputs: GraphExpansionInputs }) =>
+      useGraphExpansion(inputs),
+      {
+        initialProps: {
+          inputs: baseInputs({
+            scope: "known",
+            entityType: "ip_address",
+            relationshipType: CNAME,
+            source: "rdap",
+            observedFrom: "2026-01-01T00:00:00Z",
+            observedTo: "2026-02-01T00:00:00Z",
+          }),
+        },
+      },
+    );
+    await waitFor(() => {
+      expect(result.current.graph).not.toBeNull();
+    });
+    act(() => {
+      result.current.expand(B, "either");
+    });
+    await drainAct();
+    await waitFor(() => {
+      expect(result.current.inFlight).toBeNull();
+    });
+    expect(recorder[0]).toEqual({
+      entity: B,
+      direction: "either",
+      scope: "known",
+      entityType: "ip_address",
+      relationshipType: CNAME,
+      source: "rdap",
+      observedFrom: "2026-01-01T00:00:00Z",
+      observedTo: "2026-02-01T00:00:00Z",
+    });
+  });
+
+  it("FE21/FE22: a scope/filter change in flight aborts, and after expansion it resets accumulated state", async () => {
+    let resolveFirst!: (value: HttpResponse<GraphNeighborhood>) => void;
+    const gate = new Promise<HttpResponse<GraphNeighborhood>>((resolve) => {
+      resolveFirst = resolve;
+    });
+    let aborted = false;
+    setHttpHandlers(
+      http.get(NEIGHBORHOOD_PATH, ({ request, params }) => {
+        request.signal.addEventListener("abort", () => {
+          aborted = true;
+        });
+        if (String(params.entityId) === B) {
+          return gate;
+        }
+        return HttpResponse.json(rootNeighborhoodFake());
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ inputs }: { inputs: GraphExpansionInputs }) => useGraphExpansion(inputs),
+      { initialProps: { inputs: baseInputs({ scope: "known" }) } },
+    );
+    await waitFor(() => {
+      expect(result.current.graph).not.toBeNull();
+    });
+    act(() => {
+      result.current.expand(B, "either");
+    });
+    await waitFor(() => {
+      expect(result.current.inFlight).not.toBeNull();
+    });
+    // Scope change while the expansion is in flight: abort + reset.
+    await act(async () => {
+      rerender({
+        inputs: baseInputs({
+          scope: "known",
+          entityType: "ip_address",
+          rootNeighborhood: {
+            nodes: [node(FOCAL), node(D, "198.51.100.7")],
+            edges: [edge("e-ip", FOCAL, D)],
+            truncated: false,
+          },
+        }),
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.inFlight).toBeNull();
+      expect(entityIds(result.current.graph)).toEqual([FOCAL, D]);
+    });
+    expect(aborted).toBe(true);
+    // Late result from the old context cannot contaminate the new root.
+    await act(async () => {
+      resolveFirst(HttpResponse.json<GraphNeighborhood>(expandB()));
+    });
+    await drainAct();
+    expect(entityIds(result.current.graph)).toEqual([FOCAL, D]);
+    expect(result.current.expanded).toHaveLength(0);
+  });
+
+  it("FE38: a filter change discards completed expansion identities from the old context", async () => {
+    const recorder: FullRequest[] = [];
+    setHttpHandlers(fullRecordingHandler(recorder, (entityId) =>
+      entityId === B ? expandB() : rootNeighborhoodFake()));
+    const { result, rerender } = renderHook(
+      ({ inputs }: { inputs: GraphExpansionInputs }) => useGraphExpansion(inputs),
+      { initialProps: { inputs: baseInputs() } },
+    );
+    await waitFor(() => {
+      expect(result.current.graph).not.toBeNull();
+    });
+    act(() => {
+      result.current.expand(B, "either");
+    });
+    await drainAct();
+    await waitFor(() => {
+      expect(result.current.inFlight).toBeNull();
+    });
+    expect(result.current.expanded).toHaveLength(1);
+    // A scope change resets accumulated topology and discards completed
+    // identities; a subsequent expand of the same node is a fresh request.
+    await act(async () => {
+      rerender({
+        inputs: baseInputs({
+          scope: "known",
+          rootNeighborhood: {
+            nodes: [node(FOCAL), node(B, "203.0.113.10")],
+            edges: [edge("e-k", FOCAL, B)],
+            truncated: false,
+          },
+        }),
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.graph).not.toBeNull();
+    });
+    expect(result.current.expanded).toHaveLength(0);
+    act(() => {
+      result.current.expand(B, "either");
+    });
+    await drainAct();
+    await waitFor(() => {
+      expect(result.current.inFlight).toBeNull();
+    });
+    expect(recorder.map((r) => r.entity)).toEqual([B, B]);
+    expect(recorder[1].scope).toBe("known");
+    expect(result.current.expanded).toHaveLength(1);
   });
 });

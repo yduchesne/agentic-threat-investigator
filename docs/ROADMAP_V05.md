@@ -42,7 +42,7 @@ requirements justify the additional persistence dependency.
 | **31D** | Basic interactive graph UI | First Maltego-like visualization with pan/zoom/layout, Functional node dragging, and node/edge selection over the canonical graph API [DONE] |
 | **31E** | Interactive graph expansion | Analyst-driven expansion of already-known graph relationships via the same one-hop endpoint, canonical client merge, PivotMenu local actions [DONE] |
 | **31F** | Evidence drill-down | Relationship -> observation -> evidence navigation from the graph [DONE] |
-| **31G** | Filtering and investigation context | Manage larger graphs without confusing global knowledge with investigation provenance |
+| **31G** | Filtering and investigation context | Manage larger graphs without confusing global knowledge with investigation provenance [DONE] |
 | **31H** | Bounded multi-hop traversal | Depth-limited recursive exploration using PostgreSQL recursive CTEs |
 | **31I** | Path finding | Bounded connection discovery between analyst-selected entities |
 | **31J** | Temporal graph exploration | Explore topology through RelationshipObservation time semantics |
@@ -183,7 +183,7 @@ adding backend or API changes.
 PR 31F is the first complete investigation-grade graph-exploration
 milestone.
 
-## PR 31G — Graph filtering and investigation context
+## PR 31G — Graph filtering and investigation context [DONE]
 
 Add controls needed to work with larger graphs: Entity type, Relationship type,
 datasource/provenance where supported, and observation-time filters.
@@ -196,6 +196,34 @@ investigation was discovered by that investigation.
 
 Provide clear semantics for investigation-scoped versus broader known-graph
 views without duplicating or weakening the global evidence model.
+
+Delivered (PR 31G):
+
+- Two explicit graph scopes: ``investigation`` (default; a Relationship is
+  visible only when a supporting RelationshipObservation's exact
+  EvidenceObservation is admitted to the Investigation) and ``known``
+  (globally known live one-hop Relationships around an Investigation-visible
+  focal Entity). Omitted scope preserves current-main behavior.
+- Known scope never becomes arbitrary global Entity lookup: the focal Entity
+  must still be admitted to the Investigation through an exact
+  EvidenceObservation.
+- Per-edge backend-computed ``investigation_observation_count`` (set-wise
+  conditional aggregate; never a row-multiplying admission join) so globally
+  known topology is never presented as Investigation-discovered topology.
+- Bounded server-side filters applied before aggregation/bounding: connected
+  (counterparty) Entity type, canonical Relationship type,
+  ``RelationshipObservation.source`` exact match, and half-open
+  ``observed_at`` interval (never ``retrieved_at``).
+- Identical scope/filter context for root reads and every explicit one-hop
+  expansion; a scope/filter change aborts stale expansion and resets
+  accumulated graph state.
+- URL-backed graph context (``graph_scope`` / ``graph_entity_type`` /
+  ``graph_relationship_type`` / ``graph_source`` / ``graph_observed_from`` /
+  ``graph_observed_to``) reconstructing refresh and Back/Forward, with an
+  explicit draft/Apply/Clear pattern.
+- No graph database, multi-hop traversal, path finding, relationship-lifetime
+  inference, provider/Coordinator/Research execution, or graph mutation.
+  PR31H owns multi-hop, PR31I path finding, PR31J temporal exploration.
 
 ## PR 31H — Bounded multi-hop traversal
 

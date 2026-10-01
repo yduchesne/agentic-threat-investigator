@@ -502,8 +502,12 @@ export function RelationshipGraph({
                 ),
               },
               {
-                label: t("graph.detail.observationCount"),
+                label: t("graph.detail.matchingObservations"),
                 value: String(selectedEdge.observationCount),
+              },
+              {
+                label: t("graph.detail.matchingInvestigation"),
+                value: String(selectedEdge.investigationObservationCount),
               },
               {
                 label: t("graph.detail.firstObserved"),
@@ -521,6 +525,15 @@ export function RelationshipGraph({
               },
             ]}
           />
+          <Typography
+            variant="caption"
+            component="div"
+            role="status"
+            aria-label={edgeContextLabel(t, selectedEdge)}
+            sx={{ mt: 1, fontWeight: 600 }}
+          >
+            {edgeContextLabel(t, selectedEdge)}
+          </Typography>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
             <Button
               size="small"
@@ -556,6 +569,11 @@ export function RelationshipGraph({
         <GraphRelationshipProvenance
           investigationId={investigationId}
           relationshipId={provenanceRelationshipId}
+          knownOnly={
+            model.edges.find(
+              (edge) => edge.relationshipId === provenanceRelationshipId,
+            )?.investigationObservationCount === 0
+          }
           onClose={() => setProvenanceRelationshipId(null)}
         />
       ) : null}
@@ -678,6 +696,10 @@ export function buildSlottedEdges(
           : 0,
     );
     ordered.forEach((edge, index) => {
+      const knownOnly = edge.investigationObservationCount === 0;
+      const knownOnlyStyle = knownOnly
+        ? { strokeDasharray: "6 3" }
+        : undefined;
       if (edge.sourceEntityId === edge.targetEntityId) {
         result.push({
           id: edgeId(edge.relationshipId),
@@ -687,6 +709,7 @@ export function buildSlottedEdges(
           targetHandle: "target-loop",
           label: typeLabel(edge.relationshipType),
           type: "default",
+          style: knownOnlyStyle,
           markerEnd: { type: MarkerType.ArrowClosed, color: markerColor },
         });
         return;
@@ -700,6 +723,7 @@ export function buildSlottedEdges(
         targetHandle: slot === 0 ? "target-top-0" : slot === 1 ? "target-top-1" : "target-top-2",
         label: typeLabel(edge.relationshipType),
         type: "default",
+        style: knownOnlyStyle,
         markerEnd: { type: MarkerType.ArrowClosed, color: markerColor },
       });
     });
@@ -710,6 +734,18 @@ export function buildSlottedEdges(
 /** Fallback compact graph label when a node is not on the page. */
 function graphLabel(entityId: string): string {
   return `Entity ${entityId.slice(0, 8)}`;
+}
+
+/** Whether an edge is supported by the current Investigation (backend truth). */
+function edgeSupported(edge: RelationshipGraphEdge): boolean {
+  return edge.investigationObservationCount > 0;
+}
+
+/** The deterministic Investigation/Known context cue for one edge. */
+function edgeContextLabel(t: TFunction, edge: RelationshipGraphEdge): string {
+  return edgeSupported(edge)
+    ? t("graph.context.supported")
+    : t("graph.context.knownOnly");
 }
 
 /**
@@ -798,6 +834,8 @@ function EdgeList({
               t("graph.list.source"),
               t("graph.list.target"),
               t("graph.list.supportingObservations"),
+              t("graph.list.matchingInThisInvestigation"),
+              t("graph.list.context"),
               t("graph.list.firstObserved"),
               t("graph.list.lastObserved"),
               t("graph.list.action"),
@@ -832,6 +870,18 @@ function EdgeList({
                   </Box>
                 </td>
                 <td style={{ padding: 6 }}>{String(edge.observationCount)}</td>
+                <td style={{ padding: 6 }}>{String(edge.investigationObservationCount)}</td>
+                <td style={{ padding: 6 }}>
+                  <Typography
+                    variant="caption"
+                    component="span"
+                    role="note"
+                    aria-label={edgeContextLabel(t, edge)}
+                    sx={{ fontWeight: 600 }}
+                  >
+                    {edgeContextLabel(t, edge)}
+                  </Typography>
+                </td>
                 <td style={{ padding: 6 }}>
                   {edge.firstObservedAt !== null
                     ? <Timestamp iso={edge.firstObservedAt} />

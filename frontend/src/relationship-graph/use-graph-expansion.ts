@@ -10,7 +10,7 @@
 // or Coordinator work. Expansion is read-only exploration of topology
 // already admitted to the current Investigation.
 //
-// Rules (PR 31E §4, §15-§18):
+// Rules (PR 31E §4, §15-§18; PR 31G §13):
 // - one explicit action produces at most one bounded request;
 // - one in-flight expansion at a time;
 // - an already-completed ``(entity_id, direction)`` expansion never
@@ -20,18 +20,23 @@
 //   target;
 // - cancellation is not a semantic failure;
 // - a root semantic change (investigation/focal/direction/relationship
-//   type) aborts and resets accumulated state, and stale late results can
-//   never cross into a new root context (generation token + abort).
+//   type/scope/entity type/source/observed bounds) aborts and resets
+//   accumulated state, and stale late results can never cross into a new
+//   root context (generation token + abort);
+// - every expansion inherits the complete committed graph context.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
+  EntityTypeName,
   GraphNeighborhood,
+  GraphScopeName,
   RelationshipDirectionName,
   RelationshipTypeName,
 } from "../api/schema-types";
 import { isAbortError } from "../api/errors";
 import { GRAPH_NEIGHBORHOOD_LIMIT, fetchGraphNeighborhood } from "./graph-api";
+import { graphContextKey } from "./graph-context-url";
 import {
   emptyAccumulatedGraph,
   expansionKeyMatches,
@@ -46,7 +51,13 @@ export interface GraphExpansionInputs {
   /** The workspace focal Entity (undefined when no valid focal exists). */
   rootEntityId: string | undefined;
   rootDirection: RelationshipDirectionName;
+  /** PR 31G: the committed graph context (scope + every filter). */
+  scope: GraphScopeName;
+  entityType: EntityTypeName | undefined;
   relationshipType: RelationshipTypeName | undefined;
+  source: string | undefined;
+  observedFrom: string | undefined;
+  observedTo: string | undefined;
   /** The TanStack Query-owned root neighborhood (null while loading). */
   rootNeighborhood: GraphNeighborhood | null;
 }
@@ -80,11 +91,18 @@ function rootContextKey(
   investigationId: string,
   rootEntityId: string | undefined,
   rootDirection: RelationshipDirectionName,
-  relationshipType: RelationshipTypeName | undefined,
+  context: {
+    scope: GraphScopeName;
+    entityType: EntityTypeName | undefined;
+    relationshipType: RelationshipTypeName | undefined;
+    source: string | undefined;
+    observedFrom: string | undefined;
+    observedTo: string | undefined;
+  },
 ): string | null {
   return rootEntityId === undefined
     ? null
-    : `${investigationId}\u0000${rootEntityId}\u0000${rootDirection}\u0000${relationshipType ?? ""}`;
+    : `${investigationId}\u0000${rootEntityId}\u0000${rootDirection}\u0000${graphContextKey(context)}`;
 }
 
 /** The bounded one-hop expansion orchestrator (PR 31E Part 4). */
@@ -92,7 +110,12 @@ export function useGraphExpansion({
   investigationId,
   rootEntityId,
   rootDirection,
+  scope,
+  entityType,
   relationshipType,
+  source,
+  observedFrom,
+  observedTo,
   rootNeighborhood,
 }: GraphExpansionInputs): GraphExpansionController {
   const [graph, setGraph] = useState<AccumulatedGraph | null>(null);
@@ -109,15 +132,30 @@ export function useGraphExpansion({
     investigationId,
     rootEntityId,
     rootDirection,
+    scope,
+    entityType,
     relationshipType,
+    source,
+    observedFrom,
+    observedTo,
   });
-  inputsRef.current = { investigationId, rootEntityId, rootDirection, relationshipType };
+  inputsRef.current = {
+    investigationId,
+    rootEntityId,
+    rootDirection,
+    scope,
+    entityType,
+    relationshipType,
+    source,
+    observedFrom,
+    observedTo,
+  };
 
   const contextKey = rootContextKey(
     investigationId,
     rootEntityId,
     rootDirection,
-    relationshipType,
+    { scope, entityType, relationshipType, source, observedFrom, observedTo },
   );
 
   // Root synchronization: a root semantic change resets accumulated state
@@ -176,8 +214,7 @@ export function useGraphExpansion({
       if (contextKeyRef.current === null) {
         return; // no root context loaded yet
       }
-      const { investigationId: investigation, relationshipType: type } =
-        inputsRef.current;
+      const { investigationId: investigation, ...context } = inputsRef.current;
       const key: ExpandedNeighborhoodKey = { entityId, direction };
       const generation = generationRef.current;
       const controller = new AbortController();
@@ -190,7 +227,14 @@ export function useGraphExpansion({
         investigation,
         entityId,
         direction,
-        type,
+        {
+          scope: context.scope,
+          entityType: context.entityType,
+          relationshipType: context.relationshipType,
+          source: context.source,
+          observedFrom: context.observedFrom,
+          observedTo: context.observedTo,
+        },
         GRAPH_NEIGHBORHOOD_LIMIT,
         controller.signal,
       )

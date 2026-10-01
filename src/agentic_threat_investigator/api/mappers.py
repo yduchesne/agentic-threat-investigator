@@ -334,9 +334,11 @@ def to_graph_edge_response(edge: GraphEdge) -> GraphEdgeResponse:
     """Map one graph edge projection exactly.
 
     Canonical Relationship identity/topology/type and the application
-    observation summary (``observation_count``, ``first_observed_at``,
+    observation summary (``observation_count``,
+    ``investigation_observation_count``, ``first_observed_at``,
     ``last_observed_at``) are copied field-for-field without recomputation,
-    substitution, or aggregation.
+    substitution, or aggregation; the Investigation support count is backend
+    truth and is never inferred here.
     """
     return GraphEdgeResponse(
         relationship_id=edge.relationship_id,
@@ -344,6 +346,7 @@ def to_graph_edge_response(edge: GraphEdge) -> GraphEdgeResponse:
         target_entity_id=edge.target_entity_id,
         relationship_type=edge.relationship_type,
         observation_count=edge.observation_count,
+        investigation_observation_count=edge.investigation_observation_count,
         first_observed_at=edge.first_observed_at,
         last_observed_at=edge.last_observed_at,
     )

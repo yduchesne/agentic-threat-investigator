@@ -406,13 +406,17 @@ export interface paths {
          * @description Return the bounded one-hop neighborhood of one focal Entity.
          *
          *     ``direction`` defaults to ``either`` relative to the focal Entity;
-         *     ``relationship_type`` filters the canonical Relationship URN; an omitted
-         *     ``limit`` uses the configured default page size while the service-owned
-         *     maximum is never clamped -- an oversized caller limit is a stable 400
-         *     ``invalid_request``. Scoped absence (missing, soft-deleted, or
-         *     not-visible focal Entity) maps to one 404 ``graph_entity_not_found``;
-         *     every other graph result, including a visible isolated focal Entity,
-         *     maps to 200.
+         *     ``relationship_type`` filters the canonical Relationship URN;
+         *     ``scope`` selects ``investigation`` (default) or ``known`` topology;
+         *     ``entity_type`` filters the connected/counterparty Entity type;
+         *     ``source`` exact-matches ``RelationshipObservation.source``;
+         *     ``observed_from`` / ``observed_to`` bound ``observed_at`` half-open;
+         *     an omitted ``limit`` uses the configured default page size while the
+         *     service-owned maximum is never clamped -- an oversized caller limit is
+         *     a stable 400 ``invalid_request``. Scoped absence (missing, soft-deleted,
+         *     or not-visible focal Entity) maps to one 404 ``graph_entity_not_found``;
+         *     every other graph result, including a visible isolated focal Entity or
+         *     an all-filters-filtered focal-only graph, maps to 200.
          */
         get: operations["get_graph_entity_neighborhood"];
         put?: never;
@@ -1256,13 +1260,19 @@ export interface components {
          * GraphEdgeResponse
          * @description One canonical Relationship projected as a graph edge.
          *
-         *     ``observation_count``, ``first_observed_at`` and ``last_observed_at``
-         *     are copied exactly from the application ``GraphEdge`` summary; the wire
-         *     never recomputes or substitutes lifetimes or retrieval times.
+         *     ``observation_count``, ``investigation_observation_count``,
+         *     ``first_observed_at`` and ``last_observed_at`` are copied exactly from
+         *     the application ``GraphEdge`` summary; the wire never recomputes or
+         *     substitutes lifetimes or retrieval times, and never infers Investigation
+         *     support. ``investigation_observation_count`` counts the same matching
+         *     observations whose exact EvidenceObservation is admitted to the current
+         *     Investigation and never exceeds ``observation_count``.
          */
         GraphEdgeResponse: {
             /** First Observed At */
             first_observed_at?: string | null;
+            /** Investigation Observation Count */
+            investigation_observation_count: number;
             /** Last Observed At */
             last_observed_at?: string | null;
             /** Observation Count */
@@ -1312,6 +1322,19 @@ export interface components {
             /** Value */
             value: string;
         };
+        /**
+         * GraphScope
+         * @description Exactly two graph scopes: Investigation-supported or broader known.
+         *
+         *     ``INVESTIGATION`` (the default) admits a Relationship as visible only
+         *     when at least one supporting RelationshipObservation references an
+         *     EvidenceObservation admitted to the requested Investigation; ``KNOWN``
+         *     retains the Investigation-visible focal Entity but admits globally known
+         *     live Relationships supported by global RelationshipObservations even
+         *     when those observations were never admitted to this Investigation.
+         * @enum {string}
+         */
+        GraphScope: "investigation" | "known";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -2111,6 +2134,7 @@ export type GeointTopLocationResponse = components['schemas']['GeointTopLocation
 export type GraphEdgeResponse = components['schemas']['GraphEdgeResponse'];
 export type GraphNeighborhoodResponse = components['schemas']['GraphNeighborhoodResponse'];
 export type GraphNodeResponse = components['schemas']['GraphNodeResponse'];
+export type GraphScope = components['schemas']['GraphScope'];
 export type HttpValidationError = components['schemas']['HTTPValidationError'];
 export type HistoryOperation = components['schemas']['HistoryOperation'];
 export type HistoryRecordResponse = components['schemas']['HistoryRecordResponse'];
@@ -3518,6 +3542,11 @@ export interface operations {
             query?: {
                 direction?: components["schemas"]["RelationshipDirection"];
                 relationship_type?: components["schemas"]["RelationshipType"] | null;
+                scope?: components["schemas"]["GraphScope"] | null;
+                entity_type?: components["schemas"]["EntityType"] | null;
+                source?: string | null;
+                observed_from?: string | null;
+                observed_to?: string | null;
                 limit?: number | null;
             };
             header?: never;
