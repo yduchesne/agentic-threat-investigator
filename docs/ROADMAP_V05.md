@@ -549,3 +549,90 @@ passes in Chromium. Component suite, typecheck, ESLint and Vite build are
 green; the full E2E classification is recorded in
 `out/PR31F7_IMPLEMENTATION_REPORT.md`. GEOINT seeding and backend/DB work
 remain outside this PR. [DONE]
+
+## PR 31F-8 — Route-Oriented Investigation Resource Navigation
+
+Corrective work on fresh main after PR 31F-7 (no PR 31G scope).
+
+The generic URL-encoded `PivotWorkspace` resource host is replaced by
+ordinary Investigation-scoped React Router navigation: every Pivot
+capability resolves to one explicit routed content surface, the
+Investigation shell stays mounted around a single active `<Outlet>`
+resource, and the live nested list/detail/Pivot lifecycle implicated in
+the deterministic Chromium/Firefox detached-DOM and native-pointer class
+is removed from production navigation.
+
+Final scope:
+
+- **One exhaustive mapper (A).** `frontend/src/pivots/pivot-route.ts`
+  (`pivotTargetToRoute`) translates every allowlisted `PivotResource`
+  target to its canonical route with validated query filters; the map is
+  exhaustive (a new resource without a case fails compilation), canonical
+  IDs own path identity (labels are presentation only), and malformed
+  targets fail closed without any navigation (R01..R14 unit matrix).
+- **Capability activation is semantic navigation (B).** `PivotMenu`
+  renders route-known actions as react-router links (direct action or the
+  in-flow action bar); local/context commands remain buttons that never
+  touch the URL. No encoded pivot stack mutation, depth accounting, or
+  deferred-commit workaround remains.
+- **Route-owned detail (C).** Exact scoped detail surfaces are dedicated
+  routes: `/evidence/:evidenceId`, `/relationships/:relationshipId`,
+  `/relationships/observations/:observationId` and
+  `/geoint/observations/:observationId`, each reusing the existing
+  query hooks and detail bodies with a semantic Back link that carries
+  the reconstructible list filter/cursor query. GEOINT surfaces mount as
+  explicit routes (`/geoint/entities/:entityId`,
+  `/geoint/locations/:locationId/entities`,
+  `/geoint/locations/:locationId/observations`); route-dependent
+  breadcrumbs replace the Pivot-stack breadcrumbs/Close.
+- **GEOINT detail lifecycle (D).** `EntityGeointView`, `LocationViews`
+  and `GeointPage` retire the local `evidenceId`/`table.selection` ->
+  `ResourceDetailView` replacement: "View Evidence" is a semantic link to
+  the exact Evidence route and observation rows navigate to the exact
+  GEOINT Observation route; browser Back reconstructs Entity
+  GEOINT/Location surfaces from route/query state (N09/N15..N18). The
+  Location containment controller becomes two ordinary toggle buttons
+  flowing through the shared filter controller (the former MUI
+  ToggleButtonGroup roving-focus internals reproduced a deterministic
+  main-thread freeze on the real stack under pointer AND keyboard
+  activation; the plain buttons preserve the semantic query change and
+  cursor reset exactly, N19/N20).
+- **Investigation shell cutover (E).** `InvestigationWorkspace` is
+  route-only: persistent header + navigation + one `<Outlet>` surface.
+  Legacy `?pivot=` URLs have one deterministic policy: a valid stack
+  redirects once (replace) to its canonical route through the same
+  mapper, removing the parameter; malformed state is removed in place
+  (N03/N04). No second navigation architecture exists.
+- **Obsolete hosting retired (F).** `PivotWorkspace`, `PivotStepHost`,
+  `pivot-port.ts`, `PivotBreadcrumbs`, the Pivot-stack mutation/projection
+  helpers, and the now-unused `GeointDetailContent` local detail surface
+  are removed; the validated legacy parser/serializer remains for the
+  deterministic legacy policy.
+- **Browser acceptance (G).** `zz-geoint.spec.ts` runs the canonical
+  routed G1..G6 journeys with normal locator clicks (no dispatch/force/
+  coordinate/sleep), `zz-31f8-stress.spec.ts` repeats the routed GEOINT
+  journey at least 20 consecutive cycles per engine in one page process
+  (Chromium + Firefox, workers=1, retries=0), and the pivot trajectory
+  specs (`zz-pivots`, `zz-pivot-acceptance`, `zz-list-detail`,
+  `zz-geolocation-workflow`, `zz-relationship-evolution`) are converted to
+  routed navigation. G4 explicitly returns to `/investigations` before
+  creating Investigation B (no product control added).
+
+Threading: URL path/query remains the sole reconstructible analyst state;
+no second router/global store/generic navigation stack; capability
+registration and resource semantics unchanged; no overlay; no graph
+redesign; no backend/API/DB/migration/seeder/provider/Coordinator
+change; no PR31G scope.
+
+**Status.** Implemented on `fix/pr31f-8` over the accepted PR 31F-7
+baseline. Frontend component suite (690/690), typecheck, ESLint and Vite
+build are green; the exhaustive mapper matrix and routed navigation
+component coverage are recorded in
+`out/PR31F8_IMPLEMENTATION_REPORT.md`. The
+real-stack browser gate (routed G1..G6 plus >= 20-cycle Chromium +
+Firefox stress, workers=1/retries=0) passes through `scripts/e2e.sh`
+(see docs/TESTING.md "PR 31F-8 routed GEOINT browser gate"), and the
+converted pivot trajectory specs (zz-pivots, zz-pivot-acceptance,
+zz-list-detail, zz-geolocation-workflow, zz-relationship-evolution,
+zz-pointer-acceptance, zz-pr31f7-critical) pass in the directed
+real-stack runs. [DONE]

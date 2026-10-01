@@ -548,8 +548,8 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     await screen.findByRole("button", { name: "Expand known relationships" });
     expect(screen.getByRole("button", { name: "Expand outgoing relationships" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand incoming relationships" })).toBeInTheDocument();
-    // Existing navigation pivots remain (U20).
-    expect(screen.getByRole("button", { name: "Evidence for this entity" })).toBeInTheDocument();
+    // Existing navigation pivots remain (route links, U20).
+    expect(screen.getByRole("link", { name: "Evidence for this entity" })).toBeInTheDocument();
     // Fire the local expansion action (U02: selected canonical B, either).
     fireEvent.click(screen.getByRole("button", { name: "Expand known relationships" }));
     await waitFor(() => {

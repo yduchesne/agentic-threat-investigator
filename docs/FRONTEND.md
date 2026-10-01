@@ -160,7 +160,7 @@ Map markers link back to entity/evidence details.
 
 Show the bounded PR 26D canonical geographic summary for the Investigation: entities with geographic context, observations, canonical Locations, type/precision counts and top Locations, with the persistent semantic disclaimer that shared or nearby locations do not establish a cyber relationship, ownership, coordination, targeting, or attribution.
 
-Map markers plot only the currently loaded top Locations' representative coordinates (never all pages) with neutral markers; an always-available non-map table covers every map action. Entities show Investigation-relative current context and pageable immutable observation history; Locations expose scoped Entities/observations with the exact/contained controller (server-owned containment, `containment_applied` rendered honestly). Every observation reaches its exact Evidence through the returned `evidence_id`; geographic exploration uses the PR 24 typed PivotWorkspace.
+Map markers plot only the currently loaded top Locations' representative coordinates (never all pages) with neutral markers; an always-available non-map table covers every map action. Entities show Investigation-relative current context and pageable immutable observation history; Locations expose scoped Entities/observations with the exact/contained controller (server-owned containment, `containment_applied` rendered honestly). Every observation reaches its exact Evidence through the returned `evidence_id`; geographic exploration uses PR 31F-8 canonical Investigation-scoped routes (`/geoint/entities/:entityId`, `/geoint/locations/:locationId/entities|observations`, exact Evidence and observation routes) — the former encoded PivotWorkspace host is retired.
 
 ## Research
 

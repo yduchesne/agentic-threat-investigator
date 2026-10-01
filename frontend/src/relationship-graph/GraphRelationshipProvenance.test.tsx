@@ -139,9 +139,18 @@ function renderInRouter(children: ReactElement): {
   router: ReturnType<typeof createMemoryRouter>;
 } {
   const queryClient = freshQueryClient();
+  // Mount inside an Investigation route so routed Pivot actions resolve
+  // their canonical scope (PR 31F-8).
   const router = createMemoryRouter(
-    [{ path: "*", element: children }],
-    { initialEntries: ["/"] },
+    [
+      { path: "/investigations/:investigationId/*", element: children },
+      { path: "/", element: children },
+    ],
+    {
+      initialEntries: [
+        `/investigations/${INVESTIGATION_ID}/relationships/observations`,
+      ],
+    },
   );
   return {
     result: render(
@@ -750,9 +759,9 @@ describe("GraphRelationshipProvenance exact observation selection (PR 31F U16-U2
       name: "Observation provenance actions",
     });
     fireEvent.click(trigger);
-    await screen.findByRole("button", { name: "Open evidence" });
+    await screen.findByRole("link", { name: "Open evidence" });
     expect(
-      screen.getByRole("button", { name: "Observations for this relationship" }),
+      screen.getByRole("link", { name: "Observations for this relationship" }),
     ).toBeInTheDocument();
   });
 });

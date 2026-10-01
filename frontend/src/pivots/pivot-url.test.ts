@@ -1,27 +1,26 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Pivot URL serializer/parser tests (PR 24D §24).
+// Pivot URL serializer/parser tests (PR 24D §24; PR 31F-8 §4.1).
 //
 // Round-trip determinism and fail-closed validation: unknown versions,
 // resources, filters, step fields, malformed UUIDs, label overflow, the
 // sixth step, oversized parameters, and trailing/invalid payloads are all
-// rejected without surfacing partial state. Navigation helpers preserve
-// base search parameters exactly.
+// rejected without surfacing partial state. PR 31F-8 retired the
+// stack-mutation helpers (no production caller remains); this module now
+// backs the deterministic LEGACY ``?pivot=`` policy: parse/validate an
+// existing envelope through ``readPivotState`` so the workspace can
+// redirect once to the equivalent canonical route.
 
 import { describe, expect, it } from "vitest";
 
 import {
-  clearPivotState,
   decodeBase64Url,
   encodeBase64Url,
   MAX_PIVOT_PARAM_BYTES,
   parsePivotState,
   PIVOT_VERSION,
-  pushPivotStep,
   readPivotState,
   serializePivotState,
-  truncatePivotSteps,
-  withPivotState,
 } from "./pivot-url";
 import type { EvidenceTypeName } from "../api/schema-types";
 import {
@@ -254,46 +253,11 @@ describe("pivot URL serializer/parser", () => {
     expect(parsePivotState(encodeBase64Url(JSON.stringify(poisoned)))).toBeNull();
   });
 
-  it("push preserves previous steps and base params", () => {
-    const params = new URLSearchParams("type=urn%3Aati%3Aevidence%3Adns&cursor=cursor-9");
-    const params1 = pushPivotStep(params, evidenceStep());
-    const state1 = readPivotState(params1);
-    expect(state1?.steps).toHaveLength(1);
-    expect(params1.get("type")).toBe("urn:ati:evidence:dns");
-    expect(params1.get("cursor")).toBe("cursor-9");
 
-    const params2 = pushPivotStep(params1, relationshipStep());
-    const state2 = readPivotState(params2);
-    expect(state2?.steps).toHaveLength(2);
-    expect(state2?.steps[0]).toEqual(state1?.steps[0]);
-    expect(params2.get("cursor")).toBe("cursor-9");
-  });
 
-  it("breadcrumb truncation keeps later steps only up to the target", () => {
-    const params = withPivotState(new URLSearchParams(), {
-      steps: [evidenceStep(), relationshipStep(), observationStep()],
-    });
-    const truncated = truncatePivotSteps(params, 1);
-    const state = readPivotState(truncated);
-    expect(state?.steps.map((step) => step.resource)).toEqual(["evidence"]);
-  });
 
-  it("breadcrumb truncation to zero clears the pivot parameter", () => {
-    const params = withPivotState(new URLSearchParams("source=x"), {
-      steps: [evidenceStep(), relationshipStep()],
-    });
-    const cleared = clearPivotState(params);
-    expect(cleared.get("pivot")).toBeNull();
-    expect(cleared.get("source")).toBe("x");
-  });
 
-  it("push refuses a step beyond the maximum depth", () => {
-    const params = withPivotState(new URLSearchParams(), { steps: steps(MAX_PIVOT_STEPS) });
-    const pushed = pushPivotStep(params, researchStep());
-    expect(readPivotState(pushed)?.steps).toHaveLength(MAX_PIVOT_STEPS);
-  });
-
-  it("refuses to serialize states beyond the 4096-byte cap and keeps base params", () => {
+  it("refuses to serialize states beyond the 4096-byte cap", () => {
     const huge = {
       steps: Array.from({ length: MAX_PIVOT_STEPS }, () =>
         ({
@@ -306,9 +270,6 @@ describe("pivot URL serializer/parser", () => {
         }) as PivotStep),
     };
     expect(serializePivotState(huge)).toBeNull();
-    const params = withPivotState(new URLSearchParams("a=b"), huge);
-    expect(params.get("pivot")).toBeNull();
-    expect(params.get("a")).toBe("b");
   });
 
   it("C-V01/C-V02: accepts map_entity through the URL round-trip", () => {
@@ -361,18 +322,15 @@ describe("pivot URL serializer/parser", () => {
     expect(parseFromJson(good)).not.toBeNull();
   });
 
-  it("C-V08: close/back behavior is unchanged for map-origin stacks", () => {
-    const params = withPivotState(new URLSearchParams("source=x"), {
+  it("C-V08: map-origin stacks keep their source kind through readPivotState", () => {
+    const serialized = serializePivotState({
       steps: [evidenceStep({ sourceKind: "map_entity", label: "203.0.113.10" })],
     });
+    expect(serialized).not.toBeNull();
+    const params = new URLSearchParams(`source=x&pivot=${serialized ?? ""}`);
     expect(readPivotState(params)?.steps[0].sourceKind).toBe("map_entity");
-    const cleared = clearPivotState(params);
-    expect(cleared.get("pivot")).toBeNull();
-    expect(cleared.get("source")).toBe("x");
-    // Truncation walks back exactly to the base route without residue.
-    const truncated = truncatePivotSteps(params, 0);
-    expect(truncated.get("pivot")).toBeNull();
-    expect(truncated.get("source")).toBe("x");
+    // The legacy read only validates; base params are never mutated.
+    expect(params.get("source")).toBe("x");
   });
 });
 

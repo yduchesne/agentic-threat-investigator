@@ -33,16 +33,23 @@ import { NotFoundPage } from "../pages/NotFoundPage";
 import { AnalystShell } from "../shell/AnalystShell";
 import { CreateInvestigationPage } from "../investigations/CreateInvestigationPage";
 import { InvestigationsPage } from "../investigations/InvestigationsPage";
-import { InvestigationWorkspace } from "../investigations/InvestigationWorkspace";
+import { InvestigationWorkspace, WorkspaceIndexRedirect } from "../investigations/InvestigationWorkspace";
 import { OverviewPage } from "../investigations/OverviewPage";
 import { ReportPage } from "../investigations/ReportPage";
 import { EvidencePage } from "../evidence/EvidencePage";
+import { EvidenceDetailPage } from "../evidence/EvidenceDetailPage";
 import { HistoryPage } from "../history/HistoryPage";
 import { RelationshipsPage } from "../relationships/RelationshipsPage";
+import { RelationshipDetailPage } from "../relationships/RelationshipDetailPage";
 import { RelationshipObservationsPage } from "../relationships/RelationshipObservationsPage";
+import { ObservationDetailPage } from "../relationships/ObservationDetailPage";
 import { RelationshipEvolutionPage } from "../relationship-evolution/RelationshipEvolutionPage";
 import { InvestigationMapPage } from "../geolocation/InvestigationMapPage";
 import { GeointPage } from "../geoint/GeointPage";
+import { EntityGeointPage } from "../geoint/EntityGeointPage";
+import { LocationEntitiesPage } from "../geoint/LocationEntitiesPage";
+import { LocationObservationsPage } from "../geoint/LocationObservationsPage";
+import { GeointObservationDetailPage } from "../geoint/GeointObservationDetailPage";
 import { ResearchPage } from "../research/ResearchPage";
 import { TimelinePage } from "../timeline/TimelinePage";
 
@@ -75,15 +82,30 @@ export function createAppRoutes(): RouteObject[] {
               children: [
                 {
                   index: true,
-                  element: <Navigate to="overview" replace />,
+                  Component: WorkspaceIndexRedirect,
                 },
                 { path: "overview", Component: OverviewPage },
                 { path: "overview/report", Component: ReportPage },
                 { path: "evidence", Component: EvidencePage },
+                // PR 31F-8: exact Evidence detail is a routed surface.
+                {
+                  path: "evidence/:evidenceId",
+                  Component: EvidenceDetailPage,
+                },
                 { path: "relationships", Component: RelationshipsPage },
+                // PR 31F-8: exact Relationship detail is a routed surface.
+                {
+                  path: "relationships/:relationshipId",
+                  Component: RelationshipDetailPage,
+                },
                 {
                   path: "relationships/observations",
                   Component: RelationshipObservationsPage,
+                },
+                // PR 31F-8: exact observation detail is a routed surface.
+                {
+                  path: "relationships/observations/:observationId",
+                  Component: ObservationDetailPage,
                 },
                 {
                   path: "relationships/evolution",
@@ -92,6 +114,24 @@ export function createAppRoutes(): RouteObject[] {
                 { path: "research", Component: ResearchPage },
                 { path: "map", Component: InvestigationMapPage },
                 { path: "geoint", Component: GeointPage },
+                // PR 31F-8: GEOINT resources mount as explicit routed
+                // surfaces (canonical IDs as path identity).
+                {
+                  path: "geoint/entities/:entityId",
+                  Component: EntityGeointPage,
+                },
+                {
+                  path: "geoint/locations/:locationId/entities",
+                  Component: LocationEntitiesPage,
+                },
+                {
+                  path: "geoint/locations/:locationId/observations",
+                  Component: LocationObservationsPage,
+                },
+                {
+                  path: "geoint/observations/:observationId",
+                  Component: GeointObservationDetailPage,
+                },
                 { path: "timeline", Component: TimelinePage },
                 { path: "history", Component: HistoryPage },
               ],

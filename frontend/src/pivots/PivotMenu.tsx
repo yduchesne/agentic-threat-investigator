@@ -1,56 +1,49 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 // Reusable pivot action trigger (PR 24D §1.3, §8, §22; PR 31E §7-§14;
-// PR 31F-6 amendment 2).
+// PR 31F-6 amendment 2; PR 31F-8 §8).
 //
-// Renders the explicit registered actions for one source identity. A
-// single legal target renders as a direct accessible action; multiple
-// targets expand into a compact in-flow action bar. No-ops against the
-// active step's resource/filter context are suppressed, and at the
-// maximum pivot depth URL-backed navigation pivots are omitted entirely
-// (the modal shows the textual depth explanation). Actions are never
-// inferred client-side.
+// Renders the explicit registered actions for one source identity. PR 31F-8
+// converts every route-known resource action from the generic encoded
+// Pivot stack mutation to an ordinary React Router semantic link produced
+// by the exhaustive ``pivotTargetToRoute`` mapper: one legal target renders
+// as a direct accessible link action; multiple targets expand into a
+// compact in-flow action bar of links. Actions are never inferred
+// client-side.
 //
-// PR 31E extends the trigger with explicit local/context actions
-// (``localActions``): read-only commands such as graph expansion that are
-// not Pivot resources. Local actions are never no-op suppressed, never
-// blocked by Pivot depth, never converted to PivotSteps, never URL
-// serialized, and never enter the Pivot workspace — they collapse the
-// action bar and invoke a caller callback. Existing ``PivotAction``
-// semantics, URL validation, no-op suppression, depth limits, and
-// navigation behavior remain unchanged.
+// PR 31E local/context actions (``localActions``) are unchanged: read-only
+// commands such as graph expansion that are not Pivot resources. They are
+// never converted to routes, never URL serialized, never no-op suppressed,
+// and never enter a routed resource surface — they collapse the action bar
+// and invoke a caller callback.
 //
-// PR 31F-6 amendment 2 presentation: expanding a multi-target trigger
-// renders ordinary in-flow action buttons (a labelled action region with
-// a Cancel control) — no Portal, no MUI Menu/Popover, no fixed
+// Presentation (PR 31F-6 amendment 2, unchanged): expanding a multi-target
+// trigger renders ordinary in-flow action links (a labelled action region
+// with a Cancel control) — no Portal, no MUI Menu/Popover, no fixed
 // popup, no backdrop, no anchor bookkeeping, no document outside-click/
-// pointerdown listener, no focus trap or floating-menu focus transfer,
-// and no body scroll mutation. ``expanded`` is transient presentation
-// state only: it is not serialized, never a PivotStep, consumes no
-// depth, and resets when the hosting Pivot context changes. The bar is
-// a labelled group of ordinary buttons in natural Tab order; no
+// pointerdown listener, no focus trap or floating-menu focus transfer, and
+// no body scroll mutation. ``expanded`` is transient presentation state
+// only. The bar is a labelled group in natural Tab order; no
 // ``role=menu/menuitem`` semantics exist.
 
 import { Box, Button } from "@mui/material";
 import type { ReactElement } from "react";
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router";
+import { Link as RouterLink, useLocation, useParams } from "react-router";
 
 import {
-  MAX_PIVOT_STEPS,
-  type PivotStep,
-} from "./pivot-types";
-import { pushPivotStep, readPivotState } from "./pivot-url";
-import { suppressNoOps, type PivotAction } from "./pivot-capabilities";
+  type PivotAction,
+} from "./pivot-capabilities";
+import { pivotTargetToRoute } from "./pivot-route";
 
 /**
  * One explicit local/context action (PR 31E §8).
  *
  * A UI command hosted by the pivot trigger that is not a Pivot resource:
- * no PivotStep, no ``pivot=`` URL mutation, no Pivot depth accounting, no
- * no-op suppression. ``key`` must be caller-unique (e.g.
- * ``graph-expand-either``); ``label`` is the final analyst-facing text.
+ * no route destination, no URL mutation, no no-op suppression. ``key``
+ * must be caller-unique (e.g. ``graph-expand-either``); ``label`` is the
+ * final analyst-facing text.
  */
 export interface PivotLocalAction {
   readonly key: string;
@@ -62,7 +55,7 @@ export interface PivotLocalAction {
 export interface PivotMenuProps {
   /** Explicit registered actions for this source (never inferred). */
   actions: readonly PivotAction[];
-  /** Explicit local/context commands (PR 31E); never URL-backed pivots. */
+  /** Explicit local/context commands (PR 31E); never routed resources. */
   localActions?: readonly PivotLocalAction[];
   /** Optional accessible trigger name describing the source value. */
   ariaLabel?: string;
@@ -70,13 +63,14 @@ export interface PivotMenuProps {
   triggerLabel?: string;
 }
 
-/** One unified action-bar entry (URL pivot or local command). */
+/** One unified action-bar entry (routed resource link or local command). */
 type ActionEntry =
   | {
       kind: "pivot";
       key: string;
       label: string;
-      onSelect: () => void;
+      /** Canonical Investigation-scoped route destination. */
+      to: string;
     }
   | {
       kind: "local";
@@ -92,17 +86,47 @@ function CaretGlyph(): ReactElement {
 }
 
 /**
- * One pivot trigger bound to the URL-backed pivot stack, extended with
- * explicit local/context actions (PR 31E).
+ * Whether a canonical destination equals the current routed surface
+ * (same pathname + same query-parameter set). Re-activating the current
+ * surface is a no-op under the routed architecture (the older Pivot-stack
+ * doctrine had the same rule) and MUST NOT fire a same-URL router
+ * navigation — such navigations reproduced a deterministic real-stack
+ * main-thread stall in Chromium/Firefox (pointer AND keyboard).
+ */
+function isSameRoutedSurface(
+  pathname: string,
+  search: string,
+  targetPathname: string,
+  targetSearch: string | undefined,
+): boolean {
+  if (pathname !== targetPathname) {
+    return false;
+  }
+  const current = new URLSearchParams(search.replace(/^\?/, ""));
+  const target = new URLSearchParams(targetSearch ?? "");
+  if (current.size !== target.size) {
+    return false;
+  }
+  for (const [key, value] of current) {
+    if (target.get(key) !== value) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * One pivot trigger bound to the canonical Investigation-scoped routes,
+ * extended with explicit local/context actions (PR 31E).
  *
- * Works identically on base routes (starts a new stack) and inside the
- * pivot modal (appends to the active stack). Local actions never touch
- * the URL/pivot state and ignore Pivot depth and no-op suppression.
+ * Route-known resource actions are semantic react-router links (or MUI
+ * component-as-Link) produced by the exhaustive typed mapper — no native
+ * click -> encoded Pivot stack mutation, no depth accounting, no deferred
+ * navigation. Local actions never touch the URL and remain buttons.
  *
  * Multi-target triggers expand into an ordinary in-flow action bar
- * (PR 31F-6 amendment 2): a labelled group of semantic buttons with a
- * Cancel control. ``expanded`` is presentation-only and resets whenever
- * the active Pivot context changes.
+ * (PR 31F-6 amendment 2): a labelled group of semantic links/buttons with
+ * a Cancel control. ``expanded`` is presentation-only.
  */
 export function PivotMenu({
   actions,
@@ -111,66 +135,56 @@ export function PivotMenu({
   triggerLabel,
 }: PivotMenuProps): ReactElement | null {
   const { t } = useTranslation("pivots");
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { investigationId = "" } = useParams();
+  const location = useLocation();
   const [expanded, setExpanded] = useState(false);
   const actionBarId = useId();
-  const state = readPivotState(searchParams);
-  const active = state === null ? null : state.steps[state.steps.length - 1];
-  const legalPivotActions = suppressNoOps(actions, active);
-  const push = (action: PivotAction): void => {
-    setExpanded(false);
-    // A step-swap unmounts the source surface (e.g. a resource detail or
-    // table) in the same navigation. If the initiating control is the focused
-    // element, the removal of the focused node under Chromium's focus
-    // fixup races the re-render and can spin/crash the main thread
-    // (real-stack E22). Drop focus before the URL navigation so the
-    // swap never removes a focused node.
-    (document.activeElement as HTMLElement | null)?.blur();
-    const step = {
-      ...action.target,
-      sourceKind: action.sourceKind,
-    } as PivotStep;
-    // PR 31F-6: the pivot navigation commit runs AFTER the native pointer
-    // event completes (next macrotask) — same rationale as the
-    // resource-table commit(); a synchronous router commit inside a
-    // native pointer event hard-freezes the browser main thread.
-    window.setTimeout(() => {
-      setSearchParams(pushPivotStep(searchParams, step), { replace: false });
-    }, 0);
-  };
-  const runLocal = (onSelect: () => void): void => {
-    setExpanded(false);
-    // Same focus-safety blur as pivot navigation: the action bar closes
-    // and the initiating control may disappear; drop focus before any
-    // action runs.
-    (document.activeElement as HTMLElement | null)?.blur();
-    onSelect();
-  };
-  // Presentation-only expansion resets when the hosting Pivot context
-  // changes (URL-backed step identity), so a stale expanded bar can never
-  // outlive the context that produced it (PR 31F-6 A2-PM08).
-  const stateKey = state === null ? "" : JSON.stringify(state);
-  useEffect(() => {
-    setExpanded(false);
-  }, [stateKey]);
 
-  // Depth limit applies to URL-backed navigation pivots only; local
-  // commands remain legal at the maximum depth (PR 31E §10).
-  const depthReached = state !== null && state.steps.length >= MAX_PIVOT_STEPS;
-  const pivotEntries: ActionEntry[] = depthReached
-    ? []
-    : legalPivotActions.map((action) => ({
-        kind: "pivot",
-        key: action.key,
-        label: t(action.labelKey),
-        onSelect: () => push(action),
-      }));
+  // Route-known actions translate through the exhaustive allowlisted
+  // mapper; a target that cannot be represented safely is never rendered
+  // as a navigation (R12). Actions outside an Investigation route are
+  // never converted (no canonical scope exists), and actions whose
+  // destination equals the current routed surface are suppressed as
+  // no-ops (same-URL navigations are both redundant and the documented
+  // native-pointer stall class).
+  const pivotEntries: ActionEntry[] = [];
+  for (const action of actions) {
+    if (investigationId === "") {
+      continue;
+    }
+    const destination = pivotTargetToRoute(investigationId, action.target);
+    if (destination === null) {
+      continue;
+    }
+    if (
+      isSameRoutedSurface(
+        location.pathname,
+        location.search,
+        destination.pathname,
+        destination.search,
+      )
+    ) {
+      continue;
+    }
+    pivotEntries.push({
+      kind: "pivot",
+      key: action.key,
+      label: t(action.labelKey),
+      to:
+        destination.search === undefined
+          ? destination.pathname
+          : `${destination.pathname}?${destination.search}`,
+    });
+  }
   const localEntries: ActionEntry[] = localActions.map((action) => ({
     kind: "local",
     key: action.key,
     label: action.label,
     disabled: action.disabled ?? false,
-    onSelect: () => runLocal(action.onSelect),
+    onSelect: () => {
+      setExpanded(false);
+      action.onSelect();
+    },
   }));
   const entries: ActionEntry[] = [...localEntries, ...pivotEntries];
   if (entries.length === 0) {
@@ -182,20 +196,31 @@ export function PivotMenu({
   // direct action that can never execute.
   if (entries.length === 1) {
     const entry = entries[0];
+    const commonProps = {
+      size: "small" as const,
+      variant: "text" as const,
+      "aria-label": ariaLabel ?? undefined,
+      sx: { textTransform: "none", minWidth: 0, p: 0.5 },
+    };
+    if (entry.kind === "local") {
+      return (
+        <Button
+          {...commonProps}
+          disabled={entry.disabled}
+          onClick={entry.onSelect}
+        >
+          {entry.label}
+        </Button>
+      );
+    }
     return (
-      <Button
-        size="small"
-        variant="text"
-        onClick={entry.onSelect}
-        disabled={entry.kind === "local" && entry.disabled}
-        aria-label={ariaLabel ?? undefined}
-        sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
-      >
+      <Button {...commonProps} component={RouterLink} to={entry.to}>
         {entry.label}
       </Button>
     );
   }
 
+  const closeBar = (): void => setExpanded(false);
   return (
     <Box sx={{ display: "inline-block" }}>
       <Button
@@ -217,22 +242,37 @@ export function PivotMenu({
           aria-label={t("trigger.aria")}
           sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, alignItems: "center", mt: 0.5 }}
         >
-          {entries.map((entry) => (
-            <Button
-              key={entry.key}
-              size="small"
-              variant="text"
-              disabled={entry.kind === "local" && entry.disabled}
-              onClick={entry.onSelect}
-              sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
-            >
-              {entry.label}
-            </Button>
-          ))}
+          {entries.map((entry) => {
+            const commonProps = {
+              size: "small" as const,
+              variant: "text" as const,
+              sx: { textTransform: "none", minWidth: 0, p: 0.5 },
+            };
+            return entry.kind === "local" ? (
+              <Button
+                key={entry.key}
+                {...commonProps}
+                disabled={entry.disabled}
+                onClick={entry.onSelect}
+              >
+                {entry.label}
+              </Button>
+            ) : (
+              <Button
+                key={entry.key}
+                {...commonProps}
+                component={RouterLink}
+                to={entry.to}
+                onClick={closeBar}
+              >
+                {entry.label}
+              </Button>
+            );
+          })}
           <Button
             size="small"
             variant="text"
-            onClick={() => setExpanded(false)}
+            onClick={closeBar}
             sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
           >
             {t("cancel")}

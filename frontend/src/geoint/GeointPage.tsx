@@ -14,19 +14,15 @@
 // hotspots/threat concentration; no risk coloring exists anywhere.
 
 import { Alert, Box, Paper, Typography } from "@mui/material";
-import { useState } from "react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
 import { isNotFound404 } from "../analyst-table/detail-error";
-import { ResourceDetailView } from "../analyst-table/ResourceDetailView";
 import { EmptyState, LoadingState } from "../components/AsyncState";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { useEvidenceDetail } from "../evidence/evidence-queries";
-import { GeointEvidenceBody } from "./GeointDetailContent";
 import { PivotMenu } from "../pivots/PivotMenu";
 import {
   locationEntitiesAction,
@@ -152,17 +148,16 @@ function SummaryStat({
 /** The first-class GEOINT workspace route. */
 export function GeointPage(): ReactElement {
   const { t } = useTranslation("geoint");
-  const { t: tCommon } = useTranslation("common");
   const { investigationId = "" } = useParams();
+  const navigate = useNavigate();
   const { summary, isLoading, isError, error, refetch } =
     useGeointSummary(investigationId);
 
-  // Exact Evidence provenance detail (PR 24C architecture) when a popup
-  // item carries an exact evidence_id.
-  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const detail = useEvidenceDetail(investigationId, selectedEvidenceId);
-  const openEvidence = (evidenceId: string): void => setSelectedEvidenceId(evidenceId);
-  const closeEvidence = (): void => setSelectedEvidenceId(null);
+  // PR 31F-8: exact Evidence from the map popup navigates to the routed
+  // Evidence detail surface; the map itself never hosts a local detail.
+  const openEvidence = (evidenceId: string): void => {
+    navigate(`/investigations/${investigationId}/evidence/${evidenceId}`);
+  };
 
   if (isLoading && summary === null) {
     return <LoadingState label={t("loading")} />;
@@ -215,14 +210,6 @@ export function GeointPage(): ReactElement {
             message={t("empty.message")}
           />
         </Box>
-      ) : selectedEvidenceId !== null ? (
-        <ResourceDetailView
-          backLabel={tCommon("backToList", { resource: t("detail.evidence.detailTitle") })}
-          heading={t("detail.evidence.detailTitle")}
-          onBack={closeEvidence}
-        >
-          {GeointEvidenceBody(t, detail)}
-        </ResourceDetailView>
       ) : (
         <Box>
           {summary.truncated ? (

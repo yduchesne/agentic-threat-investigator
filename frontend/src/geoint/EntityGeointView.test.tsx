@@ -7,15 +7,19 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
-import { renderProviders } from "../test/render";
+import { renderAtPath, renderProviders } from "../test/render";
 import {
+  authMeSuccess,
   buildEvidence,
   buildGeointObservation,
   buildGeointObservationDetail,
+  buildInvestigation,
   errorResponse,
   geointEntityHandler,
   geointObservationDetailHandler,
+  investigationDetailHandler,
   jsonResponse,
+  runtimeFake,
   uuidAt,
 } from "../test/handlers";
 import { setHttpHandlers, useHttp } from "../test/server";
@@ -61,6 +65,7 @@ function entityBody(overrides = {}) {
     current_observation: buildGeointObservation(1, {
       observation_id: OBSERVATION_A,
       entity_id: ENTITY_ID,
+      evidence_id: EVIDENCE_ID,
     }),
     ...overrides,
   };
@@ -178,8 +183,7 @@ describe("Entity GEOINT current/history (U14..U19)", () => {
     );
   });
 
-  it("U17: Evidence actions use the exact returned evidence_id", async () => {
-    let seenEvidenceId: string | null = null;
+  it("U17: Evidence actions are semantic links to the exact returned evidence_id", async () => {
     setHttpHandlers(
       geointEntityHandler(entityBody()),
       http.get(
@@ -195,10 +199,8 @@ describe("Entity GEOINT current/history (U14..U19)", () => {
             ]),
           ),
       ),
-      http.get("*/api/v1/investigations/:id/evidence/:evidenceId", ({ params }) => {
-        seenEvidenceId = params.evidenceId as string;
-        return jsonResponse(buildEvidence({ id: EVIDENCE_ID }));
-      }),
+      http.get("*/api/v1/investigations/:id/evidence/:evidenceId", () =>
+        jsonResponse(buildEvidence({ id: EVIDENCE_ID }))),
     );
     renderProviders(
       <MemoryRouter>
@@ -208,10 +210,19 @@ describe("Entity GEOINT current/history (U14..U19)", () => {
     const table = await screen.findByRole("table", {
       name: "Entity geographic observation history",
     });
-    await userEvent.click(within(table).getAllByRole("button", { name: "View Evidence" })[0]);
-    const drawer = await screen.findByRole("heading", { name: "Evidence" });
-    expect(drawer).toBeVisible();
-    expect(seenEvidenceId).toBe(EVIDENCE_ID);
+    // PR 31F-8: "View Evidence" is a route-owned destination carrying the
+    // exact returned evidence_id (never a local detail replacement).
+    const historyLink = within(table)
+      .getAllByRole("link", { name: "View Evidence" })[0] as HTMLElement;
+    expect(historyLink.getAttribute("href")).toBe(
+      `/investigations/${INVESTIGATION_ID}/evidence/${EVIDENCE_ID}`,
+    );
+    const currentLink = screen
+      .getByTestId("geoint-current-view-evidence")
+      .closest("a") as HTMLElement;
+    expect(currentLink.getAttribute("href")).toBe(
+      `/investigations/${INVESTIGATION_ID}/evidence/${EVIDENCE_ID}`,
+    );
   });
 
   it("U18: the next page uses the exact opaque cursor", async () => {
@@ -278,23 +289,23 @@ describe("Entity GEOINT current/history (U14..U19)", () => {
   });
 });
 
-describe("observation detail + provenance (U26..U28)", () => {
-  it("U26: opening a row shows the exact observation semantics", async () => {
+describe("routed exact observation provenance (U26..U28, PR 31F-8)", () => {
+  const AUTH = [authMeSuccess, runtimeFake];
+
+  function investigationHandler() {
+    return investigationDetailHandler(
+      buildInvestigation({ id: INVESTIGATION_ID, status: "completed" }),
+    );
+  }
+
+  function observationRoute(): string {
+    return `/investigations/${INVESTIGATION_ID}/geoint/observations/${OBSERVATION_A}`;
+  }
+
+  it("U26: the exact observation route renders the observation semantics", async () => {
     setHttpHandlers(
-      geointEntityHandler(entityBody()),
-      http.get(
-        "*/api/v1/investigations/:id/geoint/entities/:entityId/observations",
-        () =>
-          jsonResponse(
-            historyPage([
-              buildGeointObservation(1, {
-                observation_id: OBSERVATION_A,
-                entity_id: ENTITY_ID,
-                evidence_id: EVIDENCE_ID,
-              }),
-            ]),
-          ),
-      ),
+      ...AUTH,
+      investigationHandler(),
       geointObservationDetailHandler(
         buildGeointObservationDetail(1, {
           observation: buildGeointObservation(1, {
@@ -304,18 +315,14 @@ describe("observation detail + provenance (U26..U28)", () => {
           }),
         }),
       ),
+      http.get("*/api/v1/investigations/:id/evidence/:evidenceId", () =>
+        jsonResponse(buildEvidence({ id: EVIDENCE_ID })),
+      ),
     );
-    const table = fakeTable();
-    const openSelection = vi.fn();
-    renderProviders(
-      <MemoryRouter>
-        <EntityGeointView
-          investigationId={INVESTIGATION_ID}
-          table={{ ...table, selection: OBSERVATION_A, openSelection }}
-        />
-      </MemoryRouter>,
-    );
-    const drawer = await screen.findByRole("heading", { name: "Geographic observation" });
+    const { router } = renderAtPath(observationRoute());
+    const drawer = await screen.findByRole("heading", {
+      name: "Geographic observation",
+    });
     expect(drawer).toBeVisible();
     const drawerBody = drawer.parentNode as HTMLElement;
     await within(drawerBody).findByText(/Seattle/);
@@ -323,39 +330,34 @@ describe("observation detail + provenance (U26..U28)", () => {
     expect(
       within(drawerBody).getByText("Resolved through canonical reference geography"),
     ).toBeVisible();
+    // The exact Evidence action is route-owned: activation navigates to the
+    // exact Evidence route (PR 31F-8 N09).
+    await userEvent.click(within(drawerBody).getByTestId("geoint-view-evidence"));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `/investigations/${INVESTIGATION_ID}/evidence/${EVIDENCE_ID}`,
+      );
+    });
+    await screen.findByRole("heading", { name: "Evidence details" });
   });
 
   it("U27: a scoped observation 404 renders the safe not-found", async () => {
     setHttpHandlers(
-      geointEntityHandler(entityBody()),
-      http.get(
-        "*/api/v1/investigations/:id/geoint/entities/:entityId/observations",
-        () => jsonResponse(historyPage([])),
-      ),
+      ...AUTH,
+      investigationHandler(),
       http.get(
         "*/api/v1/investigations/:id/geoint/observations/:observationId",
         () => errorResponse(404, "geoint_observation_not_found"),
       ),
     );
-    const table = fakeTable();
-    renderProviders(
-      <MemoryRouter>
-        <EntityGeointView
-          investigationId={INVESTIGATION_ID}
-          table={{ ...table, selection: OBSERVATION_A }}
-        />
-      </MemoryRouter>,
-    );
+    renderAtPath(observationRoute());
     await screen.findByText("Geographic observation not found or not accessible");
   });
 
   it("U28: an unknown resolution method renders the raw bounded string, never a fabricated provider", async () => {
     setHttpHandlers(
-      geointEntityHandler(entityBody()),
-      http.get(
-        "*/api/v1/investigations/:id/geoint/entities/:entityId/observations",
-        () => jsonResponse(historyPage([])),
-      ),
+      ...AUTH,
+      investigationHandler(),
       geointObservationDetailHandler(
         buildGeointObservationDetail(1, {
           observation: buildGeointObservation(1, {
@@ -366,16 +368,10 @@ describe("observation detail + provenance (U26..U28)", () => {
         }),
       ),
     );
-    const table = fakeTable();
-    renderProviders(
-      <MemoryRouter>
-        <EntityGeointView
-          investigationId={INVESTIGATION_ID}
-          table={{ ...table, selection: OBSERVATION_A }}
-        />
-      </MemoryRouter>,
-    );
-    const drawer = await screen.findByRole("heading", { name: "Geographic observation" });
+    renderAtPath(observationRoute());
+    const drawer = await screen.findByRole("heading", {
+      name: "Geographic observation",
+    });
     const drawerBody = drawer.parentNode as HTMLElement;
     await within(drawerBody).findByText(/some_future_method_v9/);
     for (const forbidden of ["DB-IP", "provider:"]) {

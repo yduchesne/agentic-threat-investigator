@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 // Deterministic versioned pivot URL serializer/parser (PR 24D §1.7, §7,
-// §11, §12, §20).
+// §11, §12, §20; PR 31F-8 §4.1).
 //
 // The reserved ``pivot`` search parameter carries a compact base64url
 // JSON envelope. Every decoded field is validated before use and unknown
@@ -9,17 +9,11 @@
 // carries Investigation IDs (the route owns them), raw API payloads,
 // Report/Research free text, or secrets.
 //
-// Envelope (v1): { "v": 1, "steps": [ { "r", "f", "s", "l", "k", "c" } ] }
-//
-//   r  allowlisted target resource
-//   f  exact resource-specific allowlisted filters (wire-form keys)
-//   s  exact URL-addressable selection id (UUID) or null
-//   l  bounded analyst-facing label (breadcrumb identity)
-//   k  bounded navigation provenance kind
-//   c  bounded opaque cursor (never decoded), omitted when absent
-//
-// The encoded parameter is capped at 4096 bytes (PR 24D §11), steps are
-// capped at MAX_PIVOT_STEPS, and labels/cursors/filter values are bounded.
+// PR 31F-8: resource navigation no longer builds pivot stacks, so the
+// mutation/projection helpers were retired. This module now owns only the
+// deterministic LEGACY ``?pivot=`` policy: parse/validate an existing
+// envelope (``readPivotState``) so the workspace can redirect once to the
+// equivalent canonical route, and serialize bounded state for tests.
 
 import type {
   EvidenceTypeName,
@@ -27,8 +21,6 @@ import type {
   RelationshipTypeName,
 } from "../api/schema-types";
 import { isIsoTimestamp, isUuidValue } from "../analyst-table/filters";
-import { parseCursorParam } from "../analyst-table/cursor-stack";
-import { parseSelectedParam } from "../analyst-table/url-params";
 import { EVIDENCE_TYPES } from "../evidence/labels";
 import { RELATIONSHIP_DIRECTIONS } from "../relationships/relationships-filters";
 import { RELATIONSHIP_TYPES } from "../relationships/labels";
@@ -345,134 +337,11 @@ export function pivotStateFits(state: PivotState): boolean {
   return serializePivotState(state) !== null;
 }
 
-// Navigation helpers over URLSearchParams --------------------------------
-
-/** Read and validate the pivot state of one parameter set (fail closed). */
+/** Read and validate the legacy pivot state of one parameter set (fail closed). */
 export function readPivotState(params: URLSearchParams): PivotState | null {
   const values = params.getAll(PIVOT_PARAM);
   if (values.length !== 1) {
     return null;
   }
   return parsePivotState(values[0]);
-}
-
-/** Replace the pivot parameter with one serialized state. */
-export function withPivotState(
-  params: URLSearchParams,
-  state: PivotState,
-): URLSearchParams {
-  const next = new URLSearchParams(params);
-  const serialized = serializePivotState(state);
-  if (serialized === null) {
-    next.delete(PIVOT_PARAM);
-  } else {
-    next.set(PIVOT_PARAM, serialized);
-  }
-  return next;
-}
-
-/** Open a pivot by appending one step (or start a new stack). */
-export function pushPivotStep(
-  params: URLSearchParams,
-  step: PivotStep,
-): URLSearchParams {
-  const state = readPivotState(params);
-  const steps = state === null ? [] : [...state.steps];
-  if (steps.length >= MAX_PIVOT_STEPS) {
-    return params;
-  }
-  steps.push(step);
-  return withPivotState(params, { steps });
-}
-
-/** Truncate the pivot stack to ``keep`` steps (1..current length). */
-export function truncatePivotSteps(
-  params: URLSearchParams,
-  keep: number,
-): URLSearchParams {
-  const state = readPivotState(params);
-  if (state === null) {
-    return params;
-  }
-  if (keep <= 0) {
-    return clearPivotState(params);
-  }
-  const next = state.steps.slice(0, Math.min(keep, state.steps.length));
-  if (next.length === state.steps.length) {
-    return params;
-  }
-  return withPivotState(params, { steps: next });
-}
-
-/** Remove the pivot parameter entirely (modal close). */
-export function clearPivotState(params: URLSearchParams): URLSearchParams {
-  const next = new URLSearchParams(params);
-  next.delete(PIVOT_PARAM);
-  return next;
-}
-
-// Step <-> search-parameter projection (workspace port) -------------------
-
-/** Project one step onto the resource URLSearchParams surface. */
-export function stepToSearchParams(step: PivotStep): URLSearchParams {
-  const params = new URLSearchParams();
-  for (const key of PIVOT_FILTER_KEYS[step.resource]) {
-    const value = (step.filters as Record<string, unknown>)[key];
-    if ((PIVOT_BOOLEAN_FILTER_KEYS[step.resource] as readonly string[]).includes(key)) {
-      if (value === true) {
-        params.set(key, "true");
-      }
-      continue;
-    }
-    if (typeof value === "string" && value !== "") {
-      params.set(key, value);
-    }
-  }
-  if (step.cursor !== undefined && step.cursor !== "") {
-    params.set("cursor", step.cursor);
-  }
-  if (step.selectedId !== null) {
-    params.set("selected", step.selectedId);
-  }
-  return params;
-}
-
-/** Read the validated filter/cursor/selection state off one param set. */
-export function stepFromSearchParams(
-  step: PivotStep,
-  params: URLSearchParams,
-): PivotStep {
-  const filters = parsePivotFilters(step.resource, filtersFromParams(step.resource, params));
-  const cursor = parseCursorParam(params.get("cursor"));
-  const selection = parseSelectedParam(params, isUuidValue);
-  return {
-    ...step,
-    filters: filters ?? {},
-    cursor,
-    selectedId: selection,
-  } as PivotStep;
-}
-
-/** Extract only the allowlisted resource filter values from one param set. */
-export function filtersFromParams(
-  resource: PivotResource,
-  params: URLSearchParams,
-): Record<string, string | boolean> {
-  const output: Record<string, string | boolean> = {};
-  for (const key of PIVOT_FILTER_KEYS[resource]) {
-    const value = params.get(key);
-    if (value === null || value === "") {
-      continue;
-    }
-    if ((PIVOT_BOOLEAN_FILTER_KEYS[resource] as readonly string[]).includes(key)) {
-      if (value === "true" || value === "1") {
-        output[key] = true;
-      } else if (value === "false" || value === "0") {
-        output[key] = false;
-      }
-      continue;
-    }
-    output[key] = value;
-  }
-  return output;
 }

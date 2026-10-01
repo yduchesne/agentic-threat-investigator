@@ -1,22 +1,30 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 // Investigation workspace (PR 24B §14, §15, §17, §18; PR 24C §12;
-// PR 31F-6 amendment 5).
+// PR 31F-6 amendment 5; PR 31F-8 §9).
 //
 // The workspace route owns the authoritative Investigation detail query
-// (with bounded polling), the persistent header, and — as ALTERNATIVE
-// primary views — the normal Investigation workbench (tabs + resource
-// outlet) OR the URL-selected in-flow Pivot workbench. When the bounded
-// ``pivot`` URL state is non-empty the Pivot workbench is the page's only
-// main content: the normal workbench is not mounted underneath (no
-// simultaneous interactive layer), and no durable ``pivotOpen`` state
-// exists. The persistent header stays shared in both modes.
+// (with bounded polling), the persistent header, the Investigation
+// navigation, and ONE routed content surface through the child
+// ``<Outlet>`` (PR 31F-8): every resource is mounted as an explicit
+// routed page, never through the retired generic PivotWorkspace host.
+// Legacy ``?pivot=`` URLs are handled deterministically (see
+// ``LegacyPivotRedirect``): a representable stack redirects once to its
+// canonical route; malformed/ignored state is removed without breaking
+// the current route. No durable ``pivotOpen`` state exists anywhere.
 
 import { Box, Button, Link } from "@mui/material";
 import type { ReactElement } from "react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Outlet, Link as RouterLink, useParams, useSearchParams } from "react-router";
+import {
+  Navigate,
+  Outlet,
+  Link as RouterLink,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router";
 
 import type { ApiError } from "../api/errors";
 import type { Investigation } from "../api/schema-types";
@@ -26,8 +34,9 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { useInvestigationDetail } from "./investigation-queries";
 import { InvestigationHeader } from "./InvestigationHeader";
 import { InvestigationTabs } from "./InvestigationTabs";
-import { readPivotState } from "../pivots/pivot-url";
-import { PivotWorkspace } from "../pivots/PivotWorkspace";
+import { PIVOT_PARAM, readPivotState } from "../pivots/pivot-url";
+import { pivotTargetToRoute } from "../pivots/pivot-route";
+import type { PivotStep } from "../pivots/pivot-types";
 
 /** Detail state shared with workspace child routes via the outlet. */
 export interface WorkspaceOutletContext {
@@ -110,11 +119,101 @@ function MoreNavigation({ investigationId }: { investigationId: string }): React
   );
 }
 
+/**
+ * The deterministic legacy ``?pivot=`` destination (PR 31F-8 §4.1, N03/N04).
+ *
+ * Returns null when no pivot parameter is present. A valid legacy pivot
+ * stack maps to the canonical route of its active step through the same
+ * exhaustive mapper used by live navigation; malformed/unrepresentable
+ * state maps to the current canonical route with the pivot parameter
+ * removed. The result is a one-time replace destination — no second
+ * navigation architecture survives and no pivot state is retained.
+ */
+export function legacyPivotDestination(
+  investigationId: string,
+  searchParams: URLSearchParams,
+  pathname: string,
+): string | null {
+  if (searchParams.getAll(PIVOT_PARAM).length === 0) {
+    return null;
+  }
+  const state = readPivotState(searchParams);
+  if (state !== null && state.steps.length > 0) {
+    const last = state.steps[state.steps.length - 1];
+    const route = pivotTargetToRoute(investigationId, stepAsTarget(last));
+    if (route !== null) {
+      return route.search === undefined
+        ? route.pathname
+        : `${route.pathname}?${route.search}`;
+    }
+  }
+  const next = new URLSearchParams(searchParams);
+  next.delete(PIVOT_PARAM);
+  const cleaned = next.toString();
+  return cleaned === "" ? pathname : `${pathname}?${cleaned}`;
+}
+
+/**
+ * Legacy ``?pivot=`` URL handling inside the mounted workspace (PR 31F-8).
+ *
+ * Non-index Investigation routes (e.g. ``/evidence?pivot=…``) apply the
+ * same one-time deterministic policy via a declarative Navigate so no
+ * sibling navigation can race it; the index route redirects through the
+ * shared destination helper (see routes.tsx).
+ */
+function LegacyPivotRedirect({
+  investigationId,
+}: {
+  investigationId: string;
+}): ReactElement | null {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const destination = legacyPivotDestination(
+    investigationId,
+    searchParams,
+    location.pathname,
+  );
+  if (destination === null) {
+    return null;
+  }
+  return <Navigate to={destination} replace />;
+}
+
+/** The index redirect: Overview unless a legacy pivot URL redirects first. */
+export function WorkspaceIndexRedirect(): ReactElement | null {
+  const { investigationId = "" } = useParams();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const destination = legacyPivotDestination(
+    investigationId,
+    searchParams,
+    location.pathname,
+  );
+  if (destination !== null) {
+    return <Navigate to={destination} replace />;
+  }
+  return <Navigate to="overview" replace />;
+}
+
+/** One pivot step as its canonical capability target (labels stay bounded). */
+function stepAsTarget(step: PivotStep): {
+  resource: PivotStep["resource"];
+  filters: PivotStep["filters"];
+  selectedId: PivotStep["selectedId"];
+  label: string;
+} {
+  return {
+    resource: step.resource,
+    filters: step.filters,
+    selectedId: step.selectedId,
+    label: step.label,
+  };
+}
+
 /** The Investigation workspace. */
 export function InvestigationWorkspace(): ReactElement {
   const { t } = useTranslation("investigations");
   const { investigationId = "" } = useParams();
-  const [searchParams] = useSearchParams();
   const { investigation, isLoading, isError, error, refetch } =
     useInvestigationDetail(investigationId);
 
@@ -127,12 +226,6 @@ export function InvestigationWorkspace(): ReactElement {
     }),
     [investigation, isLoading, error, refetch],
   );
-
-  // The bounded pivot URL state is the sole authority: a valid non-empty
-  // stack activates the in-flow Pivot workbench as the primary content;
-  // otherwise the normal Investigation workbench renders. No durable
-  // ``pivotOpen`` state exists (PR 31F-6 amendment 5).
-  const pivotActive = readPivotState(searchParams) !== null;
 
   // Initial load (no previous data yet).
   if (isLoading && investigation === null) {
@@ -159,6 +252,7 @@ export function InvestigationWorkspace(): ReactElement {
 
   return (
     <Box sx={{ mx: "auto", maxWidth: 1024, py: 2 }}>
+      <LegacyPivotRedirect investigationId={investigationId} />
       {isError ? (
         <Box sx={{ mb: 1 }}>
           <ErrorNotice
@@ -170,22 +264,13 @@ export function InvestigationWorkspace(): ReactElement {
         </Box>
       ) : null}
       <InvestigationHeader investigation={investigation} />
-      {pivotActive ? (
-        <PivotWorkspace
-          investigationId={investigationId}
-          investigation={investigation}
-        />
-      ) : (
-        <>
-          <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0.5 }}>
-            <InvestigationTabs investigationId={investigationId} />
-            <MoreNavigation investigationId={investigationId} />
-          </Box>
-          <Box component="section" sx={{ mt: 2 }}>
-            <Outlet context={outletContext} />
-          </Box>
-        </>
-      )}
+      <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0.5 }}>
+        <InvestigationTabs investigationId={investigationId} />
+        <MoreNavigation investigationId={investigationId} />
+      </Box>
+      <Box component="section" sx={{ mt: 2 }}>
+        <Outlet context={outletContext} />
+      </Box>
     </Box>
   );
 }

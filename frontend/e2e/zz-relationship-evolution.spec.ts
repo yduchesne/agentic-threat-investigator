@@ -160,25 +160,23 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(page.getByText("Observed at", { exact: true })).toBeVisible();
     await expect(page.getByText("Retrieved at", { exact: true })).toBeVisible();
 
-    // Observation -> Evidence exact navigation (PR 24D pivot workspace).
+    // Observation -> Evidence exact navigation (PR 31F-8 routed): the
+    // exact Evidence action is a semantic link to the scoped Evidence
+    // route.
     await activate(
       page,
       page.getByRole("button", { name: "Observation provenance actions" }),
     );
-    await activate(page, page.getByRole("button", { name: "Open evidence" }));
-    const evidenceDialog = page.getByTestId("pivot-workbench");
-    await expect(evidenceDialog).toBeVisible({ timeout: 20_000 });
-    // PR 31F-6: the exact Evidence renders as the active step's list/detail
-    // content — never a nested detail overlay dialog.
+    await activate(page, page.getByRole("link", { name: "Open evidence" }));
+    await expect(page).toHaveURL(/\/evidence\/[0-9a-f-]+$/);
     await expect(
-      evidenceDialog.getByRole("heading", { name: "Evidence details" }),
+      page.getByRole("heading", { name: "Evidence details" }),
     ).toBeVisible({ timeout: 20_000 });
-    // Close the pivot workspace through the modal's own Escape handler
-    // (keydown dispatch on the dialog box: no pointer coordinates, no
-    // focus/autoFocus races, and immune to the raw-pointer wedge).
-    await page.getByRole("button", { name: "Close pivot workspace" }).dispatchEvent("click");
+    // Browser Back returns to the observation detail surface; no pivot URL
+    // ever exists in the routed architecture.
+    await page.goBack();
     await expect(page).not.toHaveURL(/pivot=/);
-    await expect(page.getByTestId("pivot-workbench")).not.toBeVisible();
+    await expect(page.getByText("Relationship ID", { exact: true })).toBeVisible();
     // Close the underlying observation detail via its Back control.
     await page.getByRole("button", { name: "Back to Relationship evolution" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);
@@ -337,7 +335,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       page.getByRole("button", { name: "Expand incoming relationships" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Evidence for this entity" }),
+      page.getByRole("link", { name: "Evidence for this entity" }),
     ).toBeVisible();
     await activate(page, page.getByRole("button", { name: "Expand known relationships" }));
     // Exactly one bounded one-hop graph request for the selected Entity with
@@ -368,7 +366,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     });
     await expect(completedExpansionItem).toBeDisabled({ timeout: 20_000 });
     await expect(
-      page.getByRole("button", { name: "Relationships where source" }),
+      page.getByRole("link", { name: "Relationships where source" }),
     ).toBeVisible();
     // Collapse the in-flow action bar with Cancel (no popup/menu exists).
     await activate(page, page.getByRole("button", { name: "Cancel" }));

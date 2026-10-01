@@ -1,15 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Report/Assessment provenance navigation tests (PR 24D §7, §27; PR 24F §15).
+// Report/Assessment provenance navigation tests (PR 24D §7, §27; PR 24F §15;
+// PR 31F-8 §8).
 //
 // Finding support references navigate by exact persisted identity only:
-// Evidence support opens the exact scoped Evidence selection, Research
-// claim support opens the exact Research result, and RelationshipObservation
-// support opens the exact Investigation-scoped observation read (never a
-// list scan, never a substitute observation). A scoped 404 keeps the pivot
-// workspace open and states the not-found without a fallback. Report/
-// Research free text never enters the pivot URL and navigation never
-// mutates Assessment/Report requests.
+// Evidence support opens the exact scoped Evidence route, Research claim
+// support opens the exact Research result selection, and
+// RelationshipObservation support opens the exact Investigation-scoped
+// observation route (never a list scan, never a substitute observation).
+// A scoped 404 states the not-found without a fallback. Report/Research
+// free text never enters any URL and navigation never mutates
+// Assessment/Report requests.
 
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -36,7 +37,6 @@ import {
   uuidAt,
 } from "../test/handlers";
 import { CSRF_COOKIE_NAME } from "../api/csrf";
-import { decodeBase64Url, readPivotState } from "./pivot-url";
 
 useHttp();
 
@@ -46,7 +46,6 @@ beforeEach(() => {
   // exactly like the browser would (PR 31F-5 E).
   document.cookie = `${CSRF_COOKIE_NAME}=test-csrf-token`;
 });
-
 
 const AUTH = [authMeSuccess, runtimeFake];
 const INVESTIGATION_ID = "20000000-0000-4000-8000-000000000001";
@@ -136,7 +135,7 @@ function assessmentLike() {
   };
 }
 
-/** Shared handlers: Overview current-resource + pivot target resources. */
+/** Shared handlers: Overview current-resource + routed target resources. */
 function baseOverviewHandlers(
   report: Report,
   capture: { reports: number; assessments: number },
@@ -171,7 +170,7 @@ function baseOverviewHandlers(
     http.get("*/api/v1/investigations/:id/research", () =>
       jsonResponse({ items: [], next_cursor: null })),
     // Observation list serves a *different* row: the exact provenance
-    // selection must resolve through the scoped GET, never a list scan.
+    // navigation must resolve through the scoped GET, never a list scan.
     http.get("*/api/v1/investigations/:id/relationship-observations", () =>
       jsonResponse({
         items: [
@@ -205,35 +204,29 @@ function exactObservationFixture() {
   });
 }
 
-describe("Report/Assessment provenance pivots", () => {
-  it("Evidence support opens the exact scoped Evidence selection", async () => {
+describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
+  it("Evidence support navigates to the exact scoped Evidence route", async () => {
     const capture = { reports: 0, assessments: 0 };
     setHttpHandlers(...baseOverviewHandlers(reportWithEvidenceSupport(), capture));
     const { router } = renderAtPath(`${BASE}/overview`);
     await screen.findByText("Supports");
     await screen.findByText(REPORT_STATEMENT);
 
-    await userEvent.click(screen.getByRole("button", { name: "Open evidence" }));
-    const dialog = await screen.findByTestId("pivot-workbench");
-    expect(dialog).toBeInTheDocument();
-    // The exact selection opens the scoped detail as the main content of
-    // the active step (the detail handler above also asserts the exact id
-    // in the URL).
-    await within(dialog).findByRole("heading", { name: "Evidence details" });
+    await userEvent.click(screen.getByRole("link", { name: "Open evidence" }));
     await waitFor(() => {
-      expect(within(dialog).getAllByText("update-package.test").length).toBeGreaterThan(0);
+      expect(router.state.location.pathname).toBe(`${BASE}/evidence/${EVIDENCE_ID}`);
     });
-
-    // Report free text never enters the pivot URL; the step carries the
-    // exact selection identity.
-    const pivotParam = new URLSearchParams(router.state.location.search).get("pivot");
-    const decoded = decodeBase64Url(pivotParam ?? "");
-    expect(decoded).not.toBeNull();
-    expect(decoded).not.toContain(REPORT_STATEMENT);
-    expect(decoded).not.toContain("Threat-intelligence");
-    const state = readPivotState(new URLSearchParams(router.state.location.search));
-    expect(state?.steps[0].resource).toBe("evidence");
-    expect(state?.steps[0].selectedId).toBe(EVIDENCE_ID);
+    // The exact Evidence route renders the scoped detail as the main
+    // content (the detail handler above also asserts the exact id).
+    const heading = await screen.findByRole("heading", { name: "Evidence details" });
+    expect(heading).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText("update-package.test").length).toBeGreaterThan(0);
+    });
+    // Canonical URL: no pivot envelope, no Report free text anywhere.
+    expect(router.state.location.search).toBe("");
+    expect(router.state.location.search).not.toContain("pivot=");
+    expect(router.state.location.pathname).not.toContain(encodeURIComponent(REPORT_STATEMENT));
   });
 
   it("RelationshipObservation support opens the exact scoped observation (F-P03/F-P04/F-P08/F-P09)", async () => {
@@ -244,47 +237,36 @@ describe("Report/Assessment provenance pivots", () => {
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
-      screen.getByRole("button", { name: "View relationship observation" }),
+      screen.getByRole("link", { name: "View relationship observation" }),
     );
-    const dialog = await screen.findByTestId("pivot-workbench");
-    expect(dialog).toBeInTheDocument();
-
-    // The exact persisted observation id drives the scoped GET (never a
-    // list scan): the list page above serves a different row, yet the
-    // detail renders the exact observation's source from the GET response.
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `${BASE}/relationships/observations/${OBSERVATION_ID}`,
+      );
+    });
     const dialogHeading = await screen.findByRole("heading", {
       name: "Relationship observation detail",
     });
-    const drawer = dialogHeading.parentNode as HTMLElement;
-    await within(drawer).findByText("exact-dns");
+    expect(dialogHeading).toBeInTheDocument();
+    // The exact persisted observation id drives the scoped GET (never a
+    // list scan): the list page above serves a different row, yet the
+    // detail renders the exact observation's source from the GET response.
+    await within(dialogHeading.parentNode as HTMLElement).findByText("exact-dns");
     await expect(observationDetail.requests).toHaveLength(1);
     expect(observationDetail.requests[0]).toContain(
       `/relationship-observations/${OBSERVATION_ID}`,
     );
     // The detail keeps exact Evidence identity and distinct times.
+    const drawer = dialogHeading.parentNode as HTMLElement;
     await within(drawer).findByText("Observed at");
     await within(drawer).findByText("Retrieved at");
     expect(within(drawer).getAllByText("Evidence ID").length).toBeGreaterThan(0);
-
-    // Bounded breadcrumb label: the compact observation id, never raw text.
-    const breadcrumb = within(dialog).getByRole("navigation", {
-      name: "Pivot breadcrumb",
-    });
-    await within(breadcrumb).findByText(/^RelationshipObservation 40000000$/);
-
-    // Report free text never enters the pivot URL; the step carries the
-    // exact selection identity only.
-    const pivotParam = new URLSearchParams(router.state.location.search).get("pivot");
-    const decoded = decodeBase64Url(pivotParam ?? "");
-    expect(decoded).not.toBeNull();
-    expect(decoded).not.toContain("independent observation sources");
-    const state = readPivotState(new URLSearchParams(router.state.location.search));
-    expect(state?.steps[0].resource).toBe("relationship-observations");
-    expect(state?.steps[0].selectedId).toBe(OBSERVATION_ID);
-    expect(state?.steps[0].filters).toEqual({});
+    // No pivot envelope; Report text never enters the URL.
+    expect(router.state.location.search).not.toContain("pivot=");
+    expect(router.state.location.pathname).not.toContain("independent");
   });
 
-  it("a scoped observation 404 keeps the pivot open with an honest not-found (F-P05/F-P06)", async () => {
+  it("a scoped observation 404 renders the safe not-found without a substitute (F-P05/F-P06)", async () => {
     setHttpHandlers(
       ...AUTH,
       investigationLifecycleHandler([completed()]),
@@ -294,8 +276,6 @@ describe("Report/Assessment provenance pivots", () => {
       http.get("*/api/v1/investigations/:id/reports", () =>
         jsonResponse({ items: [], next_cursor: null })),
       http.get("*/api/v1/investigations/:id/assessments", () =>
-        jsonResponse({ items: [], next_cursor: null })),
-      http.get("*/api/v1/investigations/:id/relationship-observations", () =>
         jsonResponse({ items: [], next_cursor: null })),
       // The exact read reports the observation is not visible here — both
       // for missing and cross-Investigation ids (one safe scoped 404).
@@ -308,16 +288,17 @@ describe("Report/Assessment provenance pivots", () => {
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
-      screen.getByRole("button", { name: "View relationship observation" }),
+      screen.getByRole("link", { name: "View relationship observation" }),
     );
-    const dialog = await screen.findByTestId("pivot-workbench");
-    // The pivot workspace stays open; the detail states the scoped
-    // not-found without inventing a substitute observation.
-    await within(dialog).findByText("Resource not found or not accessible");
-    const pivotParam = new URLSearchParams(router.state.location.search).get("pivot");
-    const state = readPivotState(new URLSearchParams(router.state.location.search));
-    expect(state?.steps[0].selectedId).toBe(OBSERVATION_ID);
-    expect(pivotParam).not.toBeNull();
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `${BASE}/relationships/observations/${OBSERVATION_ID}`,
+      );
+    });
+    // The exact observation route states the scoped not-found without
+    // inventing a substitute observation; the route stays intact.
+    await screen.findByText("Resource not found or not accessible");
+    expect(router.state.location.pathname).toContain(OBSERVATION_ID);
   });
 
   it("observation detail pivots to exact Evidence by evidence_id (F-P07)", async () => {
@@ -328,7 +309,7 @@ describe("Report/Assessment provenance pivots", () => {
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
-      screen.getByRole("button", { name: "View relationship observation" }),
+      screen.getByRole("link", { name: "View relationship observation" }),
     );
     const dialogHeading = await screen.findByRole("heading", {
       name: "Relationship observation detail",
@@ -336,41 +317,41 @@ describe("Report/Assessment provenance pivots", () => {
     const drawer = dialogHeading.parentNode as HTMLElement;
     await within(drawer).findByText("exact-dns");
 
-    // The Inspector's provenance menu carries the exact Evidence target.
+    // The observation detail's provenance menu carries the exact Evidence
+    // destination (route link).
     await userEvent.click(
       within(drawer).getByRole("button", {
         name: "Observation provenance actions",
       }),
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Open evidence" }));
-    const evidenceDialog = await await screen.findByTestId("pivot-workbench");;
-    // The exact Evidence detail opens with its subject value.
+    await userEvent.click(await within(drawer).findByRole("link", { name: "Open evidence" }));
     await waitFor(() => {
-      expect(
-        within(evidenceDialog).getAllByText("update-package.test").length,
-      ).toBeGreaterThan(0);
+      expect(router.state.location.pathname).toBe(`${BASE}/evidence/${EVIDENCE_ID}`);
     });
-    const state = readPivotState(new URLSearchParams(router.state.location.search));
-    expect(state?.steps[1].resource).toBe("evidence");
-    expect(state?.steps[1].selectedId).toBe(EVIDENCE_ID);
+    // The exact Evidence detail opens with its subject value.
+    await screen.findByRole("heading", { name: "Evidence details" });
+    await waitFor(() => {
+      expect(screen.getAllByText("update-package.test").length).toBeGreaterThan(0);
+    });
   });
 
-  it("Close restores the base Overview state (F-P10)", async () => {
+  it("browser Back restores the previous surfaced route (F-P10)", async () => {
     const capture = { reports: 0, assessments: 0 };
     const observationDetail = { requests: [] as string[] };
     setHttpHandlers(...baseOverviewHandlers(reportWithObservationSupport(), capture, observationDetail));
-    renderAtPath(`${BASE}/overview`);
+    const { router } = renderAtPath(`${BASE}/overview`);
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
-      screen.getByRole("button", { name: "View relationship observation" }),
+      screen.getByRole("link", { name: "View relationship observation" }),
     );
-    await await screen.findByTestId("pivot-workbench");;
-    await userEvent.click(screen.getByRole("button", { name: "Close pivot workspace" }));
+    await screen.findByRole("heading", { name: "Relationship observation detail" });
+
+    // Browser Back walks the entry: the Overview surface returns and the
+    // Report support reference stays visible.
+    await router.navigate(-1);
     await screen.findByText("Reported by two independent observation sources.");
-    expect(
-      screen.queryByTestId("pivot-workbench"),
-    ).toBeNull();
+    expect(router.state.location.pathname).toBe(`${BASE}/overview`);
   });
 
   it("Research claim support opens the exact Research result selection", async () => {
@@ -381,15 +362,15 @@ describe("Report/Assessment provenance pivots", () => {
     const { router } = renderAtPath(`${BASE}/overview/report`);
     await screen.findByText("Contextual research claim about the delivery infrastructure.");
 
-    await userEvent.click(screen.getByRole("button", { name: "Open research result" }));
-    const dialog = await screen.findByTestId("pivot-workbench");
-    expect(dialog).toBeInTheDocument();
-    const state = readPivotState(new URLSearchParams(router.state.location.search));
-    expect(state?.steps[0].resource).toBe("research");
-    expect(state?.steps[0].selectedId).toBe(RESEARCH_ID);
-    // Research claim text never enters the pivot URL.
-    const decoded = decodeBase64Url(new URLSearchParams(router.state.location.search).get("pivot") ?? "");
-    expect(decoded).not.toContain("Contextual research claim");
+    await userEvent.click(screen.getByRole("link", { name: "Open research result" }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`${BASE}/research`);
+    });
+    expect(router.state.location.search).toBe(`?selected=${RESEARCH_ID}`);
+    // The exact Research detail renders as the workspace content.
+    await screen.findByRole("heading", { name: "Research context details" });
+    // Research claim text never enters the URL.
+    expect(router.state.location.search).not.toContain("Contextual");
   });
 
   it("insufficient support metadata yields no inferred action", async () => {
@@ -411,7 +392,7 @@ describe("Report/Assessment provenance pivots", () => {
     renderAtPath(`${BASE}/overview`);
     await screen.findByText("Reference without usable identity.");
     // The unknown reference renders as text only; no action exists.
-    expect(screen.queryAllByRole("button", { name: "Open evidence" })).toHaveLength(0);
+    expect(screen.queryAllByRole("link", { name: "Open evidence" })).toHaveLength(0);
   });
 
   it("navigation does not mutate Assessment/Report (single current fetches)", async () => {
@@ -435,14 +416,15 @@ describe("Report/Assessment provenance pivots", () => {
       http.get("*/api/v1/investigations/:id/evidence", () =>
         jsonResponse({ items: [evidenceFixture()], next_cursor: null })),
     );
-    renderAtPath(`${BASE}/overview`);
+    const { router } = renderAtPath(`${BASE}/overview`);
     await screen.findByText("Supports");
-    await userEvent.click(screen.getByRole("button", { name: "Open evidence" }));
-    await screen.findByTestId("pivot-workbench");
-    await userEvent.click(screen.getByRole("button", { name: "Close pivot workspace" }));
-    await screen.findByText("Supports");
+    await userEvent.click(screen.getByRole("link", { name: "Open evidence" }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`${BASE}/evidence/${EVIDENCE_ID}`);
+    });
+    await screen.findByRole("heading", { name: "Evidence details" });
     // The current Report/Assessment queries were fetched exactly once each;
-    // pivoting neither mutates nor refetches the artifacts.
+    // navigation neither mutates nor refetches the artifacts.
     expect(current.reports).toBe(1);
     expect(current.assessments).toBe(1);
   });
