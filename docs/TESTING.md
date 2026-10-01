@@ -4188,7 +4188,14 @@ real seeded local analyst user.
   exact-only explanations are visible; the same-location disclaimer is
   visible; coordinate-less rows stay actionable; observation detail shows
   exact semantics; scoped 404 is safe; unknown resolution methods render
-  the raw bounded string (provider never fabricated).
+  the raw bounded string (provider never fabricated); and the Entity-row
+  Explore composition (`entityLocationExploreActions` GC01..GC12) yields
+  exactly one registered `geoint-entity` action for rows with and without
+  current observation, with exact Entity identity/label/source, existing
+  Evidence/Location/generic-Entity actions preserved, no fabricated
+  observation actions, no duplicate keys, and no input mutation; the
+  rendered row activates the action and emits one URL-backed
+  `geoint-entity` PivotStep.
 - **G26E-PV01..PV18** (`frontend/src/pivots/pivot-capabilities.test.ts`,
   `pivot-url.test.ts`, `geoint-pivots.test.tsx`): Entity -> GEOINT,
   GEOINT -> Location, Location -> Entities/observations, observation ->
@@ -4251,7 +4258,12 @@ real seeded local analyst user.
   identical seed (same Investigation, same args) immediately after the
   first completion and requires it to succeed with the browser assertions
   unchanged, proving no duplicate GeoResolution/EntityLocationObservation
-  on real-stack replay.
+  on real-stack replay. The Location workspace -> Entity-row Explore ->
+  "Geographic context for this entity" journey verifies the registered
+  `geoint-entity` capability: the row's in-flow Explore bar composes the
+  existing `entityGeointAction` (exact Entity id, `geoint_location` source)
+  and opens the Entity current/history surface through the URL-backed Pivot
+  stack.
 
 ### Bounded agentic GEOINT reasoning (PR 26F)
 

@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Location GEOINT view tests (PR 26E §15 U20..U25).
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, RouterProvider, createMemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
-import { renderProviders } from "../test/render";
+import { freshQueryClient, renderProviders } from "../test/render";
+import { AppProviders } from "../app/AppProviders";
 import {
   buildGeointEntityLocation,
   buildGeointObservation,
@@ -17,7 +18,13 @@ import {
 import { setHttpHandlers, useHttp } from "../test/server";
 import { http } from "msw";
 import type { ResourceTableState } from "../analyst-table/resource-page";
-import { LocationEntitiesView, LocationObservationsView } from "./LocationViews";
+import type { GeointEntityLocation, GeointObservation } from "../api/schema-types";
+import { readPivotState } from "../pivots/pivot-url";
+import {
+  entityLocationExploreActions,
+  LocationEntitiesView,
+  LocationObservationsView,
+} from "./LocationViews";
 import type { GeointLocationFilters } from "./geoint-filters";
 
 useHttp();
@@ -43,6 +50,35 @@ function fakeLocationTable(
     closeSelection: vi.fn(),
   };
 }
+
+/**
+ * One runtime row whose current geographic context is absent for this
+ * Entity (the Location views guard this defensive null branch).
+ */
+function buildEntityWithoutObservation(
+  ordinal: number,
+  entityValue: string,
+): GeointEntityLocation {
+  return {
+    ...buildGeointEntityLocation(ordinal, entityValue),
+    current_observation: null as unknown as GeointObservation,
+  };
+}
+
+const GENERIC_ENTITY_ACTION_KEYS = [
+  "evidenceForEntity",
+  "relationshipsSource",
+  "relationshipsTarget",
+  "researchForEntity",
+] as const;
+
+const OBSERVATION_DERIVED_ACTION_KEYS = [
+  "evidenceExact",
+  "geointLocationEntities",
+  "geointLocationObservations",
+] as const;
+
+const GEOINT_ENTITY_KEY = "geointEntity";
 
 describe("Location -> Entities (U20..U25)", () => {
   it("U20/U22: exact is the default and containment_applied=true is visible", async () => {
@@ -230,6 +266,138 @@ describe("Location -> Entities (U20..U25)", () => {
     const rows = within(table).getAllByRole("row").slice(1);
     expect(rows[0].textContent).toContain("203.0.113.10");
     expect(rows[1].textContent).toContain("203.0.113.20");
+  });
+
+  it("GU09/GU10/GU11/GU12: rendered Explore exposes the GEOINT action and emits the geoint-entity PivotStep", async () => {
+    const item = buildGeointEntityLocation(1, "203.0.113.10");
+    setHttpHandlers(
+      http.get(
+        "*/api/v1/investigations/:id/geoint/locations/:locationId/entities",
+        () => jsonResponse({ items: [item], containment_applied: false }),
+      ),
+    );
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/",
+          element: (
+            <LocationEntitiesView
+              investigationId={INVESTIGATION_ID}
+              table={fakeLocationTable()}
+            />
+          ),
+        },
+      ],
+      { initialEntries: ["/"] },
+    );
+    render(
+      <AppProviders queryClient={freshQueryClient()}>
+        <RouterProvider router={router} useTransitions={false} />
+      </AppProviders>,
+    );
+    const table = await screen.findByRole("table", {
+      name: "Entities observed at this Location",
+    });
+    const row = within(table).getByText("203.0.113.10").closest("tr");
+    expect(row).not.toBeNull();
+    // The row's in-flow Explore action bar exposes the registered GEOINT
+    // capability as an ordinary button (no menu semantics).
+    await userEvent.click(
+      within(row as HTMLElement).getByRole("button", {
+        name: "Explore entity actions for 203.0.113.10",
+      }),
+    );
+    const bar = await screen.findByRole("group", { name: "Pivot actions" });
+    const geointButton = within(bar).getByRole("button", {
+      name: "Geographic context for this entity",
+    });
+    expect(geointButton).toBeVisible();
+    await userEvent.click(geointButton);
+    // One activation emits exactly one URL-backed PivotStep to geoint-entity.
+    await waitFor(() => {
+      const state = readPivotState(
+        new URLSearchParams(router.state.location.search),
+      );
+      expect(state?.steps).toHaveLength(1);
+      expect(state?.steps[0]).toMatchObject({
+        resource: "geoint-entity",
+        filters: { entity_id: item.entity_id },
+        selectedId: null,
+        sourceKind: "geoint_location",
+      });
+      expect(state?.steps[0].label).toBe("203.0.113.10");
+    });
+  });
+});
+
+describe("entityLocationExploreActions composition (GC01..GC12)", () => {
+  const WITH_OBSERVATION = buildGeointEntityLocation(1, "203.0.113.10");
+  const WITHOUT_OBSERVATION = buildEntityWithoutObservation(2, "203.0.113.20");
+
+  it("GC01/GC02: exactly one GEOINT Entity action for both observation states", () => {
+    for (const item of [WITH_OBSERVATION, WITHOUT_OBSERVATION]) {
+      const actions = entityLocationExploreActions(item);
+      expect(
+        actions.filter((action) => action.key === GEOINT_ENTITY_KEY),
+      ).toHaveLength(1);
+    }
+  });
+
+  it("GC03/GC04/GC05/GC06/GC07: exact Entity identity, label, source and geoint-entity target", () => {
+    for (const item of [WITH_OBSERVATION, WITHOUT_OBSERVATION]) {
+      const action = entityLocationExploreActions(item).find(
+        (candidate) => candidate.key === GEOINT_ENTITY_KEY,
+      );
+      expect(action?.sourceKind).toBe("geoint_location");
+      expect(action?.target).toEqual({
+        resource: "geoint-entity",
+        filters: { entity_id: item.entity_id },
+        selectedId: null,
+        label: item.entity_value,
+      });
+    }
+  });
+
+  it("GC08: observation present preserves Evidence + both Location actions", () => {
+    const actions = entityLocationExploreActions(WITH_OBSERVATION);
+    const keys = actions.map((action) => action.key);
+    expect(keys.slice(0, 3)).toEqual([
+      "evidenceExact",
+      "geointLocationEntities",
+      "geointLocationObservations",
+    ]);
+    expect(keys).toContain(GEOINT_ENTITY_KEY);
+  });
+
+  it("GC09: observation absent invents no observation-derived actions", () => {
+    const keys = entityLocationExploreActions(WITHOUT_OBSERVATION).map(
+      (action) => action.key,
+    );
+    for (const derived of OBSERVATION_DERIVED_ACTION_KEYS) {
+      expect(keys).not.toContain(derived);
+    }
+  });
+
+  it("GC10: generic Entity capabilities are preserved in both states", () => {
+    for (const item of [WITH_OBSERVATION, WITHOUT_OBSERVATION]) {
+      const keys = entityLocationExploreActions(item).map((action) => action.key);
+      for (const generic of GENERIC_ENTITY_ACTION_KEYS) {
+        expect(keys).toContain(generic);
+      }
+    }
+  });
+
+  it("GC11: complete result has no duplicate action keys", () => {
+    for (const item of [WITH_OBSERVATION, WITHOUT_OBSERVATION]) {
+      const keys = entityLocationExploreActions(item).map((action) => action.key);
+      expect(new Set(keys).size).toBe(keys.length);
+    }
+  });
+
+  it("GC12: the input row is never mutated", () => {
+    const before = JSON.stringify(WITH_OBSERVATION);
+    entityLocationExploreActions(WITH_OBSERVATION);
+    expect(JSON.stringify(WITH_OBSERVATION)).toBe(before);
   });
 });
 
