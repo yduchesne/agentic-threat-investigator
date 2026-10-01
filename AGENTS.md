@@ -8,6 +8,7 @@
 - [Security scanning](#security-scanning)
 - [Tests](#tests)
 - [Documentation](#documentation)
+- [Local Podman host-port contract](#local-podman-host-port-contract)
 - [Configuration and batch-persistence invariants](#configuration-and-batch-persistence-invariants)
 - [Storage, acquisition, and secrets invariants](#storage-acquisition-and-secrets-invariants)
 - [Configuration, artifact-storage, and secrets implementation rules](#configuration-artifact-storage-and-secrets-implementation-rules)
@@ -100,6 +101,18 @@ Additionally:
   Create specific docstrings that describe the override logic that the level of implementations.
 - After completing the implementation of functionality corresponding to a PR item in the relevant `ROAMDAP_<version>.md`
   document, add the `[DONE]` marker at the end of the PR item. Do so prior to the changes being committed and pushed, and after all quality checks an integration tests have completed successfully.
+
+## Local Podman host-port contract
+
+ATI owns the standard host ports for its local Podman services. ATI does **not** use an application-specific host-port prefix.
+
+- When an ATI container service is published to the host, map it to that service's standard host port. For example, PostgreSQL container port `5432` maps to host port `5432`.
+- Do not prefix, offset, or otherwise remap ATI host ports to avoid collisions with other locally running applications.
+- Do not silently choose an alternate or dynamically allocated host port when the standard ATI host port is occupied. Treat the collision as a local-environment conflict and report it clearly.
+- This contract applies to every ATI-owned Podman entry point and helper, including root scripts such as `integration-test.sh`, `start.sh`, and `stop.sh`, scripts under `scripts/`, Compose files, test harnesses, and future container-management scripts.
+- When modifying any Podman-related script or configuration, explicitly verify that all published ATI host ports continue to use their standard service ports.
+- Keep ATI-specific namespacing for container names, Compose project identity, networks, volumes, pods, and other Podman resources where applicable. The no-prefix rule applies to **host ports**, not to resource naming/isolation.
+- Prefer the canonical ATI port configuration over independently inventing mappings in individual scripts or test helpers.
 
 ## Configuration and batch-persistence invariants
 
