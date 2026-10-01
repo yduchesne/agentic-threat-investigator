@@ -4203,6 +4203,22 @@ real seeded local analyst user.
   vocabulary, cross-Investigation scoping and the other-Investigation
   guard fail closed, and the E2E environment guard requires both fake
   mode and `ATI_E2E_SEEDING_ENABLED`.
+- **GEOINT seeder idempotency matrix (SI01..SI20)**
+  (`tests/unit/infrastructure/test_e2e_geoint_seed.py`): the in-memory
+  world mirrors the authoritative PostgreSQL semantics (stable Evidence +
+  per-Investigation EvidenceObservation, idempotent association/admission
+  replay, semantic pair GeoResolution identity, and the duplicate-state
+  guard). Coverage fixes the corrective idempotency contract: absent work
+  is created; pre-existing PENDING/PROCESSING/RESOLVED work is reused with
+  the production worker left as the lifecycle owner; UNRESOLVABLE/FAILED
+  work fails closed and is never reset; reused Evidence still establishes
+  association/admission; the duplicate-state creation race re-reads the
+  pair and recovers only for PENDING/PROCESSING/RESOLVED (a duplicate
+  report with no re-readable row fails); the Entity id returned by
+  `upsert` is authoritative downstream; admission metadata conflicts and
+  unexpected database errors/cancellation propagate; the exact seed twice
+  creates no duplicate Evidence/GeoResolution/EntityLocationObservation;
+  and cross-Investigation replay preserves the designated scopes.
 - **G26E-P01..P06** (`tests/integration/test_e2e_geoint_seed.py`): the
   real-stack seeding path (reference-geography build/import -> normal
   GEOLOCATION Evidence -> GeoResolution -> production worker with the
@@ -4212,6 +4228,18 @@ real seeded local analyst user.
   cross-Investigation isolation (I2 observation never visible to I1),
   and a second seeding run is idempotent. No table is ever inserted
   directly.
+- **GEOINT seeder idempotency real-PostgreSQL matrix (GI01..GI05)**
+  (`tests/integration/test_e2e_geoint_seed.py`): replay after canonical
+  completion keeps one semantic resolution per pair and the exact
+  canonical observations byte-stable; replaying the same scenario for a
+  fresh Investigation reuses the RESOLVED work instead of colliding with
+  the already-claimed pair (the deterministic fresh-main defect);
+  pre-existing PENDING work is reused and completed; the shipped
+  duplicate-state SQL guard is proven authoritative (never weakened);
+  UNRESOLVABLE/FAILED terminal work fails the replay with zero
+  reset/recreation; and a canonical Entity pre-existing under a different
+  UUID binds all downstream work/provenance to the id returned by
+  `upsert`.
 - **G26E-E1..E6** (`frontend/e2e/zz-geoint.spec.ts`): deterministic
   real-stack Chromium workflows (`geoint_entity_history`,
   `geoint_same_location`, `geoint_containment`, `geoint_cross_investigation`,
@@ -4219,7 +4247,11 @@ real seeded local analyst user.
   Evidence -> Back -> Close stability regression) driven entirely through
   the real PR 26 pipeline seeded by `scripts/e2e-seed-geoint.sh` against
   reference geography imported by `scripts/e2e-geography-import.sh`; the
-  browser only observes clean console output.
+  browser only observes clean console output. G1 additionally replays the
+  identical seed (same Investigation, same args) immediately after the
+  first completion and requires it to succeed with the browser assertions
+  unchanged, proving no duplicate GeoResolution/EntityLocationObservation
+  on real-stack replay.
 
 ### Bounded agentic GEOINT reasoning (PR 26F)
 

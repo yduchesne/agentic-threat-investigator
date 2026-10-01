@@ -180,6 +180,11 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
       "PR 26E entity history",
     );
     seedGeoint(investigationId, "entity_history");
+    // Replay the identical seed (same Investigation, same args): the
+    // deterministic seeder must reconcile authoritative persisted state and
+    // succeed without creating duplicate GeoResolution work or canonical
+    // observations (GEOINT seeding idempotency corrective PR).
+    seedGeoint(investigationId, "entity_history");
     await openGeoint(page);
 
     // The bounded summary shows two observations across two Locations.
