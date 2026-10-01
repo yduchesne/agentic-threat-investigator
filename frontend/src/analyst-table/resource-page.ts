@@ -90,31 +90,41 @@ export function useResourceTable<F>(
   const [backStack, setBackStack] = useState<string[]>(() => initialBackStack(cursor));
 
   const commit = (next: URLSearchParams): void => {
-    // PR 31F-6: navigation commits are scheduled AFTER the originating
+    // PR 31F-6/31F-8: navigation commits are scheduled AFTER the originating
     // native pointer event completes (next macrotask). A synchronous
     // router commit + app-scale re-render inside a native pointer event
     // hard-freezes the browser main thread in both engines (minimal
-    // in-harness reproduction in the PR record: the same table, query and
-    // selection click freeze synchronously and are clean when the commit
-    // is deferred). The URL/history state transition therefore must run
-    // after native pointer dispatch; this is the same bounded deferred
-    // scheduling already used for focus in PivotMenu/PivotWorkspace.
+    // in-harness reproduction: the same table, query and selection click
+    // freeze synchronously and are clean when the commit is deferred).
+    // PR 31F-8: EVERY accompanying controller state transition (the local
+    // back stack) is deferred with the commit — a synchronous
+    // ``setBackStack`` re-rendered the whole routed surface (AnalystTable +
+    // TanStack + page chrome) inside the originating pointer event, which
+    // reproduced the same deterministic Chromium/Firefox main-thread stall
+    // on the routed GEOINT Location containment toggle (pointer AND
+    // keyboard). No controller state change may run inside the native
+    // pointer dispatch; the committed URL remains the single authority.
     window.setTimeout(() => setSearchParams(next, { replace: false }), 0);
   };
 
+  /** Defer one controller state transition past the native event. */
+  const deferState = (update: () => void): void => {
+    window.setTimeout(update, 0);
+  };
+
   const applyFilters = (next: F): void => {
-    setBackStack([]);
+    deferState(() => setBackStack([]));
     commit(codec.toParams(searchParams, next));
   };
 
   const goNext = (nextCursor: string): void => {
-    setBackStack(pushNextStack(backStack, cursor));
+    deferState(() => setBackStack(pushNextStack(backStack, cursor)));
     commit(setCursorParam(searchParams, nextCursor));
   };
 
   const goPrevious = (): void => {
     const { stack, prior } = popBackStack(backStack);
-    setBackStack(stack);
+    deferState(() => setBackStack(stack));
     commit(setCursorParam(searchParams, prior));
   };
 
@@ -128,7 +138,7 @@ export function useResourceTable<F>(
     goNext,
     goPrevious,
     returnToFirstPage: () => {
-      setBackStack([]);
+      deferState(() => setBackStack([]));
       commit(setCursorParam(searchParams, undefined));
     },
     openSelection: (id: string) => commit(setSelectedParam(searchParams, id)),

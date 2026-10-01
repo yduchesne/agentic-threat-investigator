@@ -241,7 +241,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
     expect(consoleErrors).toEqual([]);
   });
 
-  test("Evidence inside the in-flow Pivot workbench: list/detail stays inside the active step", async ({
+  test("Evidence inside the routed exploration journey: list/detail on the canonical Evidence surface (PR 31F-8)", async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -254,92 +254,87 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
 
     await login(page);
     const investigationId = await completeF02Investigation(page);
-    await page.goto(`${BASE_URL}/investigations/${investigationId}/evidence`);
+    const base = `/investigations/${investigationId}`;
+    await page.goto(`${BASE_URL}${base}/evidence`);
     await expect(page.getByText(F02_ROOT_DOMAIN).first()).toBeVisible({ timeout: 30_000 });
 
-    // Evidence -> subject Pivot -> Relationships where source. The root
-    // domain row always carries fake-world edges, so the target workbench
-    // deterministically has rows.
+    // Evidence -> subject Pivot -> Relationships where source (semantic
+    // link). The root domain row always carries fake-world edges, so the
+    // routed Relationships surface deterministically has rows.
     const rootRow = page
       .getByRole("row")
       .filter({ hasText: F02_ROOT_DOMAIN })
       .first();
     await rawPointer(page, rootRow.getByRole("button", { name: "Subject" }), "pivot-subject");
     await expect(page.getByRole("group", { name: "Pivot actions" })).toBeVisible({ timeout: 15_000 });
-    await rawPointer(page, page.getByRole("button", { name: "Relationships where source" }), "pivot-action");
-    const workbench = page.getByTestId("pivot-workbench");
-    await expect(
-      workbench.getByRole("heading", { name: "Relationships pivot workspace" }),
-    ).toBeVisible({ timeout: 30_000 });
-    await expect(
-      workbench.getByRole("table", { name: "Relationships" }),
-    ).toBeVisible({ timeout: 30_000 });
-    // A5: the in-flow workbench is ordinary page content, never a modal.
+    await page.getByRole("group", { name: "Pivot actions" }).getByRole("link", { name: "Relationships where source" }).click();
+    await expect(page).toHaveURL(new RegExp(`${base}/relationships\\?source_entity_id=`));
+    const relationshipsTable = page.getByRole("table", { name: "Relationships" });
+    await expect(relationshipsTable).toBeVisible({ timeout: 30_000 });
+    // The routed surface is ordinary page content, never a modal or a
+    // generic hosted workbench.
     expect(await page.getByRole("dialog").count()).toBe(0);
+    expect(await page.getByTestId("pivot-workbench").count()).toBe(0);
 
     // Relationship detail (raw; the former wedge class) -> pivot source ->
-    // exact Evidence step in the same in-flow workbench.
+    // exact Evidence surface (canonical route with the subject filter).
     await rawPointer(
       page,
-      workbench.getByRole("button", { name: /^View / }).first(),
-      "ws-rel-view",
+      relationshipsTable.getByRole("button", { name: /^View / }).first(),
+      "rel-view",
     );
     await expect(
-      workbench.getByRole("heading", { name: "Relationships details" }),
+      page.getByRole("heading", { name: "Relationships details" }),
     ).toBeVisible({ timeout: 30_000 });
     await rawPointer(
       page,
-      workbench.getByRole("button", { name: "Pivot actions Source entity" }),
-      "ws-rel-pivot",
+      page.getByRole("button", { name: "Pivot actions Source entity" }),
+      "rel-pivot",
     );
     await expect(page.getByRole("group", { name: "Pivot actions" })).toBeVisible({ timeout: 15_000 });
-    await rawPointer(page, page.getByRole("button", { name: "Evidence for this entity" }), "ws-pivot-ev");
-    await expect(
-      workbench.getByRole("heading", { name: "Evidence pivot workspace" }),
-    ).toBeVisible({ timeout: 30_000 });
-    await expect(
-      workbench.getByRole("table", { name: "Evidence" }),
-    ).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("group", { name: "Pivot actions" }).getByRole("link", { name: "Evidence for this entity" }).click();
+    await expect(page).toHaveURL(new RegExp(`${base}/evidence\\?subject_entity_id=`));
+    const evidenceTable = page.getByRole("table", { name: "Evidence" });
+    await expect(evidenceTable).toBeVisible({ timeout: 30_000 });
 
-    // Repeated same-page lifecycle INSIDE the active step: 5 View/Back cycles.
-    const evidenceTableInside = workbench.getByRole("table", { name: "Evidence" });
+    // Repeated same-page lifecycle on the canonical Evidence surface:
+    // 5 View/Back cycles (one routed content surface, no hidden stack).
     for (let index = 0; index < 5; index += 1) {
       await rawPointer(
         page,
-        evidenceTableInside.getByRole("button", { name: /^View / }).nth(index % 3),
-        `ws-c${index}-view`,
+        evidenceTable.getByRole("button", { name: /^View / }).nth(index % 3),
+        `ev-c${index}-view`,
       );
       const heading = page.getByRole("heading", { name: "Evidence details" });
       await expect(heading).toBeVisible({ timeout: 30_000 });
-      // A5: no modal, backdrop or nested overlay — the in-flow workbench is
-      // ordinary in-flow content with zero dialogs.
+      // No modal, backdrop or nested overlay — zero dialogs.
       await expect(page.getByRole("dialog")).toHaveCount(0);
-      // Pivot breadcrumbs remain visible in the same workbench.
-      await expect(
-        workbench.getByRole("navigation", { name: "Pivot breadcrumb" }),
-      ).toBeVisible();
-      // Back closes ONLY the nested detail: the workbench survives.
+      expect(await page.getByTestId("pivot-workbench").count()).toBe(0);
       await rawPointer(
         page,
-        workbench.getByRole("button", { name: "Back to Evidence" }),
-        `ws-c${index}-back`,
+        page.getByRole("button", { name: "Back to Evidence" }),
+        `ev-c${index}-back`,
       );
-      await expect(evidenceTableInside).toBeVisible({ timeout: 30_000 });
-      await expect(workbench).toBeVisible({ timeout: 20_000 });
-      await expect(
-        workbench.getByRole("navigation", { name: "Pivot breadcrumb" }),
-      ).toBeVisible();
+      await expect(evidenceTable).toBeVisible({ timeout: 30_000 });
+      // The shell stays mounted; the route is unchanged by the detail
+      // toggle (selection is query state).
+      expect(page.url()).toMatch(new RegExp(`${base}/evidence`));
+      expect(page.url()).not.toContain("pivot=");
     }
 
-    // The workbench can close normally afterwards and the normal workbench returns.
-    await rawPointer(
-      page,
-      workbench.getByRole("button", { name: "Close pivot workspace" }),
-      "ws-close",
-    );
-    await expect(page.getByTestId("pivot-workbench")).not.toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible();
-    await expect(page.getByText("FAKE DATA")).toBeVisible({ timeout: 10_000 });
+    // Browser Back returns to the previous entry: the closed Evidence
+    // detail re-renders from URL state (route-owned detail, N12) and the
+    // semantic Back restores the bounded list (the Evidence tab is inert
+    // while already active).
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`${base}/evidence\\?subject_entity_id=`));
+    await expect(
+      page.getByRole("heading", { name: "Evidence details" }),
+    ).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Back to Evidence" }).click();
+    await expect(page.getByRole("table", { name: "Evidence" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("FAKE DATA")).toBeVisible({ timeout: 30_000 });
+    expect(page.url()).not.toContain("pivot=");
     expect(consoleErrors).toEqual([]);
   });
 });

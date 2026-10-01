@@ -85,12 +85,13 @@ function geolocationsHandler(
 
 async function renderMap(handlers: ReturnType<typeof http.get>[]) {
   setHttpHandlers(...AUTH, workspace(), ...handlers);
-  renderAtPath(`/investigations/${INVESTIGATION_ID}/map`);
+  const { router } = renderAtPath(`/investigations/${INVESTIGATION_ID}/map`);
   await screen.findByRole("tab", { name: "Map" });
   await waitFor(() =>
     expect(screen.queryByText("Loading geolocation context…")).not.toBeInTheDocument(),
   );
   await screen.findByText("All returned geolocation items");
+  return { router };
 }
 
 function actionFor(key: string, item: InvestigationGeolocation) {
@@ -275,12 +276,12 @@ describe("map-origin entity actions (C-P01..C-P12)", () => {
     ).toHaveLength(0);
   });
 
-  it("C-P08b: Explore opens the typed PivotWorkspace with the map_entity step", async () => {
+  it("C-P08b: Explore navigates the canonical evidence route with the exact subject filter", async () => {
     const item = geoItem(1);
     const evidenceList = http.get("*/api/v1/investigations/:id/evidence", () =>
       jsonResponse({ items: [], next_cursor: null }),
     );
-    await renderMap([geolocationsHandler(collection([item])), evidenceList]);
+    const { router } = await renderMap([geolocationsHandler(collection([item])), evidenceList]);
     const rows = screen.getByRole("table", {
       name: "All returned geolocation items",
     });
@@ -288,12 +289,16 @@ describe("map-origin entity actions (C-P01..C-P12)", () => {
     await userEvent.click(within(row).getByRole("button", { name: /Explore/ }));
     await screen.findByRole("group", { name: "Pivot actions" });
     await userEvent.click(
-      screen.getByRole("button", { name: "Evidence for this entity" }),
+      screen.getByRole("link", { name: "Evidence for this entity" }),
     );
-    await screen.findByTestId("pivot-workbench");
-    // Breadcrumb preserves the IP identity of the Map-origin launch.
-    const workbench = screen.getByTestId("pivot-workbench");
-    await within(workbench).findByText("203.0.113.1");
-    expect(within(workbench).getByText("203.0.113.1")).toBeVisible();
+    // PR 31F-8: one canonical route navigation, no encoded pivot envelope.
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `/investigations/${INVESTIGATION_ID}/evidence`,
+      );
+    });
+    expect(router.state.location.search).toBe(
+      `?subject_entity_id=${item.entity_id}`,
+    );
   });
 });

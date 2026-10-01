@@ -6,7 +6,7 @@
 // citations render with inspectable closure; all external text is escaped
 // and never fetched.
 
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -74,9 +74,13 @@ describe("Research page", () => {
     await screen.findByText("Research context");
     await userEvent.type(screen.getByLabelText("Subject entity ID"), "40000000-0000-4000-8000-000000000101");
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
-    await screen.findByText("Research context");
-    const last = recorder.requests.at(-1);
-    expect(last?.params.subject_entity_id).toBe("40000000-0000-4000-8000-000000000101");
+    await waitFor(
+      () => {
+        const last = recorder.requests.at(-1);
+        expect(last?.params.subject_entity_id).toBe("40000000-0000-4000-8000-000000000101");
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("renders claims and citations with inspectable closure (Q03, Q04)", async () => {

@@ -222,7 +222,7 @@ export function ResearchWorkspace({
           heading={tCommon("detail.title", { resource: t("title") })}
           onBack={table.closeSelection}
         >
-          {detailBody(t, detail)}
+          {researchDetailBody(t, detail)}
         </ResourceDetailView>
       ) : (
         <>
@@ -279,8 +279,8 @@ export function ResearchWorkspace({
   );
 }
 
-/** The detail body with its bounded states. */
-function detailBody(
+/** The detail body with its bounded states (shared by list and routed detail). */
+export function researchDetailBody(
   t: (key: string) => string,
   detail: ReturnType<typeof useResearchResultDetail>,
 ): ReactElement {

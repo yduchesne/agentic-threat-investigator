@@ -32,8 +32,26 @@ function selectedTab(pathname: string, base: string): number | false {
   if (normalized === "overview" || normalized.startsWith("overview/")) {
     return 0;
   }
-  const index = WORKSPACE_TABS.findIndex((tab) => normalized === tab.path);
-  return index >= 0 ? index : false;
+  // PR 31F-8: the routed exact-detail families stay under their module tab.
+  if (normalized === "evidence" || normalized.startsWith("evidence/")) {
+    return 1;
+  }
+  if (normalized === "relationships" || normalized.startsWith("relationships/")) {
+    return 2;
+  }
+  if (normalized === "map") {
+    return 3;
+  }
+  if (normalized === "geoint" || normalized.startsWith("geoint/")) {
+    return 4;
+  }
+  if (normalized === "research" || normalized.startsWith("research/")) {
+    return 5;
+  }
+  if (normalized === "timeline") {
+    return 6;
+  }
+  return false;
 }
 
 /** Route links for Overview/Evidence/Relationships/Map/Research/Timeline. */
@@ -53,15 +71,34 @@ export function InvestigationTabs({
       variant="scrollable"
       scrollButtons="auto"
     >
-      {WORKSPACE_TABS.map((tab, index) => (
-        <Tab
-          key={tab.key}
-          component={RouterLink}
-          to={`${base}/${tab.path}`}
-          label={t(`tabs.${tab.key}`)}
-          value={index}
-        />
-      ))}
+      {WORKSPACE_TABS.map((tab, index) => {
+        const to = `${base}/${tab.path}`;
+        const active = value === index;
+        // PR 31F-8: re-activating the ALREADY-ACTIVE tab must not fire a
+        // same-URL router navigation (a deterministic real-stack
+        // Chromium/Firefox main-thread stall reproduced with pointer AND
+        // keyboard activation — the routed same-URL navigation class). The
+        // active tab renders as an inert tab (still announced, still in
+        // tab order); destination tabs stay semantic links.
+        if (active) {
+          return (
+            <Tab
+              key={tab.key}
+              label={t(`tabs.${tab.key}`)}
+              value={index}
+            />
+          );
+        }
+        return (
+          <Tab
+            key={tab.key}
+            component={RouterLink}
+            to={to}
+            label={t(`tabs.${tab.key}`)}
+            value={index}
+          />
+        );
+      })}
     </Tabs>
   );
 }

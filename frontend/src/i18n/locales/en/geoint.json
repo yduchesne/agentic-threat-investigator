@@ -1,5 +1,12 @@
 {
  "title": "Geographic context",
+ "breadcrumbs.aria": "Geographic context navigation",
+ "resources.entityUnknown": "Entity geographic context",
+ "resources.locationUnknown": "Canonical Location",
+ "location.entities.title": "Entities at this location",
+ "location.observations.title": "Observations at this location",
+ "detail.observation.title": "Geographic observation",
+ "detail.observation.backToContext": "Back to Geographic context",
  "intro": "Evidence-backed canonical geographic context for this Investigation.",
  "loading": "Loading geographic context…",
  "error.title": "Unable to load geographic context",

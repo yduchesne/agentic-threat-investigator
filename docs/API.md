@@ -557,8 +557,10 @@ outside this document's delivered surface.
 Map-origin analyst exploration (PR 25C) introduces **no new production
 endpoint**: every Map item's Explore surface reuses the existing typed
 Evidence/Relationships/Research list and detail endpoints through the PR
-24 PivotWorkspace with a single frontend-only `map_entity` navigation
-provenance kind. Exact Evidence provenance continues through the existing
+31F-8 canonical Investigation-scoped routes with a single frontend-only
+`map_entity` navigation provenance kind (the former PivotWorkspace stack
+is retired; legacy `pivot=` URLs get the deterministic one-time redirect
+policy). Exact Evidence provenance continues through the existing
 `GET /api/v1/investigations/{id}/evidence/{evidence_id}` detail route. The
 deterministic E2E geolocation seeding seam is a harness-only CLI
 (`scripts/e2e-seed-geolocation.sh` over `tests/e2e_support/`) that writes

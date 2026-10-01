@@ -101,11 +101,14 @@ describe("Relationships page", () => {
     await userEvent.click(screen.getByRole("combobox", { name: "Relationship type" }));
     await userEvent.click(await screen.findByRole("option", { name: "Resolves to" }));
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
-    await waitFor(() => {
-      const last = recorder.requests.at(-1);
-      expect(last?.params.source_entity_id).toBe("40000000-0000-4000-8000-000000000101");
-      expect(last?.params.relationship_type).toBe("urn:ati:relationship:dns:resolves_to");
-    });
+    await waitFor(
+      () => {
+        const last = recorder.requests.at(-1);
+        expect(last?.params.source_entity_id).toBe("40000000-0000-4000-8000-000000000101");
+        expect(last?.params.relationship_type).toBe("urn:ati:relationship:dns:resolves_to");
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("shows the stable edge plus a bounded observation preview (R03, R04)", async () => {

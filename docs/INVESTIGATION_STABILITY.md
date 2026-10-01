@@ -155,10 +155,20 @@ This remains a hypothesis, not an established root cause.
 
 Production Modal/Portal/focus architecture must not be changed solely on this hypothesis.
 
-### Current handling
+### Current handling / Resolution (PR 31F-6, PR 31F-7, PR 31F-8)
 
-For now:
+PR 31F-6 replaced the overlay DetailDrawer/Inspector with conservative
+in-flow list/detail, PR 31F-7 removed the last fixed-Portal More menu, and
+PR 31F-8 removed the URL-encoded PivotWorkspace hosting entirely:
+cross-resource exploration is now ordinary Investigation-scoped React
+Router navigation (semantic links, one routed content surface, browser
+Back/Forward). The Portal/overlay composition implicated in this
+investigation no longer exists in the analyst resource navigation path,
+and the routed native-pointer acceptance runs in Chromium and Firefox
+without dispatch/force/coordinate workarounds. The paragraphs below
+preserve the historical investigation record.
 
+For the historical record, the deferred investigation's guidance was:
 - retain E22 and E22-B;
 - retain their substantive assertions;
 - retain the normal repository/CI E2E gate;

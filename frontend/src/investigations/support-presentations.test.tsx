@@ -23,6 +23,7 @@ import {
 
 const EVIDENCE_ID = "40000000-0000-4000-8000-000000000001";
 const OBSERVATION_ID = "40000000-0000-4000-8000-000000000002";
+const INVESTIGATION_ID = "20000000-0000-4000-8000-000000000001";
 
 function findingLike(
   support: Finding["support"] | ReportFinding["support"],
@@ -56,10 +57,12 @@ function renderFindingList(options: {
   findings: readonly FindingLike[];
   presentation?: SupportPresentationLookup | null;
 }): RenderResult {
+  // The Investigation-scoped route provides the canonical context the
+  // routed support actions resolve against (PR 31F-8).
   const router = createMemoryRouter(
     [
       {
-        path: "/",
+        path: "/investigations/:investigationId/*",
         element: (
           <FindingList
             findings={options.findings}
@@ -68,7 +71,7 @@ function renderFindingList(options: {
         ),
       },
     ],
-    { initialEntries: ["/"] },
+    { initialEntries: [`/investigations/${INVESTIGATION_ID}/overview`] },
   );
   return render(
     <AppProviders queryClient={freshQueryClient()}>
@@ -161,7 +164,13 @@ describe("FindingList support presentation", () => {
       screen.getByText(/update-package\.test/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Evidence ID:/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open evidence" })).toBeInTheDocument();
+    // PR 31F-8: the support action is a semantic route link to the exact
+    // Evidence surface (canonical ID identity).
+    const action = screen.getByRole("link", { name: "Open evidence" });
+    expect(action).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/evidence/${EVIDENCE_ID}`,
+    );
   });
 
   it("renders the semantic RelationshipObservation edge (SP02/SP03)", () => {
@@ -194,9 +203,13 @@ describe("FindingList support presentation", () => {
       screen.getByText(/update-package\.test · Domain → Resolves to → malware\.badloader_v2 · Malware/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Observation ID:/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "View relationship observation" }),
-    ).toBeInTheDocument();
+    const action = screen.getByRole("link", {
+      name: "View relationship observation",
+    });
+    expect(action).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/relationships/observations/${OBSERVATION_ID}`,
+    );
   });
 
   it("renders the localized unavailable statement with the secondary ID (SP07)", () => {
@@ -206,6 +219,10 @@ describe("FindingList support presentation", () => {
     });
     expect(screen.getByText("Evidence details unavailable")).toBeInTheDocument();
     expect(screen.getByText(/Evidence ID:/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open evidence" })).toBeInTheDocument();
+    const action = screen.getByRole("link", { name: "Open evidence" });
+    expect(action).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/evidence/${EVIDENCE_ID}`,
+    );
   });
 });

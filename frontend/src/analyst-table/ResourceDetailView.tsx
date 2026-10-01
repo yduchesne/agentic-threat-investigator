@@ -24,6 +24,7 @@
 import { Box, Divider, Typography } from "@mui/material";
 import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Link as RouterLink } from "react-router";
 
 import { LoadingState } from "../components/AsyncState";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -66,6 +67,70 @@ export function ResourceDetailView({
           color: "text.primary",
           borderRadius: 1,
           bgcolor: "transparent",
+          "&:hover": { bgcolor: "action.hover" },
+          "&:focus-visible": {
+            outline: "2px solid",
+            outlineColor: "focus.visible",
+          },
+          "&:active": { bgcolor: "action.hover" },
+        }}
+      >
+        {backLabel}
+      </Box>
+      <Typography variant="h2" sx={{ mt: 0.5 }}>
+        {heading}
+      </Typography>
+      <Divider sx={{ my: 1 }} />
+      <Box sx={{ minWidth: 0 }}>{children}</Box>
+    </Box>
+  );
+}
+
+export interface RouteDetailViewProps {
+  /** Canonical parent route (list) with preserved query state. */
+  backTo: string;
+  /** Accessible + visible Back label (e.g. "Back to Evidence"). */
+  backLabel: string;
+  /** Human-readable detail heading (e.g. "Evidence details"). */
+  heading: string;
+  /** The exact detail content (loading/error/not-found states inline). */
+  children: ReactNode;
+}
+
+/**
+ * One routed full-width in-flow detail view (PR 31F-8).
+ *
+ * Route-owned detail surfaces (``/evidence/:evidenceId`` and friends) use
+ * this chrome: the Back affordance is a semantic react-router link whose
+ * destination carries the reconstructible filter/cursor query state, and
+ * the detail replaces the previous route as the primary content (the
+ * browser Back/Forward stack owns the reverse journey, never a hidden
+ * mounted resource tree). No Portal/modal/backdrop machinery exists.
+ */
+export function RouteDetailView({
+  backTo,
+  backLabel,
+  heading,
+  children,
+}: RouteDetailViewProps): ReactElement {
+  return (
+    <Box sx={{ minWidth: 0 }}>
+      <Box
+        component={RouterLink}
+        to={backTo}
+        data-testid="resource-route-detail-back"
+        sx={{
+          display: "inline-block",
+          px: 1,
+          py: 0.5,
+          fontSize: "0.875rem",
+          lineHeight: 1.2,
+          fontFamily: "inherit",
+          cursor: "pointer",
+          color: "text.primary",
+          borderRadius: 1,
+          bgcolor: "transparent",
+          textDecoration: "none",
           "&:hover": { bgcolor: "action.hover" },
           "&:focus-visible": {
             outline: "2px solid",

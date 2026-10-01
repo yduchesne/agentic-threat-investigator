@@ -64,26 +64,6 @@ function trackConsoleErrors(page: Page): string[] {
   return errors;
 }
 
-/** Click a target inside a fixed overlay via the raw pointer path. */
-async function clickForce(page: Page, target: Locator): Promise<void> {
-  await expect(target).toBeVisible({ timeout: 30_000 });
-  let box: { x: number; y: number; width: number; height: number } | null = null;
-  for (let attempt = 0; attempt < 5 && box === null; attempt += 1) {
-    box = await target.boundingBox();
-    if (box === null) {
-      await page.waitForTimeout(300);
-    }
-  }
-  if (box === null) {
-    throw new Error(`no bounding box for ${target}`);
-  }
-  await page.mouse.click(
-    box.x + box.width / 2,
-    box.y + box.height / 2,
-    { delay: 40 },
-  );
-}
-
 /** Create and complete one deterministic fake-world Investigation. */
 async function completeInvestigation(
   page: Page,
@@ -178,30 +158,35 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     });
     expect(await page.locator(".leaflet-marker-icon").count()).toBe(2);
 
-    // Explore IP A -> Evidence for the exact Entity through the typed
-    // PivotWorkspace. Breadcrumb carries the IP identity.
+    // Explore IP A -> Evidence for the exact Entity through the canonical
+    // route. The typed capability resolves to the filtered Evidence route;
+    // the server-filtered target resolves the seeded GEOLOCATION Evidence
+    // row (PR 31F-8), with no hosted workbench.
     const rowA = page
       .getByRole("table", { name: "All returned geolocation items" })
       .locator("tbody tr", { hasText: "203.0.113.10" });
     await scrollTriggerIntoView(page, rowA);
     await rowA.getByRole("button", { name: /Explore/ }).click();
     await page
-      .getByRole("button", { name: "Evidence for this entity" })
-      .dispatchEvent("click");
-    const workspace = page.getByTestId("pivot-workbench");
-    await expect(workspace).toBeVisible({ timeout: 30_000 });
-    await expect(workspace.getByText("203.0.113.10").first()).toBeVisible();
-    // Server-filtered target: the seeded GEOLOCATION Evidence row resolves.
-    await expect(
-      workspace.getByRole("table").getByText("urn:ati:source:dbip_city_lite").first(),
-    ).toBeVisible({ timeout: 30_000 });
-
-    // Close/back to Map safely; disclaimer remains.
-    await clickForce(
-      page,
-      workspace.getByRole("button", { name: "Close pivot workspace" }),
+      .getByRole("group", { name: "Pivot actions" })
+      .getByRole("link", { name: "Evidence for this entity" })
+      .click();
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/investigations/${investigationId}/evidence\\?subject_entity_id=`,
+      ),
     );
-    await expect(workspace).not.toBeVisible();
+    await expect(page.getByText("203.0.113.10").first()).toBeVisible();
+    await expect(
+      page
+        .getByRole("table", { name: "Evidence" })
+        .getByText("urn:ati:source:dbip_city_lite")
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
+    expect(page.url()).not.toContain("pivot=");
+
+    // Browser Back returns to the Map surface; disclaimer remains.
+    await page.goBack();
     await expect(
       page.getByRole("heading", { name: "Investigation Map" }),
     ).toBeVisible();
@@ -217,22 +202,23 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     await scrollTriggerIntoView(page, rowB);
     await rowB.getByRole("button", { name: /Explore/ }).click();
     await page
-      .getByRole("button", { name: "Relationships where source" })
-      .dispatchEvent("click");
-    const relationshipsWorkspace = page.getByTestId("pivot-workbench");
-    await expect(relationshipsWorkspace).toBeVisible({ timeout: 30_000 });
-    await expect(
-      relationshipsWorkspace.getByText("203.0.113.20").first(),
-    ).toBeVisible();
-    await expect(
-      relationshipsWorkspace.getByText("No relationships match these filters"),
-    ).toBeVisible({ timeout: 30_000 });
-    await clickForce(
-      page,
-      relationshipsWorkspace.getByRole("button", {
-        name: "Close pivot workspace",
-      }),
+      .getByRole("group", { name: "Pivot actions" })
+      .getByRole("link", { name: "Relationships where source" })
+      .click();
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/investigations/${investigationId}/relationships\\?source_entity_id=`,
+      ),
     );
+    // The routed Relationships surface shows the exact filter identity in
+    // the URL-backed form (the IP value itself is not a field value).
+    await expect(
+      page.getByRole("textbox", { name: "Source entity ID" }),
+    ).toHaveValue(/^[0-9a-f-]{36}$/, { timeout: 30_000 });
+    await expect(
+      page.getByText("No relationships match these filters"),
+    ).toBeVisible({ timeout: 30_000 });
+    await page.goBack();
     await expect(
       page.getByRole("heading", { name: "Investigation Map" }),
     ).toBeVisible();
@@ -318,7 +304,7 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     const actionBar = page.getByRole("group", { name: "Pivot actions" });
     await expect(actionBar).toBeVisible({ timeout: 30_000 });
     await expect(
-      page.getByRole("button", { name: "Evidence for this entity" }),
+      page.getByRole("link", { name: "Evidence for this entity" }),
     ).toBeVisible();
     // Cancel collapses the ordinary in-flow bar (no popup/menu exists).
     await page.getByRole("button", { name: "Cancel" }).click();
@@ -370,19 +356,22 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     await scrollTriggerIntoView(page, row);
     await row.getByRole("button", { name: /Explore/ }).click();
     await page
-      .getByRole("button", { name: "Research for this entity" })
-      .dispatchEvent("click");
-    const researchWorkspace = page.getByTestId("pivot-workbench");
-    await expect(researchWorkspace).toBeVisible({ timeout: 30_000 });
-    await expect(researchWorkspace.getByText("192.0.2.40").first()).toBeVisible();
-    await expect(
-      researchWorkspace.getByText("No research results match these filters"),
-    ).toBeVisible({ timeout: 30_000 });
-    // Safe close/back to Map.
-    await clickForce(
-      page,
-      researchWorkspace.getByRole("button", { name: "Close pivot workspace" }),
+      .getByRole("group", { name: "Pivot actions" })
+      .getByRole("link", { name: "Research for this entity" })
+      .click();
+    await expect(page).toHaveURL(
+      new RegExp(`/investigations/${investigationId}/research\\?subject_entity_id=`),
     );
+    // The routed Research surface shows the exact filter identity in the
+    // URL-backed form (the IP value itself is not a field value).
+    await expect(
+      page.getByRole("textbox", { name: "Subject entity ID" }),
+    ).toHaveValue(/^[0-9a-f-]{36}$/, { timeout: 30_000 });
+    await expect(
+      page.getByText("No research results match these filters"),
+    ).toBeVisible({ timeout: 30_000 });
+    // Browser Back returns to the Map.
+    await page.goBack();
     await expect(
       page.getByRole("heading", { name: "Investigation Map" }),
     ).toBeVisible();

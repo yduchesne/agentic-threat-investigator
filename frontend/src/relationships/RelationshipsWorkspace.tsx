@@ -259,7 +259,7 @@ export function RelationshipsWorkspace({
           heading={tCommon("detail.title", { resource: t("title") })}
           onBack={table.closeSelection}
         >
-          {detailBody(t, detail, investigationId, embedded)}
+          {relationshipDetailBody(t, detail, investigationId, embedded)}
         </ResourceDetailView>
       ) : (
         <>
@@ -317,7 +317,7 @@ export function RelationshipsWorkspace({
 }
 
 /** The detail body with the stable edge + bounded observations preview. */
-function detailBody(
+export function relationshipDetailBody(
   t: (key: string) => string,
   detail: ReturnType<typeof useRelationshipDetail>,
   investigationId: string,

@@ -2795,11 +2795,15 @@ never with visibility alone:
 - Repeated same-page cycles are mandatory: at least **five**
   View/detail/Back cycles in the same page/browser process (no
   reloads) for each critical surface — Evidence, Timeline, History,
-  and Evidence inside PivotWorkspace (Relationships: three). After
+  and the routed Evidence surface reached through cross-resource
+  exploration (Relationships: three). After
   every Back an action on the list must prove the browser is still
   alive; asserting that the Back button received a click is
   insufficient. The lifecycle regression lives in
-  `frontend/e2e/zz-list-detail.spec.ts`.
+  `frontend/e2e/zz-list-detail.spec.ts`. PR 31F-8: cross-resource
+  exploration no longer hosts resources in a PivotWorkbench; the
+  second `zz-list-detail` journey reaches the Evidence surface through
+  the routed relationships -> evidence navigation.
 - The raw-pointer evidence slice is the acceptance authority:
   `frontend/e2e/zz-pointer-acceptance.spec.ts` drives the complete
   Evidence journey (Investigation -> list -> RAW View -> full-width
@@ -2840,13 +2844,10 @@ never with visibility alone:
   Back, URL/browser-history restoration, exact scoped read, no
   simultaneous list/detail fetch, one durable selected identity,
   inline Pivot/Cancel, keyboard-operable Back, no Portal/modal/body
-  masking), and `frontend/src/pivots/PivotWorkspace.test.tsx` covers
-  the nested detail Back without closing the workspace.
+  masking).
 - Resource detail is ordinary layout content: no Escape listener, no
   deferred focus, no backdrop click — do not reintroduce overlay
-  machinery for resource detail. The remaining overlay lifecycle
-  (PivotWorkspace modal + PivotMenu) keeps its own focus/Escape
-  strategy (see `docs/ARCHITECTURE.md`).
+  machinery for resource detail.
 - Real-browser pointer dispatch on this stack can hang
   Playwright/Chromium's composite ``locator.click`` mid-gesture
   (``performing click action``) regardless of application code — the
@@ -2858,6 +2859,60 @@ never with visibility alone:
   pointer path. Do not treat ``locator.click`` hangs on this stack as
   list/detail regressions without the A/B control against the base
   app.
+
+### PR 31F-8 routed GEOINT browser gate
+
+PR 31F-8 replaces the generic URL-encoded `PivotWorkspace` resource host
+with ordinary Investigation-scoped React Router navigation; the browser
+acceptance proves the routed architecture natively, without the former
+workarounds:
+
+- **Routed GEOINT journey (`frontend/e2e/zz-geoint.spec.ts`, G1..G6).**
+  `Geographic context` -> Location Explore (semantic link) -> the routed
+  `/geoint/locations/:locationId/entities` surface -> Entity Explore ->
+  `/geoint/entities/:entityId` -> `View Evidence` (semantic link) -> the
+  exact `/evidence/:evidenceId` route -> browser Back reconstructs
+  Entity GEOINT, then the Location surface. G3 additionally proves
+  containment toggling writes `include_contained=true` and that refresh
+  restores the contained surface (URL-owned state). G4 explicitly
+  returns to `/investigations` before creating Investigation B (the
+  second Investigation is always created from the list page — no
+  product control was added).
+- **No workaround class.** The canonical acceptance uses NORMAL locator
+  clicks or raw pointer input only: no `dispatchEvent`, no `force: true`,
+  no coordinate `clickForce`, no arbitrary sleeps, no JS DOM click
+  bypasses, no retry dependence.
+- **Native-pointer stability gate
+  (`frontend/e2e/zz-31f8-stress.spec.ts`).** The routed journey repeats
+  at least **20 consecutive cycles per engine in ONE page process**
+  (Geographic context -> Location Entities -> Entity GEOINT -> Evidence
+  -> Back -> Back -> Forward -> Forward -> semantic parent/back). Each
+  cycle proves the target is visible, the native click completes, the
+  canonical URL contains no `pivot=` and no `pivot-workbench`, content
+  renders, Back/Forward restore the expected routes, the returned
+  resource stays interactive, the browser stays responsive (heartbeat),
+  and no product console error accumulates. Run with `workers=1` and
+  `retries=0` in Chromium (default project) and Firefox (`inspector-
+  firefox` project):
+
+  ```bash
+  cd frontend && npx playwright test zz-geoint.spec.ts zz-31f8-stress.spec.ts --project=chromium --workers=1 --retries=0
+  cd frontend && npx playwright test zz-geoint.spec.ts zz-31f8-stress.spec.ts --project=inspector-firefox --workers=1 --retries=0
+  ```
+
+  `ATI_31F8_STRESS_CYCLES` may raise the cycle count (e.g. 50) without
+  changing the assertion contract; the default 20 is never silently
+  reduced.
+- **Routed navigation architecture (`frontend/e2e/zz-pivots.spec.ts`,
+  `zz-pivot-acceptance.spec.ts`, `zz-list-detail.spec.ts`,
+  `zz-geolocation-workflow.spec.ts`, `zz-relationship-evolution.spec.ts`).**
+  Report provenance opens the exact Evidence route; capabilities resolve
+  through the exhaustive typed mapper; Back/Forward/refresh reconstruct
+  from URL state; the Investigation shell stays mounted. The
+  `zz-pointer-acceptance.spec.ts` raw list/detail Evidence journey is
+  unchanged (ordinary list/detail selection remains URL-backed query
+  state), and the point-to-history acceptance in `zz-analyst-tables`
+  retains its established History convention.
 
 ### Secondary navigation and appearance lifecycle (PR 31F-7)
 
@@ -2987,23 +3042,38 @@ hunt — new E2E regression, manual reproduction, or bisection:
   thread (both engines; minimal in-harness reproduction in the PR
   record: the same table/query/selection click freezes when the commit
   is synchronous and is clean when it is deferred one macrotask). The
-  resource-table commit, PivotMenu push and PivotWorkspace
-  close/truncate/step commits therefore schedule the URL transition
-  after the originating event completes. This is architecturally
-  justified: the navigation must not run inside native pointer dispatch;
-  it is the same bounded deferred scheduling the app already uses for
-  focus. Do not regress these commits back to synchronous without the
-  raw-pointer control.
+  resource-table selection commit therefore schedules the URL transition
+  after the originating event completes. PR 31F-8 extends the same
+  boundary to EVERY controller state transition that accompanies a URL
+  commit (the local back stack) — a synchronous `setBackStack` during a
+  pointer event re-rendered the routed GEOINT Location containment
+  surface and deterministically stalled Chromium/Firefox (reproduced
+  with pointer AND keyboard activation; fixed by deferring the state
+  update with the commit). Do not regress these commits back to
+  synchronous without the raw-pointer control. Cross-resource navigation
+  is plain React Router route navigation (semantic links), which owns
+  its own commit; the encoded Pivot-stack push/close/truncate commits
+  were retired with the host.
+- **Same-URL activations are inert.** Re-activating the CURRENT routed
+  surface (the active Investigation tab, a breadcrumb root already
+  active, or a Pivot action whose canonical destination equals the
+  current URL) is a no-op in the routed architecture: no same-URL
+  router navigation is issued (a deterministic main-thread stall
+  reproduced on the real stack with pointer AND keyboard activation).
+  The active tab renders as an inert tab; PivotMenu suppresses actions
+  whose destination equals the current route (the older Pivot-stack
+  no-op doctrine); the GEOINT breadcrumb root is inert on the context
+  route.
 - The former fixed-overlay freeze (the second, engine-level pointer-hit
   class documented in the PR 31F-6 record) is addressed architecturally:
-  the Pivot workbench is ordinary in-flow content and the raw-pointer
-  acceptance journey proves the former in-overlay View press and the
-  breadcrumb/Close/list-detail transitions first-attempt in both
-  engines. Synchronous router commits inside native pointer events
-  remain prohibited (the deferred-commit boundary is enforced by the
-  resource-table/PivotMenu/PivotWorkspace commits); treat any NEW
-  freeze as its own touching-path bisect and never reintroduce
-  side-pane/overlay detail.
+  the former overlay/Pivot hosting is replaced by ordinary in-flow
+  content and routed resource surfaces, and the native-pointer
+  acceptance journey (`zz-31f8-stress.spec.ts`) proves the routed GEOINT
+  transitions first-attempt in both engines. Synchronous router commits
+  inside native pointer events remain prohibited for the resource-table
+  deferred commit; treat any NEW freeze as its own touching-path bisect
+  and never reintroduce side-pane/overlay detail or a generic hosted
+  workbench.
 
 ### Manual Firefox verification (PR 31F-6 merge requirement)
 
@@ -3016,7 +3086,7 @@ Minimum cycles:
 | Surface | Cycles |
 | ------- | ------ |
 | Evidence (normal route) | 5 |
-| Evidence inside the in-flow Pivot workbench | 5 |
+| Routed exploration Evidence (cross-resource journey) | 5 |
 | Timeline | 5 |
 | History | 5 |
 | Relationships | 3 |
@@ -3245,6 +3315,18 @@ integration vertical slice above, and the analyst-visible presentation by
 component tests.
 
 ### Cross-resource pivots and provenance navigation (PR 24D)
+
+> **PR 31F-8 corrective (delivered behavior).** Cross-resource
+> navigation no longer uses the URL-encoded Pivot stack or the
+> PivotWorkspace host; the bullets below document the historical PR 24D
+> contract. Current production behavior: route-known resource actions are
+> semantic react-router links produced by the exhaustive
+> `pivotTargetToRoute` mapper (`frontend/src/pivots/pivot-route.ts`), and
+> provenance navigation opens the exact Investigation-scoped routes (see
+> "PR 31F-8 routed GEOINT browser gate" above and
+> `frontend/src/pivots/provenance.test.tsx`). The validated legacy
+> `pivot` URL serializer/parser remains only for the deterministic
+> one-time legacy policy in `InvestigationWorkspace`.
 
 Separate generated-schema-projected pivot steps from router-backed page
 components so the pivot modal and the normal routes reuse the exact PR 24C
@@ -3516,8 +3598,8 @@ Deterministic E2E seeding and the Map-origin typed pivot workflow:
   expose equivalent Explore actions; coordinate-less items stay
   actionable; same-coordinate items keep distinct Entity IDs; no client
   Relationship OR merge; no unsupported resource/scoped selection; a
-  rendering test proves Explore opens the typed PivotWorkspace with the
-  `map_entity` step and an IP-identity breadcrumb;
+  rendering test proves Explore navigates the canonical filtered Evidence
+  route (PR 31F-8 routed activation);
 - **pivot model/URL validation** (`pivot-url.test.ts`, `pivot-capabilities.test.ts`,
   C-V01..C-V08): `map_entity` accepted and URL round-trips; unknown
   source kinds (`map_marker`, `map_row`) rejected; max pivot depth (5),
@@ -4200,10 +4282,11 @@ real seeded local analyst user.
   `pivot-url.test.ts`, `geoint-pivots.test.tsx`): Entity -> GEOINT,
   GEOINT -> Location, Location -> Entities/observations, observation ->
   exact Evidence, existing Entity exploration reuse, no generic `geoint`
-  target, one modal with active-step-only mounting, no API prefetch while
-  a menu is open, bounded breadcrumbs, old PR 24 URLs still decode, and
-  no geometry/response/viewport payload in the pivot envelope (containment
-  round-trips as the exact boolean only).
+  target, one routed content surface (no hosted workbench), no API
+  prefetch while a menu is open, route-derived breadcrumbs with bounded
+  labels, legacy PR 24 URLs still decoded by the deterministic legacy
+  policy, and no geometry/response/viewport payload in the pivot envelope
+  (containment round-trips as the exact boolean only).
 - **G26E-S01..S06** (`tests/unit/infrastructure/test_e2e_geoint_seed.py`):
   the harness-only seed scenarios are allowlisted and bounded, identity
   derivation is deterministic, fixture facts use the exact PR 26C claim
@@ -4251,19 +4334,21 @@ real seeded local analyst user.
   real-stack Chromium workflows (`geoint_entity_history`,
   `geoint_same_location`, `geoint_containment`, `geoint_cross_investigation`,
   `geoint_non_mappable`, and the GEOINT row -> Location -> Entity ->
-  Evidence -> Back -> Close stability regression) driven entirely through
+  Evidence -> Back stability regression) driven entirely through
   the real PR 26 pipeline seeded by `scripts/e2e-seed-geoint.sh` against
   reference geography imported by `scripts/e2e-geography-import.sh`; the
   browser only observes clean console output. G1 additionally replays the
   identical seed (same Investigation, same args) immediately after the
   first completion and requires it to succeed with the browser assertions
   unchanged, proving no duplicate GeoResolution/EntityLocationObservation
-  on real-stack replay. The Location workspace -> Entity-row Explore ->
-  "Geographic context for this entity" journey verifies the registered
-  `geoint-entity` capability: the row's in-flow Explore bar composes the
-  existing `entityGeointAction` (exact Entity id, `geoint_location` source)
-  and opens the Entity current/history surface through the URL-backed Pivot
-  stack.
+  on real-stack replay. PR 31F-8: the journeys are fully routed (normal
+  locator clicks, browser Back/Forward, no dispatch/force/coordinate
+  workaround). The Location -> Entities -> "Geographic context for this
+  entity" journey verifies the registered `geoint-entity` capability:
+  the row's in-flow Explore bar composes the existing `entityGeointAction`
+  (exact Entity id, `geoint_location` source) and opens the Entity
+  current/history surface through the routed
+  `/geoint/entities/:entityId` route.
 
 ### Bounded agentic GEOINT reasoning (PR 26F)
 

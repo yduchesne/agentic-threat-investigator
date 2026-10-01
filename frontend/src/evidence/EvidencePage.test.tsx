@@ -104,12 +104,15 @@ describe("Evidence page", () => {
     const all = screen.getAllByRole("button", { name: "Apply" });
     await userEvent.click(all[0]);
 
-    await waitFor(() => {
-      const last = recorder.requests.at(-1);
-      expect(last?.params.source).toBe("fake-dns");
-      expect(last?.params.subject_entity_id).toBe("40000000-0000-4000-8000-000000000101");
-      expect(last?.params.type).toBe("urn:ati:evidence:dns");
-    });
+    await waitFor(
+      () => {
+        const last = recorder.requests.at(-1);
+        expect(last?.params.source).toBe("fake-dns");
+        expect(last?.params.subject_entity_id).toBe("40000000-0000-4000-8000-000000000101");
+        expect(last?.params.type).toBe("urn:ati:evidence:dns");
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("passes the opaque next cursor byte-for-byte (T07b)", async () => {

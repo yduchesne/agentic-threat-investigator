@@ -2,30 +2,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Entity GEOINT resource view (PR 26E §8).
 //
-// Route-independent component (usable inside the GEOINT route and the
-// PR 24D PivotWorkspace): one Entity's Investigation-relative current
-// geographic context plus its pageable immutable observation history.
+// Route-independent component used by the routed Entity GEOINT page: one
+// Entity's Investigation-relative current geographic context plus its
+// pageable immutable observation history.
 //
-// The current section is explicitly labelled "Current in this
-// Investigation": it is the newest scoped observation under the exact
-// PR 26A ordering, never the global materialized EntityLocation state.
-// History rows are immutable observations in server order; no movement
-// path is drawn and no ended/continuous presence is inferred. Current
-// emphasis never implies historical observations were false. Row actions
-// use the exact returned observation/evidence/location identities — no
-// Evidence scanning, no client-side spatial inference.
+// PR 31F-8: the former local list/detail replacement (local evidenceId +
+// table.selection -> ResourceDetailView) is retired. "View Evidence" is a
+// semantic route link to the exact Evidence route and history row View
+// navigates to the exact GEOINT observation route; browser Back
+// reconstructs this Entity surface from route/query state alone.
 
 import { Alert, Box, Button, Typography } from "@mui/material";
-import { useState } from "react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
+import { Link as RouterLink, useNavigate } from "react-router";
 
 import type { GeointObservation } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
 import { DetailSection } from "../analyst-table/DetailRows";
 import { isNotFound404 } from "../analyst-table/detail-error";
-import { DetailError, DetailLoading, ResourceDetailView } from "../analyst-table/ResourceDetailView";
+import { DetailError, DetailLoading } from "../analyst-table/ResourceDetailView";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import { EmptyState } from "../components/AsyncState";
 import { formatDateTime } from "../components/Timestamp";
@@ -38,7 +35,6 @@ import {
   type PivotAction,
 } from "../pivots/pivot-capabilities";
 import type { GeointEntityFilters } from "./geoint-filters";
-import { GeointDetailContent } from "./GeointDetailContent";
 import { locationCanonicalLabel } from "./geoint-model";
 import { locationPrecisionKey, locationTypeKey } from "./geoint-labels";
 import { useGeointEntity, useGeointEntityHistory } from "./geoint-queries";
@@ -69,13 +65,13 @@ export interface EntityGeointViewProps {
   table: ResourceTableState<GeointEntityFilters>;
 }
 
-/** One Entity's GEOINT current/history surface. */
+/** One Entity's GEOINT current/history surface (route-owned navigation). */
 export function EntityGeointView({
   investigationId,
   table,
 }: EntityGeointViewProps): ReactElement {
   const { t } = useTranslation("geoint");
-  const { t: tCommon } = useTranslation("common");
+  const navigate = useNavigate();
   const entityId = table.filters.entityId ?? null;
 
   const { entity, isLoading, isError, error, refetch } = useGeointEntity(
@@ -89,19 +85,12 @@ export function EntityGeointView({
     refetch: historyRefetch,
   } = useGeointEntityHistory(investigationId, entityId, table.cursor);
 
-  // One shared list/detail surface serves observation detail and exact
-  // Evidence; only one is open at a time. A selection replaces the
-  // entity/current/history content as the main in-flow detail and Back
-  // restores it.
-  const [evidenceId, setEvidenceId] = useState<string | null>(null);
-  const detailOpen = table.selection !== null || evidenceId !== null;
-  const closeDetail = (): void => {
-    table.closeSelection();
-    setEvidenceId(null);
-  };
-  const switchToEvidence = (id: string): void => {
-    table.closeSelection();
-    setEvidenceId(id);
+  // Route-owned exact navigation: observation rows and Evidence actions
+  // are semantic destinations (PR 31F-8), never a local detail
+  // replacement. The URL is the only detail state; Back reconstructs this
+  // Entity surface from route/query state.
+  const openObservation = (observationId: string): void => {
+    navigate(`/investigations/${investigationId}/geoint/observations/${observationId}`);
   };
 
   if (entityId === null) {
@@ -144,98 +133,72 @@ export function EntityGeointView({
         {t("entity.disclaimer")}
       </Alert>
 
-      {detailOpen ? (
-        <ResourceDetailView
-          backLabel={tCommon("backToList", {
-            resource:
-              table.selection !== null
-                ? t("detail.observation.detailTitle")
-                : t("detail.evidence.detailTitle"),
-          })}
-          heading={
-            table.selection !== null
-              ? t("detail.observation.detailTitle")
-              : t("detail.evidence.detailTitle")
-          }
-          onBack={closeDetail}
-        >
-          <GeointDetailContent
+      <DetailSection title={t("entity.current.title")}>
+        {current === null ? (
+          <Typography variant="body2">{t("entity.current.none")}</Typography>
+        ) : (
+          <CurrentContextRow
             investigationId={investigationId}
-            observationId={table.selection}
-            onViewEvidence={switchToEvidence}
-            evidenceId={evidenceId}
+            observation={current}
           />
-        </ResourceDetailView>
-      ) : (
-        <Box>
-          <DetailSection title={t("entity.current.title")}>
-            {current === null ? (
-              <Typography variant="body2">{t("entity.current.none")}</Typography>
-            ) : (
-              <CurrentContextRow
-                observation={current}
-                onViewEvidence={switchToEvidence}
-              />
-            )}
-          </DetailSection>
+        )}
+      </DetailSection>
 
-          <DetailSection title={t("entity.history.title")}>
-            <Typography variant="caption" component="div" sx={{ mb: 1 }}>
-              {t("entity.history.note")}
-            </Typography>
-            {historyErrorValue !== null && page === null ? (
-              <DetailError
-                title={t("entity.history.loadError.title")}
-                onRetry={historyRefetch}
-              />
-            ) : null}
-            <AnalystTable<GeointObservation>
-              columns={historyColumns(t, (evidenceIdValue) => setEvidenceId(evidenceIdValue))}
-              rows={page?.items ?? []}
-              getRowId={(observation) => observation.observation_id}
-              ariaLabel={t("entity.history.aria")}
-              isLoading={historyLoading && page === null}
-              error={historyErrorValue}
-              errorTitle={t("entity.history.loadError.title")}
-              onRetry={historyRefetch}
-              emptyTitle={t("entity.history.empty.title")}
-              emptyMessage={t("entity.history.empty.message")}
-              hasActiveFilters={false}
-              onClearFilters={() => undefined}
-              onView={(observation) => table.openSelection(observation.observation_id)}
-              viewLabel={t("entity.history.row.view")}
-              navigation={{
-                canGoPrevious: table.canGoPrevious,
-                canGoNext: hasNext(page),
-                onPrevious: table.goPrevious,
-                onNext: () => {
-                  if (
-                    page !== null &&
-                    page.next_cursor !== null &&
-                    page.next_cursor !== undefined
-                  ) {
-                    table.goNext(page.next_cursor);
-                  }
-                },
-              }}
-              loadingLabel={t("entity.history.loading")}
-              staleErrorTitle={t("entity.history.staleError")}
-              onReturnToFirstPage={table.returnToFirstPage}
-            />
-          </DetailSection>
-        </Box>
-      )}
+      <DetailSection title={t("entity.history.title")}>
+        <Typography variant="caption" component="div" sx={{ mb: 1 }}>
+          {t("entity.history.note")}
+        </Typography>
+        {historyErrorValue !== null && page === null ? (
+          <DetailError
+            title={t("entity.history.loadError.title")}
+            onRetry={historyRefetch}
+          />
+        ) : null}
+        <AnalystTable<GeointObservation>
+          columns={historyColumns(t, investigationId)}
+          rows={page?.items ?? []}
+          getRowId={(observation) => observation.observation_id}
+          ariaLabel={t("entity.history.aria")}
+          isLoading={historyLoading && page === null}
+          error={historyErrorValue}
+          errorTitle={t("entity.history.loadError.title")}
+          onRetry={historyRefetch}
+          emptyTitle={t("entity.history.empty.title")}
+          emptyMessage={t("entity.history.empty.message")}
+          hasActiveFilters={false}
+          onClearFilters={() => undefined}
+          onView={(observation) => openObservation(observation.observation_id)}
+          viewLabel={t("entity.history.row.view")}
+          navigation={{
+            canGoPrevious: table.canGoPrevious,
+            canGoNext: hasNext(page),
+            onPrevious: table.goPrevious,
+            onNext: () => {
+              if (
+                page !== null &&
+                page.next_cursor !== null &&
+                page.next_cursor !== undefined
+              ) {
+                table.goNext(page.next_cursor);
+              }
+            },
+          }}
+          loadingLabel={t("entity.history.loading")}
+          staleErrorTitle={t("entity.history.staleError")}
+          onReturnToFirstPage={table.returnToFirstPage}
+        />
+      </DetailSection>
     </Box>
   );
 }
 
 /** The Investigation-relative current context row of one Entity. */
 function CurrentContextRow({
+  investigationId,
   observation,
-  onViewEvidence,
 }: {
+  investigationId: string;
   observation: GeointObservation;
-  onViewEvidence: (evidenceId: string) => void;
 }): ReactElement {
   const { t } = useTranslation("geoint");
   const locationLabel =
@@ -282,8 +245,9 @@ function CurrentContextRow({
         <Button
           size="small"
           variant="outlined"
+          component={RouterLink}
           data-testid="geoint-current-view-evidence"
-          onClick={() => onViewEvidence(observation.evidence_id)}
+          to={`/investigations/${investigationId}/evidence/${observation.evidence_id}`}
           sx={{ textTransform: "none" }}
         >
           {t("entity.current.viewEvidence")}
@@ -301,8 +265,19 @@ function CurrentContextRow({
 /** The history table columns (server order is authoritative). */
 function historyColumns(
   t: (key: string, params?: Record<string, unknown>) => string,
-  onViewEvidence: (evidenceId: string) => void,
+  investigationId: string,
 ): Column<GeointObservation>[] {
+  const evidenceLink = (observation: GeointObservation): ReactElement => (
+    <Button
+      size="small"
+      variant="text"
+      component={RouterLink}
+      to={`/investigations/${investigationId}/evidence/${observation.evidence_id}`}
+      sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
+    >
+      {t("columns.evidenceAction")}
+    </Button>
+  );
   return [
     {
       id: "location",
@@ -348,16 +323,7 @@ function historyColumns(
     {
       id: "evidence",
       header: t("columns.evidence"),
-      render: (observation) => (
-        <Button
-          size="small"
-          variant="text"
-          onClick={() => onViewEvidence(observation.evidence_id)}
-          sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
-        >
-          {t("columns.evidenceAction")}
-        </Button>
-      ),
+      render: evidenceLink,
       exportValue: () => "",
     },
     {

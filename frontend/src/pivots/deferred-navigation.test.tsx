@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Deferred navigation boundary tests (PR 31F-6 amendment 2 A2-DC01..05).
+// Deferred navigation boundary tests (PR 31F-6 amendment 2 A2-DC01..03;
+// PR 31F-8 §8, §9).
 //
 // The progressive composition bisect proved that synchronously committing
 // router/search-parameter navigation while the live query/table
@@ -11,6 +12,12 @@
 // activation must not mutate the URL inside the handler stack, and the
 // commit must apply exactly once on the next macrotask with unchanged
 // URL semantics.
+//
+// PR 31F-8 removes the encoded Pivot stack from navigation: route-known
+// actions are semantic react-router links, and the router transition
+// (unlike the table controller's search-param commit) is owned by React
+// Router. The former pivot push/close tests are replaced by the canonical
+// route-navigation equivalents below.
 
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http } from "msw";
@@ -27,7 +34,6 @@ import {
   runtimeFake,
   uuidAt,
 } from "../test/handlers";
-import { readPivotState } from "./pivot-url";
 
 useHttp();
 
@@ -94,7 +100,7 @@ describe("deferred navigation boundary (A2-DC)", () => {
     expect(params.get("cursor")).toBeNull();
   });
 
-  it("A2-DC04: the Pivot push lands the exact PivotStep on the next macrotask", async () => {
+  it("A2-DC04 (PR 31F-8): a semantic route action navigates the canonical route without any pivot URL", async () => {
     evidenceHandlers();
     const { router } = renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
@@ -102,32 +108,28 @@ describe("deferred navigation boundary (A2-DC)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Subject" }));
     // Expansion is transient presentation only — no URL mutation.
     expect(router.state.location.search).not.toContain("pivot=");
-    fireEvent.click(await screen.findByRole("button", { name: "Relationships where source" }));
-    // The push commit is deferred one macrotask.
-    expect(router.state.location.search).not.toContain("pivot=");
+    fireEvent.click(await screen.findByRole("link", { name: "Relationships where source" }));
+    // The router transition lands the canonical route with the exact
+    // filter query; no legacy pivot envelope is ever produced.
     await waitFor(() => {
-      expect(router.state.location.search).toContain("pivot=");
+      expect(router.state.location.pathname).toBe(`${BASE}/relationships`);
     });
-    const state = readPivotState(new URLSearchParams(router.state.location.search));
-    expect(state?.steps).toHaveLength(1);
-    expect(state?.steps[0].resource).toBe("relationships");
+    const params = new URLSearchParams(router.state.location.search);
+    expect(params.get("source_entity_id")).toBe(uuidAt(101));
+    expect(params.has("pivot")).toBe(false);
   });
 
-  it("A2-DC05: close/truncate workspace stack results are unchanged by the deferred commit", async () => {
+  it("A2-DC05 (PR 31F-8): the canonical route never retains pivot state after navigation", async () => {
     evidenceHandlers();
     const { router } = renderAtPath(`${BASE}/evidence`);
     await screen.findByText("update-package.test");
     await screen.findByRole("button", { name: "Subject" });
     fireEvent.click(screen.getByRole("button", { name: "Subject" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Relationships where source" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Research for this entity" }));
     await waitFor(() => {
-      expect(router.state.location.search).toContain("pivot=");
+      expect(router.state.location.pathname).toBe(`${BASE}/research`);
     });
-    // Close the workspace: the stack clears on the next macrotask.
-    fireEvent.click(screen.getByRole("button", { name: "Close pivot workspace" }));
-    await waitFor(() => {
-      expect(router.state.location.search).not.toContain("pivot=");
-    });
-    expect(readPivotState(new URLSearchParams(router.state.location.search))).toBeNull();
+    expect(router.state.location.search).toBe(`?subject_entity_id=${uuidAt(101)}`);
+    expect(router.state.location.search).not.toContain("pivot=");
   });
 });

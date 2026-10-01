@@ -247,13 +247,13 @@ export function EvidenceWorkspace({
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      {table.selection !== null ? (
+          {table.selection !== null ? (
         <ResourceDetailView
           backLabel={tCommon("backToList", { resource: t("title") })}
           heading={tCommon("detail.title", { resource: t("title") })}
           onBack={table.closeSelection}
         >
-          {detailBody(t, detail)}
+          {evidenceDetailBody(t, detail)}
         </ResourceDetailView>
       ) : (
         <>
@@ -305,8 +305,8 @@ export function EvidenceWorkspace({
   );
 }
 
-/** The detail body with its bounded states. */
-function detailBody(
+/** The detail body with its bounded states (shared by list and routed detail). */
+export function evidenceDetailBody(
   t: (key: string) => string,
   detail: ReturnType<typeof useEvidenceDetail>,
 ): ReactElement {

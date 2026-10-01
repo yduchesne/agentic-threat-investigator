@@ -4,7 +4,7 @@
 // analyst-table routes, the secondary History access and scoped 404
 // (PR 24B U20-U27, U43-U49; PR 24C workspace integration).
 
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -44,13 +44,13 @@ describe("Investigation workspace routes", () => {
       ]),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}`);
-    expect(
-      await screen.findByRole("tab", { name: "Overview" }),
-    ).toBeInTheDocument();
-    // The index route redirected to the Overview surface.
+    // The index route redirected to the Overview surface: wait for the
+    // substantive Overview content (stable after the redirect), then the
+    // now-active Overview tab (PR 31F-8: the active tab is inert).
     expect(
       await screen.findByText("Investigation in progress"),
     ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
   });
 
   it("renders the real Evidence route with one bounded collection query (U44)", async () => {
@@ -197,7 +197,7 @@ describe("Investigation workspace routes", () => {
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
   });
 });
-describe("Investigation workspace More navigation (PR 31F-7 M01..M12)", () => {
+describe("Investigation workspace More navigation + legacy pivot policy (PR 31F-7 M01..M11; PR 31F-8 N03/N04)", () => {
   function renderOverview(): { navigate: (url: string) => void } {
     setHttpHandlers(
       ...AUTH,
@@ -368,7 +368,7 @@ describe("Investigation workspace More navigation (PR 31F-7 M01..M12)", () => {
     ).toBeInTheDocument();
   });
 
-  it("M12: the Pivot workbench keeps More hidden (existing visibility preserved)", async () => {
+  it("N03: a valid legacy pivot URL redirects once to its canonical route and drops the parameter", async () => {
     const recorder = resourceListRecorder();
     const entityId = uuidAt(101);
     setHttpHandlers(
@@ -392,8 +392,8 @@ describe("Investigation workspace More navigation (PR 31F-7 M01..M12)", () => {
     );
     const steps: PivotStep[] = [
       {
-        resource: "evidence",
-        filters: {},
+        resource: "relationships",
+        filters: { source_entity_id: entityId },
         selectedId: null,
         label: "update-package.test",
         sourceKind: "table_cell",
@@ -401,13 +401,47 @@ describe("Investigation workspace More navigation (PR 31F-7 M01..M12)", () => {
     ];
     const pivot = serializePivotState({ steps });
     expect(pivot).not.toBeNull();
-    renderAtPath(
-      `/investigations/${INVESTIGATION_ID}/evidence?pivot=${pivot ?? ""}`,
+    const { router } = renderAtPath(
+      `/investigations/${INVESTIGATION_ID}?pivot=${pivot ?? ""}`,
     );
-    await screen.findByRole("heading", { name: /pivot workspace/i });
-    // The normal workbench (tabs + More) is not mounted underneath.
-    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Overview" })).not.toBeInTheDocument();
+    // The workspace redirects (replace) to the active step's canonical
+    // route; the legacy pivot parameter never survives (N03).
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `/investigations/${INVESTIGATION_ID}/relationships`,
+      );
+    });
+    expect(router.state.location.search).toBe(`?source_entity_id=${entityId}`);
+    expect(router.state.location.search).not.toContain("pivot=");
+  });
+
+  it("N04: malformed legacy pivot state is removed safely without navigation or crash", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/evidence",
+        pages: [[]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    const { router } = renderAtPath(
+      `/investigations/${INVESTIGATION_ID}/overview?pivot=!!!not-an-envelope!!!`,
+    );
+    // Malformed pivot state is dropped in place; the canonical route stays
+    // and the router never crashes.
+    await waitFor(() => {
+      expect(router.state.location.search).toBe("");
+    });
+    expect(router.state.location.pathname).toBe(
+      `/investigations/${INVESTIGATION_ID}/overview`,
+    );
+    // The normal Investigation shell is mounted and usable.
+    expect(
+      await screen.findByRole("tab", { name: "Overview" }),
+    ).toBeInTheDocument();
   });
 });
 

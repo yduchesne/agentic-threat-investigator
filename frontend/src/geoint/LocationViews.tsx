@@ -1,10 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Location GEOINT resource views (PR 26E §9, §7).
+// Location GEOINT resource views (PR 26E §9, §7; PR 31F-8 §10).
 //
-// Route-independent components (usable in the GEOINT route and the
-// PR 24D PivotWorkspace): one canonical Location's Investigation-scoped
+// Route-independent components (used by the routed Location Entities /
+// observations pages): one canonical Location's Investigation-scoped
 // Entities and observations, with the server-owned containment controller.
+//
+// PR 31F-8: the former local list/detail replacement (local evidenceId +
+// table.selection -> ResourceDetailView) is retired. "View Evidence" is a
+// semantic route link to the exact Evidence route and row View navigates
+// to the exact GEOINT observation route; browser Back reconstructs the
+// Location surface from route/query state alone.
 //
 // Exact (default) and "include contained" are semantic query changes:
 // toggling resets cursor/back-stack through the shared table controller
@@ -16,16 +22,14 @@
 // canonical Location are not implied to be related.
 
 import { Alert, Box, Button, Typography } from "@mui/material";
-import ToggleButton from "@mui/material/ToggleButton";
-import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
-import { useState } from "react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
+import { Link as RouterLink, useNavigate } from "react-router";
 
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
 import { isNotFound404 } from "../analyst-table/detail-error";
-import { DetailError, DetailLoading, ResourceDetailView } from "../analyst-table/ResourceDetailView";
+import { DetailError, DetailLoading } from "../analyst-table/ResourceDetailView";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import { EmptyState } from "../components/AsyncState";
 import { formatDateTime } from "../components/Timestamp";
@@ -42,7 +46,6 @@ import type {
   GeointEntityLocation,
   GeointObservation,
 } from "../api/schema-types";
-import { GeointDetailContent } from "./GeointDetailContent";
 import type { GeointLocationFilters } from "./geoint-filters";
 import { locationCanonicalLabel } from "./geoint-model";
 import { locationPrecisionKey, locationTypeKey } from "./geoint-labels";
@@ -97,7 +100,7 @@ export function LocationEntitiesView({
   table,
 }: LocationEntitiesViewProps): ReactElement {
   const { t } = useTranslation("geoint");
-  const { t: tCommon } = useTranslation("common");
+  const navigate = useNavigate();
   const locationId = table.filters.locationId ?? null;
   const includeContained = table.filters.includeContained ?? false;
 
@@ -114,15 +117,10 @@ export function LocationEntitiesView({
     table.cursor,
   );
 
-  const [evidenceId, setEvidenceId] = useState<string | null>(null);
-  const detailOpen = table.selection !== null || evidenceId !== null;
-  const closeDetail = (): void => {
-    table.closeSelection();
-    setEvidenceId(null);
-  };
-  const switchToEvidence = (id: string): void => {
-    table.closeSelection();
-    setEvidenceId(id);
+  // Route-owned exact navigation (PR 31F-8): observation rows and Evidence
+  // actions are semantic destinations; the URL is the only detail state.
+  const openObservation = (observationId: string): void => {
+    navigate(`/investigations/${investigationId}/geoint/observations/${observationId}`);
   };
 
   if (locationId === null) {
@@ -149,45 +147,21 @@ export function LocationEntitiesView({
 
   return (
     <Box>
-      {detailOpen ? (
-        <ResourceDetailView
-          backLabel={tCommon("backToList", {
-            resource:
-              table.selection !== null
-                ? t("detail.observation.detailTitle")
-                : t("detail.evidence.detailTitle"),
-          })}
-          heading={
-            table.selection !== null
-              ? t("detail.observation.detailTitle")
-              : t("detail.evidence.detailTitle")
-          }
-          onBack={closeDetail}
-        >
-          <GeointDetailContent
-            investigationId={investigationId}
-            observationId={table.selection}
-            onViewEvidence={switchToEvidence}
-            evidenceId={evidenceId}
-          />
-        </ResourceDetailView>
-      ) : (
-        <Box>
-          <LocationScopeControls
-            includeContained={includeContained}
-            onToggle={() =>
-              table.applyFilters({
-                ...table.filters,
-                includeContained: !includeContained,
-              })
-            }
-            containmentApplied={page?.containment_applied ?? null}
-          />
-          <Alert severity="info" role="note" sx={{ mt: 1 }}>
-            {t("location.disclaimer")}
-          </Alert>
-          <AnalystTable<GeointEntityLocation>
-        columns={locationEntitiesColumns(t, (evidenceIdValue) => setEvidenceId(evidenceIdValue))}
+      <LocationScopeControls
+        includeContained={includeContained}
+        onToggle={() =>
+          table.applyFilters({
+            ...table.filters,
+            includeContained: !includeContained,
+          })
+        }
+        containmentApplied={page?.containment_applied ?? null}
+      />
+      <Alert severity="info" role="note" sx={{ mt: 1 }}>
+        {t("location.disclaimer")}
+      </Alert>
+      <AnalystTable<GeointEntityLocation>
+        columns={locationEntitiesColumns(t, investigationId)}
         rows={page?.items ?? []}
         getRowId={(item) => item.entity_id}
         ariaLabel={t("location.entities.aria")}
@@ -201,7 +175,7 @@ export function LocationEntitiesView({
         onClearFilters={() => undefined}
         onView={(item) => {
           if (item.current_observation !== null) {
-            table.openSelection(item.current_observation.observation_id);
+            openObservation(item.current_observation.observation_id);
           }
         }}
         viewLabel={t("location.entities.row.view")}
@@ -223,8 +197,6 @@ export function LocationEntitiesView({
         staleErrorTitle={t("location.entities.staleError")}
         onReturnToFirstPage={table.returnToFirstPage}
       />
-        </Box>
-      )}
     </Box>
   );
 }
@@ -240,7 +212,7 @@ export function LocationObservationsView({
   table,
 }: LocationObservationsViewProps): ReactElement {
   const { t } = useTranslation("geoint");
-  const { t: tCommon } = useTranslation("common");
+  const navigate = useNavigate();
   const locationId = table.filters.locationId ?? null;
   const includeContained = table.filters.includeContained ?? false;
 
@@ -257,15 +229,10 @@ export function LocationObservationsView({
     table.cursor,
   );
 
-  const [evidenceId, setEvidenceId] = useState<string | null>(null);
-  const detailOpen = table.selection !== null || evidenceId !== null;
-  const closeDetail = (): void => {
-    table.closeSelection();
-    setEvidenceId(null);
-  };
-  const switchToEvidence = (id: string): void => {
-    table.closeSelection();
-    setEvidenceId(id);
+  // Route-owned exact navigation (PR 31F-8): observation rows and Evidence
+  // actions are semantic destinations; the URL is the only detail state.
+  const openObservation = (observationId: string): void => {
+    navigate(`/investigations/${investigationId}/geoint/observations/${observationId}`);
   };
 
   if (locationId === null) {
@@ -292,45 +259,21 @@ export function LocationObservationsView({
 
   return (
     <Box>
-      {detailOpen ? (
-        <ResourceDetailView
-          backLabel={tCommon("backToList", {
-            resource:
-              table.selection !== null
-                ? t("detail.observation.detailTitle")
-                : t("detail.evidence.detailTitle"),
-          })}
-          heading={
-            table.selection !== null
-              ? t("detail.observation.detailTitle")
-              : t("detail.evidence.detailTitle")
-          }
-          onBack={closeDetail}
-        >
-          <GeointDetailContent
-            investigationId={investigationId}
-            observationId={table.selection}
-            onViewEvidence={switchToEvidence}
-            evidenceId={evidenceId}
-          />
-        </ResourceDetailView>
-      ) : (
-        <Box>
-          <LocationScopeControls
-            includeContained={includeContained}
-            onToggle={() =>
-              table.applyFilters({
-                ...table.filters,
-                includeContained: !includeContained,
-              })
-            }
-            containmentApplied={page?.containment_applied ?? null}
-          />
-          <Alert severity="info" role="note" sx={{ mt: 1 }}>
-            {t("location.disclaimer")}
-          </Alert>
-          <AnalystTable<GeointObservation>
-        columns={locationObservationsColumns(t, (evidenceIdValue) => setEvidenceId(evidenceIdValue))}
+      <LocationScopeControls
+        includeContained={includeContained}
+        onToggle={() =>
+          table.applyFilters({
+            ...table.filters,
+            includeContained: !includeContained,
+          })
+        }
+        containmentApplied={page?.containment_applied ?? null}
+      />
+      <Alert severity="info" role="note" sx={{ mt: 1 }}>
+        {t("location.disclaimer")}
+      </Alert>
+      <AnalystTable<GeointObservation>
+        columns={locationObservationsColumns(t, investigationId)}
         rows={page?.items ?? []}
         getRowId={(observation) => observation.observation_id}
         ariaLabel={t("location.observations.aria")}
@@ -342,7 +285,7 @@ export function LocationObservationsView({
         emptyMessage={t("location.observations.empty.message")}
         hasActiveFilters={false}
         onClearFilters={() => undefined}
-        onView={(observation) => table.openSelection(observation.observation_id)}
+        onView={(observation) => openObservation(observation.observation_id)}
         viewLabel={t("location.observations.row.view")}
         navigation={{
           canGoPrevious: table.canGoPrevious,
@@ -362,13 +305,20 @@ export function LocationObservationsView({
         staleErrorTitle={t("location.observations.staleError")}
         onReturnToFirstPage={table.returnToFirstPage}
       />
-        </Box>
-      )}
     </Box>
   );
 }
 
-/** The containment controller + honest containment status (PR 26E §9, §15). */
+/** The containment controller + honest containment status (PR 26E §9, §15).
+ *
+ * PR 31F-8: the control is two ordinary toggle buttons (the semantic
+ * query change flows through the shared table controller, resetting the
+ * cursor/back stack exactly like any other filter Apply). The former MUI
+ * ToggleButtonGroup roving-focus internals are NOT used: on the real
+ * stack the focused ToggleButton could be re-created by the router commit
+ * re-render and Chromium's focus-fixup raced it to death (deterministic
+ * main-thread stall reproduced with pointer AND keyboard activation).
+ */
 function LocationScopeControls({
   includeContained,
   onToggle,
@@ -380,21 +330,29 @@ function LocationScopeControls({
 }): ReactElement {
   const { t } = useTranslation("geoint");
   return (
-    <Box>
-      <ToggleButtonGroup
-        exclusive
-        size="small"
-        value={includeContained ? "contained" : "exact"}
-        onChange={() => onToggle()}
-        aria-label={t("location.scope.aria")}
-      >
-        <ToggleButton value="exact" aria-label={t("location.scope.exact")}>
+    <Box role="group" aria-label={t("location.scope.aria")}>
+      <Box sx={{ display: "inline-flex", gap: 1, alignItems: "center" }}>
+        <Button
+          size="small"
+          variant={!includeContained ? "contained" : "outlined"}
+          onClick={!includeContained ? undefined : onToggle}
+          aria-pressed={!includeContained}
+          aria-label={t("location.scope.exact")}
+          sx={{ textTransform: "none" }}
+        >
           {t("location.scope.exact")}
-        </ToggleButton>
-        <ToggleButton value="contained" aria-label={t("location.scope.contains")}>
+        </Button>
+        <Button
+          size="small"
+          variant={includeContained ? "contained" : "outlined"}
+          onClick={includeContained ? undefined : onToggle}
+          aria-pressed={includeContained}
+          aria-label={t("location.scope.contains")}
+          sx={{ textTransform: "none" }}
+        >
           {t("location.scope.contains")}
-        </ToggleButton>
-      </ToggleButtonGroup>
+        </Button>
+      </Box>
       {containmentApplied !== null ? (
         <Typography variant="caption" component="div" role="note" sx={{ mt: 0.5 }}>
           {containmentApplied
@@ -406,11 +364,25 @@ function LocationScopeControls({
   );
 }
 
-/** The Location -> Entities columns (Step 7). */
+/** The Location -> Entities columns (Step 7; route-owned Evidence links). */
 function locationEntitiesColumns(
   t: (key: string, params?: Record<string, unknown>) => string,
-  onViewEvidence: (evidenceId: string) => void,
+  investigationId: string,
 ): Column<GeointEntityLocation>[] {
+  const evidenceLink = (item: GeointEntityLocation): ReactElement =>
+    item.current_observation !== null ? (
+      <Button
+        size="small"
+        variant="text"
+        component={RouterLink}
+        to={`/investigations/${investigationId}/evidence/${item.current_observation.evidence_id}`}
+        sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
+      >
+        {t("columns.evidenceAction")}
+      </Button>
+    ) : (
+      <Typography variant="caption">{t("location.unavailable")}</Typography>
+    );
   return [
     {
       id: "entity",
@@ -508,19 +480,7 @@ function locationEntitiesColumns(
     {
       id: "evidence",
       header: t("columns.evidence"),
-      render: (item) =>
-        item.current_observation !== null ? (
-          <Button
-            size="small"
-            variant="text"
-            onClick={() => onViewEvidence(item.current_observation?.evidence_id ?? "")}
-            sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
-          >
-            {t("columns.evidenceAction")}
-          </Button>
-        ) : (
-          <Typography variant="caption">{t("location.unavailable")}</Typography>
-        ),
+      render: evidenceLink,
       exportValue: () => "",
     },
     {
@@ -538,11 +498,22 @@ function locationEntitiesColumns(
   ];
 }
 
-/** The Location -> observations columns (Step 7). */
+/** The Location -> observations columns (Step 7; route-owned Evidence links). */
 function locationObservationsColumns(
   t: (key: string, params?: Record<string, unknown>) => string,
-  onViewEvidence: (evidenceId: string) => void,
+  investigationId: string,
 ): Column<GeointObservation>[] {
+  const evidenceLink = (observation: GeointObservation): ReactElement => (
+    <Button
+      size="small"
+      variant="text"
+      component={RouterLink}
+      to={`/investigations/${investigationId}/evidence/${observation.evidence_id}`}
+      sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
+    >
+      {t("columns.evidenceAction")}
+    </Button>
+  );
   return [
     {
       id: "entity",
@@ -592,16 +563,7 @@ function locationObservationsColumns(
     {
       id: "evidence",
       header: t("columns.evidence"),
-      render: (observation) => (
-        <Button
-          size="small"
-          variant="text"
-          onClick={() => onViewEvidence(observation.evidence_id)}
-          sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
-        >
-          {t("columns.evidenceAction")}
-        </Button>
-      ),
+      render: evidenceLink,
       exportValue: () => "",
     },
     {

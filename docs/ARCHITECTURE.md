@@ -177,14 +177,14 @@ actions, navigation/action row) and never renders the full Report; the
 secondary Report route renders the complete persisted Report (structured
 content, metadata, Markdown). No Overview content is synthesized by an LLM.
 
-**Nested analyst state stays URL-owned (PR 31F-5).** Filters, cursors and
-selections inside the PivotWorkspace live in the URL-backed pivot envelope
-(the active step serializes `selected`); there is no second list/detail or
-pivot selection store. Timeline/History `View` and Evidence/Relationships
-`Pivot` share one detail/menu infrastructure, and Escape handling is
-topmost-only: a non-modal action menu consumes the key before the
-enclosing PivotWorkspace ever sees it (resource details are ordinary
-layout content and register no Escape handler at all).
+**Nested analyst state stays URL-owned (PR 31F-5; PR 31F-8).** Filters,
+cursors and selections live in URL search parameters; PR 31F-8 replaces
+cross-resource exploration with ordinary Investigation-scoped React
+Router navigation, so there is no pivot envelope selection store and no
+hidden resource stack: one routed content surface mounts at a time.
+Timeline/History `View` and role-specific pivot actions share one
+detail/menu infrastructure, and resource details are ordinary layout
+content that register no Escape handler at all.
 
 **Real-browser lifecycle hygiene (PR 31F-5 A).** The pivot workspace close
 control and the PivotMenu use deterministic deferred focus (never browser
@@ -1900,7 +1900,7 @@ There is no map-time geolocation lookup, no spatial query, no PostGIS, no cluste
 
 PR 25C completes the Map as a bounded analyst exploration surface without turning geography into an inference engine:
 
-- **typed entity pivots from the Map (PR 25C):** every returned Map item — marker popup and non-map row alike — exposes the exact persisted PR 25A `evidence_id` through the list/detail Evidence surface **and** an Explore surface that reuses the PR 24 typed pivot capabilities via the exact `entityActions(item.entity_id, item.ip_address, "map_entity")` registry (`frontend/src/geolocation/GeolocationEntityActions.tsx`). The single new `map_entity` source kind is navigation provenance only: the target resources are the unchanged `evidence`/`relationships`/`research` workspaces with their existing server-backed filters (Evidence by exact subject, Relationships by source and by target as two independent actions, Research by exact subject). The first Map-origin breadcrumb label is the IP display value, never city/country/coordinates; the PivotWorkspace constraint set (typed resources, allowlisted filters, UUID/timestamp validation, bounded labels/cursors, URL serialization, no-op suppression, dead-end behavior, max depth 5, close/back) is untouched, and no Leaflet viewport/marker/popup state enters the pivot URL. Same-coordinate items remain individually inspectable through the accessible non-map rows with no jitter, clustering, or co-location/coordination inference; coordinate-less items stay fully actionable without a marker; empty projections stay honestly empty.
+- **typed entity pivots from the Map (PR 25C):** every returned Map item — marker popup and non-map row alike — exposes the exact persisted PR 25A `evidence_id` through the list/detail Evidence surface **and** an Explore surface that reuses the PR 24 typed pivot capabilities via the exact `entityActions(item.entity_id, item.ip_address, "map_entity")` registry (`frontend/src/geolocation/GeolocationEntityActions.tsx`). The single new `map_entity` source kind is navigation provenance only: PR 31F-8 resolves the typed targets to canonical Investigation-scoped routes with their existing server-backed filters (Evidence by exact subject, Relationships by source and by target as two independent actions, Research by exact subject) — the former PivotWorkspace stack/URL envelope is retired (legacy `pivot=` URLs get the deterministic one-time redirect policy). Same-coordinate items remain individually inspectable through the accessible non-map rows with no jitter, clustering, or co-location/coordination inference; coordinate-less items stay fully actionable without a marker; empty projections stay honestly empty.
 - **deterministic E2E seeding seam (PR 25C):** `tests/e2e_support/seed_geolocation.py` is harness-only test infrastructure. It materializes ordinary canonical IP Entities and immutable `GEOLOCATION` Evidence into the throwaway isolated E2E PostgreSQL through the normal application repositories/UnitOfWork (`investigations.get_by_id`, `entities.upsert`, `evidence.insert`) for an exact browser-created Investigation UUID and an allowlisted scenario name (`single_mappable`, `multi_ioc`, `non_mappable`, `same_location`). It is deterministic (uuid5-derived identities, fixed UTC retrieval epoch), idempotent/bounded (repeated invocation reuses the persisted rows), offline and non-LLM, and fail-closed unless both `ATI_OPERATING_MODE=fake` and the dedicated `ATI_E2E_SEEDING_ENABLED` flag are present. There is no seed HTTP endpoint, no browser database credential, and no product fake-world/DB-IP catalog change; production reads remain exclusively the PR 25A projection through the real `/geolocations` endpoint.
 
 ## GEOINT architecture (PR 26)
@@ -2214,8 +2214,8 @@ PR 26E (delivered) adds the human analyst presentation/navigation layer over the
 PR 26D /api/v1/investigations/{I}/geoint/*  (sole canonical GEOINT read boundary)
   -> TanStack Query server state (frontend)
   -> GEOINT map/table presentations (bounded, neutral)
-  -> PR 24 typed URL-backed PivotWorkspace (geographic pivot steps)
-  -> existing Evidence detail/pivot surface (exact evidence_id)
+  -> PR 31F-8 routed exploration (canonical Investigation-scoped routes)
+  -> existing Evidence detail surface (exact evidence_id)
 ```
 
 - **First-class Investigation-scoped tab** (`/investigations/:id/geoint`): a persistent translated semantic disclaimer, the bounded PR 26D summary (exact observation/Entity/Location and type/precision counts, honest `truncated`), a neutral Leaflet map plotting only the currently loaded top Locations' representative coordinates, and an always-available non-map table with typed Explore actions.
@@ -2223,7 +2223,7 @@ PR 26D /api/v1/investigations/{I}/geoint/*  (sole canonical GEOINT read boundary
 - **Current/history semantics.** Entity GEOINT shows "Current within this Investigation" (PR 26D Investigation-relative current, never the global `EntityLocation`) beside pageable immutable observation history. Observed/retrieved/resolved stay distinct; no movement path or ended/continuous inference is drawn, and current emphasis never implies historical observations were false.
 - **Containment is server-owned.** Location surfaces expose an Exact/Include-contained controller whose only effect is the `include_contained` boolean on the PR 26D request; `containment_applied` is rendered honestly (exact-only explanation when the server could not expand). No browser spatial calculation ever runs.
 - **Provenance.** Observation detail resolves through the exact `observation_id`; every Evidence action uses the exact returned `evidence_id` through the existing Evidence detail/pivot surface — no Evidence scanning, substitution, or History fallback. Provider is never fabricated: only the fixed `canonical_geography_v1` method is labelled; unknown identities render the raw bounded string.
-- **Typed pivots.** The existing PR 24 PivotWorkspace/capability registry/URL codec is extended with four explicit allowlisted resources (`geoint-entity`, `geoint-location-entities`, `geoint-location-observations`, `geoint-observation`) whose filters hold only stable IDs and the bounded containment boolean. Investigation immutability, max depth 5, one in-flow workbench, active-step-only mounting, Back/Forward/refresh, Close restoration, and the 4096-byte URL cap are unchanged; no geometry, API payload, viewport, or marker state is ever serialized.
+- **Typed pivots (PR 26E; routed per PR 31F-8).** The PR 24 capability registry is extended with four explicit allowlisted resources (`geoint-entity`, `geoint-location-entities`, `geoint-location-observations`, `geoint-observation`) whose filters hold only stable IDs and the bounded containment boolean. PR 31F-8 maps every registered target to a canonical route (`/geoint/entities/:entityId`, `/geoint/locations/:locationId/entities|observations`, `/geoint/observations/:observationId`): one routed surface, route-derived breadcrumbs, canonical-ID path identity, URL-backed containment/cursor, browser Back/Forward, and a deterministic one-time legacy `pivot=` redirect. No geometry, API payload, viewport, or marker state is ever serialized; no hosted workbench remains.
 - **Visual inference is forbidden.** No clustering, heat map, risk coloring, fabricated radius, movement path, or inferred route exists. Same-Location Entities stay individually inspectable with an explicit neutral note that shared geography is context only.
 
 ### Agentic GEOINT (PR 26F delivered)

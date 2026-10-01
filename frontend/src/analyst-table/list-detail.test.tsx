@@ -237,7 +237,7 @@ describe("Evidence list/detail workspace (PR 31F-6 A4)", () => {
     const trigger = await screen.findByRole("button", { name: "Pivot actions" });
     await userEvent.click(trigger);
     const bar = await screen.findByRole("group", { name: "Pivot actions" });
-    expect(within(bar).getByRole("button", { name: "Relationships where source" })).toBeInTheDocument();
+    expect(within(bar).getByRole("link", { name: "Relationships where source" })).toBeInTheDocument();
     // Cancel collapses only the bar: no URL mutation, detail intact.
     await userEvent.click(within(bar).getByRole("button", { name: "Cancel" }));
     await waitFor(() =>

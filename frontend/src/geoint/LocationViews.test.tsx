@@ -19,7 +19,6 @@ import { setHttpHandlers, useHttp } from "../test/server";
 import { http } from "msw";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import type { GeointEntityLocation, GeointObservation } from "../api/schema-types";
-import { readPivotState } from "../pivots/pivot-url";
 import {
   entityLocationExploreActions,
   LocationEntitiesView,
@@ -79,7 +78,6 @@ const OBSERVATION_DERIVED_ACTION_KEYS = [
 ] as const;
 
 const GEOINT_ENTITY_KEY = "geointEntity";
-
 describe("Location -> Entities (U20..U25)", () => {
   it("U20/U22: exact is the default and containment_applied=true is visible", async () => {
     let sawContained: string | null = "unset";
@@ -229,13 +227,11 @@ describe("Location -> Entities (U20..U25)", () => {
     const row = within(table).getByText("203.0.113.20");
     expect(row).toBeVisible();
     expect(within(table).getByText("EdgeLand")).toBeVisible();
-    // The row stays actionable: an Evidence action and an Explore trigger.
+    // The row stays actionable: an exact Evidence link (the Explore
+    // trigger coverage lives in GU09 under canonical route context).
     expect(
-      within(table).getAllByRole("button", { name: "View Evidence" }).length,
+      within(table).getAllByRole("link", { name: "View Evidence" }).length,
     ).toBeGreaterThan(0);
-    expect(within(table).getAllByRole("button", { name: /Explore/ }).length).toBeGreaterThan(
-      0,
-    );
   });
 
   it("U22b: the server order of Location Entities is authoritative", async () => {
@@ -268,7 +264,7 @@ describe("Location -> Entities (U20..U25)", () => {
     expect(rows[1].textContent).toContain("203.0.113.20");
   });
 
-  it("GU09/GU10/GU11/GU12: rendered Explore exposes the GEOINT action and emits the geoint-entity PivotStep", async () => {
+  it("GU09/GU10/GU11/GU12: rendered Explore exposes the GEOINT action as a canonical route link", async () => {
     const item = buildGeointEntityLocation(1, "203.0.113.10");
     setHttpHandlers(
       http.get(
@@ -279,7 +275,7 @@ describe("Location -> Entities (U20..U25)", () => {
     const router = createMemoryRouter(
       [
         {
-          path: "/",
+          path: "/investigations/:investigationId/*",
           element: (
             <LocationEntitiesView
               investigationId={INVESTIGATION_ID}
@@ -288,7 +284,7 @@ describe("Location -> Entities (U20..U25)", () => {
           ),
         },
       ],
-      { initialEntries: ["/"] },
+      { initialEntries: [`/investigations/${INVESTIGATION_ID}/geoint/locations/${LOCATION_ID}/entities`] },
     );
     render(
       <AppProviders queryClient={freshQueryClient()}>
@@ -301,32 +297,29 @@ describe("Location -> Entities (U20..U25)", () => {
     const row = within(table).getByText("203.0.113.10").closest("tr");
     expect(row).not.toBeNull();
     // The row's in-flow Explore action bar exposes the registered GEOINT
-    // capability as an ordinary button (no menu semantics).
+    // capability as an ordinary semantic route link (no menu semantics).
     await userEvent.click(
       within(row as HTMLElement).getByRole("button", {
         name: "Explore entity actions for 203.0.113.10",
       }),
     );
     const bar = await screen.findByRole("group", { name: "Pivot actions" });
-    const geointButton = within(bar).getByRole("button", {
+    const geointLink = within(bar).getByRole("link", {
       name: "Geographic context for this entity",
     });
-    expect(geointButton).toBeVisible();
-    await userEvent.click(geointButton);
-    // One activation emits exactly one URL-backed PivotStep to geoint-entity.
+    expect(geointLink).toBeVisible();
+    expect(geointLink.getAttribute("href")).toBe(
+      `/investigations/${INVESTIGATION_ID}/geoint/entities/${item.entity_id}`,
+    );
+    // One activation navigates the canonical Entity GEOINT route — never a
+    // URL-encoded pivot envelope.
+    await userEvent.click(geointLink);
     await waitFor(() => {
-      const state = readPivotState(
-        new URLSearchParams(router.state.location.search),
+      expect(router.state.location.pathname).toBe(
+        `/investigations/${INVESTIGATION_ID}/geoint/entities/${item.entity_id}`,
       );
-      expect(state?.steps).toHaveLength(1);
-      expect(state?.steps[0]).toMatchObject({
-        resource: "geoint-entity",
-        filters: { entity_id: item.entity_id },
-        selectedId: null,
-        sourceKind: "geoint_location",
-      });
-      expect(state?.steps[0].label).toBe("203.0.113.10");
     });
+    expect(router.state.location.search).toBe("");
   });
 });
 

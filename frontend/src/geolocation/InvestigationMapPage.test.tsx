@@ -111,8 +111,14 @@ describe("InvestigationMapPage states (B-U01..B-U17)", () => {
     ]);
     const mapTab = screen.getByRole("tab", { name: "Map" });
     expect(mapTab).toHaveAttribute("aria-selected", "true");
-    const link = mapTab.closest("a");
-    expect(link).toHaveAttribute("href", `/investigations/${INVESTIGATION_ID}/map`);
+    // PR 31F-8: the ACTIVE tab is inert (no same-URL link/navigation);
+    // destination tabs remain semantic links.
+    expect(mapTab.closest("a")).toBeNull();
+    const evidenceTab = screen.getByRole("tab", { name: "Evidence" });
+    expect(evidenceTab.closest("a")).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/evidence`,
+    );
   });
 
   it("B-U02: shows the translated loading state while the request is pending", async () => {
