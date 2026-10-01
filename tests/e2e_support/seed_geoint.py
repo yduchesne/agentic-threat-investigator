@@ -32,6 +32,10 @@ Non-negotiable seam properties (mirrors PR 25C §16-§24):
 - deterministic and idempotent/bounded: deterministic UUID/timestamp
   derivation means repeated invocation of one scenario for one
   Investigation reuses the exact same rows instead of duplicating them;
+  replay reconciles authoritative existing Entity/Evidence/GeoResolution
+  state (compatible PENDING/PROCESSING/RESOLVED work is reused, terminal
+  UNRESOLVABLE/FAILED work fails closed) instead of assuming a fresh
+  PENDING row can always be created;
 - offline and non-LLM: no network, no provider, no orchestration beyond
   the local worker;
 - inaccessible through production HTTP: there is deliberately no seed
@@ -77,7 +81,9 @@ from agentic_threat_investigator.app.persistence.repositories import (
     EntityLocationObservationRepository,
     EntityRepository,
     EvidenceObservationEntityRepository,
+    EvidencePersistenceOutcome,
     EvidenceRepository,
+    GeoResolutionDuplicateStateError,
     GeoResolutionRepository,
     InvestigationEvidenceRepository,
     InvestigationRepository,
@@ -88,6 +94,7 @@ from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.evidence import (
     ConvertedEvidence,
     Evidence,
+    EvidenceObservation,
     EvidenceObservationCandidate,
     EvidenceType,
     InvestigationEvidence,
@@ -98,6 +105,7 @@ from agentic_threat_investigator.domain.geoint import (
     CanonicalLocationResolution,
     GeographicClaim,
     GeoResolution,
+    GeoResolutionStatus,
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.composites import (
     register_batch_composites,
@@ -150,6 +158,23 @@ class E2eSeedInvestigationMissingError(LookupError):
 
 class E2eSeedResolutionIncompleteError(RuntimeError):
     """Raised when the production resolver produced no expected observation."""
+
+
+class E2eSeedIncompatibleResolutionError(RuntimeError):
+    """Raised when existing GeoResolution work is terminal and incompatible.
+
+    A deterministic fixture is expected to resolve against the imported
+    canonical geography; UNRESOLVABLE/FAILED work can never satisfy it and
+    is never reset or recreated by the seeder.
+    """
+
+
+class E2eSeedResolutionConflictError(RuntimeError):
+    """Raised when a duplicate-state creation race leaves no authoritative row.
+
+    The database reported the pair as a duplicate but no authoritative row
+    could be re-read for the semantic pair; the seeder refuses to guess.
+    """
 
 
 @dataclass(frozen=True)
@@ -488,6 +513,122 @@ class SeedUnitOfWork(Protocol):
 SeedUnitOfWorkFactory = Callable[[], SeedUnitOfWork]
 
 
+async def _reconcile_evidence(
+    uow: SeedUnitOfWork, unit: SeedUnit
+) -> tuple[EvidenceObservation, bool]:
+    """Reuse or persist the exact deterministic observation of one unit.
+
+    Existence is probed by the deterministic per-Investigation observation
+    id. A replay for a fresh Investigation finds no row under that id but
+    still converges through ``persist``: the stable Evidence material is
+    unchanged, so ``ati.persist_evidence_observation`` returns the
+    authoritative existing observation row (UNCHANGED). The caller must
+    use the returned observation id everywhere — it is the durable truth,
+    not the deterministic candidate.
+    """
+    existing = await uow.evidence.get_observation(unit.evidence_id)
+    if existing is not None:
+        return existing, False
+    persisted = await uow.evidence.persist(
+        unit.evidence, observation_id=unit.evidence_id
+    )
+    # A new immutable observation row exists for CREATED/APPENDED outcomes;
+    # the deterministic UNCHANGED replay returns the prior observation.
+    return (
+        persisted.observation,
+        persisted.outcome is not EvidencePersistenceOutcome.UNCHANGED,
+    )
+
+
+def _require_compatible_resolution(resolution: GeoResolution, unit: SeedUnit) -> None:
+    """Fail closed on terminal resolution work incompatible with the fixture.
+
+    PENDING work is claimed by the production worker, PROCESSING work
+    belongs to its claimant/lease, and RESOLVED work has already produced
+    the expected canonical observation: all three are compatible reuse.
+    UNRESOLVABLE/FAILED work can never satisfy a fixture that is expected
+    to resolve against the imported canonical geography.
+    """
+    if (
+        resolution.status is GeoResolutionStatus.UNRESOLVABLE
+        or resolution.status is GeoResolutionStatus.FAILED
+    ):
+        raise E2eSeedIncompatibleResolutionError(
+            f"existing geo resolution {resolution.id} for entity "
+            f"{resolution.entity_id} evidence "
+            f"{resolution.evidence_observation_id} is "
+            f"{resolution.status.value}; the deterministic fixture "
+            f"{unit.entity_value!r} requires canonical resolution and "
+            "cannot replay incompatible terminal work"
+        )
+
+
+async def _create_pending_or_recover(
+    uow: SeedUnitOfWork,
+    unit: SeedUnit,
+    *,
+    entity_id: UUID,
+    observation_id: UUID,
+) -> None:
+    """Create the initial PENDING work, recovering only the narrow race.
+
+    ``ati.create_geo_resolution`` is idempotent for a fresh PENDING pair and
+    raises :class:`GeoResolutionDuplicateStateError` when the pair already
+    exists in a progressed shape. Only that typed error is caught: the pair
+    is re-read through the repository and validated with the same
+    compatibility rules, so work already claimed or advanced by a concurrent
+    actor is respected instead of fought. A duplicate report followed by a
+    missing authoritative row fails closed; generic database errors
+    propagate untouched.
+    """
+    pending = GeoResolution(
+        id=unit.resolution_id,
+        entity_id=entity_id,
+        evidence_observation_id=observation_id,
+    )
+    try:
+        await uow.geo_resolutions.create_pending(pending)
+    except GeoResolutionDuplicateStateError:
+        raced = await uow.geo_resolutions.get_by_entity_evidence(
+            entity_id, observation_id
+        )
+        if raced is None:
+            raise E2eSeedResolutionConflictError(
+                f"geo resolution creation reported a duplicate pair for "
+                f"entity {entity_id} evidence {observation_id} but no "
+                "authoritative row could be re-read; refusing to guess"
+            ) from None
+        _require_compatible_resolution(raced, unit)
+
+
+async def _reconcile_resolution(
+    uow: SeedUnitOfWork,
+    unit: SeedUnit,
+    *,
+    entity_id: UUID,
+    observation_id: UUID,
+) -> None:
+    """Reconcile the deterministic fixture against authoritative work state.
+
+    The (entity, observation) pair is the semantic GeoResolution identity
+    (``GeoResolution.id`` is only persistence identity). Missing work is
+    created with the deterministic candidate id; compatible
+    PENDING/PROCESSING/RESOLVED work is reused as-is — an existing
+    resolution UUID differing from the candidate is never a conflict;
+    incompatible terminal work fails closed. The database remains the
+    lifecycle authority: nothing is reset, recreated, or re-leased here.
+    """
+    existing = await uow.geo_resolutions.get_by_entity_evidence(
+        entity_id, observation_id
+    )
+    if existing is None:
+        await _create_pending_or_recover(
+            uow, unit, entity_id=entity_id, observation_id=observation_id
+        )
+        return
+    _require_compatible_resolution(existing, unit)
+
+
 async def apply_seed(
     uow_factory: SeedUnitOfWorkFactory,
     resolver: LocationResolver,
@@ -503,6 +644,12 @@ async def apply_seed(
     and the production worker completion (canonical matching + atomic
     stored-function completion creating the ``EntityLocationObservation``)
     — never a direct Location/Observation insert.
+
+    Replay reconciles authoritative persisted state instead of assuming a
+    new PENDING row must always be created: existing compatible
+    PENDING/PROCESSING/RESOLVED work is reused, incompatible terminal work
+    fails closed, and only the narrow duplicate-state creation race is
+    recovered by re-reading the pair.
     """
     scenario_fixtures(scenario)  # validate allowlist before any persistence
 
@@ -517,7 +664,15 @@ async def apply_seed(
         other_investigation_id=other_investigation_id,
     )
 
-    # 1. Persist evidence + create PENDING work through the repositories.
+    # 1. Reconcile prerequisites and GeoResolution work through the
+    #    repositories. Every unit converges on ONE reconciliation path: upsert
+    #    the canonical Entity (using the returned persisted identity), reuse
+    #    or create the exact EvidenceObservation, replay the association and
+    #    admission idempotently, and then reconcile the semantic
+    #    (entity, observation) GeoResolution pair: absent work is created,
+    #    compatible PENDING/PROCESSING/RESOLVED work is reused, and
+    #    incompatible terminal work fails closed. Evidence existence never
+    #    skips the later reconciliation steps.
     async with uow_factory() as uow:
         investigation = await uow.investigations.get_by_id(investigation_id)
         if investigation is None:
@@ -535,39 +690,34 @@ async def apply_seed(
         evidence_ids: list[UUID] = []
         created: list[UUID] = []
         reused: list[UUID] = []
+        # Authoritative per-unit (Entity, EvidenceObservation) pairs, bound to
+        # the returned canonical Entity id and the durable observation id.
+        reconciled: list[tuple[SeedUnit, UUID, UUID]] = []
         for unit in units:
             entity = await uow.entities.upsert(unit.entity)
             if entity.id is None:  # pragma: no cover
                 raise RuntimeError("seeded entity persisted without an id")
             entity_ids.append(entity.id)
-            existing = await uow.evidence.get_observation(unit.evidence_id)
-            if existing is not None:
-                reused.append(unit.evidence_id)
-                evidence_ids.append(unit.evidence_id)
-                continue
-            persisted = await uow.evidence.persist(
-                unit.evidence, observation_id=unit.evidence_id
-            )
-            created.append(persisted.observation.id)
-            evidence_ids.append(persisted.observation.id)
-            await uow.evidence_observation_entities.associate(
-                persisted.observation.id, entity.id
-            )
+            observation, was_created = await _reconcile_evidence(uow, unit)
+            evidence_ids.append(observation.id)
+            if was_created:
+                created.append(observation.id)
+            else:
+                reused.append(observation.id)
+            await uow.evidence_observation_entities.associate(observation.id, entity.id)
             await uow.investigation_evidence.admit(
                 InvestigationEvidence(
                     investigation_id=unit.admitted_to,
-                    evidence_observation_id=persisted.observation.id,
+                    evidence_observation_id=observation.id,
                     inclusion_reason=InvestigationEvidenceReason.INITIAL,
                     added_at=SEED_RETRIEVED_AT,
                     added_by=InvestigationEvidenceActor.SYSTEM,
                 )
             )
-            pending = GeoResolution(
-                id=unit.resolution_id,
-                entity_id=entity.id,
-                evidence_observation_id=persisted.observation.id,
+            await _reconcile_resolution(
+                uow, unit, entity_id=entity.id, observation_id=observation.id
             )
-            await uow.geo_resolutions.create_pending(pending)
+            reconciled.append((unit, entity.id, observation.id))
         report = SeedReport(
             scenario=scenario,
             investigation_id=investigation_id,
@@ -588,27 +738,24 @@ async def apply_seed(
     await worker.run_once()
 
     # 3. Verify the canonical Observation rows exist through the worker's
-    #    own repository boundary (never by direct table reads). An idempotent
-    #    re-run claims nothing (the rows are already terminal), so the
-    #    verification is the honest gate: every expected unit needs its
-    #    canonical Observation row. One extra bounded pass drains any
-    #    claim-boundary leftovers before the final check fails with the
-    #    geography-not-imported diagnostic.
+    #    own repository boundary (never by direct table reads), using the
+    #    authoritative persisted Entity id and the exact EvidenceObservation
+    #    id. An idempotent re-run claims nothing (the rows are already
+    #    terminal), so the verification is the honest gate: every expected
+    #    unit needs its canonical Observation row. One extra bounded pass
+    #    drains any claim-boundary leftovers before the final check fails
+    #    with the geography-not-imported diagnostic.
     observation_ids: list[UUID] = []
 
-    async def missing_units() -> list[SeedUnit]:
-        missing: list[SeedUnit] = []
+    async def missing_units() -> list[tuple[SeedUnit, UUID, UUID]]:
+        missing: list[tuple[SeedUnit, UUID, UUID]] = []
         async with uow_factory() as uow:
-            for unit in units:
-                rows = await uow.entity_location_observations.list_for_entity(
-                    unit.entity_id
-                )
+            for unit, entity_id, observation_id in reconciled:
+                rows = await uow.entity_location_observations.list_for_entity(entity_id)
                 if not [
-                    row
-                    for row in rows
-                    if row.evidence_observation_id == unit.evidence_id
+                    row for row in rows if row.evidence_observation_id == observation_id
                 ]:
-                    missing.append(unit)
+                    missing.append((unit, entity_id, observation_id))
         return missing
 
     missing = await missing_units()
@@ -616,18 +763,18 @@ async def apply_seed(
         await worker.run_once()
         missing = await missing_units()
     if missing:
+        unit, entity_id, observation_id = missing[0]
         raise E2eSeedResolutionIncompleteError(
-            f"expected a canonical observation for entity {missing[0].entity_id} "
-            f"evidence {missing[0].evidence_id}; the reference geography may "
-            "not be imported or the claim is invalid"
+            f"expected a canonical observation for entity {entity_id} "
+            f"evidence {observation_id} (scenario {scenario!r} unit "
+            f"{units.index(unit)}); the reference geography may not be "
+            "imported or the claim is invalid"
         )
     async with uow_factory() as uow:
-        for unit in units:
-            rows = await uow.entity_location_observations.list_for_entity(
-                unit.entity_id
-            )
+        for _unit, entity_id, observation_id in reconciled:
+            rows = await uow.entity_location_observations.list_for_entity(entity_id)
             for row in rows:
-                if row.evidence_observation_id != unit.evidence_id:
+                if row.evidence_observation_id != observation_id:
                     continue
                 if row.id is None:  # pragma: no cover
                     raise E2eSeedResolutionIncompleteError(
@@ -767,6 +914,8 @@ def seed_main(argv: list[str] | None = None) -> int:
             UnknownSeedScenarioError,
             E2eSeedInvestigationMissingError,
             E2eSeedResolutionIncompleteError,
+            E2eSeedIncompatibleResolutionError,
+            E2eSeedResolutionConflictError,
         ) as exc:
             print(f"E2E-GEOINT-SEED-FAILED {exc}", file=sys.stderr)
             return 2
