@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 31C graph DTO validation and mapping unit tests (G31C-D01..D06).
+"""PR 31C graph DTO validation and mapping unit tests (G31C-D01..D07; PR 31G).
 
 The public graph DTOs are explicit frozen allowlists; the mappers copy the
 PR 31A application read models field-for-field without sorting,
-de-duplication, filtering, calculations, or cursor/page metadata.
+de-duplication, filtering, calculations, or cursor/page metadata. PR 31G
+adds the per-edge ``investigation_observation_count`` to the wire model.
 """
 
 from __future__ import annotations
@@ -57,6 +58,8 @@ def _edge(
     *,
     first: datetime | None = datetime(2026, 1, 1, tzinfo=UTC),
     last: datetime | None = datetime(2026, 1, 3, tzinfo=UTC),
+    observation_count: int = 3,
+    investigation_observation_count: int | None = None,
 ) -> GraphEdge:
     """Build one deterministic graph edge."""
     return GraphEdge(
@@ -64,7 +67,12 @@ def _edge(
         source_entity_id=FOCAL_ID,
         target_entity_id=NEIGHBOR_ID,
         relationship_type=RelationshipType.RESOLVES_TO,
-        observation_count=3,
+        observation_count=observation_count,
+        investigation_observation_count=(
+            observation_count
+            if investigation_observation_count is None
+            else investigation_observation_count
+        ),
         first_observed_at=first,
         last_observed_at=last,
     )
@@ -84,7 +92,7 @@ def test_g31c_d01_graph_node_mapping_is_exact() -> None:
 
 
 def test_g31c_d02_graph_edge_mapping_is_exact() -> None:
-    """GraphEdge maps topology/type/count/times exactly."""
+    """GraphEdge maps topology/type/count/support/times exactly."""
     response = to_graph_edge_response(_edge())
     assert isinstance(response, GraphEdgeResponse)
     assert response.relationship_id == EDGE_ID
@@ -92,6 +100,7 @@ def test_g31c_d02_graph_edge_mapping_is_exact() -> None:
     assert response.target_entity_id == NEIGHBOR_ID
     assert response.relationship_type is RelationshipType.RESOLVES_TO
     assert response.observation_count == 3
+    assert response.investigation_observation_count == 3
     assert response.first_observed_at == datetime(2026, 1, 1, tzinfo=UTC)
     assert response.last_observed_at == datetime(2026, 1, 3, tzinfo=UTC)
     payload = response.model_dump()
@@ -101,9 +110,19 @@ def test_g31c_d02_graph_edge_mapping_is_exact() -> None:
         "target_entity_id",
         "relationship_type",
         "observation_count",
+        "investigation_observation_count",
         "first_observed_at",
         "last_observed_at",
     }
+
+
+def test_g31g_d08_known_scope_support_count_is_copied_exactly() -> None:
+    """A known-only edge keeps its zero Investigation support count on the wire."""
+    response = to_graph_edge_response(
+        _edge(observation_count=2, investigation_observation_count=0)
+    )
+    assert response.observation_count == 2
+    assert response.investigation_observation_count == 0
 
 
 def test_g31c_d03_null_observed_times_remain_null() -> None:
@@ -146,6 +165,7 @@ def test_g31c_d05_unknown_dto_field_is_rejected() -> None:
             target_entity_id=NEIGHBOR_ID,
             relationship_type=RelationshipType.RESOLVES_TO,
             observation_count=3,
+            investigation_observation_count=3,
             confidence=0.9,
         )
     with pytest.raises(ValidationError):
@@ -173,6 +193,7 @@ def test_g31c_d06_dto_mutation_is_rejected() -> None:
         target_entity_id=NEIGHBOR_ID,
         relationship_type=RelationshipType.RESOLVES_TO,
         observation_count=1,
+        investigation_observation_count=1,
     )
     with pytest.raises(ValidationError):
         edge.observation_count = 99

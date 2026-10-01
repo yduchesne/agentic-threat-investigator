@@ -1,24 +1,23 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Canonical graph-neighborhood query keys (PR 31D).
+// Canonical graph-neighborhood query keys (PR 31D; PR 31G).
 //
-// The key contains every semantic input of the graph request
-// (investigation, focal Entity, direction, relationship type, limit) and
-// never layout or selection state: coordinates, drag positions and the
-// current node/edge selection are browser-only presentation and must not
-// affect server-state caching.
+// The key contains every semantic input of the graph request (investigation,
+// focal Entity, direction, scope, connected Entity type, Relationship type,
+// observation source, observed interval, limit) and never layout or
+// selection state: coordinates, drag positions and the current node/edge
+// selection are browser-only presentation and must not affect server-state
+// caching.
 
-import type {
-  RelationshipDirectionName,
-  RelationshipTypeName,
-} from "../api/schema-types";
+import type { RelationshipDirectionName } from "../api/schema-types";
+import type { GraphContext } from "./graph-context-url";
 
-/** Query key for one bounded investigation-scoped one-hop neighborhood. */
+/** Query key for one bounded scoped one-hop neighborhood. */
 export function graphNeighborhoodKey(
   investigationId: string,
   entityId: string,
   direction: RelationshipDirectionName,
-  relationshipType: RelationshipTypeName | undefined,
+  context: GraphContext,
   limit: number,
 ): unknown[] {
   return [
@@ -27,7 +26,12 @@ export function graphNeighborhoodKey(
     "neighborhood",
     entityId,
     direction,
-    relationshipType ?? null,
+    context.scope,
+    context.entityType ?? null,
+    context.relationshipType ?? null,
+    context.source ?? null,
+    context.observedFrom ?? null,
+    context.observedTo ?? null,
     limit,
   ];
 }

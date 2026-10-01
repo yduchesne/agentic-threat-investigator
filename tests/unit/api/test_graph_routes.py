@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PR 31C graph neighborhood route contract tests (G31C-R01..R16).
+"""PR 31C graph neighborhood route contract tests (G31C-R01..R17; PR 31G).
 
 Pure HTTP contract tests with injected application fakes: the route builds
 exactly one ``GraphNeighborhoodQuery``, calls only
 ``services.graph.neighborhood``, maps the result to explicit public DTOs,
 and translates scoped absence to one stable 404. No database, real
-authentication, LLM, or provider work is involved.
+authentication, LLM, or provider work is involved. PR 31G adds scope and
+filter parameters and the per-edge Investigation support count to the wire.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from agentic_threat_investigator.app.query.graph import (
     GraphNeighborhoodQuery,
     GraphNode,
     GraphResult,
+    GraphScope,
 )
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipReadItem,
@@ -70,6 +72,7 @@ def _edge() -> GraphEdge:
         target_entity_id=_neighbor_node().entity_id,
         relationship_type=RelationshipType.RESOLVES_TO,
         observation_count=3,
+        investigation_observation_count=3,
         first_observed_at=datetime(2026, 1, 1, tzinfo=UTC),
         last_observed_at=datetime(2026, 1, 3, tzinfo=UTC),
     )
@@ -113,6 +116,7 @@ def test_g31c_r01_successful_result_returns_exact_public_projection() -> None:
         "target_entity_id": str(_edge().target_entity_id),
         "relationship_type": RelationshipType.RESOLVES_TO.value,
         "observation_count": 3,
+        "investigation_observation_count": 3,
         "first_observed_at": "2026-01-01T00:00:00Z",
         "last_observed_at": "2026-01-03T00:00:00Z",
     }
@@ -402,6 +406,7 @@ def test_g31c_r15_null_observation_summaries_stay_null() -> None:
         target_entity_id=_edge().target_entity_id,
         relationship_type=RelationshipType.RESOLVES_TO,
         observation_count=2,
+        investigation_observation_count=2,
         first_observed_at=None,
         last_observed_at=None,
     )
@@ -466,12 +471,11 @@ def test_g31c_r16_graph_relationship_id_works_with_existing_detail() -> None:
     [
         {"cursor": "abc"},
         {"depth": "2"},
-        {"observed_from": "2026-01-01T00:00:00Z"},
         {"datasource": "google_public_dns"},
     ],
 )
 def test_g31c_r17_unsupported_filters_fail_closed(params: dict[str, str]) -> None:
-    """Cursor/depth/temporal/datasource filters are not part of the contract."""
+    """Cursor/depth/datasource filters are not part of the contract."""
     bundle = FakeQueryBundle()
     bundle.graph.result = _result()
     with build_test_app(bundle=bundle) as client:
@@ -489,3 +493,148 @@ def test_g31c_r17_unsupported_filters_fail_closed(params: dict[str, str]) -> Non
     assert isinstance(query, GraphNeighborhoodQuery)
     assert query.direction is RelationshipDirection.EITHER
     assert query.relationship_type is None
+    assert query.scope is GraphScope.INVESTIGATION
+    assert query.entity_type is None
+    assert query.source is None
+    assert query.observed_from is None
+    assert query.observed_to is None
+
+
+# --- PR 31G scope/filter parameter contract (G31G-R01..R08) ---------------------
+
+
+def test_g31g_r01_scope_and_filters_map_verbatim() -> None:
+    """scope/entity_type/source/observed bounds map to the query verbatim."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _result()
+    entity = uuid4()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/{entity}/neighborhood",
+            params={
+                "scope": "known",
+                "entity_type": EntityType.IP_ADDRESS.value,
+                "relationship_type": RelationshipType.CNAME_OF.value,
+                "source": "rdap",
+                "observed_from": "2026-01-01T00:00:00Z",
+                "observed_to": "2026-02-01T00:00:00Z",
+            },
+        )
+    assert response.status_code == 200
+    query = bundle.graph.neighborhood_queries[0]
+    assert isinstance(query, GraphNeighborhoodQuery)
+    assert query.investigation_id == INVESTIGATION
+    assert query.entity_id == entity
+    assert query.scope is GraphScope.KNOWN
+    assert query.direction is RelationshipDirection.EITHER
+    assert query.relationship_type is RelationshipType.CNAME_OF
+    assert query.entity_type is EntityType.IP_ADDRESS
+    assert query.source == "rdap"
+    assert query.observed_from == datetime(2026, 1, 1, tzinfo=UTC)
+    assert query.observed_to == datetime(2026, 2, 1, tzinfo=UTC)
+
+
+def test_g31g_r02_omitted_scope_defaults_to_investigation() -> None:
+    """Omitted scope keeps current-main Investigation behavior."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/"
+            f"{uuid4()}/neighborhood"
+        )
+    assert response.status_code == 200
+    query = bundle.graph.neighborhood_queries[0]
+    assert query.scope is GraphScope.INVESTIGATION
+
+
+def test_g31g_r03_invalid_scope_is_422() -> None:
+    """A scope outside the two-value vocabulary fails closed as 422."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/{uuid4()}/neighborhood",
+            params={"scope": "global"},
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert bundle.graph.neighborhood_queries == []
+
+
+def test_g31g_r04_invalid_entity_type_is_422() -> None:
+    """A non-allowlisted connected Entity type fails closed as 422."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/{uuid4()}/neighborhood",
+            params={"entity_type": "crypto_wallet"},
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert bundle.graph.neighborhood_queries == []
+
+
+def test_g31g_r05_blank_source_is_400() -> None:
+    """A blank source filter is a stable 400 invalid_request."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/{uuid4()}/neighborhood",
+            params={"source": "   "},
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert bundle.graph.neighborhood_queries == []
+
+
+def test_g31g_r06_equal_observed_interval_is_400() -> None:
+    """An empty (equal-bounds) observed interval is a stable 400."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/{uuid4()}/neighborhood",
+            params={
+                "observed_from": "2026-01-01T00:00:00Z",
+                "observed_to": "2026-01-01T00:00:00Z",
+            },
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert bundle.graph.neighborhood_queries == []
+
+
+def test_g31g_r07_reversed_observed_interval_is_400() -> None:
+    """A reversed observed interval is a stable 400."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/{uuid4()}/neighborhood",
+            params={
+                "observed_from": "2026-03-01T00:00:00Z",
+                "observed_to": "2026-01-01T00:00:00Z",
+            },
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert bundle.graph.neighborhood_queries == []
+
+
+def test_g31g_r08_naive_observed_bound_is_400() -> None:
+    """A naive (timezone-less) observed bound is a stable 400."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/{uuid4()}/neighborhood",
+            params={"observed_from": "2026-01-01T00:00:00"},
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert bundle.graph.neighborhood_queries == []

@@ -142,6 +142,37 @@ Selecting a node/edge opens details with linked evidence/provenance.
 
 The graph is a bounded visualization of the investigation, not a general graph explorer.
 
+### Graph context and filters (PR 31G)
+
+The Graph view distinguishes Investigation-supported topology from broader
+known topology and exposes bounded server-side filters. The committed graph
+context has exactly one authority: the Graph route URL search parameters
+(`graph_scope`, `graph_entity_type`, `graph_relationship_type`,
+`graph_source`, `graph_observed_from`, `graph_observed_to`). Draft edits live
+in a transient local form and never issue a request before Apply; Apply and
+Clear each perform exactly one route commit, and refresh / browser
+Back/Forward reconstruct the same request from the URL. The routed Graph page
+and `RelationshipGraph` stay mounted across query-parameter-only changes;
+dragging/selection remain transient presentation state that never touches the
+URL or the query key.
+
+- **Scopes**: `investigation` (default) vs `known`. Investigation shows only
+  Relationships supported by Evidence admitted to this Investigation; Known
+  shows broader globally known live Relationships around the
+  Investigation-visible focal Entity.
+- **Server-side filters**: connected (counterparty) Entity type, canonical
+  Relationship type, exact `RelationshipObservation.source`, and half-open
+  `observed_at` bounds. Filtering happens server-side before bounding;
+  `truncated` stays truthful and the client never post-filters.
+- **Expansion inheritance and reset**: every one-hop expansion inherits the
+  complete committed context; changing any scope/filter aborts stale
+  in-flight expansion and resets accumulated graph state.
+- **Known-only presentation**: a known-only edge (`investigation_observation_count == 0`)
+  is never presented as Investigation-discovered. Its accessible list entry
+  shows `Known to ATI; not admitted to this Investigation`; Investigation-
+  supported edges show `Supported by this Investigation`; edge detail shows
+  exact matching-observation and matching-in-this-Investigation counts.
+
 ## Map
 
 Use Leaflet.

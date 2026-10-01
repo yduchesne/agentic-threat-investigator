@@ -351,6 +351,7 @@ export function buildGraphEdge(
     target_entity_id: uuidAt(102),
     relationship_type: "urn:ati:relationship:dns:resolves_to" as RelationshipTypeName,
     observation_count: 1,
+    investigation_observation_count: 1,
     first_observed_at: "2026-06-01T09:00:00Z",
     last_observed_at: "2026-06-01T09:05:00Z",
     ...overrides,

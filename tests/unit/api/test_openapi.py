@@ -179,7 +179,12 @@ def test_openapi_graph_contract_is_public_and_scoped() -> None:
     assert response_ref["$ref"].endswith("/GraphNeighborhoodResponse")
 
     schemas = schema["components"]["schemas"]
-    public = {"GraphNodeResponse", "GraphEdgeResponse", "GraphNeighborhoodResponse"}
+    public = {
+        "GraphNodeResponse",
+        "GraphEdgeResponse",
+        "GraphNeighborhoodResponse",
+        "GraphScope",
+    }
     assert public <= set(schemas)
     internal = {name for name in schemas if "Graph" in name and name not in public}
     assert not internal

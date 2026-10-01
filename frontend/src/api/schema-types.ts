@@ -32,6 +32,7 @@ import type {
   GraphEdgeResponse,
   GraphNeighborhoodResponse,
   GraphNodeResponse,
+  GraphScope,
   HistoryOperation,
   HistoryRecordResponse,
   IndicatorRequest,
@@ -239,11 +240,14 @@ export type GeoPrecisionName = GeoPrecision;
 /** One canonical Entity projected as a graph node (PR 31C). */
 export type GraphNode = GraphNodeResponse;
 
-/** One canonical Relationship projected as a graph edge (PR 31C). */
+/** One canonical Relationship projected as a graph edge (PR 31C; PR 31G). */
 export type GraphEdge = GraphEdgeResponse;
 
 /** One bounded Investigation-scoped one-hop neighborhood (PR 31C). */
 export type GraphNeighborhood = GraphNeighborhoodResponse;
+
+/** The exact two-value graph scope vocabulary (PR 31G). */
+export type GraphScopeName = GraphScope;
 
 /** One bounded cursor page of history rows (PR 24C). */
 export type HistoryPage = PageResponseHistoryRecordResponse;

@@ -909,7 +909,7 @@
       },
       "GraphEdgeResponse": {
         "additionalProperties": false,
-        "description": "One canonical Relationship projected as a graph edge.\n\n``observation_count``, ``first_observed_at`` and ``last_observed_at``\nare copied exactly from the application ``GraphEdge`` summary; the wire\nnever recomputes or substitutes lifetimes or retrieval times.",
+        "description": "One canonical Relationship projected as a graph edge.\n\n``observation_count``, ``investigation_observation_count``,\n``first_observed_at`` and ``last_observed_at`` are copied exactly from\nthe application ``GraphEdge`` summary; the wire never recomputes or\nsubstitutes lifetimes or retrieval times, and never infers Investigation\nsupport. ``investigation_observation_count`` counts the same matching\nobservations whose exact EvidenceObservation is admitted to the current\nInvestigation and never exceeds ``observation_count``.",
         "properties": {
           "first_observed_at": {
             "anyOf": [
@@ -922,6 +922,11 @@
               }
             ],
             "title": "First Observed At"
+          },
+          "investigation_observation_count": {
+            "minimum": 0.0,
+            "title": "Investigation Observation Count",
+            "type": "integer"
           },
           "last_observed_at": {
             "anyOf": [
@@ -936,6 +941,7 @@
             "title": "Last Observed At"
           },
           "observation_count": {
+            "minimum": 1.0,
             "title": "Observation Count",
             "type": "integer"
           },
@@ -963,7 +969,8 @@
           "source_entity_id",
           "target_entity_id",
           "relationship_type",
-          "observation_count"
+          "observation_count",
+          "investigation_observation_count"
         ],
         "title": "GraphEdgeResponse",
         "type": "object"
@@ -1034,6 +1041,15 @@
         ],
         "title": "GraphNodeResponse",
         "type": "object"
+      },
+      "GraphScope": {
+        "description": "Exactly two graph scopes: Investigation-supported or broader known.\n\n``INVESTIGATION`` (the default) admits a Relationship as visible only\nwhen at least one supporting RelationshipObservation references an\nEvidenceObservation admitted to the requested Investigation; ``KNOWN``\nretains the Investigation-visible focal Entity but admits globally known\nlive Relationships supported by global RelationshipObservations even\nwhen those observations were never admitted to this Investigation.",
+        "enum": [
+          "investigation",
+          "known"
+        ],
+        "title": "GraphScope",
+        "type": "string"
       },
       "HTTPValidationError": {
         "properties": {
@@ -5003,7 +5019,7 @@
     },
     "/api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/neighborhood": {
       "get": {
-        "description": "Return the bounded one-hop neighborhood of one focal Entity.\n\n``direction`` defaults to ``either`` relative to the focal Entity;\n``relationship_type`` filters the canonical Relationship URN; an omitted\n``limit`` uses the configured default page size while the service-owned\nmaximum is never clamped -- an oversized caller limit is a stable 400\n``invalid_request``. Scoped absence (missing, soft-deleted, or\nnot-visible focal Entity) maps to one 404 ``graph_entity_not_found``;\nevery other graph result, including a visible isolated focal Entity,\nmaps to 200.",
+        "description": "Return the bounded one-hop neighborhood of one focal Entity.\n\n``direction`` defaults to ``either`` relative to the focal Entity;\n``relationship_type`` filters the canonical Relationship URN;\n``scope`` selects ``investigation`` (default) or ``known`` topology;\n``entity_type`` filters the connected/counterparty Entity type;\n``source`` exact-matches ``RelationshipObservation.source``;\n``observed_from`` / ``observed_to`` bound ``observed_at`` half-open;\nan omitted ``limit`` uses the configured default page size while the\nservice-owned maximum is never clamped -- an oversized caller limit is\na stable 400 ``invalid_request``. Scoped absence (missing, soft-deleted,\nor not-visible focal Entity) maps to one 404 ``graph_entity_not_found``;\nevery other graph result, including a visible isolated focal Entity or\nan all-filters-filtered focal-only graph, maps to 200.",
         "operationId": "get_graph_entity_neighborhood",
         "parameters": [
           {
@@ -5049,6 +5065,88 @@
                 }
               ],
               "title": "Relationship Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/GraphScope"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/EntityType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "observed_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observed From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "observed_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observed To"
             }
           },
           {

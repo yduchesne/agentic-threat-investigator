@@ -48,11 +48,26 @@ import {
   emptyObservationFilters,
 } from "../relationships/relationships-filters";
 import { RelationshipGraph } from "../relationship-graph/RelationshipGraph";
+import {
+  GraphFilters,
+  graphDraftError,
+  graphDraftFromCommitted,
+  graphDraftToCommitted,
+  type GraphDraft,
+} from "../relationship-graph/GraphFilters";
 import { useGraphNeighborhood } from "../relationship-graph/graph-queries";
 import {
   buildGraphModelFromAccumulated,
 } from "../relationship-graph/relationship-graph-model";
 import { useGraphExpansion } from "../relationship-graph/use-graph-expansion";
+import {
+  applyGraphContext,
+  emptyGraphContext,
+  graphContextActive,
+  graphContextKey,
+  parseGraphContext,
+  type GraphContext,
+} from "../relationship-graph/graph-context-url";
 import { entityTypeLabelKey } from "../relationship-graph/relationship-graph-presentation";
 import { RelationshipEvolutionTimeline } from "./RelationshipEvolutionTimeline";
 import {
@@ -101,6 +116,9 @@ export function RelationshipEvolutionWorkspace({
   const filters = parseEvolutionParams(searchParams);
   const view = parseViewParam(searchParams);
   const cursor = parseEvolutionCursor(searchParams);
+  // PR 31G: the committed graph context (scope + filters) is URL-backed and
+  // independent of the Evolution observation filters.
+  const graphContext = parseGraphContext(searchParams);
   const selectionRaw = searchParams.get(SELECTED_PARAM);
   const selectedId =
     selectionRaw !== null && isUuidValue(selectionRaw) ? selectionRaw.toLowerCase() : null;
@@ -124,18 +142,25 @@ export function RelationshipEvolutionWorkspace({
     investigationId,
     filters === null ? undefined : filters.entityId,
     filters === null ? "either" : filters.direction,
-    filters === null ? undefined : filters.relationshipType,
+    graphContext,
     view === "graph" && filters !== null,
   );
 
   // PR 31E: accumulated expansion state is owned by this controller; the
   // root neighborhood seeds it and every explicit expansion reuses the
-  // same PR 31C one-hop endpoint. Root semantic changes reset it.
+  // same PR 31C one-hop endpoint. Root changes (including any graph
+  // scope/filter change) reset it; every expansion inherits the complete
+  // committed graph context.
   const graphExpansion = useGraphExpansion({
     investigationId,
     rootEntityId: filters === null ? undefined : filters.entityId,
     rootDirection: filters === null ? "either" : filters.direction,
-    relationshipType: filters === null ? undefined : filters.relationshipType,
+    scope: graphContext.scope,
+    entityType: graphContext.entityType,
+    relationshipType: graphContext.relationshipType,
+    source: graphContext.source,
+    observedFrom: graphContext.observedFrom,
+    observedTo: graphContext.observedTo,
     rootNeighborhood: graphNeighborhood.neighborhood,
   });
 
@@ -181,6 +206,20 @@ export function RelationshipEvolutionWorkspace({
     onClear: () => applyFilters(emptyEvolutionFilters(committed.entityId)),
     emptyDraft: draftFromCommitted(emptyEvolutionFilters(committed.entityId)),
     committedKey: evolutionFiltersKey(committed),
+  });
+
+  // PR 31G: the graph filter form is a local draft that commits exactly one
+  // URL transition (no direct graph/query-cache/expansion reset in the same
+  // handler); the committed graph context derives from the route URL.
+  const graphFilterForm = useFilterForm<GraphContext, GraphDraft>({
+    committed: graphContext,
+    buildDraft: graphDraftFromCommitted,
+    toFilters: graphDraftToCommitted,
+    validateDraft: (draft) => graphDraftError(t as never, draft),
+    onApply: (next) => commit(applyGraphContext(searchParams, next)),
+    onClear: () => commit(applyGraphContext(searchParams, emptyGraphContext())),
+    emptyDraft: graphDraftFromCommitted(emptyGraphContext()),
+    committedKey: graphContextKey(graphContext),
   });
 
   const commit = (next: URLSearchParams): void => {
@@ -325,9 +364,28 @@ export function RelationshipEvolutionWorkspace({
           <ToggleButton value="graph">{t("view.graph")}</ToggleButton>
         </ToggleButtonGroup>
         {view === "graph" ? (
-          <Typography variant="caption" component="div" sx={{ mt: 0.5 }}>
-            {t("graph.temporalHint")}
-          </Typography>
+          <Box sx={{ mb: 1 }}>
+            <GraphFilters
+              t={t as never}
+              draft={graphFilterForm.draft}
+              hasActiveFilters={graphContextActive(graphContext)}
+              entityTypeLabel={graphEntityTypeLabel}
+              relationshipTypeLabel={relationshipTypeLabel}
+              onSetDraft={graphFilterForm.setDraft}
+              onApply={graphFilterForm.apply}
+              onClear={graphFilterForm.clear}
+            />
+            {graphFilterForm.error !== null ? (
+              <Typography
+                variant="caption"
+                role="alert"
+                color="error"
+                sx={{ display: "block", mb: 0.5 }}
+              >
+                {graphFilterForm.error}
+              </Typography>
+            ) : null}
+          </Box>
         ) : null}
       </Box>
 
@@ -487,7 +545,7 @@ export function RelationshipEvolutionWorkspace({
             {graphModel !== null ? (
               <RelationshipGraph
                 investigationId={investigationId}
-                rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${filters.relationshipType ?? ""}`}
+                rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${graphContextKey(graphContext)}`}
                 focalEntityId={filters.entityId}
                 model={graphModel}
                 typeLabel={relationshipTypeLabel}

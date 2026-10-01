@@ -241,6 +241,45 @@ No PR 31B test requires live internet, API keys, or any external service;
 the vertical slice runs entirely against the isolated PostgreSQL integration
 fixtures.
 
+### Graph scope and filter vertical slice (PR 31G)
+
+``tests/integration/test_query_graph_filters.py`` seeds a deterministic
+two-Investigation world (focal DOMAIN, IP/ASN counterparties, an incoming
+ASN edge, a DOMAIN self-loop and a null-``observed_at`` CNAME edge, with
+observations admitted to I1, some only to I2, at distinct sources/times)
+and validates the PR 31G two-scope/filter semantics against the real schema:
+
+- **scope**: Investigation scope shows only I1-supported edges; Known scope
+  broadens to globally supported live Relationships while keeping the
+  Investigation-visible focal (a focal admitted only to I2 maps to ``None``
+  in I1 Known, never arbitrary global Entity lookup);
+- **support counts**: known-only edges have ``investigation_observation_count == 0``
+  while ``observation_count`` stays truthful; mixed edges report both
+  counts; Investigation scope leaves the two equal;
+- **source and time**: exact ``RelationshipObservation.source`` match,
+  half-open ``observed_at`` bounds (lower inclusive, upper exclusive), and
+  null ``observed_at`` failing an active time bound but contributing
+  otherwise;
+- **connected Entity type**: counterpary-relative semantics with SOURCE /
+  TARGET / EITHER, and self-loop inclusion/exclusion by focal type;
+- **combined semantics and bounds**: Relationship type intersection,
+  combined-filter intersection, focal-only filtered results, soft-deleted
+  Relationship/endpoint exclusion in both scopes, truthful ``limit + 1``
+  truncation after filtering, Relationship-ID ordering, duplicate
+  observations remaining one edge, and endpoint closure with filters.
+
+### Graph context/filter unit tests (PR 31G)
+
+Frontend ``frontend/src/relationship-graph/graph-context-url.test.ts``
+covers the URL codec (absent scope \=\> Investigation, Known/filter
+reconstruction, malformed canonicalization, Clear, refresh/Back-Forward
+round-trip, unrelated-parameter preservation, minimal canonical URL);
+``graph-queries.test.tsx`` covers the request/key/filter mapping and scope
+change issuing a new request; ``use-graph-expansion.test.tsx`` covers
+context inheritance and scope/filter-change abort/reset; and
+``relationship-graph.test.tsx`` covers the Investigation/Known edge
+context cues and exact server support counts.
+
 ### Graph API route/DTO tests (PR 31C)
 
 PR 31C test coverage spans three layers over the existing PR 31A/31B graph

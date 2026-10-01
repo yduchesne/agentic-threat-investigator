@@ -110,7 +110,7 @@ function renderGraph(params: string = "") {
 describe("Relationship Graph workspace (PR 31C API)", () => {
   it("G31D-U01/U12/U13/U14/U20: Graph uses the canonical graph endpoint with only graph-supported filters, and never re-expands", async () => {
     const recorder = renderGraph(
-      "direction=source&relationship_type=urn:ati:relationship:dns:cname_of&observed_from=2026-06-01T00:00:00Z",
+      "direction=source&graph_scope=known&graph_relationship_type=urn:ati:relationship:dns:cname_of&graph_source=rdap",
     );
     await screen.findByRole("table", { name: "Relationship list (this page)" });
     await waitFor(() => {
@@ -120,16 +120,18 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     // Exact PR 31C path (path params recorded in params.entity_id).
     expect(last?.params.entity_id).toBe(FOCAL);
     expect(last?.params.direction).toBe("source");
+    // The committed graph context (scope + filters) drives the request.
+    expect(last?.params.scope).toBe("known");
     expect(last?.params.relationship_type).toBe("urn:ati:relationship:dns:cname_of");
+    expect(last?.params.source).toBe("rdap");
     expect(last?.params.limit).toBe("25");
     // Evolution-only filters are never sent.
     expect(last?.params.observed_from).toBeUndefined();
     // No cursor, no Relationships-list fallback request.
     expect(last?.cursor).toBeNull();
-    // The screenshot copy honestly states which filters apply to Graph.
-    expect(
-      screen.getByText(/counterparty filters apply only to Evolution/i),
-    ).toBeInTheDocument();
+    // The committed graph context is reflected in the rendered URL state and
+    // the graph filter controls stay mounted (no remount on filter edits).
+    expect(screen.getByRole("group", { name: "Graph context and filters" })).toBeInTheDocument();
     // Selection must not trigger a second neighborhood request.
     const initialRequestCount = recorder.requests.length;
     const focalNode = document.querySelector(`[data-testid="rf__node-${nodeId(FOCAL)}"]`);
@@ -211,6 +213,7 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     expect(within(row).getByText("Update Package Service")).toBeInTheDocument();
     expect(within(row).getByText("203.0.113.10")).toBeInTheDocument();
     expect(within(row).getByText("3")).toBeInTheDocument();
+    expect(within(row).getByText("Supported by this Investigation")).toBeInTheDocument();
     expect(within(row).getByTitle("2026-06-01T09:00:00Z")).toBeInTheDocument();
     expect(within(row).getByTitle("2026-06-10T09:00:00Z")).toBeInTheDocument();
     // Exact canonical identity access stays available.
@@ -218,6 +221,58 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
       "href",
       `/investigations/${INVESTIGATION_ID}/relationships?selected=${RELATIONSHIP}`,
     );
+  });
+
+  it("FE25/FE26/FE27/FE28/FE29: edges expose Investigation support context exactly", async () => {
+    const { neighborhood } = neighbors();
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      authMeSuccess,
+      runtimeFake,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      graphNeighborhoodHandler({
+        neighborhood: {
+          ...neighborhood,
+          edges: [
+            buildGraphEdge({
+              relationship_id: RELATIONSHIP,
+              source_entity_id: FOCAL,
+              target_entity_id: B,
+              observation_count: 3,
+              investigation_observation_count: 3,
+            }),
+            buildGraphEdge({
+              relationship_id: "40000000-0000-4000-8000-000000000022",
+              source_entity_id: FOCAL,
+              target_entity_id: B,
+              relationship_type: "urn:ati:relationship:dns:cname_of",
+              observation_count: 2,
+              investigation_observation_count: 0,
+            }),
+          ],
+        },
+        recorder,
+      }),
+    );
+    renderAtPath(graphEntry("graph_scope=known"));
+    const list = await screen.findByRole("table", { name: "Relationship list (this page)" });
+    // FE26/FE27: supported edge carries the Investigation cue; known-only
+    // edge carries the explicit known-to-ATI cue. FE28: the cue is text
+    // (never color-only), so it is present in the accessible list.
+    const supportedRow = within(list).getByRole("row", { name: /Resolves to/ });
+    expect(
+      within(supportedRow).getByText("Supported by this Investigation"),
+    ).toBeInTheDocument();
+    // FE29: exact server counts (total + in-this-Investigation) are shown.
+    expect(within(supportedRow).getAllByText("3")).toHaveLength(2);
+    const knownOnlyRow = within(list).getByRole("row", { name: /CNAME of/ });
+    expect(
+      within(knownOnlyRow).getByText("Known to ATI; not admitted to this Investigation"),
+    ).toBeInTheDocument();
+    expect(within(knownOnlyRow).getByText("2")).toBeInTheDocument();
+    expect(within(knownOnlyRow).getByText("0")).toBeInTheDocument();
   });
 
   it("G31D-U07: null observed times render unavailable (never substituted)", async () => {
