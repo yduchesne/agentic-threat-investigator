@@ -33,6 +33,7 @@ import { PivotMenu } from "../pivots/PivotMenu";
 import {
   entityActions,
   entityCompactLabel,
+  entityGeointAction,
   geointObservationEvidenceAction,
   geointObservationLocationActions,
   type PivotAction,
@@ -61,11 +62,15 @@ export function entityLocationExploreActions(
 ): PivotAction[] {
   const observation = item.current_observation;
   if (observation === null) {
-    return entityActions(item.entity_id, item.entity_value, "geoint_location");
+    return [
+      entityGeointAction(item, "geoint_location"),
+      ...entityActions(item.entity_id, item.entity_value, "geoint_location"),
+    ];
   }
   return [
     ...geointObservationEvidenceAction(observation, "geoint_observation"),
     ...geointObservationLocationActions(observation, "geoint_location"),
+    entityGeointAction(item, "geoint_location"),
     ...entityActions(item.entity_id, item.entity_value, "geoint_location"),
   ];
 }

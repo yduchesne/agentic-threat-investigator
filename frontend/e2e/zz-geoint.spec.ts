@@ -202,10 +202,17 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
     );
 
     // Investigation-relative current is the newer Location (Dallas), and
-    // the history table lists both immutable rows in server order.
+    // the history table lists both immutable rows in server order. The
+    // current-context assertion is scoped to the current section because
+    // the history table also renders a Dallas row (strict-mode-safe).
     const current = entityWorkspace.getByText("Current in this Investigation");
     await expect(current).toBeVisible({ timeout: 30_000 });
-    await expect(entityWorkspace.getByText("Dallas")).toBeVisible();
+    await expect(
+      entityWorkspace
+        .getByRole("heading", { name: "Canonical Location" })
+        .locator("..")
+        .getByText("Dallas"),
+    ).toBeVisible();
     const history = entityWorkspace.getByRole("table", {
       name: "Entity geographic observation history",
     });
@@ -243,8 +250,10 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
     await evidenceButton.click();
     const heading = page.getByRole("heading", { name: "Evidence" });
     await expect(heading).toBeVisible({ timeout: 30_000 });
-    await expect(heading.parentElement?.parentElement?.textContent).toContain("203.0.113.10");
-    await expect(heading.parentElement?.parentElement?.textContent).toContain("Geolocation");
+    // The exact Evidence renders as the in-flow detail content: the subject
+    // value and the Geolocation type row are visible in the detail rows.
+    await expect(page.getByText("203.0.113.10").first()).toBeVisible();
+    await expect(page.getByText("Geolocation", { exact: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
@@ -473,7 +482,15 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
     await expect(
       entityWorkspace.getByText("Current in this Investigation"),
     ).toBeVisible({ timeout: 30_000 });
-    await expect(entityWorkspace.getByText("EdgeLand")).toBeVisible();
+    // The current-context section renders EdgeLand (also present in the
+    // breadcrumb Restore button and the history row), so the assertion is
+    // scoped to the current section (strict-mode-safe).
+    await expect(
+      entityWorkspace
+        .getByRole("heading", { name: "Canonical Location" })
+        .locator("..")
+        .getByText("EdgeLand"),
+    ).toBeVisible();
     const history = entityWorkspace.getByRole("table", {
       name: "Entity geographic observation history",
     });
@@ -485,7 +502,9 @@ test.describe("PR 26E real-stack GEOINT matrix", () => {
       .click();
     const heading = page.getByRole("heading", { name: "Evidence" });
     await expect(heading).toBeVisible({ timeout: 30_000 });
-    await expect(heading.parentElement?.parentElement?.textContent).toContain("203.0.113.70");
+    // The exact Evidence renders as the in-flow detail content: the subject
+    // value is visible in the detail rows.
+    await expect(page.getByText("203.0.113.70").first()).toBeVisible();
     await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
 
     await clickForce(
