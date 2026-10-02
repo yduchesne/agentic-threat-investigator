@@ -305,17 +305,45 @@ workbench. No graph database, persisted path model, path caching,
 graph-query language, graph analytics, temporal playback, or graph-driven
 action is pulled into PR 31I.
 
-## PR 31J — Temporal graph exploration
+## PR 31J — Temporal graph exploration [DONE]
 
-Use `RelationshipObservation` to make the graph temporally explorable. Allow
-the analyst to constrain displayed relationships by observation interval and
-inspect how observed topology changes over time while preserving ATI's
-distinction between `observed_at` and `retrieved_at`.
+Delivers bounded temporal exploration of the existing entity-centric Graph
+workspace using `RelationshipObservation.observed_at` only.
 
-Integrate with the planned Temporal Relationship View rather than creating
-competing temporal semantics. Do not infer unsupported relationship start/end
-lifetimes from observation gaps: the UI describes what ATI observed, not an
-unproven continuous existence interval.
+Final scope:
+
+- adds a pure frontend temporal frame model + URL codec
+  (`frontend/src/relationship-graph/graph-temporal.ts`): committed tuple
+  (`graph_temporal`, `graph_time_start`, `graph_time_end`, `graph_time_frames`
+  `4|8|12|24` default 8, `graph_time_frame`), deterministic exact-epoch-ms
+  partitioning into half-open `[from, to)` frames, Previous/Next clamped
+  navigation, fail-closed malformed-value parsing, and effective
+  observed-bound derivation; the URL is the sole committed temporal authority
+  (refresh and Back/Forward reconstruct the same frame);
+- integrates the tuple into `RelationshipEvolutionWorkspace`: one effective
+  `GraphContext` derives the active frame's bounds and is passed consistently
+  to the existing neighborhood/traversal/expansion/path hooks, so the active
+  frame constrains root topology, multi-hop traversal, explicit expansion and
+  path finding through the existing graph `observed_from`/`observed_to`
+  contract — no backend endpoint, DTO, stored function, migration, or
+  index change; frame identity participates in graph-context/key/reset
+  semantics so a frame transition deterministically resets stale expansion
+  and path state;
+- adds the presentation-only `GraphTemporalControls` (draft range/frame
+  count, validated atomic Apply starting at frame 1, Disable, Previous/Next,
+  observational frame-status banner, observation-specific empty-frame
+  wording) and localizes every new string in the `relationshipEvolution`
+  resource;
+- preserves invariants: temporal mode is frontend framing only, never
+  lifetime/start/end inference, never wall-clock, never a second durable
+  temporal store; temporal-off behavior matches PR 31G/31H/31I exactly;
+  unrelated URL parameters survive Apply/Prev/Next/Disable.
+
+Acceptance (all executed through `scripts/e2e.sh`, workers=1, retries=0):
+Chromium and Firefox directed journeys + 20-cycle temporal stress
+(`zz-31j-temporal-graph.spec.ts`) green in both engines; existing
+31F8/31G/31H/31I graph regression journeys re-run green in both engines;
+full frontend quality gates (Vitest 757 tests, tsc, eslint) green.
 
 ## PR 31K — Graph-driven investigation actions
 

@@ -192,5 +192,20 @@
   "graph.path.all": "All returned paths",
   "graph.path.path": "Path {{ordinal}} ({{hops}} hop(s))",
   "graph.path.clearEndpoints": "Clear endpoints",
-  "graph.path.toolbarAria": "Path endpoints and bounds"
+  "graph.path.toolbarAria": "Path endpoints and bounds",
+  "graph.temporal.apply": "Apply temporal",
+  "graph.temporal.aria": "Temporal exploration",
+  "graph.temporal.disable": "Disable temporal",
+  "graph.temporal.empty": "No matching relationship observations were recorded in this frame.",
+  "graph.temporal.enable": "Temporal exploration",
+  "graph.temporal.error.frames": "Choose 4, 8, 12 or 24 frames.",
+  "graph.temporal.error.range": "Enter a valid observed range with a start before the end.",
+  "graph.temporal.error.rangeStart": "Enter a range start.",
+  "graph.temporal.error.rangeEnd": "Enter a range end.",
+  "graph.temporal.frames": "Frames",
+  "graph.temporal.next": "Next frame",
+  "graph.temporal.previous": "Previous frame",
+  "graph.temporal.rangeEnd": "Range end",
+  "graph.temporal.rangeStart": "Range start",
+  "graph.temporal.status": "Frame {{current}} of {{total}} — observations from {{from}} through before {{to}}"
 }
