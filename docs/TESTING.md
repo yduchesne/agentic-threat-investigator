@@ -2997,6 +2997,83 @@ ports, a throwaway named volume, and generated test-only credentials.
 Cleanup only touches resources the harness created; no live LLM is used
 and no normal developer data is touched.
 
+#### Mandatory real-stack E2E execution procedure for coding agents
+
+Browser E2E, critical-browser acceptance, and browser stability/lifecycle
+tests **MUST execute against the repository-managed real E2E stack**. A
+coding agent MUST NOT report one of these tests as executed or passing
+unless that stack was successfully created, started, and made ready.
+
+The authoritative stack-lifecycle entry point is:
+
+```bash
+./scripts/e2e.sh [Playwright arguments...]
+```
+
+The harness performs the complete lifecycle in one invocation:
+
+```text
+throwaway PostgreSQL
+  -> migrations
+  -> deterministic fake-data bootstrap
+  -> FastAPI
+  -> durable worker
+  -> Nginx / built frontend
+  -> Playwright
+  -> isolated-stack cleanup
+```
+
+It waits for the frontend/API boundary and fake-data bootstrap before
+starting Playwright, imports the canonical reference geography, exports the
+test-only credentials and URLs required by the browser suite, and removes
+only the isolated resources that it created.
+
+For a PR-specific or stability test, pass the Playwright selector and
+options through the harness rather than invoking Playwright directly. For
+example:
+
+```bash
+./scripts/e2e.sh zz-31f8-stress.spec.ts --project=chromium --workers=1 --retries=0
+./scripts/e2e.sh zz-31f8-stress.spec.ts --project=inspector-firefox --workers=1 --retries=0
+```
+
+Commands shown elsewhere in this document in the form:
+
+```bash
+cd frontend && npx playwright test ...
+```
+
+describe Playwright test selection/execution against an **already
+established compatible E2E environment**. They do not replace the
+repository stack-lifecycle requirement. For normal coding-agent execution,
+use `scripts/e2e.sh` and pass the equivalent Playwright arguments through
+it.
+
+Before claiming PR-level browser acceptance, a coding agent MUST:
+
+1. invoke the repository E2E harness so that the isolated real stack is
+   actually started;
+2. verify that harness startup/readiness and deterministic bootstrap
+   complete successfully;
+3. execute the requested Playwright E2E/stability specs through that
+   harness;
+4. preserve `workers=1` and `retries=0` wherever the relevant acceptance
+   contract requires them;
+5. report stack startup/readiness separately from the Playwright result,
+   including the browser project and requested stability-cycle count.
+
+If the stack cannot be started or does not become ready, the corresponding
+E2E/stability acceptance criterion is **NOT TESTED**, not PASS. The agent
+must report the startup/readiness failure explicitly. It MUST NOT substitute
+Vitest/component tests, mocked browser tests, source inspection, or a bare
+Playwright invocation against no compatible running stack for the missing
+real-stack acceptance.
+
+If a PR plan requires multiple browser engines, completing the harness run
+for one engine does not satisfy the other. Run the required Chromium and
+Firefox projects independently through the harness unless the invoked
+Playwright selection explicitly covers both.
+
 ### Playwright resource control (PR 31F-4)
 
 Real-stack browser tests boot the whole production-path topology (PostgreSQL
