@@ -3029,12 +3029,21 @@ test-only credentials and URLs required by the browser suite, and removes
 only the isolated resources that it created.
 
 For a PR-specific or stability test, pass the Playwright selector and
-options through the harness rather than invoking Playwright directly. For
-example:
+options through the harness rather than invoking Playwright directly. The
+harness ultimately runs `npm run test:e2e -- "$@"`, so use Playwright CLI
+arguments exactly as you would after `npx playwright test`. For example:
 
 ```bash
 ./scripts/e2e.sh zz-31f8-stress.spec.ts --project=chromium --workers=1 --retries=0
 ./scripts/e2e.sh zz-31f8-stress.spec.ts --project=inspector-firefox --workers=1 --retries=0
+```
+
+If a PR-specific browser test needs an environment variable such as a
+stability-cycle override, set it on the harness invocation itself so the
+value is inherited by Playwright, for example:
+
+```bash
+ATI_31F8_STRESS_CYCLES=50 ./scripts/e2e.sh zz-31f8-stress.spec.ts --project=chromium --workers=1 --retries=0
 ```
 
 Commands shown elsewhere in this document in the form:
