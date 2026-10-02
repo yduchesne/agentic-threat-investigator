@@ -530,6 +530,49 @@ browser E2E stack uses `ATI_LLM_DRIVER=deterministic` (the offline
 production-compatible driver); Python `FakeLlmClient` is never injected into
 the browser stack.
 
+### Real-browser graph-driven investigation action acceptance (PR 31K)
+
+`frontend/e2e/zz-31k-graph-actions.spec.ts` runs the graph-action journey in
+Chromium **and** Firefox at `workers=1` / `retries=0` through
+`scripts/e2e.sh` (the authoritative E2E/stability harness; a direct
+`npx playwright test` is not acceptance evidence). The real stack exercises
+built frontend → real FastAPI → real auth/CSRF/idempotency → the existing
+`POST /api/v1/investigations` durable Investigation command → real
+PostgreSQL job → real durable worker → real Coordinator → deterministic
+fake-world provider boundary → `ATI_LLM_DRIVER=deterministic` → real
+persistence. Python `FakeLlmClient` is never the browser E2E LLM boundary.
+
+- **Directed journey (K-E2E01):** completed deterministic fake-world
+  Investigation → routed Graph workbench → select a canonical graph Entity
+  with path mode off → in-flow action panel shows the canonical Entity
+  (type/value and exact canonical Entity ID derived from the graph API
+  response) → Start investigation issues exactly one accepted (202) durable
+  command whose request DTO carries the EXACT canonical type/value of the
+  selected Entity (no label parsing, no free-form IOC) → navigation through
+  the existing Investigation workflow → the new Investigation reaches a
+  terminal status (durable worker) → persisted outputs are queryable through
+  normal resource/graph surfaces → heartbeat + clean product console.
+- **Path-mode precedence (K-E2E02):** PR 31I endpoint clicks inside path
+  mode never open the action panel and never POST; exiting path mode restores
+  action selection. **Temporal compatibility (K-E2E03):** PR 31J temporal
+  mode is active, the action target is the canonical Entity (never temporal
+  metadata), and a frame transition that removes the node clears the stale
+  selection so it cannot be submitted. **Duplicate submission (K-E2E04):**
+  one semantic attempt → exactly one accepted durable command on the real
+  stack.
+- **Stability:** a 20-cycle same-page action-selection stress
+  (`ATI_31K_STRESS_CYCLES=20`, 20 cycles by default) repeatedly selects
+  different visible nodes, opens/closes the action panel, and enters/exits
+  path mode around the selection WITHOUT submitting durable work, then
+  performs one real durable action at the end; it proves no duplicate
+  requests, no detached node/pointer failure, no route remount loop, and no
+  accumulating console errors.
+
+Graph regression journeys for the interaction classes PR 31K touches
+(`zz-31f8-stress` PR 31F-8, `zz-31g-graph-context` PR 31G, `zz-31h-multihop`
+PR 31H, `zz-31i-path-finding` PR 31I, `zz-31j-temporal-graph` PR 31J) are
+re-run green in both engines as PR 31K regression evidence.
+
 ### Graph API route/DTO tests (PR 31C)
 
 PR 31C test coverage spans three layers over the existing PR 31A/31B graph

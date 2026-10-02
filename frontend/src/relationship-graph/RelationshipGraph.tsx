@@ -181,6 +181,12 @@ export interface RelationshipGraphProps {
   /** PR 31I: propagate a path-endpoint node click to the workspace. */
   onPathEndpointClick?: (entityId: string) => void;
   /**
+   * PR 31K: propagate a path-mode-off node click as a bounded graph-action
+   * selection to the workspace. Never invoked while path mode is active:
+   * PR 31I endpoint-selection semantics keep click precedence.
+   */
+  onActionSelect?: (entityId: string) => void;
+  /**
    * PR 31I: the canonical ID sets of the currently highlighted path. When
    * present, participating edges/nodes are emphasized and everything else in
    * the returned path topology is dimmed; ``null`` means no highlight.
@@ -204,6 +210,7 @@ export function RelationshipGraph({
   pathMode = false,
   pathEndpoints = undefined,
   onPathEndpointClick,
+  onActionSelect,
   pathHighlight = null,
   emptyMessage = undefined,
 }: RelationshipGraphProps): ReactElement {
@@ -519,6 +526,10 @@ export function RelationshipGraph({
               }
             }
             setSelection({ kind: "node", nodeId: node.id });
+            const entityId = entityIdFromNodeId(node.id);
+            if (entityId !== null) {
+              onActionSelect?.(entityId);
+            }
           }}
           onEdgeClick={(_event, edge) => setSelection({ kind: "edge", edgeId: edge.id })}
           onPaneClick={() => setSelection(null)}

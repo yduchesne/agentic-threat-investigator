@@ -345,21 +345,52 @@ Chromium and Firefox directed journeys + 20-cycle temporal stress
 31F8/31G/31H/31I graph regression journeys re-run green in both engines;
 full frontend quality gates (Vitest 757 tests, tsc, eslint) green.
 
-## PR 31K — Graph-driven investigation actions
+## PR 31K — Graph-driven investigation actions [DONE]
 
-Connect graph exploration to ATI's existing agentic research machinery. From a
-selected Entity, allow an analyst to initiate an investigation/research action
-using the existing Coordinator, ResearchRequest/ProviderWork planning, and
-datasource architecture.
+Closes the PR 31 graph series by making a selected canonical graph Entity an
+analyst-controlled entry point into ATI's **existing** durable Investigation
+loop. No Maltego-style Transform subsystem, graph-specific provider,
+graph-specific persistence, or second orchestration engine was introduced;
+the graph remains an exploration/selection surface only.
 
-Do not introduce a separate Maltego-style "Transform" subsystem. Graph actions
-are another entry point into ATI's existing investigation capabilities.
-New Evidence, Entities, Relationships, and observations produced by the action
-flow through the normal authoritative persistence path and can then be
-reflected back into the graph.
+Final scope:
 
-This closes the series by making the graph both an evidence-exploration surface
-and an analyst-controlled entry point into ATI's agentic investigation loop.
+- adds a bounded graph-action model (`frontend/src/relationship-graph/graph-actions.ts`):
+  the action target is always a canonical persisted Entity ID (authoritative),
+  with exact canonical type/value as presentation metadata only; a neutral
+  prefilled objective (`Investigate <type> <value>`) and objective/value
+  validation reuse the exact create-Investigation bounds;
+- adds the in-flow, non-modal `GraphActionPanel` (`frontend/src/relationship-graph/GraphActionPanel.tsx`):
+  human-readable Entity type/value, canonical ID, editable objective,
+  Start investigation / Cancel controls, pending state and typed failures;
+  it reuses the existing `useCreateInvestigation` mutation + `apiRequest`/CSRF/
+  `Idempotency-Key` semantics and the exact create-attempt uncertainty policy,
+  so an accepted action navigates through the existing Investigation workflow
+  and the durable worker/Coordinator execute all investigation work;
+- integrates transient selected-Entity state into `RelationshipEvolutionWorkspace`:
+  with path mode off, clicking a rendered node selects that canonical Entity
+  for the action panel; entering path mode or any committed graph-context/
+  temporal-frame transition deterministically clears the selection (PR 31I
+  path-mode click precedence and PR 31J temporal framing are unchanged);
+  selection is browser-local workbench state — never URL-backed, never
+  persisted, never a global store;
+- the graph never calls providers or the ResearchAgent directly, never mutates
+  graph state optimistically, and never bolts the action onto the generic
+  PivotMenu: the action routes the selected Entity through the existing
+  `POST /api/v1/investigations` application command (reused exactly, no
+  backend changes), so results use normal authoritative persistence/provenance
+  and the new Investigation's graph reflects them through ordinary queries;
+- localizes every new string in the `relationshipEvolution` resource and covers
+  the boundary with deterministic unit/component tests (21 new Vitest tests:
+  model, panel idempotency/pending/error semantics, workspace selection
+  precedence/clearing, no optimistic data, no URL corruption).
+
+Acceptance (all executed through `scripts/e2e.sh`, workers=1, retries=0):
+Chromium and Firefox directed journeys + path-mode precedence + temporal
+compatibility + duplicate-submission + 20-cycle action-selection stability
+(`zz-31k-graph-actions.spec.ts`) green in both engines; existing
+31F8/31G/31H/31I/31J graph regression journeys re-run green in both engines;
+full frontend quality gates (Vitest 778 tests, tsc, eslint, api:check) green.
 
 ## Milestones
 
