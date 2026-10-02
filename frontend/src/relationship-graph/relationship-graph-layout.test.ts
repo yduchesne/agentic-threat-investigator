@@ -9,7 +9,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { positionsForExpandedNodes, type GraphPosition } from "./relationship-graph-layout";
+import {
+  layeredPositions,
+  positionsForExpandedNodes,
+  radialPositions,
+  type GraphPosition,
+} from "./relationship-graph-layout";
 
 const ANCHOR: GraphPosition = { x: 0, y: 0 };
 const A = "40000000-0000-4000-8000-000000000101";
@@ -81,5 +86,102 @@ describe("positionsForExpandedNodes (PR 31E incremental placement)", () => {
     expect(Math.round(chosen.x) === 0 && Math.round(chosen.y) === -150).toBe(false);
     // Still within the bounded ring.
     expect(Math.hypot(chosen.x - ANCHOR.x, chosen.y - ANCHOR.y)).toBeLessThanOrEqual(160);
+  });
+});
+
+describe("layeredPositions (PR 31H multi-hop distance rings)", () => {
+  const nodes = [
+    { entityId: "50000000-0000-4000-8000-000000000001" },
+    { entityId: "50000000-0000-4000-8000-000000000002" },
+    { entityId: "50000000-0000-4000-8000-000000000003" },
+    { entityId: "50000000-0000-4000-8000-000000000004" },
+  ];
+
+  it("H-L01: depth-1 topology equals the radial single-ring layout", () => {
+    const focal = nodes[0].entityId;
+    const ring = nodes.slice(1);
+    const edges = ring.map((node) => ({
+      sourceEntityId: focal,
+      targetEntityId: node.entityId,
+    }));
+    const layered = layeredPositions(focal, nodes, edges);
+    const radial = radialPositions(focal, ring.map((node) => node.entityId));
+    expect(Math.round(layered.focal.x)).toBe(0);
+    expect(Math.round(layered.focal.y)).toBe(0);
+    for (const node of ring) {
+      const layeredPos = layered.positions.get(node.entityId) as GraphPosition;
+      const radialPos = radial.counterparties.get(node.entityId) as GraphPosition;
+      expect(Math.round(layeredPos.x)).toBe(Math.round(radialPos.x));
+      expect(Math.round(layeredPos.y)).toBe(Math.round(radialPos.y));
+    }
+  });
+
+  it("H-L02: a chain places hop-2 entities on an outer distance ring", () => {
+    const focal = nodes[0].entityId;
+    const b = nodes[1].entityId;
+    const c = nodes[2].entityId;
+    const d = nodes[3].entityId;
+    const edges = [
+      { sourceEntityId: focal, targetEntityId: b },
+      { sourceEntityId: b, targetEntityId: c },
+      { sourceEntityId: c, targetEntityId: d },
+    ];
+    const layout = layeredPositions(focal, nodes, edges);
+    const bPos = layout.positions.get(b) as GraphPosition;
+    const cPos = layout.positions.get(c) as GraphPosition;
+    const dPos = layout.positions.get(d) as GraphPosition;
+    // Hop distance from the focal rings: 220 (hop 1), 440 (hop 2), 660 (hop 3).
+    expect(Math.round(Math.hypot(bPos.x, bPos.y))).toBe(220);
+    expect(Math.round(Math.hypot(cPos.x, cPos.y))).toBe(440);
+    expect(Math.round(Math.hypot(dPos.x, dPos.y))).toBe(660);
+  });
+
+  it("H-L03: a diamond uses the MINIMUM hop distance per node", () => {
+    const focal = nodes[0].entityId;
+    const b = nodes[1].entityId;
+    const c = nodes[2].entityId;
+    const d = nodes[3].entityId;
+    const edges = [
+      { sourceEntityId: focal, targetEntityId: b },
+      { sourceEntityId: focal, targetEntityId: c },
+      { sourceEntityId: b, targetEntityId: d },
+      { sourceEntityId: c, targetEntityId: d },
+    ];
+    const layout = layeredPositions(focal, nodes, edges);
+    const dPos = layout.positions.get(d) as GraphPosition;
+    // D is reachable in two hops through either branch: ring 2.
+    expect(Math.round(Math.hypot(dPos.x, dPos.y))).toBe(440);
+  });
+
+  it("H-L04: self-loops never contribute a distance step", () => {
+    const focal = nodes[0].entityId;
+    const b = nodes[1].entityId;
+    const edges = [
+      { sourceEntityId: focal, targetEntityId: focal },
+      { sourceEntityId: focal, targetEntityId: b },
+    ];
+    const layout = layeredPositions(focal, nodes, edges);
+    const bPos = layout.positions.get(b) as GraphPosition;
+    expect(Math.round(Math.hypot(bPos.x, bPos.y))).toBe(220);
+  });
+
+  it("H-L05: positions are deterministic and identity-sorted per ring", () => {
+    const focal = nodes[0].entityId;
+    const ring = nodes.slice(1);
+    const edges = ring.map((node) => ({
+      sourceEntityId: focal,
+      targetEntityId: node.entityId,
+    }));
+    const first = layeredPositions(focal, nodes, edges);
+    const second = layeredPositions(focal, [...nodes].reverse(), edges);
+    for (const node of nodes) {
+      if (node.entityId === focal) {
+        continue; // the focal sits at the center, not in the ring map
+      }
+      const a = first.positions.get(node.entityId) as GraphPosition;
+      const b = second.positions.get(node.entityId) as GraphPosition;
+      expect(Math.round(a.x)).toBe(Math.round(b.x));
+      expect(Math.round(a.y)).toBe(Math.round(b.y));
+    }
   });
 });

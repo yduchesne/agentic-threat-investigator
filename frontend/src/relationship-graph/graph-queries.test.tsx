@@ -20,10 +20,9 @@ import { freshQueryClient } from "../test/render";
 import { errorResponse, jsonResponse, uuidAt } from "../test/handlers";
 import { setHttpHandlers, useHttp } from "../test/server";
 import type { GraphNeighborhood } from "../api/schema-types";
-import { fetchGraphNeighborhood, GRAPH_NEIGHBORHOOD_LIMIT } from "./graph-api";
-import type { GraphRequestContext } from "./graph-api";
+import { fetchGraphNeighborhood, fetchGraphTraversal, GRAPH_NEIGHBORHOOD_LIMIT } from "./graph-api";
 import { emptyGraphContext, type GraphContext } from "./graph-context-url";
-import { graphNeighborhoodKey } from "./graph-keys";
+import { graphNeighborhoodKey, graphTraversalKey } from "./graph-keys";
 import { useGraphNeighborhood } from "./graph-queries";
 
 useHttp();
@@ -50,11 +49,11 @@ function neighborhoodBody(): GraphNeighborhood {
   };
 }
 
-/** A context with only a Relationship type set. */
-function typeContext(relationshipType: string | undefined): GraphRequestContext {
+/** A committed context with only a Relationship type set. */
+function typeContext(relationshipType: string | undefined): GraphContext {
   return {
     ...emptyGraphContext(),
-    relationshipType: relationshipType as GraphRequestContext["relationshipType"],
+    relationshipType: relationshipType as GraphContext["relationshipType"],
   };
 }
 
@@ -234,6 +233,7 @@ describe("Graph query seam", () => {
       null,
       null,
       null,
+      1,
       25,
     ]);
     // Undefined relationship type stays distinct from any concrete value.
@@ -252,6 +252,18 @@ describe("Graph query seam", () => {
     expect(
       graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "either", emptyGraphContext(), 25),
     ).not.toEqual(graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "either", known, 25));
+    // PR 31H: depth differentiates the one-hop key too (depth 1 vs 2).
+    expect(
+      graphNeighborhoodKey(INVESTIGATION_ID, FOCAL, "either", emptyGraphContext(), 25),
+    ).not.toEqual(
+      graphNeighborhoodKey(
+        INVESTIGATION_ID,
+        FOCAL,
+        "either",
+        { ...emptyGraphContext(), depth: 2 },
+        25,
+      ),
+    );
   });
 
   it("G31D-Q09: the query is disabled without a valid focal Entity", async () => {
@@ -332,5 +344,87 @@ describe("Graph query seam", () => {
       expect(recorder.requests).toHaveLength(2);
     });
     expect(recorder.requests[1].params.scope).toBe("known");
+  });
+});
+
+describe("PR 31H traversal seam", () => {
+  const TRAVERSAL_PATH =
+    "*/api/v1/investigations/:id/graph/entities/:entityId/traversal";
+
+  it("H-F12: the traversal request maps max_depth and every filter exactly", async () => {
+    const recorder = { requests: [] as { url: string; params: Record<string, string> }[] };
+    setHttpHandlers(
+      http.get(TRAVERSAL_PATH, ({ request, params }) => {
+        const url = new URL(request.url);
+        recorder.requests.push({
+          url: request.url,
+          params: {
+            entity_id: String(params.entityId),
+            investigation_id: String(params.id),
+            ...Object.fromEntries(url.searchParams.entries()),
+          },
+        });
+        return jsonResponse(neighborhoodBody());
+      }),
+    );
+    await fetchGraphTraversal(INVESTIGATION_ID, FOCAL, "source", {
+      scope: "known",
+      entityType: "ip_address",
+      relationshipType: CNAME,
+      source: "rdap",
+      observedFrom: "2026-01-01T00:00:00Z",
+      observedTo: "2026-02-01T00:00:00Z",
+      maxDepth: 3,
+    });
+    expect(recorder.requests).toHaveLength(1);
+    expect(recorder.requests[0].url).toContain(
+      `/investigations/${INVESTIGATION_ID}/graph/entities/${FOCAL}/traversal`,
+    );
+    const params = recorder.requests[0].params;
+    expect(params.max_depth).toBe("3");
+    expect(params.direction).toBe("source");
+    expect(params.scope).toBe("known");
+    expect(params.entity_type).toBe("ip_address");
+    expect(params.relationship_type).toBe(CNAME);
+    expect(params.source).toBe("rdap");
+    expect(params.observed_from).toBe("2026-01-01T00:00:00Z");
+    expect(params.observed_to).toBe("2026-02-01T00:00:00Z");
+    expect(params.limit).toBe("25");
+  });
+
+  it("G31H-D01: traversal and neighborhood keys are distinct and depth-aware", () => {
+    const depthTwo = { ...emptyGraphContext(), depth: 2 } as GraphContext;
+    const depthThree = { ...emptyGraphContext(), depth: 3 } as GraphContext;
+    expect(graphTraversalKey(INVESTIGATION_ID, FOCAL, "either", depthTwo, 25)).toEqual([
+      "graph",
+      INVESTIGATION_ID,
+      "traversal",
+      FOCAL,
+      "either",
+      "investigation",
+      null,
+      null,
+      null,
+      null,
+      null,
+      2,
+      25,
+    ]);
+    expect(
+      graphTraversalKey(INVESTIGATION_ID, FOCAL, "either", depthTwo, 25),
+    ).not.toEqual(
+      graphTraversalKey(INVESTIGATION_ID, FOCAL, "either", depthThree, 25),
+    );
+    expect(
+      graphTraversalKey(INVESTIGATION_ID, FOCAL, "either", depthTwo, 25),
+    ).not.toEqual(
+      graphNeighborhoodKey(
+        INVESTIGATION_ID,
+        FOCAL,
+        "either",
+        { ...emptyGraphContext(), depth: 2 },
+        25,
+      ),
+    );
   });
 });

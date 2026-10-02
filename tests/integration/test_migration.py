@@ -97,6 +97,7 @@ EXPECTED_FUNCTIONS = {
     "reference_geometry_parse",
     "reference_centroid_parse",
     "append_datasource_log_event",
+    "traverse_graph",
 }
 
 
@@ -412,6 +413,52 @@ async def test_graph_integrity_migration_downgrade_and_re_upgrade() -> None:
     function_present, foreign_key_present = await schema_state()
     assert function_present
     assert foreign_key_present
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_graph_traversal_migration_downgrade_and_re_upgrade() -> None:
+    """PR 31H migration 0035 downgrades and re-upgrades cleanly (H-SF02)."""
+    alembic_cfg = Config("alembic.ini")
+
+    async def traversal_function_present() -> bool:
+        """Return whether the traversal stored function is installed."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                return bool(
+                    await connection.scalar(
+                        text("""
+                        SELECT 1 FROM information_schema.routines
+                        WHERE routine_schema = 'ati'
+                          AND routine_name = 'traverse_graph'
+                    """)
+                    )
+                )
+        finally:
+            await engine.dispose()
+
+    assert await traversal_function_present()
+    command.downgrade(alembic_cfg, "0034_timeline_error_message")
+    assert not await traversal_function_present()
+    # The unrelated timeline diagnostic migration remains installed.
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            column = await connection.scalar(
+                text("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'ati'
+                  AND table_name = 'investigation_timeline_event'
+                  AND column_name = 'error_message'
+            """)
+            )
+    finally:
+        await engine.dispose()
+    assert column == "error_message"
+
+    command.upgrade(alembic_cfg, "head")
+    assert await traversal_function_present()
 
 
 @pytest.mark.asyncio

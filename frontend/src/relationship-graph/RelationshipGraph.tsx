@@ -50,9 +50,9 @@ import type {
   RelationshipGraphNode,
 } from "./relationship-graph-model";
 import {
+  layeredPositions,
   layoutSize,
   positionsForExpandedNodes,
-  radialPositions,
   type GraphPosition,
 } from "./relationship-graph-layout";
 import type { GraphExpansionController } from "./use-graph-expansion";
@@ -141,11 +141,13 @@ function EvolutionGraphNode({ data }: NodeProps): ReactElement {
 
 export interface RelationshipGraphProps {
   investigationId: string;
-  /** Root graph context key (investigation/focal/direction/type); a change
-   * resets the deterministic root layout and dropped expansion state. */
+  /** Root graph context key (investigation/focal/direction/type/depth); a
+   * change resets the deterministic root layout and dropped expansion state. */
   rootGraphKey: string;
   focalEntityId: string;
   model: RelationshipGraphModel;
+  /** PR 31H: true when the committed depth is 2/3 (multi-hop traversal). */
+  multiHop?: boolean;
   /** Relationship type URN -> analyst label. */
   typeLabel: (type: string) => string;
   /** Entity type -> analyst label (exact text, non-color differentiation). */
@@ -160,6 +162,7 @@ export function RelationshipGraph({
   rootGraphKey,
   focalEntityId,
   model,
+  multiHop = false,
   typeLabel,
   entityTypeLabel,
   expansion,
@@ -190,8 +193,8 @@ export function RelationshipGraph({
     [model.counterparties],
   );
   const positions = useMemo(
-    () => radialPositions(model.focal.entityId, counterpartyIds),
-    [model.focal.entityId, counterpartyIds],
+    () => layeredPositions(model.focal.entityId, model.nodes, model.edges),
+    [model.focal.entityId, model.nodes, model.edges],
   );
   const size = useMemo(() => layoutSize(counterpartyIds.length), [counterpartyIds.length]);
 
@@ -211,7 +214,7 @@ export function RelationshipGraph({
       ...model.counterparties.map((node) => ({
         id: nodeId(node.entityId),
         type: "evolutionNode" as const,
-        position: positions.counterparties.get(node.entityId) ?? { x: 0, y: 0 },
+        position: positions.positions.get(node.entityId) ?? { x: 0, y: 0 },
         data: {
           entityValue: node.value,
           role: node.role,
@@ -352,7 +355,7 @@ export function RelationshipGraph({
     <Box>
       {model.truncated ? (
         <Alert severity="info" role="status" sx={{ mb: 1 }}>
-          {t("graph.boundedNotice")}
+          {multiHop ? t("graph.multihopBoundedNotice") : t("graph.boundedNotice")}
         </Alert>
       ) : null}
       {expansion.inFlight !== null ? (

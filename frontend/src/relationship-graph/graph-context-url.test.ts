@@ -17,6 +17,7 @@ import {
   graphContextActive,
   graphContextEqual,
   graphContextKey,
+  graphDepthActive,
   parseGraphContext,
 } from "./graph-context-url";
 
@@ -27,15 +28,17 @@ function ps(query: string): URLSearchParams {
 const KNOWN = "urn:ati:relationship:dns:resolves_to";
 
 describe("PR 31G graph context URL codec", () => {
-  it("FE01: absent params are Investigation scope with no optional filters", () => {
+  it("FE01: absent params are Investigation scope, depth 1, no optional filters", () => {
     const context = parseGraphContext(ps(""));
     expect(context.scope).toBe("investigation");
+    expect(context.depth).toBe(1);
     expect(context.entityType).toBeUndefined();
     expect(context.relationshipType).toBeUndefined();
     expect(context.source).toBeUndefined();
     expect(context.observedFrom).toBeUndefined();
     expect(context.observedTo).toBeUndefined();
     expect(graphContextActive(context)).toBe(false);
+    expect(graphDepthActive(context)).toBe(false);
   });
 
   it("FE02: a Known scope URL reconstructs to Known", () => {
@@ -101,6 +104,7 @@ describe("PR 31G graph context URL codec", () => {
       source: "rdap",
       observedFrom: "2026-01-01T00:00:00Z",
       observedTo: "2026-02-01T00:00:00Z",
+      depth: 2,
     };
     const url = applyGraphContext(ps("unrelated=x"), context);
     const reparsed = parseGraphContext(url);
@@ -111,6 +115,7 @@ describe("PR 31G graph context URL codec", () => {
   it("FE11: unrelated URL parameters are preserved by Apply", () => {
     const applied = applyGraphContext(ps("entity_id=abc&view=graph&cursor=x&selected=y"), {
       scope: "known",
+      depth: 1,
       entityType: undefined,
       relationshipType: undefined,
       source: undefined,
@@ -122,13 +127,16 @@ describe("PR 31G graph context URL codec", () => {
     expect(applied.get("cursor")).toBe("x");
     expect(applied.get("selected")).toBe("y");
     expect(applied.get("graph_scope")).toBe("known");
+    expect(applied.get("graph_depth")).toBeNull();
   });
 
   it("FE37: the canonical URL omits the default Investigation scope", () => {
     const minimal = applyGraphContext(ps(""), emptyGraphContext());
     expect(minimal.toString()).not.toContain("graph_scope");
+    expect(minimal.toString()).not.toContain("graph_depth");
     const known = applyGraphContext(ps(""), {
       scope: "known",
+      depth: 1,
       entityType: undefined,
       relationshipType: undefined,
       source: undefined,
@@ -151,5 +159,37 @@ describe("PR 31G graph context URL codec", () => {
     expect(graphContextKey(base)).not.toBe(
       graphContextKey({ ...base, source: "rdap" }),
     );
+    expect(graphContextKey(base)).not.toBe(
+      graphContextKey({ ...base, depth: 2 }),
+    );
+  });
+
+  it("H-F01/H-F03: absent or invalid depth canonicalizes to safe depth 1", () => {
+    expect(parseGraphContext(ps("")).depth).toBe(1);
+    expect(parseGraphContext(ps("graph_depth=0")).depth).toBe(1);
+    expect(parseGraphContext(ps("graph_depth=4")).depth).toBe(1);
+    expect(parseGraphContext(ps("graph_depth=two")).depth).toBe(1);
+  });
+
+  it("H-F02: depth 2/3 reconstruct from the URL", () => {
+    expect(parseGraphContext(ps("graph_depth=2")).depth).toBe(2);
+    expect(parseGraphContext(ps("graph_depth=3")).depth).toBe(3);
+  });
+
+  it("H-F04/H-F05: serializing depth 1 omits the param; 2/3 are canonical", () => {
+    const applied = applyGraphContext(ps("unrelated=x"), {
+      ...emptyGraphContext(),
+      depth: 3,
+    });
+    expect(applied.get("graph_depth")).toBe("3");
+    expect(parseGraphContext(applied).depth).toBe(3);
+    expect(applied.get("unrelated")).toBe("x");
+    const withTwo = applyGraphContext(ps(""), { ...emptyGraphContext(), depth: 2 });
+    expect(withTwo.get("graph_depth")).toBe("2");
+  });
+
+  it("H-F02b: graphDepthActive reports only a non-default depth", () => {
+    expect(graphDepthActive(emptyGraphContext())).toBe(false);
+    expect(graphDepthActive({ ...emptyGraphContext(), depth: 2 })).toBe(true);
   });
 });

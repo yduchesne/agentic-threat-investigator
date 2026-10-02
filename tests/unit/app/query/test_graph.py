@@ -21,6 +21,7 @@ from agentic_threat_investigator.app.query.graph import (
     GraphQueryService,
     GraphResult,
     GraphScope,
+    GraphTraversalQuery,
 )
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.relationships import (
@@ -84,9 +85,14 @@ class _FixedGraphQueryService(GraphQueryService):
     def __init__(self, result: GraphResult | None) -> None:
         self._result = result
         self.queries: list[GraphNeighborhoodQuery] = []
+        self.traversals: list[GraphTraversalQuery] = []
 
     async def neighborhood(self, query: GraphNeighborhoodQuery) -> GraphResult | None:
         self.queries.append(query)
+        return self._result
+
+    async def traverse(self, query: GraphTraversalQuery) -> GraphResult | None:
+        self.traversals.append(query)
         return self._result
 
 
@@ -587,3 +593,174 @@ async def test_s03_none_represents_missing_focal_entity() -> None:
     result = await service.neighborhood(query)
     assert result is None
     assert service.queries == [query]
+
+
+# --- GraphTraversalQuery (PR 31H H-U01..H-U12) --------------------------------
+
+
+def _traversal(
+    *,
+    max_depth: int = 2,
+    limit: int = 10,
+    scope: GraphScope = GraphScope.INVESTIGATION,
+    source: str | None = None,
+    observed_from: datetime | None = None,
+    observed_to: datetime | None = None,
+) -> GraphTraversalQuery:
+    """Build one valid bounded traversal query for contract tests."""
+    return GraphTraversalQuery(
+        investigation_id=uuid4(),
+        entity_id=uuid4(),
+        max_depth=max_depth,
+        limit=limit,
+        scope=scope,
+        source=source,
+        observed_from=observed_from,
+        observed_to=observed_to,
+    )
+
+
+def test_hu01_depth_one_accepted() -> None:
+    """Depth 1 is the one-hop-equivalent traversal floor."""
+    query = _traversal(max_depth=1)
+    assert query.max_depth == 1
+
+
+def test_hu02_depth_two_accepted() -> None:
+    """Depth 2 is an accepted bounded walk."""
+    query = _traversal(max_depth=2)
+    assert query.max_depth == 2
+
+
+def test_hu03_depth_three_accepted() -> None:
+    """Depth 3 is the maximum accepted walk."""
+    query = _traversal(max_depth=3)
+    assert query.max_depth == 3
+
+
+def test_hu04_depth_zero_rejected() -> None:
+    """Depth 0 (focal only) is rejected: depth is hop distance."""
+    with pytest.raises(ValidationError, match="max_depth"):
+        _traversal(max_depth=0)
+
+
+def test_hu05_depth_four_rejected() -> None:
+    """Depth 4 exceeds the hard server-owned traversal bound."""
+    with pytest.raises(ValidationError, match="max_depth"):
+        _traversal(max_depth=4)
+
+
+def test_hu06_default_scope_is_investigation() -> None:
+    """Omitted scope keeps the PR 31G Investigation default."""
+    assert _traversal().scope is GraphScope.INVESTIGATION
+
+
+def test_hu07_blank_source_rejected() -> None:
+    """A blank exact source filter is rejected like the neighborhood."""
+    with pytest.raises(ValidationError, match="must not be blank"):
+        _traversal(source="   ")
+
+
+def test_hu08_naive_observed_bound_rejected() -> None:
+    """A timezone-less observed bound is rejected like the neighborhood."""
+    with pytest.raises(ValidationError):
+        _traversal(observed_from=datetime(2026, 1, 1))
+
+
+def test_hu09_one_sided_interval_accepted() -> None:
+    """A one-sided observed bound is legal."""
+    query = _traversal(
+        observed_from=datetime(2026, 1, 1, tzinfo=UTC),
+        observed_to=None,
+    )
+    assert query.observed_from == datetime(2026, 1, 1, tzinfo=UTC)
+    assert query.observed_to is None
+
+
+def test_hu10_invalid_interval_same_rule_as_neighborhood() -> None:
+    """Equal/reversed two-sided intervals fail exactly like the neighborhood."""
+    with pytest.raises(ValidationError, match="earlier than"):
+        _traversal(
+            observed_from=datetime(2026, 2, 1, tzinfo=UTC),
+            observed_to=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+
+
+def test_hu11_duplicate_identity_result_rejected() -> None:
+    """A traversal result reuses the canonical GraphResult identity rules."""
+    entity_id = uuid4()
+    with pytest.raises(ValidationError, match="entity IDs must be unique"):
+        GraphResult(
+            nodes=(_node(entity_id), _node(entity_id)), edges=(), truncated=False
+        )
+    relationship_id = uuid4()
+    source = _node()
+    target = _node()
+    with pytest.raises(ValidationError, match="relationship IDs must be unique"):
+        GraphResult(
+            nodes=(source, target),
+            edges=(
+                _edge(
+                    relationship_id,
+                    source_entity_id=source.entity_id,
+                    target_entity_id=target.entity_id,
+                ),
+                _edge(
+                    relationship_id,
+                    source_entity_id=source.entity_id,
+                    target_entity_id=target.entity_id,
+                ),
+            ),
+            truncated=False,
+        )
+
+
+def test_hu12_endpoint_closure_enforced() -> None:
+    """A traversal result reuses the canonical GraphResult closure rule."""
+    source = _node()
+    with pytest.raises(ValidationError, match="target entity must be present"):
+        GraphResult(
+            nodes=(source,),
+            edges=(
+                _edge(
+                    source_entity_id=source.entity_id,
+                    target_entity_id=uuid4(),
+                ),
+            ),
+            truncated=False,
+        )
+
+
+# --- GraphQueryService.traverse (PR 31H H-U13..H-U14) ---------------------------
+
+
+def test_hu13_service_double_implements_neighborhood_and_traverse() -> None:
+    """The contract double satisfies the extended service ABC."""
+    service = _FixedGraphQueryService(None)
+    assert isinstance(service, GraphQueryService)
+
+
+@pytest.mark.asyncio
+async def test_hu14_isolated_focal_distinct_from_missing() -> None:
+    """A visible isolated focal traversal is distinct from ``None``."""
+    focal = _node()
+    isolated = GraphResult(nodes=(focal,), edges=(), truncated=False)
+    service = _FixedGraphQueryService(isolated)
+    query = _traversal(max_depth=3, limit=5)
+    result = await service.traverse(query)
+    assert result is not None
+    assert result.nodes == (focal,)
+    assert result.edges == ()
+    assert result.truncated is False
+    assert service.traversals == [query]
+    assert service.queries == []
+
+
+@pytest.mark.asyncio
+async def test_hu14b_missing_focal_traverse_returns_none() -> None:
+    """``None`` expresses a missing or not-visible traversal focal."""
+    service = _FixedGraphQueryService(None)
+    query = _traversal()
+    result = await service.traverse(query)
+    assert result is None
+    assert service.traversals == [query]

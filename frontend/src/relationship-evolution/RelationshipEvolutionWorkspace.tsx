@@ -55,7 +55,7 @@ import {
   graphDraftToCommitted,
   type GraphDraft,
 } from "../relationship-graph/GraphFilters";
-import { useGraphNeighborhood } from "../relationship-graph/graph-queries";
+import { useGraphNeighborhood, useGraphTraversal } from "../relationship-graph/graph-queries";
 import {
   buildGraphModelFromAccumulated,
 } from "../relationship-graph/relationship-graph-model";
@@ -65,6 +65,7 @@ import {
   emptyGraphContext,
   graphContextActive,
   graphContextKey,
+  graphDepthActive,
   parseGraphContext,
   type GraphContext,
 } from "../relationship-graph/graph-context-url";
@@ -138,13 +139,27 @@ export function RelationshipEvolutionWorkspace({
     view === "evolution" && observationFilters !== null,
   );
 
+  // PR 31H: the committed graph depth selects exactly ONE server operation.
+  // Depth 1 keeps the one-hop neighborhood endpoint; depth 2/3 use the
+  // bounded traversal endpoint. Only one hook is enabled at a time so the two
+  // can never race or share a cache entry, and a depth/context change issues
+  // a fresh request through its distinct TanStack Query key.
+  const useOneHop = graphContext.depth === 1;
   const graphNeighborhood = useGraphNeighborhood(
     investigationId,
     filters === null ? undefined : filters.entityId,
     filters === null ? "either" : filters.direction,
     graphContext,
-    view === "graph" && filters !== null,
+    view === "graph" && filters !== null && useOneHop,
   );
+  const graphTraversal = useGraphTraversal(
+    investigationId,
+    filters === null ? undefined : filters.entityId,
+    filters === null ? "either" : filters.direction,
+    graphContext,
+    view === "graph" && filters !== null && !useOneHop,
+  );
+  const graphResult = useOneHop ? graphNeighborhood : graphTraversal;
 
   // PR 31E: accumulated expansion state is owned by this controller; the
   // root neighborhood seeds it and every explicit expansion reuses the
@@ -156,12 +171,13 @@ export function RelationshipEvolutionWorkspace({
     rootEntityId: filters === null ? undefined : filters.entityId,
     rootDirection: filters === null ? "either" : filters.direction,
     scope: graphContext.scope,
+    depth: graphContext.depth,
     entityType: graphContext.entityType,
     relationshipType: graphContext.relationshipType,
     source: graphContext.source,
     observedFrom: graphContext.observedFrom,
     observedTo: graphContext.observedTo,
-    rootNeighborhood: graphNeighborhood.neighborhood,
+    rootNeighborhood: graphResult.neighborhood,
   });
 
   const graphModel = useMemo(
@@ -368,7 +384,9 @@ export function RelationshipEvolutionWorkspace({
             <GraphFilters
               t={t as never}
               draft={graphFilterForm.draft}
-              hasActiveFilters={graphContextActive(graphContext)}
+              hasActiveFilters={
+                graphContextActive(graphContext) || graphDepthActive(graphContext)
+              }
               entityTypeLabel={graphEntityTypeLabel}
               relationshipTypeLabel={relationshipTypeLabel}
               onSetDraft={graphFilterForm.setDraft}
@@ -521,12 +539,12 @@ export function RelationshipEvolutionWorkspace({
         </Box>
         ) : (
           <Box>
-            {graphNeighborhood.isLoading && graphNeighborhood.neighborhood === null ? (
+            {graphResult.isLoading && graphResult.neighborhood === null ? (
             <Alert severity="info" role="status" sx={{ mt: 1 }}>
               {t("graph.loading")}
             </Alert>
           ) : null}
-          {graphNeighborhood.error !== null && graphNeighborhood.neighborhood === null ? (
+          {graphResult.error !== null && graphResult.neighborhood === null ? (
             <Box sx={{ mt: 1 }}>
               <Alert severity="error" role="alert">
                 {t("graph.error.message")}
@@ -535,7 +553,7 @@ export function RelationshipEvolutionWorkspace({
                 <Button
                   size="small"
                   variant="outlined"
-                  onClick={() => graphNeighborhood.refetch()}
+                  onClick={() => graphResult.refetch()}
                 >
                   {t("error.retry")}
                 </Button>
@@ -548,6 +566,7 @@ export function RelationshipEvolutionWorkspace({
                 rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${graphContextKey(graphContext)}`}
                 focalEntityId={filters.entityId}
                 model={graphModel}
+                multiHop={graphContext.depth > 1}
                 typeLabel={relationshipTypeLabel}
                 entityTypeLabel={graphEntityTypeLabel}
                 expansion={graphExpansion}

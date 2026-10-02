@@ -36,7 +36,10 @@ import type {
 } from "../api/schema-types";
 import { isAbortError } from "../api/errors";
 import { GRAPH_NEIGHBORHOOD_LIMIT, fetchGraphNeighborhood } from "./graph-api";
-import { graphContextKey } from "./graph-context-url";
+import {
+  graphContextKey,
+  type GraphDepth,
+} from "./graph-context-url";
 import {
   emptyAccumulatedGraph,
   expansionKeyMatches,
@@ -53,6 +56,8 @@ export interface GraphExpansionInputs {
   rootDirection: RelationshipDirectionName;
   /** PR 31G: the committed graph context (scope + every filter). */
   scope: GraphScopeName;
+  /** PR 31H: the committed root depth (1 = one-hop, 2/3 = traversal). */
+  depth: GraphDepth;
   entityType: EntityTypeName | undefined;
   relationshipType: RelationshipTypeName | undefined;
   source: string | undefined;
@@ -93,6 +98,7 @@ function rootContextKey(
   rootDirection: RelationshipDirectionName,
   context: {
     scope: GraphScopeName;
+    depth: GraphDepth;
     entityType: EntityTypeName | undefined;
     relationshipType: RelationshipTypeName | undefined;
     source: string | undefined;
@@ -111,6 +117,7 @@ export function useGraphExpansion({
   rootEntityId,
   rootDirection,
   scope,
+  depth,
   entityType,
   relationshipType,
   source,
@@ -133,6 +140,7 @@ export function useGraphExpansion({
     rootEntityId,
     rootDirection,
     scope,
+    depth,
     entityType,
     relationshipType,
     source,
@@ -144,6 +152,7 @@ export function useGraphExpansion({
     rootEntityId,
     rootDirection,
     scope,
+    depth,
     entityType,
     relationshipType,
     source,
@@ -155,7 +164,7 @@ export function useGraphExpansion({
     investigationId,
     rootEntityId,
     rootDirection,
-    { scope, entityType, relationshipType, source, observedFrom, observedTo },
+    { scope, depth, entityType, relationshipType, source, observedFrom, observedTo },
   );
 
   // Root synchronization: a root semantic change resets accumulated state

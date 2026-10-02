@@ -43,7 +43,7 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Row, and_, func, or_, select
+from sqlalchemy import Row, and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
@@ -55,6 +55,7 @@ from agentic_threat_investigator.app.query.graph import (
     GraphQueryService,
     GraphResult,
     GraphScope,
+    GraphTraversalQuery,
 )
 from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.domain.entities import EntityType
@@ -89,7 +90,15 @@ def _graph_node_from_row(row: EntityRow) -> GraphNode:
 
 
 class PostgresGraphQueryService(GraphQueryService):
-    """One bounded one-hop graph neighborhood read over PostgreSQL."""
+    """One bounded one-hop graph neighborhood read over PostgreSQL.
+
+    PR 31H adds :meth:`traverse`, which is a deliberately different shape: an
+    ``ati.traverse_graph`` stored-function boundary. The one-hop
+    ``neighborhood`` read keeps its established direct SQLAlchemy form while
+    the traversal (recursive CTE, cycle safety, aggregation, bounding,
+    endpoint projection) is implemented exclusively inside the stored
+    function.
+    """
 
     def __init__(self, session: AsyncSession, limits: QueryLimits) -> None:
         """Bind the short-lived read session and the configured limits."""
@@ -155,6 +164,92 @@ class PostgresGraphQueryService(GraphQueryService):
         )
         nodes = await self._endpoint_nodes(focal_node, selected_rows)
         return GraphResult(nodes=nodes, edges=edges, truncated=truncated)
+
+    async def traverse(self, query: GraphTraversalQuery) -> GraphResult | None:
+        """Return the bounded multi-hop traversal via the stored function.
+
+        This adapter is a thin persistence boundary: it validates the bound
+        through :class:`QueryLimits`, invokes the PR 31H stored function
+        ``ati.traverse_graph`` with the exact validated parameters and maps
+        its canonical node/edge rows into one :class:`GraphResult`. It
+        contains no traversal SELECT, recursive CTE, join, filter,
+        aggregation, endpoint lookup, or other graph SQL; every PR 31H SQL
+        query lives inside the stored function. ``None`` means the stored
+        function returned no rows because the focal Entity is missing,
+        soft-deleted, or not visible to the Investigation (both scopes).
+        """
+        limit = self._limits.validate_limit(query.limit)
+        rows = (
+            await self._session.execute(
+                text(
+                    "SELECT * FROM ati.traverse_graph("
+                    ":investigation_id, :entity_id, :max_depth, :scope, "
+                    ":direction, :relationship_type, :entity_type, :source, "
+                    ":observed_from, :observed_to, :limit)"
+                ),
+                {
+                    "investigation_id": query.investigation_id,
+                    "entity_id": query.entity_id,
+                    "max_depth": query.max_depth,
+                    "scope": query.scope.value,
+                    "direction": query.direction.value,
+                    "relationship_type": (
+                        query.relationship_type.value
+                        if query.relationship_type is not None
+                        else None
+                    ),
+                    "entity_type": (
+                        query.entity_type.value
+                        if query.entity_type is not None
+                        else None
+                    ),
+                    "source": query.source,
+                    "observed_from": query.observed_from,
+                    "observed_to": query.observed_to,
+                    "limit": limit,
+                },
+            )
+        ).all()
+        if not rows:
+            return None
+        nodes: list[GraphNode] = []
+        edges: list[GraphEdge] = []
+        truncated = False
+        for row in rows:
+            if row.kind == "node":
+                nodes.append(
+                    GraphNode(
+                        entity_id=row.node_entity_id,
+                        entity_type=EntityType(row.node_entity_type),
+                        value=row.node_canonical_value,
+                        display_name=row.node_display_name,
+                    )
+                )
+                truncated = row.truncated
+            elif row.kind == "edge":
+                edges.append(
+                    GraphEdge(
+                        relationship_id=row.edge_relationship_id,
+                        source_entity_id=row.edge_source_entity_id,
+                        target_entity_id=row.edge_target_entity_id,
+                        relationship_type=RelationshipType(
+                            row.edge_relationship_type_urn
+                        ),
+                        observation_count=row.edge_observation_count,
+                        investigation_observation_count=(
+                            row.edge_investigation_observation_count
+                        ),
+                        first_observed_at=row.edge_first_observed_at,
+                        last_observed_at=row.edge_last_observed_at,
+                    )
+                )
+                truncated = row.truncated
+            else:  # pragma: no cover - stored-function contract invariant
+                raise AssertionError(
+                    "traversal stored function returned an unknown row kind: "
+                    f"{row.kind!r}"
+                )
+        return GraphResult(nodes=tuple(nodes), edges=tuple(edges), truncated=truncated)
 
     def _edge_statement(self, query: GraphNeighborhoodQuery, limit: int) -> Select[Any]:
         """Build the grouped, bounded canonical Relationship edge selection.

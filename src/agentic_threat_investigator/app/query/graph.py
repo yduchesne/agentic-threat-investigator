@@ -18,6 +18,12 @@ server-side filters (connected Entity type, Relationship type,
 RelationshipObservation source, half-open ``observed_at`` interval), and
 carries an explicit result bound. PostgreSQL retrieval is PR 31B work; this
 module owns the application contract only.
+
+PR 31H adds :class:`GraphTraversalQuery`: the same scoped graph context plus
+an explicit 1..3 hop depth. It is a bounded, cycle-safe, read-only
+server-side walk over already-persisted canonical Relationship topology;
+it never invokes providers, never mutates persistence, never invents path
+finding (PR 31I) and never replaces one-hop interactive expansion.
 """
 
 from __future__ import annotations
@@ -35,6 +41,17 @@ from agentic_threat_investigator.domain.relationships import (
     RelationshipDirection,
     RelationshipType,
 )
+
+GRAPH_TRAVERSAL_MAX_DEPTH = 3
+"""Hard server-owned maximum traversal depth (PR 31H).
+
+Depth is hop distance from the focal Entity: ``1`` means exactly the one-hop
+neighborhood, ``3`` is the deepest supported walk. The bound is enforced by
+the contract and defensively inside the PostgreSQL stored function.
+"""
+
+DEFAULT_TRAVERSAL_MAX_DEPTH = 2
+"""API default traversal depth when a caller omits ``max_depth`` (PR 31H)."""
 
 
 class GraphScope(StrEnum):
@@ -167,24 +184,16 @@ class GraphResult(BaseModel):
         return self
 
 
-class GraphNeighborhoodQuery(BaseModel):
-    """One bounded one-hop neighborhood request with explicit graph context.
+class _GraphQueryBase(BaseModel):
+    """Shared scoped graph-query context (PR 31G filters + result bound).
 
-    The query is always scoped to one Investigation and one focal Entity.
-    ``scope`` selects Investigation-supported topology (the default) or the
-    broader Known graph around the Investigation-visible focal Entity;
-    omitted scope always means ``INVESTIGATION``. ``direction`` is relative
-    to the focal Entity and defaults to ``EITHER`` (reusing
-    ``RelationshipDirection``). ``relationship_type`` filters the canonical
-    Relationship type; ``entity_type`` filters the connected/counterparty
-    Entity type relative to the focal Entity; ``source`` exact-matches
-    ``RelationshipObservation.source`` (blank rejected); ``observed_from`` /
-    ``observed_to`` bound ``observed_at`` with half-open ``[from, to)``
-    semantics and a non-empty window when both are supplied (``retrieved_at``
-    is never substituted). ``limit`` bounds the number of returned
-    Relationships and is mandatory at the contract level; callers/composition
-    layers may later apply configured defaults on top of it. PR 31A adds no
-    cursor, depth, multi-hop, path, lifecycle, or datasource semantics.
+    A narrow internal base shared by the one-hop neighborhood and the PR 31H
+    traversal so the Investigation/focal scoping, the two-value
+    ``GraphScope``, direction, Relationship/Entity type filters, exact
+    ``source`` and half-open ``observed_at`` interval validation can never
+    drift between the two operations. It deliberately carries no depth or
+    path vocabulary: the neighborhood query is exactly one hop and the
+    traversal query adds an explicit depth on top of this context.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -215,7 +224,7 @@ class GraphNeighborhoodQuery(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def interval_ordered(self) -> "GraphNeighborhoodQuery":
+    def interval_ordered(self) -> "_GraphQueryBase":
         """Require a strictly ordered half-open interval when both bounds exist.
 
         One-sided intervals are legal; a two-sided interval must form a
@@ -231,8 +240,58 @@ class GraphNeighborhoodQuery(BaseModel):
         return self
 
 
+class GraphNeighborhoodQuery(_GraphQueryBase):
+    """One bounded one-hop neighborhood request with explicit graph context.
+
+    The query is always scoped to one Investigation and one focal Entity.
+    ``scope`` selects Investigation-supported topology (the default) or the
+    broader Known graph around the Investigation-visible focal Entity;
+    omitted scope always means ``INVESTIGATION``. ``direction`` is relative
+    to the focal Entity and defaults to ``EITHER`` (reusing
+    ``RelationshipDirection``). ``relationship_type`` filters the canonical
+    Relationship type; ``entity_type`` filters the connected/counterparty
+    Entity type relative to the focal Entity; ``source`` exact-matches
+    ``RelationshipObservation.source`` (blank rejected); ``observed_from`` /
+    ``observed_to`` bound ``observed_at`` with half-open ``[from, to)``
+    semantics and a non-empty window when both are supplied (``retrieved_at``
+    is never substituted). ``limit`` bounds the number of returned
+    Relationships and is mandatory at the contract level; callers/composition
+    layers may later apply configured defaults on top of it. PR 31A adds no
+    cursor, depth, multi-hop, path, lifecycle, or datasource semantics.
+    """
+
+
+class GraphTraversalQuery(_GraphQueryBase):
+    """One bounded multi-hop traversal request over canonical topology.
+
+    The query inherits the exact PR 31G graph context (Investigation,
+    focal Entity, scope, direction, Relationship type, connected Entity
+    type, exact observation source, half-open ``observed_at`` interval)
+    and adds one explicit ``max_depth`` measured as hop distance from the
+    focal Entity: ``1`` equals the one-hop neighborhood, ``2`` and ``3``
+    walk deeper canonical Relationships. Depth is hard-bounded by
+    :data:`GRAPH_TRAVERSAL_MAX_DEPTH`; the traversal is deterministic,
+    cycle-safe (an Entity path can never revisit itself), read-only, and
+    bounded by ``limit`` distinct canonical Relationships. Visibility and
+    observation filters apply before any recursion, so a traversal can
+    never cross a hidden edge.
+    """
+
+    max_depth: int
+
+    @field_validator("max_depth")
+    @classmethod
+    def bounded_depth(cls, value: int) -> int:
+        """Reject traversal depths outside the server-owned 1..3 window."""
+        if value < 1 or value > GRAPH_TRAVERSAL_MAX_DEPTH:
+            raise ValueError(
+                f"graph max_depth must be between 1 and {GRAPH_TRAVERSAL_MAX_DEPTH}"
+            )
+        return value
+
+
 class GraphQueryService(ABC):
-    """Application-level one-hop graph read contract (PR 31A).
+    """Application-level one-hop graph read contract (PR 31A; PR 31H).
 
     Graph exploration belongs to the analyst read path
     (``app/query/*`` + ``infrastructure/persistence/query/*``), never to a
@@ -261,4 +320,24 @@ class GraphQueryService(ABC):
         backend truth; the result is bounded by ``query.limit`` Relationships;
         and ``truncated`` truthfully reports whether additional matching
         Relationships existed.
+        """
+
+    @abstractmethod
+    async def traverse(self, query: GraphTraversalQuery) -> GraphResult | None:
+        """Return the bounded multi-hop traversal of the focal Entity.
+
+        ``None``, an isolated focal node, edge summaries, scope/filter and
+        bounces/truncation semantics are exactly those of
+        :meth:`neighborhood` for the same graph context. Depth is hop
+        distance from the focal Entity and ``1`` is semantically equivalent
+        to the one-hop neighborhood for the same context and non-truncating
+        limit. Traversal is deterministic, cycle-safe (an Entity path never
+        revisits a branch Entity; a self-loop is topology but never
+        recurses), bounded by ``query.max_depth`` (1..
+        :data:`GRAPH_TRAVERSAL_MAX_DEPTH`) and by ``query.limit`` distinct
+        canonical Relationships, and read-only: no provider, LLM,
+        Coordinator, persistence or acquisition work occurs. Direction and
+        connected Entity type apply at every frontier and PR 31G
+        scope/source/time/type filters apply to every traversed Relationship
+        before recursion, so traversal can never cross a hidden edge.
         """

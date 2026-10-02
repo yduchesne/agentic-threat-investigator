@@ -119,6 +119,7 @@ function baseInputs(
     rootEntityId: FOCAL,
     rootDirection: "either",
     scope: "investigation",
+    depth: 1,
     entityType: undefined,
     relationshipType: undefined,
     source: undefined,
@@ -826,5 +827,77 @@ describe("useGraphExpansion (PR 31E Part 4)", () => {
     expect(recorder.map((r) => r.entity)).toEqual([B, B]);
     expect(recorder[1].scope).toBe("known");
     expect(result.current.expanded).toHaveLength(1);
+  });
+
+  // --- PR 31H: depth is part of the root semantic context (H-F19/H-F20) ---
+
+  it("H-F19: expansion inherits the full committed context at any depth", async () => {
+    const recorder: FullRequest[] = [];
+    setHttpHandlers(fullRecordingHandler(recorder, (entityId) =>
+      entityId === B ? expandB() : rootNeighborhoodFake()));
+    const { result } = renderHook(({ inputs }: { inputs: GraphExpansionInputs }) =>
+      useGraphExpansion(inputs),
+      {
+        initialProps: {
+          inputs: baseInputs({
+            depth: 2,
+            scope: "known",
+            entityType: "ip_address",
+          }),
+        },
+      },
+    );
+    await waitFor(() => {
+      expect(result.current.graph).not.toBeNull();
+    });
+    act(() => {
+      result.current.expand(B, "either");
+    });
+    await drainAct();
+    await waitFor(() => {
+      expect(result.current.inFlight).toBeNull();
+    });
+    expect(recorder[0].entityType).toBe("ip_address");
+    expect(recorder[0].scope).toBe("known");
+  });
+
+  it("H-F20: a depth change discards stale prior-depth expansion state", async () => {
+    const recorder: RecordedRequest[] = [];
+    setHttpHandlers(recordingHandler(recorder, (entityId) =>
+      entityId === B ? expandB() : rootNeighborhoodFake()));
+    const { result, rerender } = renderHook(
+      ({ inputs }: { inputs: GraphExpansionInputs }) => useGraphExpansion(inputs),
+      { initialProps: { inputs: baseInputs({ depth: 2 }) } },
+    );
+    await waitFor(() => {
+      expect(result.current.graph).not.toBeNull();
+    });
+    act(() => {
+      result.current.expand(B, "either");
+    });
+    await drainAct();
+    await waitFor(() => {
+      expect(result.current.inFlight).toBeNull();
+    });
+    expect(result.current.expanded).toHaveLength(1);
+    // A committed depth change (2 -> 3) is a root semantic change: expanded
+    // state is discarded and never merged with the new traversal root.
+    await act(async () => {
+      rerender({
+        inputs: baseInputs({
+          depth: 3,
+          rootNeighborhood: {
+            nodes: [node(FOCAL), node(B, "203.0.113.10")],
+            edges: [edge("e-d3", FOCAL, B)],
+            truncated: false,
+          },
+        }),
+      });
+    });
+    await waitFor(() => {
+      expect(entityIds(result.current.graph)).toEqual([FOCAL, B]);
+    });
+    expect(result.current.expanded).toHaveLength(0);
+    expect(result.current.truncated).toHaveLength(0);
   });
 });
