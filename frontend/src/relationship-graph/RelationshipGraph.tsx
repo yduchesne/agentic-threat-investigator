@@ -172,6 +172,8 @@ export interface RelationshipGraphProps {
   entityTypeLabel: (type: string) => string;
   /** PR 31E analyst-driven expansion controller (owned by the workspace). */
   expansion: GraphExpansionController;
+  /** PR 31J: override the ordinary empty-state wording (temporal empty frame). */
+  emptyMessage?: string | undefined;
   /** PR 31I: path-finding mode active: node clicks select endpoints. */
   pathMode?: boolean;
   /** PR 31I: analyst-selected canonical path endpoints (source/target). */
@@ -203,6 +205,7 @@ export function RelationshipGraph({
   pathEndpoints = undefined,
   onPathEndpointClick,
   pathHighlight = null,
+  emptyMessage = undefined,
 }: RelationshipGraphProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
   // PR 31F-4: the active theme's semantic graph tokens drive canvas, edge,
@@ -686,7 +689,7 @@ export function RelationshipGraph({
 
       {model.edges.length === 0 ? (
         <Typography variant="body2" sx={{ py: 2, textAlign: "center" }}>
-          {t("graph.empty")}
+          {emptyMessage ?? t("graph.empty")}
         </Typography>
       ) : null}
 

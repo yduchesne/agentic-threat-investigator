@@ -72,6 +72,25 @@ import {
 } from "../relationship-graph/GraphPathPanel";
 import { useGraphExpansion } from "../relationship-graph/use-graph-expansion";
 import {
+  GraphTemporalControls,
+  graphTemporalDraftError,
+  graphTemporalDraftFromCommitted,
+  graphTemporalDraftToCommitted,
+  type GraphTemporalDraft,
+} from "../relationship-graph/GraphTemporalControls";
+import {
+  applyGraphTemporal,
+  emptyGraphTemporalContext,
+  graphTemporalActive,
+  graphTemporalEffectiveBounds,
+  graphTemporalHasNext,
+  graphTemporalHasPrevious,
+  graphTemporalKey,
+  parseGraphTemporal,
+  shiftGraphTemporalFrame,
+  type GraphTemporalContext,
+} from "../relationship-graph/graph-temporal";
+import {
   applyGraphContext,
   emptyGraphContext,
   graphContextActive,
@@ -131,6 +150,23 @@ export function RelationshipEvolutionWorkspace({
   // PR 31G: the committed graph context (scope + filters) is URL-backed and
   // independent of the Evolution observation filters.
   const graphContext = parseGraphContext(searchParams);
+  // PR 31J: the committed temporal tuple (observed range partitioned into
+  // 4/8/12/24 half-open frames) is equally URL-backed; the active frame
+  // overrides ONLY ``graphContext.observedFrom/observedTo`` per request.
+  const graphTemporal = parseGraphTemporal(searchParams);
+  // PR 31J A2: ONE effective request context per commit — the active frame's
+  // half-open bounds override the ordinary committed observed bounds while
+  // scope/entity type/relationship type/source/depth stay authoritative.
+  // Every graph operation below consumes this same effective context, so
+  // root topology, explicit expansion and path finding can never run against
+  // different observed ranges.
+  const effectiveGraphContext = useMemo(
+    () => ({
+      ...graphContext,
+      ...graphTemporalEffectiveBounds(graphContext, graphTemporal),
+    }),
+    [graphContext, graphTemporal],
+  );
   const selectionRaw = searchParams.get(SELECTED_PARAM);
   const selectedId =
     selectionRaw !== null && isUuidValue(selectionRaw) ? selectionRaw.toLowerCase() : null;
@@ -160,14 +196,14 @@ export function RelationshipEvolutionWorkspace({
     investigationId,
     filters === null ? undefined : filters.entityId,
     filters === null ? "either" : filters.direction,
-    graphContext,
+    effectiveGraphContext,
     view === "graph" && filters !== null && useOneHop,
   );
   const graphTraversal = useGraphTraversal(
     investigationId,
     filters === null ? undefined : filters.entityId,
     filters === null ? "either" : filters.direction,
-    graphContext,
+    effectiveGraphContext,
     view === "graph" && filters !== null && !useOneHop,
   );
   const graphResult = useOneHop ? graphNeighborhood : graphTraversal;
@@ -181,13 +217,13 @@ export function RelationshipEvolutionWorkspace({
     investigationId,
     rootEntityId: filters === null ? undefined : filters.entityId,
     rootDirection: filters === null ? "either" : filters.direction,
-    scope: graphContext.scope,
-    depth: graphContext.depth,
-    entityType: graphContext.entityType,
-    relationshipType: graphContext.relationshipType,
-    source: graphContext.source,
-    observedFrom: graphContext.observedFrom,
-    observedTo: graphContext.observedTo,
+    scope: effectiveGraphContext.scope,
+    depth: effectiveGraphContext.depth,
+    entityType: effectiveGraphContext.entityType,
+    relationshipType: effectiveGraphContext.relationshipType,
+    source: effectiveGraphContext.source,
+    observedFrom: effectiveGraphContext.observedFrom,
+    observedTo: effectiveGraphContext.observedTo,
     rootNeighborhood: graphResult.neighborhood,
   });
 
@@ -218,7 +254,7 @@ export function RelationshipEvolutionWorkspace({
     pathRequest?.source,
     pathRequest?.target,
     filters === null ? "either" : filters.direction,
-    graphContext,
+    effectiveGraphContext,
     pathMaxDepth,
     pathMaxPaths,
     pathRequest !== null,
@@ -228,8 +264,11 @@ export function RelationshipEvolutionWorkspace({
   // A committed graph-context change resets path state deterministically:
   // the displayed path result is cleared and both endpoint selections are
   // cleared (the simple option the PR 31I plan explicitly allows), so a stale
-  // prior-context result can never render.
-  const committedGraphKey = graphContextKey(graphContext);
+  // prior-context result can never render. PR 31J A4: the effective context
+  // (active-frame bounds) participates in this identity, so a frame
+  // transition is a real semantic graph-context transition for the path
+  // workbench and expansion/key identity.
+  const committedGraphKey = graphContextKey(effectiveGraphContext);
   useEffect(() => {
     setPathRequest(null);
     setPathEndpoints({ source: null, target: null });
@@ -408,6 +447,36 @@ export function RelationshipEvolutionWorkspace({
     committedKey: graphContextKey(graphContext),
   });
 
+  // PR 31J B4/B5/C2: the temporal form owns ONE browser-local draft; Apply
+  // commits the validated tuple in one URL transition (always starting at
+  // frame 0), Disable removes the temporal-owned parameters, and Previous/
+  // Next change only the committed frame index through the same URL codec.
+  // Frame navigation therefore goes through browser Back/Forward normally
+  // and never keeps a second committed temporal store.
+  const graphTemporalForm = useFilterForm<GraphTemporalContext, GraphTemporalDraft>({
+    committed: graphTemporal,
+    buildDraft: graphTemporalDraftFromCommitted,
+    toFilters: graphTemporalDraftToCommitted,
+    validateDraft: (draft) => graphTemporalDraftError(t as never, draft),
+    onApply: (next) => commit(applyGraphTemporal(searchParams, next)),
+    onClear: () => commit(applyGraphTemporal(searchParams, emptyGraphTemporalContext())),
+    emptyDraft: graphTemporalDraftFromCommitted(emptyGraphTemporalContext()),
+    committedKey: graphTemporalKey(graphTemporal),
+  });
+
+  const previousGraphTemporalFrame = (): void => {
+    if (!graphTemporalHasPrevious(graphTemporal)) {
+      return;
+    }
+    commit(applyGraphTemporal(searchParams, shiftGraphTemporalFrame(graphTemporal, -1)));
+  };
+  const nextGraphTemporalFrame = (): void => {
+    if (!graphTemporalHasNext(graphTemporal)) {
+      return;
+    }
+    commit(applyGraphTemporal(searchParams, shiftGraphTemporalFrame(graphTemporal, 1)));
+  };
+
   const commit = (next: URLSearchParams): void => {
     setSearchParams(next, { replace: false });
   };
@@ -573,6 +642,19 @@ export function RelationshipEvolutionWorkspace({
                 {graphFilterForm.error}
               </Typography>
             ) : null}
+            <GraphTemporalControls
+              t={t as never}
+              committed={graphTemporal}
+              draft={graphTemporalForm.draft}
+              error={graphTemporalForm.error}
+              canPrevious={graphTemporalHasPrevious(graphTemporal)}
+              canNext={graphTemporalHasNext(graphTemporal)}
+              onSetDraft={graphTemporalForm.setDraft}
+              onApply={graphTemporalForm.apply}
+              onDisable={graphTemporalForm.clear}
+              onPrevious={previousGraphTemporalFrame}
+              onNext={nextGraphTemporalFrame}
+            />
             <GraphPathModeToolbar {...pathPanelProps} />
             <GraphPathStatus {...pathPanelProps} />
             <GraphPathResultPanel {...pathPanelProps} />
@@ -736,7 +818,7 @@ export function RelationshipEvolutionWorkspace({
             {graphModel !== null ? (
               <RelationshipGraph
                 investigationId={investigationId}
-                rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${graphContextKey(graphContext)}`}
+                rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${graphContextKey(effectiveGraphContext)}:${graphTemporalKey(graphTemporal)}`}
                 focalEntityId={pathRequest !== null ? pathRequest.source : filters.entityId}
                 model={graphModel}
                 multiHop={graphContext.depth > 1}
@@ -750,6 +832,11 @@ export function RelationshipEvolutionWorkspace({
                   pathRequest !== null && pathResult !== null
                     ? pathHighlight
                     : null
+                }
+                emptyMessage={
+                  graphTemporalActive(graphTemporal) && graphModel.edges.length === 0
+                    ? t("graph.temporal.empty")
+                    : undefined
                 }
               />
             ) : null}

@@ -19,9 +19,11 @@ import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
 import {
   authMeSuccess,
+  buildGraphNeighborhood,
   buildObservation,
   completedInvestigationFixture,
   evolutionObservationsHandler,
+  graphNeighborhoodHandler,
   investigationDetailHandler,
   resourceListRecorder,
   runtimeFake,
@@ -464,5 +466,214 @@ describe("Relationship Evolution counterparty presentation (PR 31F-1)", () => {
       Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevoke });
       HTMLAnchorElement.prototype.click = originalClick;
     }
+  });
+});
+
+describe("PR 31J temporal graph workspace (FE10..FE30)", () => {
+  const GRAPH_VIEW = (params: string) =>
+    evolutionEntry(`entity_id=${FOCAL}&view=graph&${params}`);
+  // A committed 8-day observed range -> 8 one-day frames.
+  const RANGE_START = "2026-02-01T00:00:00Z";
+  const RANGE_END = "2026-02-09T00:00:00Z";
+  const temporalUrl = (frame: string | null) => {
+    const q =
+      `graph_temporal=1&graph_time_start=${RANGE_START}&graph_time_end=${RANGE_END}`;
+    return GRAPH_VIEW(frame === null ? q : `${q}&graph_time_frame=${frame}`);
+  };
+  const neighborhood = buildGraphNeighborhood();
+
+  function temporalNeighborhoodHandler() {
+    const recorder = resourceListRecorder();
+    return {
+      recorder,
+      install: () =>
+        setHttpHandlers(
+          ...authHandlers(),
+          graphNeighborhoodHandler({ neighborhood, recorder }),
+        ),
+    };
+  }
+
+  it("FE10: without temporal params the graph request stays ordinary", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    renderAtPath(GRAPH_VIEW(""));
+    await waitFor(() => expect(recorder.requests.length).toBeGreaterThan(0));
+    const last = recorder.requests.at(-1);
+    expect(last?.params.observed_from).toBeUndefined();
+    expect(last?.params.observed_to).toBeUndefined();
+    expect(last?.params.entity_id).toBe(FOCAL);
+  });
+
+  it("FE11/FE20: temporal frame 0 overrides the neighborhood request bounds", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    renderAtPath(temporalUrl(null));
+    await waitFor(() => expect(recorder.requests.length).toBeGreaterThan(0));
+    const last = recorder.requests.at(-1);
+    expect(last?.params.observed_from).toBe("2026-02-01T00:00:00Z");
+    expect(last?.params.observed_to).toBe("2026-02-02T00:00:00Z");
+  });
+
+  it("FE12: Next frame advances the URL frame identity and request bounds", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(temporalUrl(null));
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    await userEvent.click(screen.getByRole("button", { name: "Next frame" }));
+    await waitFor(() => expect(recorder.requests.length).toBe(2));
+    const last = recorder.requests.at(-1);
+    expect(last?.params.observed_from).toBe("2026-02-02T00:00:00Z");
+    expect(last?.params.observed_to).toBe("2026-02-03T00:00:00Z");
+    // The committed URL carries the new frame identity.
+    expect(router.state.location.search).toContain("graph_time_frame=1");
+  });
+
+  it("FE13/FE14: Previous retreats and is disabled on the first frame", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    renderAtPath(temporalUrl("1"));
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    expect(recorder.requests.at(-1)?.params.observed_from).toBe("2026-02-02T00:00:00Z");
+    await userEvent.click(screen.getByRole("button", { name: "Previous frame" }));
+    await waitFor(() => expect(recorder.requests.length).toBe(2));
+    expect(recorder.requests.at(-1)?.params.observed_from).toBe("2026-02-01T00:00:00Z");
+    expect(screen.getByRole("button", { name: "Previous frame" })).toBeDisabled();
+  });
+
+  it("FE15: Next is disabled on the last frame", async () => {
+    const { install } = temporalNeighborhoodHandler();
+    install();
+    renderAtPath(temporalUrl("7"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next frame" })).toBeDisabled());
+  });
+
+  it("FE16: Apply commits a new range and resets the frame index to 0", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(temporalUrl("3"));
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    // The committed tuple is already temporal active (frame 3 of 8); edit the
+    // draft range directly. A new Apply resets to frame 0.
+    const startInput = screen.getByLabelText("Range start");
+    const endInput = screen.getByLabelText("Range end");
+    await userEvent.clear(startInput);
+    await userEvent.type(startInput, "2026-02-01T00:00");
+    await userEvent.clear(endInput);
+    await userEvent.type(endInput, "2026-02-03T00:00");
+    await userEvent.click(within(screen.getByRole("group", { name: "Temporal exploration" })).getByRole("button", { name: "Apply temporal" }));
+    await waitFor(() => expect(recorder.requests.length).toBe(2));
+    const last = recorder.requests.at(-1);
+    // The draft is local wall-clock; the committed/request values are UTC ISO.
+    // The new range starts on 02-01; frame 0 boundary strictly follows the
+    // start (half-open), and the frame index is NOT committed (reset to 0).
+    expect(last?.params.observed_from).toMatch(/^2026-02-01T/);
+    expect(
+      Date.parse(last?.params.observed_to ?? "") >
+        Date.parse(last?.params.observed_from ?? ""),
+    ).toBe(true);
+    expect(router.state.location.search).not.toContain("graph_time_frame=");
+  });
+
+  it("FE17: draft edits before Apply never commit URL or request", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(temporalUrl(null));
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    const before = router.state.location.search;
+    const startInput = screen.getByLabelText("Range start");
+    await userEvent.clear(startInput);
+    await userEvent.type(startInput, "2026-02-02T00:00");
+    expect(recorder.requests.length).toBe(1);
+    expect(router.state.location.search).toBe(before);
+  });
+
+  it("FE18/FE29: Disable removes temporal params and restores ordinary graph bounds", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(temporalUrl("2"));
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    await userEvent.click(screen.getByRole("button", { name: "Disable temporal" }));
+    await waitFor(() => expect(recorder.requests.length).toBe(2));
+    const last = recorder.requests.at(-1);
+    expect(last?.params.observed_from).toBeUndefined();
+    expect(last?.params.observed_to).toBeUndefined();
+    expect(router.state.location.search).not.toContain("graph_time_start");
+    expect(router.state.location.search).not.toContain("graph_time_end");
+  });
+
+  it("FE19: unrelated graph URL params survive Apply/Prev/Next/Disable", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(
+      `${GRAPH_VIEW("graph_scope=known")}&graph_temporal=1&graph_time_start=${RANGE_START}&graph_time_end=${RANGE_END}`,
+    );
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    await userEvent.click(screen.getByRole("button", { name: "Next frame" }));
+    await waitFor(() => expect(recorder.requests.length).toBe(2));
+    expect(router.state.location.search).toContain("graph_scope=known");
+    expect(recorder.requests.at(-1)?.params.scope).toBe("known");
+    await userEvent.click(screen.getByRole("button", { name: "Disable temporal" }));
+    await waitFor(() => expect(recorder.requests.length).toBe(3));
+    expect(router.state.location.search).toContain("graph_scope=known");
+    expect(recorder.requests.at(-1)?.params.scope).toBe("known");
+  });
+
+  it("FE26: the same committed frame reparses to the same request bounds", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    renderAtPath(temporalUrl("4"));
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    expect(recorder.requests.at(-1)?.params.observed_from).toBe("2026-02-05T00:00:00Z");
+    expect(recorder.requests.at(-1)?.params.observed_to).toBe("2026-02-06T00:00:00Z");
+  });
+
+  it("FE27: an empty temporal frame renders the observational empty wording", async () => {
+    const recorder = resourceListRecorder();
+    // The backend guarantees the focal node on every 200: an empty frame is a
+    // focal-only graph (same contract PR 31G asserts for isolated Entities).
+    const focalOnly = buildGraphNeighborhood({
+      nodes: [buildGraphNeighborhood().nodes[0]],
+      edges: [],
+      truncated: false,
+    });
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({ neighborhood: focalOnly, recorder }),
+    );
+    renderAtPath(temporalUrl("5"));
+    await screen.findByText(
+      "No matching relationship observations were recorded in this frame.",
+    );
+    expect(
+      screen.queryByText("No stable relationships are known for this entity in this Investigation."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("FE28: an invalid draft range is rejected and the committed graph is unchanged", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(temporalUrl(null));
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    const before = router.state.location.search;
+    const startInput = screen.getByLabelText("Range start");
+    const endInput = screen.getByLabelText("Range end");
+    await userEvent.clear(startInput);
+    await userEvent.type(startInput, "2026-02-09T00:00");
+    await userEvent.clear(endInput);
+    await userEvent.type(endInput, "2026-02-01T00:00");
+    await userEvent.click(within(screen.getByRole("group", { name: "Temporal exploration" })).getByRole("button", { name: "Apply temporal" }));
+    await screen.findByText(/Enter a valid observed range with a start before the end\./);
+    expect(recorder.requests.length).toBe(1);
+    expect(router.state.location.search).toBe(before);
+  });
+
+  it("FE30: the active-frame banner shows human 1-based numbering and half-open bounds", async () => {
+    const { install } = temporalNeighborhoodHandler();
+    install();
+    renderAtPath(temporalUrl("2"));
+    await screen.findByRole("status", {
+      name: "Frame 3 of 8 — observations from 2026-02-03T00:00:00Z through before 2026-02-04T00:00:00Z",
+    });
   });
 });
