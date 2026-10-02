@@ -48,6 +48,7 @@ import {
   emptyObservationFilters,
 } from "../relationships/relationships-filters";
 import { RelationshipGraph } from "../relationship-graph/RelationshipGraph";
+import { GraphActionPanel } from "../relationship-graph/GraphActionPanel";
 import {
   GraphFilters,
   graphDraftError,
@@ -233,6 +234,13 @@ export function RelationshipEvolutionWorkspace({
   // path query, whose key contains the endpoints, the committed graph context
   // and the path-owned bounds, so any committed context change can never be
   // served a stale prior-context result.
+  //
+  // PR 31K: ``selectedActionEntityId`` is the transient analyst selection of
+  // one canonical graph Entity for the bounded investigation action. It is
+  // browser-local workbench state (never URL-backed, never persisted), it is
+  // cleared when path mode is entered and when the committed graph context
+  // (including an active temporal frame) changes, so a stale selection can
+  // never be submitted against a topology that no longer represents it.
   const [pathMode, setPathMode] = useState(false);
   const [pathEndpoints, setPathEndpoints] = useState<{
     source: string | null;
@@ -244,6 +252,9 @@ export function RelationshipEvolutionWorkspace({
   const [pathMaxPaths, setPathMaxPaths] = useState<number>(
     GRAPH_PATH_DEFAULT_MAX_PATHS,
   );
+  const [selectedActionEntityId, setSelectedActionEntityId] = useState<
+    string | null
+  >(null);
   const [pathSelected, setPathSelected] = useState<number | "all">("all");
   const [pathRequest, setPathRequest] = useState<{
     source: string;
@@ -273,6 +284,7 @@ export function RelationshipEvolutionWorkspace({
     setPathRequest(null);
     setPathEndpoints({ source: null, target: null });
     setPathSelected("all");
+    setSelectedActionEntityId(null);
   }, [committedGraphKey]);
 
   const choosePathEndpoint = (entityId: string): void => {
@@ -316,6 +328,19 @@ export function RelationshipEvolutionWorkspace({
     setPathSelected("all");
   };
 
+  // PR 31K: a path-mode click never selects an action (path mode owns the
+  // click); selecting a canonical Entity is derived from the currently
+  // rendered model so a free-form/stale identity can never open the panel.
+  const selectActionEntity = (entityId: string): void => {
+    if (pathMode) {
+      return;
+    }
+    setSelectedActionEntityId(entityId);
+  };
+  const clearActionEntity = (): void => {
+    setSelectedActionEntityId(null);
+  };
+
   const pathHighlight = useMemo(() => {
     if (pathRequest === null || pathResult === null) {
       return null;
@@ -347,8 +372,30 @@ export function RelationshipEvolutionWorkspace({
       : buildGraphModelFromAccumulated(graphExpansion.graph);
   }, [pathRequest, pathResult, graphExpansion.graph]);
 
-  // PR 31I: human-readable endpoint labels come from the currently rendered
-  // topology (canonical IDs only, never free-form UUID typing).
+  // PR 31K: the action target is always the canonical Entity currently
+  // rendered in the model; presentation metadata (type/value) is derived from
+  // that canonical node, never from graph label text or arbitrary input. If
+  // the node disappears from the model, the selection is not actionable.
+  const selectedActionEntity = useMemo(() => {
+    if (selectedActionEntityId === null) {
+      return null;
+    }
+    const node =
+      graphModel === null
+        ? undefined
+        : graphModel.nodes.find(
+            (candidate) => candidate.entityId === selectedActionEntityId,
+          );
+    if (node === undefined) {
+      return null;
+    }
+    return {
+      entityId: node.entityId,
+      entityType: node.entityType,
+      entityValue: node.value,
+    };
+  }, [selectedActionEntityId, graphModel]);
+
   const sourcePathLabel =
     graphModel === null || pathEndpoints.source === null
       ? null
@@ -375,7 +422,10 @@ export function RelationshipEvolutionWorkspace({
     error: pathRequest !== null && pathQuery.error !== null,
     selected: pathSelected,
     resultEndpoints: pathRequest,
-    onEnter: () => setPathMode(true),
+    onEnter: () => {
+      setPathMode(true);
+      setSelectedActionEntityId(null);
+    },
     onExit: exitPathMode,
     onFind: findPaths,
     onEndpointsChanged: () => {
@@ -828,6 +878,7 @@ export function RelationshipEvolutionWorkspace({
                 pathMode={pathMode}
                 pathEndpoints={pathMode ? pathEndpoints : null}
                 onPathEndpointClick={pathMode ? choosePathEndpoint : undefined}
+                onActionSelect={pathMode ? undefined : selectActionEntity}
                 pathHighlight={
                   pathRequest !== null && pathResult !== null
                     ? pathHighlight
@@ -838,6 +889,14 @@ export function RelationshipEvolutionWorkspace({
                     ? t("graph.temporal.empty")
                     : undefined
                 }
+              />
+            ) : null}
+            {selectedActionEntity !== null && !pathMode ? (
+              <GraphActionPanel
+                key={selectedActionEntity.entityId}
+                selection={selectedActionEntity}
+                entityTypeLabel={graphEntityTypeLabel}
+                onCancel={clearActionEntity}
               />
             ) : null}
           </Box>

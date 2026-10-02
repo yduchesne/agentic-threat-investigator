@@ -51,9 +51,11 @@ export default defineConfig({
       // PR 31H: the multi-hop depth journey + 20-cycle stress also runs in
       // both engines. PR 31I: the bounded path-finding journey + 20-cycle
       // stress also runs in both engines. PR 31J: the temporal graph journey
-      // + 20-cycle stress also runs in both engines.
+      // + 20-cycle stress also runs in both engines. PR 31K: the
+      // graph-driven investigation action journey + 20-cycle action-selection
+      // stability also run in both engines.
       testMatch:
-        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop|zz-31i-path-finding|zz-31j-temporal-graph)\.spec\.ts/,
+        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop|zz-31i-path-finding|zz-31j-temporal-graph|zz-31k-graph-actions)\.spec\.ts/,
     },
   ],
 });

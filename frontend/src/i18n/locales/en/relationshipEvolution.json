@@ -207,5 +207,17 @@
   "graph.temporal.previous": "Previous frame",
   "graph.temporal.rangeEnd": "Range end",
   "graph.temporal.rangeStart": "Range start",
-  "graph.temporal.status": "Frame {{current}} of {{total}} — observations from {{from}} through before {{to}}"
+  "graph.temporal.status": "Frame {{current}} of {{total}} — observations from {{from}} through before {{to}}",
+  "graph.action.cancel": "Cancel",
+  "graph.action.conflict": "An identical submission was already accepted.",
+  "graph.action.csrf": "Your session's security token could not be sent. Reopen the graph and try again.",
+  "graph.action.entityId": "Canonical Entity ID: {{value}}",
+  "graph.action.intro": "Starts an ATI investigation for {{type}} {{value}}. The selected Entity becomes the new investigation's seed indicator and the durable worker executes the investigation.",
+  "graph.action.objective.label": "Objective",
+  "graph.action.objective.required": "Enter an objective for the investigation.",
+  "graph.action.submit": "Start investigation",
+  "graph.action.submitError": "Unable to start the investigation.",
+  "graph.action.submitUncertain": "Submission status is uncertain. Retry will safely reuse the same submission identifier.",
+  "graph.action.submitting": "Starting…",
+  "graph.action.title": "Start investigation"
 }
