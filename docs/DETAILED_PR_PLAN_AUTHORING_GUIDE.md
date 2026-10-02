@@ -162,6 +162,128 @@ This pattern reduces implementation ambiguity and makes regressions easier to is
 
 ---
 
+# 3A. Replanning an in-progress PR
+
+A detailed plan may be written after implementation has already started. In that case, do not treat the roadmap or original plan as if no work exists.
+
+Inspect the implementation branch as well as fresh `main`, then classify each originally planned capability:
+
+| Classification | Meaning | Plan treatment |
+|---|---|---|
+| DONE + VERIFIED | implementation exists and required evidence has passed | preserve it; do not reimplement; include regression coverage |
+| DONE, NOT VERIFIED | implementation exists but required acceptance evidence is missing | verify it before completion |
+| PARTIAL | only part of the required behavior exists | describe the exact remaining delta |
+| NOT STARTED | required behavior does not exist | provide normal implementation steps |
+| BLOCKED | progress requires a decision, dependency, or unavailable environment | apply the plan's STOP rules |
+
+For an in-progress PR, the plan must explicitly distinguish:
+
+```text
+what is already implemented
+what has actually been verified
+what remains to implement
+what remains only to verify
+what prior evidence is reusable
+what evidence must still be produced
+```
+
+Do not instruct the coding agent to rewrite working code merely because the original plan described its creation. Do not treat a status report as proof by itself; reconcile its claims with the branch and available test evidence.
+
+---
+
+# 3B. Execution evidence and completion discipline
+
+For every mandatory quality or acceptance gate, distinguish three different facts:
+
+```text
+test/code exists
+    !=
+test was executed
+    !=
+test passed in the required environment/topology
+```
+
+A gate is complete only when the required command has actually executed successfully in the required environment. Compilation, code inspection, a related test, a previous run against different code, or reasoning that a test "should pass" is not acceptance evidence.
+
+Plans should classify test evidence where relevant:
+
+```text
+baseline evidence
+    proves the starting branch/environment was healthy
+
+regression evidence
+    proves previously delivered behavior remains healthy
+
+feature acceptance evidence
+    proves the new capability itself works
+```
+
+**Regression evidence must not substitute for feature acceptance evidence.**
+
+If a repository defines an authoritative test harness, name it and require it for acceptance. Distinguish what is tested from how the required topology is established. For example, if `scripts/e2e.sh` owns the production-path browser stack, a direct `npx playwright test` invocation against an arbitrary running stack is not equivalent acceptance evidence.
+
+Include exact commands when command form, environment variables, browser/project selection, worker count, retry count, cycle count, or harness setup materially changes what is exercised. Otherwise, naming the repository-prescribed gate is sufficient.
+
+For E2E/stability work, state explicitly:
+
+- the authoritative harness;
+- the real application components exercised;
+- deterministic/fake substitutions and the exact boundary each replaces;
+- browser/project matrix when required;
+- worker/retry settings when required;
+- stability-cycle count when required;
+- whether direct lower-level test-runner invocation is diagnostic only or permitted acceptance evidence.
+
+Avoid ambiguous phrases such as "fake LLM", "fake stack", or "run Playwright" when multiple deterministic mechanisms exist. Name the concrete implementation/configuration and boundary, for example:
+
+```text
+Python integration/evaluation:
+    FakeLlmClient at the model boundary
+
+Browser E2E:
+    production worker
+    ATI_LLM_DRIVER=deterministic
+    deterministic fake-world provider data
+    real API/database/frontend/browser path
+```
+
+These substitutions are not interchangeable.
+
+---
+
+# 3C. Required failure classification
+
+When a mandatory gate fails, the plan should require the coding agent to classify the failure as one of:
+
+1. introduced regression;
+2. feature implementation defect;
+3. deterministic pre-existing failure;
+4. nondeterministic/flaky failure;
+5. environment/harness failure.
+
+A failure may be called pre-existing only after reproducing it on the relevant baseline/base commit or otherwise producing equivalent evidence. A failure may be called flaky only after evidence demonstrates nondeterminism. "Unrelated" is not a sufficient classification by itself.
+
+The final implementation report must state unresolved failures explicitly. Do not hide them behind reruns, retries, or a green subset.
+
+---
+
+# 3D. Status is derived from acceptance
+
+Keep these states separate:
+
+```text
+implementation status
+test/evidence status
+PR completion status
+roadmap/documentation status
+```
+
+A feature can be implemented but unverified. A test can exist but be unexecuted. A PR is complete only when its mandatory acceptance gates pass.
+
+Roadmap `[DONE]`, completion markers, release notes, or equivalent status documentation must be updated **after** the required acceptance gates pass. A documentation status marker is a consequence of completion; it is never evidence of completion.
+
+---
+
 # 4. Recommended document structure
 
 A detailed PR plan should normally contain the following sections.
@@ -171,11 +293,14 @@ Title
 Purpose
 Architectural invariants
 Current-main facts
+In-progress status/evidence reconciliation (when applicable)
 Scope
 Explicitly out of scope
 Detailed implementation parts/steps
 Test matrices
 Integration/vertical-slice tests
+Authoritative test harness / execution topology (when relevant)
+Failure classification and completion evidence
 Documentation updates
 Expected files changed
 Files that should normally not change
@@ -1028,6 +1153,23 @@ PR is complete only when:
 
 These criteria become the final contract for both coding agent and reviewer.
 
+Group completion gates by concern when the PR has multiple test layers, for example:
+
+```text
+Implementation
+Targeted/unit tests
+Integration/vertical slice
+E2E
+Stability/stress
+Regression
+Repository QA
+Documentation/status
+```
+
+For each nontrivial gate, make clear what constitutes evidence. A required test that exists but has not run is **NOT TESTED**, not PASS. A related regression suite passing does not prove a new feature-specific acceptance journey.
+
+Do not allow retries to conceal a required first-attempt or stability guarantee. If acceptance requires `retries=0`, a later rerun can diagnose the failure but cannot retroactively make the failed acceptance run green.
+
 Prefer objective statements.
 
 Avoid:
@@ -1253,6 +1395,26 @@ Fixups should be substantially narrower than the originating PR.
 
 ---
 
+# 37A. Follow-up plans for partially implemented or stopped PRs
+
+When implementation stops partway through a PR and work will continue on the same PR, create a follow-up plan rather than pretending the original plan is unexecuted.
+
+A follow-up plan must:
+
+1. inspect fresh `main` and the current implementation branch;
+2. reconcile any coding-agent status/STOP report with the actual branch;
+3. inventory DONE + VERIFIED, DONE NOT VERIFIED, PARTIAL, NOT STARTED, and BLOCKED work;
+4. preserve verified implementation unless a demonstrated defect requires change;
+5. identify the exact remaining implementation delta;
+6. identify feature-specific acceptance evidence still missing;
+7. distinguish previously passed regression gates from new feature acceptance gates;
+8. carry forward applicable architectural invariants, non-goals, reuse rules, and STOP conditions;
+9. define the exact conditions under which the PR may finally be marked complete.
+
+Do not inflate the follow-up plan by restating already completed implementation instructions as new work. Include enough existing-state detail that a low-reasoning agent knows what must remain unchanged.
+
+---
+
 # 38. Review process after implementation
 
 Review the implementation against:
@@ -1415,6 +1577,52 @@ Assert:
 
 ---
 
+# Test execution topology and acceptance evidence
+
+Authoritative harness:
+
+```text
+<repository-prescribed command/harness, if applicable>
+```
+
+Required topology/substitutions:
+
+- ...
+
+Feature acceptance evidence:
+
+- ...
+
+Regression evidence:
+
+- ...
+
+Stability/stress evidence, if applicable:
+
+- ...
+
+Direct lower-level runner invocation is:
+
+```text
+<acceptance evidence / diagnostic only / not applicable>
+```
+
+---
+
+# Failure classification
+
+For every failing required gate, classify and provide evidence:
+
+```text
+introduced regression
+feature defect
+pre-existing deterministic failure
+flaky/nondeterministic failure
+environment/harness failure
+```
+
+---
+
 # Failure and cancellation behavior
 
 - ...
@@ -1528,10 +1736,27 @@ smallest architecture decision needed
 
 PR X is complete only when:
 
+## Implementation
 1. ...
+
+## Targeted/unit tests
 2. ...
+
+## Integration / feature acceptance
 3. ...
-4. full QA passes.
+
+## E2E / stability, when applicable
+4. required feature-specific journey passes through the authoritative harness;
+5. required stability cycles pass with the specified workers/retries/browser matrix;
+
+## Regression / repository QA
+6. relevant regression suites pass;
+7. full QA passes;
+
+## Documentation/status
+8. docs match delivered behavior;
+9. roadmap/completion status is updated only after gates 1-8 pass;
+10. no unresolved STOP condition or unexplained required-gate failure remains.
 
 ---
 
@@ -1563,6 +1788,8 @@ Critical coding-agent rules:
 Before delivering a detailed PR plan, verify:
 
 - [ ] Fresh `main` was inspected.
+- [ ] For an in-progress/follow-up plan, the implementation branch and status report were reconciled with actual code/evidence.
+- [ ] Existing work is classified as DONE + VERIFIED, DONE NOT VERIFIED, PARTIAL, NOT STARTED, or BLOCKED where applicable.
 - [ ] The roadmap scope was reconciled with actual implementation.
 - [ ] Existing abstractions are explicitly identified.
 - [ ] The PR has one dominant architectural concern.
@@ -1570,6 +1797,9 @@ Before delivering a detailed PR plan, verify:
 - [ ] Ownership boundaries are explicit.
 - [ ] Transaction boundaries are explicit where relevant.
 - [ ] Production vs test/fake boundaries are explicit.
+- [ ] Each deterministic/fake substitution is named precisely; ambiguous "fake" terminology is avoided.
+- [ ] The authoritative test harness/execution topology is named where relevant.
+- [ ] Exact commands/options are specified when invocation semantics affect acceptance.
 - [ ] External API assumptions were verified where relevant.
 - [ ] Scope and non-goals are explicit.
 - [ ] Implementation is broken into ordered steps.
@@ -1581,6 +1811,10 @@ Before delivering a detailed PR plan, verify:
 - [ ] STOP conditions prevent architectural improvisation.
 - [ ] Reviewer checklist exists.
 - [ ] Objective PR-level acceptance criteria exist.
+- [ ] Baseline, regression, and feature-acceptance evidence are distinguished where relevant.
+- [ ] Required stability/stress evidence is explicit where relevant.
+- [ ] Required-gate failures must be classified with evidence before being called pre-existing/flaky/unrelated.
+- [ ] Roadmap/DONE status is explicitly downstream of successful acceptance gates.
 - [ ] Full repository QA gates are named.
 - [ ] Future PR responsibilities are not accidentally absorbed.
 
