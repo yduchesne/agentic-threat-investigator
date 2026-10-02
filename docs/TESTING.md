@@ -360,6 +360,126 @@ the one-hop radial layout, hop rings, diamond minimum distances,
 self-loops never stepping, determinism) and `relationship-graph.test.tsx`
 keeps the one-hop presentation contract green.
 
+### Bounded path-finding tests (PR 31I)
+
+``tests/unit/app/query/test_graph_path.py`` (P-U01..P-U20) validates the
+path contract: server-owned depth (1..6) and path-count (1..25) bounds with
+oversized values rejected, the inherited PR 31G blank-source / half-open
+interval rules, `GraphPath` structural rules (zero-hop legality, arity, no
+repeated Entity/Relationship in a simple path) and `GraphPathResult`
+closure (unique canonical nodes/edges, every edge endpoint present, path
+references present, adjacency of the relationship references).
+
+``tests/unit/app/query/test_graph_traversal_boundary.py`` (P-SF03..P-SF10)
+pins the path stored-function boundary: one `ati.find_graph_paths` call
+with every parameter bound exactly, canonical model mapping, the
+`endpoints_visible` metadata distinguishing `None` from an empty result,
+unknown-row-kind and mis-anchored-path invariant failures, plus the
+one-hop consolidation (P-N17): `neighborhood()` invokes the shared
+`_invoke_traverse_graph(..., max_depth=1)` helper and the whole adapter
+module passes a source-review assertion that no graph SELECT / recursive
+CTE / JOIN / aggregation / ORM graph-row SQL exists anywhere inside it.
+
+``tests/integration/test_query_graph_paths.py`` (P-I01..P-I38 + the plan's
+vertical slice) runs the real migration-installed stored function through
+the production service against deterministic topology fixtures (sparse
+chain, branching tree, diamond, cycles, dense bounded neighborhoods,
+multiple equal-length paths, Known-only support, filtered topology):
+
+- **basic topology**: one-edge and two-edge chains, path longer than
+  `max_depth` yields no path, source==target yields exactly one zero-hop
+  path, and two visible but unconnected endpoints yield empty paths with
+  both endpoints projected;
+- **endpoint visibility and scope**: Investigation-invisible source or
+  target (including a soft-deleted or Known-global-only target) maps to
+  `None`; Known-only intermediate topology is found only in Known scope;
+  Investigation scope never traverses global-only support;
+- **filters**: exact source removal, inclusive `observed_from`, exclusive
+  `observed_to`, null `observed_at` excluded under a time filter,
+  `retrieved_at` never substituted, Relationship type and counterparty
+  Entity type blocking at every hop, SOURCE/TARGET/EITHER direction at
+  every frontier;
+- **cycles**: simple cycles never repeat an Entity, self-loops never grow
+  recursion;
+- **ordering/truncation**: shorter paths first, equal-length canonical
+  signature ordering, `max_paths + 1` truthful truncation (more than the
+  bound vs exactly the bound), repeated invocation returns identical
+  paths/order;
+- **deduplication/summaries**: one canonical edge/node per selected path
+  topology, observation-based support counts (never path counts), Known
+  scope Investigation-support counts, soft-deleted Relationship/intermediate
+  Entity exclusion;
+- **closure**: only selected-path topology is returned (explored-only
+  entities never leak) and a no-path result still projects both visible
+  endpoints; the depth-6 chain fixture completes bounded work.
+
+The plan's canonical vertical slice seeds the full stack — A→B→D, A→C→D,
+B→C, C→A cycle, one Known-only support edge, one filtered-out source and a
+boundary-time observation — and asserts endpoint visibility, the two
+deterministic equal-length paths sorted first (with canonical longer
+simple paths after), canonical deduplication, support summaries, scope and
+filter behavior, cycle safety and public DTO identity preservation.
+
+``tests/integration/test_query_graph_one_hop_parity.py`` (P-N01..P-N16) is
+the acceptance gate for the legacy-SQL removal: for every representative
+graph context (both scopes, source/time filters, half-open interval,
+Relationship/Entity type, self-loops, mixed support, isolated/invisible
+focal, truncating limit, repeated calls) ``neighborhood(query)`` matches
+``traverse(equivalent query, max_depth=1)`` exactly on nodes, edge
+ordering, per-edge summaries, `truncated`, focal-only results and the
+`None` visibility outcome.
+
+``tests/integration/test_query_indexes.py`` (P-P01..P-P03) records
+PostgreSQL `EXPLAIN (ANALYZE, BUFFERS)` evidence against the exact path
+function-body query (extracted from the versioned v0031 SQL artifact for
+plan inspection only): a source chain path plan stays served by the
+relationship-access index family, the dense bounded lattice fixture at the
+depth-6 ceiling terminates with bounded work under the combinatorial-work
+gate, and both-endpoint visibility uses the exact-admission and entity
+association index families. No new index is introduced.
+
+``tests/integration/test_migration.py`` (P-SF01/P-SF02) asserts migration
+`0036_graph_path_finding` installs `ati.find_graph_paths` at head and that
+a downgrade to `0035_graph_traversal` drops only the path function
+(`ati.traverse_graph` and the authoritative graph tables/data remain
+untouched; re-upgrade restores it).
+
+`tests/unit/api/test_graph_routes.py` (P-A01..P-A12) covers the path route:
+defaults (depth 4, max paths 10), explicit in-window bounds accepted,
+depth 7 / max paths 26 as stable 400 `invalid_request`, Investigation-
+invisible source/target as the scoped 404, no-path 200 with empty paths,
+source==target 200 with the zero-hop path, Known scope and every PR 31G
+filter forwarded exactly, blank source / reversed interval as 400, the path
+response reusing the canonical node/edge DTO vocabulary (no SQL row kinds
+or PostgreSQL arrays) and the pinned OpenAPI operation
+`get_graph_paths`.
+
+Frontend: `graph-paths-queries` are covered in
+`frontend/src/relationship-graph/graph-path.test.tsx` (P-F01..P-F05,
+P-F09..P-F13, P-F15, P-F17): the API boundary sends exactly the
+`/graph/paths` parameters with both endpoints + committed context + path
+bounds (never `graph_depth`); the path TanStack key is distinct and
+contains endpoints/context/bounds; the hook issues no request while
+disabled and exactly one on Find; the toolbar's Find is disabled until both
+endpoints are selected and Exit restores the ordinary state flag; the
+result panel renders the no-connection state, the truthfully-truncated
+warning and the deterministic *All / Path N (M hop(s))* selector; the
+renderer emphasizes highlighted-path relationships and dims the rest; and
+a 404 path failure surfaces a typed `ApiError`.
+
+Browser acceptance: `frontend/e2e/zz-31i-path-finding.spec.ts` runs in
+Chromium and Firefox (workers=1, retries=0) with the directed journey
+(authenticate → deterministic F02 Investigation → routed Graph workbench →
+enter path mode → select source → select target → prove no request before
+Find → one bounded Find → path graph rendered → individual path selection
+with no refetch → exit → ordinary graph restored → one-hop expansion →
+committed context change → second Find in the new context → stale
+prior-context result cannot reappear → heartbeat → clean product console)
+plus the 20-cycle same-page path stress (ordinary graph → path mode → two
+selections → Find → exit → expansion → re-enter → clear) proving no
+request storm, no stale-result contamination, no frozen UI and no route
+remount.
+
 ### Real-browser multi-hop acceptance (PR 31H)
 
 `frontend/e2e/zz-31h-multihop.spec.ts` runs the depth journey in Chromium

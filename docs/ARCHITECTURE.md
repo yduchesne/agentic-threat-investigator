@@ -1458,6 +1458,99 @@ Architectural decisions:
   `RelationshipObservation`; acquisition, mutation, provider/Coordinator/LLM
   work and destination path enumeration are all out of scope (PR 31I).
 
+#### PR 31I bounded connection-path analysis and the consolidated one-hop boundary
+
+PR 31I adds one dominant read capability: bounded, deterministic, cycle-safe
+simple paths between two Investigation-visible canonical Entities over the
+same PR 31G scope/filter semantics. It also closes the last pre-PR 31H
+inconsistency by migrating the legacy direct-SQL one-hop `neighborhood` read
+onto the existing stored-function boundary; every graph query in ATI now
+lives entirely inside versioned PostgreSQL stored functions.
+
+```text
+GraphPathQuery (app/query/graph.py)                application contract (depth 1..6, paths 1..25)
+    -> GraphQueryService.find_paths()                       application read service
+    -> ati.find_graph_paths(...) (migrations/sql/ati/v0031)  PostgreSQL stored function
+    -> PostgresGraphQueryService.find_paths()                invocation/mapping boundary only
+    -> FastAPI path route (api/routes/graph.py)              PR 31I thin HTTP projection
+    -> GraphPathResponse (existing node/edge DTOs + reference-only paths)
+    -> TanStack Query path hook (frontend graph-queries.ts)  distinct query key
+    -> path mode + GraphPathPanel (frontend)                 explicit two-Entity selection
+    -> RelationshipGraph (canonical renderer, path highlight)
+```
+
+The one-hop boundary consolidation is behavior-preserving:
+`PostgresGraphQueryService.neighborhood()` now invokes
+`ati.traverse_graph(..., max_depth = 1)` with the exact
+`GraphNeighborhoodQuery` context and shares the traversal row mapper. The
+legacy `_edge_statement()` / `_endpoint_nodes()` direct SQLAlchemy graph
+query construction was removed; no production graph SELECT / JOIN / CTE /
+filter / aggregation SQL remains in the adapter (only stored-function
+invocation statements). One-hop parity against the depth-1 traversal is
+proven by the real-PostgreSQL P-N suite.
+
+Architectural decisions:
+
+- **path finding is a read-only projection**: paths are never persisted and
+  create no graph-local identity; `Entity` / `Relationship` /
+  `RelationshipObservation` remain the only authoritative topology and no
+  persisted path model, graph database, or second graph representation is
+  introduced;
+- **both endpoints must be Investigation-visible in both scopes**: source
+  and target must be present, live and admitted through the exact
+  EvidenceObservation rule; `scope=known` may broaden eligible intermediate
+  and support topology but never permits arbitrary global endpoint lookup
+  (an invisible endpoint maps to the same scoped `graph_entity_not_found`
+  404 as the focal Entity, never revealing whether the Entity exists
+  globally);
+- **stored-function-only path SQL**: the entire path computation — endpoint
+  visibility, eligible observation/Relationship selection, Entity-path
+  cycle-safe recursive simple-path search, entity-sequence deduplication
+  (parallel/reverse Relationships connecting the same pair collapse to one
+  deterministic path carrying the smallest eligible Relationship sequence),
+  deterministic shortest-first ordering with the canonical relationship/
+  entity ID signature, the `max_paths + 1` truncation probe, canonical graph
+  closure, and observation/support aggregation — is inside the versioned
+  `ati.find_graph_paths` stored function, which returns one explicit
+  metadata row (`endpoints_visible`, `truncated`) plus canonical node/edge/
+  path rows so endpoint-invalid and no-path outcomes are distinguishable
+  with one invocation;
+- **PR 31G semantics apply unchanged to every path frontier**: scope
+  admission, exact `RelationshipObservation.source`, half-open `observed_at`
+  bounds, Relationship type, direction (relative to the current Entity at
+  every hop) and the counterparty-relative Entity type filter all precede
+  recursion — a path can never cross a hidden edge;
+- **simple paths, deterministic order, truthful truncation**: a returned
+  path never repeats an Entity (`len(entity_ids) == len(relationship_ids) +
+  1`, zero-hop source==target is the single exception, returned as exactly
+  one zero-hop path); paths order by ascending hop count then canonical
+  path signature; `truncated` is true exactly when more qualifying simple
+  paths existed within `max_depth` than fit `max_paths` (probed with
+  `max_paths + 1`);
+- **server-owned ceilings**: depth is hard-bounded to 1..6 (default 4) and
+  the result count to 1..25 (default 10); oversized values are rejected as
+  `invalid_request`, never silently clamped;
+- **canonical closure and no explored-only leakage**: only topology that
+  participates in a selected path is returned (deduplicated per canonical
+  Entity/Relationship — a Relationship used by several paths appears once),
+  with one exception: a no-path result still projects the two visible
+  endpoints; support counts are computed over the eligible filtered
+  observation set, never from path multiplicity;
+- **one dedicated HTTP operation**: `GET .../graph/paths?source_entity_id=
+  ...&target_entity_id=...` reuses the existing canonical node/edge DTOs and
+  adds only reference-only ordered paths (`GraphPathDto`); no SQL row kinds,
+  PostgreSQL arrays, recursive depth internals or path signatures are
+  exposed; visible-but-unconnected pairs return 200 with empty `paths`;
+- **no new index**: the path plan stays served by the existing PR 31B
+  source/target adjacency, exact-admission and focal-visibility index
+  families under `EXPLAIN (ANALYZE, BUFFERS)` evidence (including a dense
+  bounded lattice fixture at depth 6); no index is added without
+  reviewer-approved measured evidence;
+- **bounded work**: the explicit Entity-path cycle guard, the depth cap
+  inside the recursion and the short-cutting of branches that reach the
+  target bound database work by the requested depth and the number of
+  simple paths, never by graph size.
+
 #### PR 31B visibility and projection rules
 
 - **focal Entity visibility**: the focal Entity is visible when it exists,

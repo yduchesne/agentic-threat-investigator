@@ -1,21 +1,23 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Investigation-scoped graph route (PR 31C; PR 31G; PR 31H).
+"""Investigation-scoped graph route (PR 31C; PR 31G; PR 31H; PR 31I).
 
 The route is a thin authenticated read projection over the existing
 :class:`GraphQueryService`: it builds exactly one
 :class:`GraphNeighborhoodQuery` (or, for the PR 31H traversal endpoint, one
-:class:`GraphTraversalQuery`) from validated path/query parameters, calls the
+:class:`GraphTraversalQuery`, or, for the PR 31I path endpoint, one
+:class:`GraphPathQuery`) from validated path/query parameters, calls the
 corresponding service method, and maps the result to explicit public DTOs.
 It never imports PostgreSQL, never issues SQL, never reconstructs
 Topology, never aggregates observations, and never infers visibility; a
-``None`` result (missing, deleted, or not-visible focal Entity) maps to one
-scoped 404 with a single stable code, and a visible isolated focal Entity
-maps to 200 with a focal-only graph. PR 31G adds the optional ``scope``
-(``investigation`` default / ``known``), connected Entity type, exact
-observation source and half-open observed-time filters; PR 31H adds the
-bounded ``/traversal`` endpoint with an explicit 1..3 ``max_depth`` on top
-of the identical filter vocabulary, reusing the same response model.
-Defaults preserve current-main behavior.
+``None`` result (missing, deleted, or not-visible focal/endpoint Entity)
+maps to one scoped 404 with a single stable code, and a visible isolated
+focal Entity maps to 200 with a focal-only graph. PR 31G adds the optional
+``scope`` (``investigation`` default / ``known``), connected Entity type,
+exact observation source and half-open observed-time filters; PR 31H adds the
+bounded ``/traversal`` endpoint with an explicit 1..3 ``max_depth``;
+PR 31I adds the ``/paths`` endpoint with two Investigation-visible Entity
+endpoints and server-owned ``max_depth`` (default 4, max 6) / ``max_paths``
+(default 10, max 25) bounds. Defaults preserve current-main behavior.
 """
 
 from __future__ import annotations
@@ -27,15 +29,22 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 
 from agentic_threat_investigator.api.dependencies import AnalystUser, QueryServices
-from agentic_threat_investigator.api.dto.graph import GraphNeighborhoodResponse
+from agentic_threat_investigator.api.dto.graph import (
+    GraphNeighborhoodResponse,
+    GraphPathResponse,
+)
 from agentic_threat_investigator.api.errors import ApiError, ApiErrorCode
 from agentic_threat_investigator.api.mappers import (
     to_graph_neighborhood_response,
+    to_graph_path_response,
 )
 from agentic_threat_investigator.api.routes.common import effective_page_limit
 from agentic_threat_investigator.app.query.graph import (
+    DEFAULT_GRAPH_PATH_MAX_DEPTH,
+    DEFAULT_GRAPH_PATH_MAX_RESULTS,
     DEFAULT_TRAVERSAL_MAX_DEPTH,
     GraphNeighborhoodQuery,
+    GraphPathQuery,
     GraphScope,
     GraphTraversalQuery,
 )
@@ -49,6 +58,85 @@ router = APIRouter(
     prefix="/api/v1/investigations/{investigation_id}/graph",
     tags=["graph"],
 )
+
+
+@router.get(
+    "/paths",
+    response_model=GraphPathResponse,
+    operation_id="get_graph_paths",
+)
+async def get_graph_paths(
+    investigation_id: UUID,
+    services: QueryServices,
+    _user: AnalystUser,
+    source_entity_id: Annotated[UUID, Query(alias="source_entity_id")],
+    target_entity_id: Annotated[UUID, Query(alias="target_entity_id")],
+    max_depth: Annotated[int | None, Query(alias="max_depth")] = None,
+    max_paths: Annotated[int | None, Query(alias="max_paths")] = None,
+    direction: RelationshipDirection = RelationshipDirection.EITHER,
+    relationship_type: Annotated[
+        RelationshipType | None, Query(alias="relationship_type")
+    ] = None,
+    scope: Annotated[GraphScope | None, Query(alias="scope")] = None,
+    entity_type: Annotated[EntityType | None, Query(alias="entity_type")] = None,
+    source: Annotated[str | None, Query(alias="source")] = None,
+    observed_from: Annotated[datetime | None, Query(alias="observed_from")] = None,
+    observed_to: Annotated[datetime | None, Query(alias="observed_to")] = None,
+) -> GraphPathResponse:
+    """Return bounded deterministic simple paths between two Entities.
+
+    ``source_entity_id`` / ``target_entity_id`` are required canonical UUIDs
+    and both must be visible to the Investigation in both scopes: ``scope``
+    may broaden intermediate/support topology only, never arbitrary global
+    endpoint lookup. ``max_depth`` defaults to
+    :data:`DEFAULT_GRAPH_PATH_MAX_DEPTH` (4) and is hard-bounded to
+    1..:data:`GRAPH_PATH_MAX_DEPTH` (6); ``max_paths`` defaults to
+    :data:`DEFAULT_GRAPH_PATH_MAX_RESULTS` (10) and is hard-bounded to
+    1..:data:`GRAPH_PATH_MAX_RESULTS` (25); oversized values are 400
+    ``invalid_request``, never silently clamped. Every other parameter
+    (``direction``, ``scope``, ``relationship_type``, ``entity_type``,
+    ``source``, ``observed_from`` / ``observed_to``) keeps the exact PR 31G
+    meaning and applies at every frontier. The response reuses the canonical
+    node/edge DTO vocabulary plus reference-only ordered paths and a
+    truthful ``truncated`` flag: no SQL row kinds, PostgreSQL arrays or
+    recursive internals are exposed. Scoped endpoint absence (either
+    endpoint missing, soft-deleted, or not Investigation-visible) maps to
+    the same 404 ``graph_entity_not_found`` as the one-hop read; both
+    endpoints visible with no eligible connection is 200 with empty
+    ``paths``; ``source == target`` returns 200 with exactly one zero-hop
+    path. No ``limit`` parameter exists: path results are bounded by
+    ``max_paths``, not by an edge page size.
+    """
+    try:
+        result = await services.graph.find_paths(
+            GraphPathQuery(
+                investigation_id=investigation_id,
+                entity_id=source_entity_id,
+                target_entity_id=target_entity_id,
+                max_depth=(
+                    DEFAULT_GRAPH_PATH_MAX_DEPTH if max_depth is None else max_depth
+                ),
+                max_paths=(
+                    DEFAULT_GRAPH_PATH_MAX_RESULTS if max_paths is None else max_paths
+                ),
+                scope=GraphScope.INVESTIGATION if scope is None else scope,
+                direction=direction,
+                relationship_type=relationship_type,
+                entity_type=entity_type,
+                source=source,
+                observed_from=observed_from,
+                observed_to=observed_to,
+            )
+        )
+    except ValueError as error:
+        raise ApiError(ApiErrorCode.INVALID_REQUEST, str(error), 400) from error
+    if result is None:
+        raise ApiError(
+            ApiErrorCode.GRAPH_ENTITY_NOT_FOUND,
+            "Graph entity was not found for this investigation.",
+            404,
+        )
+    return to_graph_path_response(result)
 
 
 @router.get(

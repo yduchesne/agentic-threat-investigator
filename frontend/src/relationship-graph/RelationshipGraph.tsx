@@ -67,6 +67,12 @@ export type EvolutionNodeData = {
   /** Optional server display name; rendered only when distinct from value. */
   displayName: string | null;
   role: "focal" | "counterparty";
+  /** PR 31I: path-mode endpoint role of the node, when selected. */
+  pathEndpoint?: "source" | "target";
+  /** PR 31I: node participates in the currently highlighted path. */
+  pathHighlighted?: boolean;
+  /** PR 31I: node is outside the currently highlighted path. */
+  pathDimmed?: boolean;
 } & Record<string, unknown>;
 
 const nodeTypes: NodeTypes = { evolutionNode: EvolutionGraphNode };
@@ -87,9 +93,21 @@ function EvolutionGraphNode({ data }: NodeProps): ReactElement {
         py: 0.75,
         border: 2,
         borderRadius: 999,
-        borderColor: nodeData.role === "focal" ? "primary.main" : "divider",
+        borderColor:
+          nodeData.pathEndpoint === "source"
+            ? "primary.main"
+            : nodeData.pathEndpoint === "target"
+              ? "secondary.main"
+              : nodeData.role === "focal"
+                ? "primary.main"
+                : "divider",
         bgcolor: nodeData.role === "focal" ? "primary.main" : "background.paper",
         color: nodeData.role === "focal" ? "primary.contrastText" : "text.primary",
+        opacity: nodeData.pathDimmed ? 0.4 : 1,
+        boxShadow:
+          nodeData.pathHighlighted
+            ? (theme) => `0 0 0 3px ${theme.palette.primary.main}`
+            : undefined,
         fontSize: 12,
         fontFamily: "monospace",
         whiteSpace: "nowrap",
@@ -154,6 +172,21 @@ export interface RelationshipGraphProps {
   entityTypeLabel: (type: string) => string;
   /** PR 31E analyst-driven expansion controller (owned by the workspace). */
   expansion: GraphExpansionController;
+  /** PR 31I: path-finding mode active: node clicks select endpoints. */
+  pathMode?: boolean;
+  /** PR 31I: analyst-selected canonical path endpoints (source/target). */
+  pathEndpoints?: { source: string | null; target: string | null } | null;
+  /** PR 31I: propagate a path-endpoint node click to the workspace. */
+  onPathEndpointClick?: (entityId: string) => void;
+  /**
+   * PR 31I: the canonical ID sets of the currently highlighted path. When
+   * present, participating edges/nodes are emphasized and everything else in
+   * the returned path topology is dimmed; ``null`` means no highlight.
+   */
+  pathHighlight?: {
+    relationshipIds: ReadonlySet<string>;
+    entityIds: ReadonlySet<string>;
+  } | null;
 }
 
 /** The bounded accumulated graph surface with an always-available list path. */
@@ -166,6 +199,10 @@ export function RelationshipGraph({
   typeLabel,
   entityTypeLabel,
   expansion,
+  pathMode = false,
+  pathEndpoints = undefined,
+  onPathEndpointClick,
+  pathHighlight = null,
 }: RelationshipGraphProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
   // PR 31F-4: the active theme's semantic graph tokens drive canvas, edge,
@@ -226,6 +263,32 @@ export function RelationshipGraph({
     [model, positions, entityTypeLabel],
   );
 
+  // PR 31I: path-mode presentation decorations are derived per render so
+  // endpoint selection, the displayed result and the highlighted path never
+  // mutate React Flow node state.
+  const decoratedInitialNodes: Node<EvolutionNodeData>[] = useMemo(() => {
+    const activeHighlight = pathHighlight;
+    return initialNodes.map((node) => {
+      const entityId = entityIdFromNodeId(node.id);
+      if (entityId === null) {
+        return node;
+      }
+      const data: EvolutionNodeData = {
+        ...node.data,
+        pathEndpoint:
+          entityId === pathEndpoints?.source
+            ? "source"
+            : entityId === pathEndpoints?.target
+              ? "target"
+              : undefined,
+        pathHighlighted: activeHighlight?.entityIds.has(entityId) ?? false,
+        pathDimmed:
+          activeHighlight !== null && !activeHighlight.entityIds.has(entityId),
+      };
+      return { ...node, data };
+    });
+  }, [initialNodes, pathEndpoints, pathHighlight]);
+
   // Functional dragging: React Flow stays controlled through the standard
   // node-change path. Drag positions are local browser state only; a new
   // root graph context (or a refresh/refetch of that context) resets the
@@ -246,8 +309,9 @@ export function RelationshipGraph({
     const key = rootGraphKey;
     const rootChanged = rootKeyRef.current !== key;
     rootKeyRef.current = key;
+    const baseNodes = rootChanged ? decoratedInitialNodes : nodesRef.current;
     if (rootChanged) {
-      setNodes(initialNodes);
+      setNodes(decoratedInitialNodes);
       return;
     }
     // Same root graph context (PR 31E §6): keep every existing React Flow
@@ -256,7 +320,7 @@ export function RelationshipGraph({
     // only for genuinely new Entities, placed deterministically near the
     // expanded anchor (falling back to the focal when a root overlay added
     // topology without an expansion).
-    const currentNodes = nodesRef.current;
+    const currentNodes = baseNodes;
     const currentIds = new Set<string>();
     for (const rfNode of currentNodes) {
       const id = entityIdFromNodeId(rfNode.id);
@@ -291,6 +355,16 @@ export function RelationshipGraph({
           role: node.role,
           entityTypeText: entityTypeLabel(node.entityType),
           displayName: node.displayName,
+          pathEndpoint:
+            node.entityId === pathEndpoints?.source
+              ? "source"
+              : node.entityId === pathEndpoints?.target
+                ? "target"
+                : undefined,
+          pathHighlighted: pathHighlight?.entityIds.has(node.entityId) ?? false,
+          pathDimmed:
+            pathHighlight !== null &&
+            !pathHighlight.entityIds.has(node.entityId),
         };
         const existing = byId.get(id);
         if (existing === undefined) {
@@ -304,11 +378,31 @@ export function RelationshipGraph({
         return { ...existing, data: { ...existing.data, ...data } };
       });
     });
-  }, [setNodes, rootGraphKey, initialNodes, model, expansion.lastExpansion, entityTypeLabel]);
+  }, [
+    setNodes,
+    rootGraphKey,
+    decoratedInitialNodes,
+    model,
+    expansion.lastExpansion,
+    entityTypeLabel,
+    pathEndpoints,
+    pathHighlight,
+  ]);
 
   const edges: Edge[] = useMemo(
-    () => buildSlottedEdges(model.edges, typeLabel, graphTokens.edge.default),
-    [model.edges, typeLabel, graphTokens.edge.default],
+    () =>
+      buildSlottedEdges(
+        model.edges,
+        typeLabel,
+        graphTokens.edge.default,
+        {
+          highlightedRelationshipIds: pathHighlight?.relationshipIds ?? null,
+          highlightedColor: graphTokens.edge.selected,
+          dimmedColor: graphTokens.edge.default,
+          dimmedOpacity: 0.3,
+        },
+      ),
+    [model.edges, typeLabel, graphTokens.edge.default, graphTokens.edge.selected, pathHighlight],
   );
 
   const nodeById = useMemo(
@@ -413,7 +507,16 @@ export function RelationshipGraph({
           maxZoom={2}
           deleteKeyCode={null}
           onNodesChange={onNodesChange}
-          onNodeClick={(_event, node) => setSelection({ kind: "node", nodeId: node.id })}
+          onNodeClick={(_event, node) => {
+            if (pathMode && onPathEndpointClick !== undefined) {
+              const entityId = entityIdFromNodeId(node.id);
+              if (entityId !== null) {
+                onPathEndpointClick(entityId);
+                return;
+              }
+            }
+            setSelection({ kind: "node", nodeId: node.id });
+          }}
           onEdgeClick={(_event, edge) => setSelection({ kind: "edge", edgeId: edge.id })}
           onPaneClick={() => setSelection(null)}
         >
@@ -671,13 +774,22 @@ export function graphCssVariables(tokens: AtiSemanticTokens): CSSProperties {
  * edge keeps an exact source/target node; slot 0 is the historical center
  * route. A self-loop routes between distinct same-node handles so it draws a
  * visible arc instead of a zero-length path. The deterministic arrow marker
- * communicates direction without alternate topology.
+ * communicates direction without alternate topology. PR 31I adds an optional
+ * path highlight: relationships on the highlighted path get the emphasized
+ * color and a thicker stroke while non-participating relationships in the
+ * returned path topology are dimmed.
  */
 export function buildSlottedEdges(
   edges: readonly RelationshipGraphEdge[],
   typeLabel: (type: string) => string,
   /** Semantic edge-stroke/arrow color from the active theme (PR 31F-4). */
   markerColor: string,
+  highlight?: {
+    highlightedRelationshipIds: ReadonlySet<string> | null;
+    highlightedColor: string;
+    dimmedColor: string;
+    dimmedOpacity: number;
+  },
 ): Edge[] {
   const groups = new Map<string, RelationshipGraphEdge[]>();
   for (const edge of edges) {
@@ -690,6 +802,27 @@ export function buildSlottedEdges(
     groups.set(key, list);
   }
   const result: Edge[] = [];
+  const highlightActive =
+    highlight !== undefined && highlight.highlightedRelationshipIds !== null;
+  const strokeColorFor = (edge: RelationshipGraphEdge): string => {
+    if (highlight === undefined) {
+      return markerColor;
+    }
+    if (highlight.highlightedRelationshipIds?.has(edge.relationshipId)) {
+      return highlight.highlightedColor;
+    }
+    return highlightActive ? highlight.dimmedColor : markerColor;
+  };
+  const strokeWidthFor = (edge: RelationshipGraphEdge): number =>
+    highlight !== undefined &&
+    highlight.highlightedRelationshipIds?.has(edge.relationshipId)
+      ? 3
+      : 1.5;
+  const strokeOpacityFor = (edge: RelationshipGraphEdge): number =>
+    highlightActive &&
+    !highlight.highlightedRelationshipIds?.has(edge.relationshipId)
+      ? highlight.dimmedOpacity
+      : 1;
   for (const group of groups.values()) {
     const ordered = [...group].sort((a, b) =>
       a.relationshipId < b.relationshipId
@@ -703,6 +836,12 @@ export function buildSlottedEdges(
       const knownOnlyStyle = knownOnly
         ? { strokeDasharray: "6 3" }
         : undefined;
+      const stroke = strokeColorFor(edge);
+      const pathStyle = {
+        stroke,
+        strokeWidth: strokeWidthFor(edge),
+        strokeOpacity: strokeOpacityFor(edge),
+      };
       if (edge.sourceEntityId === edge.targetEntityId) {
         result.push({
           id: edgeId(edge.relationshipId),
@@ -712,8 +851,8 @@ export function buildSlottedEdges(
           targetHandle: "target-loop",
           label: typeLabel(edge.relationshipType),
           type: "default",
-          style: knownOnlyStyle,
-          markerEnd: { type: MarkerType.ArrowClosed, color: markerColor },
+          style: { ...knownOnlyStyle, ...pathStyle },
+          markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
         });
         return;
       }
@@ -726,8 +865,8 @@ export function buildSlottedEdges(
         targetHandle: slot === 0 ? "target-top-0" : slot === 1 ? "target-top-1" : "target-top-2",
         label: typeLabel(edge.relationshipType),
         type: "default",
-        style: knownOnlyStyle,
-        markerEnd: { type: MarkerType.ArrowClosed, color: markerColor },
+        style: { ...knownOnlyStyle, ...pathStyle },
+        markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
       });
     });
   }

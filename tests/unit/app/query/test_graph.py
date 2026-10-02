@@ -18,6 +18,8 @@ from agentic_threat_investigator.app.query.graph import (
     GraphEdge,
     GraphNeighborhoodQuery,
     GraphNode,
+    GraphPathQuery,
+    GraphPathResult,
     GraphQueryService,
     GraphResult,
     GraphScope,
@@ -86,6 +88,7 @@ class _FixedGraphQueryService(GraphQueryService):
         self._result = result
         self.queries: list[GraphNeighborhoodQuery] = []
         self.traversals: list[GraphTraversalQuery] = []
+        self.path_queries: list[GraphPathQuery] = []
 
     async def neighborhood(self, query: GraphNeighborhoodQuery) -> GraphResult | None:
         self.queries.append(query)
@@ -94,6 +97,11 @@ class _FixedGraphQueryService(GraphQueryService):
     async def traverse(self, query: GraphTraversalQuery) -> GraphResult | None:
         self.traversals.append(query)
         return self._result
+
+    async def find_paths(self, query: GraphPathQuery) -> GraphPathResult | None:
+        """Return None; the PR 31I contract double records the path query."""
+        self.path_queries.append(query)
+        return None
 
 
 # --- GraphNode (G31A-M01..M03) -------------------------------------------------

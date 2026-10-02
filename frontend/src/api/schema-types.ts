@@ -32,6 +32,8 @@ import type {
   GraphEdgeResponse,
   GraphNeighborhoodResponse,
   GraphNodeResponse,
+  GraphPathDto,
+  GraphPathResponse,
   GraphScope,
   HistoryOperation,
   HistoryRecordResponse,
@@ -245,6 +247,12 @@ export type GraphEdge = GraphEdgeResponse;
 
 /** One bounded Investigation-scoped one-hop neighborhood (PR 31C). */
 export type GraphNeighborhood = GraphNeighborhoodResponse;
+
+/** One ordered simple path of canonical graph references (PR 31I). */
+export type GraphPath = GraphPathDto;
+
+/** One bounded deterministic path-finding projection (PR 31I). */
+export type GraphPathResult = GraphPathResponse;
 
 /** The exact two-value graph scope vocabulary (PR 31G). */
 export type GraphScopeName = GraphScope;

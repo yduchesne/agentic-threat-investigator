@@ -279,13 +279,14 @@ class FakeQueryBundle:
 
 
 class FakeGraphService:
-    """Record neighborhood/traversal queries and return a configured result."""
+    """Record neighborhood/traversal/path queries and return a configured result."""
 
     def __init__(self, result: Any = None) -> None:
         """Bind the default result and empty received-query logs."""
         self.result = result
         self.neighborhood_queries: list[Any] = []
         self.traversal_queries: list[Any] = []
+        self.path_queries: list[Any] = []
 
     async def neighborhood(self, query: Any) -> Any:
         """Record the query and return the configured result."""
@@ -295,6 +296,11 @@ class FakeGraphService:
     async def traverse(self, query: Any) -> Any:
         """Record the traversal query and return the configured result."""
         self.traversal_queries.append(query)
+        return self.result
+
+    async def find_paths(self, query: Any) -> Any:
+        """Record the path query and return the configured result."""
+        self.path_queries.append(query)
         return self.result
 
 

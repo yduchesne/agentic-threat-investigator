@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Public Investigation graph response DTOs (PR 31C).
+"""Public Investigation graph response DTOs (PR 31C; PR 31I).
 
 The graph wire contract is a thin, frontend-independent projection of the
 PR 31A application graph read model: canonical Entity identities map to
 ``GraphNodeResponse`` items, canonical Relationship identities map to
 ``GraphEdgeResponse`` items, and one bounded neighborhood maps to
 :class:`GraphNeighborhoodResponse` with a truthful ``truncated`` flag and no
-cursor. No database rows, raw Evidence payloads, Entity persistence
-internals, layout coordinates, or frontend-library ``data`` structures ever
-cross this boundary.
+cursor. PR 31I adds :class:`GraphPathResponse`: the same canonical node/edge
+DTOs plus ordered reference-only paths (``GraphPathDto``) and a truthful
+path truncation flag. No database rows, raw Evidence payloads, Entity
+persistence internals, layout coordinates, PostgreSQL arrays, or
+frontend-library ``data`` structures ever cross this boundary.
 """
 
 from __future__ import annotations
@@ -74,4 +76,42 @@ class GraphNeighborhoodResponse(BaseModel):
 
     nodes: tuple[GraphNodeResponse, ...]
     edges: tuple[GraphEdgeResponse, ...]
+    truncated: bool
+
+
+class GraphPathDto(BaseModel):
+    """One ordered simple path of canonical graph references (PR 31I).
+
+    Paths reuse the canonical node/edge vocabulary: ``entity_ids`` and
+    ``relationship_ids`` are the authoritative Entity/Relationship UUIDs in
+    traversal order (``len(entity_ids) == len(relationship_ids) + 1``, no
+    repeated Entity). No PostgreSQL array syntax, SQL signature, recursive
+    depth internals or row kinds are exposed; the zero-hop source==target
+    path carries one Entity ID and zero Relationship IDs.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entity_ids: tuple[UUID, ...]
+    relationship_ids: tuple[UUID, ...]
+
+
+class GraphPathResponse(BaseModel):
+    """One bounded path-finding projection over canonical graph vocabulary.
+
+    ``nodes`` and ``edges`` reuse the existing node/edge DTOs exactly; each
+    canonical Entity/Relationship appears at most once across the selected
+    paths. ``paths`` are ordered shortest-first (deterministic tie-break).
+    ``truncated`` is true exactly when additional qualifying simple paths
+    existed within ``max_depth`` beyond ``max_paths``; a no-path result is
+    ``200`` with empty ``paths`` (and the two visible endpoint nodes), never
+    a 404. Endpoint-visibility failure is the existing scoped ``404
+    graph_entity_not_found``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    nodes: tuple[GraphNodeResponse, ...]
+    edges: tuple[GraphEdgeResponse, ...]
+    paths: tuple[GraphPathDto, ...]
     truncated: bool

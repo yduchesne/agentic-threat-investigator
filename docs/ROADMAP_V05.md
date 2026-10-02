@@ -44,7 +44,7 @@ requirements justify the additional persistence dependency.
 | **31F** | Evidence drill-down | Relationship -> observation -> evidence navigation from the graph [DONE] |
 | **31G** | Filtering and investigation context | Manage larger graphs without confusing global knowledge with investigation provenance [DONE] |
 | **31H** | Bounded multi-hop traversal | Depth-limited recursive exploration using PostgreSQL recursive CTEs |
-| **31I** | Path finding | Bounded connection discovery between analyst-selected entities |
+| **31I** | Path finding | Bounded connection discovery between analyst-selected entities [DONE] |
 | **31J** | Temporal graph exploration | Explore topology through RelationshipObservation time semantics |
 | **31K** | Graph-driven investigation actions | Launch ATI research/investigation actions directly from graph entities |
 | **31F-1** | UI correctness and human-readable analyst presentation | Analyst-facing i18n labels before raw codes on Timeline/relationship surfaces [DONE] |
@@ -273,17 +273,37 @@ traversal is an exploration convenience, not permission for unbounded
 whole-graph queries. Preserve one-hop incremental expansion as the normal
 interactive path.
 
-## PR 31I — Bounded path finding
+## PR 31I — Bounded path finding [DONE]
 
 Allow an analyst to select two Entities and ask ATI to find bounded connection
 paths between them. Implement path discovery with recursive CTEs, explicit
 cycle avoidance, maximum depth, maximum returned paths, deterministic ordering,
-and resource limits.
+and resource limits. [DONE]
 
 Return paths in the same canonical graph DTO vocabulary used elsewhere so the
 UI can highlight or isolate connections without creating another graph model.
 This PR intentionally stops short of general graph analytics, community
 detection, centrality, or arbitrary pattern-query infrastructure.
+
+Delivered (PR 31I): one versioned ``ati.find_graph_paths`` stored function
+with endpoint Investigation visibility, PR 31G scope/filter semantics,
+Entity-path cycle-safe recursive simple-path search, entity-sequence
+deduplication, deterministic shortest-first ordering with a canonical path
+signature, a ``max_paths + 1`` truthful truncation probe and canonical graph
+closure; an explicit metadata row distinguishes endpoint-invalid (`None` /
+scoped 404) from visible-but-unconnected (200 with empty `paths` and the two
+visible endpoint nodes); bounded depth 1..6 (default 4) and path count 1..25
+(default 10); source==target returns exactly one zero-hop path; paths reuse
+``GraphNode`` / ``GraphEdge`` plus reference-only ordered paths. The legacy
+direct-SQLAlchemy one-hop ``neighborhood`` read was consolidated onto
+``ati.traverse_graph(..., max_depth = 1)`` with real-PostgreSQL parity
+coverage, so every graph read now lives behind versioned stored functions.
+The analyst-facing path mode (two canonical Entity selections from the graph,
+explicit Find, deterministic path selector and highlight, no-connection and
+truncation states, ordinary-graph restoration) was added to the routed Graph
+workbench. No graph database, persisted path model, path caching,
+graph-query language, graph analytics, temporal playback, or graph-driven
+action is pulled into PR 31I.
 
 ## PR 31J — Temporal graph exploration
 

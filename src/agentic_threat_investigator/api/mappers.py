@@ -30,6 +30,8 @@ from agentic_threat_investigator.api.dto.graph import (
     GraphEdgeResponse,
     GraphNeighborhoodResponse,
     GraphNodeResponse,
+    GraphPathDto,
+    GraphPathResponse,
 )
 from agentic_threat_investigator.api.dto.history import HistoryRecordResponse
 from agentic_threat_investigator.api.dto.investigation import (
@@ -75,6 +77,7 @@ from agentic_threat_investigator.app.query.geolocation import (
 from agentic_threat_investigator.app.query.graph import (
     GraphEdge,
     GraphNode,
+    GraphPathResult,
     GraphResult,
 )
 from agentic_threat_investigator.app.query.history import DomainObjectHistoryRecord
@@ -364,6 +367,29 @@ def to_graph_neighborhood_response(
     return GraphNeighborhoodResponse(
         nodes=tuple(to_graph_node_response(node) for node in result.nodes),
         edges=tuple(to_graph_edge_response(edge) for edge in result.edges),
+        truncated=result.truncated,
+    )
+
+
+def to_graph_path_response(result: GraphPathResult) -> GraphPathResponse:
+    """Map one path-finding result to its public path DTO (PR 31I).
+
+    Nodes and edges reuse the existing canonical node/edge responses exactly
+    (no PathNode/PathEdge vocabulary); paths carry the ordered canonical
+    Entity/Relationship references only. Ordering, deduplication, the
+    truthful ``truncated`` flag and the no-path endpoint-closure state are
+    preserved field-for-field; nothing is recomputed here.
+    """
+    return GraphPathResponse(
+        nodes=tuple(to_graph_node_response(node) for node in result.nodes),
+        edges=tuple(to_graph_edge_response(edge) for edge in result.edges),
+        paths=tuple(
+            GraphPathDto(
+                entity_ids=path.entity_ids,
+                relationship_ids=path.relationship_ids,
+            )
+            for path in result.paths
+        ),
         truncated=result.truncated,
     )
 

@@ -18,10 +18,15 @@ from uuid import UUID, uuid4
 import pytest
 
 from agentic_threat_investigator.app.query.graph import (
+    DEFAULT_GRAPH_PATH_MAX_DEPTH,
+    DEFAULT_GRAPH_PATH_MAX_RESULTS,
     DEFAULT_TRAVERSAL_MAX_DEPTH,
     GraphEdge,
     GraphNeighborhoodQuery,
     GraphNode,
+    GraphPath,
+    GraphPathQuery,
+    GraphPathResult,
     GraphResult,
     GraphScope,
     GraphTraversalQuery,
@@ -859,3 +864,374 @@ def test_ha12_neighborhood_contract_unchanged() -> None:
     query = bundle.graph.neighborhood_queries[0]
     assert isinstance(query, GraphNeighborhoodQuery)
     assert bundle.graph.traversal_queries == []
+
+
+# ---------------------------------------------------------------------------
+# PR 31I path route contract (P-A01..P-A12)
+# ---------------------------------------------------------------------------
+
+_PATH = f"/api/v1/investigations/{INVESTIGATION}/graph/paths"
+
+
+def _path_nodes() -> tuple[GraphNode, ...]:
+    """Two deterministic endpoint nodes for path route fixtures."""
+    return (
+        GraphNode(
+            entity_id=UUID("55555555-5555-4555-8555-555555555555"),
+            entity_type=EntityType.DOMAIN,
+            value="source.test",
+        ),
+        GraphNode(
+            entity_id=UUID("66666666-6666-4666-8666-666666666666"),
+            entity_type=EntityType.IP_ADDRESS,
+            value="192.0.2.7",
+        ),
+    )
+
+
+def _path_edges() -> tuple[GraphEdge, ...]:
+    """One canonical edge connecting the path endpoint nodes."""
+    return (
+        GraphEdge(
+            relationship_id=UUID("77777777-7777-4777-8777-777777777777"),
+            source_entity_id=_path_nodes()[0].entity_id,
+            target_entity_id=_path_nodes()[1].entity_id,
+            relationship_type=RelationshipType.RESOLVES_TO,
+            observation_count=1,
+            investigation_observation_count=1,
+        ),
+    )
+
+
+def _path_result(*, paths: tuple[GraphPath, ...] | None = None) -> GraphPathResult:
+    """One deterministic path result for route contract tests."""
+    return GraphPathResult(
+        nodes=_path_nodes(),
+        edges=_path_edges(),
+        paths=(
+            paths
+            if paths is not None
+            else (
+                GraphPath(
+                    entity_ids=(
+                        _path_nodes()[0].entity_id,
+                        _path_nodes()[1].entity_id,
+                    ),
+                    relationship_ids=(_path_edges()[0].relationship_id,),
+                ),
+            )
+        ),
+        truncated=False,
+    )
+
+
+def test_pa01_defaults_depth_four_max_paths_ten() -> None:
+    """P-A01: omitted bounds become the documented server-owned defaults."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _path_result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+            },
+        )
+    assert response.status_code == 200
+    query = bundle.graph.path_queries[0]
+    assert isinstance(query, GraphPathQuery)
+    assert query.max_depth == DEFAULT_GRAPH_PATH_MAX_DEPTH
+    assert query.max_paths == DEFAULT_GRAPH_PATH_MAX_RESULTS
+
+
+def test_pa02_explicit_bounds_accepted_and_forwarded() -> None:
+    """P-A02: explicit in-window depth/path bounds are forwarded exactly."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _path_result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+                "max_depth": "6",
+                "max_paths": "25",
+            },
+        )
+    assert response.status_code == 200
+    query = bundle.graph.path_queries[0]
+    assert isinstance(query, GraphPathQuery)
+    assert query.max_depth == 6
+    assert query.max_paths == 25
+
+
+def test_pa03_depth_above_maximum_is_400() -> None:
+    """P-A03: max_depth 7 is a stable 400 invalid_request, never clamped."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+                "max_depth": "7",
+            },
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert bundle.graph.path_queries == []
+
+
+def test_pa04_max_paths_above_maximum_is_400() -> None:
+    """P-A04: max_paths 26 is a stable 400 invalid_request, never clamped."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+                "max_paths": "26",
+            },
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert bundle.graph.path_queries == []
+
+
+def test_pa05_source_endpoint_invisible_is_scoped_404() -> None:
+    """P-A05: an Investigation-invisible source endpoint is a scoped 404."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = None
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+            },
+        )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "graph_entity_not_found"
+
+
+def test_pa06_target_endpoint_invisible_is_scoped_404() -> None:
+    """P-A06: an Investigation-invisible target endpoint is a scoped 404."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = None
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": uuid4(),
+            },
+        )
+    assert response.status_code == 404
+    code = response.json()["error"]["code"]
+    # The 404 must not reveal which endpoint exists globally.
+    assert code == "graph_entity_not_found"
+
+
+def test_pa07_no_path_is_200_empty_paths() -> None:
+    """P-A07: visible endpoints with no path map to 200 with empty paths."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = GraphPathResult(
+        nodes=_path_nodes(), edges=(), paths=(), truncated=False
+    )
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["paths"] == []
+    assert body["edges"] == []
+    assert body["truncated"] is False
+    assert [node["entity_id"] for node in body["nodes"]] == [
+        str(_path_nodes()[0].entity_id),
+        str(_path_nodes()[1].entity_id),
+    ]
+
+
+def test_pa08_source_equals_target_zero_hop_path() -> None:
+    """P-A08: source == target returns a deterministic zero-hop path."""
+    bundle = FakeQueryBundle()
+    node = _path_nodes()[0]
+    bundle.graph.result = GraphPathResult(
+        nodes=(node,),
+        edges=(),
+        paths=(GraphPath(entity_ids=(node.entity_id,), relationship_ids=()),),
+        truncated=False,
+    )
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": node.entity_id,
+                "target_entity_id": node.entity_id,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["paths"] == [
+        {"entity_ids": [str(node.entity_id)], "relationship_ids": []}
+    ]
+    assert len(body["nodes"]) == 1
+
+
+def test_pa09_known_scope_forwarded_exactly() -> None:
+    """P-A09: the requested Known scope is forwarded to the query exactly."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _path_result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+                "scope": "known",
+            },
+        )
+    assert response.status_code == 200
+    query = bundle.graph.path_queries[0]
+    assert isinstance(query, GraphPathQuery)
+    assert query.scope is GraphScope.KNOWN
+
+
+def test_pa10_all_graph_filters_forwarded_exactly() -> None:
+    """P-A10: every PR 31G filter is forwarded verbatim to the path query."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _path_result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+                "direction": "target",
+                "relationship_type": "urn:ati:relationship:dns:resolves_to",
+                "entity_type": "domain",
+                "source": "urn:ati:source:rdap",
+                "observed_from": "2026-01-01T00:00:00Z",
+                "observed_to": "2026-02-01T00:00:00Z",
+            },
+        )
+    assert response.status_code == 200
+    query = bundle.graph.path_queries[0]
+    assert isinstance(query, GraphPathQuery)
+    assert query.direction == RelationshipDirection.TARGET
+    assert query.relationship_type == RelationshipType.RESOLVES_TO
+    assert query.entity_type == EntityType.DOMAIN
+    assert query.source == "urn:ati:source:rdap"
+    assert query.observed_from == datetime(2026, 1, 1, tzinfo=UTC)
+    assert query.observed_to == datetime(2026, 2, 1, tzinfo=UTC)
+
+
+def test_pa10b_blank_source_is_400() -> None:
+    """P-A10b: a blank source filter is a stable 400 like the other graph ops."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+                "source": "   ",
+            },
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_pa10c_reversed_observed_interval_is_400() -> None:
+    """P-A10c: a reversed observed interval is a stable 400."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+                "observed_from": "2026-02-01T00:00:00Z",
+                "observed_to": "2026-01-01T00:00:00Z",
+            },
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_pa11_path_response_reuses_node_edge_dto() -> None:
+    """P-A11: the path wire reuses the canonical node/edge DTO vocabulary."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _path_result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _PATH,
+            params={
+                "source_entity_id": _path_nodes()[0].entity_id,
+                "target_entity_id": _path_nodes()[1].entity_id,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    node = body["nodes"][0]
+    assert set(node) == {"entity_id", "entity_type", "value", "display_name"}
+    edge = body["edges"][0]
+    assert set(edge) == {
+        "relationship_id",
+        "source_entity_id",
+        "target_entity_id",
+        "relationship_type",
+        "observation_count",
+        "investigation_observation_count",
+        "first_observed_at",
+        "last_observed_at",
+    }
+    path = body["paths"][0]
+    assert set(path) == {"entity_ids", "relationship_ids"}
+    assert path["entity_ids"] == [
+        str(_path_nodes()[0].entity_id),
+        str(_path_nodes()[1].entity_id),
+    ]
+    assert path["relationship_ids"] == [str(_path_edges()[0].relationship_id)]
+    # No SQL row kinds / PostgreSQL arrays / recursive internals leak.
+    assert "kind" not in body
+    assert "{{" not in response.text
+
+
+def test_pa12_path_operation_in_openapi() -> None:
+    """P-A12: the path operation is part of the pinned OpenAPI contract."""
+    schema = create_openapi_schema()
+    path = "/api/v1/investigations/{investigation_id}/graph/paths"
+    operation = schema["paths"][path]["get"]
+    assert operation["operationId"] == "get_graph_paths"
+    parameters = {parameter["name"] for parameter in operation["parameters"]}
+    assert {
+        "source_entity_id",
+        "target_entity_id",
+        "max_depth",
+        "max_paths",
+    } <= parameters
+    assert "limit" not in parameters
+    response_schema = operation["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]
+    assert response_schema["$ref"].endswith("GraphPathResponse")

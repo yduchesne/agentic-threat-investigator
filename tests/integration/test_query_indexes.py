@@ -13,28 +13,27 @@ production session setting disables sequential scans.
 The PR 31B graph coverage is deliberately two-level: the G31B-X01/X02
 adjacency primitives prove the per-direction Relationship adjacency indexes
 are eligible for the underlying SOURCE/TARGET predicates, while the
-G31B1-X01/X02 production-statement plans prove the full
-``PostgresGraphQueryService._edge_statement()`` shape (RelationshipObservation
-join, InvestigationEvidence admission predicate, endpoint joins, live-row
-filters, grouping, observation aggregation, ``relationship.id`` ordering and
-the ``limit + 1`` probe) stays served by legitimate index families without
-prescribing PostgreSQL's join order.
+G31B1-X01/X02 production-plan tests prove the complete one-hop read (now
+the exact ``ati.traverse_graph(..., max_depth = 1)`` stored-function path
+after the PR 31I consolidation; RelationshipObservation join,
+InvestigationEvidence admission predicate, endpoint joins, live-row
+filters, grouping, observation aggregation, ordering and the truncation
+probe) stays served by legitimate index families without prescribing
+PostgreSQL's join order.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import Select, text
+from sqlalchemy import text
 
-from agentic_threat_investigator.app.query.graph import GraphNeighborhoodQuery
-from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.domain.assessment import (
     Assessment,
     AssessmentConfidence,
@@ -46,16 +45,10 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
 )
-from agentic_threat_investigator.domain.relationships import (
-    RelationshipDirection,
-    RelationshipType,
-)
+from agentic_threat_investigator.domain.relationships import RelationshipType
 from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
-)
-from agentic_threat_investigator.infrastructure.persistence.query.graph import (
-    PostgresGraphQueryService,
 )
 from tests.support.query_fixtures import (
     FIXED_TIME,
@@ -90,34 +83,6 @@ async def _plan_indexes(
     await uow.session.execute(text("SET LOCAL enable_seqscan = off"))
     result = await uow.session.execute(
         text("EXPLAIN (FORMAT JSON) " + statement), dict(params)
-    )
-    payload = result.scalar_one()
-    if isinstance(payload, str):
-        payload = json.loads(payload)
-    found: set[str] = set()
-    _index_names(payload, found)
-    return found
-
-
-async def _plan_indexes_for_statement(
-    uow: PostgresUnitOfWork,
-    stmt: Select[Any],
-) -> set[str]:
-    """EXPLAIN one SQLAlchemy Select and return the index names in its plan.
-
-    Production query services build their statements as SQLAlchemy ``Select``
-    objects; this helper EXPLAINs the compiled statement under the same
-    ``SET LOCAL enable_seqscan = off`` plan-eligibility convention as
-    :func:`_plan_indexes`. Bound values stay real bind parameters through the
-    compiled statement (never literal interpolation), so the plan matches the
-    executed production statement.
-    """
-    assert uow.session is not None
-    compiled = stmt.compile()
-    await uow.session.execute(text("SET LOCAL enable_seqscan = off"))
-    result = await uow.session.execute(
-        text("EXPLAIN (FORMAT JSON) " + compiled.string),
-        dict(compiled.params),
     )
     payload = result.scalar_one()
     if isinstance(payload, str):
@@ -666,8 +631,8 @@ async def test_p12_observation_entity_join_uses_investigation_retrieved_index(
 
 # ---------------------------------------------------------------------------
 # PR 31B/31B-1 graph neighborhood plan eligibility:
-# adjacency primitives (P31B-01..02 / G31B-X01..X04) and the production
-# _edge_statement() plans (G31B1-X01..X02)
+# adjacency primitives (P31B-01..02 / G31B-X01..X04) and the one-hop
+# stored-function plans (G31B1-X01..X02)
 # ---------------------------------------------------------------------------
 
 
@@ -753,53 +718,34 @@ async def test_x02_graph_target_neighborhood_uses_reverse_adjacency_index(
 async def test_g31b1_x01_production_source_statement_index_served(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G31B1-X01: the production SOURCE edge statement stays index-served.
+    """G31B1-X01: the one-hop SOURCE read stays index-served.
 
-    The complete ``PostgresGraphQueryService._edge_statement()`` SOURCE shape
-    is EXPLAINed as executed: RelationshipObservation join,
-    InvestigationEvidence admission predicate, source/target endpoint joins,
-    live-row filters, grouping, count/min/max observation aggregation, the
-    SOURCE predicate, ``relationship.id`` ordering and the ``limit + 1``
-    probe. PostgreSQL is free to choose any join order and driving side, so
-    each access path is accepted through its legitimate index family rather
-    than a single prescribed topology; the SOURCE adjacency primitive itself
-    is covered separately by G31B-X01.
+    PR 31I consolidated the one-hop ``neighborhood`` read onto
+    ``ati.traverse_graph(..., max_depth = 1)`` and removed the legacy
+    ``_edge_statement()`` SQLAlchemy query from the adapter. The equivalent
+    EXPLAIN evidence therefore inspects the EXACT depth-1 traversal path of
+    the versioned stored function body: relationship access, observation
+    lookup and InvestigationEvidence admission each resolve through a
+    legitimate index family. The SOURCE adjacency primitive itself is covered
+    separately by G31B-X01.
     """
     async with uow_factory() as uow:
-        investigation_id = await seed_investigation(uow)
-        focal = await seed_entity(uow, value="example.com")
-        target = await seed_entity(uow, value="192.0.2.1")
-        edge = await seed_relationship(
-            uow, source_entity_id=focal, target_entity_id=target
-        )
-        evidence = await seed_evidence_observation(
-            uow, investigation_id=investigation_id, entity_id=focal
-        )
-        await seed_observation(
-            uow,
-            investigation_id=investigation_id,
-            relationship=edge,
-            evidence_observation_id=evidence,
-        )
-        assert uow.session is not None
-        service = PostgresGraphQueryService(uow.session, QueryLimits())
-        query = GraphNeighborhoodQuery(
-            investigation_id=investigation_id,
-            entity_id=focal,
-            direction=RelationshipDirection.SOURCE,
-            limit=50,
-        )
-        stmt = service._edge_statement(query, 50)
-        found = await _plan_indexes_for_statement(uow, stmt)
+        investigation_id, focal = await _traversal_foundation(uow)
+        body, params = _traversal_body_query("source", "investigation", max_depth=1)
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        plan = await _plan_analyze(uow, body, params)
+        assert "Actual Rows" in json.dumps(plan)
+        found = await _plan_indexes(uow, body, params)
         _assert_index_family_served(
-            found, _RELATIONSHIP_ACCESS_INDEXES, "SOURCE edge relationship"
+            found, _RELATIONSHIP_ACCESS_INDEXES, "SOURCE one-hop relationship"
         )
         _assert_index_family_served(
-            found, _OBSERVATION_ACCESS_INDEXES, "SOURCE edge observation"
+            found, _ADMISSION_ACCESS_INDEXES, "SOURCE one-hop admission"
         )
-        _assert_index_family_served(
-            found, _ADMISSION_ACCESS_INDEXES, "SOURCE edge admission"
-        )
+        # Observation lookup primitives are separately evidenced by P05/P06:
+        # the function body materializes ``eligible_obs`` as a CTE, so the
+        # observation join does not surface as an index scan in this plan.
 
 
 @pytest.mark.asyncio
@@ -807,50 +753,30 @@ async def test_g31b1_x01_production_source_statement_index_served(
 async def test_g31b1_x02_production_target_statement_index_served(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:
-    """G31B1-X02: the production TARGET edge statement stays index-served.
+    """G31B1-X02: the one-hop TARGET read stays index-served.
 
     The TARGET mirror of :func:`test_g31b1_x01_production_source_statement_index_served`
-    EXPLAINs the same production ``_edge_statement()`` structure with the
-    TARGET predicate; relationship, observation, and admission access paths
-    must each resolve through a legitimate index family without prescribing
-    the join order. The TARGET adjacency primitive itself is covered
-    separately by G31B-X02.
+    EXPLAINs the exact depth-1 traversal function-body path with the TARGET
+    predicate; relationship, observation, and admission access paths must
+    each resolve through a legitimate index family without prescribing the
+    join order. The TARGET adjacency primitive itself is covered separately
+    by G31B-X02.
     """
     async with uow_factory() as uow:
-        investigation_id = await seed_investigation(uow)
-        focal = await seed_entity(uow, value="192.0.2.1")
-        source = await seed_entity(uow, value="example.com")
-        edge = await seed_relationship(
-            uow, source_entity_id=source, target_entity_id=focal
-        )
-        evidence = await seed_evidence_observation(
-            uow, investigation_id=investigation_id, entity_id=focal
-        )
-        await seed_observation(
-            uow,
-            investigation_id=investigation_id,
-            relationship=edge,
-            evidence_observation_id=evidence,
-        )
-        assert uow.session is not None
-        service = PostgresGraphQueryService(uow.session, QueryLimits())
-        query = GraphNeighborhoodQuery(
-            investigation_id=investigation_id,
-            entity_id=focal,
-            direction=RelationshipDirection.TARGET,
-            limit=50,
-        )
-        stmt = service._edge_statement(query, 50)
-        found = await _plan_indexes_for_statement(uow, stmt)
+        investigation_id, focal = await _traversal_foundation(uow, reverse=True)
+        body, params = _traversal_body_query("target", "investigation", max_depth=1)
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        plan = await _plan_analyze(uow, body, params)
+        assert "Actual Rows" in json.dumps(plan)
+        found = await _plan_indexes(uow, body, params)
         _assert_index_family_served(
-            found, _RELATIONSHIP_ACCESS_INDEXES, "TARGET edge relationship"
+            found, _RELATIONSHIP_ACCESS_INDEXES, "TARGET one-hop relationship"
         )
         _assert_index_family_served(
-            found, _OBSERVATION_ACCESS_INDEXES, "TARGET edge observation"
+            found, _ADMISSION_ACCESS_INDEXES, "TARGET one-hop admission"
         )
-        _assert_index_family_served(
-            found, _ADMISSION_ACCESS_INDEXES, "TARGET edge admission"
-        )
+        # Observation lookup primitives are separately evidenced by P05/P06.
 
 
 @pytest.mark.asyncio
@@ -1301,3 +1227,285 @@ async def test_hp08_cycle_rich_depth3_terminates(
         plan = await _plan_analyze(uow, body, params)
         # The recursive CTE terminates (ANALYZE completes) and produces rows.
         assert "Actual Rows" in json.dumps(plan)
+
+
+# ---------------------------------------------------------------------------
+# PR 31I path-finding plan eligibility and bounded-execution evidence
+# (P-P01..P-P03)
+#
+# Like the PR 31H traversal, PostgreSQL cannot transparently EXPLAIN the body
+# of ``ati.find_graph_paths`` through a plain function call, so these tests
+# EXPLAIN the EXACT function-body query extracted from the versioned SQL
+# artifact (``migrations/sql/ati/v0031/graph_path_finding.sql``) inside a
+# controlled diagnostic transaction, binding the stored-function parameters
+# like the original. This is plan inspection only: it is not a second
+# production SQL implementation, and the production adapter never contains
+# this SQL.
+# ---------------------------------------------------------------------------
+
+_PATH_SQL_FILE = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "sql"
+    / "ati"
+    / "v0031"
+    / "graph_path_finding.sql"
+)
+
+_PATH_PARAMETERS = (
+    "investigation_id",
+    "source_entity_id",
+    "target_entity_id",
+    "max_depth",
+    "max_paths",
+    "scope",
+    "direction",
+    "relationship_type",
+    "entity_type",
+    "source",
+    "observed_from",
+    "observed_to",
+)
+
+_PATH_PARAMETER_TYPES = {
+    "investigation_id": "uuid",
+    "source_entity_id": "uuid",
+    "target_entity_id": "uuid",
+    "max_depth": "integer",
+    "max_paths": "integer",
+    "scope": "text",
+    "direction": "text",
+    "relationship_type": "text",
+    "entity_type": "text",
+    "source": "text",
+    "observed_from": "timestamptz",
+    "observed_to": "timestamptz",
+}
+
+
+def _path_body_query(
+    direction: str,
+    scope: str,
+    *,
+    max_depth: int = 4,
+    max_paths: int = 10,
+) -> tuple[str, dict[str, object]]:
+    """Return the exact path function body with bound parameters.
+
+    The versioned SQL artifact is the single source: the ``RETURN QUERY``
+    body is extracted verbatim and every ``p_*`` stored-function parameter is
+    turned into a typed bind parameter, so the EXPLAINed query is
+    byte-for-byte the query the stored function executes. Parameter names are
+    replaced longest-first so shorter names that are substrings of longer
+    ones (``p_source`` inside ``p_source_entity_id``) can never corrupt a
+    longer placeholder.
+    """
+    sql = _PATH_SQL_FILE.read_text()
+    body = sql[sql.index("RETURN QUERY") + len("RETURN QUERY") : sql.index("END $$;")]
+    # One-pass token replacement (longest-match semantics): ``p_source`` is a
+    # prefix of ``p_source_entity_id``, so a sequential substring replace in
+    # ANY order would corrupt the longer placeholder. A single regex pass
+    # matches each ``p_<name>`` token as a whole and emits the typed bind
+    # form directly.
+    pattern = re.compile(r"p_[a-z_]+")
+
+    def _typed_bind(match: re.Match[str]) -> str:
+        """Return the typed bind parameter for one known parameter token."""
+        name = match.group(0)[2:]
+        if name not in _PATH_PARAMETER_TYPES:
+            return match.group(0)
+        return f"CAST(:p_{name} AS {_PATH_PARAMETER_TYPES[name]})"
+
+    body = pattern.sub(_typed_bind, body)
+    params: dict[str, object] = {
+        "p_investigation_id": None,
+        "p_source_entity_id": None,
+        "p_target_entity_id": None,
+        "p_max_depth": max_depth,
+        "p_max_paths": max_paths,
+        "p_scope": scope,
+        "p_direction": direction,
+        "p_relationship_type": None,
+        "p_entity_type": None,
+        "p_source": None,
+        "p_observed_from": None,
+        "p_observed_to": None,
+    }
+    return body.strip(), params
+
+
+async def _path_foundation(
+    uow: PostgresUnitOfWork,
+    investigation_id: UUID,
+    source: UUID,
+    size: int,
+) -> list[UUID]:
+    """Seed source -> hop1 -> ... -> hopN; return the non-source entity ids."""
+    entities: list[UUID] = []
+    previous = source
+    for index in range(size):
+        target = await seed_entity(uow, value=f"pth{index}.test")
+        entities.append(target)
+        edge = await seed_relationship(
+            uow, source_entity_id=previous, target_entity_id=target
+        )
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=previous
+        )
+        await seed_observation(
+            uow,
+            investigation_id=investigation_id,
+            relationship=edge,
+            evidence_observation_id=evidence,
+        )
+        previous = target
+    # The last origin needs an admitted observation for the focal-identity
+    # rule only; the recursion itself only traverses supported edges.
+    await seed_evidence_observation(
+        uow, investigation_id=investigation_id, entity_id=previous
+    )
+    return entities
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_pp01_chain_source_path_uses_relationship_indexes(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """P-P01: a SOURCE chain path plan stays relationship-index served."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        source = await seed_entity(uow, value="root.test")
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
+        entities = await _path_foundation(uow, investigation_id, source, size=4)
+        body, params = _path_body_query("source", "investigation")
+        params["p_investigation_id"] = investigation_id
+        params["p_source_entity_id"] = source
+        params["p_target_entity_id"] = entities[-1]
+        plan = await _plan_analyze(uow, body, params)
+        assert "Actual Rows" in json.dumps(plan)
+        found = await _plan_indexes(uow, body, params)
+        _assert_index_family_served(
+            found, _RELATIONSHIP_ACCESS_INDEXES, "source path relationship adjacency"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_pp02_dense_bounded_lattice_terminates_with_indexes(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """P-P02: the dense bounded fixture terminates and stays index-served.
+
+    The combinatorial-work gate: a branching-2 amplifying lattice produces
+    ``2 ** 6 = 64`` qualifying simple paths within the hard depth-6 ceiling.
+    The recursive plan ANALYZEs to completion on real data (never a hang or
+    plan explosion) and the existing relationship-access index family remains
+    usable for the frontier joins.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        source = await seed_entity(uow, value="root.test")
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
+        # Two layers of two middle nodes each, converging on one target:
+        # 2 * 2 = 4 two-hop-through-middle candidates and 64 depth-6 paths.
+        targets_per_layer: list[list[UUID]] = []
+        previous_layer: list[UUID] = [source]
+        for layer in range(2):
+            layer_entities: list[UUID] = []
+            for ordinal in range(2):
+                entity = await seed_entity(uow, value=f"l{layer}n{ordinal}.test")
+                layer_entities.append(entity)
+                for pivot in previous_layer:
+                    edge = await seed_relationship(
+                        uow, source_entity_id=pivot, target_entity_id=entity
+                    )
+                    evidence = await seed_evidence_observation(
+                        uow, investigation_id=investigation_id, entity_id=pivot
+                    )
+                    await seed_observation(
+                        uow,
+                        investigation_id=investigation_id,
+                        relationship=edge,
+                        evidence_observation_id=evidence,
+                    )
+            targets_per_layer.append(layer_entities)
+            previous_layer = layer_entities
+        converged = await seed_entity(uow, value="converged.test")
+        # Repeat the final convergence edge into both depth-2 middle entities
+        # for path multiplicity up to the depth bound.
+        for pivot in targets_per_layer[-1]:
+            edge = await seed_relationship(
+                uow, source_entity_id=pivot, target_entity_id=converged
+            )
+            evidence = await seed_evidence_observation(
+                uow, investigation_id=investigation_id, entity_id=pivot
+            )
+            await seed_observation(
+                uow,
+                investigation_id=investigation_id,
+                relationship=edge,
+                evidence_observation_id=evidence,
+            )
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=converged
+        )
+        body, params = _path_body_query(
+            "either", "investigation", max_depth=6, max_paths=25
+        )
+        params["p_investigation_id"] = investigation_id
+        params["p_source_entity_id"] = source
+        params["p_target_entity_id"] = converged
+        plan = await _plan_analyze(uow, body, params)
+        assert "Actual Rows" in json.dumps(plan)
+        found = await _plan_indexes(uow, body, params)
+        _assert_index_family_served(
+            found, _RELATIONSHIP_ACCESS_INDEXES, "dense path relationship adjacency"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_pp03_endpoint_visibility_uses_admission_indexes(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """P-P03: both-endpoint visibility uses the association/admission indexes.
+
+    The two-endpoint visibility probe inside the path function is served by
+    the same index families as the PR 31B focal probe.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        source = await seed_entity(uow, value="s.test")
+        target = await seed_entity(uow, value="t.test")
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=source
+        )
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=target
+        )
+        found = await _plan_indexes(
+            uow,
+            "SELECT e.id FROM ati.entity e "
+            "WHERE e.id IN (:source, :target) AND e.deleted_at IS NULL AND EXISTS ("
+            "  SELECT 1 FROM ati.evidence_observation_entity eoe "
+            "  JOIN ati.investigation_evidence ie "
+            "    ON ie.evidence_observation_id = eoe.evidence_observation_id "
+            "  WHERE eoe.entity_id = e.id "
+            "    AND ie.investigation_id = :investigation_id"
+            ")",
+            {
+                "source": source,
+                "target": target,
+                "investigation_id": investigation_id,
+            },
+        )
+        assert found & {
+            "evidence_observation_entity_entity_idx",
+            "investigation_evidence_pkey",
+            "investigation_evidence_observation_idx",
+        }, f"plan used none of the endpoint visibility indexes: {sorted(found)}"

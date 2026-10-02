@@ -463,6 +463,81 @@ async def test_graph_traversal_migration_downgrade_and_re_upgrade() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_graph_path_migration_downgrade_and_re_upgrade() -> None:
+    """PR 31I migration 0036 downgrades and re-upgrades cleanly (P-SF01/02)."""
+    alembic_cfg = Config("alembic.ini")
+
+    async def function_present(name: str) -> bool:
+        """Return whether the named stored function is installed."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                return bool(
+                    await connection.scalar(
+                        text("""
+                        SELECT 1 FROM information_schema.routines
+                        WHERE routine_schema = 'ati'
+                          AND routine_name = :name
+                    """),
+                        {"name": name},
+                    )
+                )
+        finally:
+            await engine.dispose()
+
+    async def graph_counts() -> tuple[int, int]:
+        """Return (entity row count, relationship row count) from the tables."""
+        engine = _test_engine()
+        try:
+            async with engine.connect() as connection:
+                entities = await connection.scalar(
+                    text("SELECT count(*) FROM ati.entity")
+                )
+                relationships = await connection.scalar(
+                    text("SELECT count(*) FROM ati.relationship")
+                )
+        finally:
+            await engine.dispose()
+        return int(entities or 0), int(relationships or 0)
+
+    assert await function_present("find_graph_paths")
+    assert await function_present("traverse_graph")
+    before = await graph_counts()
+
+    command.downgrade(alembic_cfg, "0035_graph_traversal")
+    # The downgrade removes only the path function; the traversal function and
+    # the authoritative graph tables/data remain untouched.
+    assert not await function_present("find_graph_paths")
+    assert await function_present("traverse_graph")
+    assert await graph_counts() == before
+
+    command.upgrade(alembic_cfg, "head")
+    assert await function_present("find_graph_paths")
+    assert await function_present("traverse_graph")
+    assert await graph_counts() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_graph_path_function_installed_at_head() -> None:
+    """P-SF01: ati.find_graph_paths is installed by the head migration."""
+    engine = _test_engine()
+    try:
+        async with engine.connect() as connection:
+            exists = await connection.scalar(
+                text("""
+                SELECT 1 FROM information_schema.routines
+                WHERE routine_schema = 'ati'
+                  AND routine_name = 'find_graph_paths'
+            """)
+            )
+    finally:
+        await engine.dispose()
+    assert exists is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_timeline_schema_contract() -> None:
     """Timeline has the error-code check, owned sequence, and no mutation routines."""
     engine = _test_engine()
