@@ -280,6 +280,102 @@ context inheritance and scope/filter-change abort/reset; and
 ``relationship-graph.test.tsx`` covers the Investigation/Known edge
 context cues and exact server support counts.
 
+### Bounded multi-hop traversal tests (PR 31H)
+
+``tests/unit/app/query/test_graph.py`` (H-U01..H-U14) validates the
+``GraphTraversalQuery`` contract (depth 1..3 accepted, 0/4 rejected,
+Investigation default scope, source/time validation identical to the one-hop
+neighborhood, GraphResult identity/closure rules, and the service double
+implementing both `neighborhood` and `traverse` with isolated-focal vs
+`None` semantics).
+
+``tests/unit/app/query/test_graph_traversal_boundary.py`` (H-SF03/H-SF04/
+H-SF09) pins the mandatory stored-function boundary: the adapter issues
+one `ati.traverse_graph` call with the exact validated parameters, maps
+only returned rows, and a source-review assertion fails if any traversal
+SELECT / recursive CTE / join / filter / aggregation / endpoint SQL is ever
+introduced into the Python adapter.
+
+``tests/integration/test_query_graph_traversal.py`` (H-I01..H-I28) runs the
+real migration-installed stored function through the production service:
+
+- **depth boundaries**: A→B→C→D→E returns exactly the depth-1/2/3 edge
+  boundaries and depth-4 topology is never traversed;
+- **direction at every frontier**: SOURCE / TARGET / EITHER applied to each
+  frontier Entity;
+- **cycle/self-loop safety**: A→B→C→A terminates with canonical dedup and a
+  self-loop appears once without recursive growth;
+- **diamond/min-depth**: D once, E reachable, cross-branch repeated edges
+  keep one edge with one summary (never count multiplication);
+- **scope/filters before recursion**: cross-Investigation support hidden in
+  Investigation scope, Known global support traversable with truthful
+  investigation counts, Known-invisible root returns `None`, and
+  source/intervals/Relationship type/connected Entity type filters block
+  deeper reach;
+- **deletion/null semantics**: soft-deleted Relationships/endpoints are
+  absent, null `observed_at` matches one-hop semantics;
+- **equivalence/determinism**: depth-1 traversal topology and summaries
+  equal the one-hop neighborhood, ordering is deterministic
+  `(minimum_hop_depth, relationship_id)` / `(entity depth, entity_id)`;
+- **bounds/truncation**: exact-limit returns `truncated=false`, `limit + 1`
+  returns limit with `truncated=true`, endpoint closure is retained, an
+  isolated visible focal is focal-only, and a missing/deleted focal is
+  `None`.
+
+``tests/integration/test_query_indexes.py`` (H-P01..H-P08) records
+PostgreSQL `EXPLAIN (ANALYZE, BUFFERS)` evidence against the exact
+function-body query (extracted from the versioned SQL artifact for plan
+inspection only — never a second Python implementation): the source/target
+chain traversals stay served by the PR 31B adjacency index family,
+branching/high-degree/cycle-rich depth-2/3 recursion terminates with bounded
+work, Investigation scope uses the exact-admission index family, Known scope
+keeps one canonical row per Relationship, and filters plan as
+eligible-selection predicates.
+
+``tests/integration/test_migration.py`` (H-SF01/H-SF02) asserts migration
+`0035_graph_traversal` installs `ati.traverse_graph` at head and that a
+downgrade to `0034_timeline_error_message` drops only the traversal function
+(re-upgrade restores it).
+
+`tests/unit/api/test_graph_routes.py` (H-A01..H-A12) covers the traversal
+route: default depth 2 + Investigation + either, explicit depths 1/3
+forwarded, depth 0/4 as stable 400, every PR 31G filter forwarded exactly,
+oversized limit through the existing `QueryLimits` bound, scoped 404,
+isolated-focal 200, truthful truncation, exact summaries, the pinned
+OpenAPI operation `get_graph_entity_traversal`, and the one-hop
+`/neighborhood` contract remaining unchanged.
+
+Frontend: `graph-context-url.test.ts` (H-F01..H-F05) proves absent/invalid
+depth canonicalizes to 1, depth 2/3 reconstruct, depth 1 serializes as
+absent (2/3 canonical), and the context key/equality and
+`graphDepthActive()` include depth without redefining
+`graphContextActive()`; `graph-queries.test.tsx` (H-F12/G31H-D01) proves
+the traversal request maps `max_depth` + every filter exactly and that the
+traversal and neighborhood TanStack keys are distinct and depth-aware;
+`use-graph-expansion.test.tsx` (H-F19/H-F20) proves expansion inherits the
+full committed context at depth 2 and that a root depth change discards
+stale prior-depth expansion state; `relationship-graph-layout.test.ts`
+(H-L01..H-L05) proves the layered distance-ring layout (ring 1 identical to
+the one-hop radial layout, hop rings, diamond minimum distances,
+self-loops never stepping, determinism) and `relationship-graph.test.tsx`
+keeps the one-hop presentation contract green.
+
+### Real-browser multi-hop acceptance (PR 31H)
+
+`frontend/e2e/zz-31h-multihop.spec.ts` runs the depth journey in Chromium
+**and** Firefox at `workers=1` / `retries=0`: completed fake-world
+Investigation → Graph route at depth 1 → draft depth 2 with no request
+before Apply → Apply (one committed `graph_depth=2` transition) → edge
+selection + existing provenance → explicit one-hop node expansion on a
+traversal root → Apply Known scope (traversal inherits full context) →
+Clear (canonical depth-1 state) → Back reconstructs depth 2 / Forward
+depth 1 → depth 3 → refresh reconstructs the committed depth. A 20-cycle
+same-page stress (depth 1 → draft/apply 2 → interact/select/expand →
+draft/apply 3 → interact → Clear → Back → Forward → heartbeat) proves no
+route/Graph remount, no detached-DOM/native-pointer wedge, no duplicate
+request storm, no stale cross-depth result, and no accumulating product
+console errors. The PR 31G lifecycle gate remains green.
+
 ### Graph API route/DTO tests (PR 31C)
 
 PR 31C test coverage spans three layers over the existing PR 31A/31B graph

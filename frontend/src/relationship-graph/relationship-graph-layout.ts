@@ -1,14 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Deterministic radial one-hop graph layout (PR 24E §25; PR 31E expansion).
+// Deterministic radial / layered graph layout (PR 24E §25; PR 31E expansion;
+// PR 31H multi-hop distance rings).
 //
-// Focal entity centered, counterparties evenly spaced on a circle. The
-// layout depends only on the sorted counterparty identity order, so it is
-// fully deterministic and never persisted (coordinates are presentation
-// only; no graph physics for cosmetic effect). PR 31E adds incremental
-// placement for expansion: genuinely new Entities are arranged on a small
-// bounded ring around the expanded anchor Entity, ordered by canonical
-// identity and never colliding exactly with an existing position.
+// Focal entity centered, counterparties evenly spaced on a circle (or, for
+// multi-hop traversal, on minimum-distance rings). The layout depends only on
+// the sorted counterparty identity order, so it is fully deterministic and
+// never persisted (coordinates are presentation only; no graph physics for
+// cosmetic effect). PR 31E adds incremental placement for expansion:
+// genuinely new Entities are arranged on a small bounded ring around the
+// expanded anchor Entity, ordered by canonical identity and never colliding
+// exactly with an existing position.
 
 /** One positioned node coordinate (view-space units). */
 export interface GraphPosition {
@@ -17,6 +19,8 @@ export interface GraphPosition {
 }
 
 const RADIUS = 220;
+/** Distance-ring step for the PR 31H layered layout (ring 1 = RADIUS). */
+const RING_STEP = RADIUS;
 /** Half the radial base layout: expansion rings stay inside the circle. */
 const EXPANSION_RADIUS = 150;
 /** Extra angular offset (radians) so the first counterparty is not stuck
@@ -25,6 +29,80 @@ const START_ANGLE = -Math.PI / 2;
 /** Deterministic collision-avoidance step (golden angle), applies only when
  * an exact candidate position is already occupied. */
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+/**
+ * Deterministic layered positions for one focal + N counterparties (PR 31H).
+ *
+ * Multi-hop traversal results are placed on distance rings: the focal at the
+ * center, every other node on the ring of its minimum hop distance from the
+ * focal computed over the RETURNED graph topology (unweighted adjacency over
+ * the returned canonical edges; self-loops never contribute distance). Within
+ * one ring, entity IDs are sorted before angles are assigned, so the same
+ * identities always produce the same positions. For a depth-1 neighborhood
+ * (every counterparty at distance 1) the result is byte-identical to
+ * :func:`radialPositions`, keeping the one-hop visual unchanged. Position is
+ * presentation-only and never persisted; an entity unreachable through the
+ * returned edges (a closed result makes this impossible) falls back to ring 1.
+ */
+export function layeredPositions(
+  focalId: string,
+  nodes: readonly { entityId: string }[],
+  edges: readonly { sourceEntityId: string; targetEntityId: string }[],
+): { focal: GraphPosition; positions: ReadonlyMap<string, GraphPosition> } {
+  const adjacency = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (edge.sourceEntityId === edge.targetEntityId) {
+      continue; // a self-loop is topology, never a distance step
+    }
+    for (const [a, b] of [
+      [edge.sourceEntityId, edge.targetEntityId],
+      [edge.targetEntityId, edge.sourceEntityId],
+    ]) {
+      const list = adjacency.get(a) ?? [];
+      list.push(b);
+      adjacency.set(a, list);
+    }
+  }
+  const distance = new Map<string, number>([[focalId, 0]]);
+  const queue = [focalId];
+  const depth = new Map<string, number>([[focalId, 0]]);
+  while (queue.length > 0) {
+    const current = queue.shift() ?? "";
+    const currentDepth = depth.get(current) ?? 0;
+    for (const next of adjacency.get(current) ?? []) {
+      if (distance.has(next)) {
+        continue;
+      }
+      distance.set(next, currentDepth + 1);
+      depth.set(next, currentDepth + 1);
+      queue.push(next);
+    }
+  }
+  const byDistance = new Map<number, string[]>();
+  for (const node of nodes) {
+    if (node.entityId === focalId) {
+      continue;
+    }
+    const ring = Math.max(1, distance.get(node.entityId) ?? 1);
+    const list = byDistance.get(ring) ?? [];
+    list.push(node.entityId);
+    byDistance.set(ring, list);
+  }
+  const positions = new Map<string, GraphPosition>();
+  for (const [ring, ids] of byDistance) {
+    const ordered = [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const radius = RING_STEP * ring;
+    const step = (2 * Math.PI) / ordered.length;
+    ordered.forEach((id, index) => {
+      const angle = START_ANGLE + step * index;
+      positions.set(id, {
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+      });
+    });
+  }
+  return { focal: { x: 0, y: 0 }, positions };
+}
 
 /**
  * Deterministic radial positions for one focal + N counterparties.

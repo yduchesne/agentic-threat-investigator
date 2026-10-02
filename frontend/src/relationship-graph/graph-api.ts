@@ -37,6 +37,11 @@ export interface GraphRequestContext {
   observedTo: string | undefined;
 }
 
+/** Every semantic traversal input except direction and bound. */
+export interface GraphTraversalContext extends GraphRequestContext {
+  maxDepth: 1 | 2 | 3;
+}
+
 /**
  * Load the bounded one-hop neighborhood of one focal Entity.
  *
@@ -77,6 +82,53 @@ export async function fetchGraphNeighborhood(
   const qs = query.toString();
   return apiGet<GraphNeighborhood>(
     `/investigations/${investigationId}/graph/entities/${entityId}/neighborhood${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+/**
+ * Load the bounded multi-hop traversal of one focal Entity (PR 31H).
+ *
+ * The dedicated traversal endpoint returns the same atomic
+ * ``GraphNeighborhood`` wire vocabulary (canonical nodes/edges and a
+ * truthful ``truncated`` flag) with ``max_depth`` hops from the focal
+ * Entity. ``context`` carries the committed scope, every optional filter and
+ * the committed depth (2 or 3); ``direction`` is relative to the focal
+ * Entity and always sent. The request is Investigation- and Entity-scoped,
+ * bounded at the browser and funneled through the centralized api client
+ * with AbortSignal support.
+ */
+export async function fetchGraphTraversal(
+  investigationId: string,
+  entityId: string,
+  direction: RelationshipDirectionName,
+  context: GraphTraversalContext,
+  limit: number = GRAPH_NEIGHBORHOOD_LIMIT,
+  signal?: AbortSignal,
+): Promise<GraphNeighborhood> {
+  const query = new URLSearchParams();
+  query.set("direction", direction);
+  query.set("scope", context.scope);
+  query.set("max_depth", String(context.maxDepth));
+  if (context.entityType !== undefined) {
+    query.set("entity_type", context.entityType);
+  }
+  if (context.relationshipType !== undefined) {
+    query.set("relationship_type", context.relationshipType);
+  }
+  if (context.source !== undefined) {
+    query.set("source", context.source);
+  }
+  if (context.observedFrom !== undefined) {
+    query.set("observed_from", context.observedFrom);
+  }
+  if (context.observedTo !== undefined) {
+    query.set("observed_to", context.observedTo);
+  }
+  query.set("limit", String(limit));
+  const qs = query.toString();
+  return apiGet<GraphNeighborhood>(
+    `/investigations/${investigationId}/graph/entities/${entityId}/traversal${qs ? `?${qs}` : ""}`,
     signal,
   );
 }

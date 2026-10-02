@@ -173,6 +173,44 @@ URL or the query key.
   supported edges show `Supported by this Investigation`; edge detail shows
   exact matching-observation and matching-in-this-Investigation counts.
 
+### Bounded multi-hop traversal (PR 31H)
+
+The Graph view adds one URL-backed committed depth (`graph_depth`) that
+selects exactly one server operation: depth 1 (absent parameter, the
+backward-compatible default) uses the existing one-hop neighborhood endpoint;
+depth 2/3 use the dedicated bounded traversal endpoint (`.../traversal`).
+Depth is hop distance from the focal Entity; the server hard-bounds 1..3 and
+the traversal inherits the exact PR 31G scope and every optional filter at
+every frontier.
+
+- **URL is the committed depth authority**: absent or malformed `graph_depth`
+  canonicalizes to depth 1; depth 1 serializes as absent; depth 2/3 serialize
+  canonically; refresh and browser Back/Forward reconstruct the committed
+  depth. `graphDepthActive()` is a narrow depth predicate distinct from
+  `graphContextActive()` (optional filters).
+- **Draft/Apply lifecycle**: the depth selector is part of the browser-local
+  graph draft; editing the draft issues no request, Apply performs one route
+  commit, and Clear returns to depth 1 with Investigation scope and no
+  optional filters.
+- **One server operation at a time**: depth 1 enables the neighborhood hook,
+  depth 2/3 the traversal hook; the two TanStack Query keys are distinct and
+  never share cache entries, so stale prior-depth responses cannot overwrite
+  the current state and the two never race.
+- **Traversal root + explicit one-hop expansion**: the depth 2/3 server
+  result seeds the root topology and explicit node expansion continues to use
+  the existing one-hop endpoint under the same committed context. Changing
+  the root depth is a root semantic change: accumulated expansion state
+  resets and stale prior-root expansion results are discarded.
+- **No route/Graph remount**: depth changes are query-only navigation on the
+  same Graph route; the Investigation shell and `RelationshipGraph` stay
+  mounted (`key=`-style remounts, second router/stores and URL write-back
+  effects are prohibited).
+- **Presentation**: `RelationshipGraph` is reused as-is; nodes are placed on
+  deterministic minimum-distance rings (focal center, hop 1 at the historical
+  radius, deeper hops on outer rings with Entity UUID tie-breakers), the
+  `truncated` cue is reused per operation, and the bound never implies
+  topology exhaustion beyond the requested depth.
+
 ## Map
 
 Use Leaflet.

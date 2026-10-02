@@ -48,8 +48,10 @@ export default defineConfig({
       // PR 31F-8: the routed native-pointer stress journey runs in Firefox
       // as well (both engines reproduced the detached-DOM/pointer class).
       // PR 31G: the graph-context lifecycle stress also runs in both engines.
+      // PR 31H: the multi-hop depth journey + 20-cycle stress also runs in
+      // both engines.
       testMatch:
-        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context)\.spec\.ts/,
+        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop)\.spec\.ts/,
     },
   ],
 });

@@ -12,17 +12,21 @@ filter parameters and the per-edge Investigation support count to the wire.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
 from agentic_threat_investigator.app.query.graph import (
+    DEFAULT_TRAVERSAL_MAX_DEPTH,
     GraphEdge,
     GraphNeighborhoodQuery,
     GraphNode,
     GraphResult,
     GraphScope,
+    GraphTraversalQuery,
 )
+from agentic_threat_investigator.app.query.models import QueryLimits
 from agentic_threat_investigator.app.query.relationships import (
     RelationshipReadItem,
 )
@@ -343,7 +347,6 @@ def test_g31c_r13_non_analyst_role_is_403() -> None:
     ``require_analyst`` dependency then rejects it exactly like analytical
     GETs.
     """
-    from typing import Any
 
     class ObserverActor:
         """Authenticated actor with an unsupported role value."""
@@ -638,3 +641,221 @@ def test_g31g_r08_naive_observed_bound_is_400() -> None:
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_request"
     assert bundle.graph.neighborhood_queries == []
+
+
+def create_openapi_schema() -> dict[str, Any]:
+    """Build the deterministic OpenAPI schema for the fixture app."""
+    from agentic_threat_investigator.api.app import create_app
+    from agentic_threat_investigator.config import Settings
+
+    schema = create_app(Settings()).openapi()
+    assert isinstance(schema, dict)
+    return schema
+
+
+# --- PR 31H traversal route contract (H-A01..H-A12) ---------------------------
+
+_TRAVERSAL = (
+    f"/api/v1/investigations/{INVESTIGATION}/graph/entities/{{entity_id}}/traversal"
+)
+
+
+def test_ha01_default_traversal_depth_scope_direction() -> None:
+    """Omitted max_depth defaults to 2; scope/direction to Investigation/either."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(_TRAVERSAL.format(entity_id=uuid4()))
+    assert response.status_code == 200
+    query = bundle.graph.traversal_queries[0]
+    assert isinstance(query, GraphTraversalQuery)
+    assert query.max_depth == DEFAULT_TRAVERSAL_MAX_DEPTH
+    assert query.scope is GraphScope.INVESTIGATION
+    assert query.direction is RelationshipDirection.EITHER
+    assert bundle.graph.neighborhood_queries == []
+
+
+@pytest.mark.parametrize("depth", [1, 3])
+def test_ha02_ha03_explicit_depth_forwarded(depth: int) -> None:
+    """Explicit depth 1 and depth 3 are forwarded verbatim."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _TRAVERSAL.format(entity_id=uuid4()), params={"max_depth": str(depth)}
+        )
+    assert response.status_code == 200
+    query = bundle.graph.traversal_queries[0]
+    assert query.max_depth == depth
+
+
+@pytest.mark.parametrize("depth", [0, 4])
+def test_ha04_depth_outside_bounds_is_stable_400(depth: int) -> None:
+    """Depth 0/4 fail closed as a stable 400, never reaching the service."""
+    bundle = FakeQueryBundle()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _TRAVERSAL.format(entity_id=uuid4()),
+            params={"max_depth": str(depth)},
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert bundle.graph.traversal_queries == []
+
+
+def test_ha05_all_pr31g_filters_forwarded_exactly() -> None:
+    """Every PR 31G filter parameter maps to the traversal query verbatim."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _result()
+    entity = uuid4()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _TRAVERSAL.format(entity_id=entity),
+            params={
+                "max_depth": "3",
+                "direction": RelationshipDirection.SOURCE.value,
+                "scope": "known",
+                "relationship_type": RelationshipType.CNAME_OF.value,
+                "entity_type": EntityType.IP_ADDRESS.value,
+                "source": "rdap",
+                "observed_from": "2026-01-01T00:00:00Z",
+                "observed_to": "2026-02-01T00:00:00Z",
+                "limit": "9",
+            },
+        )
+    assert response.status_code == 200
+    query = bundle.graph.traversal_queries[0]
+    assert isinstance(query, GraphTraversalQuery)
+    assert query.investigation_id == INVESTIGATION
+    assert query.entity_id == entity
+    assert query.max_depth == 3
+    assert query.direction is RelationshipDirection.SOURCE
+    assert query.scope is GraphScope.KNOWN
+    assert query.relationship_type is RelationshipType.CNAME_OF
+    assert query.entity_type is EntityType.IP_ADDRESS
+    assert query.source == "rdap"
+    assert query.observed_from == datetime(2026, 1, 1, tzinfo=UTC)
+    assert query.observed_to == datetime(2026, 2, 1, tzinfo=UTC)
+    assert query.limit == 9
+
+
+def test_ha06_oversized_limit_is_existing_bounded_failure() -> None:
+    """An oversized traversal limit fails through the existing service bound."""
+
+    async def bounded_traverse(query: GraphTraversalQuery) -> GraphResult:
+        """Reject limits above the server maximum before any read."""
+        if query.limit > QueryLimits().max_page_size:
+            raise ValueError("limit must be between 1 and 200")
+        return _result()
+
+    bundle = FakeQueryBundle()
+    bundle.graph.traverse = bounded_traverse  # type: ignore[method-assign]
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            _TRAVERSAL.format(entity_id=uuid4()), params={"limit": "500"}
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_ha07_service_none_is_graph_entity_404() -> None:
+    """Missing/deleted/not-visible focal maps to the scoped graph 404."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = None
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(_TRAVERSAL.format(entity_id=uuid4()))
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "graph_entity_not_found"
+    assert len(bundle.graph.traversal_queries) == 1
+
+
+def test_ha08_isolated_focal_is_200_focal_only() -> None:
+    """A visible isolated focal Entity maps to a 200 focal-only graph."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = GraphResult(nodes=(_focal_node(),), edges=(), truncated=False)
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(_TRAVERSAL.format(entity_id=_focal_node().entity_id))
+    assert response.status_code == 200
+    body = response.json()
+    assert [node["entity_id"] for node in body["nodes"]] == [
+        str(_focal_node().entity_id)
+    ]
+    assert body["edges"] == []
+    assert body["truncated"] is False
+    assert set(body) == {"nodes", "edges", "truncated"}
+
+
+def test_ha09_truncated_flag_preserved() -> None:
+    """A truthful truncated traversal passes through unchanged."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = GraphResult(
+        nodes=(_focal_node(), _neighbor_node()),
+        edges=(_edge(),),
+        truncated=True,
+    )
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(_TRAVERSAL.format(entity_id=uuid4()))
+    assert response.status_code == 200
+    assert response.json()["truncated"] is True
+
+
+def test_ha10_summaries_copied_exactly() -> None:
+    """Edge summaries are copied field-for-field onto the traversal wire."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(_TRAVERSAL.format(entity_id=uuid4()))
+    assert response.status_code == 200
+    edge = response.json()["edges"][0]
+    expected = _edge()
+    assert edge == {
+        "relationship_id": str(expected.relationship_id),
+        "source_entity_id": str(expected.source_entity_id),
+        "target_entity_id": str(expected.target_entity_id),
+        "relationship_type": RelationshipType.RESOLVES_TO.value,
+        "observation_count": 3,
+        "investigation_observation_count": 3,
+        "first_observed_at": "2026-01-01T00:00:00Z",
+        "last_observed_at": "2026-01-03T00:00:00Z",
+    }
+
+
+def test_ha11_openapi_synchronized() -> None:
+    """The traversal operation is part of the pinned OpenAPI contract."""
+    schema = create_openapi_schema()
+    path = (
+        "/api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/traversal"
+    )
+    operation = schema["paths"][path]["get"]
+    assert operation["operationId"] == "get_graph_entity_traversal"
+    parameters = {parameter["name"] for parameter in operation["parameters"]}
+    assert "max_depth" in parameters
+    assert "limit" in parameters
+
+
+def test_ha12_neighborhood_contract_unchanged() -> None:
+    """The one-hop neighborhood keeps the exact PR 31G contract."""
+    bundle = FakeQueryBundle()
+    bundle.graph.result = _result()
+    with build_test_app(bundle=bundle) as client:
+        login_client(client)
+        response = client.get(
+            f"/api/v1/investigations/{INVESTIGATION}/graph/entities/"
+            f"{uuid4()}/neighborhood",
+            params={"max_depth": "2"},
+        )
+    # Unknown query parameters are ignored: the neighborhood stays one-hop and
+    # never accepts a depth.
+    assert response.status_code == 200
+    query = bundle.graph.neighborhood_queries[0]
+    assert isinstance(query, GraphNeighborhoodQuery)
+    assert bundle.graph.traversal_queries == []

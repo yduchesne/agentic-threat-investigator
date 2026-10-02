@@ -1383,6 +1383,81 @@ PR 24E `PostgresRelationshipQueryService` Investigation-visibility
 semantics, and production composition wires the concrete service into
 `QueryServiceBundle.graph`.
 
+#### PR 31H bounded multi-hop traversal
+
+PR 31H adds one bounded server-side operation that walks already-persisted
+canonical Relationship topology to a requested depth. It is an exploration
+convenience over the exact PR 31G scope/filter semantics; one-hop
+incremental expansion remains the normal interactive path and path finding
+remains PR 31I.
+
+```text
+GraphTraversalQuery (app/query/graph.py)          application contract (depth 1..3)
+    -> GraphQueryService.traverse()                         application read service
+    -> ati.traverse_graph(...) (migrations/sql/ati/v0030)    PostgreSQL stored function
+    -> PostgresGraphQueryService.traverse()                  invocation/mapping boundary only
+    -> FastAPI traversal route (api/routes/graph.py)         PR 31H thin HTTP projection
+    -> existing GraphNeighborhoodResponse wire vocabulary
+    -> TanStack Query traversal hook (frontend graph-queries.ts)
+    -> RelationshipGraph (layered distance rings)
+```
+
+Architectural decisions:
+
+- **stored-function-only traversal SQL (mandatory boundary)**: the entire
+  traversal (focal visibility, eligible-edge selection under PR 31G scope/
+  source/time/type filters, recursive CTE, Entity-path cycle prevention,
+  minimum-hop-depth derivation, canonical deduplication, observation/support
+  aggregation, endpoint Entity projection, deterministic ordering and the
+  limit + 1 truncation accounting) is implemented inside the versioned
+  `ati.traverse_graph` database function. `PostgresGraphQueryService
+  .traverse()` only binds validated parameters, invokes the function and maps
+  its canonical node/edge rows; no traversal SELECT, recursive CTE, join,
+  filter, aggregation or endpoint lookup SQL exists in Python;
+- **depth is hop distance from the focal Entity**: depth `1` is semantically
+  equivalent to the one-hop neighborhood for the same context and
+  non-truncating limit, depths `2`/`3` walk deeper canonical Relationships;
+  the server-owned hard bound is 3 and the traversal endpoint defaults to 2;
+- **cycle prevention is per Entity path**: a recursive branch never revisits
+  an Entity already in that branch; a self-loop is returned once as topology
+  but never recurses; depth is capped inside the recursion so database work
+  is bounded by depth, never by graph size;
+- **direction and connected Entity type apply at every frontier**: SOURCE /
+  TARGET / EITHER semantics follow the current frontier Entity, and the
+  `entity_type` filter is applied to each next Entity (not only depth-1 and
+  not to the root);
+- **PR 31G visibility/filter semantics precede recursion**: scope admission
+  (`investigation` vs `known`), exact `RelationshipObservation.source` and
+  half-open `observed_at` bounds filter the eligible observation set before
+  any edge can be traversed, so a traversal can never cross a hidden edge;
+  Known scope broadens edge support globally but never removes the focal
+  Entity's Investigation visibility;
+- **canonical deduplication after recursive reachability**: one canonical
+  Relationship appears once ordered by `(minimum_hop_depth, relationship_id)`
+  and one canonical Entity once (focal first, then
+  `(minimum_hop_depth, entity_id)`); recursive/path multiplicity can never
+  inflate `observation_count`, `investigation_observation_count` or
+  first/last observed timestamps, which are computed set-wise over the
+  eligible filtered observation set;
+- **bounded distinct Relationships**: `QueryLimits` validates the caller
+  `limit`, exactly `limit` distinct Relationships are returned, and
+  `truncated` truthfully reports whether more eligible distinct Relationships
+  were discovered than fit the bound (it never implies graph exhaustion
+  beyond the requested depth);
+- **existing indexes first**: the recursive plan stays served by the PR 31B
+  source/target adjacency indexes, the exact-admission index family and the
+  focal-visibility association index; no index/schema migration is introduced
+  without measured `EXPLAIN (ANALYZE, BUFFERS)` evidence (none is required);
+- **one dedicated HTTP operation**: `GET .../entities/{id}/traversal` reuses
+  the existing one-hop wire vocabulary (`GraphNeighborhoodResponse` — nodes,
+  edges, `truncated`); no paths, arrays, SQL concepts or second edge/node
+  DTO are exposed and `/neighborhood` remains one-hop and
+  backward-compatible;
+- **no graph database, no second graph model, no path finding**: traversal
+  stays a bounded relational read over `Entity` / `Relationship` /
+  `RelationshipObservation`; acquisition, mutation, provider/Coordinator/LLM
+  work and destination path enumeration are all out of scope (PR 31I).
+
 #### PR 31B visibility and projection rules
 
 - **focal Entity visibility**: the focal Entity is visible when it exists,

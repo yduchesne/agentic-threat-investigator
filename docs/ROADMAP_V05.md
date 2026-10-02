@@ -232,6 +232,42 @@ CTEs over the canonical Relationship topology. Support a small, explicit
 maximum depth, cycle prevention, deterministic result semantics, and hard
 resource/result limits.
 
+Delivered:
+
+- `GraphTraversalQuery` (the exact PR 31G graph context plus an explicit
+  1..3 hop depth) and `GraphQueryService.traverse()` returning the existing
+  `GraphResult` vocabulary;
+- the entire traversal is implemented inside the versioned stored function
+  `ati.traverse_graph` (migration `0035_graph_traversal`): focal visibility,
+  PR 31G eligible-observation/scope/source/time/type filters before
+  recursion, direction and connected Entity type at every frontier,
+  Entity-path cycle prevention (self-loops returned once, never recursing),
+  minimum-hop-depth derivation, canonical deduplication, set-wise support
+  aggregation, endpoint Entity projection, deterministic
+  `(minimum_hop_depth, id)` ordering, and bounded distinct Relationship
+  results with truthful `truncated`. `PostgresGraphQueryService.traverse()`
+  is an invocation/mapping boundary only — no traversal SQL lives in
+  Python;
+- depth-1 traversal is proven equivalent to the one-hop neighborhood under
+  the same context; cycle/diamond/self-loop/scope/filter/deletion/
+  truncation/determinism vertical slices pass against real PostgreSQL;
+  representative `EXPLAIN (ANALYZE, BUFFERS)` evidence shows the existing PR
+  31B adjacency/admission index families serve the recursive plan (no new
+  index migration is introduced);
+- a dedicated GET `.../entities/{entity_id}/traversal` endpoint reuses the
+  existing `GraphNeighborhoodResponse` wire vocabulary (default depth 2;
+  `/neighborhood` stays one-hop and backward-compatible; OpenAPI + generated
+  TypeScript synchronized);
+- URL-backed `graph_depth` committed state (absent/invalid = depth 1,
+  depth 1 serializes as absent), a bounded depth selector in the graph
+  draft with no request before Apply, TanStack Query ownership with distinct
+  traversal/neighborhood keys (no cross-depth cache or race), traversal
+  root + explicit one-hop expansion with reset on committed depth change,
+  existing `RelationshipGraph` with deterministic minimum-distance rings,
+  and a Chromium+Firefox directed journey + 20-cycle same-page stress;
+- multi-hop is an exploration convenience: one-hop incremental expansion
+  remains the normal interactive path, and path finding remains PR 31I. [DONE]
+
 Benchmark representative ATI graph sizes and access patterns. Multi-hop
 traversal is an exploration convenience, not permission for unbounded
 whole-graph queries. Preserve one-hop incremental expansion as the normal

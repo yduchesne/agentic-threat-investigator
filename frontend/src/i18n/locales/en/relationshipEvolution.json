@@ -163,5 +163,11 @@
  "title": "Relationship evolution",
  "view.evolution": "Evolution",
  "view.graph": "Graph",
- "view.switchAria": "Workspace view"
+ "view.switchAria": "Workspace view",
+ "graph.filters.depth.label": "Depth",
+ "graph.filters.depth.1": "1 hop",
+ "graph.filters.depth.2": "2 hops",
+ "graph.filters.depth.3": "3 hops",
+ "graph.depth.hint": "Depth is hop distance from the focal entity. Depth 1 is the one-hop neighborhood; depth 2/3 run a bounded server-side traversal. Explicit one-hop node expansion remains available at any depth.",
+ "graph.multihopBoundedNotice": "Bounded traversal; additional relationships may exist up to the requested depth."
 }

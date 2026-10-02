@@ -15,6 +15,7 @@
 //   graph_relationship_type=<RelationshipType>
 //   graph_source=<exact RelationshipObservation source>
 //   graph_observed_from=<ISO>&graph_observed_to=<ISO>
+//   graph_depth=2|3                              (absent/1 = depth 1)
 //
 // Unrelated URL parameters are preserved; a malformed enum/timestamp value
 // is canonicalized away rather than sent to the API.
@@ -33,6 +34,12 @@ import { RELATIONSHIP_TYPES } from "../relationships/labels";
 
 /** The exactly-two graph scopes (Investigation default). */
 export const GRAPH_SCOPES: readonly GraphScopeName[] = ["investigation", "known"];
+
+/** The exactly three committed traversal depths (1 = one-hop default). */
+export const GRAPH_DEPTHS: readonly [1, 2, 3] = [1, 2, 3];
+
+/** The canonical committed graph depth (hop distance from the focal). */
+export type GraphDepth = 1 | 2 | 3;
 
 /** The canonical connected/counterparty Entity types offered as filters. */
 export const GRAPH_ENTITY_TYPES: readonly EntityTypeName[] = [
@@ -55,9 +62,10 @@ export const GRAPH_CONTEXT_PARAMS = [
   "graph_source",
   "graph_observed_from",
   "graph_observed_to",
+  "graph_depth",
 ] as const;
 
-/** The committed graph context (Investigation + no filters = default). */
+/** The committed graph context (Investigation + no filters + depth 1 = default). */
 export interface GraphContext {
   scope: GraphScopeName;
   entityType: EntityTypeName | undefined;
@@ -65,6 +73,8 @@ export interface GraphContext {
   source: string | undefined;
   observedFrom: string | undefined;
   observedTo: string | undefined;
+  /** PR 31H: hop distance from the focal; 1 = the one-hop neighborhood. */
+  depth: GraphDepth;
 }
 
 /** The neutral graph context: Investigation scope, no optional filters. */
@@ -76,7 +86,17 @@ export function emptyGraphContext(): GraphContext {
     source: undefined,
     observedFrom: undefined,
     observedTo: undefined,
+    depth: 1,
   };
+}
+
+/** Parse one committed depth; absent/malformed/out-of-range values are 1. */
+export function parseGraphDepth(value: string | null): GraphDepth {
+  if (value === null) {
+    return 1;
+  }
+  const parsed = parseInt(value, 10);
+  return parsed === 2 || parsed === 3 ? (parsed as GraphDepth) : 1;
 }
 
 /**
@@ -97,6 +117,7 @@ export function parseGraphContext(params: URLSearchParams): GraphContext {
     source: nonBlank(params.get("graph_source")),
     observedFrom: parseTimestampParam(params.get("graph_observed_from")),
     observedTo: parseTimestampParam(params.get("graph_observed_to")),
+    depth: parseGraphDepth(params.get("graph_depth")),
   };
 }
 
@@ -118,6 +139,7 @@ export function applyGraphContext(
     graph_source: context.source,
     graph_observed_from: context.observedFrom,
     graph_observed_to: context.observedTo,
+    graph_depth: context.depth === 1 ? undefined : String(context.depth),
   });
 }
 
@@ -132,6 +154,11 @@ export function graphContextActive(context: GraphContext): boolean {
   );
 }
 
+/** Whether the committed depth is beyond the default one-hop (PR 31H). */
+export function graphDepthActive(context: GraphContext): boolean {
+  return context.depth !== 1;
+}
+
 /** Canonical committed-context identity (URL resync + expansion reset). */
 export function graphContextKey(context: GraphContext): string {
   return JSON.stringify([
@@ -141,6 +168,7 @@ export function graphContextKey(context: GraphContext): string {
     context.source ?? null,
     context.observedFrom ?? null,
     context.observedTo ?? null,
+    context.depth,
   ]);
 }
 

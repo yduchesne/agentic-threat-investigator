@@ -427,6 +427,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/investigations/{investigation_id}/graph/entities/{entity_id}/traversal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Graph Entity Traversal
+         * @description Return the bounded multi-hop traversal of one focal Entity.
+         *
+         *     ``max_depth`` defaults to :data:`DEFAULT_TRAVERSAL_MAX_DEPTH` (2) and is
+         *     hard-bounded to 1..3 (depth 1 equals the one-hop neighborhood; other
+         *     values are a stable 400 ``invalid_request``). Every other parameter
+         *     (``direction``, ``scope``, ``relationship_type``, ``entity_type``,
+         *     ``source``, ``observed_from`` / ``observed_to``, ``limit``) keeps the
+         *     exact PR 31G neighborhood meaning and is applied at every traversal
+         *     frontier. The response reuses the canonical
+         *     ``GraphNeighborhoodResponse`` vocabulary (nodes, edges, ``truncated``):
+         *     no paths, arrays, SQL concepts, or second edge/node DTO are exposed.
+         *     Scoped absence maps to the same 404 ``graph_entity_not_found`` as the
+         *     one-hop read.
+         */
+        get: operations["get_graph_entity_traversal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/investigations/{investigation_id}/history": {
         parameters: {
             query?: never;
@@ -3540,6 +3572,93 @@ export interface operations {
     get_graph_entity_neighborhood: {
         parameters: {
             query?: {
+                direction?: components["schemas"]["RelationshipDirection"];
+                relationship_type?: components["schemas"]["RelationshipType"] | null;
+                scope?: components["schemas"]["GraphScope"] | null;
+                entity_type?: components["schemas"]["EntityType"] | null;
+                source?: string | null;
+                observed_from?: string | null;
+                observed_to?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                investigation_id: string;
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphNeighborhoodResponse"];
+                };
+            };
+            /** @description Invalid request. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Access forbidden. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_graph_entity_traversal: {
+        parameters: {
+            query?: {
+                max_depth?: number | null;
                 direction?: components["schemas"]["RelationshipDirection"];
                 relationship_type?: components["schemas"]["RelationshipType"] | null;
                 scope?: components["schemas"]["GraphScope"] | null;

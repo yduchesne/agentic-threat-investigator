@@ -32,14 +32,17 @@ import type {
 import { localDateTimeToIso } from "../analyst-table/filters";
 import { RELATIONSHIP_TYPES } from "../relationships/labels";
 import {
+  GRAPH_DEPTHS,
   GRAPH_ENTITY_TYPES,
   GRAPH_SCOPES,
   type GraphContext,
+  type GraphDepth,
 } from "./graph-context-url";
 
 /** One draft (browser-local until Apply). */
 export interface GraphDraft {
   scope: GraphScopeName;
+  depth: GraphDepth;
   entityType: EntityTypeName | "";
   relationshipType: RelationshipTypeName | "";
   source: string;
@@ -51,6 +54,7 @@ export interface GraphDraft {
 export function graphDraftFromCommitted(context: GraphContext): GraphDraft {
   return {
     scope: context.scope,
+    depth: context.depth,
     entityType: context.entityType ?? "",
     relationshipType: context.relationshipType ?? "",
     source: context.source ?? "",
@@ -63,6 +67,7 @@ export function graphDraftFromCommitted(context: GraphContext): GraphDraft {
 export function graphDraftToCommitted(draft: GraphDraft): GraphContext {
   return {
     scope: draft.scope,
+    depth: draft.depth,
     entityType: draft.entityType === "" ? undefined : draft.entityType,
     relationshipType:
       draft.relationshipType === "" ? undefined : draft.relationshipType,
@@ -160,6 +165,36 @@ export function GraphFilters({
             ))}
           </ToggleButtonGroup>
         </Box>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          <Typography
+            variant="caption"
+            component="span"
+            id="graph-depth-label"
+          >
+            {t("graph.filters.depth.label")}
+          </Typography>
+          <ToggleButtonGroup
+            value={draft.depth}
+            exclusive
+            size="small"
+            aria-labelledby="graph-depth-label"
+            onChange={(_event, next: number | null) => {
+              if (next === 1 || next === 2 || next === 3) {
+                set({ depth: next });
+              }
+            }}
+          >
+            {GRAPH_DEPTHS.map((depth) => (
+              <ToggleButton
+                key={depth}
+                value={depth}
+                aria-label={t(`graph.filters.depth.${depth}`)}
+              >
+                {t(`graph.filters.depth.${depth}`)}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Box>
         <FormControl size="small" sx={{ minWidth: 160 }}>
           <InputLabel id="graph-entity-type-label">
             {t("graph.filters.entityType.label")}
@@ -247,6 +282,14 @@ export function GraphFilters({
         aria-label={t(`graph.filters.scope.${draft.scope}Hint`)}
       >
         {t(`graph.filters.scope.${draft.scope}Hint`)}
+      </Typography>
+      <Typography
+        variant="caption"
+        component="div"
+        role="note"
+        aria-label={t("graph.depth.hint")}
+      >
+        {t("graph.depth.hint")}
       </Typography>
     </Box>
   );

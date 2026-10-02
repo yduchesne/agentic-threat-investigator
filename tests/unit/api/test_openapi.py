@@ -105,6 +105,7 @@ def test_openapi_operation_ids_are_explicit() -> None:
         "list_investigation_geoint_location_observations",
         "get_investigation_geoint_observation",
         "get_graph_entity_neighborhood",
+        "get_graph_entity_traversal",
         "list_relationships",
         "get_relationship",
         "list_relationship_observations",

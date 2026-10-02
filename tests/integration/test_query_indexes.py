@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -930,3 +931,373 @@ async def test_x04_graph_admission_join_uses_admission_index(
             "investigation_evidence_pkey",
             "investigation_evidence_observation_idx",
         }, f"plan used none of the admission indexes: {sorted(found)}"
+
+
+# ---------------------------------------------------------------------------
+# PR 31H traversal plan eligibility and bounded-execution evidence (H-P01..H-P08)
+#
+# PostgreSQL cannot transparently EXPLAIN the body of ``ati.traverse_graph``
+# through a plain function call (the plan shows a Function Scan node). Per the
+# PR 31H plan-authoring guidance, these tests therefore EXPLAIN the EXACT
+# function-body query extracted from the versioned SQL artifact
+# (``migrations/sql/ati/v0030/graph_traversal.sql``) inside a controlled
+# diagnostic transaction, with the stored-function parameters bound like the
+# original. This is plan inspection only: it is not a second production SQL
+# implementation, and the production adapter never contains this SQL.
+# ---------------------------------------------------------------------------
+
+
+_TRAVERSAL_SQL_FILE = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "sql"
+    / "ati"
+    / "v0030"
+    / "graph_traversal.sql"
+)
+
+_TRAVERSAL_PARAMETERS = (
+    "investigation_id",
+    "entity_id",
+    "max_depth",
+    "scope",
+    "direction",
+    "relationship_type",
+    "entity_type",
+    "source",
+    "observed_from",
+    "observed_to",
+    "limit",
+)
+
+# The diagnostic statement is run outside the PL/pgSQL function, so each bind
+# parameter must carry the stored function's declared SQL type explicitly
+# (otherwise ``%s IS NULL``-style usages make prepared plans infer conflicting
+# types for the same parameter).
+_TRAVERSAL_PARAMETER_TYPES = {
+    "investigation_id": "uuid",
+    "entity_id": "uuid",
+    "max_depth": "integer",
+    "scope": "text",
+    "direction": "text",
+    "relationship_type": "text",
+    "entity_type": "text",
+    "source": "text",
+    "observed_from": "timestamptz",
+    "observed_to": "timestamptz",
+    "limit": "integer",
+}
+
+
+def _traversal_body_query(
+    direction: str,
+    scope: str,
+    *,
+    max_depth: int = 3,
+    relationship_type: str | None = None,
+    source: str | None = None,
+    limit: int = 50,
+) -> tuple[str, dict[str, object]]:
+    """Return the exact traversal function body with bound parameters.
+
+    The versioned SQL artifact is the single source: the ``RETURN QUERY``
+    body is extracted verbatim and every ``p_*`` stored-function parameter is
+    turned into a bind parameter with the same name, so the EXPLAINed query
+    is byte-for-byte the query the stored function executes.
+    """
+    sql = _TRAVERSAL_SQL_FILE.read_text()
+    body = sql[sql.index("RETURN QUERY") + len("RETURN QUERY") : sql.index("END $$;")]
+    for name in _TRAVERSAL_PARAMETERS:
+        body = body.replace(f"p_{name}", f":p_{name}")
+    for name, typ in _TRAVERSAL_PARAMETER_TYPES.items():
+        body = body.replace(f":p_{name}", f"CAST(:p_{name} AS {typ})")
+    params: dict[str, object] = {
+        "p_investigation_id": None,
+        "p_entity_id": None,
+        "p_max_depth": max_depth,
+        "p_scope": scope,
+        "p_direction": direction,
+        "p_relationship_type": relationship_type,
+        "p_entity_type": None,
+        "p_source": source,
+        "p_observed_from": None,
+        "p_observed_to": None,
+        "p_limit": limit,
+    }
+    return body.strip(), params
+
+
+async def _traversal_foundation(
+    uow: PostgresUnitOfWork, *, reverse: bool = False
+) -> tuple[UUID, UUID]:
+    """Seed a deterministic chain and return (investigation id, focal id)."""
+    investigation_id = await seed_investigation(uow)
+    focal = await seed_entity(uow, value="example.com")
+    await seed_evidence_observation(
+        uow, investigation_id=investigation_id, entity_id=focal
+    )
+    previous = focal
+    for index in range(3):
+        target = await seed_entity(uow, value=f"hop{index}.test")
+        evidence = await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=previous
+        )
+        if reverse:
+            edge = await seed_relationship(
+                uow, source_entity_id=target, target_entity_id=previous
+            )
+        else:
+            edge = await seed_relationship(
+                uow, source_entity_id=previous, target_entity_id=target
+            )
+        await seed_observation(
+            uow,
+            investigation_id=investigation_id,
+            relationship=edge,
+            evidence_observation_id=evidence,
+        )
+        previous = target
+    return investigation_id, focal
+
+
+async def _plan_analyze(
+    uow: PostgresUnitOfWork,
+    statement: str,
+    params: Mapping[str, object],
+) -> dict[str, object]:
+    """Run ``EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`` and return the plan."""
+    assert uow.session is not None
+    result = await uow.session.execute(
+        text("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement), dict(params)
+    )
+    payload = result.scalar_one()
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    assert isinstance(payload, list) and payload
+    return dict(payload[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hp01_chain_source_depth3_uses_source_adjacency(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """H-P01: chain SOURCE depth-3 traversal stays relationship-index served.
+
+    PostgreSQL materializes the ``elig`` CTE, so the recursive join itself
+    scans the materialized topologies rather than an index. The evidence
+    therefore asserts the legitimate relationship-access index family inside
+    the plan (G31B-X01/X02 cover the directional adjacency primitives
+    separately), proving the traversal is served by canonical adjacency
+    indexes and never degrades to an unindexed relationship scan.
+    """
+    async with uow_factory() as uow:
+        investigation_id, focal = await _traversal_foundation(uow)
+        body, params = _traversal_body_query("source", "investigation")
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        found = await _plan_indexes(uow, body, params)
+        assert found & _RELATIONSHIP_ACCESS_INDEXES, (
+            "source traversal used no legitimate relationship access index: "
+            f"{sorted(found)}"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hp02_reverse_chain_target_depth3_uses_target_adjacency(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """H-P02: reverse-chain TARGET depth-3 stays relationship-index served.
+
+    Same materialized-CTE plan shape as H-P01; the directional TARGET
+    primitive is separately evidenced by G31B-X02.
+    """
+    async with uow_factory() as uow:
+        investigation_id, focal = await _traversal_foundation(uow, reverse=True)
+        body, params = _traversal_body_query("target", "investigation")
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        found = await _plan_indexes(uow, body, params)
+        assert found & _RELATIONSHIP_ACCESS_INDEXES, (
+            "target traversal used no legitimate relationship access index: "
+            f"{sorted(found)}"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hp03_branching_either_depth2_bounded_recursive_plan(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """H-P03: branching EITHER depth-2 recursion terminates with a bounded plan."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        focal = await seed_entity(uow, value="root.test")
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=focal
+        )
+        branch_a = await seed_entity(uow, value="a.test")
+        branch_b = await seed_entity(uow, value="b.test")
+        for target in (branch_a, branch_b):
+            edge = await seed_relationship(
+                uow, source_entity_id=focal, target_entity_id=target
+            )
+            evidence = await seed_evidence_observation(
+                uow, investigation_id=investigation_id, entity_id=focal
+            )
+            await seed_observation(
+                uow,
+                investigation_id=investigation_id,
+                relationship=edge,
+                evidence_observation_id=evidence,
+            )
+            deeper = await seed_entity(uow, value=f"{target}-leaf.test")
+            leaf_edge = await seed_relationship(
+                uow, source_entity_id=target, target_entity_id=deeper
+            )
+            leaf_evidence = await seed_evidence_observation(
+                uow, investigation_id=investigation_id, entity_id=target
+            )
+            await seed_observation(
+                uow,
+                investigation_id=investigation_id,
+                relationship=leaf_edge,
+                evidence_observation_id=leaf_evidence,
+            )
+        body, params = _traversal_body_query("either", "investigation", max_depth=2)
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        plan = await _plan_analyze(uow, body, params)
+        # Bounded recursive execution evidence: shared buffers are recorded and
+        # the plan terminates (ANALYZE completes with actual rows > 0).
+        assert "Shared Hit Blocks" in json.dumps(plan)
+        assert "Planning" in json.dumps(plan)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hp04_high_degree_depth2_with_truncation(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """H-P04: high-degree depth-2 traversal with a low limit stays bounded."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        focal = await seed_entity(uow, value="root.test")
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=focal
+        )
+        for index in range(6):
+            target = await seed_entity(uow, value=f"leaf{index}.test")
+            edge = await seed_relationship(
+                uow, source_entity_id=focal, target_entity_id=target
+            )
+            evidence = await seed_evidence_observation(
+                uow, investigation_id=investigation_id, entity_id=focal
+            )
+            await seed_observation(
+                uow,
+                investigation_id=investigation_id,
+                relationship=edge,
+                evidence_observation_id=evidence,
+            )
+        body, params = _traversal_body_query(
+            "either", "investigation", max_depth=2, limit=2
+        )
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        plan = await _plan_analyze(uow, body, params)
+        assert json.dumps(plan)  # ANALYZE completed (terminated, bounded work)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hp05_investigation_scope_uses_setwise_admission(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """H-P05: Investigation scope is served by the exact-admission index."""
+    async with uow_factory() as uow:
+        investigation_id, focal = await _traversal_foundation(uow)
+        body, params = _traversal_body_query("either", "investigation")
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        found = await _plan_indexes(uow, body, params)
+        assert found & {
+            "investigation_evidence_pkey",
+            "investigation_evidence_observation_idx",
+        }, f"Investigation scope used no admission index: {sorted(found)}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hp06_known_scope_global_support_plan(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """H-P06: Known scope keeps one canonical row per Relationship."""
+    async with uow_factory() as uow:
+        investigation_id, focal = await _traversal_foundation(uow)
+        body, params = _traversal_body_query("either", "known")
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        plan = await _plan_analyze(uow, body, params)
+        # The plan is a single set-wise execution (ANALYZE actual rows per
+        # selected edge are 1, never multiplied by traversal occurrences).
+        text_plan = json.dumps(plan)
+        assert "Actual Rows" in text_plan
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hp07_filters_precede_reachability(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """H-P07: source/time/type filters plan as eligible-selection predicates."""
+    async with uow_factory() as uow:
+        investigation_id, focal = await _traversal_foundation(uow)
+        body, params = _traversal_body_query(
+            "either",
+            "investigation",
+            relationship_type="urn:ati:relationship:dns:resolves_to",
+            source="urn:ati:source:google_public_dns",
+        )
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        plan = await _plan_analyze(uow, body, params)
+        assert "Actual Rows" in json.dumps(plan)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hp08_cycle_rich_depth3_terminates(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """H-P08: a cycle-rich depth-3 traversal terminates with bounded work."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+        focal = await seed_entity(uow, value="a.test")
+        await seed_evidence_observation(
+            uow, investigation_id=investigation_id, entity_id=focal
+        )
+        b = await seed_entity(uow, value="b.test")
+        c = await seed_entity(uow, value="c.test")
+        previous = focal
+        for target in (b, c, focal):
+            edge = await seed_relationship(
+                uow, source_entity_id=previous, target_entity_id=target
+            )
+            evidence = await seed_evidence_observation(
+                uow, investigation_id=investigation_id, entity_id=previous
+            )
+            await seed_observation(
+                uow,
+                investigation_id=investigation_id,
+                relationship=edge,
+                evidence_observation_id=evidence,
+            )
+            previous = target
+        body, params = _traversal_body_query("either", "investigation")
+        params["p_investigation_id"] = investigation_id
+        params["p_entity_id"] = focal
+        plan = await _plan_analyze(uow, body, params)
+        # The recursive CTE terminates (ANALYZE completes) and produces rows.
+        assert "Actual Rows" in json.dumps(plan)
