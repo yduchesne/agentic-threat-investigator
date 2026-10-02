@@ -37,6 +37,7 @@ Major product/architecture decisions are already defined. Do not replace them wi
 - RAG provides threat context, not live IOC facts.
 - Geolocation is approximate context, not maliciousness evidence.
 - PostgreSQL + pgvector is the v0.1 persistence/vector platform.
+- **All PostgreSQL SQL is implemented inside PostgreSQL stored functions. This is non-negotiable.** Repository implementations may bind parameters, invoke stored functions, and map returned rows/results, but they must not contain application SQL queries or SQL business/persistence logic directly (including `SELECT`, `INSERT`, `UPDATE`, `DELETE`, joins, CTEs/recursive CTEs, filtering, aggregation, reconciliation, or projection queries). New or changed database behavior must be implemented in versioned stored functions and called through repository/query-service implementations. Do not treat read/query paths as an exception. If a planned change appears to require direct SQL outside a stored function, STOP and obtain an explicit architecture decision rather than bypassing this rule.
 - Local deployment uses Podman Compose with durable host bind mounts.
 - LangSmith is optional observability, not a functional dependency.
 - API contracts do not leak LangGraph/provider/ORM/LLM implementation internals.
