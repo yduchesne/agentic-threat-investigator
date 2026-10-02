@@ -291,9 +291,11 @@ To completely tear down the local environment after you are finished:
 
 ```bash
 ./stop.sh -t
+# or
+./stop.sh --teardown
 ```
 
-`-t` (equivalent to `--teardown`) is destructive: it removes the ATI
+`-t` and `--teardown` is destructive: it removes the ATI
 stack containers and deletes the service-managed PostgreSQL, Prometheus,
 Loki, and Grafana data below `ATI_DATA_DIR`. Repository/operator-provided
 dataset artifacts are not deleted. The next `./start.sh` therefore starts
