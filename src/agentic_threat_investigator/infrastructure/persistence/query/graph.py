@@ -1,57 +1,66 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""PostgreSQL one-hop graph neighborhood reads (PR 31B; PR 31G).
+"""PostgreSQL graph read adapters via stored functions (PR 31B; PR 31G; PR 31H; PR 31I).
 
-The concrete :class:`PostgresGraphQueryService` implements the PR 31A graph
-read contract on top of ATI's authoritative relational model. It never
-persists graph projections and never introduces a graph database: canonical
-``Entity`` rows project to ``GraphNode`` items, canonical ``Relationship``
-rows project to ``GraphEdge`` items (one edge per Relationship, aggregated
-before materialization).
+The concrete :class:`PostgresGraphQueryService` implements the PR 31A / PR 31H
+/ PR 31I graph read contracts on top of ATI's authoritative relational model.
+It never persists graph projections and never introduces a graph database:
+canonical ``Entity`` rows project to ``GraphNode`` items, canonical
+``Relationship`` rows project to ``GraphEdge`` items (one edge per
+Relationship, aggregated inside PostgreSQL before materialization).
 
-PR 31G adds two scopes. ``investigation`` (the default) admits a
-Relationship only through ``RelationshipObservation`` rows whose exact
-``EvidenceObservation`` is admitted to the requested Investigation through
-``InvestigationEvidence``; ``known`` keeps that exact-admission rule only
-for the focal Entity, while edge observations are global live support for
-the canonical Relationship. Source is an exact
-``RelationshipObservation.source`` match and time is half-open over
-``observed_at`` (``retrieved_at`` is never substituted); both filter the
-active observation set before grouping. ``investigation_observation_count``
-is computed set-wise with a conditional aggregate (never by joining
-admissions, which could multiply rows); in investigation scope it equals
-``observation_count``, in known scope it reports how much matching support
-is admitted to the current Investigation.
+PR 31I consolidates the graph read boundary: after PR 31H the multi-hop
+traversal already lived exclusively inside the versioned ``ati.traverse_graph``
+stored function while the one-hop ``neighborhood`` still constructed direct
+SQLAlchemy SELECT/JOIN/EXISTS/GROUP BY SQL. This module now routes every
+graph read through versioned stored functions:
 
-Focal Entity visibility follows the exact-admission rule through the
-``EvidenceObservationEntity`` association in BOTH scopes: the Entity
-exists, is not soft-deleted, and at least one associated EvidenceObservation
-is admitted to the requested Investigation. Known scope therefore never
-becomes arbitrary global Entity browsing. Missing or not-visible focal
-Entities return ``None``; a visible isolated focal Entity returns a
-one-node ``GraphResult``.
+    neighborhood() -> ati.traverse_graph(... , max_depth = 1)
+    traverse()     -> ati.traverse_graph(... , max_depth = 1..3)
+    find_paths()   -> ati.find_graph_paths(...)
 
-The read path follows the established analyst-facing SQLAlchemy query-service
-architecture (no stored read functions). Bounds use the server-owned
-``QueryLimits`` ceiling and the ``limit + 1`` truncation probe ordered by
-``relationship.id ASC``; endpoint Entities are loaded in one bulk query (no
-N+1 reads).
+The adapter contains no production graph SELECT / join / CTE / filter /
+aggregation / endpoint-lookup SQL: ``text(...)`` appears only to invoke the
+stored functions, and the shared ``_map_graph_result_rows`` /
+``_map_path_result_rows`` helpers map returned rows to canonical application
+models. Every filter/scope/visibility/cycle/aggregation/bounding decision is
+stored-function-owned; binding parameters and mapping rows is all the Python
+does.
+
+One-hop semantics are unchanged by the migration: for the same graph context
+and a non-truncating bound, ``neighborhood(query)`` is exactly the depth-1
+``traverse`` call, with the same focal visibility rule (both scopes require
+the focal Entity to be admitted via an exact EvidenceObservation), the same
+edge summaries and the same truncation behavior. ``None`` means the stored
+function returned no rows (missing/soft-deleted/not-visible focal Entity); a
+visible isolated focal Entity is a one-node ``GraphResult``.
+
+Path finding (PR 31I) is bounded, deterministic and cycle-safe. Both
+endpoints must be valid/live and Investigation-visible through the exact
+admission rule in both scopes (Known scope may broaden intermediate/support
+topology only). A single ``ati.find_graph_paths`` invocation returns an
+explicit metadata row (``endpoints_visible``, ``truncated``) plus canonical
+node/edge/path rows, so "endpoint invalid" (maps to ``None``) is
+distinguishable from "both endpoints visible but no eligible path" (an empty
+``GraphPathResult.paths``) without a second SQL query.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Row, and_, func, or_, select, text
+from sqlalchemy import Row, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
-from sqlalchemy.sql import Select
 
 from agentic_threat_investigator.app.query.graph import (
     GraphEdge,
     GraphNeighborhoodQuery,
     GraphNode,
+    GraphPath,
+    GraphPathQuery,
+    GraphPathResult,
     GraphQueryService,
     GraphResult,
     GraphScope,
@@ -64,40 +73,15 @@ from agentic_threat_investigator.domain.relationships import (
     RelationshipType,
 )
 
-from ..postgresql.models import (
-    EntityRow,
-    EvidenceObservationEntityRow,
-    InvestigationEvidenceRow,
-    RelationshipObservationRow,
-    RelationshipRow,
-)
-
-
-def _graph_node_from_row(row: EntityRow) -> GraphNode:
-    """Map one live canonical Entity row to a GraphNode projection.
-
-    Only the PR 31A projection fields are exposed: identity, canonical type
-    and value, and the optional display name. Persistence internals
-    (``version``, ``deleted_at``, ``content_hash``, ``attributes``) never
-    leak into the graph projection.
-    """
-    return GraphNode(
-        entity_id=row.id,
-        entity_type=EntityType(row.entity_type),
-        value=row.canonical_value,
-        display_name=row.display_name,
-    )
-
 
 class PostgresGraphQueryService(GraphQueryService):
-    """One bounded one-hop graph neighborhood read over PostgreSQL.
+    """Stored-function-invocation/mapping boundary for every graph read.
 
-    PR 31H adds :meth:`traverse`, which is a deliberately different shape: an
-    ``ati.traverse_graph`` stored-function boundary. The one-hop
-    ``neighborhood`` read keeps its established direct SQLAlchemy form while
-    the traversal (recursive CTE, cycle safety, aggregation, bounding,
-    endpoint projection) is implemented exclusively inside the stored
-    function.
+    ``neighborhood`` and ``traverse`` share one ``ati.traverse_graph``
+    invocation (depth 1 vs the requested depth) and one canonical row mapper;
+    ``find_paths`` invokes ``ati.find_graph_paths`` exactly once and maps its
+    metadata + canonical node/edge/path rows. No graph SELECT, JOIN, CTE,
+    filter, aggregation, endpoint lookup or recursion exists in Python.
     """
 
     def __init__(self, session: AsyncSession, limits: QueryLimits) -> None:
@@ -106,64 +90,34 @@ class PostgresGraphQueryService(GraphQueryService):
         self._limits = limits
 
     async def neighborhood(self, query: GraphNeighborhoodQuery) -> GraphResult | None:
-        """Return the bounded one-hop neighborhood of the focal Entity.
+        """Return the bounded one-hop neighborhood via the stored function.
 
-        The read has three bounded SQL steps in one short-lived session:
-        the focal visibility probe, the grouped canonical Relationship
-        selection with scope/source/time-filtered observation summaries and
-        the set-wise Investigation support count, and one bulk endpoint
-        Entity projection. ``None`` means the focal Entity is missing,
-        soft-deleted, or not visible to the Investigation (in both scopes);
-        a visible isolated focal Entity yields a one-node result even when
-        every filter removes all edges.
+        The read is exactly the PR 31H depth-1 traversal: the same validated
+        context is bound to ``ati.traverse_graph`` with ``max_depth = 1`` and
+        the returned canonical node/edge rows are mapped by the shared
+        mapper. ``None`` means the focal Entity is missing, soft-deleted, or
+        not visible to the Investigation (in both scopes); a visible isolated
+        focal Entity yields a one-node result even when every filter removes
+        all edges. This is a behavior-preserving persistence-boundary
+        migration of the legacy direct-SQL one-hop read: same focal rule,
+        same scope/source/time/type filtering, same edge summaries, same
+        deterministic ordering and same limit + 1 truncation probe.
         """
         limit = self._limits.validate_limit(query.limit)
-
-        focal_row = (
-            await self._session.execute(
-                select(EntityRow).where(
-                    EntityRow.id == query.entity_id,
-                    EntityRow.deleted_at.is_(None),
-                    select(EvidenceObservationEntityRow.evidence_observation_id)
-                    .join(
-                        InvestigationEvidenceRow,
-                        InvestigationEvidenceRow.evidence_observation_id
-                        == EvidenceObservationEntityRow.evidence_observation_id,
-                    )
-                    .where(
-                        EvidenceObservationEntityRow.entity_id == EntityRow.id,
-                        InvestigationEvidenceRow.investigation_id
-                        == query.investigation_id,
-                    )
-                    .exists(),
-                )
-            )
-        ).scalar_one_or_none()
-        if focal_row is None:
-            return None
-        focal_node = _graph_node_from_row(focal_row)
-
-        rows = (await self._session.execute(self._edge_statement(query, limit))).all()
-        selected_rows = rows[:limit]
-        truncated = len(rows) > limit
-        if not selected_rows:
-            return GraphResult(nodes=(focal_node,), edges=(), truncated=False)
-
-        edges = tuple(
-            GraphEdge(
-                relationship_id=row.relationship_id,
-                source_entity_id=row.source_entity_id,
-                target_entity_id=row.target_entity_id,
-                relationship_type=RelationshipType(row.relationship_type_urn),
-                observation_count=row.observation_count,
-                investigation_observation_count=row.investigation_observation_count,
-                first_observed_at=row.first_observed_at,
-                last_observed_at=row.last_observed_at,
-            )
-            for row in selected_rows
+        rows = await self._invoke_traverse_graph(
+            investigation_id=query.investigation_id,
+            entity_id=query.entity_id,
+            max_depth=1,
+            scope=query.scope,
+            direction=query.direction,
+            relationship_type=query.relationship_type,
+            entity_type=query.entity_type,
+            source=query.source,
+            observed_from=query.observed_from,
+            observed_to=query.observed_to,
+            limit=limit,
         )
-        nodes = await self._endpoint_nodes(focal_node, selected_rows)
-        return GraphResult(nodes=nodes, edges=edges, truncated=truncated)
+        return self._map_graph_result_rows(rows)
 
     async def traverse(self, query: GraphTraversalQuery) -> GraphResult | None:
         """Return the bounded multi-hop traversal via the stored function.
@@ -179,18 +133,51 @@ class PostgresGraphQueryService(GraphQueryService):
         soft-deleted, or not visible to the Investigation (both scopes).
         """
         limit = self._limits.validate_limit(query.limit)
+        rows = await self._invoke_traverse_graph(
+            investigation_id=query.investigation_id,
+            entity_id=query.entity_id,
+            max_depth=query.max_depth,
+            scope=query.scope,
+            direction=query.direction,
+            relationship_type=query.relationship_type,
+            entity_type=query.entity_type,
+            source=query.source,
+            observed_from=query.observed_from,
+            observed_to=query.observed_to,
+            limit=limit,
+        )
+        return self._map_graph_result_rows(rows)
+
+    async def find_paths(self, query: GraphPathQuery) -> GraphPathResult | None:
+        """Return bounded deterministic simple paths via the stored function.
+
+        Binds the validated PR 31I parameters and invokes
+        ``ati.find_graph_paths`` exactly once; there is no second SQL query
+        for endpoint lookup, edge summaries, or path reconstruction. The
+        stored function's explicit metadata row distinguishes the two empty
+        outcomes: ``endpoints_visible = false`` maps to ``None`` (either
+        endpoint is missing, soft-deleted, or not Investigation-visible), and
+        ``endpoints_visible = true`` with no path rows maps to an empty
+        successful :class:`GraphPathResult` whose nodes still project the two
+        visible endpoints. Every returned path is validated to start at the
+        source Entity and end at the target Entity (stored-function contract);
+        a violation is an internal invariant failure and fails closed.
+        """
         rows = (
             await self._session.execute(
                 text(
-                    "SELECT * FROM ati.traverse_graph("
-                    ":investigation_id, :entity_id, :max_depth, :scope, "
-                    ":direction, :relationship_type, :entity_type, :source, "
-                    ":observed_from, :observed_to, :limit)"
+                    "SELECT * FROM ati.find_graph_paths("
+                    ":investigation_id, :source_entity_id, :target_entity_id, "
+                    ":max_depth, :max_paths, :scope, :direction, "
+                    ":relationship_type, :entity_type, :source, :observed_from, "
+                    ":observed_to)"
                 ),
                 {
                     "investigation_id": query.investigation_id,
-                    "entity_id": query.entity_id,
+                    "source_entity_id": query.entity_id,
+                    "target_entity_id": query.target_entity_id,
                     "max_depth": query.max_depth,
+                    "max_paths": query.max_paths,
                     "scope": query.scope.value,
                     "direction": query.direction.value,
                     "relationship_type": (
@@ -206,10 +193,68 @@ class PostgresGraphQueryService(GraphQueryService):
                     "source": query.source,
                     "observed_from": query.observed_from,
                     "observed_to": query.observed_to,
+                },
+            )
+        ).all()
+        if not rows:
+            return None
+        return self._map_path_result_rows(query, rows)
+
+    async def _invoke_traverse_graph(
+        self,
+        *,
+        investigation_id: UUID,
+        entity_id: UUID,
+        max_depth: int,
+        scope: GraphScope,
+        direction: RelationshipDirection,
+        relationship_type: RelationshipType | None,
+        entity_type: EntityType | None,
+        source: str | None,
+        observed_from: datetime | None,
+        observed_to: datetime | None,
+        limit: int,
+    ) -> Sequence[Row[Any]]:
+        """Invoke the traversal stored function and return its raw rows."""
+        return (
+            await self._session.execute(
+                text(
+                    "SELECT * FROM ati.traverse_graph("
+                    ":investigation_id, :entity_id, :max_depth, :scope, "
+                    ":direction, :relationship_type, :entity_type, :source, "
+                    ":observed_from, :observed_to, :limit)"
+                ),
+                {
+                    "investigation_id": investigation_id,
+                    "entity_id": entity_id,
+                    "max_depth": max_depth,
+                    "scope": scope.value,
+                    "direction": direction.value,
+                    "relationship_type": (
+                        relationship_type.value
+                        if relationship_type is not None
+                        else None
+                    ),
+                    "entity_type": (
+                        entity_type.value if entity_type is not None else None
+                    ),
+                    "source": source,
+                    "observed_from": observed_from,
+                    "observed_to": observed_to,
                     "limit": limit,
                 },
             )
         ).all()
+
+    @staticmethod
+    def _map_graph_result_rows(rows: Sequence[Row[Any]]) -> GraphResult | None:
+        """Map stored-function node/edge rows to one bounded GraphResult.
+
+        ``None`` when the stored function returned no rows (invisible focal).
+        ``truncated`` is propagated from every returned row (the stored
+        function reports ONE truthful value on all rows); an unknown row kind
+        is an internal invariant violation and fails closed.
+        """
         if not rows:
             return None
         nodes: list[GraphNode] = []
@@ -246,168 +291,90 @@ class PostgresGraphQueryService(GraphQueryService):
                 truncated = row.truncated
             else:  # pragma: no cover - stored-function contract invariant
                 raise AssertionError(
-                    "traversal stored function returned an unknown row kind: "
-                    f"{row.kind!r}"
+                    f"graph stored function returned an unknown row kind: {row.kind!r}"
                 )
         return GraphResult(nodes=tuple(nodes), edges=tuple(edges), truncated=truncated)
 
-    def _edge_statement(self, query: GraphNeighborhoodQuery, limit: int) -> Select[Any]:
-        """Build the grouped, bounded canonical Relationship edge selection.
+    @staticmethod
+    def _map_path_result_rows(
+        query: GraphPathQuery, rows: Sequence[Row[Any]]
+    ) -> GraphPathResult | None:
+        """Map one stored-function path result into a canonical GraphPathResult.
 
-        Active RelationshipObservations are filtered by scope (investigation
-        scope additionally requires exact InvestigationEvidence admission),
-        exact source and half-open ``observed_at`` bounds before grouping;
-        one row per live canonical Relationship whose endpoint Entities are
-        live and whose active observations survive the direction/type/
-        counterparty-type filters. ``observation_count`` and first/last
-        summaries come from those active observations;
-        ``investigation_observation_count`` is a conditional aggregate over
-        the same rows (no admission-join row multiplication). The
-        ``limit + 1`` probe bounds canonical Relationships (never raw
-        observation rows) in ``relationship.id ASC`` order.
+        The metadata row is authoritative: ``endpoints_visible = false`` maps
+        to ``None``; otherwise node/edge/path rows map to canonical models
+        and the result is validated for closure and shared endpoints. Unknown
+        row kinds or a missing metadata row are internal invariant violations
+        and fail closed.
         """
-        source_entity = aliased(EntityRow)
-        target_entity = aliased(EntityRow)
-
-        observation_predicates: list[Any] = []
-        if query.source is not None:
-            observation_predicates.append(
-                RelationshipObservationRow.source == query.source
-            )
-        if query.observed_from is not None:
-            observation_predicates.append(
-                RelationshipObservationRow.observed_at >= query.observed_from
-            )
-        if query.observed_to is not None:
-            observation_predicates.append(
-                RelationshipObservationRow.observed_at < query.observed_to
-            )
-
-        admission = (
-            select(InvestigationEvidenceRow.evidence_observation_id)
-            .where(
-                InvestigationEvidenceRow.investigation_id == query.investigation_id,
-                InvestigationEvidenceRow.evidence_observation_id
-                == RelationshipObservationRow.evidence_observation_id,
-            )
-            .exists()
-        )
-        if query.scope is GraphScope.INVESTIGATION:
-            observation_predicates.append(admission)
-
-        stmt = (
-            select(
-                RelationshipRow.id.label("relationship_id"),
-                RelationshipRow.source_entity_id,
-                RelationshipRow.target_entity_id,
-                RelationshipRow.relationship_type_urn,
-                func.count(RelationshipObservationRow.id).label("observation_count"),
-                func.count(RelationshipObservationRow.id)
-                .filter(admission)
-                .label("investigation_observation_count"),
-                func.min(RelationshipObservationRow.observed_at).label(
-                    "first_observed_at"
-                ),
-                func.max(RelationshipObservationRow.observed_at).label(
-                    "last_observed_at"
-                ),
-            )
-            .join(
-                RelationshipObservationRow,
-                RelationshipObservationRow.relationship_id == RelationshipRow.id,
-            )
-            .join(source_entity, source_entity.id == RelationshipRow.source_entity_id)
-            .join(target_entity, target_entity.id == RelationshipRow.target_entity_id)
-            .where(
-                *observation_predicates,
-                RelationshipRow.deleted_at.is_(None),
-                source_entity.deleted_at.is_(None),
-                target_entity.deleted_at.is_(None),
-            )
-            .group_by(
-                RelationshipRow.id,
-                RelationshipRow.source_entity_id,
-                RelationshipRow.target_entity_id,
-                RelationshipRow.relationship_type_urn,
-            )
-            .order_by(RelationshipRow.id.asc())
-            .limit(limit + 1)
-        )
-        if query.direction is RelationshipDirection.SOURCE:
-            stmt = stmt.where(RelationshipRow.source_entity_id == query.entity_id)
-        elif query.direction is RelationshipDirection.TARGET:
-            stmt = stmt.where(RelationshipRow.target_entity_id == query.entity_id)
-        else:
-            stmt = stmt.where(
-                or_(
-                    RelationshipRow.source_entity_id == query.entity_id,
-                    RelationshipRow.target_entity_id == query.entity_id,
-                )
-            )
-        if query.relationship_type is not None:
-            stmt = stmt.where(
-                RelationshipRow.relationship_type_urn == query.relationship_type.value
-            )
-        if query.entity_type is not None:
-            entity_type = query.entity_type.value
-            if query.direction is RelationshipDirection.SOURCE:
-                stmt = stmt.where(target_entity.entity_type == entity_type)
-            elif query.direction is RelationshipDirection.TARGET:
-                stmt = stmt.where(source_entity.entity_type == entity_type)
-            else:
-                stmt = stmt.where(
-                    or_(
-                        and_(
-                            RelationshipRow.source_entity_id == query.entity_id,
-                            target_entity.entity_type == entity_type,
-                        ),
-                        and_(
-                            RelationshipRow.target_entity_id == query.entity_id,
-                            source_entity.entity_type == entity_type,
-                        ),
+        endpoints_visible = False
+        truncated = False
+        meta_seen = False
+        nodes: list[GraphNode] = []
+        edges: list[GraphEdge] = []
+        paths: list[GraphPath] = []
+        for row in rows:
+            if row.kind == "meta":
+                meta_seen = True
+                endpoints_visible = row.endpoints_visible
+                truncated = row.truncated
+            elif row.kind == "node":
+                nodes.append(
+                    GraphNode(
+                        entity_id=row.node_entity_id,
+                        entity_type=EntityType(row.node_entity_type),
+                        value=row.node_canonical_value,
+                        display_name=row.node_display_name,
                     )
                 )
-        return stmt
-
-    async def _endpoint_nodes(
-        self, focal_node: GraphNode, selected_rows: Sequence[Row[Any]]
-    ) -> tuple[GraphNode, ...]:
-        """Load and order every endpoint Entity of the selected edges.
-
-        The focal node comes first; the remaining live endpoint Entities are
-        loaded in one bounded query and ordered by Entity ID. A soft-deleted
-        endpoint would have been filtered before selection, so a selected
-        edge whose endpoint cannot be mapped indicates data/query
-        inconsistency and fails closed deterministically.
-        """
-        non_focal_ids: set[UUID] = set()
-        for row in selected_rows:
-            if row.source_entity_id != focal_node.entity_id:
-                non_focal_ids.add(row.source_entity_id)
-            if row.target_entity_id != focal_node.entity_id:
-                non_focal_ids.add(row.target_entity_id)
-        if not non_focal_ids:
-            return (focal_node,)
-
-        rows = (
-            (
-                await self._session.execute(
-                    select(EntityRow).where(
-                        EntityRow.id.in_(non_focal_ids),
-                        EntityRow.deleted_at.is_(None),
+            elif row.kind == "edge":
+                edges.append(
+                    GraphEdge(
+                        relationship_id=row.edge_relationship_id,
+                        source_entity_id=row.edge_source_entity_id,
+                        target_entity_id=row.edge_target_entity_id,
+                        relationship_type=RelationshipType(
+                            row.edge_relationship_type_urn
+                        ),
+                        observation_count=row.edge_observation_count,
+                        investigation_observation_count=(
+                            row.edge_investigation_observation_count
+                        ),
+                        first_observed_at=row.edge_first_observed_at,
+                        last_observed_at=row.edge_last_observed_at,
                     )
                 )
-            )
-            .scalars()
-            .all()
+            elif row.kind == "path":
+                paths.append(
+                    GraphPath(
+                        entity_ids=tuple(row.path_entity_ids),
+                        relationship_ids=tuple(row.path_relationship_ids),
+                    )
+                )
+            else:  # pragma: no cover - stored-function contract invariant
+                raise AssertionError(
+                    f"path stored function returned an unknown row kind: {row.kind!r}"
+                )
+        if not meta_seen:  # pragma: no cover - stored-function contract invariant
+            raise AssertionError("path stored function returned no metadata row")
+        if not endpoints_visible:
+            return None
+        result = GraphPathResult(
+            nodes=tuple(nodes),
+            edges=tuple(edges),
+            paths=tuple(paths),
+            truncated=truncated,
         )
-        nodes_by_id = {row.id: _graph_node_from_row(row) for row in rows}
-        missing = non_focal_ids - nodes_by_id.keys()
-        if missing:  # pragma: no cover - FK/soft-delete invariant complement
-            raise AssertionError(
-                "graph edge endpoint entity row is missing for endpoint(s): "
-                + ", ".join(sorted(str(entity_id) for entity_id in missing))
-            )
-        return (focal_node,) + tuple(
-            nodes_by_id[entity_id] for entity_id in sorted(non_focal_ids)
-        )
+        # Service-construction invariant: every path shares the requested
+        # endpoints (stored-function contract); fail closed on violation.
+        for path in result.paths:
+            if (
+                not path.entity_ids
+                or path.entity_ids[0] != query.entity_id
+                or path.entity_ids[-1] != query.target_entity_id
+            ):
+                raise AssertionError(
+                    "path stored function returned a path not anchored at the "
+                    "requested endpoints"
+                )
+        return result

@@ -106,6 +106,7 @@ def test_openapi_operation_ids_are_explicit() -> None:
         "get_investigation_geoint_observation",
         "get_graph_entity_neighborhood",
         "get_graph_entity_traversal",
+        "get_graph_paths",
         "list_relationships",
         "get_relationship",
         "list_relationship_observations",
@@ -184,6 +185,8 @@ def test_openapi_graph_contract_is_public_and_scoped() -> None:
         "GraphNodeResponse",
         "GraphEdgeResponse",
         "GraphNeighborhoodResponse",
+        "GraphPathResponse",
+        "GraphPathDto",
         "GraphScope",
     }
     assert public <= set(schemas)

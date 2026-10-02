@@ -63,3 +63,41 @@ export function graphTraversalKey(
     limit,
   ];
 }
+
+/**
+ * Query key for one bounded path-finding result (PR 31I).
+ *
+ * The key contains every semantic input of the path request: Investigation
+ * ID, both canonical endpoint Entity IDs, direction, the committed graph
+ * context (scope + every optional filter, but NOT the committed traversal
+ * depth: path finding has its own bounded max depth/path count) and both
+ * path-owned bounds. It is deliberately distinct from the neighborhood and
+ * traversal keys so a path result can never share a cache entry with either
+ * topology request.
+ */
+export function graphPathKey(
+  investigationId: string,
+  sourceEntityId: string,
+  targetEntityId: string,
+  direction: RelationshipDirectionName,
+  context: GraphContext,
+  maxDepth: number,
+  maxPaths: number,
+): unknown[] {
+  return [
+    "graph",
+    investigationId,
+    "paths",
+    sourceEntityId,
+    targetEntityId,
+    direction,
+    context.scope,
+    context.entityType ?? null,
+    context.relationshipType ?? null,
+    context.source ?? null,
+    context.observedFrom ?? null,
+    context.observedTo ?? null,
+    maxDepth,
+    maxPaths,
+  ];
+}

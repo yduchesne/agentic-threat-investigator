@@ -211,6 +211,55 @@ every frontier.
   `truncated` cue is reused per operation, and the bound never implies
   topology exhaustion beyond the requested depth.
 
+### Bounded path finding (PR 31I)
+
+The Graph view adds an analyst-driven path mode that requests bounded,
+deterministic simple paths between two canonical Entities already
+represented in the graph workbench.
+
+- **Path mode is transient workbench state**: entering path mode, selecting
+  the source and target Entities (plain canvas node clicks — first click
+  source, second click target, clicks on an already-selected endpoint
+  deselect it) and adjusting the path-owned depth/path-count bounds are all
+  local React state and never issue a request; only the explicit *Find
+  paths* action enables the server request (exactly one per Find). No
+  second durable or URL-backed store exists and no new navigation stack is
+  created.
+- **Committed context inheritance**: a path request inherits the committed
+  graph context (scope, direction, Entity/Relationship type filters,
+  observation source and half-open interval) exactly; path finding uses its
+  own bounded max depth (default 4, max 6) and path count (default 10, max
+  25) and never accidentally reuses the committed `graph_depth`. Only the
+  committed (applied) context is sent — uncommitted draft values never
+  reach the request.
+- **Distinct TanStack path query**: `useGraphPaths` uses a dedicated
+  `graphPathKey` that contains the Investigation ID, both endpoint Entity
+  IDs, direction, the committed context and the path bounds, so a path
+  result can never share a cache identity with the neighborhood/traversal
+  topology and any committed context change issues a fresh request.
+  AbortSignal is propagated; an aborted request is a normal cancellation,
+  never a semantic error.
+- **Stale-result protection**: a committed graph-context change deterministically
+  clears the displayed path result and both endpoint selections (the simple
+  option the PR 31I plan explicitly allows), so a stale prior-context
+  response can never render. Bounds/endpoint edits also clear the displayed
+  result until the next explicit Find.
+- **Canonical rendering and highlighting**: the returned nodes/edges render
+  through the existing `RelationshipGraph` (deterministic layout, no second
+  renderer); a result panel offers *All returned paths* or a deterministic
+  individual path choice with ordinal and hop count, and the selected path
+  is visually isolated — participating relationships/nodes are emphasized
+  while the remaining returned topology is dimmed — using canonical IDs only
+  and without any refetch. The no-connection state is explicit (both
+  endpoints visible but no eligible path) and a truthful truncation notice
+  appears when additional qualifying paths existed beyond the requested
+  bound.
+- **Exit restores the ordinary graph without reload**: leaving path mode
+  is local state only; the ordinary root neighborhood/traversal result and
+  accumulated one-hop expansions return unchanged, one-hop interactive
+  expansion keeps working, and the Graph route/Investigation shell never
+  remounts.
+
 ## Map
 
 Use Leaflet.

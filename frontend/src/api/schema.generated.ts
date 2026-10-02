@@ -459,6 +459,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/investigations/{investigation_id}/graph/paths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Graph Paths
+         * @description Return bounded deterministic simple paths between two Entities.
+         *
+         *     ``source_entity_id`` / ``target_entity_id`` are required canonical UUIDs
+         *     and both must be visible to the Investigation in both scopes: ``scope``
+         *     may broaden intermediate/support topology only, never arbitrary global
+         *     endpoint lookup. ``max_depth`` defaults to
+         *     :data:`DEFAULT_GRAPH_PATH_MAX_DEPTH` (4) and is hard-bounded to
+         *     1..:data:`GRAPH_PATH_MAX_DEPTH` (6); ``max_paths`` defaults to
+         *     :data:`DEFAULT_GRAPH_PATH_MAX_RESULTS` (10) and is hard-bounded to
+         *     1..:data:`GRAPH_PATH_MAX_RESULTS` (25); oversized values are 400
+         *     ``invalid_request``, never silently clamped. Every other parameter
+         *     (``direction``, ``scope``, ``relationship_type``, ``entity_type``,
+         *     ``source``, ``observed_from`` / ``observed_to``) keeps the exact PR 31G
+         *     meaning and applies at every frontier. The response reuses the canonical
+         *     node/edge DTO vocabulary plus reference-only ordered paths and a
+         *     truthful ``truncated`` flag: no SQL row kinds, PostgreSQL arrays or
+         *     recursive internals are exposed. Scoped endpoint absence (either
+         *     endpoint missing, soft-deleted, or not Investigation-visible) maps to
+         *     the same 404 ``graph_entity_not_found`` as the one-hop read; both
+         *     endpoints visible with no eligible connection is 200 with empty
+         *     ``paths``; ``source == target`` returns 200 with exactly one zero-hop
+         *     path. No ``limit`` parameter exists: path results are bounded by
+         *     ``max_paths``, not by an edge page size.
+         */
+        get: operations["get_graph_paths"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/investigations/{investigation_id}/history": {
         parameters: {
             query?: never;
@@ -1355,6 +1397,46 @@ export interface components {
             value: string;
         };
         /**
+         * GraphPathDto
+         * @description One ordered simple path of canonical graph references (PR 31I).
+         *
+         *     Paths reuse the canonical node/edge vocabulary: ``entity_ids`` and
+         *     ``relationship_ids`` are the authoritative Entity/Relationship UUIDs in
+         *     traversal order (``len(entity_ids) == len(relationship_ids) + 1``, no
+         *     repeated Entity). No PostgreSQL array syntax, SQL signature, recursive
+         *     depth internals or row kinds are exposed; the zero-hop source==target
+         *     path carries one Entity ID and zero Relationship IDs.
+         */
+        GraphPathDto: {
+            /** Entity Ids */
+            entity_ids: string[];
+            /** Relationship Ids */
+            relationship_ids: string[];
+        };
+        /**
+         * GraphPathResponse
+         * @description One bounded path-finding projection over canonical graph vocabulary.
+         *
+         *     ``nodes`` and ``edges`` reuse the existing node/edge DTOs exactly; each
+         *     canonical Entity/Relationship appears at most once across the selected
+         *     paths. ``paths`` are ordered shortest-first (deterministic tie-break).
+         *     ``truncated`` is true exactly when additional qualifying simple paths
+         *     existed within ``max_depth`` beyond ``max_paths``; a no-path result is
+         *     ``200`` with empty ``paths`` (and the two visible endpoint nodes), never
+         *     a 404. Endpoint-visibility failure is the existing scoped ``404
+         *     graph_entity_not_found``.
+         */
+        GraphPathResponse: {
+            /** Edges */
+            edges: components["schemas"]["GraphEdgeResponse"][];
+            /** Nodes */
+            nodes: components["schemas"]["GraphNodeResponse"][];
+            /** Paths */
+            paths: components["schemas"]["GraphPathDto"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
          * GraphScope
          * @description Exactly two graph scopes: Investigation-supported or broader known.
          *
@@ -2166,6 +2248,8 @@ export type GeointTopLocationResponse = components['schemas']['GeointTopLocation
 export type GraphEdgeResponse = components['schemas']['GraphEdgeResponse'];
 export type GraphNeighborhoodResponse = components['schemas']['GraphNeighborhoodResponse'];
 export type GraphNodeResponse = components['schemas']['GraphNodeResponse'];
+export type GraphPathDto = components['schemas']['GraphPathDto'];
+export type GraphPathResponse = components['schemas']['GraphPathResponse'];
 export type GraphScope = components['schemas']['GraphScope'];
 export type HttpValidationError = components['schemas']['HTTPValidationError'];
 export type HistoryOperation = components['schemas']['HistoryOperation'];
@@ -3684,6 +3768,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GraphNeighborhoodResponse"];
+                };
+            };
+            /** @description Invalid request. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Access forbidden. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_graph_paths: {
+        parameters: {
+            query: {
+                source_entity_id: string;
+                target_entity_id: string;
+                max_depth?: number | null;
+                max_paths?: number | null;
+                direction?: components["schemas"]["RelationshipDirection"];
+                relationship_type?: components["schemas"]["RelationshipType"] | null;
+                scope?: components["schemas"]["GraphScope"] | null;
+                entity_type?: components["schemas"]["EntityType"] | null;
+                source?: string | null;
+                observed_from?: string | null;
+                observed_to?: string | null;
+            };
+            header?: never;
+            path: {
+                investigation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphPathResponse"];
                 };
             };
             /** @description Invalid request. */

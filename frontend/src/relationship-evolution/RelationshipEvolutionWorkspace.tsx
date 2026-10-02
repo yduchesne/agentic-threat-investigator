@@ -16,7 +16,7 @@
 
 import { Alert, Box, Button, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import type { ReactElement } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 
@@ -55,10 +55,21 @@ import {
   graphDraftToCommitted,
   type GraphDraft,
 } from "../relationship-graph/GraphFilters";
-import { useGraphNeighborhood, useGraphTraversal } from "../relationship-graph/graph-queries";
+import { useGraphNeighborhood, useGraphPaths, useGraphTraversal } from "../relationship-graph/graph-queries";
 import {
+  GRAPH_PATH_DEFAULT_MAX_DEPTH,
+  GRAPH_PATH_DEFAULT_MAX_PATHS,
+} from "../relationship-graph/graph-api";
+import {
+  buildGraphModel,
   buildGraphModelFromAccumulated,
 } from "../relationship-graph/relationship-graph-model";
+import {
+  GraphPathModeToolbar,
+  GraphPathResultPanel,
+  GraphPathStatus,
+  type GraphPathPanelProps,
+} from "../relationship-graph/GraphPathPanel";
 import { useGraphExpansion } from "../relationship-graph/use-graph-expansion";
 import {
   applyGraphContext,
@@ -180,13 +191,172 @@ export function RelationshipEvolutionWorkspace({
     rootNeighborhood: graphResult.neighborhood,
   });
 
-  const graphModel = useMemo(
-    () =>
-      graphExpansion.graph === null
-        ? null
-        : buildGraphModelFromAccumulated(graphExpansion.graph),
-    [graphExpansion.graph],
+  // PR 31I: path-finding is transient workbench state (never durable, never
+  // URL-backed, never a second graph context). Endpoint selection issues no
+  // request; only the explicit Find commit enables the dedicated TanStack
+  // path query, whose key contains the endpoints, the committed graph context
+  // and the path-owned bounds, so any committed context change can never be
+  // served a stale prior-context result.
+  const [pathMode, setPathMode] = useState(false);
+  const [pathEndpoints, setPathEndpoints] = useState<{
+    source: string | null;
+    target: string | null;
+  }>({ source: null, target: null });
+  const [pathMaxDepth, setPathMaxDepth] = useState<number>(
+    GRAPH_PATH_DEFAULT_MAX_DEPTH,
   );
+  const [pathMaxPaths, setPathMaxPaths] = useState<number>(
+    GRAPH_PATH_DEFAULT_MAX_PATHS,
+  );
+  const [pathSelected, setPathSelected] = useState<number | "all">("all");
+  const [pathRequest, setPathRequest] = useState<{
+    source: string;
+    target: string;
+  } | null>(null);
+  const pathQuery = useGraphPaths(
+    investigationId,
+    pathRequest?.source,
+    pathRequest?.target,
+    filters === null ? "either" : filters.direction,
+    graphContext,
+    pathMaxDepth,
+    pathMaxPaths,
+    pathRequest !== null,
+  );
+  const pathResult = pathRequest !== null ? pathQuery.paths : null;
+
+  // A committed graph-context change resets path state deterministically:
+  // the displayed path result is cleared and both endpoint selections are
+  // cleared (the simple option the PR 31I plan explicitly allows), so a stale
+  // prior-context result can never render.
+  const committedGraphKey = graphContextKey(graphContext);
+  useEffect(() => {
+    setPathRequest(null);
+    setPathEndpoints({ source: null, target: null });
+    setPathSelected("all");
+  }, [committedGraphKey]);
+
+  const choosePathEndpoint = (entityId: string): void => {
+    setPathRequest(null);
+    setPathSelected("all");
+    setPathEndpoints((previous) => {
+      if (previous.source === null) {
+        return { ...previous, source: entityId };
+      }
+      if (previous.target === null) {
+        if (entityId === previous.source) {
+          return { ...previous, source: null };
+        }
+        return { ...previous, target: entityId };
+      }
+      if (entityId === previous.source) {
+        return { ...previous, source: null };
+      }
+      if (entityId === previous.target) {
+        return { ...previous, target: null };
+      }
+      return { ...previous, target: entityId };
+    });
+  };
+
+  const findPaths = (): void => {
+    if (pathEndpoints.source === null || pathEndpoints.target === null) {
+      return;
+    }
+    setPathSelected("all");
+    setPathRequest({
+      source: pathEndpoints.source,
+      target: pathEndpoints.target,
+    });
+  };
+
+  const exitPathMode = (): void => {
+    setPathMode(false);
+    setPathEndpoints({ source: null, target: null });
+    setPathRequest(null);
+    setPathSelected("all");
+  };
+
+  const pathHighlight = useMemo(() => {
+    if (pathRequest === null || pathResult === null) {
+      return null;
+    }
+    const relationshipIds = new Set<string>();
+    const entityIds = new Set<string>();
+    if (pathSelected === "all") {
+      for (const path of pathResult.paths) {
+        path.relationship_ids.forEach((id) => relationshipIds.add(id));
+        path.entity_ids.forEach((id) => entityIds.add(id));
+      }
+    } else {
+      const path = pathResult.paths[pathSelected];
+      if (path === undefined) {
+        return null;
+      }
+      path.relationship_ids.forEach((id) => relationshipIds.add(id));
+      path.entity_ids.forEach((id) => entityIds.add(id));
+    }
+    return { relationshipIds, entityIds };
+  }, [pathRequest, pathResult, pathSelected]);
+
+  const graphModel = useMemo(() => {
+    if (pathRequest !== null && pathResult !== null) {
+      return buildGraphModel(pathRequest.source, pathResult);
+    }
+    return graphExpansion.graph === null
+      ? null
+      : buildGraphModelFromAccumulated(graphExpansion.graph);
+  }, [pathRequest, pathResult, graphExpansion.graph]);
+
+  // PR 31I: human-readable endpoint labels come from the currently rendered
+  // topology (canonical IDs only, never free-form UUID typing).
+  const sourcePathLabel =
+    graphModel === null || pathEndpoints.source === null
+      ? null
+      : (graphModel.nodes.find(
+          (node) => node.entityId === pathEndpoints.source,
+        )?.label ?? null);
+  const targetPathLabel =
+    graphModel === null || pathEndpoints.target === null
+      ? null
+      : (graphModel.nodes.find(
+          (node) => node.entityId === pathEndpoints.target,
+        )?.label ?? null);
+
+  const pathPanelProps: GraphPathPanelProps = {
+    t: t as never,
+    pathMode,
+    endpoints: pathEndpoints,
+    sourceLabel: sourcePathLabel,
+    targetLabel: targetPathLabel,
+    maxDepth: pathMaxDepth,
+    maxPaths: pathMaxPaths,
+    result: pathRequest !== null ? pathResult : null,
+    loading: pathRequest !== null && pathQuery.isLoading,
+    error: pathRequest !== null && pathQuery.error !== null,
+    selected: pathSelected,
+    resultEndpoints: pathRequest,
+    onEnter: () => setPathMode(true),
+    onExit: exitPathMode,
+    onFind: findPaths,
+    onEndpointsChanged: () => {
+      setPathEndpoints({ source: null, target: null });
+      setPathRequest(null);
+      setPathSelected("all");
+    },
+    onDepthChange: (value) => {
+      setPathMaxDepth(value);
+      setPathRequest(null);
+      setPathSelected("all");
+    },
+    onPathsChange: (value) => {
+      setPathMaxPaths(value);
+      setPathRequest(null);
+      setPathSelected("all");
+    },
+    onSelect: setPathSelected,
+    onRetry: () => pathQuery.refetch(),
+  };
   const evolutionModel = useMemo(
     () =>
       filters === null
@@ -403,6 +573,9 @@ export function RelationshipEvolutionWorkspace({
                 {graphFilterForm.error}
               </Typography>
             ) : null}
+            <GraphPathModeToolbar {...pathPanelProps} />
+            <GraphPathStatus {...pathPanelProps} />
+            <GraphPathResultPanel {...pathPanelProps} />
           </Box>
         ) : null}
       </Box>
@@ -564,12 +737,20 @@ export function RelationshipEvolutionWorkspace({
               <RelationshipGraph
                 investigationId={investigationId}
                 rootGraphKey={`${investigationId}:${filters.entityId}:${filters.direction}:${graphContextKey(graphContext)}`}
-                focalEntityId={filters.entityId}
+                focalEntityId={pathRequest !== null ? pathRequest.source : filters.entityId}
                 model={graphModel}
                 multiHop={graphContext.depth > 1}
                 typeLabel={relationshipTypeLabel}
                 entityTypeLabel={graphEntityTypeLabel}
                 expansion={graphExpansion}
+                pathMode={pathMode}
+                pathEndpoints={pathMode ? pathEndpoints : null}
+                onPathEndpointClick={pathMode ? choosePathEndpoint : undefined}
+                pathHighlight={
+                  pathRequest !== null && pathResult !== null
+                    ? pathHighlight
+                    : null
+                }
               />
             ) : null}
           </Box>

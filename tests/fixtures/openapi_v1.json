@@ -1042,6 +1042,73 @@
         "title": "GraphNodeResponse",
         "type": "object"
       },
+      "GraphPathDto": {
+        "additionalProperties": false,
+        "description": "One ordered simple path of canonical graph references (PR 31I).\n\nPaths reuse the canonical node/edge vocabulary: ``entity_ids`` and\n``relationship_ids`` are the authoritative Entity/Relationship UUIDs in\ntraversal order (``len(entity_ids) == len(relationship_ids) + 1``, no\nrepeated Entity). No PostgreSQL array syntax, SQL signature, recursive\ndepth internals or row kinds are exposed; the zero-hop source==target\npath carries one Entity ID and zero Relationship IDs.",
+        "properties": {
+          "entity_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Entity Ids",
+            "type": "array"
+          },
+          "relationship_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Relationship Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entity_ids",
+          "relationship_ids"
+        ],
+        "title": "GraphPathDto",
+        "type": "object"
+      },
+      "GraphPathResponse": {
+        "additionalProperties": false,
+        "description": "One bounded path-finding projection over canonical graph vocabulary.\n\n``nodes`` and ``edges`` reuse the existing node/edge DTOs exactly; each\ncanonical Entity/Relationship appears at most once across the selected\npaths. ``paths`` are ordered shortest-first (deterministic tie-break).\n``truncated`` is true exactly when additional qualifying simple paths\nexisted within ``max_depth`` beyond ``max_paths``; a no-path result is\n``200`` with empty ``paths`` (and the two visible endpoint nodes), never\na 404. Endpoint-visibility failure is the existing scoped ``404\ngraph_entity_not_found``.",
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdgeResponse"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/GraphPathDto"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "paths",
+          "truncated"
+        ],
+        "title": "GraphPathResponse",
+        "type": "object"
+      },
       "GraphScope": {
         "description": "Exactly two graph scopes: Investigation-supported or broader known.\n\n``INVESTIGATION`` (the default) admits a Relationship as visible only\nwhen at least one supporting RelationshipObservation references an\nEvidenceObservation admitted to the requested Investigation; ``KNOWN``\nretains the Investigation-visible focal Entity but admits globally known\nlive Relationships supported by global RelationshipObservations even\nwhen those observations were never admitted to this Investigation.",
         "enum": [
@@ -5492,6 +5559,264 @@
           }
         ],
         "summary": "Get Graph Entity Traversal",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/graph/paths": {
+      "get": {
+        "description": "Return bounded deterministic simple paths between two Entities.\n\n``source_entity_id`` / ``target_entity_id`` are required canonical UUIDs\nand both must be visible to the Investigation in both scopes: ``scope``\nmay broaden intermediate/support topology only, never arbitrary global\nendpoint lookup. ``max_depth`` defaults to\n:data:`DEFAULT_GRAPH_PATH_MAX_DEPTH` (4) and is hard-bounded to\n1..:data:`GRAPH_PATH_MAX_DEPTH` (6); ``max_paths`` defaults to\n:data:`DEFAULT_GRAPH_PATH_MAX_RESULTS` (10) and is hard-bounded to\n1..:data:`GRAPH_PATH_MAX_RESULTS` (25); oversized values are 400\n``invalid_request``, never silently clamped. Every other parameter\n(``direction``, ``scope``, ``relationship_type``, ``entity_type``,\n``source``, ``observed_from`` / ``observed_to``) keeps the exact PR 31G\nmeaning and applies at every frontier. The response reuses the canonical\nnode/edge DTO vocabulary plus reference-only ordered paths and a\ntruthful ``truncated`` flag: no SQL row kinds, PostgreSQL arrays or\nrecursive internals are exposed. Scoped endpoint absence (either\nendpoint missing, soft-deleted, or not Investigation-visible) maps to\nthe same 404 ``graph_entity_not_found`` as the one-hop read; both\nendpoints visible with no eligible connection is 200 with empty\n``paths``; ``source == target`` returns 200 with exactly one zero-hop\npath. No ``limit`` parameter exists: path results are bounded by\n``max_paths``, not by an edge page size.",
+        "operationId": "get_graph_paths",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Target Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_depth",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Depth"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_paths",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Paths"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RelationshipDirection",
+              "default": "either"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relationship_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RelationshipType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Relationship Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/GraphScope"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/EntityType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "observed_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observed From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "observed_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observed To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphPathResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Access forbidden."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "summary": "Get Graph Paths",
         "tags": [
           "graph"
         ]
