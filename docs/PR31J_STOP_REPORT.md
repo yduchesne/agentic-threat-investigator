@@ -4,7 +4,19 @@ Status: **PARTIALLY IMPLEMENTED** · branch `dev/temporal-exploration`
 
 ## What is DONE and VERIFIED (real gates, this session)
 
-- **New pure module** `frontend/src/relationship-graph/graph-temporal.ts`:
+- **PR 31J stability + graph e2e gates (isolated `scripts/e2e.sh` stack, the
+  authoritative harness) — GREEN in this session (2026-10-02):**
+  `zz-31f8-stress`, `zz-31g-graph-context`, `zz-31h-multihop`, and
+  `zz-31i-path-finding` all passed **Chromium AND Firefox, `workers=1`
+  `retries=0`** (14 passed, exit 0, ~7.9 min), including every 20-cycle
+  same-page stress journey. A full-suite run (46 passed / 2 failed) had one
+  `zz-31h` depth-journey flake that passed cleanly on rerun; the other
+  failure (`zz-relationship-evolution` E23, "Supporting observations" vs
+  the committed renderer's "Matching observations") is a **pre-existing
+  deterministic mismatch**, verified present at branch base `eac4382` in
+  both the spec and the renderer — unrelated to PR 31J's graph-temporal
+  module (which no spec renders).
+- **New module** `frontend/src/relationship-graph/graph-temporal.ts`:
   - Committed temporal tuple model (`graph_temporal`, `graph_time_start`,
     `graph_time_end`, `graph_time_frames`, `graph_time_frame`), exactly 4/8/12/24
     half-open frames (default 8), Prev/Next navigation clamped to
