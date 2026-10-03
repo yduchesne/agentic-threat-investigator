@@ -1793,6 +1793,7 @@ def _worker_instance(
             max_attempts=max_attempts,
             retry_base_seconds=60.0,
             retry_max_seconds=3600.0,
+            max_concurrency=4,
         ),
     )
 
@@ -2012,6 +2013,7 @@ async def test_p44_production_composition_no_work_and_wiring(
         geo_resolver_enabled=True,
         geo_resolver_worker_id="",
         geo_resolver_batch_size=17,
+        geo_resolver_max_concurrency=6,
         geo_resolver_lease_seconds=120,
         geo_resolver_poll_interval_seconds=0.1,
         geo_resolver_max_attempts=5,
@@ -2023,6 +2025,7 @@ async def test_p44_production_composition_no_work_and_wiring(
     assert worker._config.worker_id.startswith("geo-resolver-")
     assert len(worker._config.worker_id) <= 200
     assert worker._config.batch_size == 17
+    assert worker._config.max_concurrency == 6
     assert worker._config.lease_seconds == 120
     assert worker._config.max_attempts == 5
     assert worker._config.retry_base_seconds == 7.0

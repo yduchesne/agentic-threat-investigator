@@ -21,7 +21,7 @@
 - [Task dispatch configuration](#task-dispatch-configuration)
 - [Operating mode (PR 23D)](#operating-mode-pr-23d)
 - [Datasource definitions (PR 27A)](#datasource-definitions-pr-27a)
-- [GEOINT configuration (planned PR 26)](#geoint-configuration-planned-pr-26)
+- [GEOINT configuration (PR 26 / PR L-2)](#geoint-configuration-pr-26--pr-l-2)
 - [Kafka-compatible Evidence log configuration (PR 28G)](#kafka-compatible-evidence-log-configuration-pr-28g)
 - [Observability settings (PR 29A)](#observability-settings-pr-29a)
 - [Authentication settings](#authentication-settings)
@@ -486,7 +486,7 @@ PR 27A exposes the typed datasource vocabulary through `Settings.datasources`, a
 
 No dimension is inferred from another: the same `SourceId` may appear on multiple datasource instances, and the same serialization may carry different semantic formats. Fail-closed validation at the Settings boundary rejects unknown typed values and duplicate `datasource_id` values; profiles may override the whole collection by supplying a list of definitions, but provider-specific operational settings (concurrency, secret references, lookback windows, retry policy, endpoints) remain exactly where `CONFIGURATION.md` already defines them and are never migrated into datasource definitions. Secret-resolution and profile behavior are unchanged.
 
-## GEOINT configuration (PR 26)
+## GEOINT configuration (PR 26 / PR L-2)
 
 PR 26 adds typed configuration for the asynchronous Geo Resolver (PR 26C). Configuration preserves the existing separation between deployment profile and operating mode.
 
@@ -499,6 +499,7 @@ The Geo Resolver policy is delivered as typed, non-secret settings (see `DEPLOYM
 - `ATI_GEO_RESOLVER_ENABLED` (default `true`);
 - `ATI_GEO_RESOLVER_WORKER_ID` (blank auto-generates a per-process id);
 - `ATI_GEO_RESOLVER_BATCH_SIZE` (default 10);
+- `ATI_GEO_RESOLVER_MAX_CONCURRENCY` (default 4);
 - `ATI_GEO_RESOLVER_LEASE_SECONDS` (default 300);
 - `ATI_GEO_RESOLVER_POLL_INTERVAL_SECONDS` (default 1.0);
 - `ATI_GEO_RESOLVER_MAX_ATTEMPTS` (default 3);
@@ -506,10 +507,33 @@ The Geo Resolver policy is delivered as typed, non-secret settings (see `DEPLOYM
 - `ATI_GEO_RESOLVER_RETRY_MAX_SECONDS` (default 3600.0).
 
 Bounds are validated fail-closed at configuration load (`batch_size >= 1`,
-`lease_seconds >= 1`, `max_attempts >= 1`, `retry_base_seconds > 0`,
-`retry_max_seconds >= retry_base_seconds`, bounded poll interval). The worker
-id is operational, never a secret or authorization identity; no secret
-values are stored or logged.
+`max_concurrency >= 1`, `lease_seconds >= 1`, `max_attempts >= 1`,
+`retry_base_seconds > 0`, `retry_max_seconds >= retry_base_seconds`, bounded
+poll interval). The worker id is operational, never a secret or
+authorization identity; no secret values are stored or logged.
+
+### Geo Resolver batch size vs. active-item concurrency (PR L-2)
+
+`ATI_GEO_RESOLVER_BATCH_SIZE` and `ATI_GEO_RESOLVER_MAX_CONCURRENCY` are two
+independent worker policies and must not be conflated:
+
+- **batch size** controls how many rows one `run_once()` iteration durably
+  claims from PostgreSQL (`geo_resolution`);
+- **max concurrency** controls how many of those already-claimed item
+  pipelines (evidence load UoW -> resolve -> completion UoW) may execute
+  concurrently in the worker process.
+
+Effective concurrency is naturally `min(claimed_count, max_concurrency)`;
+`max_concurrency > batch_size` is legal and simply never fully used. Leases
+begin at claim time (before any item pipeline runs), so operators should
+size `batch_size` and lease duration so the claimed batch normally drains
+within the lease window under the configured concurrency. Database
+capacity should also be considered: each concurrent item opens short
+PostgreSQL transactions for its evidence load and completion, and each
+canonical resolution opens its own resolver session, so concurrency
+increase does not automatically increase throughput. `ATI_DATABASE_POOL_SIZE`
+and `ATI_DATABASE_MAX_OVERFLOW` remain unchanged and are not used as an
+implicit concurrency policy.
 
 ### Analyst GEOINT context bounds (PR 26F)
 

@@ -1,12 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""GeoResolutionWorker: the bounded async geographic-resolution lifecycle (PR 26C).
+"""GeoResolutionWorker: the bounded async geographic-resolution lifecycle (PR 26C, PR L-2).
 
 One iteration of the durable worker follows the approved transaction split:
 
 ```text
 short UoW: claim bounded batch        -> COMMIT/CLOSE
-for each claimed item:
+claimed rows carry id/version/owner/lease
+    -> bounded concurrent item pipelines (max_concurrency)
+for each claimed item (independently):
+    wait for the worker concurrency permit (no UoW held)
     short UoW: load exact immutable LegacyEvidence -> CLOSE
     extract GeographicClaim                   (no DB I/O)
     LocationResolver.resolve(claim)           (NO UoW open, no locks held)
@@ -16,15 +19,22 @@ for each claimed item:
         retry/failure record_failure
 ```
 
+Active item pipelines never exceed ``max_concurrency``; a task waiting for
+admission holds no UnitOfWork, session, connection, or resolver resource.
+Never share a UnitOfWork or SQLAlchemy session between item tasks; every
+production resolver call owns its own invocation-local session.
+
 The worker owns no queue, no broker, no generic scheduler framework: it
 drives ``GeoResolution`` rows through the SQL API v0024 stored functions,
 which remain the final authority for provenance, versions, leases, and
-attempt bookkeeping. ``asyncio.CancelledError`` always propagates (no worker
-transition is persisted); committed leases recover by expiry. One item
-failure never terminates the daemon: the bounded error is logged and — for
-conditions the SQL API rejects (stale version/claim, expired lease,
-terminal replay conflict, provenance violations surfaced at completion) —
-lease expiry recovers the row; no ad-hoc UPDATE recovery ever runs.
+attempt bookkeeping. ``asyncio.CancelledError`` always propagates (parent
+cancellation settles outstanding children and no worker transition is
+persisted); committed leases recover by expiry. One item failure never
+terminates the daemon: a bounded resolver/persistence error is persisted
+through the existing retry/failure semantics, and an unexpected exception
+escaping an item is logged only (bounded identity/type, never raw
+exception text) and reclaimed by lease expiry; no ad-hoc UPDATE recovery
+ever runs.
 """
 
 from __future__ import annotations
@@ -101,6 +111,10 @@ class GeoResolutionWorkerConfig(BaseModel):
     max_attempts: int
     retry_base_seconds: float
     retry_max_seconds: float
+    # PR L-2: explicit bounded concurrency of claimed item pipelines, kept
+    # independent from batch_size (the claim-count policy). Never stored as
+    # an asyncio primitive: this stays a plain validated integer policy.
+    max_concurrency: int
 
     @field_validator("worker_id")
     @classmethod
@@ -117,6 +131,8 @@ class GeoResolutionWorkerConfig(BaseModel):
         """Enforce the bounded retry/lease/batch policy contract."""
         if self.batch_size < 1:
             raise ValueError("batch_size must be >= 1")
+        if self.max_concurrency < 1:
+            raise ValueError("max_concurrency must be >= 1")
         if self.lease_seconds < 1:
             raise ValueError("lease_seconds must be >= 1")
         if self.poll_interval_seconds < 0:
@@ -172,20 +188,76 @@ class GeoResolutionWorker:
         duration_metric=DurationMetrics.GEO_RESOLVE,
     )
     async def run_once(self) -> int:
-        """Claim a bounded batch, resolve each item, and persist outcomes.
+        """Claim a bounded batch, then process items under a concurrency bound.
 
-        Returns the number of claimed items processed. Claim and every
-        completion are their own short committed UnitOfWork; resolution runs
-        with no UnitOfWork open. One ``ati.geo.resolve`` span and seconds
-        duration cover the whole iteration; per-item resolved, unresolvable,
-        and failed outcomes are counted at their authoritative persist points.
-        An empty claim still measures the worker iteration and never invents
-        item outcomes.
+        Returns the number of claimed items processed. The claim remains one
+        short committed UnitOfWork; a non-empty batch then runs through one
+        iteration-local ``asyncio.TaskGroup`` whose admitted item pipelines
+        are bounded by ``max_concurrency``. Every item keeps its own
+        short load/resolve/complete UnitOfWork lifecycle; resolution always
+        runs with no UnitOfWork open. Active item pipelines never exceed
+        ``max_concurrency`` and a task waiting for admission holds no
+        UnitOfWork/session/connection. One ``ati.geo.resolve`` span and
+        seconds duration cover the whole iteration; per-item resolved,
+        unresolvable, and failed outcomes are counted at their authoritative
+        persist points. An empty claim still measures the worker iteration
+        and never invents item outcomes. Parent cancellation propagates
+        (settling outstanding children) and never fabricates transitions.
         """
         claimed = await self._claim_batch()
-        for resolution in claimed:
-            await self._process_one(resolution)
+        if not claimed:
+            return 0
+        semaphore = asyncio.Semaphore(self._config.max_concurrency)
+        child_cancelled = False
+
+        async def _admit(resolution: GeoResolution) -> None:
+            """Admit one claimed item and detect a child-local cancellation.
+
+            ``asyncio.TaskGroup`` treats a child task that re-raises
+            ``CancelledError`` as cancelled and does not re-raise it; ATI's
+            worker contract is that cancellation always propagates, so the
+            occurrence is recorded here and re-raised once the group settles.
+            """
+            nonlocal child_cancelled
+            try:
+                await self._run_admitted(resolution, semaphore)
+            except asyncio.CancelledError:
+                child_cancelled = True
+                raise
+
+        async with asyncio.TaskGroup() as task_group:
+            for resolution in claimed:
+                task_group.create_task(_admit(resolution))
+        if child_cancelled:
+            raise asyncio.CancelledError()
         return len(claimed)
+
+    async def _run_admitted(
+        self, resolution: GeoResolution, semaphore: asyncio.Semaphore
+    ) -> None:
+        """Wait for one worker concurrency permit, then process one item.
+
+        The permit is acquired BEFORE ``_process_one`` opens any UnitOfWork,
+        and released cancellation-safely via ``async with``, so a task
+        waiting for admission holds no UnitOfWork, session, connection, or
+        resolver resource. An unexpected exception escaping ``_process_one``
+        is isolated here (bounded log only) so one item failure never
+        cancels sibling item pipelines under ``TaskGroup``; the already-
+        claimed row is left to the existing lease-expiry recovery and no
+        ad-hoc persistence or raw exception text is ever written.
+        """
+        async with semaphore:
+            try:
+                await self._process_one(resolution)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                LOGGER.exception(
+                    "geo resolution item failed unexpectedly "
+                    "resolution_id=%s error_type=%s",
+                    resolution.id,
+                    type(error).__name__,
+                )
 
     async def _claim_batch(self) -> list[GeoResolution]:
         """Claim eligible work in one short committed UnitOfWork."""

@@ -172,3 +172,141 @@ class TestGeoTelemetry:
         recorded = _recorded(in_memory_persistence_telemetry)
         assert Metrics.GEO_FAILED not in recorded
         assert DurationMetrics.GEO_RESOLVE not in recorded
+
+
+class TestL2GeoTelemetry:
+    """PR L-2 T01..T04: telemetry semantics stay stable under concurrency."""
+
+    @pytest.mark.asyncio
+    async def test_t01_concurrent_resolved_counts_each(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """Concurrent resolved items count once each (T01)."""
+        from tests.unit.app.geoint.test_geo_resolution_worker_concurrency import (
+            _outcome,
+            _ScriptedByCountryResolver,
+        )
+
+        codes = ("US", "CA", "MX")
+        observations = [
+            geolocation_evidence(facts={"country_code": code})[1] for code in codes
+        ]
+        resolutions = [
+            claimed_resolution(evidence_observation_id=obs.id) for obs in observations
+        ]
+        factory = FakeUnitOfWorkFactory(observations, resolutions)
+        resolver = _ScriptedByCountryResolver(
+            factory, {code: _outcome(code) for code in codes}
+        )
+        processed = await run_worker(
+            factory, resolver, config=worker_config(max_concurrency=3)
+        )
+        assert processed == 3
+        recorded = _recorded(in_memory_persistence_telemetry)
+        assert counter_value(recorded[Metrics.GEO_RESOLVED]) == 3
+        assert Metrics.GEO_UNRESOLVABLE not in recorded
+        assert Metrics.GEO_FAILED not in recorded
+        assert histogram_count(recorded[DurationMetrics.GEO_RESOLVE]) == 1
+
+    @pytest.mark.asyncio
+    async def test_t02_mixed_outcomes_count_only_their_own(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """Concurrent mixed outcomes increment only their correct counters (T02)."""
+        from agentic_threat_investigator.app.geoint.resolution import (
+            unresolvable_result,
+        )
+        from tests.unit.app.geoint.test_geo_resolution_worker_concurrency import (
+            _outcome,
+            _ScriptedByCountryResolver,
+        )
+
+        codes = ("US", "CA", "MX")
+        observations = [
+            geolocation_evidence(facts={"country_code": code})[1] for code in codes
+        ]
+        resolutions = [
+            claimed_resolution(evidence_observation_id=obs.id) for obs in observations
+        ]
+        factory = FakeUnitOfWorkFactory(observations, resolutions)
+        resolver = _ScriptedByCountryResolver(
+            factory,
+            {
+                "US": _outcome("US"),
+                "CA": unresolvable_result("unknown_city"),
+                "MX": _outcome("MX"),
+            },
+            fail_countries=frozenset({"MX"}),
+        )
+        processed = await run_worker(
+            factory, resolver, config=worker_config(max_concurrency=3)
+        )
+        assert processed == 3
+        recorded = _recorded(in_memory_persistence_telemetry)
+        assert counter_value(recorded[Metrics.GEO_RESOLVED]) == 1
+        assert counter_value(recorded[Metrics.GEO_UNRESOLVABLE]) == 1
+        assert counter_value(recorded[Metrics.GEO_FAILED]) == 1
+
+    @pytest.mark.asyncio
+    async def test_t03_one_batch_span_for_concurrent_run(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """One concurrent run emits exactly one worker iteration span (T03)."""
+        from tests.unit.app.geoint.test_geo_resolution_worker_concurrency import (
+            _outcome,
+            _ScriptedByCountryResolver,
+        )
+
+        codes = ("US", "CA", "MX")
+        observations = [
+            geolocation_evidence(facts={"country_code": code})[1] for code in codes
+        ]
+        resolutions = [
+            claimed_resolution(evidence_observation_id=obs.id) for obs in observations
+        ]
+        factory = FakeUnitOfWorkFactory(observations, resolutions)
+        resolver = _ScriptedByCountryResolver(
+            factory, {code: _outcome(code) for code in codes}
+        )
+        processed = await run_worker(
+            factory, resolver, config=worker_config(max_concurrency=2)
+        )
+        assert processed == 3
+        recorded = _recorded(in_memory_persistence_telemetry)
+        duration = recorded[DurationMetrics.GEO_RESOLVE]
+        assert histogram_count(duration) == 1
+
+    @pytest.mark.asyncio
+    async def test_t04_cancellation_invents_no_failure_counters(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """Parent cancellation creates no failed-outcome counters (T04)."""
+        from tests.unit.app.geoint.test_geo_resolution_worker_concurrency import (
+            _GatedResolver,
+            _outcome,
+        )
+
+        observations = [
+            geolocation_evidence(facts={"country_code": code})[1]
+            for code in ("US", "CA", "MX")
+        ]
+        resolutions = [
+            claimed_resolution(evidence_observation_id=obs.id) for obs in observations
+        ]
+        factory = FakeUnitOfWorkFactory(observations, resolutions)
+        resolver = _GatedResolver(factory, _outcome("US"))
+        worker = GeoResolutionWorker(
+            uow_factory=cast(Callable[[], UnitOfWork], factory),
+            resolver=resolver,
+            config=worker_config(max_concurrency=2),
+        )
+        task = asyncio.create_task(worker.run_once())
+        resolver.expect_entries(2)
+        await resolver.entry_reached.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        recorded = _recorded(in_memory_persistence_telemetry)
+        assert Metrics.GEO_FAILED not in recorded
+        assert Metrics.GEO_RESOLVED not in recorded
+        assert Metrics.GEO_UNRESOLVABLE not in recorded

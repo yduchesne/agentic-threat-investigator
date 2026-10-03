@@ -63,6 +63,7 @@ def worker_config(
     retry_base_seconds: float = 60.0,
     retry_max_seconds: float = 3600.0,
     batch_size: int = 10,
+    max_concurrency: int = 4,
 ) -> GeoResolutionWorkerConfig:
     """Return a valid bounded worker policy fixture."""
     return GeoResolutionWorkerConfig(
@@ -74,6 +75,7 @@ def worker_config(
         max_attempts=max_attempts,
         retry_base_seconds=retry_base_seconds,
         retry_max_seconds=retry_max_seconds,
+        max_concurrency=max_concurrency,
     )
 
 

@@ -373,6 +373,10 @@ class Settings(BaseSettings):
     geo_resolver_enabled: bool = True
     geo_resolver_worker_id: str = ""
     geo_resolver_batch_size: int = Field(default=10, ge=1, le=1000)
+    # PR L-2: independent bounded concurrency of claimed item pipelines. It
+    # is deliberately separate from batch_size (rows durably claimed per
+    # iteration): effective concurrency is min(len(claimed), this bound).
+    geo_resolver_max_concurrency: int = Field(default=4, ge=1, le=1000)
     geo_resolver_lease_seconds: int = Field(default=300, ge=1, le=86400)
     geo_resolver_poll_interval_seconds: float = Field(
         default=1.0, ge=0, allow_inf_nan=False
@@ -659,6 +663,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "geo_resolver_batch_size",
+        "geo_resolver_max_concurrency",
         "geo_resolver_lease_seconds",
         "geo_resolver_max_attempts",
         mode="before",

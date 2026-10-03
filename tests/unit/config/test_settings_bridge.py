@@ -175,10 +175,11 @@ def test_map_geolocation_bound_default_and_validation() -> None:
 
 
 def test_geo_resolver_bounds_default_and_validation() -> None:
-    """PR 26C resolver settings default safely and reject bad values."""
+    """PR 26C/PR L-2 resolver settings default safely and reject bad values."""
     settings = settings_from_config({})
     assert settings.geo_resolver_enabled is True
     assert settings.geo_resolver_batch_size == 10
+    assert settings.geo_resolver_max_concurrency == 4
     assert settings.geo_resolver_lease_seconds == 300
     assert settings.geo_resolver_max_attempts == 3
     assert settings.geo_resolver_retry_base_seconds == 60.0
@@ -193,11 +194,50 @@ def test_geo_resolver_bounds_default_and_validation() -> None:
     with pytest.raises(ValidationError):
         settings_from_config({"geo_resolver_batch_size": 0})
     with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_max_concurrency": 0})
+    with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_max_concurrency": -1})
+    with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_max_concurrency": True})
+    with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_max_concurrency": "many"})
+    with pytest.raises(ValidationError):
+        settings_from_config({"geo_resolver_max_concurrency": 1001})
+    with pytest.raises(ValidationError):
         settings_from_config({"geo_resolver_lease_seconds": True})
     with pytest.raises(ValidationError):
         settings_from_config({"geo_resolver_max_attempts": 0})
     with pytest.raises(ValidationError):
         settings_from_config({"geo_resolver_poll_interval_seconds": -1})
+
+
+def test_geo_resolver_max_concurrency_environment_override(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """PR L-2: ATI_GEO_RESOLVER_MAX_CONCURRENCY wins over profile values."""
+    monkeypatch.setenv("ATI_GEO_RESOLVER_MAX_CONCURRENCY", "7")
+    assert (
+        settings_from_config(
+            {"geo_resolver_max_concurrency": 2}
+        ).geo_resolver_max_concurrency
+        == 7
+    )
+
+
+def test_geo_resolver_max_concurrency_no_batch_coupling() -> None:
+    """PR L-2 concurrency is independent: values above or below batch work."""
+    assert (
+        settings_from_config(
+            {"geo_resolver_batch_size": 2, "geo_resolver_max_concurrency": 8}
+        ).geo_resolver_max_concurrency
+        == 8
+    )
+    assert (
+        settings_from_config(
+            {"geo_resolver_batch_size": 100, "geo_resolver_max_concurrency": 1}
+        ).geo_resolver_max_concurrency
+        == 1
+    )
 
 
 def test_evidence_kafka_default_and_validation() -> None:
