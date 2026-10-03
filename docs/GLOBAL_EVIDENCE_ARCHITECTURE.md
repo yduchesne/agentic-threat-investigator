@@ -255,6 +255,55 @@ no broker metadata cross the persistence boundary.
   after a DB-commit/log-commit failure adds no observation and no derived
   row.
 
+## MISP collection Evidence path (PR 32D, delivered)
+
+MISP is ATI's first configured **collection** datasource sharing this
+distributed Global Evidence pipeline. A configured MISP collection
+acquisition reuses the existing semantic conversion, `EvidenceMessage` v1
+publication, consumer extraction, and global PostgreSQL persistence
+boundaries without becoming an Investigation provider and without any
+MISP-specific persistence:
+
+```text
+MISP REST
+ -> MispDatasource                 (CollectionSemanticAcquirer, PR 32C)
+ -> MispSemanticRecord             (PR 32A parser)
+ -> MispToEvidenceConverter        (selected by SemanticFormatId.MISP, PR 32B)
+ -> EvidenceMessage v1             (PR 28C)
+ -> CollectionDatasourceEvidenceProducer
+ -> EvidencePublisher / Kafka-Redpanda (PR 28G)
+ -> EvidencePersistenceConsumer    (PR 28E)
+ -> EvidenceBatchPersistenceService
+ -> PostgreSQL global Evidence     (SQL API v0027)
+```
+
+- The producer shares the PR 28F-2 post-acquisition pipeline with the
+  entity-triggered `DatasourceEvidenceProducer` through one private
+  helper; zero conversion is a valid `PUBLISHED(0)`/`COMPLETED` execution
+  and the exact lifecycle is `STARTED, ACQUIRED, DECODED, CONVERTED(N),
+  PUBLISHED(N), COMPLETED`.
+- Consumer-side extraction is extended at the existing single dispatch
+  boundary (`extraction_view_from_message`) for the supported MISP +
+  MISP pair: the invocation Entity and any additional represented Entities
+  are reconstructed **only** from the durable normalized `facts.iocs`
+  (canonical `domain`/`ip_address`, first IOC = invocation, distinct
+  identities), never from raw payloads or tags/category.
+- `domain|ip` is one Evidence item with two represented IOC Entities and
+  **zero** inferred relationships; the deterministic MISP extractor returns
+  the additional Entity identity with always-empty relationships, and the
+  global `_validate_prepared()` duplicate/preflight rules are unchanged.
+- Collection ingestion creates global Evidence only: it never admits
+  `InvestigationEvidence` and never registers MISP as an EvidenceProvider.
+- PostgreSQL remains authoritative for committed EvidenceObservation
+  identity, versions, material no-op/change decisions, and diffs; an
+  unchanged material state in a new execution is a new receipt with
+  UNCHANGED, and a material change appends the next Observation version
+  through the stored-function transition.
+- Producer `COMPLETED` means the publisher accepted every message; the
+  broker commit happens only after the PostgreSQL batch commit. MISP
+  distribution/sharing-group metadata is source fact, never ATI
+  authorization.
+
 ## Domain model
 
 ```text

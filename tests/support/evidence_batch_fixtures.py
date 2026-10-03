@@ -60,6 +60,17 @@ _THREATFOX_DEFINITION = DatasourceDefinition(
 )
 """The canonical synthetic ThreatFox definition (mirrors PR 28C fixtures)."""
 
+_MISP_ENDPOINT = "https://misp.example.test/events/restSearch"
+
+_MISP_DEFINITION = DatasourceDefinition(
+    datasource_id=DatasourceId("misp-live"),
+    source_id=SourceId.MISP,
+    protocol=DatasourceProtocol.HTTPS,
+    serialization_format=SerializationFormat.JSON,
+    semantic_format=SemanticFormatId.MISP,
+)
+"""The canonical synthetic MISP definition (mirrors PR 32C fixtures)."""
+
 
 def threatfox_semantic_context(
     *,
@@ -176,3 +187,72 @@ def message_batch(
             for index, message in enumerate(messages)
         ),
     )
+
+
+def misp_semantic_context(
+    *,
+    retrieved_at: datetime = FIXED_RETRIEVED_AT,
+    source_reference: str = _MISP_ENDPOINT,
+) -> SemanticSourceContext:
+    """Build one MISP semantic provenance context."""
+    return SemanticSourceContext(
+        datasource_id=_MISP_DEFINITION.datasource_id,
+        source_id=_MISP_DEFINITION.source_id,
+        semantic_format=_MISP_DEFINITION.semantic_format,
+        retrieved_at=retrieved_at,
+        source_reference=source_reference,
+    )
+
+
+def build_misp_ioc_fact(*, type: str, value: str) -> dict[str, str]:
+    """Build one durable normalized MISP IOC fact (PR 32B handoff keys).
+
+    Mirrors the exact handoff keys of the production converter so
+    consumer-side reconstruction sees byte-identical durable content.
+    """
+    return {"type": type, "value": value}
+
+
+def misp_message(
+    *,
+    source_record_id: str,
+    iocs: tuple[dict[str, str], ...],
+    execution_id: UUID | None = None,
+    sequence: int = 0,
+    retrieved_at: datetime = FIXED_RETRIEVED_AT,
+    facts: dict[str, Any] | None = None,
+    observed_at: datetime | None = None,
+) -> tuple[EvidenceMessage, ConvertedEvidence]:
+    """Build one valid MISP V1 message plus its exact ConvertedEvidence.
+
+    The message goes through the public PR 28C builder, so every
+    deterministic identity (Evidence, message, candidate) is recomputed and
+    validated by production code.
+    """
+    context = misp_semantic_context(retrieved_at=retrieved_at)
+    evidence = Evidence(
+        id=evidence_id_for_source_record(
+            SemanticFormatId.MISP, SourceId.MISP, source_record_id
+        ),
+        type=EvidenceType.THREAT_INTELLIGENCE,
+        source=SourceId.MISP.value,
+        source_record_id=source_record_id,
+    )
+    converted = ConvertedEvidence(
+        evidence=evidence,
+        observation=EvidenceObservationCandidate(
+            evidence_id=evidence.id,
+            source_url=_MISP_ENDPOINT,
+            observed_at=observed_at,
+            retrieved_at=retrieved_at,
+            facts=(facts if facts is not None else {"iocs": list(iocs)}),
+            raw_payload=None,
+        ),
+    )
+    message = evidence_message_from_converted(
+        converted,
+        datasource_execution_id=execution_id or uuid4(),
+        semantic_source=context,
+        sequence=sequence,
+    )
+    return message, converted

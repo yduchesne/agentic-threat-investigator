@@ -49,7 +49,7 @@ from __future__ import annotations
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Generic, Protocol, TypeVar
 from uuid import UUID
@@ -165,23 +165,24 @@ class RecorderDatasourceExecutionCompletion(DatasourceExecutionCompletion):
         await self._recorder.cancel()
 
 
-async def observe_semantic_acquisition(
-    acquirer: SemanticAcquirer[T],
-    *,
-    definition: DatasourceDefinition,
-    entity: Entity,
-    recorder: DatasourceExecutionRecorder,
-) -> SemanticAcquisitionResult[T]:
-    """Run one semantic acquisition inside the canonical acquire telemetry.
+R = TypeVar("R")
+"""One validated source-native semantic object type of the telemetry seam."""
 
-    This is the shared acquisition seam both the datasource Evidence producer
-    and the datasource-backed provider use, so every logical semantic
-    acquisition is observed exactly once regardless of caller. The span and
-    the seconds duration histogram carry a bounded success/error outcome: a
-    typed acquisition stage error result is a failure, an ordinary exception
-    is a failure, and ``asyncio.CancelledError`` propagates without recording
-    any telemetry. No source body, URL, IOC value, or exception text is ever
-    captured, and the caller's recorder/lifecycle semantics are untouched.
+
+async def _observe_acquisition(
+    run: Callable[[], Awaitable[SemanticAcquisitionResult[R]]],
+) -> SemanticAcquisitionResult[R]:
+    """Record the canonical acquire telemetry around one acquisition call.
+
+    The span and the seconds duration histogram carry a bounded
+    success/error outcome: a typed acquisition stage error result is a
+    failure, an ordinary exception is a failure, and
+    ``asyncio.CancelledError`` propagates without recording any telemetry.
+    No source body, URL, IOC value, or exception text is ever captured;
+    the caller's recorder/lifecycle semantics are untouched. This is the
+    one shared body behind both the entity-triggered and the collection
+    acquisition seams, so every logical semantic acquisition is observed
+    exactly once regardless of caller.
     """
     tracer = get_tracer()
     histogram = get_histogram(DurationMetrics.DATASOURCE_ACQUIRE, unit=DURATION_UNIT)
@@ -189,9 +190,7 @@ async def observe_semantic_acquisition(
     start = time.perf_counter()
     with tracer.start_as_current_span(SpanNames.DATASOURCE_ACQUIRE) as span:
         try:
-            result = await acquirer.acquire(
-                definition=definition, entity=entity, recorder=recorder
-            )
+            result = await run()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -216,6 +215,49 @@ async def observe_semantic_acquisition(
                     attributes={AttributeKeys.OUTCOME: "success"},
                 )
             return result
+
+
+async def observe_semantic_acquisition(
+    acquirer: SemanticAcquirer[T],
+    *,
+    definition: DatasourceDefinition,
+    entity: Entity,
+    recorder: DatasourceExecutionRecorder,
+) -> SemanticAcquisitionResult[T]:
+    """Run one semantic acquisition inside the canonical acquire telemetry.
+
+    This is the shared acquisition seam both the datasource Evidence producer
+    and the datasource-backed provider use, so every logical semantic
+    acquisition is observed exactly once regardless of caller. The span and
+    the seconds duration histogram carry a bounded success/error outcome: a
+    typed acquisition stage error result is a failure, an ordinary exception
+    is a failure, and ``asyncio.CancelledError`` propagates without recording
+    any telemetry. No source body, URL, IOC value, or exception text is ever
+    captured, and the caller's recorder/lifecycle semantics are untouched.
+    """
+    return await _observe_acquisition(
+        lambda: acquirer.acquire(
+            definition=definition, entity=entity, recorder=recorder
+        )
+    )
+
+
+async def observe_collection_acquisition(
+    acquirer: CollectionSemanticAcquirer[T],
+    *,
+    definition: DatasourceDefinition,
+    recorder: DatasourceExecutionRecorder,
+) -> SemanticAcquisitionResult[T]:
+    """Run one collection acquisition inside the canonical acquire telemetry (PR 32D).
+
+    Mirrors :func:`observe_semantic_acquisition` for the collection
+    contract: no Entity and no ``supports(entity)`` gate. The shared
+    telemetry body records the same bounded success/error outcome; the
+    caller's recorder/lifecycle semantics are untouched.
+    """
+    return await _observe_acquisition(
+        lambda: acquirer.acquire(definition=definition, recorder=recorder)
+    )
 
 
 def _record_telemetry_exception(span: trace.Span, exc: Exception) -> None:
@@ -289,6 +331,32 @@ class SemanticAcquirer(Protocol, Generic[T]):
         recorder: DatasourceExecutionRecorder,
     ) -> SemanticAcquisitionResult[T]:
         """Acquire and parse one semantic acquisition for the entity."""
+
+
+class CollectionSemanticAcquirer(Protocol, Generic[T]):
+    """One collection semantic acquisition seam over a configured datasource (PR 32D).
+
+    Shape-compatible with :meth:`MispDatasource.acquire`: a **collection**
+    acquisition has no Investigation Entity and declares no
+    ``supports(entity)`` gate. The acquirer appends its own stage events to
+    the recorder in short committed transactions, performs acquisition/parse
+    work with no database transaction open, and returns validated
+    source-native objects or one typed bounded stage error. Nothing in the
+    contract knows about MISP, HTTP, persistence, or Investigation.
+
+    ``MispDatasource`` satisfies this protocol structurally without any
+    wrapper; the entity-triggered :class:`SemanticAcquirer` contract remains
+    unchanged.
+    """
+
+    @abstractmethod
+    async def acquire(
+        self,
+        *,
+        definition: DatasourceDefinition,
+        recorder: DatasourceExecutionRecorder,
+    ) -> SemanticAcquisitionResult[T]:
+        """Acquire and parse one collection semantic acquisition."""
 
 
 def _utc_now() -> datetime:

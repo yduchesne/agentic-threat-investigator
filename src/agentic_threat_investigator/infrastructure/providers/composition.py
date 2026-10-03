@@ -10,20 +10,42 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import AsyncExitStack
 from types import MappingProxyType
 
+from agentic_threat_investigator.app.datasource_evidence_producer import (
+    CollectionDatasourceEvidenceProducer,
+)
+from agentic_threat_investigator.app.evidence_log import EvidencePublisher
+from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.providers import EvidenceProvider
 from agentic_threat_investigator.app.secrets import (
     EnvVarSecretsResolver,
     SecretsResolver,
 )
 from agentic_threat_investigator.config.settings import Settings
-from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.datasource import (
+    DatasourceDefinition,
+    DatasourceProtocol,
+    SerializationFormat,
+)
+from agentic_threat_investigator.domain.identifiers import (
+    SemanticFormatId,
+    SourceId,
+)
 from agentic_threat_investigator.infrastructure.datasources.misp import MispDatasource
+from agentic_threat_investigator.infrastructure.datasources.misp_evidence import (
+    build_misp_conversion_registry,
+)
+from agentic_threat_investigator.infrastructure.datasources.misp_semantics import (
+    MispSemanticRecord,
+)
 from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
+)
+from agentic_threat_investigator.infrastructure.kafka.composition import (
+    compose_kafka_publisher,
 )
 from agentic_threat_investigator.infrastructure.object_store import (
     FileSystemObjectStore,
@@ -76,6 +98,92 @@ class DefaultHttpClientFactory(HttpClientFactory):
     ) -> ProviderHttpClient:
         """Construct one owned provider HTTP client."""
         return ProviderHttpClient(policy=policy, limiter=limiter)
+
+
+def resolve_misp_datasource_definition(
+    settings: Settings,
+) -> DatasourceDefinition | None:
+    """Resolve the authoritative MISP ``DatasourceDefinition`` or ``None``.
+
+    Selection is deterministic over ``settings.datasources`` only: exactly
+    one definition whose ``source_id`` is MISP is selected, zero returns
+    ``None`` (the not-configured state), and more than one fails closed
+    with :class:`ValueError` rather than imposing accidental uniqueness or
+    manufacturing an identity from ``misp_base_url``. The returned
+    definition still receives the explicit MISP dimension validation at the
+    composition boundary.
+    """
+    definitions = [d for d in settings.datasources if d.source_id is SourceId.MISP]
+    if not definitions:
+        return None
+    if len(definitions) > 1:
+        raise ValueError(
+            "multiple MISP datasource definitions are ambiguous; "
+            "configure exactly one MISP datasource"
+        )
+    return definitions[0]
+
+
+def _validate_misp_definition(definition: DatasourceDefinition) -> None:
+    """Fail closed unless the definition matches the MISP collection contract.
+
+    Mirrors ``MispDatasource._validate_definition`` so a configured URL
+    paired with a missing or mismatched definition fails before any
+    acquisition. No dimension is inferred from another.
+    """
+    if definition.source_id is not SourceId.MISP:
+        raise ValueError("MISP datasource definition source_id must be MISP")
+    if definition.protocol is not DatasourceProtocol.HTTPS:
+        raise ValueError("MISP datasource definition protocol must be HTTPS")
+    if definition.serialization_format is not SerializationFormat.JSON:
+        raise ValueError("MISP datasource definition serialization_format must be JSON")
+    if definition.semantic_format is not SemanticFormatId.MISP:
+        raise ValueError("MISP datasource definition semantic_format must be MISP")
+
+
+def compose_misp_collection_producer(
+    settings: Settings,
+    *,
+    datasource: MispDatasource | None,
+    uow_factory: Callable[[], UnitOfWork],
+    publisher: EvidencePublisher | None = None,
+    secrets: SecretsResolver | None = None,
+) -> CollectionDatasourceEvidenceProducer[MispSemanticRecord] | None:
+    """Compose the configured MISP collection Evidence producer, or ``None``.
+
+    ``None`` is the durable not-configured state: a blank ``misp_base_url``
+    (``ProviderComposition.misp_datasource`` is ``None``) requires no MISP
+    API key and produces no collection producer. A configured datasource
+    with a missing or mismatched MISP ``DatasourceDefinition`` fails closed
+    with :class:`ValueError` before any acquisition. The converter registry
+    is the real :func:`build_misp_conversion_registry` selected by
+    ``SemanticFormatId.MISP``; the concrete Kafka publisher is injected
+    behind the ``EvidencePublisher`` ABC and defaults to
+    :func:`compose_kafka_publisher` over ``settings.evidence_kafka``. MISP
+    never enters the Investigation provider registry and no scheduler is
+    introduced here.
+    """
+    if datasource is None:
+        return None
+    definition = resolve_misp_datasource_definition(settings)
+    if definition is None:
+        raise ValueError(
+            "misp_base_url is configured but settings.datasources declares "
+            "no MISP datasource definition"
+        )
+    _validate_misp_definition(definition)
+    selected_publisher = publisher
+    if selected_publisher is None:
+        selected_publisher = compose_kafka_publisher(
+            settings.evidence_kafka, secrets=secrets
+        )
+    return CollectionDatasourceEvidenceProducer(
+        definition=definition,
+        acquirer=datasource,
+        registry=build_misp_conversion_registry(),
+        publisher=selected_publisher,
+        uow_factory=uow_factory,
+    )
 
 
 async def _compose_dbip_city_lite(

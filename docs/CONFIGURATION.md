@@ -960,6 +960,47 @@ production:
   keeps ordinary fake/local startup legal before PR 32D production wiring,
   with no MISP credential requirement.
 
+### MISP collection runtime selection (PR 32D)
+
+Starting with PR 32D, a configured MISP URL resolves to the
+`CollectionDatasourceEvidenceProducer` through the following deterministic
+selection rules (all via `Settings`; no identity is manufactured from
+`misp_base_url`):
+
+- the authoritative MISP `DatasourceDefinition` comes from
+  `Settings.datasources`; it must declare exactly `SourceId.MISP` +
+  `DatasourceProtocol.HTTPS` + `SerializationFormat.JSON` +
+  `SemanticFormatId.MISP` (none inferred from another);
+- a blank `misp_base_url` yields no collection producer and requires no
+  MISP key, even when a MISP definition exists in `datasources`;
+- a configured URL with **no** MISP definition, with **more than one**
+  MISP definition (ambiguous selection fails closed rather than guessing),
+  or with a mismatched dimension fails closed at composition time — before
+  any acquisition — with `ValueError`;
+- the real `build_misp_conversion_registry()` is selected by
+  `SemanticFormatId.MISP` only, never by source ID, datasource ID,
+  endpoint, serialization, or object shape;
+- the concrete Kafka publisher is injected behind `EvidencePublisher` via
+  the standard `compose_kafka_publisher(settings.evidence_kafka, ...)`;
+  there are no MISP-specific broker settings or topics;
+- MISP stays absent from `ProviderComposition.provider_registry()` and no
+  scheduler/CLI entry point is added by PR 32D: the composition seam is
+  the production entry point.
+
+Example profile shape for a configured MISP collection datasource:
+
+```python
+"datasources": [
+    {
+        "datasource_id": "misp-live",
+        "source_id": "urn:ati:source:misp",
+        "protocol": "https",
+        "serialization_format": "json",
+        "semantic_format": "urn:ati:datasource:semanticformat:misp",
+    },
+],
+```
+
 MISP HTTP admission (timeout, retries, response-size bounding, concurrency,
 rate limiting, cancellation) is owned entirely by the shared
 `ProviderHttpClient`/`BoundedLimiter` infrastructure configured through the

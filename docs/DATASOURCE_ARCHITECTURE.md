@@ -509,6 +509,69 @@ No database transaction spans HTTP/decoding/parsing, no Evidence is
 constructed by acquisition, and there is no MISP-specific persistence path;
 PR 32D owns production runtime composition and real-stack Evidence closure.
 
+## Native MISP collection runtime closure (PR 32D, delivered)
+
+PR 32D closes the MISP runtime by wiring the PR 32A semantics, PR 32B
+conversion, and PR 32C bounded REST acquisition through ATI's existing
+distributed Global Evidence publication and persistence boundaries. MISP
+remains a **collection** datasource: it never becomes an Investigation
+`EvidenceProvider`, never gains a fake/ignored Entity or
+`supports(entity)`, never registers in
+`ProviderComposition.provider_registry()`, and never routes through
+`ProviderWorkExecutor`.
+
+- **Collection acquisition contract.** `app/datasource_provider.py` now
+  defines `CollectionSemanticAcquirer[T]` alongside the entity-triggered
+  `SemanticAcquirer[T]`: `acquire(*, definition, recorder)` with no
+  Entity and no `supports(entity)`. `MispDatasource.acquire` satisfies it
+  structurally without a wrapper. The entity-triggered contract is
+  unchanged.
+- **Collection Evidence producer.**
+  `app/datasource_evidence_producer.py` adds
+  `CollectionDatasourceEvidenceProducer[T]`. Its `produce()` takes no
+  Entity argument and shares the **same** post-acquisition pipeline as
+  `DatasourceEvidenceProducer` through the private
+  `_convert_and_publish()` helper (never copied):
+  `SemanticAcquisitionResult -> EvidenceConversionContext ->
+  convert_semantic_source_objects -> CONVERTED(N) -> EvidenceMessage
+  construction -> exactly one EvidencePublisher.publish -> PUBLISHED(N) ->
+  COMPLETED`. Zero conversion is valid (`CONVERTED(0)`, `publish(())`,
+  `PUBLISHED(0)`, `COMPLETED`); typed acquisition failures record
+  `FAILED(code)`, conversion/message-construction/publication failures
+  record their bounded codes and propagate, cancellation records
+  `CANCELLED` (best effort) and propagates, and a lifecycle append failure
+  after a successful publish propagates without republish and without
+  `COMPLETED`.
+- **Composition.** `infrastructure/providers/composition.py` owns
+  `resolve_misp_datasource_definition(settings)` (exactly one MISP
+  definition in `Settings.datasources`; zero returns `None`, more than
+  one fails closed) and `compose_misp_collection_producer(...)` (blank
+  URL -> `None` with no MISP key requirement; configured URL with a
+  missing/mismatched definition fails before acquisition; the real
+  `build_misp_conversion_registry()` is selected by
+  `SemanticFormatId.MISP`; the concrete Kafka publisher is injected
+  behind the `EvidencePublisher` ABC via
+  `compose_kafka_publisher(settings.evidence_kafka)`). No new CLI or
+  scheduler exists: the composition seam is the production entry point.
+- **Consumer-side extraction.** `app/extraction/message_context.py`
+  dispatches by the exact `(semantic_format, source)` pair (ThreatFox +
+  ThreatFox, MISP + MISP; anything else fails closed). MISP
+  reconstruction derives the transient invocation Entity from the durable
+  normalized `facts.iocs` (first ordered IOC; DOMAIN for `domain|ip`),
+  requires canonical values and distinct identities, and never re-parses
+  raw payloads. `app/extraction/misp.py` returns the additional
+  represented IOC Entities (one for `domain|ip`) with always-empty
+  relationships; the dispatcher is registered for
+  `(SourceId.MISP, THREAT_INTELLIGENCE)`.
+- **Invariants preserved.** Evidence identity remains the exact MISP
+  semantic format + MISP source + Attribute UUID; no MISP tables,
+  message schema, topic, Observation versioning, or direct
+  `MispDatasource -> PostgreSQL` path exists; EvidenceMessage v1, the
+  normal Kafka topic, the normal consumer, and the global PostgreSQL
+  batch stored functions are reused; `domain|ip` preserves both Entities
+  with zero invented relationships; MISP distribution/sharing-group
+  metadata remains source fact, never ATI authorization; collection
+  ingestion never creates `InvestigationEvidence`.
 
 ## Evidence wire boundary (PR 28C, delivered)
 
@@ -658,9 +721,12 @@ publication are separate durable boundaries (no distributed transaction,
 no outbox); after a successful publish a lifecycle-append failure propagates
 without republishing. This producer path is tested end-to-end on the
 ThreatFox reference datasource (deterministic unit matrices F2-* and real-
-PostgreSQL vertical slices V28F2-*) but is not yet wired into a production
-runner; the PR 27E Investigation compatibility lifecycle above remains the
-active production path for Investigation execution.
+PostgreSQL vertical slices V28F2-*) and is now also proven by the PR 32D
+collection twin `CollectionDatasourceEvidenceProducer`: the shared
+post-acquisition pipeline is exercised by real-stack MISP slices (V01..V05)
+and real Redpanda + PostgreSQL closure tests (K01..K06). Publisher
+completion still never waits for the PR 28E consumer; a future process or
+container may call `process_next_batch()` repeatedly.
 
 One UoW = one real bounded PostgreSQL transaction. No UoW spans
 acquisition, parsing, conversion, extraction, retry sleep, or a whole
