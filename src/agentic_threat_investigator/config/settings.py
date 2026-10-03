@@ -269,6 +269,20 @@ class Settings(BaseSettings):
         default=None, gt=0, allow_inf_nan=False
     )
     urlhaus_auth_key_secret: str = "ATI_URLHAUS_AUTH_KEY"
+    # MISP acquisition settings (PR 32C). MISP is a configured collection
+    # datasource (never an entity-search provider): the base URL is blank by
+    # default so an unset URL remains legal before PR 32D production wiring.
+    # The secret setting carries only the NAME of the environment variable
+    # holding the MISP API key; the key value is resolved outside
+    # configuration during composition and never stored or logged here.
+    misp_base_url: str = ""
+    misp_api_key_secret: str = "ATI_MISP_API_KEY"
+    misp_max_concurrency: int = Field(default=4, ge=1)
+    misp_requests_per_second: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    misp_page_size: int = Field(default=100, ge=1, le=1000)
+    misp_max_pages: int = Field(default=10, ge=1, le=1000)
     # LLM settings (PR 20B). The secret setting carries only the NAME of the
     # environment variable holding the provider API key; the key value is
     # resolved outside configuration during composition and never stored or
@@ -414,6 +428,9 @@ class Settings(BaseSettings):
         "abuseipdb_max_age_in_days",
         "threatfox_max_concurrency",
         "urlhaus_max_concurrency",
+        "misp_max_concurrency",
+        "misp_page_size",
+        "misp_max_pages",
         mode="before",
     )
     @classmethod
@@ -434,6 +451,7 @@ class Settings(BaseSettings):
         "abuseipdb_requests_per_second",
         "threatfox_requests_per_second",
         "urlhaus_requests_per_second",
+        "misp_requests_per_second",
         mode="before",
     )
     @classmethod
@@ -473,6 +491,44 @@ class Settings(BaseSettings):
         """Require a non-blank secret reference name (never an Auth-Key value)."""
         if not value.strip():
             raise ValueError("urlhaus_auth_key_secret must not be blank")
+        return value.strip()
+
+    @field_validator("misp_api_key_secret")
+    @classmethod
+    def validate_misp_api_key_secret(cls, value: str) -> str:
+        """Require a non-blank secret reference name (never an API key value)."""
+        if not value.strip():
+            raise ValueError("misp_api_key_secret must not be blank")
+        return value.strip()
+
+    @field_validator("misp_base_url")
+    @classmethod
+    def validate_misp_base_url(cls, value: str) -> str:
+        """Require a blank or credential-free HTTPS MISP base URL.
+
+        A blank value is legal before PR 32D production wiring and disables
+        MISP composition. A non-blank value must use ``https`` (MISP TLS
+        verification is never disabled), contain a hostname, carry no
+        username/password (so a URL can never embed a key), and carry no
+        query or fragment. Path components are preserved exactly; no DNS
+        resolution or network probing happens here.
+        """
+        if not value.strip():
+            return ""
+        try:
+            parsed = urlsplit(value.strip())
+            hostname = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("misp_base_url is malformed") from exc
+        if parsed.scheme != "https":
+            raise ValueError("misp_base_url must use the https scheme")
+        if not hostname:
+            raise ValueError("misp_base_url must contain a hostname")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("misp_base_url must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("misp_base_url must not contain a query or fragment")
         return value.strip()
 
     @field_validator("llm_driver", mode="before")

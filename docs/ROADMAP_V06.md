@@ -174,7 +174,7 @@ metadata remain source facts/provenance. The converter must not assign
 maliciousness, directly persist Entities/Relationships, or infer semantics
 from arbitrary MISP type names.
 
-## PR 32C — MISP acquisition
+## PR 32C — MISP acquisition `[DONE]`
 
 Implement native MISP REST/API acquisition behind ATI's existing datasource
 acquisition boundary. Cover endpoint/configuration composition,
@@ -190,6 +190,32 @@ checkpointing, or source pagination semantics must remain explicit.
 
 Automated tests use deterministic ATI-authored MISP response fixtures and fake
 the external HTTP boundary only. No ordinary test contacts a live MISP server.
+
+Delivered by this PR:
+
+- `MispDatasource` + the `extract_misp_event_envelopes()` REST-envelope adapter
+  + the `acquire_misp_execution` runner in
+  `infrastructure/datasources/misp.py`: dimensions validated fail-closed before
+  any I/O, `SecretsResolver`-resolved API key kept header-only, bounded
+  sequential pagination against `POST {misp_base_url}/events/restSearch` with
+  explicit `page`/`limit` within a validated page-size/max-pages window, real
+  `parse_misp_event()` reuse, one credential-free `SemanticSourceContext`,
+  bounded typed `DatasourceStageError` outcomes, later-page-failure atomicity,
+  cancellation propagation, and no Evidence construction or MISP persistence;
+- MISP acquisition settings (`misp_base_url`, `misp_api_key_secret`,
+  `misp_max_concurrency`, `misp_requests_per_second`, `misp_page_size`,
+  `misp_max_pages`) with documented defaults (`100`/`10`/`4`) and bounds, the
+  `.env.example` entries, and `ProviderComposition.misp_datasource`
+  composition only when a base URL is configured (an unset URL keeps ordinary
+  fake/local startup legal; MISP is **not** registered as a production
+  `EvidenceProvider`);
+- deterministic unit matrix M32C-01..60 + M32C-C01..C10 + acquisition vertical
+  slices M32C-V01..V05 with ATI-authored REST fixtures in
+  `tests/support/misp_fixtures.py`; only the external HTTP boundary is faked;
+- architecture/configuration/testing documentation and road-map status.
+
+PR 32D remains responsible for production runtime composition and the
+semantic acquisition -> conversion -> publication/persistence closure.
 
 ## PR 32D — MISP runtime integration and closure
 

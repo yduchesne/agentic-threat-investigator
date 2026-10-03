@@ -21,6 +21,7 @@ from agentic_threat_investigator.app.secrets import (
 )
 from agentic_threat_investigator.config.settings import Settings
 from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.infrastructure.datasources.misp import MispDatasource
 from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
 )
@@ -123,6 +124,7 @@ class ProviderComposition:
         self._ipinfo_lite: IpinfoLiteProvider | None = None
         self._abuseipdb: AbuseIpdbProvider | None = None
         self._threatfox_datasource: ThreatFoxDatasource | None = None
+        self._misp_datasource: MispDatasource | None = None
         self._urlhaus: UrlhausProvider | None = None
         self._dbip_city_lite: DbIpCityLiteProvider | None = None
 
@@ -264,6 +266,35 @@ class ProviderComposition:
             clients.append(http)
             composition._urlhaus = UrlhausProvider(http, auth_key=urlhaus_key)
 
+            # Native MISP REST acquisition (PR 32C): composed only when a
+            # base URL is configured, because MISP is a configured
+            # collection datasource that is not wired into the production
+            # runtime before PR 32D. An unset URL keeps ordinary fake/local
+            # startup legal without any MISP credential requirement. When
+            # configured, the API key is resolved here through the same
+            # bootstrap contract; the acquirer receives only the resolved
+            # key and never reads configuration or the environment.
+            if settings.misp_base_url:
+                misp_key = resolver.require(settings.misp_api_key_secret)
+                http = factory.create(
+                    policy,
+                    BoundedLimiter(
+                        RateLimiterSettings(
+                            max_concurrency=settings.misp_max_concurrency,
+                            requests_per_second=settings.misp_requests_per_second,
+                        )
+                    ),
+                )
+                stack.push_async_callback(http.aclose)
+                clients.append(http)
+                composition._misp_datasource = MispDatasource(
+                    http,
+                    api_key=misp_key,
+                    base_url=settings.misp_base_url,
+                    page_size=settings.misp_page_size,
+                    max_pages=settings.misp_max_pages,
+                )
+
             # Local DB-IP City Lite geolocation: composed only when the
             # credential-free artifact URI is configured. The artifact must
             # already exist and be readable; composition fails fast otherwise.
@@ -328,6 +359,18 @@ class ProviderComposition:
         if self._urlhaus is None:
             raise RuntimeError("ProviderComposition must be created via create()")
         return self._urlhaus
+
+    @property
+    def misp_datasource(self) -> MispDatasource | None:
+        """PR 32C native MISP acquisition datasource, or ``None`` when unset.
+
+        The acquirer is composed only when ``misp_base_url`` is configured;
+        ``None`` is the documented not-configured state that keeps ordinary
+        fake/local startup legal before PR 32D production wiring. It is
+        **not** registered as an ``EvidenceProvider`` and carries its own
+        owned HTTP client, limiter, and resolved API key.
+        """
+        return self._misp_datasource
 
     @property
     def dbip_city_lite(self) -> DbIpCityLiteProvider | None:

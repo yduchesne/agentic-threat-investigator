@@ -2182,6 +2182,48 @@ production runtime composition/real-stack closure remains PR 32D; this
 slice proves pure conversion only (`parse_misp_event` -> real registry ->
 real `convert_semantic_source_objects` -> `MispToEvidenceConverter`).
 
+### Native MISP REST acquisition (PR 32C)
+
+PR 32C adds the bounded native MISP acquisition boundary between the MISP
+REST API and the PR 32A semantic parser without touching PR 32A/32B
+semantics and without wiring MISP into the production Evidence runtime
+(PR 32D owns that closure):
+
+```text
+MISP REST POST {base_url}/events/restSearch
+  -> MispDatasource (PR 32C acquisition)
+  -> decoded Event envelopes
+  -> parse_misp_event() (PR 32A, real, reused)
+  -> MispSemanticRecord
+  -> PR 32B converter (unchanged) in PR 32D
+```
+
+`infrastructure/datasources/misp.py` owns `MispDatasource`, the narrow
+`extract_misp_event_envelopes()` REST-envelope adapter, and the tiny
+`acquire_misp_execution` runner reusing the PR 27B
+`DatasourceExecutionRecorder`. It validates the explicit datasource
+dimensions (MISP/HTTPS/JSON/MISP) fail-closed before any I/O,
+authenticates with a `SecretsResolver`-resolved API key carried only in the
+`Authorization` header (never in URLs, bodies, context, logs, or errors),
+and returns one typed `SemanticAcquisitionResult[MispSemanticRecord]`
+with a credential-free `SemanticSourceContext`.
+
+Pagination is strictly sequential and explicitly bounded by a validated
+`page_size` (1..1000) and `max_pages` (1..1000) window: each page is
+fetched, adapted, and fully parsed before the next is requested, an empty
+page stops success, and reaching `max_pages` means the bounded acquisition
+window completed (never that the server is exhausted). No event is returned
+until the whole bounded acquisition succeeds — a later-page
+HTTP/serialization/semantic failure fails the whole acquisition with zero
+objects. `ProviderHttpClient` owns every HTTP bound (timeout, retry,
+response size, concurrency admission, rate limiting, cancellation); no
+second limiter or task group is stacked. Failures map to bounded typed
+`DatasourceStageError` outcomes using `HttpOutcome.final_error_stage` and
+the provider error-code vocabulary, never by matching free-form server
+messages. Cancellation always propagates. No database transaction ever
+spans HTTP/decoding/parsing, no Evidence is constructed, and no MISP
+persistence path exists.
+
 ## Geospatial
 
 v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are used for map visualization.
