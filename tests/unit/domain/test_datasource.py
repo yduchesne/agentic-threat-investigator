@@ -41,16 +41,18 @@ def _definition(**overrides: object) -> DatasourceDefinition:
 
 
 def test_d27a_01_semantic_format_urns_are_exact() -> None:
-    """D27A-01: STIX 2.1 and ThreatFox semantic URNs are exact durable values."""
+    """D27A-01: STIX 2.1, ThreatFox, and MISP semantic URNs are exact."""
     assert SemanticFormatId.STIX_21.value == (
         "urn:ati:datasource:semanticformat:stix21"
     )
     assert SemanticFormatId.THREATFOX.value == (
         "urn:ati:datasource:semanticformat:threatfox"
     )
+    assert SemanticFormatId.MISP.value == ("urn:ati:datasource:semanticformat:misp")
     assert {member.value for member in SemanticFormatId} == {
         "urn:ati:datasource:semanticformat:stix21",
         "urn:ati:datasource:semanticformat:threatfox",
+        "urn:ati:datasource:semanticformat:misp",
     }
 
 
@@ -66,6 +68,7 @@ def test_d27a_02_source_id_values_remain_exact() -> None:
         SourceId.URLHAUS: "urn:ati:source:urlhaus",
         SourceId.MITRE_ATTACK: "urn:ati:source:mitre_attack",
         SourceId.CISA_KEV: "urn:ati:source:cisa_kev",
+        SourceId.MISP: "urn:ati:source:misp",
     }
 
 
@@ -168,9 +171,9 @@ def test_d27a_08b_serialization_vocabulary_is_exact() -> None:
     "invalid",
     [
         "",
-        "urn:ati:datasource:semanticformat:misp",
         "stix21",
         "urn:ati:source:threatfox",
+        "urn:ati:datasource:semanticformat:taxii",
     ],
 )
 def test_d27a_09_unknown_semantic_format_fails_closed(invalid: str) -> None:

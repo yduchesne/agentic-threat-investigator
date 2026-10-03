@@ -26,6 +26,7 @@ class SourceId(str, Enum):
     URLHAUS = "urn:ati:source:urlhaus"
     MITRE_ATTACK = "urn:ati:source:mitre_attack"
     CISA_KEV = "urn:ati:source:cisa_kev"
+    MISP = "urn:ati:source:misp"
 
 
 class SemanticFormatId(str, Enum):
@@ -40,3 +41,4 @@ class SemanticFormatId(str, Enum):
 
     STIX_21 = "urn:ati:datasource:semanticformat:stix21"
     THREATFOX = "urn:ati:datasource:semanticformat:threatfox"
+    MISP = "urn:ati:datasource:semanticformat:misp"

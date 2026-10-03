@@ -104,11 +104,24 @@ The following rules apply to every PR in v0.6:
 
 # PR 32 series — Native MISP integration
 
-## PR 32A — MISP semantic model and parser
+## PR 32A — MISP semantic model and parser `[DONE]`
 
-Introduce the MISP semantic-format identity and the smallest typed,
-immutable semantic representation required by ATI. Preserve MISP source data
-needed for exact provenance while validating the fields ATI consumes.
+Delivered: durable `SourceId.MISP = urn:ati:source:misp` and
+`SemanticFormatId.MISP = urn:ati:datasource:semanticformat:misp`;
+`infrastructure/datasources/misp_semantics.py` parses one decoded native
+MISP `{"Event": {...}}` envelope into immutable `MispAttributeRecord` /
+`MispObjectRecord` records (Event context, Attributes, Objects with nested
+Attributes/ObjectReferences, tags, strict UTC timestamps, `deleted`,
+distribution/sharing-group state preserved; UUID is upstream identity;
+malformed modeled content fails closed with a bounded
+`SEMANTIC_VALIDATION` error and zero records); synthetic ATI-authored
+fixtures and the deterministic M32A-01..50 matrix; docs. No acquisition,
+Evidence conversion (PR 32B), or runtime composition (PR 32C/32D).
+
+Original planning description: introduce the MISP semantic-format identity
+and the smallest typed, immutable semantic representation required by ATI.
+Preserve MISP source data needed for exact provenance while validating the
+fields ATI consumes.
 
 The parser should flatten an acquired MISP Event response into bounded semantic
 records suitable for independent conversion rather than requiring one giant
