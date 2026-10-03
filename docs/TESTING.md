@@ -1238,6 +1238,69 @@ PR 32A MISP semantic suites (including Object distribution `5`), the
 ThreatFox and generic converter/registry suites, and Evidence identity
 tests remain green; no generic conversion contract is weakened for MISP.
 
+### Native MISP REST acquisition (PR 32C)
+
+PR 32C adds bounded native MISP Event acquisition tests
+(`tests/unit/infrastructure/datasources/test_misp_acquisition.py`, M32C-01..60
++ M32C-V01..V05, config matrix M32C-C01..C10 in
+`tests/unit/config/test_misp_settings.py`, with PR 32C fixture additions in
+`tests/support/misp_fixtures.py`). Everything fakes only the external HTTPS
+boundary (in-process `httpx.MockTransport`) and runs the real
+`ProviderHttpClient`, the real `MispDatasource`, the real REST-envelope
+adapter, and the real PR 32A `parse_misp_event`; no test contacts a live
+MISP server and no test reads the wall clock or sleeps for timing:
+
+- configuration/construction (M32C-01..10): HTTPS base URL joins the
+  canonical `https://misp.example.test/events/restSearch` endpoint; HTTP/
+  credentialed/query/fragment URLs fail; blank resolved keys fail;
+  composition resolves the `SecretsResolver` reference into the exact
+  `Authorization` value and a missing key raises `SecretNotFoundError`
+  before any I/O; defaults are pinned; invalid page/window bounds fail;
+  environment values beat profile values;
+- definition guards (M32C-11..15): MISP/HTTPS/JSON/MISP is accepted and
+  every wrong dimension fails before any request;
+- request/security (M32C-16..22): `POST` to the exact `restSearch`
+  endpoint with the key only in `Authorization`, JSON `Accept`/`Content-`
+  `Type`, exact `{"page": N, "limit": L}` bodies, a credential-free
+  `SemanticSourceContext`, and no key/body leakage into errors, events, or
+  context;
+- envelope/parser reuse (M32C-23..31): one Event equals the direct
+  `parse_misp_event` output; multiple Events preserve order; empty pages
+  are successful empty; invalid roots, missing/`non-list` `response`
+  members, non-object Events, and malformed Event semantics fail with the
+  bounded `SEMANTIC_VALIDATION` error and zero objects; supported +
+  unsupported Attribute types and Event Objects are all transported;
+- pagination (M32C-32..42): short-first-page one request; full-then-short
+  two requests; empty-page stop; all-full pages stop at exactly
+  `max_pages` with no `max_pages+1` probe; deterministic cross-page order;
+  later-page HTTP/envelope/Event failures leak zero objects; request
+  bodies carry pages `1..N` with a constant limit; `ACQUIRED` carries the
+  exact successful-page byte sum; raw page payloads are never retained;
+- HTTP mapping (M32C-43..50): timeout, 429/Retry-After, 401/403/404,
+  exhausted 5xx, malformed JSON/media, and oversized responses map to the
+  bounded typed `DatasourceStageError` outcomes with exact retryability,
+  never by matching free-form message text;
+- cancellation/determinism (M32C-51..60): cancellation during a request or
+  limiter wait propagates (`CancelledError`, recorder CANCELLED in the
+  runner), cancelling before page 2 yields no successful result, identical
+  inputs yield structurally equal results, acquisition returns only typed
+  MISP semantic records and performs no persistence beyond lifecycle
+  appends, the real parser is exercised end to end, no second concurrency
+  wrapper is stacked, and at most one page request is ever in flight;
+- acquisition vertical slices (M32C-V01..V05): ATI-authored REST fixtures
+  -> controlled external HTTP boundary -> real `ProviderHttpClient` -> real
+  `MispDatasource` -> real REST adapter -> real `parse_misp_event` ->
+  `SemanticAcquisitionResult`, covering one-page acquisition with exact
+  request/context/record assertions, two-page deterministic flattening,
+  later-page failure atomicity, semantic-failure atomicity, and the
+  max-window bound without extra probing;
+- config matrix (M32C-C01..C10): exact PR 32C defaults, environment
+  precedence for the base URL and the secret reference (never the key
+  value itself), legal/illegal page bounds, concurrency and request-rate
+  bounds, safe malformed-URL rejection, and the guarantee that an unset
+  MISP URL keeps ordinary fake/local startup legal before PR 32D without
+  composing any MISP datasource or requiring the MISP key.
+
 MITRE regressions unchanged: STIX-parser reuse in the batch source keeps
 `SourceRecord` identities, canonical payloads, content hashes, and
 checkpoints identical across the unit source tests, the ATT&CK ingestion

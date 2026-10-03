@@ -813,6 +813,12 @@ type before bounds are enforced. The bounds below apply on top of those type req
 | `urlhaus_max_concurrency` | `ATI_URLHAUS_MAX_CONCURRENCY` | `int` | `10` | `> 0` | URLhaus maximum in-flight requests |
 | `urlhaus_requests_per_second` | `ATI_URLHAUS_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional URLhaus rate limit (omission disables) |
 | `urlhaus_auth_key_secret` | `ATI_URLHAUS_AUTH_KEY_SECRET` | `str` | `ATI_URLHAUS_AUTH_KEY` | non-blank | Environment variable NAME carrying the abuse.ch URLhaus Auth-Key (secret reference, never a key value) |
+| `misp_base_url` | `ATI_MISP_BASE_URL` | `str` | `""` (blank) | HTTPS only, no credentials/query/fragment | Credential-free HTTPS base URL of the configured MISP server (PR 32C); blank disables MISP composition and keeps ordinary startup legal before PR 32D |
+| `misp_api_key_secret` | `ATI_MISP_API_KEY_SECRET` | `str` | `ATI_MISP_API_KEY` | non-blank | Environment variable NAME carrying the MISP API key (secret reference, never a key value) |
+| `misp_max_concurrency` | `ATI_MISP_MAX_CONCURRENCY` | `int` | `4` | `> 0` | MISP maximum in-flight requests (ProviderHttpClient limiter) |
+| `misp_requests_per_second` | `ATI_MISP_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional MISP rate limit (omission disables) |
+| `misp_page_size` | `ATI_MISP_PAGE_SIZE` | `int` | `100` | `1..1000` | MISP `events/restSearch` page size (explicit, per-request `limit`) |
+| `misp_max_pages` | `ATI_MISP_MAX_PAGES` | `int` | `10` | `1..1000` | Maximum sequential pages fetched before the bounded acquisition window completes |
 | `dbip_city_lite_artifact_uri` | `ATI_DBIP_CITY_LITE_ARTIFACT_URI` | `str` | `""` (blank) | see notes | Credential-free local `file://` artifact URI of the DB-IP IP to City Lite MMDB. Blank (default) disables composition of the DB-IP City Lite provider. v0.1 requires an authority-free absolute `file://` URI; query, fragment, credential, and non-file URIs are rejected by the settings validator, and artifact paths outside `${ATI_DATA_DIR}/datasets` are rejected by the storage boundary. The configured artifact must already exist and be readable at composition time; there is no downloader and no API key. |
 
 When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
@@ -930,6 +936,34 @@ deterministic tests. In production:
   client is created; Google DNS, RDAP, IPinfo, AbuseIPDB, and ThreatFox
   clients created earlier in the same composition are rolled back
   cleanly.
+
+### MISP API key (PR 32C)
+
+The native MISP acquirer authenticates with an API key sent as an
+`Authorization` header on every `events/restSearch` request. The key never
+travels in the URL, query, request body, provenance, logs, or errors. Real
+or resolved MISP keys must never be committed, logged, persisted, placed
+in URLs or request bodies, or copied into test fixtures; clearly synthetic
+placeholder keys are permitted only in isolated deterministic tests. In
+production:
+
+- the setting `misp_api_key_secret` holds only the NAME of the environment
+  variable carrying the API key (default reference: `ATI_MISP_API_KEY`);
+- during composition, the `SecretsResolver` bootstrap contract resolves
+  that reference through `EnvVarSecretsResolver`;
+- the resolved key value is passed to `MispDatasource`, which uses it only
+  in the `Authorization` header; the acquirer never reads configuration or
+  the environment directly;
+- a missing, empty, or whitespace-only key fails clearly at composition
+  time with `SecretNotFoundError` before the MISP HTTP client is created;
+- MISP is composed only when `misp_base_url` is configured: an unset URL
+  keeps ordinary fake/local startup legal before PR 32D production wiring,
+  with no MISP credential requirement.
+
+MISP HTTP admission (timeout, retries, response-size bounding, concurrency,
+rate limiting, cancellation) is owned entirely by the shared
+`ProviderHttpClient`/`BoundedLimiter` infrastructure configured through the
+standard provider settings; the acquirer stacks no second limiter.
 
 ## Testing requirements
 

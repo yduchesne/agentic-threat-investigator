@@ -278,8 +278,8 @@ Format-specific parsers (`src/agentic_threat_investigator/infrastructure/datasou
   before Objects in source order, and Object-owned Attributes/
   ObjectReferences stay nested (never duplicated top level) for future
   0..N conversion in PR 32B. It performs no acquisition, Evidence
-  construction, or persistence; MISP REST acquisition/composition is
-  deferred to PR 32C/32D, and converter selection remains
+  construction, or persistence; MISP REST acquisition is PR 32C and
+  runtime composition is PR 32D, and converter selection remains
   semantic-format-driven.
 - `threatfox.py` is the narrow production ThreatFox acquisition-to-semantic
   reference path (`ThreatFoxDatasource` + tiny runner): it validates the
@@ -288,6 +288,19 @@ Format-specific parsers (`src/agentic_threat_investigator/infrastructure/datasou
   header-only) and the PR 27B `DatasourceExecutionRecorder`, classifies
   failures by typed stage (never by matching free-form message text), and
   persists only bounded safe terminal codes.
+- `misp.py` is the bounded native MISP REST acquisition path
+  (`MispDatasource` + `extract_misp_event_envelopes` + tiny runner): it
+  validates the explicit datasource dimensions (MISP + HTTPS + JSON +
+  MISP) fail-closed before any I/O, authenticates with a
+  `SecretsResolver`-resolved key kept header-only, paginates strictly
+  sequentially within a validated page-size/max-pages window through the
+  existing `ProviderHttpClient` (which owns every HTTP admission/bound),
+  adapts each `events/restSearch` response member into the exact
+  `{"Event": {...}}` envelope PR 32A accepts, and returns typed
+  `MispSemanticRecord` values under one credential-free
+  `SemanticSourceContext`; a later-page failure fails the whole bounded
+  acquisition with zero objects. It performs no Evidence construction and
+  no MISP persistence.
 
 Semantic modules construct no ATI Evidence/`SourceRecord`, perform no
 network/DB/persistence I/O, and never log full source objects. There is no
@@ -444,6 +457,58 @@ unsupported Attribute type returns zero Evidence deterministically.
 Acquisition (REST/auth/pagination) is PR 32C; production runtime
 composition and real-stack closure are PR 32D — nothing in PR 32B claims
 live MISP integration.
+
+## Native MISP REST acquisition (PR 32C, delivered)
+
+PR 32C lands the bounded native MISP acquisition boundary between the MISP
+REST API and the PR 32A semantic parser, still without wiring MISP into
+the production Evidence runtime (PR 32D owns that closure):
+
+- `infrastructure/datasources/misp.py` owns `MispDatasource`, the narrow
+  `extract_misp_event_envelopes()` REST-envelope adapter, and the tiny
+  `acquire_misp_execution` runner reusing the PR 27B
+  `DatasourceExecutionRecorder` (STARTED -> execution-level ACQUIRED\(total successful page bytes\) -> DECODED\(total semantic records\) -> one
+  terminal outcome);
+- the endpoint is `POST {misp_base_url}/events/restSearch` with an explicit
+  JSON `{"page": N, "limit": L}` body, `Authorization: <resolved key>`
+  header, and JSON `Accept`/`Content-Type`; the normal JSON response shape
+  `{"response": [{"Event": {...}}, ...]}` is verified against the current
+  official MISP/PyMISP contract and is the only supported form;
+- every response member is adapted at the acquisition layer into the exact
+  `{"Event": {...}}` envelope and parsed by the **real**
+  `parse_misp_event()`, so PR 32A remains the sole Event semantic
+authority; a malformed search envelope or Event fails the whole bounded
+acquisition with zero objects via `semantic_validation_failed`;
+- pagination is strictly sequential and explicitly bounded by validated
+  `page_size` (1..1000) and `max_pages` (1..1000) settings; an empty page
+  stops success, reaching `max_pages` means the bounded acquisition window
+  completed (never that the server is exhausted), and no request is issued
+  past the bound;
+- HTTP admission, retries, response-size bounding, rate limiting, and
+  cancellation are owned entirely by `ProviderHttpClient`/`BoundedLimiter`;
+  the acquirer stacks no second semaphore/limiter and never prefetches
+  pages;
+- failures map to bounded typed `DatasourceStageError` outcomes
+  (`ACQUISITION`/`timeout`|`rate_limited`|`authentication_failed`|
+  `forbidden`|`not_found`|`provider_unavailable`,
+  `SERIALIZATION`/`serialization_failed`, and
+  `SEMANTIC_VALIDATION`/`semantic_validation_failed`) using
+  `HttpOutcome.final_error_stage` and the provider error-code vocabulary;
+  `429 Retry-After` is preserved; no raw body/server text/key text is ever
+  promoted; `asyncio.CancelledError` always propagates;
+- secrets follow the standard contract: `misp_api_key_secret` stores only a
+  reference name, composition resolves it through `SecretsResolver` and
+  injects the value, and the key travels only in the `Authorization`
+  header;
+- the composed acquirer is exposed as `ProviderComposition.misp_datasource`
+  only when `misp_base_url` is configured (an unset URL keeps ordinary
+  fake/local startup legal before PR 32D) and is **not** registered as an
+  `EvidenceProvider`.
+
+No database transaction spans HTTP/decoding/parsing, no Evidence is
+constructed by acquisition, and there is no MISP-specific persistence path;
+PR 32D owns production runtime composition and real-stack Evidence closure.
+
 
 ## Evidence wire boundary (PR 28C, delivered)
 

@@ -80,6 +80,16 @@ CONFIG: dict[str, Any] = {
     "geo_resolver_max_attempts": 3,
     "geo_resolver_retry_base_seconds": 60.0,
     "geo_resolver_retry_max_seconds": 3600.0,
+    # MISP acquisition (PR 32C). Non-secret defaults only: the API key
+    # reference name is declared by Settings and must never be committed
+    # with a value. The base URL is blank by default because MISP is a
+    # configured collection datasource that is not wired into the production
+    # runtime before PR 32D; an unset URL remains legal.
+    "misp_base_url": "",
+    "misp_max_concurrency": 4,
+    "misp_requests_per_second": None,
+    "misp_page_size": 100,
+    "misp_max_pages": 10,
     # Kafka-compatible distributed Evidence log (PR 28G). Local Redpanda
     # development defaults only; SASL credentials are never placed here —
     # only secret reference names (defaults omitted => plaintext).

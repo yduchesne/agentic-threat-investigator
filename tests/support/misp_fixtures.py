@@ -46,6 +46,14 @@ COMPOUND_DOMAIN_IPV6_VALUE = "Example.TEST.|2001:0db8:0000:0000:0000:0000:0000:0
 # One valid-but-unsupported 32B MISP Attribute type.
 UNSUPPORTED_ATTRIBUTE_TYPE = "sha256"
 
+# Synthetic documentation-safe MISP REST fixture constants (PR 32C).
+MISP_BASE_URL = "https://misp.example.test"
+MISP_REST_SEARCH_ENDPOINT = "https://misp.example.test/events/restSearch"
+FIXED_KEY = "test-misp-api-key"
+# Additional synthetic Event UUIDs for multi-Event REST pages (PR 32C).
+SECOND_EVENT_UUID = "65fac2a0-7e54-4a0a-ac7d-4f9cc2ff3b11"
+THIRD_EVENT_UUID = "76fbc2a0-8e54-4a0a-bc8e-5f9cc2ff3b12"
+
 # Synthetic documentation-safe MISP REST timestamps (UTC Unix seconds as
 # JSON strings) and ISO-8601 seen windows.
 EVENT_TIMESTAMP = "1700000000"
@@ -218,3 +226,39 @@ def misp_object(
 def synthetic_uuid(seed: int) -> UUID:
     """Return one fixed documentation-safe RFC 4122 UUID from a seed."""
     return UUID(int=seed) if seed >= 0 else UUID(int=abs(seed))
+
+
+def misp_rest_search(*events: dict[str, Any]) -> dict[str, Any]:
+    """Build one synthetic MISP REST ``events/restSearch`` response body.
+
+    The canonical normal JSON form verified against the current
+    MISP/PyMISP contract is ``{"response": [{"Event": {...}}, ...]}``; each
+    ``events`` argument is an Event envelope produced by
+    :func:`misp_event`. The envelope is validated/adapted only by the
+    PR 32C acquisition layer; the semantic parser never sees the search
+    envelope itself.
+    """
+    return {"response": list(events)}
+
+
+def misp_rest_event(
+    *,
+    uuid: str = EVENT_UUID,
+    info: str = "Synthetic MISP event for ATI documentation testing",
+    attributes: tuple[dict[str, Any], ...] = (),
+    objects: tuple[dict[str, Any], ...] = (),
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Build one synthetic MISP Event envelope for a REST search page.
+
+    Thin identity-scoped convenience over :func:`misp_event` so one REST
+    response can carry several distinct Events with documentation-safe
+    UUIDs.
+    """
+    return misp_event(
+        uuid=uuid,
+        info=info,
+        attributes=attributes,
+        objects=objects,
+        **overrides,
+    )
