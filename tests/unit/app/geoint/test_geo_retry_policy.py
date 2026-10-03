@@ -44,6 +44,7 @@ def test_g26c_b04_invalid_config_is_rejected() -> None:
             max_attempts=0,
             retry_base_seconds=60.0,
             retry_max_seconds=3600.0,
+            max_concurrency=3,
         )
     with pytest.raises(ValueError, match="retry_base_seconds"):
         GeoResolutionWorkerConfig(
@@ -54,6 +55,7 @@ def test_g26c_b04_invalid_config_is_rejected() -> None:
             max_attempts=3,
             retry_base_seconds=0.0,
             retry_max_seconds=3600.0,
+            max_concurrency=3,
         )
     with pytest.raises(ValueError, match="retry_max_seconds"):
         GeoResolutionWorkerConfig(
@@ -64,6 +66,7 @@ def test_g26c_b04_invalid_config_is_rejected() -> None:
             max_attempts=3,
             retry_base_seconds=60.0,
             retry_max_seconds=30.0,
+            max_concurrency=3,
         )
     with pytest.raises(ValueError, match="worker_id"):
         GeoResolutionWorkerConfig(
@@ -74,6 +77,18 @@ def test_g26c_b04_invalid_config_is_rejected() -> None:
             max_attempts=3,
             retry_base_seconds=60.0,
             retry_max_seconds=3600.0,
+            max_concurrency=3,
+        )
+    with pytest.raises(ValueError, match="max_concurrency"):
+        GeoResolutionWorkerConfig(
+            worker_id="w1",
+            batch_size=10,
+            lease_seconds=300,
+            poll_interval_seconds=1.0,
+            max_attempts=3,
+            retry_base_seconds=60.0,
+            retry_max_seconds=3600.0,
+            max_concurrency=0,
         )
     with pytest.raises(ValueError, match="attempt_count"):
         retry_delay_seconds(0, base_seconds=60.0, max_seconds=3600.0)

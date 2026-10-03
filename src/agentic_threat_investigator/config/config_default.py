@@ -72,6 +72,9 @@ CONFIG: dict[str, Any] = {
     "geo_resolver_enabled": True,
     "geo_resolver_worker_id": "",
     "geo_resolver_batch_size": 10,
+    # PR L-2: bounded concurrency of already-claimed item pipelines, separate
+    # from batch size (rows durably claimed per iteration).
+    "geo_resolver_max_concurrency": 4,
     "geo_resolver_lease_seconds": 300,
     "geo_resolver_poll_interval_seconds": 1.0,
     "geo_resolver_max_attempts": 3,

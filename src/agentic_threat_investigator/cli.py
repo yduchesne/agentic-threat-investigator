@@ -809,6 +809,7 @@ def _compose_geo_worker(
         max_attempts=settings.geo_resolver_max_attempts,
         retry_base_seconds=settings.geo_resolver_retry_base_seconds,
         retry_max_seconds=settings.geo_resolver_retry_max_seconds,
+        max_concurrency=settings.geo_resolver_max_concurrency,
     )
     return GeoResolutionWorker(
         uow_factory=uow_factory,

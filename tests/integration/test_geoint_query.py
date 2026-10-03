@@ -2268,6 +2268,7 @@ def _worker_instance(
             max_attempts=3,
             retry_base_seconds=60.0,
             retry_max_seconds=3600.0,
+            max_concurrency=4,
         ),
     )
 

@@ -5112,3 +5112,49 @@ asynchronous geographic-resolution lifecycle on the PR 26A/26B foundation:
   attempt boundaries, no observations on failures, exactly one observation
   on the eventual success, and terminal FAILED at exhaustion). Timestamp
   control is deterministic SQL, never sleep-based.
+
+#### Bounded concurrent GEO resolution item execution (PR L-2)
+
+PR L-2 (`tests/unit/app/geoint/test_geo_resolution_worker_concurrency.py`,
+`tests/integration/test_geo_resolution_worker_concurrency.py`, Geo worker
+config tests) lets one `GeoResolutionWorker` process its already-claimed
+batch with an explicit `geo_resolver_max_concurrency` bound, independent of
+claim `batch_size`, without weakening the PostgreSQL lease/version
+lifecycle or the per-item short-transaction split:
+
+- **Deterministic event/counter model, never wall-clock throughput.**
+  Concurrency is proven with `asyncio.Event`/counter barriers at the
+  `LocationResolver` boundary only: L2-W02 (concurrency=1 serializes item
+  pipelines), L2-W03 (concurrency=2 admits genuine resolver overlap and the
+  third item waits for a permit), L2-W14 (batch larger than the bound fully
+  drains with peak active never exceeding the bound), L2-W15 (concurrency
+  above batch size is legal). Gated resolvers own timing/control only; fake
+  UoW/repository boundaries prove lifecycle behavior.
+- **Waiting tasks hold no UnitOfWork.** L2-W04 parks one item at the
+  resolver with concurrency=1 and asserts `active_uows == 0` while sibling
+  tasks are queued behind the permit; L2-W05 asserts the same at the
+  resolver boundary under concurrency=2 overlap.
+- **No UoW/session is shared across item tasks.** L2-W12 proves every
+  completion/failure receives its exact original `resolution_id`,
+  `expected_version`, and `claimed_by`; L2-W13 forces reverse/out-of-order
+  completion and asserts each observation keeps its own deterministic id,
+  entity, evidence-observation, location, and timestamp provenance.
+- **Failure and cancellation isolation.** L2-W06/L2-W07 (mixed outcomes and
+  a normal resolver failure persist independently without cancelling
+  siblings), L2-W08/L2-W11 (an unexpected `_process_one` escape is logged
+  with a bounded identity/type only — never raw exception text — siblings
+  continue, and the permit is released so the next item completes),
+  L2-W09 (parent cancellation propagates, settles active and waiting
+  children, and never fabricates failure transitions), L2-W10 (the permit
+  is released after an expected failure).
+- **Real-PostgreSQL worker coverage.** L2-P01 runs one concurrent
+  `run_once()` through the real claim/evidence/canonical resolver/completion
+  stored functions: every intended row reaches terminal RESOLVED with
+  correct version/claim semantics and exactly one observation/provenance,
+  no duplicates and nothing left PROCESSING. L2-P02 parks two real item
+  pipelines at the resolver boundary with `max_concurrency=2` (real
+  persistence everywhere, a timing gate only at the resolver seam) and
+  asserts no caller UoW is held across the gate. L2-P03 re-runs disjoint
+  multi-worker claims; the existing claimant/version/lease conflict matrix
+  (G26C-P13..P18) and vertical slices remain authoritative for stale/
+  expired completion authority.
