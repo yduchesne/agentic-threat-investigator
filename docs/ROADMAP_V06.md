@@ -217,7 +217,7 @@ Delivered by this PR:
 PR 32D remains responsible for production runtime composition and the
 semantic acquisition -> conversion -> publication/persistence closure.
 
-## PR 32D — MISP runtime integration and closure
+## PR 32D — MISP runtime integration and closure `[DONE]`
 
 Compose the MISP datasource through the existing datasource runtime and
 converter registry, preserving the PR 27/28 lifecycle and Evidence

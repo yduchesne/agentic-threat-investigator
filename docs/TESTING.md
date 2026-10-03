@@ -1301,6 +1301,78 @@ MISP server and no test reads the wall clock or sleeps for timing:
   MISP URL keeps ordinary fake/local startup legal before PR 32D without
   composing any MISP datasource or requiring the MISP key.
 
+### MISP collection runtime and Evidence closure (PR 32D)
+
+PR 32D closes the MISP collection runtime through the source-neutral
+producer and the existing distributed Evidence pipeline. Deterministic
+unit/offline matrices:
+
+- collection producer (`tests/unit/app/test_collection_datasource_evidence_producer.py`,
+  P01..P16): one converted object -> `CONVERTED(1)`/one publish/
+  `PUBLISHED(1)`/`COMPLETED`; multiple objects keep deterministic
+  sequence/order; zero conversion -> `publish(())`/`PUBLISHED(0)`/
+  `COMPLETED`; typed acquisition failure -> exact bounded `FAILED` code
+  with no publish; acquisition exception -> `unexpected_error` re-raised;
+  conversion failure -> `conversion_failed` (no publish); message
+  construction failure -> `message_construction_failed`; publisher failure
+  -> `publication_failed` without `COMPLETED`; cancellation in acquisition
+  and publication -> `CANCELLED` and propagate; lifecycle append failure
+  after publish -> no republish; execution-ID propagation to recorder and
+  messages; flattening order unchanged; lifecycle-UoW-only with no
+  Evidence persistence and no transaction open across HTTP; unchanged
+  entity-producer regression; and the explicit no-Entity/no-`supports`
+  collection contract (the real `MispDatasource` satisfies the protocol
+  structurally).
+- MISP durable-message extraction (`tests/unit/app/extraction/test_misp_message_context.py`,
+  X01..X18): canonical DOMAIN invocation; hostname-produced facts are
+  DOMAIN; IPv4/IPv6 -> IP_ADDRESS; domain+IP preserves both Entities with
+  zero relationships; missing/empty/non-array/non-object/unknown-type/
+  malformed/noncanonical/duplicate `facts.iocs` fail closed; MISP format
+  with a wrong source and MISP source with a wrong format fail closed;
+  and the ThreatFox reconstruction/extraction path regression is
+  unchanged. Dispatch is by the exact `(semantic_format, source)` pair
+  only.
+- composition (`tests/unit/infrastructure/providers/test_misp_collection_composition.py`,
+  C01..C10): blank URL -> no producer without a key requirement; URL +
+  exact MISP definition -> composed; URL + missing definition -> fail
+  before acquisition; ambiguous (multiple MISP) definitions -> fail
+  closed; wrong protocol/serialization/semantic format/source -> fail; the
+  real MISP conversion registry is selected by `SemanticFormatId.MISP`
+  only; and `ProviderComposition.provider_registry()` has no MISP entry.
+
+Real-stack vertical slices (only external MISP HTTPS is faked, in-process
+`httpx.MockTransport`):
+
+- V01..V05 (`tests/integration/test_misp_evidence_pipeline.py`, real
+  PostgreSQL + `InMemoryEvidenceLog`): MISP fixture -> real
+  `ProviderHttpClient` -> real `MispDatasource` -> real `parse_misp_event`
+  -> real `MispToEvidenceConverter` -> real collection producer -> real
+  `EvidenceMessage` -> real consumer -> real `EvidenceBatchPersistenceService`
+  -> real PostgreSQL. V01 asserts the exact
+  `STARTED, ACQUIRED, DECODED, CONVERTED(1), PUBLISHED(1), COMPLETED`
+  lifecycle, one global Evidence with the exact Attribute UUID identity,
+  one Observation with exact `observed_at`/`retrieved_at`/credential-free
+  provenance, normalized facts with `raw_payload IS NULL`, canonical DOMAIN
+  association, zero relationships, and zero `InvestigationEvidence`; V02 is
+  canonical IPv6; V03 is `domain|ip` with two Entity associations and zero
+  relationships; V04 is a supported + unsupported + Object mix that
+  persists only the supported Event-level Evidence; V05 is an
+  unsupported/Object-only input yielding `CONVERTED(0)`, `PUBLISHED(0)`,
+  `COMPLETED` and no Evidence.
+- K01..K06 (`tests/integration/kafka/test_misp_distributed_ingestion.py`,
+  mandatory feature acceptance with real Redpanda + real PostgreSQL,
+  reusing the PR 28G/28H topology): K01 complete domain pipeline with
+  broker processing and committed Evidence/Observation/Entity; K02
+  multi-message distinct Attribute-UUID identities (no cross-partition
+  order claims); K03 replay/idempotency through the
+  PostgreSQL-commit/Kafka-commit-failure seam (no duplicate Evidence,
+  Observation, Entity association, or receipt; final poll empty); K04
+  unchanged material state in a new execution (new receipt, UNCHANGED, no
+  new Observation); K05 a material change under the global state contract
+  (same Evidence, next Observation version, PostgreSQL-owned diff, exact
+  authoritative observation references); K06 pre-commit persistence failure
+  with broker uncommitted until the retry's PostgreSQL commit succeeds.
+
 MITRE regressions unchanged: STIX-parser reuse in the batch source keeps
 `SourceRecord` identities, canonical payloads, content hashes, and
 checkpoints identical across the unit source tests, the ATT&CK ingestion

@@ -15,6 +15,7 @@ migrations are source-specific follow-ups.
 | Status | Meaning |
 | ------ | ------- |
 | `MIGRATED` | Production runtime runs the full PR 27A-D stack: configured `DatasourceDefinition` -> acquisition execution -> serialization -> semantic source objects -> semantic-format-selected `ToEvidenceConverter` -> existing Evidence persistence/Investigation runtime. |
+| `MIGRATED_COLLECTION` | Production runtime runs the PR 28 distributed Evidence pipeline for a configured **collection** datasource (no Investigation Entity): configured `DatasourceDefinition` -> `CollectionSemanticAcquirer` -> semantic source objects -> semantic-format-selected `ToEvidenceConverter` -> `EvidenceMessage` v1 -> producer publication -> consumer extraction -> global PostgreSQL Evidence persistence, with no Investigation admission (PR 32D). |
 | `SEMANTIC_BOUNDARY_ONLY` | The source has an approved semantic parser boundary (PR 27C) but its production product is not Investigation Evidence through the PR 27D converter path. |
 | `LEGACY_NOT_SEMANTICALLY_MODELED` | The source still uses the legacy direct-to-Evidence provider path; no approved PR 27 semantic format/parser/converter contracts exist for it. |
 | `NOT_EVIDENCE_SOURCE` | The source produces corpus/reference products that are intentionally not converted to Investigation Evidence. |
@@ -25,6 +26,7 @@ migrations are source-specific follow-ups.
 | Source | Runtime product | Semantic format | Status |
 | ------ | --------------- | --------------- | ------ |
 | ThreatFox | Investigation Evidence | `urn:ati:datasource:semanticformat:threatfox` | `MIGRATED` |
+| MISP | Global Evidence (collection; no Investigation admission) | `urn:ati:datasource:semanticformat:misp` | `MIGRATED_COLLECTION` (PR 32D) |
 | MITRE ATT&CK | SourceRecord corpus / RAG documents | `urn:ati:datasource:semanticformat:stix21` | `SEMANTIC_BOUNDARY_ONLY` + `NOT_EVIDENCE_SOURCE` |
 | Google Public DNS | Investigation Evidence | none approved | `LEGACY_NOT_SEMANTICALLY_MODELED` |
 | RDAP | Investigation Evidence | none approved | `LEGACY_NOT_SEMANTICALLY_MODELED` |
@@ -75,6 +77,42 @@ pre-27E contract tests, but production bootstrap no longer composes it
 in-memory reference runner (`acquire_and_convert_threatfox_execution`)
 remains the D27D test seam; production terminal ownership lives in the
 executor.
+
+## MISP — `MIGRATED_COLLECTION` (PR 32D)
+
+MISP is the audit's first **collection** migration: PR 32A..32D migrate MISP
+from no runtime wiring to a fully composed native collection datasource that
+publishes/persists **global** Evidence through the PR 28 distributed
+pipeline without any Investigation admission:
+
+```text
+Settings.datasources (exactly one MISP definition)
+ -> CollectionDatasourceEvidenceProducer (app/datasource_evidence_producer.py)
+ -> MispDatasource / ProviderHttpClient (Authorization header only)
+ -> MISP semantic parser -> MispSemanticRecord
+ -> EvidenceConversionContext
+ -> ToEvidenceConverterRegistry (SemanticFormatId.MISP only)
+ -> MispToEvidenceConverter
+ -> EvidenceMessage v1 -> EvidencePublisher/Kafka
+ -> EvidencePersistenceConsumer -> PostgreSQL global Evidence
+```
+
+Why the distinct `MIGRATED_COLLECTION` status:
+
+- `MispDatasource.acquire` satisfies the new `CollectionSemanticAcquirer`
+  contract with no Entity and no `supports(entity)`; MISP is deliberately
+  absent from `provider_registry()` and `ProviderWorkExecutor`;
+- conversion, EvidenceMessage publication, consumer extraction, and
+  global PostgreSQL persistence are reused unchanged (no MISP tables,
+  message schema, topic, or Observation versioning);
+- Evidence identity is the exact Attribute UUID under
+  `evidence_id_for_source_record(SemanticFormatId.MISP, SourceId.MISP, ...)`;
+- `domain|ip` associates both canonical Entities with zero inferred
+  relationships;
+- unchanged material state in a new execution is a receipt + UNCHANGED;
+  material change appends the next Observation version through the
+  stored-function transition;
+- collection ingestion never creates `InvestigationEvidence`.
 
 ## MITRE ATT&CK — `SEMANTIC_BOUNDARY_ONLY` + `NOT_EVIDENCE_SOURCE`
 

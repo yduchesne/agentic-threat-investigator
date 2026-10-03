@@ -20,6 +20,7 @@ from collections.abc import Callable
 
 from agentic_threat_investigator.app.extraction.dns import extract_dns
 from agentic_threat_investigator.app.extraction.ipinfo import extract_ipinfo
+from agentic_threat_investigator.app.extraction.misp import extract_misp
 from agentic_threat_investigator.app.extraction.models import (
     EvidenceExtractionError,
     EvidenceExtractionView,
@@ -50,6 +51,7 @@ def extract_empty(_view: EvidenceExtractionView) -> ExtractionResult:
 _EVIDENCE_EXTRACTORS: dict[tuple[str, EvidenceType], Extractor] = {
     (SourceId.GOOGLE_PUBLIC_DNS.value, EvidenceType.DNS): extract_dns,
     (SourceId.THREATFOX.value, EvidenceType.THREAT_INTELLIGENCE): extract_threatfox,
+    (SourceId.MISP.value, EvidenceType.THREAT_INTELLIGENCE): extract_misp,
     (SourceId.URLHAUS.value, EvidenceType.THREAT_INTELLIGENCE): extract_urlhaus,
     (SourceId.RDAP.value, EvidenceType.NETWORK): extract_rdap,
     (SourceId.RDAP.value, EvidenceType.REGISTRATION): extract_rdap,

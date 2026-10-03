@@ -9,14 +9,21 @@ they already require (:class:`EvidenceExtractionView`): the stable
 :class:`Evidence`, the material observation candidate, and the transient
 provider invocation Entity. This module owns that message-to-view seam:
 
-- exactly one supported semantic source contract today (ThreatFox);
+- exactly the supported semantic source contracts (ThreatFox and, since
+  PR 32D, MISP);
 - the invocation Entity is **execution context only** — it is never
   persisted as Evidence ownership and no subject field is added to
   ``EvidenceMessage``;
-- the invocation identity is derived deterministically from the durable
-  normalized fact ``matches[].ioc`` / ``matches[].ioc_type`` exactly as the
-  current ThreatFox semantic contract defines it (``domain`` and ``ip:port``
-  only);
+- the ThreatFox invocation identity is derived deterministically from the
+  durable normalized fact ``matches[].ioc`` / ``matches[].ioc_type``
+  exactly as the current ThreatFox semantic contract defines it
+  (``domain`` and ``ip:port`` only);
+- the MISP invocation identity is derived deterministically from the
+  durable normalized ``facts.iocs`` array: the first ordered IOC is the
+  transient invocation Entity (DOMAIN for ``domain|ip``, guaranteed by
+  PR 32B), every IOC must be canonical and identity-distinct, and the
+  remaining IOC identities are returned nowhere here — the deterministic
+  MISP extractor owns the additional represented Entities;
 - unsupported sources/evidence types and malformed facts fail closed with
   typed :class:`EvidenceExtractionError` subclasses, so an unprocessable
   message never fabricates graph structure.
@@ -24,7 +31,7 @@ provider invocation Entity. This module owns that message-to-view seam:
 The helper is pure: no database, network, broker, clock, or UnitOfWork.
 Reconstruction reuses the PR 28C contract (``converted_evidence_from_message``)
 and the existing extraction dispatcher; it never re-parses raw payloads and
-never reimplements ThreatFox graph semantics.
+never reimplements ThreatFox/MISP graph semantics.
 """
 
 from __future__ import annotations
@@ -54,11 +61,30 @@ from agentic_threat_investigator.domain.identifiers import (
 
 _THREATFOX_SOURCE = SourceId.THREATFOX.value
 _THREATFOX_SEMANTIC_FORMAT = SemanticFormatId.THREATFOX
-"""The one supported durable-message extraction source (PR 28E).
+_MISP_SOURCE = SourceId.MISP.value
+_MISP_SEMANTIC_FORMAT = SemanticFormatId.MISP
+"""The supported durable-message extraction sources and formats (PR 28E/32D).
 
-Anything else fails closed with :class:`UnsupportedMessageExtractionError`
-until a source producer publishes PR 28C messages with an approved durable
-extraction adapter (PR 28F owns producer migration).
+Dispatch is by the exact ``(semantic format, source)`` pair; anything else
+fails closed with :class:`UnsupportedMessageExtractionError`. MISP durable
+messages reconstruct their invocation Entity from ``facts.iocs`` and rely
+on the deterministic MISP extractor for the additional represented
+Entities; ThreatFox reconstructs from ``matches`` as before.
+"""
+
+_SUPPORTED_DURABLE_EXTRACTION_PAIRS: frozenset[tuple[SemanticFormatId, str]] = (
+    frozenset(
+        {
+            (_THREATFOX_SEMANTIC_FORMAT, _THREATFOX_SOURCE),
+            (_MISP_SEMANTIC_FORMAT, _MISP_SOURCE),
+        }
+    )
+)
+"""Exact supported ``(semantic_format, source)`` durable extraction pairs.
+
+Mismatched pairs (MISP format with a non-MISP source, ThreatFox format with
+a non-ThreatFox source, or any other combination) fail closed; dispatch is
+never inferred from arbitrary fact shape.
 """
 
 
@@ -106,23 +132,128 @@ def extraction_view_from_message(
 ) -> EvidenceExtractionView:
     """Build the smallest extraction view one message can reconstruct.
 
-    Only the currently supported ThreatFox semantic format is accepted; any
-    other source/evidence-type combination raises
-    :class:`UnsupportedMessageExtractionError`. The invocation Entity is
-    derived from the durable normalized ``matches[].ioc`` facts and carries
+    Only the supported ``(semantic_format, source)`` pairs are accepted:
+    ThreatFox + ThreatFox and MISP + MISP. Any other source/format
+    combination raises :class:`UnsupportedMessageExtractionError`; a
+    mismatched pair never dispatches by fact shape. The invocation Entity is
+    derived from the durable normalized facts (``matches[].ioc`` for
+    ThreatFox, the first ordered ``facts.iocs`` entry for MISP) and carries
     no ``id`` or display metadata: it is execution context only.
     """
     source = message.source_id.value
-    if (
-        message.semantic_format is not _THREATFOX_SEMANTIC_FORMAT
-        or source != _THREATFOX_SOURCE
-    ):
+    pair = (message.semantic_format, source)
+    if pair not in _SUPPORTED_DURABLE_EXTRACTION_PAIRS:
         raise UnsupportedMessageExtractionError(source, evidence_id=message.evidence_id)
-    invocation = _threatfox_invocation_entity(message)
+    if pair == (_MISP_SEMANTIC_FORMAT, _MISP_SOURCE):
+        invocation = _misp_invocation_entity(message)
+    else:
+        invocation = _threatfox_invocation_entity(message)
     return EvidenceExtractionView(
         evidence=converted.evidence,
         observation=converted.observation,
         invocation_entity=invocation,
+    )
+
+
+_MISP_IOC_TYPE_DOMAIN = EntityType.DOMAIN.value
+_MISP_IOC_TYPE_IP_ADDRESS = EntityType.IP_ADDRESS.value
+"""The exact durable MISP ``facts.iocs`` type vocabulary (PR 32B)."""
+
+
+def _misp_invocation_entity(message: EvidenceMessage) -> Entity:
+    """Derive the transient MISP invocation Entity from durable ``facts.iocs``.
+
+    ``facts.iocs`` must be a non-empty array; every entry must be an object
+    with a supported ``type`` (``domain`` or ``ip_address``) and a value that
+    is already canonical under the strict domain/IP canonicalizers; every
+    IOC identity must be distinct (one Evidence item describes distinct
+    represented IOC Entities); and the first ordered IOC is the transient
+    invocation Entity (DOMAIN for ``domain|ip``, guaranteed by PR 32B). Any
+    violation fails closed with :class:`MalformedMessageExtractionError`;
+    no original Attribute value, tag, category, or raw payload is ever
+    inspected.
+    """
+    facts = message.facts
+    iocs = facts.get("iocs")
+    if not isinstance(iocs, (list, tuple)) or not iocs:
+        raise MalformedMessageExtractionError(
+            _MISP_SOURCE,
+            "MISP message must carry validated iocs",
+            evidence_id=message.evidence_id,
+        )
+    identities: list[tuple[EntityType, str]] = []
+    for ioc in iocs:
+        identities.append(_misp_ioc_identity(ioc, message.evidence_id))
+    if len(set(identities)) != len(identities):
+        raise MalformedMessageExtractionError(
+            _MISP_SOURCE,
+            "MISP message iocs repeat an entity identity",
+            evidence_id=message.evidence_id,
+        )
+    entity_type, value = identities[0]
+    return Entity(type=entity_type, value=value)
+
+
+def _misp_ioc_identity(ioc: Any, evidence_id: UUID) -> tuple[EntityType, str]:
+    """Derive the canonical entity identity of one validated MISP IOC fact.
+
+    ``type`` maps exactly to the durable PR 32B contract (``domain`` ->
+    ``EntityType.DOMAIN`` with the strict DNS validator, ``ip_address`` ->
+    ``EntityType.IP_ADDRESS`` with the canonical IP helper); values must
+    already equal their canonical form. An unknown type, a malformed value,
+    or a non-canonical value fails closed with
+    :class:`MalformedMessageExtractionError`.
+    """
+    if not isinstance(ioc, Mapping):
+        raise MalformedMessageExtractionError(
+            _MISP_SOURCE,
+            "MISP ioc must be an object",
+            evidence_id=evidence_id,
+        )
+    ioc_type = ioc.get("type")
+    value = ioc.get("value")
+    if not isinstance(ioc_type, str) or not isinstance(value, str) or not value:
+        raise MalformedMessageExtractionError(
+            _MISP_SOURCE,
+            "MISP ioc carries an invalid type or value",
+            evidence_id=evidence_id,
+        )
+    if ioc_type == _MISP_IOC_TYPE_DOMAIN:
+        try:
+            canonical = validate_dns_name(value)
+        except ValueError as exc:
+            raise MalformedMessageExtractionError(
+                _MISP_SOURCE,
+                "MISP ioc domain is malformed",
+                evidence_id=evidence_id,
+            ) from exc
+        if canonical != value:
+            raise MalformedMessageExtractionError(
+                _MISP_SOURCE,
+                "MISP ioc domain is not in canonical form",
+                evidence_id=evidence_id,
+            )
+        return EntityType.DOMAIN, canonical
+    if ioc_type == _MISP_IOC_TYPE_IP_ADDRESS:
+        try:
+            canonical = canonicalize(EntityType.IP_ADDRESS, value)
+        except ValueError as exc:
+            raise MalformedMessageExtractionError(
+                _MISP_SOURCE,
+                "MISP ioc ip_address is malformed",
+                evidence_id=evidence_id,
+            ) from exc
+        if canonical != value:
+            raise MalformedMessageExtractionError(
+                _MISP_SOURCE,
+                "MISP ioc ip_address is not in canonical form",
+                evidence_id=evidence_id,
+            )
+        return EntityType.IP_ADDRESS, canonical
+    raise MalformedMessageExtractionError(
+        _MISP_SOURCE,
+        "MISP ioc carries an unknown type",
+        evidence_id=evidence_id,
     )
 
 

@@ -68,10 +68,13 @@ from agentic_threat_investigator.app.datasource_execution import (
     DatasourceExecutionRecorder,
 )
 from agentic_threat_investigator.app.datasource_provider import (
+    CollectionSemanticAcquirer,
     SemanticAcquirer,
+    observe_collection_acquisition,
     observe_semantic_acquisition,
 )
 from agentic_threat_investigator.app.datasource_semantics import (
+    SemanticAcquisitionResult,
     SemanticSourceContext,
 )
 from agentic_threat_investigator.app.evidence_conversion import (
@@ -90,6 +93,7 @@ from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 
 __all__ = [
+    "CollectionDatasourceEvidenceProducer",
     "DatasourceProducerOutcome",
     "DatasourceProducerResult",
     "DatasourceEvidenceProducer",
@@ -189,6 +193,79 @@ def _build_messages(
         )
         for sequence, item in enumerate(converted)
     )
+
+
+async def _convert_and_publish(
+    *,
+    recorder: DatasourceExecutionRecorder,
+    result: SemanticAcquisitionResult[T],
+    registry: ToEvidenceConverterRegistry,
+    publisher: EvidencePublisher,
+) -> tuple[EvidenceMessage, ...]:
+    """Run the shared post-acquisition conversion/message/publication pipeline.
+
+    This is the single implementation behind both the entity-triggered and
+    the collection producer shapes; it is never copied. It preserves exactly:
+    the PR 28A Evidence identity and the PR 28C message identity, zero-based
+    sequence over the whole flattened converted output, source/converter
+    order, zero-output ``publish(())``, exactly one ``EvidencePublisher``
+    call, the existing bounded failure codes (``conversion_failed``,
+    ``message_construction_failed``, ``publication_failed``), cancellation
+    behavior, and no republish when a later lifecycle append fails.
+
+    On success the recorder receives ``CONVERTED(len)`` and then
+    ``PUBLISHED(len)``; the caller owns the terminal ``COMPLETED``/``FAILED``
+    append and the returned messages. PR 27D/28A conversion is global and
+    Investigation-independent: the context carries only the cross-cutting
+    semantic provenance and the converter is selected by semantic format
+    through the injected registry, never by source identity.
+    """
+    context = EvidenceConversionContext(semantic_source=result.context)
+    try:
+        converted = convert_semantic_source_objects(result.objects, context, registry)
+    except asyncio.CancelledError:
+        await _best_effort_terminal(recorder, cancelled=True)
+        raise
+    except Exception:
+        await _best_effort_terminal(
+            recorder, cancelled=False, error_code=_ERROR_CODE_CONVERSION
+        )
+        raise
+
+    await recorder.converted(item_count=len(converted))
+
+    try:
+        messages = _build_messages(
+            execution_id=recorder.execution_id,
+            semantic_source=result.context,
+            converted=converted,
+        )
+    except asyncio.CancelledError:
+        await _best_effort_terminal(recorder, cancelled=True)
+        raise
+    except Exception:
+        await _best_effort_terminal(
+            recorder,
+            cancelled=False,
+            error_code=_ERROR_CODE_MESSAGE_CONSTRUCTION,
+        )
+        raise
+
+    try:
+        await publisher.publish(messages)
+    except asyncio.CancelledError:
+        await _best_effort_terminal(recorder, cancelled=True)
+        raise
+    except Exception:
+        await _best_effort_terminal(
+            recorder,
+            cancelled=False,
+            error_code=_ERROR_CODE_PUBLICATION,
+        )
+        raise
+
+    await recorder.published(item_count=len(messages))
+    return messages
 
 
 class DatasourceEvidenceProducer(Generic[T]):
@@ -293,58 +370,133 @@ class DatasourceEvidenceProducer(Generic[T]):
                 error_code=result.error.code,
             )
 
-        # PR 27D/28A conversion is global and Investigation-independent; the
-        # context carries only the cross-cutting semantic provenance.
-        context = EvidenceConversionContext(semantic_source=result.context)
+        messages = await _convert_and_publish(
+            recorder=recorder,
+            result=result,
+            registry=self._registry,
+            publisher=self._publisher,
+        )
+        await recorder.complete()
+        return DatasourceProducerResult(
+            outcome=DatasourceProducerOutcome.COMPLETED,
+            execution_id=recorder.execution_id,
+            published_count=len(messages),
+        )
+
+
+class CollectionDatasourceEvidenceProducer(Generic[T]):
+    """Collection datasource Evidence producer seam (PR 32D).
+
+    The collection twin of :class:`DatasourceEvidenceProducer`: it owns one
+    execution recorder per ``produce()`` call and runs the **same shared
+    post-acquisition pipeline** (conversion through the semantic-format
+    registry, CONVERTED, PR 28C message construction, exactly one ordered
+    ``EvidencePublisher.publish`` call, PUBLISHED, COMPLETED). It differs in
+    the acquisition contract only: the injected acquirer is a
+    :class:`CollectionSemanticAcquirer`, so ``produce()`` takes no Entity
+    argument and there is no ``supports(entity)`` gate. The producer is
+    source-neutral — nothing here understands MISP or any other source's
+    semantic model, and no Entity, Investigation admission, or Evidence
+    persistence is involved.
+
+    Lifecycle on success: ``STARTED, ACQUIRED, DECODED, CONVERTED(N),
+    PUBLISHED(N), COMPLETED`` where ``ACQUIRED``/``DECODED`` come from the
+    acquirer's own stage appends. Zero conversion is valid:
+    ``CONVERTED(0), publish(()), PUBLISHED(0), COMPLETED``. Failure rules
+    mirror the entity producer exactly: a typed acquisition stage error
+    records ``FAILED`` with the bounded code and returns a failed result;
+    conversion, message-construction, and publication failures record their
+    bounded ``FAILED`` codes (best effort) and propagate; cancellation
+    records ``CANCELLED`` (best effort) and always propagates; a lifecycle
+    append failure after a successful publish propagates without republish
+    and without COMPLETED. No application-level publication retry exists.
+    No Evidence is ever persisted here and no consumer is waited on.
+    """
+
+    def __init__(
+        self,
+        *,
+        definition: DatasourceDefinition,
+        acquirer: CollectionSemanticAcquirer[T],
+        registry: ToEvidenceConverterRegistry,
+        publisher: EvidencePublisher,
+        uow_factory: Callable[[], UnitOfWork],
+        clock: Callable[[], datetime] | None = None,
+        execution_id: UUID | None = None,
+    ) -> None:
+        """Bind the producer to its configured collection datasource and seams.
+
+        ``uow_factory`` backs the PR 27B recorder's short lifecycle
+        transactions; ``publisher`` is the broker-neutral PR 28D
+        ``EvidencePublisher`` (never a concrete in-memory adapter reference);
+        the UTC clock stamps lifecycle events. ``execution_id`` is normally
+        ``None`` (the recorder generates a fresh UUID per execution);
+        injecting a fixed value is supported only for deterministic test
+        fixtures, mirroring the recorder's own fixture seam.
+        """
+        self._definition = definition
+        self._acquirer = acquirer
+        self._registry = registry
+        self._publisher = publisher
+        self._uow_factory = uow_factory
+        self._clock: Callable[[], datetime] = clock if clock is not None else _utc_now
+        self._execution_id = execution_id
+
+    @property
+    def definition(self) -> DatasourceDefinition:
+        """Return the configured datasource definition owned by this producer."""
+        return self._definition
+
+    async def produce(self) -> DatasourceProducerResult:
+        """Produce one complete collection execution and publish its messages.
+
+        Owns one recorder: STARTED, the acquirer's stage appends
+        (ACQUIRED/DECODED when the source path emits them), the shared
+        post-acquisition conversion/message/publication pipeline
+        (CONVERTED, one ``EvidencePublisher.publish`` call, PUBLISHED), and
+        COMPLETED. A typed acquisition stage error records FAILED with the
+        bounded code and returns a failed result; conversion,
+        message-construction, and publication failures record their bounded
+        FAILED codes (best effort) and propagate; cancellation records
+        CANCELLED (best effort) and always propagates. A lifecycle append
+        failure after a successful publish propagates without republishing
+        and without COMPLETED. No Entity argument exists: this is the
+        collection contract, never a hidden Investigation trigger.
+        """
+        recorder = DatasourceExecutionRecorder(
+            self._definition.datasource_id,
+            self._uow_factory,
+            clock=self._clock,
+            execution_id=self._execution_id,
+        )
+        await recorder.start()
         try:
-            converted = convert_semantic_source_objects(
-                result.objects, context, self._registry
+            result = await observe_collection_acquisition(
+                self._acquirer,
+                definition=self._definition,
+                recorder=recorder,
             )
         except asyncio.CancelledError:
             await _best_effort_terminal(recorder, cancelled=True)
             raise
         except Exception:
-            await _best_effort_terminal(
-                recorder, cancelled=False, error_code=_ERROR_CODE_CONVERSION
-            )
+            await _best_effort_terminal(recorder, cancelled=False)
             raise
 
-        await recorder.converted(item_count=len(converted))
-
-        try:
-            messages = _build_messages(
+        if result.error is not None:
+            await recorder.fail(error_code=result.error.code)
+            return DatasourceProducerResult(
+                outcome=DatasourceProducerOutcome.FAILED,
                 execution_id=recorder.execution_id,
-                semantic_source=result.context,
-                converted=converted,
+                error_code=result.error.code,
             )
-        except asyncio.CancelledError:
-            await _best_effort_terminal(recorder, cancelled=True)
-            raise
-        except Exception:
-            await _best_effort_terminal(
-                recorder,
-                cancelled=False,
-                error_code=_ERROR_CODE_MESSAGE_CONSTRUCTION,
-            )
-            raise
 
-        try:
-            await self._publisher.publish(messages)
-        except asyncio.CancelledError:
-            await _best_effort_terminal(recorder, cancelled=True)
-            raise
-        except Exception:
-            await _best_effort_terminal(
-                recorder,
-                cancelled=False,
-                error_code=_ERROR_CODE_PUBLICATION,
-            )
-            raise
-
-        # Publication is durable and complete: the lifecycle and the broker
-        # are separate boundaries. An append failure here propagates (with no
-        # republish and no COMPLETED); it is never relabeled publication_failed.
-        await recorder.published(item_count=len(messages))
+        messages = await _convert_and_publish(
+            recorder=recorder,
+            result=result,
+            registry=self._registry,
+            publisher=self._publisher,
+        )
         await recorder.complete()
         return DatasourceProducerResult(
             outcome=DatasourceProducerOutcome.COMPLETED,

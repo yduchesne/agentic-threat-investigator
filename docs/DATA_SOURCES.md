@@ -1703,6 +1703,127 @@ malicious once a URL changes or is cleaned.
   upstream (`urlhaus-api.abuse.ch`); no test contacts the real URLhaus
   service, requires a real Auth-Key, or has internet access.
 
+### MISP collection (PR 32A..32D)
+
+MISP is ATI's first configured **collection** datasource: one bounded
+acquisition of a native MISP Event collection produces global Evidence
+without ever becoming an Investigation provider. The MISP semantic model
+(`infrastructure/datasources/misp_semantics.py`, PR 32A), the MISP
+Evidence conversion profile (`misp_evidence.py`, PR 32B), and the bounded
+native MISP REST acquisition (`misp.py`, PR 32C) are closed at runtime by
+PR 32D through the source-neutral collection producer and the existing
+distributed Global Evidence pipeline.
+
+#### Purpose and acquisition (PR 32C/32D)
+
+- The acquirer is `MispDatasource`, a `CollectionSemanticAcquirer`
+  structural implementation: `acquire(definition, recorder)` with no
+  Entity and no `supports(entity)`.
+- Endpoint: `POST {misp_base_url}/events/restSearch` with an explicit
+  JSON `{"page": N, "limit": L}` body and `Authorization: <key>`
+  header; the normal JSON form `{"response": [{"Event": {...}}, ...]}`
+  is the only supported shape.
+- Pagination is strictly sequential and explicitly bounded by
+  `misp_page_size` (1..1000) and `misp_max_pages` (1..1000); reaching
+  `max_pages` means the bounded acquisition window completed, never
+  that the server is exhausted.
+- The API key travels only in the `Authorization` header: the
+  `misp_api_key_secret` setting stores a secret reference, composition
+  resolves it, and no credential ever enters URLs, Evidence, messages,
+  lifecycle logs, or errors.
+- The acquisition produces typed bounded stage errors (timeout,
+  rate_limited, authentication_failed, forbidden, not_found,
+  provider_unavailable, serialization_failed, semantic_validation_failed)
+  and propagates cancellation.
+
+#### Supported and interpreted into Evidence
+
+The exact supported Attribute profile is Event-level Attributes only:
+
+| MISP Attribute type | Normalized IOC fact(s) | Output |
+| ------------------- | ---------------------- | ------ |
+| `domain`            | one `domain`           | one Evidence, one DOMAIN IOC |
+| `hostname`          | one `domain`           | one Evidence, one DOMAIN IOC |
+| `ip-src`            | one `ip_address`       | one Evidence, one IP_ADDRESS IOC |
+| `ip-dst`            | one `ip_address`       | one Evidence, one IP_ADDRESS IOC |
+| `domain|ip`         | `domain` then `ip_address` | one Evidence, two ordered IOC facts |
+
+Evidence identity is deterministic and stable:
+`evidence_id_for_source_record(SemanticFormatId.MISP, SourceId.MISP,
+str(attribute.uuid))` — the exact MISP Attribute UUID is the source-record
+identity, never the IOC value.
+
+#### Entity and observation semantics
+
+- One supported Attribute is one `Evidence` plus one
+  `EvidenceObservation` persisted by the global batch path.
+- `domain`/`hostname` associate the canonical DOMAIN Entity;
+  `ip-src`/`ip-dst` associate the canonical IP_ADDRESS Entity (IPv4 and
+  IPv6); `domain|ip` associates **both** canonical Entities through one
+  Evidence item/observation.
+- Consumer-side reconstruction reads only the durable normalized
+  `facts.iocs` (never raw payloads, tags, category, or re-parsing): the
+  first ordered IOC is the transient invocation Entity and the
+  deterministic MISP extractor returns the additional represented
+  Entities.
+- **Zero inferred relationships.** IOC co-occurrence (for example
+  `domain|ip`) never fabricates a DOMAIN<->IP relationship, and no tag,
+  category, distribution, sharing-group, `to_ids`, or `deleted` field
+  ever creates an Entity or Relationship.
+- Provenance preserves the exact Attribute `observed_at`, the
+  acquisition `retrieved_at`, the credential-free source reference, and
+  normalized Event/Attribute/IOC facts; `raw_payload` is always `NULL`.
+
+#### Preserved but not interpreted as policy or analysis
+
+Event UUID/ID/info/timestamp, Attribute UUID/category/type/value/timestamp,
+`deleted`, `to_ids`, `distribution`, sharing-group ID, tags, and Event
+context are preserved as source facts in normalized facts. They are never
+verdicts, authorization, deletion instructions, or relationship assertions:
+MISP distribution/sharing-group metadata is **not** ATI authorization.
+
+#### Valid but unsupported for Evidence production
+
+At minimum: MISP Objects, Object-owned Attributes, and ObjectReferences
+(never flattened), Galaxies as ATI CTI entities, and every valid Attribute
+outside the supported profile (`url`, file/hash, email, certificate,
+AS/port Attributes, ...). Valid unsupported constructs deterministically
+produce zero Evidence; ATI never guesses. A collection containing only
+unsupported constructs is a successful zero-Evidence execution
+(`CONVERTED(0)`, `PUBLISHED(0)`, `COMPLETED`).
+
+#### Persistence and Investigation boundaries
+
+- MISP collection ingestion creates **global Evidence only**: it never
+  creates `InvestigationEvidence` and is never registered as an
+  Investigation `EvidenceProvider` (`ProviderComposition.provider_registry()`
+  has no MISP entry).
+- The producer composes the authoritative MISP `DatasourceDefinition`
+  from `Settings.datasources` (exactly one MISP definition; a configured
+  URL with a missing/mismatched/ambiguous definition fails closed before
+  acquisition).
+- The converter registry is selected by `SemanticFormatId.MISP` only.
+- There is no MISP-specific schema, message, topic, or persistence path;
+  producer publication reuses `EvidenceMessage` v1 and the configured
+  Kafka/Redpanda topic, and the consumer persists through the global
+  PostgreSQL batch stored functions.
+- Producer `COMPLETED` means the publisher accepted every message, never
+  that PostgreSQL consumed them; PostgreSQL remains authoritative for
+  Observation identity, versions, material no-op/change decisions, and
+  diffs.
+- The producer holds no UnitOfWork across HTTP/decoding/parsing/
+  conversion/publication: lifecycle appends remain short transactions and
+  consumer PostgreSQL commit precedes the broker commit.
+
+#### Deterministic testing
+
+All MISP tests are fully synthetic over ATI-authored fixtures (RFC 5737 /
+RFC 2606 / RFC 3849 documentation-safe values). Unit matrices P01..P16,
+X01..X18, and C01..C10 are offline; V01..V05 are real-PostgreSQL vertical
+slices; K01..K06 are real Redpanda + PostgreSQL feature-acceptance tests.
+Only external MISP HTTPS is faked (in-process `httpx.MockTransport`); no
+live MISP server, real key, or internet access is involved.
+
 ## Structured batch sources
 
 ### MITRE ATT&CK
