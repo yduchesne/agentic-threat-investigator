@@ -106,12 +106,16 @@ def test_shared_source_id_with_distinct_datasource_ids_is_accepted() -> None:
     [
         ("protocol", "gopher"),
         ("serialization_format", "xml"),
-        ("semantic_format", "urn:ati:datasource:semanticformat:misp"),
+        ("semantic_format", "urn:ati:datasource:semanticformat:taxii"),
         ("source_id", "urn:ati:source:unknown"),
     ],
 )
 def test_unknown_typed_values_fail_closed_in_profiles(field: str, invalid: str) -> None:
-    """Unknown typed dimension values are rejected at the settings boundary."""
+    """Unknown typed dimension values are rejected at the settings boundary.
+
+    ``urn:ati:datasource:semanticformat:misp`` is no longer unknown since
+    PR 32A registers the MISP semantic format.
+    """
     definition = _threatfox_definition("threatfox-live")
     definition[field] = invalid
     with pytest.raises(ValidationError):

@@ -1148,6 +1148,35 @@ HTTP paths; only the external Internet endpoint is faked via in-process
   exact bounded byte/item counts, no Evidence/SourceRecord/Investigation
   rows, and no raw body or credential in the durable log.
 
+### MISP native semantic parsing (PR 32A)
+
+PR 32A adds the native MISP semantic boundary
+(`tests/unit/infrastructure/datasources/test_misp_semantics.py`, M32A-01..50,
+with ATI-authored synthetic fixtures in `tests/support/misp_fixtures.py`):
+
+- a decoded `{"Event": {...}}` envelope validates to immutable
+  `MispAttributeRecord` / `MispObjectRecord` records: Event-level
+  Attributes first, then Objects, each in source order, with nested Object
+  Attributes/ObjectReferences preserved and never duplicated top level;
+- strict scalars are verified against the current MISP core format: Unix
+  timestamps must be decimal JSON strings -> UTC, `first_seen`/`last_seen`
+  must be timezone-aware ISO-8601 (`first_seen <= last_seen`), semantic
+  booleans must be real booleans, and modeled strings are bounded without
+  truncation;
+- UUID is upstream identity: identical duplicates are kept once, conflicting
+  duplicates and any malformed modeled member fail the whole Event with a
+  bounded, non-retryable `SEMANTIC_VALIDATION` error and zero records;
+- `deleted`, Attribute/Object distribution (including `5` = inherit Event),
+  sharing-group state, and unknown valid MISP Attribute types are preserved
+  without interpretation; binary `data` and unmodeled members never leak;
+- caller-mutation isolation, repeated-parse equality, module isolation from
+  Evidence/provider/HTTP/persistence imports, and no source-content logging
+  are asserted directly.
+
+No live MISP/network and no database are involved; REST acquisition is
+outside 32A (PR 32C), and `MispToEvidenceConverter` is PR 32B. See
+`docs/DATASOURCE_ARCHITECTURE.md`.
+
 MITRE regressions unchanged: STIX-parser reuse in the batch source keeps
 `SourceRecord` identities, canonical payloads, content hashes, and
 checkpoints identical across the unit source tests, the ATT&CK ingestion

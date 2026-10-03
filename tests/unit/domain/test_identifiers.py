@@ -7,7 +7,10 @@ and exchanged through the API and must never drift silently.
 """
 
 from agentic_threat_investigator.domain.evidence import EvidenceType
-from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.identifiers import (
+    SemanticFormatId,
+    SourceId,
+)
 from agentic_threat_investigator.domain.investigation import StopReason
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
@@ -25,6 +28,17 @@ def test_source_identifier_urns_are_stable() -> None:
         "urn:ati:source:urlhaus",
         "urn:ati:source:mitre_attack",
         "urn:ati:source:cisa_kev",
+        "urn:ati:source:misp",
+    }
+
+
+def test_semantic_format_identifier_urns_are_stable() -> None:
+    """Semantic-format URNs match the confirmed v0.1 semantic set."""
+
+    assert {item.value for item in SemanticFormatId} == {
+        "urn:ati:datasource:semanticformat:stix21",
+        "urn:ati:datasource:semanticformat:threatfox",
+        "urn:ati:datasource:semanticformat:misp",
     }
 
 

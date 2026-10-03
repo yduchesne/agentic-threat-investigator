@@ -127,9 +127,10 @@ Examples:
 ```text
 urn:ati:datasource:semanticformat:stix21
 urn:ati:datasource:semanticformat:threatfox
+urn:ati:datasource:semanticformat:misp
 ```
 
-Provider-specific/proprietary semantic models receive their own ATI URNs. ThreatFox therefore uses `urn:ati:datasource:semanticformat:threatfox` even though its transport is HTTPS and its serialization is JSON.
+Provider-specific/proprietary semantic models receive their own ATI URNs. ThreatFox therefore uses `urn:ati:datasource:semanticformat:threatfox` even though its transport is HTTPS and its serialization is JSON. MISP (PR 32A) is a native semantic format — `urn:ati:datasource:semanticformat:misp` with `SourceId.MISP = urn:ati:source:misp` — and is deliberately **not** translated through STIX/TAXII.
 
 Semantic format is independent of provider, protocol, serialization format, and datasource instance.
 
@@ -268,6 +269,18 @@ Format-specific parsers (`src/agentic_threat_investigator/infrastructure/datasou
   standard. `MitreAttackBatchSource` consumes it as its decoded-value
   boundary with `SourceRecord` identity, content-hash, checkpoint, batch,
   and ingestion behavior unchanged.
+- `misp_semantics.py` owns the PR 32A native MISP semantic boundary
+  (`parse_misp_event` -> `MispAttributeRecord` / `MispObjectRecord`): one
+  decoded `{"Event": {...}}` envelope validates to immutable source records
+  preserving UUID identity, UTC timestamps, Attribute
+  `category`/`type`/`value`, `deleted`, tags, and
+  distribution/sharing-group state; Event-level Attributes are returned
+  before Objects in source order, and Object-owned Attributes/
+  ObjectReferences stay nested (never duplicated top level) for future
+  0..N conversion in PR 32B. It performs no acquisition, Evidence
+  construction, or persistence; MISP REST acquisition/composition is
+  deferred to PR 32C/32D, and converter selection remains
+  semantic-format-driven.
 - `threatfox.py` is the narrow production ThreatFox acquisition-to-semantic
   reference path (`ThreatFoxDatasource` + tiny runner): it validates the
   explicit datasource dimensions (THREATFOX + HTTPS + JSON + THREATFOX)
