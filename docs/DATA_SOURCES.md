@@ -1824,6 +1824,50 @@ slices; K01..K06 are real Redpanda + PostgreSQL feature-acceptance tests.
 Only external MISP HTTPS is faked (in-process `httpx.MockTransport`); no
 live MISP server, real key, or internet access is involved.
 
+### STIX 2.1 IOC Evidence conversion (PR 33B)
+
+PR 33B delivers ATI's first STIX 2.1 Evidence production **without** any
+live STIX/TAXII acquisition (TAXII runtime integration is PR 33E): the
+reusable PR 33A semantic seam (`parse_stix21_object` -> `Stix21Object`)
+now feeds a registered converter so that already-validated STIX objects
+can deterministically produce global `THREAT_INTELLIGENCE` Evidence.
+
+Delivered profile (exact; everything else is unsupported and produces zero
+Evidence):
+
+- `domain-name` SCO (string `value`) -> one DOMAIN IOC;
+- `ipv4-addr` SCO (string `value` that is actually IPv4) -> one IP_ADDRESS IOC;
+- `ipv6-addr` SCO (string `value` that is actually IPv6) -> one IP_ADDRESS IOC;
+- `indicator` SDO whose whole STIX pattern is an approved non-temporal
+  equality composition -> one Evidence with ordered IOC leaves.
+
+Indicator support is deliberately narrow: `pattern_type == "stix"` with a
+nonblank `pattern`, and the **entire** pattern must be composed solely of
+`domain-name:value`/`ipv4-addr:value`/`ipv6-addr:value` equality leaves
+combined with `AND`/`OR` and parentheses. The maintained OASIS
+`stix2-patterns` grammar parser (`>=2.1.2,<3`, Python 3.14 capable,
+BSD-3-Clause) establishes syntax; an ATI-owned structural whitelist
+distinguishes supported / valid-but-unsupported / malformed. ATI never
+regex-parses Patterning, never partially extracts a mixed pattern, and
+maps a malformed approved-context pattern to a bounded `ConversionError`.
+
+Evidence identity = semantic format + ATI source namespace + **exact STIX
+`id`** (`evidence_id_for_source_record(SemanticFormatId.STIX_21, source,
+source.id)`). `created`/`modified`/`valid_from`, retrieval time, IOC
+values, and pattern content never participate in identity. STIX
+`observed_at` stays `None`; `retrieved_at`/`source_url` come from the
+semantic context; `raw_payload` is `None`. Approved STIX metadata and
+markings are preserved as source facts only (never interpreted or
+enforced); no verdict, confidence interpretation, attribution,
+relationship, pivot, or ATT&CK mapping is synthesized.
+
+Nothing in PR 33B claims TAXII support: there is no discovery,
+collection, pagination, authentication, or runtime composition, and not
+every STIX object produces Evidence — most valid STIX is unsupported
+until PR 33C/33D/33E land. The MITRE ATT&CK batch path is unchanged (it
+consumes STIX semantics independently and performs its own `SourceRecord`
+normalization).
+
 ## Structured batch sources
 
 ### MITRE ATT&CK
