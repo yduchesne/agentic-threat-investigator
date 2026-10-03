@@ -1871,7 +1871,12 @@ The STIX 2.1 decoded-value semantic parser
 (`agentic_threat_investigator/infrastructure/datasources/stix21_semantics.py`)
 owns the shared STIX 2.1 envelope/object identity contract and deep
 immutable snapshots that preserve extension fields (`x_mitre_*` and unknown
-valid object types). `MitreAttackBatchSource` consumes it as its
+valid object types). PR 33A split the boundary into one reusable object
+seam (`parse_stix21_object` -> immutable `Stix21Object`) plus the Bundle as
+an envelope adapter (`parse_stix21_bundle` delegates every member to the
+seam); future TAXII 2.1 acquisition reuses the same object seam without
+manufacturing a Bundle envelope, and a STIX Bundle is rejected by the
+object parser. `MitreAttackBatchSource` consumes the Bundle adapter as its
 decoded-value boundary before the existing ATT&CK-specific `SourceRecord`
 normalization; record identities, canonical payloads, content hashes,
 checkpoints, and batch/ingestion behavior are unchanged. STIX semantics and
