@@ -33,6 +33,19 @@ SECONDARY_DOMAIN_VALUE = "secondary.test"
 IPV4_VALUE = "203.0.113.42"
 IPV6_VALUE = "2001:db8::42"
 
+# 32B canonicalization targets: mixed-case/trailing-dot domain and IPv6
+# forms that must normalize through the existing ATI canonicalizers.
+MIXED_CASE_DOMAIN_VALUE = "Example.TEST."
+UNICODE_DOMAIN_VALUE = "b\u00fccher.example"
+EXPANDED_IPV6_VALUE = "2001:0db8:0000:0000:0000:0000:0000:0042"
+
+# 32B compound ``domain|ip`` source values (exactly one literal ``|``).
+COMPOUND_DOMAIN_IP_VALUE = "Example.TEST.|203.0.113.42"
+COMPOUND_DOMAIN_IPV6_VALUE = "Example.TEST.|2001:0db8:0000:0000:0000:0000:0000:0042"
+
+# One valid-but-unsupported 32B MISP Attribute type.
+UNSUPPORTED_ATTRIBUTE_TYPE = "sha256"
+
 # Synthetic documentation-safe MISP REST timestamps (UTC Unix seconds as
 # JSON strings) and ISO-8601 seen windows.
 EVENT_TIMESTAMP = "1700000000"

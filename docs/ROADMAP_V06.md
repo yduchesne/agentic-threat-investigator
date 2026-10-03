@@ -139,9 +139,24 @@ forms such as `domain|ip`. File/hash, URL, certificate, Galaxy, and richer
 Object semantics may be added only where the detailed plan can map them to
 existing approved ATI concepts without inventing ontology.
 
-## PR 32B — MISP-to-Evidence conversion
+## PR 32B — MISP-to-Evidence conversion `[DONE]`
 
-Add `MispToEvidenceConverter`, registered exclusively under the MISP semantic
+Delivered: `infrastructure/datasources/misp_evidence.py` owns the pure
+`MispToEvidenceConverter` (selected exclusively by
+`SemanticFormatId.MISP`) plus MISP fact builders and the explicit
+side-effect-free `build_misp_conversion_registry()`. Exact five-type IOC
+profile (`domain`/`hostname` -> DOMAIN, `ip-src`/`ip-dst` -> IP_ADDRESS
+IPv4+IPv6, `domain|ip` -> one Evidence with two ordered IOC facts),
+reusing the existing `validate_dns_name`/`canonicalize_ip_address`
+canonicalizers; stable global Evidence identity from the exact Attribute
+UUID; normalized Event/Attribute/IOC fact shape (preserved `deleted`/
+`to_ids`/distribution/sharing/tags/published metadata, `raw_payload=None`,
+no verdict/relationship synthesis); zero Evidence for valid unsupported
+Attributes and every `MispObjectRecord`; deterministic parser-to-converter
+tests (M32B-01..57 + V01..V05) with synthetic ATI fixtures; docs. No
+acquisition (PR 32C), runtime composition (PR 32D), or live MISP claim.
+
+Original planning description: add `MispToEvidenceConverter`, registered exclusively under the MISP semantic
 format. Convert the approved PR 32A semantic records into deterministic global
 Evidence with exact MISP/Event/record provenance.
 

@@ -1177,6 +1177,67 @@ No live MISP/network and no database are involved; REST acquisition is
 outside 32A (PR 32C), and `MispToEvidenceConverter` is PR 32B. See
 `docs/DATASOURCE_ARCHITECTURE.md`.
 
+### Native MISP-to-Evidence conversion (PR 32B)
+
+PR 32B adds the pure MISP semantic-record -> `ConvertedEvidence` layer
+(`tests/unit/infrastructure/datasources/test_misp_evidence.py`, M32B-01..57
+and M32B-V01..V05, with 32B fixture additions in
+`tests/support/misp_fixtures.py`). Everything is synthetic, static, and
+offline:
+
+- registration/contract (M32B-01..06): the converter owns exactly
+  `SemanticFormatId.MISP`; the real `build_misp_conversion_registry()`
+  lookup selects it by semantic format only; wrong source type, wrong
+  semantic-format context, and wrong `SourceId` each raise the bounded
+  `ConversionError`; repeated conversion is structurally equal;
+  `convert_semantic_source_objects` selection is keyed only by semantic
+  format (a MISP-SourceId/THREATFOX-format context fails on the format
+  lookup);
+- identity/provenance (M32B-07..16): `source_record_id` is the exact
+  Attribute UUID string; Evidence ID equals the deterministic
+  `evidence_id_for_source_record(SemanticFormatId.MISP, SourceId.MISP,
+  str(attribute.uuid))`; value changes keep the same ID, different UUIDs
+  yield different IDs, Event UUID and retrieval-time changes never move
+  the ID; `source_reference`/`retrieved_at` come from the semantic
+  context, `observed_at` is the exact Attribute timestamp, and
+  `raw_payload` is `None`;
+- IOC profile (M32B-17..24): `domain`/`hostname` -> one canonical DOMAIN
+  IOC, `ip-src`/`ip-dst` -> one canonical IP_ADDRESS IOC with IPv4 and
+  compressed IPv6 coverage, and existing strict `validate_dns_name`/
+  `canonicalize_ip_address` behavior (mixed-case/trailing-dot and IDNA
+  domains, expanded IPv6) — the supported set is pinned to exactly the
+  five approved types;
+- compound (M32B-25..32 + 57): `domain|ip` is one Evidence with two
+  ordered canonical IOC facts through both the direct converter and the
+  real generic flattening seam; missing/extra/invalid components raise
+  `ConversionError`; identity is the bare Attribute UUID with no
+  component suffix;
+- unsupported/state preservation (M32B-33..45): sha256/url/arbitrary
+  types, `MispObjectRecord`, and Objects nesting supported Attributes all
+  return zero Evidence; `to_ids=false` and `deleted=true` Attributes still
+  convert with state preserved; distribution `5` is preserved not
+  resolved; distribution `4` + sharing group, Event distribution,
+  ordered Event/Attribute tags, comments/object relation, and published
+  metadata are preserved exactly;
+- fact/determinism/generic seam (M32B-46..55): exact UTC `Z` timestamp
+  format, canonical UUID strings, original source value retained
+  separately from canonical `iocs`, immutable output, no verdict/risk/
+  attribution synthesis, no local MISP numeric IDs or binary `data`;
+  supported+unsupported+supported passes emit two outputs in source
+  order, all-unsupported passes succeed empty, and one malformed
+  supported record fails the whole pass with no partial API;
+- parser-to-converter vertical slices (M32B-V01..V05): a synthetic ATI
+  MISP Event through the **real** `parse_misp_event`, then the **real**
+  registry and `convert_semantic_source_objects` — multiple supported
+  Event Attributes emit in source order, `domain|ip` stays one
+  Evidence/two IOC facts, unsupported types are skipped, deleted
+  supported Attributes emit with `deleted=true`, and Object-only Events
+  convert to successful empty output.
+
+PR 32A MISP semantic suites (including Object distribution `5`), the
+ThreatFox and generic converter/registry suites, and Evidence identity
+tests remain green; no generic conversion contract is weakened for MISP.
+
 MITRE regressions unchanged: STIX-parser reuse in the batch source keeps
 `SourceRecord` identities, canonical payloads, content hashes, and
 checkpoints identical across the unit source tests, the ATT&CK ingestion

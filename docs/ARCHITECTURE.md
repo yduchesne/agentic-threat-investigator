@@ -2125,6 +2125,63 @@ observations remain durable — later failures never compensate earlier
 commits. No UoW ever spans acquisition/parse/conversion/extraction, and
 lifecycle events are execution-level, never per Evidence.
 
+### Native MISP Evidence conversion (PR 32B)
+
+PR 32B adds the second production semantic-format converter without
+touching the PR 27D/28A boundary: `infrastructure/datasources/misp_evidence.py`
+owns `MispToEvidenceConverter` (selected exclusively by
+`SemanticFormatId.MISP`), the MISP fact builders, mapping-specific
+canonicalization wrappers, and the explicit side-effect-free
+`build_misp_conversion_registry()`. It consumes only already-validated PR
+32A records; `misp_semantics.py` still constructs no Evidence, and no new
+dependency, acquisition, persistence, API, or runtime wiring is added.
+
+The verified supported MISP IOC profile is exactly `domain`, `hostname`,
+`ip-src`, `ip-dst`, and `domain|ip` (no substring/similarity/fallback
+inference). DOMAIN/IOC values flow through the existing
+``validate_dns_name``/``canonicalize_ip_address`` canonicalizers;
+canonicalization failure for a supported type is a bounded
+``ConversionError``. `domain|ip` requires exactly two nonempty components
+separated by exactly one literal `|` and emits **one** Evidence carrying
+two ordered canonical IOC facts — component identities such as
+``<uuid>#domain``/``<uuid>#ip`` are never fabricated. One MISP Attribute
+UUID remains one Evidence identity.
+
+Stable source-record identity for an Event-level Attribute is exactly
+``str(attribute.uuid)``; the Evidence ID is the deterministic
+``evidence_id_for_source_record(SemanticFormatId.MISP, source_id, str(attribute.uuid))``
+(PR 28A helper). Attribute value, Event UUID, retrieval time, datasource
+ID, tags, timestamps, distribution, and compound-component position never
+participate in Evidence identity. `observed_at` is the exact Attribute
+source timestamp; `retrieved_at`/`source_reference` come from the
+semantic context; `raw_payload` stays `None`. Global and
+Investigation-independent: no Investigation or subject context is
+involved.
+
+Normalized facts use one pinned stable shape per supported Attribute: an
+`event` object (UUID, info, UTC `Z` timestamp, published,
+publish_timestamp, extends_uuid, distribution, sharing_group_id, ordered
+tags), an `attribute` object (UUID, type, category, original source
+value, timestamp, to_ids, deleted, distribution, sharing_group_id,
+comment, object_relation, ordered tags), and an `iocs` list of ordered
+canonical `{"type", "value"}` objects. `to_ids`, tags, category, comment,
+`deleted`, distribution (including `5` = inherit Event), and sharing
+group are source facts — preserved, never interpreted as verdict or
+authorization; a supported `deleted=True` Attribute still converts so the
+same Evidence identity can later reflect `false -> true`. No
+verdict/confidence/risk/attribution/relationship/pivot semantics are
+synthesized, and no raw payload or binary content is retained.
+
+A valid `MispObjectRecord` deterministically returns zero Evidence (MISP
+Objects are never flattened, even with nested supported Attributes) and
+ObjectReferences create no ATI Relationship. Defense-in-depth
+provenance guards fail closed with bounded `ConversionError` text: wrong
+source type, non-MISP semantic-format context, and non-`SourceId.MISP`
+context. Acquisition (REST/auth/pagination) remains PR 32C and
+production runtime composition/real-stack closure remains PR 32D; this
+slice proves pure conversion only (`parse_misp_event` -> real registry ->
+real `convert_semantic_source_objects` -> `MispToEvidenceConverter`).
+
 ## Geospatial
 
 v0.1 uses DB-IP City Lite through a local MMDB database. Latitude/longitude are used for map visualization.
