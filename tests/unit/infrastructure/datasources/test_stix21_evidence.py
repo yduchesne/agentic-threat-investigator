@@ -713,7 +713,7 @@ class TestFactsProvenance:
         """M33B-49: the common STIX fact key set is exact and ordered."""
         (converted,) = _convert_single(fixtures.stix_indicator())
         facts = _thaw_facts(converted.observation)
-        assert list(facts.keys()) == ["stix", "indicator", "iocs"]
+        assert list(facts.keys()) == ["stix", "indicator", "iocs", "cti_entity"]
         assert list(facts["stix"].keys()) == [
             "id",
             "type",
@@ -888,7 +888,7 @@ class TestFactsProvenance:
         """M33B-65: no verdict/risk/attribution/relationship semantics exist."""
         (converted,) = _convert_single(fixtures.stix_indicator())
         facts = _thaw_facts(converted.observation)
-        assert set(facts.keys()) == {"stix", "indicator", "iocs"}
+        assert set(facts.keys()) == {"stix", "indicator", "iocs", "cti_entity"}
         assert all(set(ioc.keys()) == {"type", "value"} for ioc in facts["iocs"])
         flattened = str(facts).lower()
         for banned in (
@@ -1210,7 +1210,8 @@ class TestVerticalSlices:
             {"type": "ip_address", "value": "2001:db8::42"},
         ]
         # No verdict/relationship semantics anywhere in the slice.
-        assert set(facts.keys()) == {"stix", "indicator", "iocs"}
+        assert set(facts.keys()) == {"stix", "indicator", "iocs", "cti_entity"}
+        assert facts["cti_entity"] is None
 
     def test_m33b_v03_mixed_objects_supported_order(self) -> None:
         """M33B-V03: mixed objects yield exactly three outputs in source order."""
@@ -1273,3 +1274,314 @@ class TestVerticalSlices:
         assert first.evidence.source_record_id == second.evidence.source_record_id
         assert first.evidence.source == second.evidence.source
         assert _thaw_facts(first.observation) != _thaw_facts(second.observation)
+
+
+class TestCtiSdoEvidence:
+    """M33C-S01..S22: the five PR 33C CTI SDO Evidence profile."""
+
+    @pytest.mark.parametrize(
+        ("decoded", "expected_type", "expected_id"),
+        [
+            (
+                fixtures.stix_threat_actor(),
+                "threat_actor",
+                fixtures.THREAT_ACTOR_ID,
+            ),
+            (fixtures.stix_campaign(), "campaign", fixtures.CAMPAIGN_ID),
+            (
+                fixtures.stix_intrusion_set(),
+                "intrusion_set",
+                fixtures.INTRUSION_SET_ID,
+            ),
+            (fixtures.stix_tool(), "tool", fixtures.TOOL_ID),
+            (
+                fixtures.stix_infrastructure(),
+                "infrastructure",
+                fixtures.INFRASTRUCTURE_ID,
+            ),
+        ],
+    )
+    def test_m33c_s01_d05_exactly_one_evidence(
+        self, decoded: dict[str, Any], expected_type: str, expected_id: str
+    ) -> None:
+        """M33C-S01..05: each supported CTI SDO converts to exactly one Evidence."""
+        converted = _convert_single(decoded)
+        assert len(converted) == 1
+        (single,) = converted
+        assert single.evidence.type is EvidenceType.THREAT_INTELLIGENCE
+        assert single.evidence.source_record_id == expected_id
+        assert single.evidence.id == _expected_evidence_id(expected_id)
+        facts = _thaw_facts(single.observation)
+        assert facts["cti_entity"]["type"] == expected_type
+        assert facts["cti_entity"]["value"] == expected_id
+        assert facts["iocs"] == []
+        assert facts["indicator"] is None
+        assert single.observation.observed_at is None
+        assert single.observation.raw_payload is None
+
+    def test_m33c_s06_exact_cti_entity_block_shape(self) -> None:
+        """M33C-S06: cti_entity carries exactly type/value/display_name."""
+        (converted,) = _convert_single(fixtures.stix_threat_actor())
+        facts = _thaw_facts(converted.observation)
+        assert set(facts["cti_entity"].keys()) == {
+            "type",
+            "value",
+            "display_name",
+        }
+        assert facts["cti_entity"] == {
+            "type": "threat_actor",
+            "value": fixtures.THREAT_ACTOR_ID,
+            "display_name": fixtures.THREAT_ACTOR_NAME,
+        }
+
+    def test_m33c_s07_name_preserved_exactly_as_display_metadata(self) -> None:
+        """M33C-S07: the source name spelling/case is preserved verbatim."""
+        name = "  MidNight Blizzard!"
+        (converted,) = _convert_single(fixtures.stix_threat_actor(name=name))
+        facts = _thaw_facts(converted.observation)
+        assert facts["cti_entity"]["display_name"] == name
+        assert facts["cti_entity"]["value"] == fixtures.THREAT_ACTOR_ID
+
+    def test_m33c_s08_same_name_different_ids_distinct(self) -> None:
+        """M33C-S08: same name + different STIX IDs remain distinct identities."""
+        (a,) = _convert_single(fixtures.stix_threat_actor())
+        (b,) = _convert_single(
+            fixtures.stix_threat_actor(
+                id=fixtures.THREAT_ACTOR_2_ID, name=fixtures.THREAT_ACTOR_NAME
+            )
+        )
+        facts_a = _thaw_facts(a.observation)
+        facts_b = _thaw_facts(b.observation)
+        assert facts_a["cti_entity"]["value"] == fixtures.THREAT_ACTOR_ID
+        assert facts_b["cti_entity"]["value"] == fixtures.THREAT_ACTOR_2_ID
+        assert (
+            facts_a["cti_entity"]["display_name"]
+            == facts_b["cti_entity"]["display_name"]
+        )
+        assert a.evidence.id != b.evidence.id
+
+    @pytest.mark.parametrize(
+        "decoded",
+        [
+            fixtures.stix_threat_actor(id=fixtures.CAMPAIGN_ID),
+            fixtures.stix_campaign(id=fixtures.TOOL_ID),
+            fixtures.stix_intrusion_set(id=fixtures.INFRASTRUCTURE_ID),
+            fixtures.stix_tool(id=fixtures.THREAT_ACTOR_ID),
+            fixtures.stix_infrastructure(id=fixtures.CAMPAIGN_ID),
+        ],
+    )
+    def test_m33c_s09_d13_wrong_type_prefix_fails_closed(
+        self, decoded: dict[str, Any]
+    ) -> None:
+        """M33C-S09..13: a mismatched id prefix is a bounded ConversionError."""
+        with pytest.raises(ConversionError, match="id"):
+            _convert_single(decoded)
+
+    def test_m33c_s14_malformed_id_fails_closed(self) -> None:
+        """M33C-S14: a malformed machine ID is a bounded ConversionError."""
+        with pytest.raises(ConversionError):
+            _convert_single(fixtures.stix_threat_actor(id="threat-actor--not-a-uuid"))
+        with pytest.raises(ConversionError):
+            _convert_single(
+                fixtures.stix_threat_actor(
+                    id="threat-actor--11111111-1111-1111-1111-11111111111x"
+                )
+            )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"name": None},
+            {"name": 42},
+            {"name": ""},
+            {"name": "   "},
+            {"name": "x" * 513},
+        ],
+    )
+    def test_m33c_s15_d19_invalid_name_fails_closed(
+        self, kwargs: dict[str, Any]
+    ) -> None:
+        """M33C-S15..19: missing/non-string/blank/over-bound names fail."""
+        with pytest.raises(ConversionError, match="name"):
+            _convert_single(fixtures.stix_tool(**kwargs))
+
+    def test_m33c_s20_errors_never_echo_source_content(self) -> None:
+        """M33C-S20: bounded errors never echo names, ids, or source content."""
+        secret_name = "Ultra-Secret-Actor-Name"
+        with pytest.raises(ConversionError) as error:
+            _convert_single(fixtures.stix_threat_actor(name=secret_name, id="bad"))
+        assert secret_name not in str(error.value)
+        assert "threat-actor" not in str(error.value)
+        with pytest.raises(ConversionError) as error:
+            _convert_single(fixtures.stix_threat_actor(name="x" * 513))
+        assert "x" * 10 not in str(error.value)
+
+    def test_m33c_s21_common_stix_metadata_preserved(self) -> None:
+        """M33C-S21: approved common STIX metadata is preserved as in 33B."""
+        (converted,) = _convert_single(
+            fixtures.stix_campaign(
+                created="2026-01-01T00:00:00+01:00",
+                modified="2026-01-02T00:00:00Z",
+                labels=["espionage"],
+                confidence=60,
+                object_marking_refs=[_MARKING_REF],
+            )
+        )
+        facts = _thaw_facts(converted.observation)
+        assert facts["stix"]["created"] == "2025-12-31T23:00:00Z"
+        assert facts["stix"]["modified"] == "2026-01-02T00:00:00Z"
+        assert facts["stix"]["labels"] == ["espionage"]
+        assert facts["stix"]["confidence"] == 60
+        assert facts["stix"]["object_marking_refs"] == [_MARKING_REF]
+
+    def test_m33c_s22_no_reference_fields_become_entities(self) -> None:
+        """M33C-S22: references/aliases stay source facts, never entities."""
+        (converted,) = _convert_single(fixtures.stix_threat_actor())
+        facts = _thaw_facts(converted.observation)
+        flattened = str(facts).lower()
+        # The threat-actor fixture carries aliases; they never surface.
+        assert "synthetic-alias" not in flattened
+        assert set(facts["cti_entity"].keys()) == {
+            "type",
+            "value",
+            "display_name",
+        }
+
+
+class TestCtiSdoIsolation:
+    """M33C-S23..S35: CTI support never disturbs unsupported/IOC behavior."""
+
+    def test_m33c_s23_ioc_evidence_keeps_cti_entity_null(self) -> None:
+        """M33C-S23: PR33B IOC/Indicator Evidence keeps cti_entity=None."""
+        for decoded in (
+            fixtures.stix_domain_name(),
+            fixtures.stix_indicator(),
+        ):
+            (converted,) = _convert_single(decoded)
+            assert _thaw_facts(converted.observation)["cti_entity"] is None
+
+    def test_m33c_s24_cti_fields_absent_from_ioc_facts(self) -> None:
+        """M33C-S24: CTI SDO blocks never leak into IOC-only facts."""
+        (converted,) = _convert_single(fixtures.stix_indicator())
+        facts = _thaw_facts(converted.observation)
+        assert list(facts.keys()) == ["stix", "indicator", "iocs", "cti_entity"]
+        assert facts["cti_entity"] is None
+        assert facts["iocs"] == [{"type": "domain", "value": fixtures.DOMAIN_VALUE}]
+
+    @pytest.mark.parametrize(
+        "decoded",
+        [
+            fixtures.stix_malware(),
+            fixtures.stix_relationship(),
+            fixtures.stix_sighting(),
+            fixtures.stix_attack_pattern(),
+            fixtures.stix_custom(),
+        ],
+    )
+    def test_m33c_s25_d29_other_objects_still_zero(
+        self, decoded: dict[str, Any]
+    ) -> None:
+        """M33C-S25..29: relationship/sighting/attack-pattern/malware/custom stay zero."""
+        assert _convert_single(decoded) == ()
+
+    def test_m33c_s30_generic_vulnerability_object_unsupported(self) -> None:
+        """M33C-S30: a valid STIX vulnerability object produces zero Evidence."""
+        decoded = {
+            "type": "vulnerability",
+            "id": "vulnerability--99999999-9999-9999-9999-999999999999",
+            "spec_version": "2.1",
+            "name": "CVE-2024-0001 Synthetic",
+        }
+        assert _convert_single(decoded) == ()
+
+    def test_m33c_s31_unsupported_indicator_still_zero(self) -> None:
+        """M33C-S31: valid-but-unsupported Indicator patterns stay zero."""
+        assert (
+            _convert_single(fixtures.stix_indicator(pattern="[file:name = 'x.exe']"))
+            == ()
+        )
+
+    def test_m33c_s32_mixed_supported_and_unsupported_objects(self) -> None:
+        """M33C-S32: CTI objects convert alongside zero-result objects in order."""
+        converted = convert_semantic_source_objects(
+            (
+                _object(fixtures.stix_malware()),
+                _object(fixtures.stix_threat_actor()),
+                _object(fixtures.stix_relationship()),
+                _object(fixtures.stix_tool()),
+                _object(fixtures.stix_custom()),
+            ),
+            _conversion_context(),
+            build_stix21_conversion_registry(),
+        )
+        assert [r.evidence.source_record_id for r in converted] == [
+            fixtures.THREAT_ACTOR_ID,
+            fixtures.TOOL_ID,
+        ]
+
+    def test_m33c_s33_version_continuity_for_cti_object(self) -> None:
+        """M33C-S33: later versions keep the same Evidence identity."""
+        (first,) = _convert_single(fixtures.stix_threat_actor())
+        (second,) = _convert_single(
+            fixtures.stix_threat_actor(
+                modified="2026-03-01T00:00:00Z", name="Renamed Actor"
+            )
+        )
+        assert first.evidence.id == second.evidence.id
+        assert (
+            _thaw_facts(first.observation)["cti_entity"]["display_name"]
+            != _thaw_facts(second.observation)["cti_entity"]["display_name"]
+        )
+
+    def test_m33c_s34_registry_remains_single_stix_converter(self) -> None:
+        """M33C-S34: the registry stays keyed only by the STIX 2.1 format."""
+        registry = build_stix21_conversion_registry()
+        assert isinstance(
+            registry.get(SemanticFormatId.STIX_21), Stix21ToEvidenceConverter
+        )
+        with pytest.raises(UnknownSemanticFormatError):
+            registry.get(SemanticFormatId.MISP)
+
+    def test_m33c_s35_converter_has_no_persistence_or_graph_imports(self) -> None:
+        """M33C-S35: the converter stays free of persistence/graph semantics."""
+        source = inspect.getsource(stix21_evidence)
+        for banned in (
+            "from agentic_threat_investigator.domain.relationships",
+            "from agentic_threat_investigator.app.extraction",
+            "from agentic_threat_investigator.app.persistence",
+            "from agentic_threat_investigator.app.evidence_consumer",
+            "from agentic_threat_investigator.app.evidence_batch_persistence",
+            "RelationshipAssertion",
+            "ExtractedEntity",
+        ):
+            assert banned not in source
+
+    def test_m33c_v01_all_five_sdos_through_real_seams(self) -> None:
+        """M33C-V01: all five SDOs convert through the real registry seam."""
+        converted = convert_semantic_source_objects(
+            (
+                _object(fixtures.stix_threat_actor()),
+                _object(fixtures.stix_campaign()),
+                _object(fixtures.stix_intrusion_set()),
+                _object(fixtures.stix_tool()),
+                _object(fixtures.stix_infrastructure()),
+            ),
+            _conversion_context(),
+            build_stix21_conversion_registry(),
+        )
+        assert len(converted) == 5
+        assert [r.evidence.source_record_id for r in converted] == [
+            fixtures.THREAT_ACTOR_ID,
+            fixtures.CAMPAIGN_ID,
+            fixtures.INTRUSION_SET_ID,
+            fixtures.TOOL_ID,
+            fixtures.INFRASTRUCTURE_ID,
+        ]
+        for result, expected_type in zip(
+            converted,
+            ("threat_actor", "campaign", "intrusion_set", "tool", "infrastructure"),
+            strict=True,
+        ):
+            facts = _thaw_facts(result.observation)
+            assert facts["cti_entity"]["type"] == expected_type
+            assert facts["iocs"] == []

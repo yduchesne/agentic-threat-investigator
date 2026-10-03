@@ -201,7 +201,7 @@ def test_x06c_ambiguous_ip_port_spellings_fail_closed() -> None:
 
 
 def test_x07_unsupported_source_fails_closed() -> None:
-    """A non-ThreatFox message has no durable extraction adapter (typed)."""
+    """A message with no durable extraction adapter pair fails closed (typed)."""
     from uuid import uuid4
 
     from agentic_threat_investigator.app.evidence_message import (
@@ -213,11 +213,13 @@ def test_x07_unsupported_source_fails_closed() -> None:
         evidence_id_for_source_record,
     )
 
-    # A fully valid PR 28C message under the STIX 2.1 semantic format and
-    # the URLhaus source: deterministic identities recompute exactly.
+    # A fully valid PR 28C message under the MISP semantic format but the
+    # URLhaus source: the exact (semantic format, source) pair has no
+    # durable extraction adapter (PR 33C only adds STIX 2.1 for every
+    # source namespace) and deterministic identities recompute exactly.
     source_record_id = "unsupported-record-1"
     evidence_id = evidence_id_for_source_record(
-        SemanticFormatId.STIX_21, SourceId.URLHAUS, source_record_id
+        SemanticFormatId.MISP, SourceId.URLHAUS, source_record_id
     )
     execution_id = uuid4()
     message_id = evidence_message_id(execution_id, 0, evidence_id)
@@ -228,7 +230,7 @@ def test_x07_unsupported_source_fails_closed() -> None:
         datasource_execution_id=execution_id,
         datasource_id=DatasourceId("urlhaus-live"),
         source_id=SourceId.URLHAUS,
-        semantic_format=SemanticFormatId.STIX_21,
+        semantic_format=SemanticFormatId.MISP,
         sequence=0,
         evidence_id=evidence_id,
         evidence_type=EvidenceType.THREAT_INTELLIGENCE,
@@ -236,7 +238,7 @@ def test_x07_unsupported_source_fails_closed() -> None:
         retrieved_at=_FIXED_TS,
         observed_at=None,
         source_url="https://urlhaus.abuse.ch/",
-        facts={"matches": [build_threatfox_fact(ioc="x", ioc_type="url")]},
+        facts={"iocs": [{"type": "domain", "value": "example.test"}]},
         raw_payload=None,
     )
     with pytest.raises(UnsupportedMessageExtractionError):

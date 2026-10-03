@@ -52,6 +52,11 @@ export const GRAPH_ENTITY_TYPES: readonly EntityTypeName[] = [
   "malware",
   "attack_technique",
   "vulnerability",
+  "threat_actor",
+  "campaign",
+  "intrusion_set",
+  "tool",
+  "infrastructure",
 ];
 
 /** The graph-owned URL search parameters (all ``graph_*`` except none else). */

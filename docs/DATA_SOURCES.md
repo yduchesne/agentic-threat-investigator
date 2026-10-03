@@ -1861,12 +1861,32 @@ markings are preserved as source facts only (never interpreted or
 enforced); no verdict, confidence interpretation, attribution,
 relationship, pivot, or ATT&CK mapping is synthesized.
 
-Nothing in PR 33B claims TAXII support: there is no discovery,
+Nothing in PR 33B/33C claims TAXII support: there is no discovery,
 collection, pagination, authentication, or runtime composition, and not
 every STIX object produces Evidence — most valid STIX is unsupported
-until PR 33C/33D/33E land. The MITRE ATT&CK batch path is unchanged (it
+until PR 33D/33E land. The MITRE ATT&CK batch path is unchanged (it
 consumes STIX semantics independently and performs its own `SourceRecord`
 normalization).
+
+### STIX 2.1 CTI Evidence profile (PR 33C)
+
+PR 33C extends the same converter (still one STIX converter, selected only
+by `SemanticFormatId.STIX_21`) with exactly five source-neutral CTI SDO
+types: `threat-actor`, `campaign`, `intrusion-set`, `tool`, and
+`infrastructure`. Each produces exactly one Evidence whose normalized
+facts carry one `cti_entity` represented-entity block (ATI wire type,
+exact validated STIX machine ID, and the STIX `name` preserved verbatim as
+`display_name`) and an empty `iocs` array. `name` is display metadata only
+and never participates in canonical identity; a wrong/malformed object ID
+or a missing/blank/over-512-character `name` is a bounded `ConversionError`.
+
+Generic `attack-pattern`, `malware`, and `vulnerability` objects remain
+unsupported here: ATI's `ATTACK_TECHNIQUE`/`MALWARE`/`VULNERABILITY`
+identity contracts are deliberately narrower, and name-based mapping would
+be unsafe. These five SDO types feed the existing global Evidence batch
+persistence path: durable extraction produces one canonical Entity and
+zero Relationships/RelationshipObservations per object, and no
+relationship/sighting/TAXII/cross-source-equivalence feature is claimed.
 
 ## Structured batch sources
 

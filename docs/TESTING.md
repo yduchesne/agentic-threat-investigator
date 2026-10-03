@@ -1341,6 +1341,95 @@ Internet). The mandatory acceptance topology runs the STIX semantic
 `tests/unit/infrastructure/test_mitre_attack_source.py` (MITRE
 compatibility), and the MISP Evidence (M32B) regression suite.
 
+### Source-neutral CTI Entity expansion, extraction, and persistence (PR 33C)
+
+PR 33C adds exactly five source-neutral CTI Entity types and their strict
+machine-identity contracts (unit, offline, synthetic):
+
+- `tests/unit/domain/test_canonicalization.py` (M33C-D01..D25): exact
+  STIX machine IDs pass through unchanged for all five types; wrong
+  prefixes, missing `--`, malformed/non-canonical UUIDs, surrounding
+  whitespace, mutated prefixes, human names, and blank values fail
+  closed; idempotency; same-name/different-ID identities stay distinct;
+  every new enum has a registered canonicalizer; existing MALWARE /
+  VULNERABILITY / ATT&CK / IOC contracts are regression-pinned; exact
+  wire-value serialization;
+- `tests/unit/infrastructure/datasources/test_stix21_evidence.py`
+  (M33C-S01..S35 + M33C-V01): one Evidence per supported CTI SDO with
+  exact Evidence/`source_record_id` identity, the exact `cti_entity`
+  block (`type` wire value / exact machine value / verbatim
+  `display_name`), same-name/different-ID non-merging, wrong-prefix and
+  malformed IDs as bounded `ConversionError`, missing/non-string/
+  blank/over-512-char names as bounded failure, errors that never echo
+  source content, common STIX metadata preserved as in 33B, `iocs: []`
+  and `indicator: null` for CTI SDOs, `cti_entity: null` for PR 33B
+  IOC/Indicator Evidence, unsupported objects (relationship, sighting,
+  attack-pattern, malware, vulnerability, custom) still returning `()`,
+  the single-STIX-converter registry invariant, and converter isolation
+  from persistence/graph imports;
+- `tests/unit/app/extraction/test_stix_extraction.py` + message-context
+  additions (M33C-X01..X34): one `ExtractedEntity` (exact type/value/
+  display name) and zero relationships per CTI fact; malformed blocks,
+  unknown CTI wire types, non-canonical/wrong-prefix values, and invalid
+  display names fail closed with `MALFORMED_FACTS`; errors never echo
+  source values; PR 33B direct domain/IP durable facts reconstruct;
+  multi-leaf Indicators associate all canonical Entities in deterministic
+  order with first-seen deduplication of duplicate leaves; no Indicator
+  pattern reparsing; no `RelationshipAssertion` from CTI facts; no
+  reference/alias/marking-derived entities or edges; durable message
+  reconstruction derives the STIX invocation from the `cti_entity` fact
+  or the first `iocs` entry (source-fact-derived, never fabricated);
+- `tests/unit/app/test_investigation_submission.py` and
+  `tests/unit/domain/test_investigation.py`: `INVESTIGATION_SEED_TYPES`
+  is an explicit allowlist of the nine established seed types; the five
+  CTI types are rejected at the application boundary as seeds (never
+  provider/orchestration work) while established seed types keep their
+  behavior; `pivot_class` coverage pins the established nine (unlisted
+  types deterministically produce no provider/research work).
+
+The PostgreSQL vertical slices (`tests/integration/test_stix_evidence_pipeline.py`, M33C-V01..V07) run every layer through its production
+implementation over real PostgreSQL and the real durable-log seam
+(`parse_stix21_object` -> real converter -> real PR 28C message codec ->
+real message reconstruction -> real STIX extraction -> real
+`EvidencePersistenceConsumer`/`EvidenceBatchPersistenceService`):
+
+- M33C-V01: one `threat-actor` object closes the full pipeline — one
+  Evidence, one EvidenceObservation, one THREAT_ACTOR Entity with the
+  exact STIX ID canonical value and exact `name` display name, one
+  `EvidenceObservationEntity` association, zero Relationships and zero
+  RelationshipObservations;
+- M33C-V02: one object of each of the five types persists five distinct
+  typed Entities with exact values/names and zero graph edges;
+- M33C-V03: same-name threat actors with different STIX IDs persist two
+  Entities (mandatory anti-false-merge acceptance);
+- M33C-V04: two material versions (same STIX ID + source namespace,
+  changed `modified`/`name`) keep the same Evidence ID, append a second
+  EvidenceObservation, keep one canonical Entity whose display metadata
+  follows existing upsert semantics, associate both observations, and
+  create zero relationships;
+- M33C-V05: the same STIX ID under two ATI source namespaces produces two
+  Evidence identities but one canonical (type, machine value) Entity,
+  each observation associates to it, and no inferred equivalence
+  Relationship is created;
+- M33C-V06: a supported multi-leaf Indicator persists one Evidence, one
+  observation, and all represented DOMAIN/IP Entities, with zero
+  relationships;
+- M33C-V07: generic graph/API projection — test-only relationship
+  observations created through the authoritative persistence APIs let
+  two new Entity types appear as graph nodes and pass through the
+  generic `entity_type` filter with exact value/display name retention;
+  STIX extraction itself never produces edges.
+
+The API/frontend matrix (M33C-U01..U15) is covered by the regenerated
+OpenAPI snapshot (`tests/unit/api/test_openapi.py`), the generated
+`frontend/src/api/schema.generated.ts` (regenerated via `npm run
+api:generate`; `api:check` verifies currency), the exhaustive
+`ENTITY_TYPE_LABEL_KEYS` registry and the English `relationshipEvolution`
+i18n labels for all five values, `GRAPH_ENTITY_TYPES` filter acceptance,
+graph/render tests, and the untouched `ENTITY_TYPE_OPTIONS` Investigation
+seed form. No CTI-specific endpoint, icon, or broad UI redesign is
+introduced; type differentiation remains textual.
+
 ### Native MISP REST acquisition (PR 32C)
 
 PR 32C adds bounded native MISP Event acquisition tests

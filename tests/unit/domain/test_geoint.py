@@ -335,6 +335,11 @@ def test_gd14_no_location_entity_type_added() -> None:
         "malware",
         "attack_technique",
         "vulnerability",
+        "threat_actor",
+        "campaign",
+        "intrusion_set",
+        "tool",
+        "infrastructure",
     }
 
 

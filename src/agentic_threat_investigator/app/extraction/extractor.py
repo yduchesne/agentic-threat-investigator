@@ -28,10 +28,11 @@ from agentic_threat_investigator.app.extraction.models import (
     ExtractionResult,
 )
 from agentic_threat_investigator.app.extraction.rdap import extract_rdap
+from agentic_threat_investigator.app.extraction.stix import extract_stix
 from agentic_threat_investigator.app.extraction.threatfox import extract_threatfox
 from agentic_threat_investigator.app.extraction.urlhaus import extract_urlhaus
 from agentic_threat_investigator.domain.evidence import EvidenceType
-from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.domain.identifiers import SemanticFormatId, SourceId
 
 Extractor = Callable[[EvidenceExtractionView], ExtractionResult]
 """A pure, synchronous per-source extraction function."""
@@ -66,10 +67,15 @@ _EVIDENCE_SOURCES = frozenset(source for source, _ in _EVIDENCE_EXTRACTORS)
 def extract(view: EvidenceExtractionView) -> ExtractionResult:
     """Extract deterministic entities and assertions from one observation.
 
-    Unknown sources return an empty result by documented policy; a known
-    source paired with an evidence type it never produces is a contract
-    failure.
+    A STIX 2.1 semantic-format view (durable collection/message evidence
+    reconstructed by the PR 33C seam) dispatches to the source-neutral STIX
+    extractor regardless of the ATI source namespace. Everything else keeps
+    the exact ``(source, evidence type)`` dispatch: unknown sources return
+    an empty result by documented policy; a known source paired with an
+    evidence type it never produces is a contract failure.
     """
+    if view.semantic_format is SemanticFormatId.STIX_21:
+        return extract_stix(view)
     extractor = _EVIDENCE_EXTRACTORS.get((view.evidence.source, view.evidence.type))
     if extractor is not None:
         return extractor(view)

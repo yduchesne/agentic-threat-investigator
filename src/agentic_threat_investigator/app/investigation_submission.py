@@ -55,6 +55,7 @@ from agentic_threat_investigator.domain.audit import (
 )
 from agentic_threat_investigator.domain.entities import Entity, EntityType, canonicalize
 from agentic_threat_investigator.domain.investigation import (
+    INVESTIGATION_SEED_TYPES,
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
@@ -178,6 +179,11 @@ def canonical_indicator_identities(
         if len(raw) > max_value_length:
             raise SubmissionBoundsError(
                 f"indicator value exceeds limit {max_value_length} characters"
+            )
+        if indicator.type not in INVESTIGATION_SEED_TYPES:
+            raise SubmissionBoundsError(
+                f"indicator type {indicator.type.value} is not a valid "
+                "Investigation seed"
             )
         try:
             identity = (indicator.type.value, canonicalize(indicator.type, raw))

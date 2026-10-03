@@ -328,13 +328,16 @@ conversion (PR 33B owns that). The four categories are:
   and does not imply Evidence production.
 - **Evidence-supported** — ATI has an explicit deterministic
   `Stix21ToEvidenceConverter` mapping. PR 33A implemented none; PR 33B
-  delivers the initial approved profile: `domain-name`, `ipv4-addr`,
-  `ipv6-addr` direct SCOs and bounded equality-only Indicator patterns
-  (see the PR 33B section below).
+  delivered the initial approved profile: `domain-name`, `ipv4-addr`,
+  `ipv6-addr` direct SCOs and bounded equality-only Indicator patterns;
+  PR 33C adds the five CTI SDO types `threat-actor`, `campaign`,
+  `intrusion-set`, `tool`, and `infrastructure` (see the PR 33B/PR 33C
+  sections below).
 - **Semantic-valid but Evidence-unsupported** — acceptable at the semantic
   boundary but no approved Evidence mapping exists yet. Examples include
-  malware, campaign, relationship, sighting, tool, and custom objects until
-  their owning PRs land. Unsupported is not malformed.
+  malware, relationship, sighting, identity, location, course-of-action,
+  and custom objects until their owning PRs land. Unsupported is not
+  malformed.
 - **Semantic-malformed** — violates the boundary ATI owns: non-Mapping,
   missing/blank/non-string type or id, invalid current-contract
   `spec_version` type, or a Bundle passed to the object parser.
@@ -574,7 +577,9 @@ sorted or deduplicated).
 The observation candidate carries `observed_at=None` (STIX timestamps are
 normalized source facts, never ATI observation time), `retrieved_at` and
 `source_reference` from the semantic context, and `raw_payload=None`.
-Normalized facts use one stable pinned shape:
+Normalized facts use one stable pinned shape (the ``cti_entity`` block is
+added by PR 33C and is always present, ``null`` for IOC/Indicator
+Evidence):
 
 ```json
 {
@@ -586,7 +591,8 @@ Normalized facts use one stable pinned shape:
     "granular_markings": [], "defanged": null
   },
   "indicator": null,
-  "iocs": [{"type": "domain", "value": "example.test"}]
+  "iocs": [{"type": "domain", "value": "example.test"}],
+  "cti_entity": null
 }
 ```
 
@@ -617,6 +623,111 @@ acquisition/runtime integration (PR 33E), URL/file/hash/email/certificate
 IOC support, exhaustive STIX SCO support, and full STIX Patterning are
 explicitly out of scope; `DATA_SOURCES.md` does not claim TAXII support
 and no all-STIX-objects-produce-Evidence claim is made.
+
+## Source-neutral CTI Entity expansion (PR 33C, delivered)
+
+PR 33C adds exactly five source-neutral (not STIX-alias) Entity types:
+`THREAT_ACTOR`, `CAMPAIGN`, `INTRUSION_SET`, `TOOL`, and
+`INFRASTRUCTURE`. `MALWARE`, `VULNERABILITY`, and `ATTACK_TECHNIQUE` were
+**not** introduced by 33C — they already exist and their identity
+contracts are unchanged. No generic `ATTACK_PATTERN`, `IDENTITY`,
+`LOCATION`, `COURSE_OF_ACTION`, or other STIX SDO mirror was added.
+
+### Identity and display contract
+
+Entity type is source-neutral; the current STIX adapter supplies a STIX
+machine identifier as the Entity value. For these five types the canonical
+value is a **strict opaque machine identifier**, initially the exact
+validated STIX 2.1 object `id`. `canonicalize_cti_object_id`/the
+registered `_CANONICALIZERS` entries validate rather than normalize: the
+exact lowercase STIX type prefix, the `--` delimiter, and a canonical
+textual UUID suffix are required, and accepted input is returned
+byte-for-byte. Wrong or mutated prefixes, non-canonical UUID spellings,
+surrounding whitespace, blank values, human `name` values, and aliases fail
+closed with `ValueError`.
+
+`name` is required (nonblank, bounded to 512 characters) but is **display
+metadata only**; the exact source spelling is preserved as
+`display_name` and never participates in canonical identity. Same-name
+STIX objects with different IDs remain distinct Entities, and no
+cross-source equivalence is inferred: a future MISP Galaxy/cluster may
+reuse the same ATI Entity type, but no MISP↔STIX identity merge occurs
+without an explicit future equivalence mechanism.
+
+### Converter extension (PR 33B converter extended, not duplicated)
+
+`stix21_evidence.py` (still the one STIX `ToEvidenceConverter`, keyed only
+by `SemanticFormatId.STIX_21`) now admits exactly five CTI SDO types:
+
+| STIX type | ATI Entity type | Required members | Evidence representation |
+|---|---|---|---|
+| `threat-actor` | `threat_actor` | exact validated `id` + nonblank bounded `name` | 1 Evidence, `iocs: []`, one `cti_entity` block |
+| `campaign` | `campaign` | exact validated `id` + nonblank bounded `name` | 1 Evidence, `iocs: []`, one `cti_entity` block |
+| `intrusion-set` | `intrusion_set` | exact validated `id` + nonblank bounded `name` | 1 Evidence, `iocs: []`, one `cti_entity` block |
+| `tool` | `tool` | exact validated `id` + nonblank bounded `name` | 1 Evidence, `iocs: []`, one `cti_entity` block |
+| `infrastructure` | `infrastructure` | exact validated `id` + nonblank bounded `name` | 1 Evidence, `iocs: []`, one `cti_entity` block |
+
+A selected CTI type with a malformed required identity/name raises a
+bounded `ConversionError` (zero converted output for the batch call); a
+valid unsupported object still yields zero Evidence. The normalized facts
+now use one stable four-block shape shared by every supported object:
+
+```json
+{
+  "stix": { "...": "common facts unchanged" },
+  "indicator": null,
+  "iocs": [],
+  "cti_entity": {
+    "type": "threat_actor",
+    "value": "threat-actor--11111111-1111-1111-1111-111111111111",
+    "display_name": "Example Group"
+  }
+}
+```
+
+IOC/Indicator Evidence keeps `cti_entity: null`; CTI SDO Evidence keeps
+`iocs: []` and `indicator: null`. `type` is the ATI Entity wire value,
+`value` the exact validated machine ID, and `display_name` the exact source
+name. `relationship`/`sighting` objects, `created_by_ref`, `object_refs`,
+`aliases`, `labels`, `external_references`, and `object_marking_refs` stay
+unconsumed source facts — never Entity or edge state. Generic STIX
+`attack-pattern`/`malware`/`vulnerability` remain unsupported because ATI's
+`ATTACK_TECHNIQUE`/`MALWARE`/`VULNERABILITY` contracts are narrower
+canonical identity contracts and name-based mapping would be unsafe.
+
+### Durable extraction and persistence
+
+The PR 28E durable seam (`app/extraction/message_context.py`) reconstructs
+the STIX invocation target from normalized facts — never a fabricated
+semantic owner: the single `cti_entity` block is the represented subject of
+a CTI SDO, otherwise the first ordered `iocs` entry exactly as the MISP
+collection solution does. The source-neutral STIX extractor
+(`app/extraction/stix.py`) is dispatched by semantic format (STIX 2.1 has
+deliberately no fixed `SourceId` guard) and consumes only durable facts. It
+produces exactly one canonical CTI Entity per `cti_entity` block (or every
+represented IOC identity for PR 33B Evidence, first-seen deduplicated) and
+**zero relationships**. Malformed durable facts fail closed with
+`EvidenceExtractionError(MALFORMED_FACTS)` without echoing source values.
+
+Persistence reuses the global Evidence batch path unchanged
+(`ati.persist_evidence_batch`, Entity type/value stored as generic text
+with no DB enum/CHECK, so **no migration** is required): Evidence +
+EvidenceObservation + `EvidenceObservationEntity` association per the
+existing version/upsert semantics. CTI SDO Evidence creates zero
+`Relationship` and zero `RelationshipObservation` rows. The source
+namespace participates in Evidence identity (one STIX ID under two ATI
+sources yields two Evidence identities) while Entity identity is
+`(EntityType, canonical value)` (the same Entity is associated once).
+
+Graph/query/API projection is entirely generic: `GraphNodeResponse`,
+entity-type filters, paths, and the frontend presentation registry accept
+the new wire values without CTI-specific endpoints or DTOs. Investigation
+seeding is **not** implied by graphability: `INVESTIGATION_SEED_TYPES`
+(authoritative in `domain/investigation.py`) explicitly excludes the five
+CTI types, so no provider or orchestration capability is invented.
+
+PR 33D owns source-asserted Relationship/Sighting semantics; PR 33E owns
+TAXII acquisition. No relationship/sighting/TAXII work happened in 33C.
 
 ## Native MISP REST acquisition (PR 32C, delivered)
 

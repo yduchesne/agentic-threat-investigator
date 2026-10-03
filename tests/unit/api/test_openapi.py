@@ -216,3 +216,25 @@ def test_openapi_graph_is_investigation_scoped_with_no_cursor() -> None:
     response_dto = schema["components"]["schemas"]["GraphNeighborhoodResponse"]
     assert "next_cursor" not in response_dto["properties"]
     assert set(response_dto["properties"]) == {"nodes", "edges", "truncated"}
+
+
+def test_m33c_u01_entity_type_enum_exposes_exactly_five_new_values() -> None:
+    """M33C-U01: OpenAPI EntityType includes existing + five PR 33C values."""
+    schema = create_app(Settings()).openapi()
+    entity_type = schema["components"]["schemas"]["EntityType"]["enum"]
+    assert sorted(entity_type) == [
+        "asn",
+        "attack_technique",
+        "campaign",
+        "domain",
+        "infrastructure",
+        "intrusion_set",
+        "ip_address",
+        "malware",
+        "network_prefix",
+        "organization",
+        "threat_actor",
+        "tool",
+        "url",
+        "vulnerability",
+    ]
