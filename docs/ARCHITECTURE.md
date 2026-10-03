@@ -12,6 +12,7 @@
   - [API](#api)
   - [Frontend](#frontend)
 - [Core architectural rule](#core-architectural-rule)
+- [Bounded asynchronous I/O concurrency](#bounded-asynchronous-io-concurrency)
 - [Asynchronous investigation execution](#asynchronous-investigation-execution)
 - [LangGraph topology](#langgraph-topology)
   - [Current LangGraph implementation status (PR 19A–19C)](#current-langgraph-implementation-status-pr-19a19c)
@@ -536,6 +537,37 @@ to PR 24C/24D).
 > Providers retrieve. Collectors coordinate retrieval. Repositories persist. Application workflows decide persistence. Agents decide investigative actions within policy.
 
 > Orchestration selects and authorizes work. Dispatchers route already-selected work. Executors perform it. Dispatchers do not make investigative decisions.
+
+## Bounded asynchronous I/O concurrency
+
+ATI uses asynchronous I/O throughout application and infrastructure code. When multiple I/O operations are independent, concurrency can reduce end-to-end latency and increase throughput; new and modified I/O-bound workflows must therefore explicitly evaluate whether bounded concurrent execution is appropriate rather than defaulting to sequential awaits.
+
+The governing rule is:
+
+> **Independent I/O should execute concurrently when doing so preserves the workflow's semantics, and that concurrency must always be explicitly bounded.**
+
+This is a design principle, not a mandate to parallelize every asynchronous loop. Concurrency is appropriate only when the operations do not depend on one another's result or ordering and when their simultaneous execution does not violate a transaction, lease, checkpoint, rate-limit, budget, orchestration, or persistence invariant.
+
+Typical candidates include independent HTTP requests, independent database-backed item pipelines that already have isolated UnitOfWork/session ownership, and independent storage or retrieval operations. Prefer structured concurrency (for example, `asyncio.TaskGroup`) with an explicit admission bound such as a semaphore or an existing subsystem-owned limiter. Reuse the authoritative limiter when one already owns admission or rate policy; do not stack unrelated semaphores or create generic concurrency frameworks merely to parallelize one workflow.
+
+Concurrency bounds are part of the owning subsystem's policy. A batch size, page size, database-pool size, provider rate limit, and active-work concurrency limit are different concepts and must not be conflated unless the architecture explicitly defines them as the same policy. Tasks waiting for an application-level concurrency permit should not hold scarce resources such as UnitOfWork instances, database sessions/connections, transactions, or leases acquired solely for execution when those resources can be acquired after admission.
+
+Do **not** introduce concurrency across boundaries whose sequencing is semantically significant. Examples include ordered persistence where earlier commits affect later work, Coordinator selection/replanning and investigation budget decisions, broker poll/commit ordering, atomic batch-plus-checkpoint transactions, and any workflow in which one operation determines whether another is authorized or necessary. Parallelizing such work is an architecture change, not an I/O optimization.
+
+Concurrent implementations must preserve deterministic externally observable behavior where the contract requires it. Completion order must not silently become result order; aggregate results in canonical/source order when ordering is part of the contract. One task's ordinary bounded failure should not cancel independent sibling work unless fail-fast behavior is the explicit contract. Parent cancellation must propagate and settle child tasks without orphan work. Never swallow `asyncio.CancelledError` or convert cancellation into an ordinary failure.
+
+Testing must prove concurrency deterministically with synchronization primitives, admission counters, or controlled fakes rather than elapsed-time assertions or arbitrary sleeps. Tests should cover the configured bound, resource ownership while waiting, sibling failure behavior, cancellation, deterministic aggregation/order where applicable, and the production limiter/session/UnitOfWork boundary relevant to the workflow.
+
+When designing or reviewing an I/O-bound workflow, explicitly answer:
+
+1. Which operations are independent?
+2. What component owns the concurrency bound and, if applicable, rate limiting?
+3. Which resources may be held while waiting for admission?
+4. Which ordering, transaction, lease, checkpoint, budget, and orchestration invariants must remain sequential?
+5. How do sibling failure and parent cancellation behave?
+6. How is deterministic behavior proven without wall-clock timing?
+
+If these questions cannot be answered without changing established semantics, keep the workflow sequential until the architecture change is explicitly designed and approved.
 
 ## Asynchronous investigation execution
 
