@@ -260,15 +260,24 @@ Format-specific parsers (`src/agentic_threat_investigator/infrastructure/datasou
   decoded values. The legacy `ThreatFoxProvider` reuses this parser and
   keeps only Evidence-specific construction (`_build_match_facts`) locally;
   its public behavior is unchanged.
-- `stix21_semantics.py` owns a narrow STIX 2.1 decoded-value parser
-  (`parse_stix21_bundle` -> `Stix21Object`): mapping bundle, nonblank
-  `type`/`id`, optional string `spec_version`, and deeply immutable
-  snapshots that preserve every extension field (`x_mitre_*`, unknown valid
-  types) as data. It is independent of MITRE ATT&CK `SourceRecord`
-  normalization and deliberately does not reimplement the full STIX 2.1
-  standard. `MitreAttackBatchSource` consumes it as its decoded-value
-  boundary with `SourceRecord` identity, content-hash, checkpoint, batch,
-  and ingestion behavior unchanged.
+- `stix21_semantics.py` owns a narrow STIX 2.1 decoded-value parser with
+  one reusable object boundary and one envelope adapter (PR 27C + PR 33A):
+  `parse_stix21_object` validates exactly one decoded non-Bundle STIX
+  object (`Stix21Object`): mapping, nonblank `type`/`id`, optional string
+  `spec_version`, and deeply immutable snapshots that preserve every
+  extension field (`x_mitre_*`, unknown valid types, nested
+  extensions/custom members) as data. `parse_stix21_bundle` is an envelope
+  adapter only: it validates the Bundle container (mapping, `type ==
+  "bundle"`, list `objects`, member source order, member-index error
+  context) and delegates every member to `parse_stix21_object`. Future
+  TAXII 2.1 acquisition reuses the same object seam without manufacturing a
+  Bundle envelope. A Bundle passed to the object parser is rejected: a
+  Bundle is not a STIX object, and Bundle membership never implies
+  relationship/graph semantics. The parser is independent of MITRE ATT&CK
+  `SourceRecord` normalization, ATI Evidence, and TAXII; it deliberately
+  does not reimplement the full STIX 2.1 standard. `MitreAttackBatchSource`
+  consumes it as its decoded-value boundary with `SourceRecord` identity,
+  content-hash, checkpoint, batch, and ingestion behavior unchanged.
 - `misp_semantics.py` owns the PR 32A native MISP semantic boundary
   (`parse_misp_event` -> `MispAttributeRecord` / `MispObjectRecord`): one
   decoded `{"Event": {...}}` envelope validates to immutable source records
@@ -306,6 +315,28 @@ Semantic modules construct no ATI Evidence/`SourceRecord`, perform no
 network/DB/persistence I/O, and never log full source objects. There is no
 universal mega-schema (ThreatFox and STIX objects remain source-native),
 no semantic-object persistence table, and no migration in this slice.
+
+### ATI STIX 2.1 Evidence Profile vocabulary (PR 33A)
+
+PR 33A documents the vocabulary that separates semantic validity from
+Evidence production and from malformed input. It implements no Evidence
+conversion (PR 33B owns that). The four categories are:
+
+- **Semantic-valid** — the object satisfies ATI's reusable `Stix21Object`
+  boundary (mapping, nonblank `type`/`id`, optional string
+  `spec_version`). This does not claim complete normative STIX validation
+  and does not imply Evidence production.
+- **Evidence-supported** — ATI has an explicit deterministic
+  `Stix21ToEvidenceConverter` mapping. PR 33A implements none; the planned
+  PR 33B starting scope (domain-name, ipv4-addr, ipv6-addr, and bounded
+  approved Indicator patterns) is future work only.
+- **Semantic-valid but Evidence-unsupported** — acceptable at the semantic
+  boundary but no approved Evidence mapping exists yet. Examples include
+  malware, campaign, relationship, sighting, tool, and custom objects until
+  their owning PRs land. Unsupported is not malformed.
+- **Semantic-malformed** — violates the boundary ATI owns: non-Mapping,
+  missing/blank/non-string type or id, invalid current-contract
+  `spec_version` type, or a Bundle passed to the object parser.
 
 ## Semantic-format Evidence conversion (PR 27D + PR 28A, delivered)
 

@@ -232,7 +232,7 @@ and unsupported.
 
 # PR 33 series — STIX 2.1 and TAXII 2.1
 
-## PR 33A — Reusable STIX 2.1 semantic refactoring
+## PR 33A — Reusable STIX 2.1 semantic refactoring `[DONE]`
 
 Refactor the existing STIX 2.1 semantic parser so individual STIX objects can
 be validated independently of a STIX Bundle envelope. Introduce a reusable
@@ -254,6 +254,35 @@ Define and document an explicit ATI STIX 2.1 Evidence Profile distinguishing:
 
 This PR is semantic refactoring only and must preserve existing MITRE ATT&CK
 corpus behavior.
+
+Delivered by this PR:
+
+- `parse_stix21_object()` in
+  `infrastructure/datasources/stix21_semantics.py`: ATI's one reusable STIX
+  2.1 object semantic boundary — decoded Mapping only, nonblank `type`/`id`,
+  optional string `spec_version`, Bundle rejected as "not a STIX object",
+  bounded `Stix21SemanticError` (never echoing source values), deep immutable
+  lossless snapshots via the existing frozen `Stix21Object` reuse;
+- `parse_stix21_bundle()` refactored as an envelope adapter that owns only
+  the Bundle container (mapping, `type == "bundle"`, list `objects`, member
+  source order, member-index error context) and delegates every member to
+  `parse_stix21_object()`; no fake Bundle adaptation and no
+  relationship/graph semantics from co-membership;
+- the documented ATI STIX 2.1 Evidence Profile vocabulary
+  (semantic-valid / Evidence-supported / semantic-valid-but-
+  Evidence-unsupported / semantic-malformed) in
+  `docs/DATASOURCE_ARCHITECTURE.md`; no Evidence conversion or converter
+  registration (PR 33B owns that);
+- deterministic matrix M33A-01..30 extending
+  `tests/unit/infrastructure/datasources/test_stix21_semantics.py` (direct
+  seam, Bundle rejection, lossless nested preservation, bounded
+  non-echoing errors, re-parse equality, Bundle delegation proven by
+  parity and source inspection, member-index context, module isolation
+  from Evidence/provider/HTTP/persistence/TAXII imports), with D27C-S01..12
+  and ATT&CK compatibility (`tests/unit/infrastructure/
+  test_mitre_attack_source.py` and repository integration suites) kept
+  green; no `pyproject.toml`/`uv.lock` change;
+- `docs/TESTING.md` and `docs/ROADMAP_V06.md` status documentation.
 
 ## PR 33B — STIX IOC Evidence conversion
 

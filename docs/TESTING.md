@@ -1132,11 +1132,21 @@ HTTP paths; only the external Internet endpoint is faked via in-process
   CONVERTED event, fail-closed dimension validation before I/O, and
   header-only Auth-Key with zero context/log leakage;
 - STIX semantics (`tests/unit/infrastructure/datasources/test_stix21_semantics.py`,
-  D27C-S01..S12): typed bundle/object parsing in source order, fail-closed
-  envelope and object-identity validation, preserved `x_mitre_*` extension
-  fields and unknown valid types, deep snapshot isolation from caller
-  mutation, and the serialization boundary (raw bytes must be decoded
-  before the semantic parser);
+  D27C-S01..S12 + M33A-01..30): typed bundle/object parsing in source
+  order, fail-closed envelope and object-identity validation, preserved
+  `x_mitre_*` extension fields and unknown valid types, deep snapshot
+  isolation from caller mutation, the serialization boundary (raw bytes
+  must be decoded before the semantic parser), direct single-object
+  validation through the reusable `parse_stix21_object()` seam
+  (Bundle-rejected, bounded errors that never echo source values,
+  deterministic re-parse equality), Bundle-adapter delegation with
+  member-index error context (proved both by parity against the direct
+  seam and by source inspection), and module isolation from Evidence/
+  provider/HTTP/persistence/TAXII imports. MITRE ATT&CK compatibility is
+  pinned at the existing boundary by
+  `tests/unit/infrastructure/test_mitre_attack_source.py` and the
+  repository integration suites, all with ATI-authored synthetic STIX and
+  no live external source;
 - the canonical real-stack vertical slice
   (`tests/integration/test_datasource_semantic_acquisition.py`): a
   deterministic local HTTP fixture -> real `ProviderHttpClient` -> real
