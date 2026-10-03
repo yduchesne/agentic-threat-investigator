@@ -373,6 +373,78 @@ adapters; PR 28H delivered the real-stack producer -> log -> consumer ->
 PostgreSQL closure as integration coverage, without wiring a production
 runner that would require Investigation orchestration redesign).
 
+## Native MISP Evidence conversion (PR 32B, delivered)
+
+PR 32B lands the MISP IOC Evidence profile as the second native
+semantic-format converter: `infrastructure/datasources/misp_evidence.py`
+owns `MispToEvidenceConverter` (selected exclusively by
+`SemanticFormatId.MISP`), the MISP fact builders, and the explicit
+side-effect-free `build_misp_conversion_registry()`. It consumes only
+already-validated PR 32A records and constructs no Evidence inside
+`misp_semantics.py` (which remains source validation only). Conversion is
+synchronous, pure, and performs no acquisition, I/O, persistence, clock/
+random reads, or secret lookup.
+
+The explicitly supported IOC profile is exactly five MISP Attribute types
+(no substring/similarity/fallback inference):
+
+| MISP Attribute type | Normalized IOC(s) | Output |
+|---|---|---|
+| `domain` / `hostname` | DOMAIN | 1 Evidence |
+| `ip-src` / `ip-dst` | IP_ADDRESS (IPv4 + IPv6) | 1 Evidence |
+| `domain\|ip` | DOMAIN then IP_ADDRESS | 1 Evidence |
+| anything else | unsupported | 0 Evidence |
+
+DOMAIN uses the existing `validate_dns_name(value)` and IP uses the
+existing `canonicalize_ip_address(value)`; canonicalization failure for an
+already supported type is a bounded `ConversionError`. `domain|ip` requires
+exactly two nonempty components separated by one literal `|` and is **one
+Evidence with two ordered IOC facts** — no `<uuid>#domain`/`<uuid>#ip`
+component identities are ever fabricated (invariant 8).
+
+Evidence identity/provenance:
+
+- `Evidence.type = THREAT_INTELLIGENCE`;
+- `Evidence.source = context.semantic_source.source_id.value`;
+- `Evidence.source_record_id = str(attribute.uuid)` (exact upstream
+  Attribute UUID — value/Event UUID/retrieval time/datasource ID never
+  participate);
+- `Evidence.id = evidence_id_for_source_record(SemanticFormatId.MISP,
+  context.semantic_source.source_id, str(attribute.uuid))`;
+- candidate `observed_at` is the exact Attribute source timestamp (never
+  Event/publish/retrieval time), `retrieved_at` and `source_reference` come
+  from the semantic context, and `raw_payload = None`.
+
+Normalized facts use one stable pinned shape per supported Attribute:
+`event` (UUID, info, UTC `Z` timestamp, published, publish_timestamp,
+extends_uuid, distribution, sharing_group_id, ordered tags), `attribute`
+(UUID, type, category, **original source value**, timestamp, to_ids,
+deleted, distribution, sharing_group_id, comment, object_relation,
+ordered tags), and `iocs` (only canonical entity-eligible values as
+ordered `{"type", "value"}` objects). Optional modeled fields use stable
+explicit `None`; local MISP numeric IDs and binary `data` never appear.
+
+Source facts are preserved, never interpreted: `to_ids`, tags, category,
+comment, distribution (including Attribute `5` = inherit Event), sharing
+group, and `deleted` are material facts — a supported `deleted=True`
+Attribute still converts so the same Evidence identity can later reflect
+`false -> true`. No verdict, ATI confidence, risk, attribution,
+relationship, pivot, campaign, or analyst disposition is synthesized.
+Distribution/sharing is never resolved to an effective value and never
+treated as ATI authorization. MISP Objects and ObjectReferences remain
+unsupported for Evidence production: a valid `MispObjectRecord` returns
+zero Evidence even when it nests supported domain/IP Attributes, and no
+ObjectReference relationship is created.
+
+Defense-in-depth provenance guards fail closed: a non-MISP source object,
+a context whose semantic format is not MISP, and a context whose source
+identity is not `SourceId.MISP` each raise a bounded `ConversionError`
+with no IOC value/Event info/comment/URL interpolation. A valid
+unsupported Attribute type returns zero Evidence deterministically.
+Acquisition (REST/auth/pagination) is PR 32C; production runtime
+composition and real-stack closure are PR 32D — nothing in PR 32B claims
+live MISP integration.
+
 ## Evidence wire boundary (PR 28C, delivered)
 
 PR 28C defines the versioned, broker-independent `EvidenceMessage`

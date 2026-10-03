@@ -63,12 +63,22 @@ run_security_checks() {
   # p/ci rules are fetched from the Semgrep registry (network required).
   uv run semgrep scan --config p/ci --metrics=off --error src
   echo '== Security: dependency vulnerabilities (Safety) =='
-  uv run safety check
+  # SFTY-20260902-58666 / CVE-2026-81726 (nltk <= 3.10.3, path traversal via
+  # built-in open() on caller-controlled paths) is ignored for the same
+  # reason as pip-audit's PYSEC-2026-3740 below: nltk is a transitive,
+  # test-only dependency of the Safety scanner itself, ATI production code
+  # never imports nltk, and both Safety 3.8.1 and nltk 3.10.3 are the newest
+  # releases — there is no fixed upstream release to upgrade to. The ignore
+  # uses the exact Safety vulnerability ID the advisory instructs; the CVE
+  # is re-audited when Safety ships a fixed nltk bound.
+  uv run safety check --ignore SFTY-20260902-58666
   echo '== Security: dependency vulnerabilities (pip-audit) =='
-  # PYSEC-2026-3740 (nltk, no fixed release on PyPI) is a transitive,
-  # test-only dependency of the Safety scanner itself; ATI production code
-  # never imports nltk. Re-evaluate when Safety ships a fixed nltk bound.
-  uv run pip-audit --ignore-vuln PYSEC-2026-3740
+  # PYSEC-2026-3740 and CVE-2026-81726 (nltk, no fixed release on PyPI) are
+  # transitive, test-only dependencies of the Safety scanner itself; ATI
+  # production code never imports nltk. Re-evaluate when Safety ships a
+  # fixed nltk bound. CVE-2026-81726 is listed here defensively so any
+  # future OSV entry for the same advisory also stays scoped to the scanner.
+  uv run pip-audit --ignore-vuln PYSEC-2026-3740 --ignore-vuln CVE-2026-81726
 }
 
 run_quality_checks() {
