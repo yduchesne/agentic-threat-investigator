@@ -7,6 +7,7 @@ Uses the JSON API at ``https://dns.google/resolve``.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -574,10 +575,14 @@ class GooglePublicDnsProvider(EvidenceProvider):
     ) -> ProviderResult:
         """Resolve DNS records for a supported entity via the Google JSON API.
 
-        Domains are queried once per RR type in the fixed A, AAAA, CNAME,
-        MX, NS, TXT, SOA order; IP addresses yield a single reverse PTR
-        query. Answers are strictly validated and normalized into immutable
-        DNS LegacyEvidence; NXDOMAIN is a valid miss and no persistence occurs.
+        Domains are queried in the fixed A, AAAA, CNAME, MX, NS, TXT, SOA
+        order: the A query runs first and alone as the authoritative
+        clean-NXDOMAIN gate, after which the remaining independent RR queries
+        execute concurrently through the provider's shared HTTP client and
+        its BoundedLimiter admission. IP addresses yield a single reverse
+        PTR query. Answers are strictly validated and normalized into
+        immutable DNS LegacyEvidence; NXDOMAIN is a valid miss and no
+        persistence occurs.
         """
         canonical_value, error_result = validate_investigation_entity(self, entity)
         if error_result is not None:
@@ -626,8 +631,43 @@ class GooglePublicDnsProvider(EvidenceProvider):
             evidence_list.append(first_outcome.evidence)
         errors_list.extend(first_outcome.errors)
 
+        # After a continuing A outcome the remaining independent RR queries
+        # run concurrently through the shared ProviderHttpClient; its
+        # BoundedLimiter stays the sole authority for admitted HTTP
+        # concurrency and request rate (no additional semaphore or setting).
+        # Each child task only retrieves and normalizes its own RR type, so
+        # no shared evidence/error list is mutated by children. asyncio
+        # TaskGroup provides structured cancellation: parent cancellation
+        # settles/cancels every outstanding child before propagating, so no
+        # orphan DNS request survives.
+        try:
+            async with asyncio.TaskGroup() as task_group:
+                tasks: dict[str, asyncio.Task[DnsQueryOutcome]] = {
+                    rr_type: task_group.create_task(
+                        self._query_rr_type(context, canonical_domain, rr_type)
+                    )
+                    for rr_type in _DOMAIN_RR_TYPES[1:]
+                }
+        except BaseExceptionGroup as group:
+            # asyncio TaskGroup reports unexpected child failures as an
+            # exception group. A group with a lone member is re-raised as
+            # that original exception so the single-query contract holds:
+            # typed provider failures are outcomes, and only genuinely
+            # unexpected exceptions propagate unchanged (the orchestration
+            # boundary catches ``Exception``, which a group wrapper would
+            # otherwise bypass). CancelledError is never wrapped by
+            # TaskGroup and therefore never reaches this handler. A group
+            # with several members is propagated intact so no failure is
+            # hidden or flattened.
+            if len(group.exceptions) == 1:
+                raise group.exceptions[0] from None
+            raise
+
+        # Aggregate deterministically in canonical _DOMAIN_RR_TYPES order
+        # regardless of task completion order: a later query finishing first
+        # never moves its evidence/errors ahead of an earlier RR type.
         for rr_type in _DOMAIN_RR_TYPES[1:]:
-            outcome = await self._query_rr_type(context, canonical_domain, rr_type)
+            outcome = tasks[rr_type].result()
             if outcome.evidence is not None:
                 evidence_list.append(outcome.evidence)
             errors_list.extend(outcome.errors)

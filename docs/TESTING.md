@@ -1571,6 +1571,33 @@ Live provider integration tests (`tests/integration/test_live_provider_http_inte
 - Multi-host discovery flows (IANA bootstrap to authoritative RDAP services) are tested with distinct virtual upstream hosts, including longest-prefix and narrowest-range authority selection and proof that wrong-authority hosts are never contacted.
 - Non-persistence isolation guarantees are verified directly against PostgreSQL: provider invocation alone must leave `ati.evidence` row counts unchanged.
 
+### Bounded concurrent Google Public DNS RR lookups (PR L-1)
+
+`GooglePublicDnsProvider` domain investigations schedule the post-A RR
+queries concurrently (`tests/unit/infrastructure/providers/test_google_dns_concurrency.py`):
+
+- the initial A query remains sequential and is the authoritative
+  clean-NXDOMAIN gate — a clean first-A NXDOMAIN still performs exactly one
+  request before any other RR query is scheduled;
+- after a continuing A outcome, AAAA/CNAME/MX/NS/TXT/SOA run concurrently
+  through the provider's real `ProviderHttpClient`, whose configured
+  `BoundedLimiter` stays the **sole** admission authority for HTTP
+  concurrency and request rate (no additional semaphore, limiter, or
+  concurrency setting);
+- evidence and typed-error aggregation remains deterministic in canonical
+  `_DOMAIN_RR_TYPES` order regardless of task completion order;
+- `asyncio.TaskGroup` provides structured cancellation: parent cancellation
+  settles/cancels every outstanding child and propagates `CancelledError`
+  without orphan DNS requests, and an unexpected child exception fails the
+  whole operation (a lone child failure is re-raised as its original
+  exception, never converted to a `ProviderError`/partial success);
+- PTR/IP investigations and retry/429/timeout semantics are unchanged.
+
+These scheduling tests prove overlap, limiter bounding, completion ordering,
+and cancellation with `asyncio.Event` barriers and counters at the synthetic
+in-process HTTP transport boundary — never with wall-clock timing or live
+Google DNS.
+
 ## Typical provider issues to watch for
 
 The following checklist captures recurring failure modes in live-provider implementations and tests. It is intentionally non-exhaustive: implementers and reviewers must still apply provider specifications, ATI contracts, security requirements, and change-specific reasoning. Relevant items should be considered while designing and implementing code changes, the implementation should account for them, and corresponding tests should exercise them. Apply an item only when supported by the change's actual behavior, contract, or risk; do not invent speculative requirements or imaginative edge cases without a concrete basis.
