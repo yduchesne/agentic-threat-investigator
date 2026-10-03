@@ -1248,6 +1248,99 @@ PR 32A MISP semantic suites (including Object distribution `5`), the
 ThreatFox and generic converter/registry suites, and Evidence identity
 tests remain green; no generic conversion contract is weakened for MISP.
 
+### STIX 2.1 IOC Evidence conversion and pattern whitelist (PR 33B)
+
+PR 33B adds the pure STIX 2.1 semantic-object -> `ConvertedEvidence` layer
+over the reusable PR 33A seam. Two new offline suites:
+
+- `tests/unit/infrastructure/datasources/test_stix21_pattern.py`
+  (adapter matrix, 53 cases): the three-way whitelist-adapter verdict
+  (SUPPORTED with ordered left-to-right decoded leaves /
+  VALID_BUT_UNSUPPORTED with zero leaves / MALFORMED with the fixed safe
+  `indicator_pattern_syntax` error kind), the exact approved
+  equality-only leaf set, string-literal escape decoding, approved
+  `AND`/`OR`/parenthesis composition order, duplicate-leaf preservation,
+  whole-tree whitelisting (MATCHES/LIKE/ISSUBSET/ISSUPERSET/
+  inequalities/sets/`!=`/`NOT`-prefixed operators, file/URL paths,
+  indexes/wildcards/extension paths, non-string literals, `FOLLOWEDBY`,
+  `WITHIN`, `REPEATS`), malformed syntax, and module isolation (no
+  regex/string-splitting grammar, no network/clock/random imports, and
+  the maintained `stix2patterns` parser is the only grammar boundary);
+- `tests/unit/infrastructure/datasources/test_stix21_evidence.py`
+  (M33B-01..78 + M33B-V01..V06, with ATI-authored synthetic fixtures in
+  `tests/support/stix21_fixtures.py`):
+  - registration/contract (M33B-01..04): the converter owns exactly
+    `SemanticFormatId.STIX_21`; wrong Python source type and wrong
+    semantic-format context raise bounded `ConversionError`; **no** fixed
+    `SourceId` guard — a non-MITRE source identity with STIX format is
+    accepted;
+  - identity/provenance (M33B-05..10): repeated conversion yields the
+    same UUID; a later `modified` never changes identity; the same STIX
+    `id` under a different ATI source namespace yields a different UUID;
+    `source_record_id` is the exact STIX `id`; retrieval-time-only
+    changes never move the identity; no Investigation/subject identity
+    in output;
+  - direct SCOs (M33B-11..20): `domain-name` -> one canonical DOMAIN
+    IOC; mixed-case/root-dot and IDNA domains canonicalize through
+    `validate_dns_name`; malformed domains are `ConversionError`; IPv4
+    canonicalizes, malformed IPv4 fails, an `ipv4-addr` carrying IPv6
+    fails closed, IPv6 canonicalizes to its compressed form, and an
+    `ipv6-addr` carrying IPv4 fails closed (IP family enforced);
+  - unsupported objects (M33B-21..25): malware/relationship/sighting/
+    attack-pattern/custom types each return zero Evidence;
+  - indicator profile (M33B-26..48 + 72): single domain/IPv4/IPv6
+    equality, approved OR/AND and nested parentheses preserve
+    deterministic left-to-right order, duplicate leaves preserved, a
+    malformed pattern raises `ConversionError`, MATCHES/LIKE/subset/
+    superset/inequality/file/URL/mixed/FOLLOWEDBY/qualifiers/indexed/
+    wildcard/extension/non-string-literal patterns return `()`, wrong
+    `pattern_type` returns `()`, missing/non-string/blank pattern while
+    `pattern_type=stix` fails closed, an admitted path with a malformed
+    IOC value fails closed, the original pattern is preserved exactly,
+    and a multi-leaf Indicator is still exactly **one**
+    `ConvertedEvidence`;
+  - facts/provenance (M33B-49..66): exact common and Indicator fact key
+    sets, id/type/spec_version preserved, created/modified and
+    valid_from/valid_until normalized to UTC `Z`, marking refs and
+    granular markings preserved-not-dereferenced/not-enforced,
+    confidence preserved as a source fact only, label/indicator_types
+    order preserved, external references preserved, SCO `defanged`
+    pinned, `observed_at is None`, `retrieved_at`/`source_url` exact
+    context values, `raw_payload is None`, deeply immutable output, no
+    verdict/risk/relationship synthesis, and bounded errors that never
+    echo IOC/pattern/source content;
+  - registry/generic seam/isolation (M33B-67..78): registry lookup by
+    semantic format only, deterministic independent registry factories,
+    supported-object source order through the real
+    `convert_semantic_source_objects`, all-unsupported empty success,
+    malformed-after-valid aborts with no partial result, multi-leaf
+    Indicator as one Evidence, converter module isolation from HTTP/DB/
+    broker/orchestration imports, PR 33A semantic-module
+    Evidence-independence, no regex/string-splitting grammar, pattern
+    adapter with no network/clock/random behavior, the bounded
+    `stix2-patterns>=2.1.2,<3` dependency pinned in `pyproject.toml` +
+    `uv.lock`, and MITRE batch-source isolation;
+  - parser-to-converter vertical slices (M33B-V01..V06): synthetic
+    decoded STIX objects through the **real** `parse_stix21_object()`
+    (PR 33A), the **real** pattern-adapter parser, the **real**
+    registry, and the **real** `convert_semantic_source_objects` —
+    three direct SCOs in order, one supported Indicator stays one
+    Evidence with ordered IOCs, mixed objects yield exactly three
+    outputs in supported source order, a valid unsupported Indicator
+    converts to zero, a malformed Indicator raises with no partial
+    result, and version continuity keeps the same Evidence identity
+    across changed material facts.
+
+All fixtures are ATI-authored synthetic STIX (RFC 5737 / RFC 2606 / RFC
+3849 documentation-safe values and fixed synthetic IDs); the **real**
+pattern parser boundary is exercised (never faked except by the isolated
+adapter tests, and no test contacts TAXII, MITRE, OASIS, or the
+Internet). The mandatory acceptance topology runs the STIX semantic
+(M33A) and evidence (M33B) suites together with
+`tests/unit/app/test_evidence_conversion.py` (generic conversion),
+`tests/unit/infrastructure/test_mitre_attack_source.py` (MITRE
+compatibility), and the MISP Evidence (M32B) regression suite.
+
 ### Native MISP REST acquisition (PR 32C)
 
 PR 32C adds bounded native MISP Event acquisition tests

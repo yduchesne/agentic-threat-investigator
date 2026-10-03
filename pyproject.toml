@@ -71,6 +71,13 @@ dependencies = [
   # rather than relying on a transitive import; it is only ever *used* when
   # ATI_LLM_OBSERVABILITY_BACKEND=langfuse selects it.
   "langfuse>=4,<5",
+  # OASIS STIX 2.1 Patterning grammar/parser (PR 33B). The maintained
+  # stix2-patterns package is ATI's only standards-compliant structural
+  # pattern boundary: Indicator patterns are parsed into ANTLR parse trees
+  # and whitelisted structurally; ATI never regex-parses STIX Patterning.
+  # 2.1.2 is the first line with a Python 3.14 classifier; the only
+  # transitive dependency is the BSD-3-Clause antlr4-python3-runtime.
+  "stix2-patterns>=2.1.2,<3",
 ]
 
 [dependency-groups]
@@ -196,6 +203,16 @@ mypy_path = "src"
 # code, and strict checking of our own modules remains fully enabled.
 [[tool.mypy.overrides]]
 module = ["aiokafka", "aiokafka.*"]
+ignore_missing_imports = true
+
+# stix2-patterns ships no PEP 561 type stubs (verified when adding PR 33B's
+# dependency). The ATI pattern adapter treats its public parser surface
+# (Pattern, STIXPatternVisitor, ParseException) through a narrow typed
+# seam in stix21_pattern.py; this scoped override silences import-untyped
+# for the untyped third-party package only, never for ATI code, and strict
+# checking of our own modules remains fully enabled.
+[[tool.mypy.overrides]]
+module = ["stix2patterns", "stix2patterns.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

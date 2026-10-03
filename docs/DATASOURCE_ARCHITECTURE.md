@@ -327,9 +327,10 @@ conversion (PR 33B owns that). The four categories are:
   `spec_version`). This does not claim complete normative STIX validation
   and does not imply Evidence production.
 - **Evidence-supported** — ATI has an explicit deterministic
-  `Stix21ToEvidenceConverter` mapping. PR 33A implements none; the planned
-  PR 33B starting scope (domain-name, ipv4-addr, ipv6-addr, and bounded
-  approved Indicator patterns) is future work only.
+  `Stix21ToEvidenceConverter` mapping. PR 33A implemented none; PR 33B
+  delivers the initial approved profile: `domain-name`, `ipv4-addr`,
+  `ipv6-addr` direct SCOs and bounded equality-only Indicator patterns
+  (see the PR 33B section below).
 - **Semantic-valid but Evidence-unsupported** — acceptable at the semantic
   boundary but no approved Evidence mapping exists yet. Examples include
   malware, campaign, relationship, sighting, tool, and custom objects until
@@ -488,6 +489,134 @@ unsupported Attribute type returns zero Evidence deterministically.
 Acquisition (REST/auth/pagination) is PR 32C; production runtime
 composition and real-stack closure are PR 32D — nothing in PR 32B claims
 live MISP integration.
+
+## STIX 2.1 IOC Evidence conversion (PR 33B, delivered)
+
+PR 33B lands ATI's first STIX 2.1 `ToEvidenceConverter` over the reusable
+PR 33A single-object semantic seam:
+`infrastructure/datasources/stix21_evidence.py` owns
+`Stix21ToEvidenceConverter` (selected exclusively by
+`SemanticFormatId.STIX_21`), the STIX fact builders, and the explicit
+side-effect-free `build_stix21_conversion_registry()`. It consumes only
+already-validated `Stix21Object` values — never raw JSON, Bundle
+envelopes, or fabricated Bundles — and `stix21_semantics.py` remains
+Evidence-independent (PR 33A semantics unchanged). Conversion is
+synchronous, pure, and performs no acquisition, I/O, persistence,
+clock/random reads, or secret lookup.
+
+### Approved Evidence profile
+
+The exact supported profile (everything else valid is unsupported and
+yields zero Evidence):
+
+| STIX type | Required member | Normalized IOC(s) | Output |
+|---|---|---|---|
+| `domain-name` | string `value` | DOMAIN | 1 Evidence |
+| `ipv4-addr` | string `value`, actually IPv4 | IP_ADDRESS | 1 Evidence |
+| `ipv6-addr` | string `value`, actually IPv6 | IP_ADDRESS | 1 Evidence |
+| `indicator` | approved whole-pattern (below) | ordered approved IOCs | 1 Evidence |
+| any other valid object | n/a | unsupported | 0 Evidence |
+
+IP family is enforced: an `ipv4-addr` containing IPv6 and an `ipv6-addr`
+containing IPv4 are each a bounded `ConversionError`; DOMAIN reuses
+`validate_dns_name(value)` and IP reuses `canonicalize_ip_address(value)`
+(no STIX-specific normalization exists).
+
+An `indicator` SDO is Evidence-supported only when
+`pattern_type == "stix"`, the `pattern` member is a nonblank
+string, any present `pattern_version` is a string, the pattern is
+syntactically valid STIX Patterning, the **entire** pattern belongs to the
+approved whitelist, at least one approved leaf exists, and every approved
+leaf canonicalizes. Only three equality leaves are approved:
+`domain-name:value = '<string>'`, `ipv4-addr:value = '<string>'`,
+`ipv6-addr:value = '<string>'`; approved composition is exactly those
+leaves combined with `AND`/`OR` and parentheses (both within one bracket
+and across `[a] OR [b]` brackets). Anything else — `FOLLOWEDBY`,
+`WITHIN`/`START ... STOP`/`REPEATS`, `MATCHES`/`LIKE`/`ISSUBSET`/
+`ISSUPERSET`, inequalities/ranges, `!=`, `NOT`-prefixed operators,
+sets, `EXISTS`, extra object-path steps, indexes, wildcards, or
+non-string comparison literals — makes the whole pattern unsupported and
+produces zero Evidence. A mixed approved/unsupported pattern is **never**
+partially extracted. A syntactically valid pattern outside the whitelist
+returns `()` (valid unsupported, not a failure); a syntactically malformed
+approved-context pattern raises a bounded `ConversionError`.
+
+Indicator pattern interpretation is delegated to the ATI-owned structural
+adapter `stix21_pattern.py`, which parses through the maintained OASIS
+`stix2-patterns` dependency (bounded to `>=2.1.2,<3`, the first line with
+a Python 3.14 classifier) and whitelists the parsed tree with an
+ATI-owned walker. ATI never regex-parses or string-splits STIX
+Patterning, and the third-party parser's error text (which may echo input)
+is never propagated — malformed syntax maps to a fixed safe label.
+
+### Identity, observation, and facts
+
+For every supported object the Evidence identity is pinned to
+`evidence_id_for_source_record(SemanticFormatId.STIX_21, source, source.id)`
+where **the exact STIX `id` is `source_record_id`**:
+
+```text
+Evidence(id=evidence_id_for_source_record(STIX_21, ctx.source, stix_id),
+         type=THREAT_INTELLIGENCE,
+         source=ctx.source_id.value,
+         source_record_id=stix_id)
+```
+
+`created`, `modified`, `valid_from`, retrieval time, IOC values, pattern
+content, Bundle IDs, datasource IDs, and Investigation IDs never
+participate in Evidence identity: a later version of the same STIX object
+under the same ATI source namespace resolves to the same Evidence
+identity. Cardinality is 0..1 per STIX object: a supported indicator with
+multiple approved leaves is still exactly **one** Evidence whose `iocs`
+preserve the left-to-right pattern leaf order (duplicates included, never
+sorted or deduplicated).
+
+The observation candidate carries `observed_at=None` (STIX timestamps are
+normalized source facts, never ATI observation time), `retrieved_at` and
+`source_reference` from the semantic context, and `raw_payload=None`.
+Normalized facts use one stable pinned shape:
+
+```json
+{
+  "stix": {
+    "id": "domain-name--...", "type": "domain-name",
+    "spec_version": "2.1", "created": null, "modified": null,
+    "revoked": null, "labels": [], "confidence": null, "lang": null,
+    "external_references": [], "object_marking_refs": [],
+    "granular_markings": [], "defanged": null
+  },
+  "indicator": null,
+  "iocs": [{"type": "domain", "value": "example.test"}]
+}
+```
+
+For an `indicator` source, `indicator` carries only `pattern` (preserved
+exactly), `pattern_type`, `pattern_version`, `valid_from`/`valid_until`
+(normalized UTC `Z`), and ordered `indicator_types`. Optional scalars use
+explicit `None`; modeled list fields use `[]` when absent; list source
+order is preserved; approved STIX metadata/marking fields are preserved
+as source facts and never dereferenced, interpreted, or enforced (no TLP
+inference, no marking-policy enforcement, no confidence interpretation).
+No verdict, risk, attribution, relationship, pivot, or ATT&CK semantics
+is synthesized.
+
+### Guards and no-SourceId guard
+
+Defense-in-depth provenance guards fail closed: a non-`Stix21Object`
+source and a context whose semantic format is not STIX 2.1 each raise a
+bounded `ConversionError` with no IOC value, pattern, source URL, or
+marking content interpolation. There is deliberately **no** fixed
+`SourceId` guard (contrast with MISP): STIX is a shared open semantic
+model, and future TAXII sources may carry it under any ATI source
+namespace. A valid unsupported object and a valid-but-unsupported pattern
+each return zero Evidence deterministically.
+
+TAXII discovery/collections/pagination/authentication, CTI Entity
+expansion (PR 33C), Relationship/Sighting semantics (PR 33D), TAXII
+acquisition/runtime integration (PR 33E), URL/file/hash/email/certificate
+IOC support, exhaustive STIX SCO support, and full STIX Patterning are
+explicitly out of scope; `DATA_SOURCES.md` does not claim TAXII support
+and no all-STIX-objects-produce-Evidence claim is made.
 
 ## Native MISP REST acquisition (PR 32C, delivered)
 

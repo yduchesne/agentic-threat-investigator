@@ -284,7 +284,7 @@ Delivered by this PR:
   green; no `pyproject.toml`/`uv.lock` change;
 - `docs/TESTING.md` and `docs/ROADMAP_V06.md` status documentation.
 
-## PR 33B — STIX IOC Evidence conversion
+## PR 33B — STIX IOC Evidence conversion `[DONE]`
 
 Add `Stix21ToEvidenceConverter`, registered under the STIX 2.1 semantic
 format independently of TAXII.
@@ -303,6 +303,45 @@ never guessed.
 
 Preserve STIX object identity and version information so repeated versions of
 one logical STIX object do not lose source provenance.
+
+Delivered by this PR:
+
+- `Stix21ToEvidenceConverter` in
+  `infrastructure/datasources/stix21_evidence.py`: registered exclusively by
+  `SemanticFormatId.STIX_21`, consumes only already-validated PR 33A
+  `Stix21Object` values, maps one supported object to exactly one
+  `THREAT_INTELLIGENCE` `ConvertedEvidence` (identity =
+  `evidence_id_for_source_record(STIX_21, context source, exact STIX id)`;
+  `created`/`modified`/retrieval time never participate), with
+  `observed_at=None`, `retrieved_at`/`source_url` from the semantic
+  context, and `raw_payload=None`;
+- direct SCO profile `domain-name`/`ipv4-addr`/`ipv6-addr` reusing
+  `validate_dns_name`/`canonicalize_ip_address` with enforced IP family
+  (an `ipv4-addr` carrying IPv6 and an `ipv6-addr` carrying IPv4 each fail
+  closed), plus bounded Indicator conversion for the approved
+  equality-only whole-pattern whitelist (left-to-right ordered leaves,
+  duplicates preserved, never partially extracted);
+- `stix21_pattern.py`: the ATI-owned structural pattern adapter over the
+  maintained OASIS `stix2-patterns` dependency (` >=2.1.2,<3`, the first
+  Python-3.14-capable line; only transitive dependency is the
+  BSD-3-Clause antlr4 runtime), distinguishing SUPPORTED /
+  VALID_BUT_UNSUPPORTED / MALFORMED with bounded content-safe error
+  classification; no regex/string-splitting grammar exists;
+- deterministic M33B-01..78 matrix and M33B-V01..V06 vertical slices
+  (real PR 33A seam, real pattern parser, real registry, real generic
+  conversion) in
+  `tests/unit/infrastructure/datasources/test_stix21_evidence.py` and
+  `test_stix21_pattern.py`, with ATI-authored synthetic fixtures in
+  `tests/support/stix21_fixtures.py`;
+- `pyproject.toml` + `uv.lock` bounded dependency, `docs/` status
+  documentation (`DATASOURCE_ARCHITECTURE.md`, `DATA_SOURCES.md`,
+  `TESTING.md`, `ROADMAP_V06.md`);
+- mandatory gates green on final head: `./build.sh --qa` (5993 unit tests,
+  87.52% coverage, Ruff/Mypy/frontend), `./build.sh --intg` (1011 passed,
+  27 skipped), `./build.sh --sec` (Bandit/Semgrep/Safety/pip-audit); PR 33A
+  semantic, MITRE batch, generic conversion, and MISP conversion
+  regressions stay green; no TAXII, Entity expansion, relationship/
+  sighting persistence, or runtime acquisition change.
 
 ## PR 33C — Source-neutral CTI Entity expansion
 
