@@ -167,6 +167,28 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     expect(entityTypeLabelKey("future_type" as never)).toBe("future_type");
   });
 
+  it("M33C-U05: every PR 33C CTI EntityType has an explicit textual label", () => {
+    // The presentation registry is exhaustive over the generated union; the
+    // five source-neutral CTI types must render textual labels, never fall
+    // back to raw URNs and never rely on color alone.
+    expect(entityTypeLabelKey("threat_actor")).toBe("graph.entityTypes.threat_actor");
+    expect(entityTypeLabelKey("campaign")).toBe("graph.entityTypes.campaign");
+    expect(entityTypeLabelKey("intrusion_set")).toBe("graph.entityTypes.intrusion_set");
+    expect(entityTypeLabelKey("tool")).toBe("graph.entityTypes.tool");
+    expect(entityTypeLabelKey("infrastructure")).toBe("graph.entityTypes.infrastructure");
+  });
+
+  it("M33C-U06: the English i18n namespace labels every new CTI EntityType", () => {
+    // Type differentiation is textual: every registered label key resolves to
+    // an explicit English noun phrase in the committed locale resource.
+    const relationshipEvolution = require("../i18n/locales/en/relationshipEvolution.json");
+    expect(relationshipEvolution["graph.entityTypes.threat_actor"]).toBe("Threat actor");
+    expect(relationshipEvolution["graph.entityTypes.campaign"]).toBe("Campaign");
+    expect(relationshipEvolution["graph.entityTypes.intrusion_set"]).toBe("Intrusion set");
+    expect(relationshipEvolution["graph.entityTypes.tool"]).toBe("Tool");
+    expect(relationshipEvolution["graph.entityTypes.infrastructure"]).toBe("Infrastructure");
+  });
+
   it("G31D-U04/E-U09: the accessible edge list is always present with canonical navigation", async () => {
     renderGraph();
     const list = await screen.findByRole("table", { name: "Relationship list (this page)" });

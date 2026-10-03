@@ -328,3 +328,89 @@ async def test_replay_preserves_deterministic_fingerprint_semantics() -> None:
     assert _fingerprint(submission_a) == _fingerprint(
         _submission(value="example.com", objective="  assess the domain  ")
     )
+
+
+@pytest.mark.asyncio
+async def test_cti_entity_types_are_not_investigation_seeds() -> None:
+    """PR 33C: graphable CTI Entity types are never Investigation seeds.
+
+    Every new source-neutral CTI Entity type is accepted by the canonical
+    domain canonicalizer (so it can be persisted and displayed as a graph
+    node), but the explicit seed allowlist must reject it deterministically
+    at the application validation boundary before any orchestration work can
+    be planned. No provider or research capability is invented.
+    """
+    service = _service()
+    for entity_type, value in (
+        (EntityType.THREAT_ACTOR, "threat-actor--11111111-1111-1111-1111-111111111111"),
+        (EntityType.CAMPAIGN, "campaign--22222222-2222-2222-2222-222222222222"),
+        (
+            EntityType.INTRUSION_SET,
+            "intrusion-set--33333333-3333-3333-3333-333333333333",
+        ),
+        (EntityType.TOOL, "tool--44444444-4444-4444-4444-444444444444"),
+        (
+            EntityType.INFRASTRUCTURE,
+            "infrastructure--55555555-5555-5555-5555-555555555555",
+        ),
+    ):
+        submission = InvestigationSubmission(
+            indicators=[IndicatorInput(type=entity_type, value=value)],
+            objective="assess the CTI object",
+        )
+        with pytest.raises(SubmissionBoundsError, match="seed"):
+            await service.submit(submission, actor_id=uuid4(), idempotency_key="key-1")
+
+
+@pytest.mark.asyncio
+async def test_established_seed_types_still_accepted() -> None:
+    """Existing seed types retain their established submission behavior."""
+    uow = FakeUnitOfWork()
+    service = _service(uow)
+    for entity_type, value in (
+        (EntityType.DOMAIN, "example.com"),
+        (EntityType.IP_ADDRESS, "203.0.113.9"),
+        (EntityType.MALWARE, "win.asyncrat"),
+        (EntityType.ATTACK_TECHNIQUE, "T1059"),
+        (EntityType.VULNERABILITY, "CVE-2024-1234"),
+    ):
+        submission = InvestigationSubmission(
+            indicators=[IndicatorInput(type=entity_type, value=value)],
+            objective="assess",
+        )
+        investigation = await service.submit(
+            submission, actor_id=uuid4(), idempotency_key=f"key-{entity_type.value}"
+        )
+        assert investigation.status is InvestigationStatus.PENDING
+
+
+def test_investigation_seed_allowlist_excludes_cti_types() -> None:
+    """The domain seed allowlist exactly equals the nine established types."""
+    from agentic_threat_investigator.domain.investigation import (
+        INVESTIGATION_SEED_TYPES,
+    )
+
+    assert (
+        frozenset(
+            {
+                EntityType.DOMAIN,
+                EntityType.IP_ADDRESS,
+                EntityType.URL,
+                EntityType.NETWORK_PREFIX,
+                EntityType.ASN,
+                EntityType.ORGANIZATION,
+                EntityType.MALWARE,
+                EntityType.ATTACK_TECHNIQUE,
+                EntityType.VULNERABILITY,
+            }
+        )
+        == INVESTIGATION_SEED_TYPES
+    )
+    for entity_type in (
+        EntityType.THREAT_ACTOR,
+        EntityType.CAMPAIGN,
+        EntityType.INTRUSION_SET,
+        EntityType.TOOL,
+        EntityType.INFRASTRUCTURE,
+    ):
+        assert entity_type not in INVESTIGATION_SEED_TYPES

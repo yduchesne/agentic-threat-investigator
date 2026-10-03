@@ -27,6 +27,11 @@ class EntityType(str, Enum):
     MALWARE = "malware"
     ATTACK_TECHNIQUE = "attack_technique"
     VULNERABILITY = "vulnerability"
+    THREAT_ACTOR = "threat_actor"
+    CAMPAIGN = "campaign"
+    INTRUSION_SET = "intrusion_set"
+    TOOL = "tool"
+    INFRASTRUCTURE = "infrastructure"
 ```
 
 ```python
@@ -53,10 +58,36 @@ Canonicalization is type-specific:
   characters, only lowercase ASCII letters, digits, and ``.``, ``_``, ``-``).
   This narrow machine-identity grammar is shared by the sources that publish
   machine malware identifiers (ThreatFox). Printable names, aliases, and
-  human-readable labels never determine MALWARE identity, and no
-  ORGANIZATION canonicalization contract exists in v0.1.
+  human-readable labels never determine MALWARE identity;
+- threat actor / campaign / intrusion set / tool / infrastructure (PR 33C):
+  strict opaque CTI machine identifiers, initially the exact validated STIX
+  2.1 object ``id`` (``<type>--<uuid>``). The canonicalizer validates, never
+  normalizes: the exact lowercase type prefix, the ``--`` delimiter, and a
+  canonical textual UUID suffix are required, and accepted input is returned
+  byte-for-byte. Wrong/mutated prefixes, non-canonical UUID spellings,
+  surrounding whitespace, human names, and aliases fail closed. ``name``
+  values are display metadata only and never participate in canonical
+  identity, so same-name STIX objects with different machine IDs stay
+  distinct Entities. Cross-source equivalence is never inferred: a future
+  MISP adapter may supply a different durable machine identifier for the
+  same ATI type, and those remain separate Entities until an explicit
+  equivalence mechanism proves otherwise.
 
-### URL identity contract (v0.1)
+No ORGANIZATION canonicalization contract exists in v0.1.
+
+### Investigation seed allowlist (PR 33C)
+
+`POST /api/v1/investigations` accepts only Entity types in the explicit
+`INVESTIGATION_SEED_TYPES` allowlist (`frozenset(_PIVOT_CLASSES)`: the nine
+established provider/research seed types). Graphability never implies
+seedability: the source-neutral CTI Entity types are deliberately excluded,
+so a newly admitted enum value can never accidentally begin provider or
+orchestration work by becoming an Investigation seed. CTI Entities may be
+persisted, displayed, filtered, and pivoted to existing
+Evidence/Relationships/Research views without becoming valid provider-
+orchestration seed indicators.
+
+## URL identity contract (v0.1)
 
 ATI URL canonicalization (`canonicalize_url`) is deterministic,
 conservative, stable across Python runtimes, safe for persistence

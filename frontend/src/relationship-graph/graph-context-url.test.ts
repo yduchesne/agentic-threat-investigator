@@ -53,6 +53,22 @@ describe("PR 31G graph context URL codec", () => {
     expect(graphContextActive(context)).toBe(true);
   });
 
+  it("M33C-U12: a new CTI Entity type filter serializes through the URL", () => {
+    const parsed = parseGraphContext(ps("graph_entity_type=threat_actor"));
+    expect(parsed.entityType).toBe("threat_actor");
+    expect(graphContextActive(parsed)).toBe(true);
+    const applied = applyGraphContext(ps(""), {
+      scope: "known",
+      depth: 1,
+      entityType: "threat_actor",
+      relationshipType: undefined,
+      source: undefined,
+      observedFrom: undefined,
+      observedTo: undefined,
+    });
+    expect(applied.get("graph_entity_type")).toBe("threat_actor");
+  });
+
   it("FE04: a Relationship type URL reconstructs", () => {
     const context = parseGraphContext(ps(`graph_relationship_type=${KNOWN}`));
     expect(context.relationshipType).toBe(KNOWN);

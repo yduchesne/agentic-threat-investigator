@@ -1031,7 +1031,7 @@ export interface components {
          * @description Canonical entity types that can participate in relationships.
          * @enum {string}
          */
-        EntityType: "domain" | "ip_address" | "url" | "network_prefix" | "asn" | "organization" | "malware" | "attack_technique" | "vulnerability";
+        EntityType: "domain" | "ip_address" | "url" | "network_prefix" | "asn" | "organization" | "malware" | "attack_technique" | "vulnerability" | "threat_actor" | "campaign" | "intrusion_set" | "tool" | "infrastructure";
         /**
          * EvidenceResponse
          * @description One exact admitted EvidenceObservation, normalized facts only (PR 28B).

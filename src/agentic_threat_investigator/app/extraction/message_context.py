@@ -9,8 +9,8 @@ they already require (:class:`EvidenceExtractionView`): the stable
 :class:`Evidence`, the material observation candidate, and the transient
 provider invocation Entity. This module owns that message-to-view seam:
 
-- exactly the supported semantic source contracts (ThreatFox and, since
-  PR 32D, MISP);
+- exactly the supported semantic source contracts (ThreatFox, MISP since
+  PR 32D, and STIX 2.1 since PR 33C under any ATI source namespace);
 - the invocation Entity is **execution context only** — it is never
   persisted as Evidence ownership and no subject field is added to
   ``EvidenceMessage``;
@@ -24,6 +24,12 @@ provider invocation Entity. This module owns that message-to-view seam:
   PR 32B), every IOC must be canonical and identity-distinct, and the
   remaining IOC identities are returned nowhere here — the deterministic
   MISP extractor owns the additional represented Entities;
+- the STIX 2.1 invocation identity is derived deterministically from the
+  durable normalized facts: the single represented ``facts.cti_entity``
+  block for a supported CTI SDO (the evidence's own subject, never a
+  fabricated owner), otherwise the first ordered ``facts.iocs`` entry
+  exactly like MISP — the deterministic STIX extractor owns the additional
+  represented IOC Entities;
 - unsupported sources/evidence types and malformed facts fail closed with
   typed :class:`EvidenceExtractionError` subclasses, so an unprocessable
   message never fabricates graph structure.
@@ -47,6 +53,10 @@ from agentic_threat_investigator.app.extraction.models import (
     EvidenceExtractionView,
     ExtractionErrorReason,
 )
+from agentic_threat_investigator.app.extraction.stix import (
+    validate_stix_cti_entity_fact,
+    validate_stix_ioc_fact,
+)
 from agentic_threat_investigator.domain.entities import (
     Entity,
     EntityType,
@@ -69,7 +79,12 @@ Dispatch is by the exact ``(semantic format, source)`` pair; anything else
 fails closed with :class:`UnsupportedMessageExtractionError`. MISP durable
 messages reconstruct their invocation Entity from ``facts.iocs`` and rely
 on the deterministic MISP extractor for the additional represented
-Entities; ThreatFox reconstructs from ``matches`` as before.
+Entities; ThreatFox reconstructs from ``matches`` as before. STIX 2.1 is a
+shared open semantic model with deliberately **no** fixed source guard (PR
+33B/33C), so every STIX message — regardless of the ATI source namespace —
+reconstructs its invocation Entity from its durable normalized facts:
+the represented ``cti_entity`` for a supported CTI SDO, otherwise the
+first ordered ``facts.iocs`` entry exactly like MISP.
 """
 
 _SUPPORTED_DURABLE_EXTRACTION_PAIRS: frozenset[tuple[SemanticFormatId, str]] = (
@@ -141,18 +156,67 @@ def extraction_view_from_message(
     no ``id`` or display metadata: it is execution context only.
     """
     source = message.source_id.value
-    pair = (message.semantic_format, source)
-    if pair not in _SUPPORTED_DURABLE_EXTRACTION_PAIRS:
-        raise UnsupportedMessageExtractionError(source, evidence_id=message.evidence_id)
-    if pair == (_MISP_SEMANTIC_FORMAT, _MISP_SOURCE):
-        invocation = _misp_invocation_entity(message)
+    if message.semantic_format is SemanticFormatId.STIX_21:
+        invocation = _stix_invocation_entity(message)
     else:
-        invocation = _threatfox_invocation_entity(message)
+        pair = (message.semantic_format, source)
+        if pair not in _SUPPORTED_DURABLE_EXTRACTION_PAIRS:
+            raise UnsupportedMessageExtractionError(
+                source, evidence_id=message.evidence_id
+            )
+        if pair == (_MISP_SEMANTIC_FORMAT, _MISP_SOURCE):
+            invocation = _misp_invocation_entity(message)
+        else:
+            invocation = _threatfox_invocation_entity(message)
     return EvidenceExtractionView(
         evidence=converted.evidence,
         observation=converted.observation,
         invocation_entity=invocation,
+        semantic_format=message.semantic_format,
     )
+
+
+def _stix_invocation_entity(message: EvidenceMessage) -> Entity:
+    """Derive the transient STIX invocation Entity from durable facts.
+
+    For a supported CTI SDO the represented ``facts.cti_entity`` block IS the
+    evidence subject, so the invocation Entity is derived from that durable
+    fact (this is source-fact-derived execution context, never a fabricated
+    semantic owner). Otherwise the first ordered ``facts.iocs`` entry is the
+    transient invocation Entity exactly as the MISP boundary does; both
+    helpers fail closed with :class:`MalformedMessageExtractionError` on any
+    malformed or non-canonical durable fact and never echo fact content.
+    """
+    facts = message.facts
+    cti_entity = facts.get("cti_entity")
+    if cti_entity is not None:
+        try:
+            entity_type, value, _display_name = validate_stix_cti_entity_fact(
+                cti_entity
+            )
+        except ValueError as exc:
+            raise MalformedMessageExtractionError(
+                message.source_id.value,
+                "STIX cti_entity facts are malformed",
+                evidence_id=message.evidence_id,
+            ) from exc
+        return Entity(type=entity_type, value=value)
+    iocs = facts.get("iocs")
+    if not isinstance(iocs, (list, tuple)) or not iocs:
+        raise MalformedMessageExtractionError(
+            message.source_id.value,
+            "STIX message must carry validated iocs",
+            evidence_id=message.evidence_id,
+        )
+    try:
+        entity_type, value = validate_stix_ioc_fact(iocs[0])
+    except ValueError as exc:
+        raise MalformedMessageExtractionError(
+            message.source_id.value,
+            "STIX ioc facts are malformed",
+            evidence_id=message.evidence_id,
+        ) from exc
+    return Entity(type=entity_type, value=value)
 
 
 _MISP_IOC_TYPE_DOMAIN = EntityType.DOMAIN.value

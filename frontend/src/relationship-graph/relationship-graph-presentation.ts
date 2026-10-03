@@ -21,6 +21,11 @@ export const ENTITY_TYPE_LABEL_KEYS: Readonly<Record<EntityTypeName, string>> = 
   malware: "graph.entityTypes.malware",
   attack_technique: "graph.entityTypes.attack_technique",
   vulnerability: "graph.entityTypes.vulnerability",
+  threat_actor: "graph.entityTypes.threat_actor",
+  campaign: "graph.entityTypes.campaign",
+  intrusion_set: "graph.entityTypes.intrusion_set",
+  tool: "graph.entityTypes.tool",
+  infrastructure: "graph.entityTypes.infrastructure",
 };
 
 /**

@@ -814,6 +814,19 @@ _PIVOT_CLASSES: dict[EntityType, PivotClass] = {
     EntityType.VULNERABILITY: PivotClass.RESEARCHABLE,
 }
 
+INVESTIGATION_SEED_TYPES: frozenset[EntityType] = frozenset(_PIVOT_CLASSES)
+"""Explicit allowlist of Entity types accepted as Investigation seeds (PR 33C).
+
+Investigation creation canonicalizes each submitted indicator into a root
+Entity and then plans provider/research orchestration around it. Graphability
+never implies seedability: source-neutral CTI Entity types
+(``THREAT_ACTOR``/``CAMPAIGN``/``INTRUSION_SET``/``TOOL``/
+``INFRASTRUCTURE``) are deliberately **not** in this allowlist, so a newly
+admitted enum value can never accidentally begin provider or orchestration
+work by becoming an Investigation seed. The set exactly covers the
+established pivot classes; extending seeds is an explicit domain change.
+"""
+
 
 def pivot_class(entity_type: EntityType) -> PivotClass:
     """Return the fixed pivot classification of an entity type.

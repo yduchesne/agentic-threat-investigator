@@ -29,6 +29,15 @@ _DNS_MAX_NAME_LENGTH = 253
 _DNS_MAX_LABEL_LENGTH = 63
 _MALWARE_MACHINE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
+CTI_ENTITY_DISPLAY_NAME_MAX_LENGTH = 512
+"""Bounded maximum length of one CTI Entity display name (PR 33C).
+
+``name`` is display metadata only and never participates in identity; the
+bound keeps arbitrary source names out of unbounded persistence and error
+text. The constant is shared by the STIX converter (admission) and the
+extraction fact revalidation.
+"""
+
 
 class EntityType(str, Enum):
     """Canonical entity types that can participate in relationships."""
@@ -42,6 +51,27 @@ class EntityType(str, Enum):
     MALWARE = "malware"
     ATTACK_TECHNIQUE = "attack_technique"
     VULNERABILITY = "vulnerability"
+    THREAT_ACTOR = "threat_actor"
+    CAMPAIGN = "campaign"
+    INTRUSION_SET = "intrusion_set"
+    TOOL = "tool"
+    INFRASTRUCTURE = "infrastructure"
+
+
+_CTI_ENTITY_STIX_TYPE_PREFIX: dict[EntityType, str] = {
+    EntityType.THREAT_ACTOR: "threat-actor",
+    EntityType.CAMPAIGN: "campaign",
+    EntityType.INTRUSION_SET: "intrusion-set",
+    EntityType.TOOL: "tool",
+    EntityType.INFRASTRUCTURE: "infrastructure",
+}
+"""Exact STIX 2.1 object-type prefix of each source-neutral CTI Entity type.
+
+Declared after the enum so the annotation is already in scope; the mapping
+is the single authoritative ``ATI EntityType -> STIX prefix`` source, used by
+:func:`canonicalize_cti_object_id` and never inferred from enum names or
+spelling.
+"""
 
 
 class Entity(BaseModel):
@@ -182,6 +212,73 @@ def canonicalize_network_prefix(value: str) -> str:
     """
 
     return str(ipaddress.ip_network(value.strip(), strict=False))
+
+
+def canonicalize_cti_object_id(entity_type: EntityType, value: str) -> str:
+    """Return the validated opaque CTI machine identifier, byte-for-byte.
+
+    The v0.1 CTI Entity identity contract is a **strict opaque machine
+    identifier**, initially the exact validated STIX 2.1 object ``id`` of the
+    supported SDO (``threat-actor--<uuid>``, ``campaign--<uuid>``,
+    ``intrusion-set--<uuid>``, ``tool--<uuid>``, ``infrastructure--<uuid>``).
+    This function validates, never normalizes: input must be the typed domain
+    string, not blank and not surrounded by whitespace; the exact lowercase
+    STIX type prefix for ``entity_type`` must be followed by ``--``; and the
+    suffix must be a canonical textual UUID (lower-case hyphenated form).
+    Accepted input is returned byte-for-byte identical. Any other spelling —
+    a wrong or mutated type prefix, a non-canonical UUID form, surrounding
+    whitespace, a printable human name, an alias, or an empty value — raises
+    :class:`ValueError` and is never trimmed, case-folded, slugified, or
+    name-normalized. Names therefore never become global CTI identity:
+    same-name objects with different machine IDs stay distinct Entities.
+    """
+    expected_prefix = _CTI_ENTITY_STIX_TYPE_PREFIX.get(entity_type)
+    if expected_prefix is None:
+        raise ValueError(
+            f"no CTI object identity contract for type: {entity_type.value}"
+        )
+    if value != value.strip() or not value:
+        raise ValueError(
+            "CTI object identifier must not be blank or padded with whitespace"
+        )
+    full_prefix = f"{expected_prefix}--"
+    if not value.startswith(full_prefix):
+        raise ValueError("CTI object identifier does not match its object type")
+    suffix = value[len(full_prefix) :]
+    try:
+        canonical_suffix = str(UUID(suffix))
+    except ValueError as exc:
+        raise ValueError(
+            "CTI object identifier suffix is not a canonical UUID"
+        ) from exc
+    if canonical_suffix != suffix:
+        raise ValueError("CTI object identifier suffix is not a canonical UUID")
+    return value
+
+
+def canonicalize_threat_actor(value: str) -> str:
+    """Return the exact validated STIX machine ID of a threat actor."""
+    return canonicalize_cti_object_id(EntityType.THREAT_ACTOR, value)
+
+
+def canonicalize_campaign(value: str) -> str:
+    """Return the exact validated STIX machine ID of a campaign."""
+    return canonicalize_cti_object_id(EntityType.CAMPAIGN, value)
+
+
+def canonicalize_intrusion_set(value: str) -> str:
+    """Return the exact validated STIX machine ID of an intrusion set."""
+    return canonicalize_cti_object_id(EntityType.INTRUSION_SET, value)
+
+
+def canonicalize_tool(value: str) -> str:
+    """Return the exact validated STIX machine ID of a tool."""
+    return canonicalize_cti_object_id(EntityType.TOOL, value)
+
+
+def canonicalize_infrastructure(value: str) -> str:
+    """Return the exact validated STIX machine ID of infrastructure."""
+    return canonicalize_cti_object_id(EntityType.INFRASTRUCTURE, value)
 
 
 def canonicalize_malware(value: str) -> str:
@@ -342,6 +439,11 @@ _CANONICALIZERS: dict[EntityType, Canonicalizer] = {
     EntityType.VULNERABILITY: canonicalize_cve,
     EntityType.ATTACK_TECHNIQUE: canonicalize_attack_technique,
     EntityType.MALWARE: canonicalize_malware,
+    EntityType.THREAT_ACTOR: canonicalize_threat_actor,
+    EntityType.CAMPAIGN: canonicalize_campaign,
+    EntityType.INTRUSION_SET: canonicalize_intrusion_set,
+    EntityType.TOOL: canonicalize_tool,
+    EntityType.INFRASTRUCTURE: canonicalize_infrastructure,
 }
 
 

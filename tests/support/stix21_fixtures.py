@@ -28,6 +28,12 @@ RELATIONSHIP_ID = "relationship--66666666-6666-6666-6666-666666666666"
 SIGHTING_ID = "sighting--77777777-7777-7777-7777-777777777777"
 ATTACK_PATTERN_ID = "attack-pattern--88888888-8888-8888-8888-888888888888"
 CUSTOM_ID = "x-ati-sample--99999999-9999-9999-9999-999999999999"
+THREAT_ACTOR_ID = "threat-actor--aaaaaaa1-1111-1111-1111-111111111111"
+CAMPAIGN_ID = "campaign--bbbbbbb2-2222-2222-2222-222222222222"
+INTRUSION_SET_ID = "intrusion-set--ccccccc3-3333-3333-3333-333333333333"
+TOOL_ID = "tool--ddddddd4-4444-4444-4444-444444444444"
+INFRASTRUCTURE_ID = "infrastructure--eeeeeee5-5555-5555-5555-555555555555"
+THREAT_ACTOR_2_ID = "threat-actor--aaaaaaa9-9999-9999-9999-999999999999"
 
 # Synthetic documentation-safe IOC values (RFC 5737 / RFC 2606 / RFC 3849).
 DOMAIN_VALUE = "malicious-domain.test"
@@ -47,6 +53,13 @@ VALID_FROM_TS = "2026-01-03T00:00:00.000000Z"
 SINGLE_DOMAIN_PATTERN = "[domain-name:value = 'malicious-domain.test']"
 SINGLE_IPV4_PATTERN = "[ipv4-addr:value = '203.0.113.42']"
 SINGLE_IPV6_PATTERN = "[ipv6-addr:value = '2001:db8::42']"
+
+# Synthetic documentation-safe CTI display names (PR 33C).
+THREAT_ACTOR_NAME = "Adversary Simulation Group"
+CAMPAIGN_NAME = "Operation Synthetic Dawn"
+INTRUSION_SET_NAME = "Synthetic Intrusion Set"
+TOOL_NAME = "Synthetic Scanner v2"
+INFRASTRUCTURE_NAME = "Synthetic MitM Infrastructure"
 
 
 def stix_domain_name(**overrides: Any) -> dict[str, Any]:
@@ -109,6 +122,85 @@ def stix_indicator(
         "object_marking_refs": [
             "marking-definition--1c9b3a0a-7f1b-4b1e-8f2b-2b2b2b2b2b2b"
         ],
+    }
+    value.update(overrides)
+    return value
+
+
+def stix_threat_actor(
+    *, name: str = THREAT_ACTOR_NAME, **overrides: Any
+) -> dict[str, Any]:
+    """Build one synthetic supported STIX 2.1 ``threat-actor`` SDO."""
+    value: dict[str, Any] = {
+        "type": "threat-actor",
+        "id": THREAT_ACTOR_ID,
+        "spec_version": "2.1",
+        "name": name,
+        "created": CREATED_TS,
+        "modified": MODIFIED_TS,
+        "aliases": ["synthetic-alias"],
+        "labels": ["apt"],
+    }
+    value.update(overrides)
+    return value
+
+
+def stix_campaign(**overrides: Any) -> dict[str, Any]:
+    """Build one synthetic supported STIX 2.1 ``campaign`` SDO."""
+    value: dict[str, Any] = {
+        "type": "campaign",
+        "id": CAMPAIGN_ID,
+        "spec_version": "2.1",
+        "name": CAMPAIGN_NAME,
+        "created": CREATED_TS,
+        "modified": MODIFIED_TS,
+        "aliases": ["synthetic-campaign"],
+        "objective": "synthetic objective",
+    }
+    value.update(overrides)
+    return value
+
+
+def stix_intrusion_set(**overrides: Any) -> dict[str, Any]:
+    """Build one synthetic supported STIX 2.1 ``intrusion-set`` SDO."""
+    value: dict[str, Any] = {
+        "type": "intrusion-set",
+        "id": INTRUSION_SET_ID,
+        "spec_version": "2.1",
+        "name": INTRUSION_SET_NAME,
+        "created": CREATED_TS,
+        "modified": MODIFIED_TS,
+        "aliases": ["synthetic-intrusion-alias"],
+    }
+    value.update(overrides)
+    return value
+
+
+def stix_tool(**overrides: Any) -> dict[str, Any]:
+    """Build one synthetic supported STIX 2.1 ``tool`` SDO."""
+    value: dict[str, Any] = {
+        "type": "tool",
+        "id": TOOL_ID,
+        "spec_version": "2.1",
+        "name": TOOL_NAME,
+        "created": CREATED_TS,
+        "modified": MODIFIED_TS,
+        "tool_types": ["remote-access"],
+    }
+    value.update(overrides)
+    return value
+
+
+def stix_infrastructure(**overrides: Any) -> dict[str, Any]:
+    """Build one synthetic supported STIX 2.1 ``infrastructure`` SDO."""
+    value: dict[str, Any] = {
+        "type": "infrastructure",
+        "id": INFRASTRUCTURE_ID,
+        "spec_version": "2.1",
+        "name": INFRASTRUCTURE_NAME,
+        "created": CREATED_TS,
+        "modified": MODIFIED_TS,
+        "infrastructure_types": ["command-and-control"],
     }
     value.update(overrides)
     return value

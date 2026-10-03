@@ -24,6 +24,7 @@ from .models import (
     deduplicate_entities,
 )
 from .rdap import extract_rdap
+from .stix import extract_stix
 from .threatfox import extract_threatfox
 from .urlhaus import extract_urlhaus
 
@@ -33,6 +34,7 @@ __all__ = [
     "extract_empty",
     "extract_ipinfo",
     "extract_rdap",
+    "extract_stix",
     "extract_threatfox",
     "extract_urlhaus",
     "EntityIdentity",

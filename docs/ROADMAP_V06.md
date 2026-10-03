@@ -343,20 +343,99 @@ Delivered by this PR:
   regressions stay green; no TAXII, Entity expansion, relationship/
   sighting persistence, or runtime acquisition change.
 
-## PR 33C — Source-neutral CTI Entity expansion
+## PR 33C — Source-neutral CTI Entity expansion `[DONE]`
 
-Add the smallest source-neutral CTI Entity vocabulary justified by the
-supported intelligence workflows. Candidate types include MALWARE,
-THREAT_ACTOR, CAMPAIGN, INTRUSION_SET, TOOL, VULNERABILITY, ATTACK_PATTERN,
-and INFRASTRUCTURE.
+Add exactly five source-neutral CTI Entity types — `THREAT_ACTOR`,
+`CAMPAIGN`, `INTRUSION_SET`, `TOOL`, and `INFRASTRUCTURE` (wire values
+`threat_actor`, `campaign`, `intrusion_set`, `tool`, `infrastructure`) —
+to close the actor/tool/campaign/infrastructure gap for the STIX/MISP
+roadmap and PR 33D graph endpoints. `MALWARE`, `VULNERABILITY`, and
+`ATTACK_TECHNIQUE` already exist and were **not** introduced by 33C. A
+generic `ATTACK_PATTERN` is deliberately not added: ATI already owns the
+narrower `ATTACK_TECHNIQUE` ATT&CK-identity contract, and blindly equating
+arbitrary STIX `attack-pattern` identity with ATT&CK identity would be
+semantically wrong.
 
 This is an ATI domain expansion, not a STIX-specific mirror of every SDO.
-Each admitted Entity type must have explicit canonicalization, display,
-query/graph, extraction, pivot/researchability, persistence, API/frontend, and
-test semantics where those surfaces apply.
+Each admitted Entity type has explicit canonicalization, display,
+query/graph, extraction, seed-exclusion, persistence, API/frontend, and
+test semantics where those surfaces apply. MISP may reuse these types in
+later enrichment without gaining a parallel MISP ontology; no MISP↔STIX
+identity merge occurs without an explicit future equivalence mechanism.
 
-MISP may reuse these types in later enrichment without gaining a parallel MISP
-ontology.
+Delivered by this PR:
+
+- domain: five `EntityType` members plus one shared strict machine-ID
+  canonicalization mechanism (`canonicalize_cti_object_id` and the five
+  registered `_CANONICALIZERS`): STIX-derived canonical values are the
+  **exact validated STIX 2.1 object `id`** (`<type>--<canonical uuid>`),
+  validated (never normalized/alised/slugified) and returned
+  byte-for-byte; wrong/mutated prefixes, missing `--`, non-canonical
+  UUID spellings, surrounding whitespace, blank values, human `name`
+  values, and aliases fail closed; `CTI_ENTITY_DISPLAY_NAME_MAX_LENGTH =
+  512` bounds display metadata, which never participates in identity;
+- converter: `stix21_evidence.py` (still the **only** STIX converter,
+  keyed solely by `SemanticFormatId.STIX_21`) admits exactly
+  `threat-actor`, `campaign`, `intrusion-set`, `tool`, and
+  `infrastructure`, each mapping to exactly one `THREAT_INTELLIGENCE`
+  Evidence whose normalized facts carry one explicit `cti_entity` block
+  (`type` ATI wire value / exact machine value / verbatim `display_name`)
+  and `iocs: []`; PR 33B IOC/Indicator Evidence keeps `cti_entity:
+  null`; malformed required identity/name is a bounded `ConversionError`;
+  valid unsupported objects (including `relationship`, `sighting`,
+  generic `attack-pattern`/`malware`/`vulnerability`) return zero
+  Evidence; reference fields, aliases, markings, and descriptions stay
+  unconsumed source facts;
+- extraction: source-neutral `app/extraction/stix.py` consumed through the
+  durable message seam (`message_context.py` reconstructs the STIX
+  invocation from the `cti_entity` fact or the first ordered `iocs` entry
+  — source-fact-derived, never a fabricated semantic owner), dispatched
+  by semantic format with deliberately no fixed `SourceId` guard;
+  `EvidenceExtractionView` gained an optional `semantic_format`;
+  deterministic extraction produces one canonical CTI Entity (or every
+  represented PR 33B IOC identity, first-seen deduplicated) and zero
+  relationships; malformed durable facts fail closed with
+  `EvidenceExtractionError(MALFORMED_FACTS)` without echoing content;
+- persistence: reuses the global Evidence batch path unchanged
+  (`ati.persist_evidence_batch`; `entity_type` is generic text with no
+  DB enum/CHECK, so **no migration** was needed); Evidence +
+  `EvidenceObservation` + `EvidenceObservationEntity` per existing
+  version/upsert semantics; CTI SDOs create zero Relationship and zero
+  RelationshipObservation rows; source namespace is part of Evidence
+  identity while Entity identity stays `(EntityType, canonical value)`;
+- seeds: `INVESTIGATION_SEED_TYPES` is an explicit allowlist of the nine
+  established seed types; the five CTI types are rejected at the
+  application validation boundary so provider/research orchestration is
+  never invented for them (graphability never implies seedability);
+- API/frontend: OpenAPI snapshot and generated TypeScript expose the five
+  wire values through the existing `EntityType` enum; the exhaustive
+  `ENTITY_TYPE_LABEL_KEYS` registry, English `relationshipEvolution`
+  i18n labels (Threat actor / Campaign / Intrusion set / Tool /
+  Infrastructure), and `GRAPH_ENTITY_TYPES` filter accept the new types
+  textually; the Investigation-seed form (`ENTITY_TYPE_OPTIONS`) is
+  intentionally unchanged; generic entity-ID pivot actions work for CTI
+  nodes with no CTI-specific endpoint;
+- deterministic M33C-D01..D25, M33C-S01..S35, M33C-X01..X34, and
+  M33C-U01..U15 matrices plus M33C-V01..V07 real-PostgreSQL vertical
+  slices (one threat-actor Entity persistence, all five types,
+  same-name/different-ID anti-merge, version/display-name continuity,
+  source-namespace separation, multi-leaf Indicator association, and
+  generic graph/API projection with test-only relationship fixtures),
+  with ATI-authored synthetic fixtures in `tests/support/stix21_fixtures.py`;
+- `docs/` status updates (`DATASOURCE_ARCHITECTURE.md`, `DATA_SOURCES.md`,
+  `TESTING.md`, `DOMAIN_MODEL.md`, `ROADMAP_V06.md`);
+- mandatory gates green on final head: `./build.sh --qa`
+  (Ruff/Mypy/frontend + 6092 unit tests at 87.54% coverage ≥ 85),
+  `./build.sh --intg` (1018 passed, 27 skipped on real PostgreSQL +
+  Redpanda, plus the frontend production bundle), `./build.sh --sec`
+  (Bandit/Semgrep/Safety/pip-audit); PR 33A/33B,
+  MISP, ThreatFox, generic conversion, and Investigation regressions stay
+  green.
+
+No relationship/sighting semantics (PR 33D), TAXII acquisition (PR 33E),
+MISP Galaxy/cluster conversion, cross-source entity resolution, new
+persistence path, second STIX converter, or generic STIX ontology mirror
+was introduced.
 
 ## PR 33D — Source-asserted relationships and STIX sightings
 

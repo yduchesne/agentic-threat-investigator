@@ -31,6 +31,7 @@ from agentic_threat_investigator.domain.evidence import (
     EvidenceObservationCandidate,
     EvidenceType,
 )
+from agentic_threat_investigator.domain.identifiers import SemanticFormatId
 from agentic_threat_investigator.domain.relationships import RelationshipType
 
 
@@ -70,6 +71,12 @@ class EvidenceExtractionView(BaseModel):
     candidate, and the authoritative persisted provider invocation target
     Entity. This is execution context only: it is never persisted as
     Evidence ownership, and the v0.1 privileged ``subject`` is not restored.
+
+    ``semantic_format`` is the optional durable semantic-format identity of
+    message-derived views (PR 33C: collection/STIX evidence carries no
+    natural provider invocation, so dispatch can also route by semantic
+    format); provider-step views leave it ``None`` and dispatch by
+    ``(source, evidence type)`` exactly as before.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -77,6 +84,7 @@ class EvidenceExtractionView(BaseModel):
     evidence: Evidence
     observation: EvidenceObservationCandidate
     invocation_entity: Entity
+    semantic_format: SemanticFormatId | None = None
 
 
 class RelationshipAssertion(BaseModel):

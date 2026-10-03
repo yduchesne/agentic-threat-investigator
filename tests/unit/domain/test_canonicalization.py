@@ -241,3 +241,198 @@ def test_malware_printable_name_is_never_an_identity() -> None:
 
     with pytest.raises(ValueError):
         canonicalize(EntityType.MALWARE, "AsyncRAT (aka Win32.AsyncRAT)")
+
+
+# --- PR 33C source-neutral CTI Entity identity contract (M33C-D01..D25) ---
+
+_TA_ID = "threat-actor--11111111-1111-1111-1111-111111111111"
+_CAMPAIGN_ID = "campaign--22222222-2222-2222-2222-222222222222"
+_INTRUSION_SET_ID = "intrusion-set--33333333-3333-3333-3333-333333333333"
+_TOOL_ID = "tool--44444444-4444-4444-4444-444444444444"
+_INFRASTRUCTURE_ID = "infrastructure--55555555-5555-5555-5555-555555555555"
+
+
+@pytest.mark.parametrize(
+    ("entity_type", "value"),
+    [
+        (EntityType.THREAT_ACTOR, _TA_ID),
+        (EntityType.CAMPAIGN, _CAMPAIGN_ID),
+        (EntityType.INTRUSION_SET, _INTRUSION_SET_ID),
+        (EntityType.TOOL, _TOOL_ID),
+        (EntityType.INFRASTRUCTURE, _INFRASTRUCTURE_ID),
+    ],
+)
+def test_m33c_d01_d05_exact_machine_ids_unchanged(
+    entity_type: EntityType, value: str
+) -> None:
+    """D01..D05: exact STIX machine IDs pass through byte-for-byte unchanged."""
+
+    assert canonicalize(entity_type, value) == value
+
+
+def test_m33c_d06_wrong_stix_prefix_rejected() -> None:
+    """D06: a threat-actor carrying a campaign prefix fails closed."""
+
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.THREAT_ACTOR, _CAMPAIGN_ID)
+
+
+def test_m33c_d07_campaign_wrong_prefix_rejected() -> None:
+    """D07: a campaign carrying a tool prefix fails closed."""
+
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.CAMPAIGN, _TOOL_ID)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "threat-actor--not-a-uuid",
+        "threat-actor--11111111-1111-1111-1111-11111111111x",
+        "threat-actor--11111111111111111111111111111111",
+    ],
+)
+def test_m33c_d08_malformed_uuid_rejected(bad: str) -> None:
+    """D08: a non-canonical or malformed UUID suffix fails closed."""
+
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.THREAT_ACTOR, bad)
+
+
+def test_m33c_d09_missing_delimiter_rejected() -> None:
+    """D09: a missing ``--`` delimiter fails closed."""
+
+    with pytest.raises(ValueError):
+        canonicalize(
+            EntityType.THREAT_ACTOR, "threat-actor11111111-1111-1111-1111-111111111111"
+        )
+
+
+@pytest.mark.parametrize(
+    "bad", [f" {_TA_ID}", _TA_ID.upper(), _TA_ID.replace("-", "_")]
+)
+def test_m33c_d10_d11_padded_or_mutated_identifier_rejected(bad: str) -> None:
+    """D10/D11: leading/trailing whitespace and mutated prefixes fail closed."""
+
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.THREAT_ACTOR, bad)
+
+
+def test_m33c_d12_human_name_never_identity() -> None:
+    """D12: a printable human/alias name is never a machine identity."""
+
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.THREAT_ACTOR, "APT 29")
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.TOOL, "Synthetic Scanner")
+
+
+def test_m33c_d13_blank_rejected() -> None:
+    """D13: blank values fail closed."""
+
+    for entity_type in (
+        EntityType.THREAT_ACTOR,
+        EntityType.CAMPAIGN,
+        EntityType.INTRUSION_SET,
+        EntityType.TOOL,
+        EntityType.INFRASTRUCTURE,
+    ):
+        with pytest.raises(ValueError):
+            canonicalize(entity_type, "")
+        with pytest.raises(ValueError):
+            canonicalize(entity_type, "   ")
+
+
+def test_m33c_d14_canonicalization_idempotent() -> None:
+    """D14: canonicalization is idempotent for accepted machine IDs."""
+
+    for entity_type, value in (
+        (EntityType.THREAT_ACTOR, _TA_ID),
+        (EntityType.CAMPAIGN, _CAMPAIGN_ID),
+        (EntityType.INTRUSION_SET, _INTRUSION_SET_ID),
+        (EntityType.TOOL, _TOOL_ID),
+        (EntityType.INFRASTRUCTURE, _INFRASTRUCTURE_ID),
+    ):
+        assert canonicalize(entity_type, canonicalize(entity_type, value)) == value
+
+
+def test_m33c_d15_same_display_name_never_merges_identity() -> None:
+    """D15: different machine IDs stay distinct even under one display name.
+
+    Names are display metadata only; canonical identity is the exact machine
+    value, so two same-name STIX objects remain two distinct identities.
+    """
+
+    first = canonicalize(EntityType.THREAT_ACTOR, _TA_ID)
+    second = canonicalize(EntityType.THREAT_ACTOR, _TA_ID.replace("1111", "9999", 1))
+    assert first != second
+
+
+@pytest.mark.parametrize(
+    ("entity_type", "stix_prefix"),
+    [
+        (EntityType.THREAT_ACTOR, "threat-actor"),
+        (EntityType.CAMPAIGN, "campaign"),
+        (EntityType.INTRUSION_SET, "intrusion-set"),
+        (EntityType.TOOL, "tool"),
+        (EntityType.INFRASTRUCTURE, "infrastructure"),
+    ],
+)
+def test_m33c_d16_d20_every_new_enum_has_canonicalizer(
+    entity_type: EntityType, stix_prefix: str
+) -> None:
+    """D16..D20: each new enum member is registered in ``_CANONICALIZERS``."""
+
+    value = f"{stix_prefix}--99999999-9999-9999-9999-999999999999"
+    assert canonicalize(entity_type, value) == value
+
+
+def test_m33c_d21_malware_contract_unchanged() -> None:
+    """D21: the existing MALWARE machine-ID contract is unchanged."""
+
+    assert canonicalize(EntityType.MALWARE, "win.asyncrat") == "win.asyncrat"
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.MALWARE, "AsyncRAT")
+
+
+def test_m33c_d22_vulnerability_contract_unchanged() -> None:
+    """D22: the existing CVE contract is unchanged."""
+
+    assert canonicalize(EntityType.VULNERABILITY, "cve-2024-1234") == "CVE-2024-1234"
+
+
+def test_m33c_d23_attack_technique_contract_unchanged() -> None:
+    """D23: the existing ATT&CK technique contract is unchanged."""
+
+    assert canonicalize(EntityType.ATTACK_TECHNIQUE, "t1059") == "T1059"
+    with pytest.raises(ValueError):
+        canonicalize(EntityType.ATTACK_TECHNIQUE, "")
+
+
+def test_m33c_d24_ioc_canonicalizers_unchanged() -> None:
+    """D24: existing domain/IP/URL/ASN/prefix IOC contracts are unchanged."""
+
+    assert canonicalize(EntityType.DOMAIN, "  EXAMPLE.COM ") == "example.com"
+    assert canonicalize(EntityType.IP_ADDRESS, "2001:0DB8::1") == "2001:db8::1"
+    assert canonicalize(EntityType.ASN, "as65001") == "AS65001"
+    assert canonicalize(EntityType.NETWORK_PREFIX, "192.168.1.5/24") == "192.168.1.0/24"
+    assert (
+        canonicalize(EntityType.URL, "HTTPS://Example.COM/A") == "https://example.com/A"
+    )
+
+
+def test_m33c_d25_enum_wire_values_exact() -> None:
+    """D25: every EntityType serializes to its exact approved wire value."""
+
+    assert {member.value for member in EntityType} >= {
+        "threat_actor",
+        "campaign",
+        "intrusion_set",
+        "tool",
+        "infrastructure",
+    }
+    assert EntityType.THREAT_ACTOR.value == "threat_actor"
+    assert EntityType.CAMPAIGN.value == "campaign"
+    assert EntityType.INTRUSION_SET.value == "intrusion_set"
+    assert EntityType.TOOL.value == "tool"
+    assert EntityType.INFRASTRUCTURE.value == "infrastructure"

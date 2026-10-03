@@ -33,8 +33,22 @@ Supported Evidence profile (deliberately narrow):
   a nonblank string, and whose **entire** pattern belongs to the approved
   equality-only IOC whitelist -> one Evidence whose ``iocs`` preserve the
   left-to-right pattern leaf order (duplicates included);
+- the five PR 33C CTI SDO types ``threat-actor``, ``campaign``,
+  ``intrusion-set``, ``tool``, and ``infrastructure`` -> one Evidence whose
+  normalized facts carry exactly one ``cti_entity`` represented-entity block
+  (the exact validated STIX machine ID plus the source ``name`` as display
+  metadata) and an empty ``iocs`` array;
 - every other valid STIX object and every valid-but-unsupported Indicator
   pattern -> zero Evidence (a valid no-result, never a failure).
+
+Generic STIX ``attack-pattern``, ``malware``, and ``vulnerability`` objects
+are deliberately **not** admitted: ATI's ``ATTACK_TECHNIQUE``/``MALWARE``/
+``VULNERABILITY`` contracts are narrower canonical identity contracts and
+name-based mapping would be unsafe. CTI ``name`` values are display metadata
+and never participate in canonical identity; ``relationship``/``sighting``
+and every reference field (source/target refs, aliases, labels, markings)
+stay unconsumed source facts and never become ATI graph state (PR 33D owns
+source-asserted edges).
 
 Indicator pattern interpretation is delegated to the ATI-owned structural
 adapter (``stix21_pattern.py``) which uses the maintained OASIS
@@ -70,7 +84,9 @@ from agentic_threat_investigator.app.evidence_conversion import (
     ToEvidenceConverterRegistry,
 )
 from agentic_threat_investigator.domain.entities import (
+    CTI_ENTITY_DISPLAY_NAME_MAX_LENGTH,
     EntityType,
+    canonicalize_cti_object_id,
     canonicalize_ip_address,
     validate_dns_name,
 )
@@ -95,6 +111,7 @@ __all__ = [
     "Stix21ToEvidenceConverter",
     "build_stix21_conversion_registry",
     "build_stix_common_facts",
+    "build_stix_cti_entity_facts",
     "build_stix_indicator_facts",
     "build_stix_normalized_facts",
     "extract_stix_ioc_facts",
@@ -105,6 +122,20 @@ _STIX_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 Mirrors the established MISP fact-timestamp format contract so STIX and
 MISP normalized timestamps render identically.
+"""
+
+_STIX_CTI_ENTITY_TYPES: dict[str, EntityType] = {
+    "threat-actor": EntityType.THREAT_ACTOR,
+    "campaign": EntityType.CAMPAIGN,
+    "intrusion-set": EntityType.INTRUSION_SET,
+    "tool": EntityType.TOOL,
+    "infrastructure": EntityType.INFRASTRUCTURE,
+}
+"""Exact STIX 2.1 object-type to ATI CTI Entity mapping (PR 33C).
+
+An explicit source-neutral mapping; nothing is inferred from enum names or
+spelling. Generic STIX ``attack-pattern``/``malware``/``vulnerability`` are
+deliberately absent: they are not admitted here (see the module invariants).
 """
 
 
@@ -390,10 +421,51 @@ def extract_stix_ioc_facts(source: Stix21Object) -> tuple[dict[str, str], ...]:
     return tuple(_canonicalize_ioc_leaf(leaf) for leaf in interpretation.iocs)
 
 
+def build_stix_cti_entity_facts(
+    source_value: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Build the normalized represented-entity block for one supported CTI SDO.
+
+    Returns ``None`` for every non-CTI object type. For one of the five
+    supported CTI SDO types (``threat-actor``, ``campaign``,
+    ``intrusion-set``, ``tool``, ``infrastructure``) it fail-closed requires
+    an exact validated STIX ``id`` whose type prefix matches ``type`` and a
+    nonblank bounded ``name`` string; the returned block carries the ATI
+    Entity wire value, the exact canonical opaque machine ID, and the exact
+    source ``name`` spelling as display metadata. A malformed machine ID,
+    missing/non-string name, or over-bound name is a bounded
+    :class:`ConversionError`; source content is never echoed. No
+    relationship reference, alias, goal, role, motivation, or description is
+    interpreted or admitted.
+    """
+    stix_type = source_value["type"]
+    entity_type = _STIX_CTI_ENTITY_TYPES.get(stix_type)
+    if entity_type is None:
+        return None
+    name = _optional_stix_string(source_value, "name")
+    if name is None or not name.strip():
+        raise ConversionError(f"STIX {stix_type} object requires a nonblank name")
+    if len(name) > CTI_ENTITY_DISPLAY_NAME_MAX_LENGTH:
+        raise ConversionError(f"STIX {stix_type} name exceeds the bounded maximum")
+    try:
+        machine_id = canonicalize_cti_object_id(entity_type, source_value["id"])
+    except ValueError as exc:
+        raise ConversionError(
+            "STIX object id does not match its declared CTI object type"
+        ) from exc
+    return {
+        "type": entity_type.value,
+        "value": machine_id,
+        "display_name": name,
+    }
+
+
 def build_stix_normalized_facts(
-    source: Stix21Object, iocs: tuple[dict[str, str], ...]
+    source: Stix21Object,
+    iocs: tuple[dict[str, str], ...],
+    cti_entity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the stable normalized STIX/IOC fact object for one supported object.
+    """Build the stable normalized STIX/IOC/CTI fact object for one object.
 
     One stable shape:
 
@@ -402,7 +474,10 @@ def build_stix_normalized_facts(
     - ``indicator``: the normalized Indicator block for an ``indicator``
       source, otherwise ``None``;
     - ``iocs``: canonical entity-eligible values as ordered
-      ``{"type", "value"}`` objects.
+      ``{"type", "value"}`` objects (``[]`` for CTI SDO Evidence);
+    - ``cti_entity``: the one represented CTI Entity block (see
+      :func:`build_stix_cti_entity_facts`) for a supported CTI SDO,
+      otherwise ``None`` (IOC/Indicator Evidence keeps ``null``).
 
     Optional modeled fields use stable explicit ``None``; list fields use
     ``[]`` when absent; list source order is preserved; the original
@@ -418,6 +493,7 @@ def build_stix_normalized_facts(
             else None
         ),
         "iocs": list(iocs),
+        "cti_entity": cti_entity,
     }
 
 
@@ -473,7 +549,8 @@ class Stix21ToEvidenceConverter(ToEvidenceConverter[Stix21Object]):
                 "STIX converter requires a STIX 2.1 semantic-format context"
             )
         iocs = extract_stix_ioc_facts(source)
-        if not iocs:
+        cti_entity = build_stix_cti_entity_facts(source.source_value())
+        if not iocs and cti_entity is None:
             return ()
         evidence = Evidence(
             id=evidence_id_for_source_record(
@@ -490,7 +567,7 @@ class Stix21ToEvidenceConverter(ToEvidenceConverter[Stix21Object]):
             source_url=semantic.source_reference,
             observed_at=None,
             retrieved_at=semantic.retrieved_at,
-            facts=build_stix_normalized_facts(source, iocs),
+            facts=build_stix_normalized_facts(source, iocs, cti_entity),
             raw_payload=None,
         )
         return (ConvertedEvidence(evidence=evidence, observation=candidate),)
