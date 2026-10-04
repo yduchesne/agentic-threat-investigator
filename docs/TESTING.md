@@ -16,6 +16,7 @@
 - [Synthetic HTTP provider integration tests](#synthetic-http-provider-integration-tests)
 - [Typical provider issues to watch for](#typical-provider-issues-to-watch-for)
 - [Database integration tests](#database-integration-tests)
+- [TAXII interoperability testing strategy](#taxii-interoperability-testing-strategy)
 - [Redpanda / Kafka integration tests (PR 28G)](#redpanda--kafka-integration-tests-pr-28g)
 - [Distributed Evidence ingestion closure (PR 28H)](#distributed-evidence-ingestion-closure-pr-28h)
 - [Migration tests](#migration-tests)
@@ -2328,6 +2329,64 @@ APIs, no Kafka transactions, no retry topics/DLQ, no Schema Registry, no
 live Internet, and no ThreatFox clone/download. The real PostgreSQL
 integration lane, fresh per-test topics and groups, and the no-internet
 rule keep the module deterministic and isolated.
+
+## TAXII interoperability testing strategy
+
+ATI distinguishes protocol correctness, third-party interoperability, and live-data robustness when validating TAXII 2.1 ingestion. These layers are complementary; no single layer replaces the others.
+
+### 1. Protocol-level tests — planned
+
+Use a deterministic TAXII 2.1 test server or fixtures controlled by ATI to exercise the TAXII client/adapter cheaply and precisely. These tests should cover API-root and collection discovery, authentication behavior where applicable, object retrieval, pagination, incremental acquisition (including `added_after` semantics), error handling, malformed/unsupported input, and conversion through the STIX 2.1 semantic boundary.
+
+These tests use deterministic data and exact assertions and are suitable for ordinary automated integration testing. They do not by themselves establish interoperability with an independent CTI product.
+
+### 2. OpenCTI deterministic interoperability — PR 33 foundation
+
+PR 33 is establishing the prerequisite OpenCTI integration environment using a real OpenCTI deployment loaded with ATI's deterministic Fake World data. Once TAXII ingestion is implemented, this environment is the canonical deterministic third-party interoperability path:
+
+```text
+ATI deterministic/Fake World STIX data
+        -> real OpenCTI
+        -> OpenCTI TAXII 2.1 endpoint
+        -> ATI TAXII ingestion
+        -> STIX 2.1 conversion
+        -> ATI canonical persistence
+```
+
+The purpose is to prove interoperability against another product's real TAXII/STIX implementation while retaining exact, reproducible expected outcomes. Tests should exercise the production OpenCTI application and its real TAXII endpoint; they must not replace OpenCTI or TAXII with ATI-owned fakes at this boundary.
+
+PR 33 provides the OpenCTI + Fake World prerequisite; the TAXII round trip itself remains planned until the TAXII implementation lands.
+
+### 3. OpenCTI live-data interoperability — planned
+
+A separate live integration path will load OpenCTI with a real-world CTI dataset (not ATI Fake World data), expose that data through OpenCTI's real TAXII 2.1 endpoint, and ingest it into ATI.
+
+"Live" here means **real third-party implementation plus real-world CTI data**. The OpenCTI instance may be locally/self-hosted; the TAXII endpoint does not need to be a public Internet service for this to constitute live interoperability testing.
+
+Because the upstream dataset can change, live-data tests should assert stable invariants rather than brittle exact object counts or identities. At minimum, validate that:
+
+- API-root/collection discovery and authentication succeed as configured;
+- pagination and incremental retrieval complete correctly;
+- returned STIX objects are syntactically/semantically handled according to ATI's supported-object contract;
+- supported objects convert and persist through the production STIX 2.1 conversion path;
+- supported relationships preserve endpoint/provenance semantics;
+- datasource provenance identifies the actual OpenCTI/TAXII acquisition path;
+- unsupported or malformed objects fail or skip only according to the documented fail-closed policy, with bounded/sanitized diagnostics;
+- repeated/incremental acquisition preserves ATI's idempotency and history contracts.
+
+Live-data interoperability is a robustness/interoperability test, not a deterministic Fake World correctness oracle. It should not become a mandatory ordinary-CI dependency on changing external data.
+
+### Layering and acceptance intent
+
+The intended testing stack is therefore:
+
+| Layer | TAXII implementation | Data | Assertion style | Status |
+| --- | --- | --- | --- | --- |
+| Protocol | ATI-controlled deterministic server/fixtures | Deterministic | Exact protocol/conversion assertions | Planned |
+| Deterministic interoperability | Real OpenCTI TAXII 2.1 | ATI Fake World | Exact end-to-end assertions | OpenCTI prerequisite in PR 33; TAXII path planned |
+| Live interoperability | Real OpenCTI TAXII 2.1 | Real-world CTI dataset | Stable invariants + robustness diagnostics | Planned |
+
+The deterministic OpenCTI path is the reproducible interoperability gate. The live-data path supplements it by exposing ATI to real-world STIX diversity and changing CTI content; it must not replace the deterministic gate.
 
 ## Migration tests
 
