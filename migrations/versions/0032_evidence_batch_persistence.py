@@ -45,13 +45,15 @@ def _read(name: str) -> str:
 def upgrade() -> None:
     """Install the PR 28E batch persistence SQL API."""
     op.execute(_read("evidence_batch_persistence.sql"))
-    op.execute(text("COMMENT ON TABLE ati.evidence_message_receipt IS "
-                    "'PR 28E at-least-once message processing receipt (idempotency only)'"))
+    op.execute(
+        text(
+            "COMMENT ON TABLE ati.evidence_message_receipt IS "
+            "'PR 28E at-least-once message processing receipt (idempotency only)'"
+        )
+    )
 
 
 def downgrade() -> None:
     """Remove exactly the PR 28E objects introduced by this migration."""
-    op.execute(
-        "DROP FUNCTION IF EXISTS ati.persist_evidence_batch(jsonb)"
-    )
+    op.execute("DROP FUNCTION IF EXISTS ati.persist_evidence_batch(jsonb)")
     op.execute("DROP TABLE IF EXISTS ati.evidence_message_receipt")

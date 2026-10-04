@@ -10,15 +10,23 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
+from datetime import UTC, datetime
 from types import MappingProxyType
 
 from agentic_threat_investigator.app.datasource_evidence_producer import (
     CollectionDatasourceEvidenceProducer,
 )
+from agentic_threat_investigator.app.datasource_semantics import (
+    CollectionAcquisitionProgress,
+)
 from agentic_threat_investigator.app.evidence_log import EvidencePublisher
-from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
+from agentic_threat_investigator.app.persistence.repositories import (
+    DatasourceCheckpoint,
+    DatasourceCheckpointConflictError,
+    UnitOfWork,
+)
 from agentic_threat_investigator.app.providers import EvidenceProvider
 from agentic_threat_investigator.app.secrets import (
     EnvVarSecretsResolver,
@@ -27,6 +35,7 @@ from agentic_threat_investigator.app.secrets import (
 from agentic_threat_investigator.config.settings import Settings
 from agentic_threat_investigator.domain.datasource import (
     DatasourceDefinition,
+    DatasourceId,
     DatasourceProtocol,
     SerializationFormat,
 )
@@ -40,6 +49,16 @@ from agentic_threat_investigator.infrastructure.datasources.misp_evidence import
 )
 from agentic_threat_investigator.infrastructure.datasources.misp_semantics import (
     MispSemanticRecord,
+)
+from agentic_threat_investigator.infrastructure.datasources.stix21_evidence import (
+    build_stix21_conversion_registry,
+)
+from agentic_threat_investigator.infrastructure.datasources.stix21_semantics import (
+    Stix21Object,
+)
+from agentic_threat_investigator.infrastructure.datasources.taxii21 import (
+    TAXII_CHECKPOINT_KIND,
+    Taxii21Datasource,
 )
 from agentic_threat_investigator.infrastructure.datasources.threatfox import (
     ThreatFoxDatasource,
@@ -186,6 +205,173 @@ def compose_misp_collection_producer(
     )
 
 
+def _utc_now() -> datetime:
+    """Return the current UTC time."""
+    return datetime.now(UTC)
+
+
+def resolve_taxii_datasource_definition(
+    settings: Settings,
+) -> DatasourceDefinition | None:
+    """Resolve the authoritative TAXII ``DatasourceDefinition`` or ``None`` (PR 33E).
+
+    Selection is deterministic over ``settings.datasources`` only: exactly
+    one definition whose acquisition dimensions are TAXII_21 protocol, JSON
+    serialization, and STIX_21 semantic format is selected; zero returns
+    ``None`` (the not-configured state); more than one fails closed with
+    :class:`ValueError`. The MITRE ATT&CK STIX definition (FILE protocol)
+    can never match, so resolving a TAXII/OpenCTI datasource can never
+    accidentally select a MITRE STIX ingest path. The ``source_id`` is never
+    inferred from the URL or hostname: the definition's own explicit source
+    identity is authoritative and the acquirer stays source-neutral.
+    """
+    definitions = [
+        d
+        for d in settings.datasources
+        if d.protocol is DatasourceProtocol.TAXII_21
+        and d.serialization_format is SerializationFormat.JSON
+        and d.semantic_format is SemanticFormatId.STIX_21
+    ]
+    if not definitions:
+        return None
+    if len(definitions) > 1:
+        raise ValueError(
+            "multiple TAXII/STIX datasource definitions are ambiguous; "
+            "configure exactly one TAXII datasource for the configured instance"
+        )
+    return definitions[0]
+
+
+def _validate_taxii_definition(definition: DatasourceDefinition) -> None:
+    """Fail closed unless the definition matches the TAXII/STIX collection contract.
+
+    Mirrors ``Taxii21Datasource._validate_definition`` so a configured URL
+    paired with a missing or mismatched definition fails before any
+    acquisition. The source identity remains unrestricted (generic TAXII
+    acquisition) and no dimension is inferred from another.
+    """
+    if definition.protocol is not DatasourceProtocol.TAXII_21:
+        raise ValueError("TAXII datasource definition protocol must be TAXII_21")
+    if definition.serialization_format is not SerializationFormat.JSON:
+        raise ValueError(
+            "TAXII datasource definition serialization_format must be JSON"
+        )
+    if definition.semantic_format is not SemanticFormatId.STIX_21:
+        raise ValueError("TAXII datasource definition semantic_format must be STIX_21")
+
+
+def build_taxii_checkpoint_committer(
+    uow_factory: Callable[[], UnitOfWork],
+    *,
+    checkpoint_kind: str = TAXII_CHECKPOINT_KIND,
+    clock: Callable[[], datetime] | None = None,
+) -> Callable[[DatasourceId, CollectionAcquisitionProgress], Awaitable[None]]:
+    """Build the source-neutral TAXII post-publication progress committer (PR 33E).
+
+    The committer owns every repository interaction of checkpoint
+    advancement: it reads the current durable row in one short committed
+    UnitOfWork, refuses a candidate that would move the canonical TAXII
+    date-added checkpoint backward, treats an equal candidate as an
+    idempotent no-op, and otherwise compare-and-advances with the freshly
+    read value as the optimistic expectation. A concurrent execution that
+    advanced the row in between surfaces a typed
+    :class:`DatasourceCheckpointConflictError` and nothing is overwritten.
+    The producer invokes this committer **after** PUBLISHED and **before**
+    COMPLETED so publication always precedes any durable checkpoint
+    advancement (at-least-once replay safety).
+    """
+    utc_clock: Callable[[], datetime] = clock if clock is not None else _utc_now
+
+    async def commit(
+        datasource_id: DatasourceId, progress: CollectionAcquisitionProgress
+    ) -> None:
+        if progress.kind != checkpoint_kind or progress.candidate is None:
+            return
+        async with uow_factory() as uow:
+            current = await uow.datasource_checkpoints.get(
+                datasource_id=datasource_id.value,
+                checkpoint_kind=progress.kind,
+            )
+            if current is not None and progress.candidate < current.checkpoint_value:
+                # Canonical TAXII date-added timestamps are fixed-width UTC
+                # strings, so lexical comparison is chronological; a
+                # candidate that sorts earlier would move the cursor backward.
+                raise DatasourceCheckpointConflictError(
+                    "checkpoint candidate would move the TAXII cursor backward"
+                )
+            if current is not None and progress.candidate == current.checkpoint_value:
+                return
+            await uow.datasource_checkpoints.advance(
+                datasource_id=datasource_id.value,
+                checkpoint_kind=progress.kind,
+                expected_value=(
+                    current.checkpoint_value if current is not None else None
+                ),
+                new_value=progress.candidate,
+                updated_at=utc_clock(),
+            )
+
+    return commit
+
+
+def compose_taxii_collection_producer(
+    settings: Settings,
+    *,
+    datasource: Taxii21Datasource | None,
+    uow_factory: Callable[[], UnitOfWork],
+    publisher: EvidencePublisher | None = None,
+    secrets: SecretsResolver | None = None,
+    checkpoint_reader: Callable[[], Awaitable[DatasourceCheckpoint | None]]
+    | None = None,
+    progress_committer: (
+        Callable[[DatasourceId, CollectionAcquisitionProgress], Awaitable[None]] | None
+    ) = None,
+) -> CollectionDatasourceEvidenceProducer[Stix21Object] | None:
+    """Compose the configured TAXII collection Evidence producer, or ``None`` (PR 33E).
+
+    ``None`` is the durable not-configured state: a blank ``taxii_api_root_url``
+    (``ProviderComposition.taxii_datasource`` is ``None``) requires no bearer
+    token and produces no collection producer. A configured datasource with
+    a missing or mismatched TAXII ``DatasourceDefinition`` fails closed with
+    :class:`ValueError` before any acquisition. The converter registry is the
+    real :func:`build_stix21_conversion_registry` selected by
+    ``SemanticFormatId.STIX_21`` (never by source or protocol); the concrete
+    Kafka publisher is injected behind the ``EvidencePublisher`` ABC and
+    defaults to :func:`compose_kafka_publisher` over
+    ``settings.evidence_kafka``. The durable post-publication committer
+    defaults to :func:`build_taxii_checkpoint_committer` over
+    ``uow_factory``. TAXII/OpenCTI never enters the Investigation provider
+    registry and no scheduler is introduced here.
+    """
+    if datasource is None:
+        return None
+    definition = resolve_taxii_datasource_definition(settings)
+    if definition is None:
+        raise ValueError(
+            "taxii_api_root_url is configured but settings.datasources declares "
+            "no TAXII/STIX datasource definition"
+        )
+    _validate_taxii_definition(definition)
+    selected_publisher = publisher
+    if selected_publisher is None:
+        selected_publisher = compose_kafka_publisher(
+            settings.evidence_kafka, secrets=secrets
+        )
+    if checkpoint_reader is not None:
+        datasource = datasource.with_checkpoint_reader(checkpoint_reader)
+    committer = progress_committer
+    if committer is None:
+        committer = build_taxii_checkpoint_committer(uow_factory)
+    return CollectionDatasourceEvidenceProducer(
+        definition=definition,
+        acquirer=datasource,
+        registry=build_stix21_conversion_registry(),
+        publisher=selected_publisher,
+        uow_factory=uow_factory,
+        progress_committer=committer,
+    )
+
+
 async def _compose_dbip_city_lite(
     settings: Settings, stack: AsyncExitStack
 ) -> tuple[DbIpCityLiteProvider, CityLiteDatabase]:
@@ -233,6 +419,7 @@ class ProviderComposition:
         self._abuseipdb: AbuseIpdbProvider | None = None
         self._threatfox_datasource: ThreatFoxDatasource | None = None
         self._misp_datasource: MispDatasource | None = None
+        self._taxii_datasource: Taxii21Datasource | None = None
         self._urlhaus: UrlhausProvider | None = None
         self._dbip_city_lite: DbIpCityLiteProvider | None = None
 
@@ -403,6 +590,41 @@ class ProviderComposition:
                     max_pages=settings.misp_max_pages,
                 )
 
+            # TAXII 2.1 collection acquisition (PR 33E): composed only when
+            # an API-root URL is configured, because TAXII is a configured
+            # collection datasource that is not wired into the production
+            # runtime before PR 33E wiring. An unset URL keeps ordinary
+            # fake/local startup legal without any TAXII bearer-token
+            # requirement. When configured, the bearer token is resolved
+            # here through the same bootstrap contract; the acquirer receives
+            # only the resolved token and never reads configuration or the
+            # environment. The durable-checkpoint reader is attached later at
+            # the operating-mode composition boundary where the UnitOfWork
+            # factory is available (see
+            # :func:`compose_taxii_collection_producer`).
+            if settings.taxii_api_root_url:
+                taxii_token = resolver.require(settings.taxii_bearer_token_secret)
+                http = factory.create(
+                    policy,
+                    BoundedLimiter(
+                        RateLimiterSettings(
+                            max_concurrency=settings.taxii_max_concurrency,
+                            requests_per_second=settings.taxii_requests_per_second,
+                        )
+                    ),
+                )
+                stack.push_async_callback(http.aclose)
+                clients.append(http)
+                composition._taxii_datasource = Taxii21Datasource(
+                    http,
+                    api_root_url=settings.taxii_api_root_url,
+                    collection_id=settings.taxii_collection_id,
+                    bearer_token=taxii_token,
+                    page_size=settings.taxii_page_size,
+                    max_pages=settings.taxii_max_pages,
+                    initial_added_after=(settings.taxii_initial_added_after or None),
+                )
+
             # Local DB-IP City Lite geolocation: composed only when the
             # credential-free artifact URI is configured. The artifact must
             # already exist and be readable; composition fails fast otherwise.
@@ -479,6 +701,20 @@ class ProviderComposition:
         owned HTTP client, limiter, and resolved API key.
         """
         return self._misp_datasource
+
+    @property
+    def taxii_datasource(self) -> Taxii21Datasource | None:
+        """PR 33E TAXII 2.1 collection acquirer, or ``None`` when unset.
+
+        The acquirer is composed only when ``taxii_api_root_url`` (and its
+        required collection ID) is configured; ``None`` is the documented
+        not-configured state that requires no bearer token. It is **not**
+        registered as an ``EvidenceProvider`` and carries its own owned HTTP
+        client, limiter, and resolved bearer token. The durable-checkpoint
+        reader is attached at the operating-mode composition boundary (see
+        :meth:`Taxii21Datasource.with_checkpoint_reader`).
+        """
+        return self._taxii_datasource
 
     @property
     def dbip_city_lite(self) -> DbIpCityLiteProvider | None:

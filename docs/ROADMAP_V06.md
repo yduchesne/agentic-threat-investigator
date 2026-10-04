@@ -498,7 +498,7 @@ placeholder Identity/Location/ObservedData Entity is fabricated.
 The source-neutral assertion seam is reusable by MISP Object References
 when/if their richer relationship semantics are enabled.
 
-## PR 33E — TAXII 2.1 acquisition and runtime integration
+## PR 33E — TAXII 2.1 acquisition and runtime integration `[DONE]`
 
 Implement TAXII 2.1 as an acquisition/protocol integration that feeds the
 existing STIX 2.1 semantic pipeline.
@@ -523,6 +523,17 @@ Add deterministic fake TAXII fixtures/server-boundary behavior plus real ATI
 runtime/persistence vertical slices. Automated tests must not require a live
 public TAXII service.
 
+Status: durable incremental TAXII 2.1 retrieval, bounded pagination,
+envelope validation, typed safe errors, the datasource checkpoint system
+(compare-and-advance stored functions), runtime composition, the
+real-Redpanda vertical slices, and the OpenCTI 6.9 interoperability
+harness are implemented. Unit, integration, and real-broker TLS-free
+gates pass; the optional OpenCTI harness additionally validates real
+OpenCTI 6.9 boot, health, GraphQL seeding (`uploadAndAskJobImport` +
+`INTERNAL_IMPORT_FILE`), TAXII 2.1 serving (`/taxii2/root/`), and the
+production acquisition path — see `docs/TESTING.md` for the pinned-image
+topology and the environmental caveat around OpenCTI's import
+materialization.
 ## Deferred beyond v0.6
 
 The following are not implied by this roadmap and require separate approval:

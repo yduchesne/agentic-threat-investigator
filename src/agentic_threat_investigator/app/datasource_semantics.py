@@ -176,6 +176,43 @@ T = TypeVar("T")
 
 
 @dataclass(frozen=True)
+class CollectionAcquisitionProgress:
+    """Source-neutral acquisition progress candidate of one collection run (PR 33E).
+
+    One bounded operational progress proposal returned by a checkpointed
+    collection acquirer: ``kind`` names the interpretation (for example
+    ``taxii_added_after``), ``previous`` is the durable value the execution
+    actually started from (``None`` when no durable checkpoint existed), and
+    ``candidate`` is the value the publication-safe committer may advance to
+    (``None`` means the execution proposes no advancement). The candidate is
+    always derived from the source's own progress semantics (TAXII date-added
+    metadata for TAXII), never from ATI wall-clock retrieval time, STIX
+    timestamps, or broker positions. It is operational state, never an
+    Evidence value; the acquirer itself never persists it.
+    """
+
+    kind: str
+    previous: str | None
+    candidate: str | None
+
+    def __post_init__(self) -> None:
+        """Validate the bounded kind and canonical value strings."""
+        from agentic_threat_investigator.app.persistence.repositories import (
+            validate_checkpoint_kind,
+        )
+
+        validate_checkpoint_kind(self.kind)
+        for value in (self.previous, self.candidate):
+            if value is not None:
+                if not value.strip() or value != value.strip():
+                    raise ValueError(
+                        "checkpoint progress values must be nonblank and trimmed"
+                    )
+                if len(value) > 512:
+                    raise ValueError("checkpoint progress value exceeds the bound")
+
+
+@dataclass(frozen=True)
 class SemanticAcquisitionResult(Generic[T]):
     """A small generic outcome of one semantic acquisition execution.
 
@@ -183,13 +220,21 @@ class SemanticAcquisitionResult(Generic[T]):
     empty (a valid no-result is successful empty semantics, never benign
     evidence); failure means ``error`` is set and ``objects`` is empty.
     A valid no-result is never a benign evidence result.
+
+    ``progress`` (PR 33E) is an optional source-neutral acquisition-progress
+    candidate returned only by checkpointed collection acquirers (TAXII):
+    the entity-triggered and non-checkpointed collection paths leave it
+    ``None``. The producer commits it only after successful publication.
     """
 
     context: SemanticSourceContext
     objects: tuple[T, ...] = ()
     error: DatasourceStageError | None = None
+    progress: CollectionAcquisitionProgress | None = None
 
     def __post_init__(self) -> None:
         """Enforce the success/failure invariant of the generic result."""
         if self.error is not None and self.objects:
             raise ValueError("a failed semantic acquisition cannot carry objects")
+        if self.error is not None and self.progress is not None:
+            raise ValueError("a failed semantic acquisition cannot carry progress")

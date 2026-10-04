@@ -1670,6 +1670,149 @@ Real-stack vertical slices (only external MISP HTTPS is faked, in-process
   authoritative observation references); K06 pre-commit persistence failure
   with broker uncommitted until the retry's PostgreSQL commit succeeds.
 
+### TAXII 2.1 acquisition and runtime integration (PR 33E)
+
+Deterministic unit/offline matrices (only the external TAXII 2.1 HTTPS
+boundary is faked, via in-process `httpx.MockTransport` that speaks the
+real wire contract):
+
+- protocol/envelope (`tests/unit/infrastructure/datasources/test_taxii21.py`,
+  T33E-P01..P18): empty envelope is valid empty semantics; one/multiple
+  objects preserve order exactly; `more=true` requires a nonblank opaque
+  `next`; malformed roots/non-array `objects` fail closed; non-object and
+  malformed STIX members fail the whole acquisition semantically; a valid
+  unsupported STIX object is accepted (converter yields zero later); a
+  Bundle member is rejected by the direct object boundary (never
+  fake-wrapped); opaque punctuation-bearing `next` round-trips verbatim;
+  `application/taxii+json;version=2.1` is accepted and incompatible
+  content types are bounded serialization failures; date-added headers
+  canonicalize and malformed values fail closed; server error bodies never
+  leak into outcomes.
+- acquisition/pagination (`test_taxii21.py`, T33E-A01..A20): no
+  checkpoint -> no `added_after`; configured initial cursor sent; durable
+  checkpoint wins; 2-3 page runs pass the exact `next` tokens in strict
+  order; `max_pages` reached with `more=true` is a successful bounded
+  window with no extra request; empty first page is successful empty;
+  401/403/404/429/timeout map to bounded codes; a malformed later page or
+  later-page STIX member yields zero semantic objects overall; cancellation
+  propagates unchanged; pages are strictly sequential (single in-flight
+  request, no second limiter); the bearer token travels only in the
+  `Authorization` header; public collections send no header; the
+  source reference is credential-free with no incremental cursor state.
+- checkpoint semantics (`tests/unit/app/test_taxii_checkpoint_commit.py`,
+  T33E-C01..C20): the durable checkpoint advances only after a successful
+  publish; HTTP/STIX/conversion/publication/PUBLISHED-append failures leave
+  it unchanged; checkpoint-DB failure after publish fails the call and
+  permits replay; COMPLETED-append failure keeps the (already advanced)
+  checkpoint without republishing; older candidates are rejected and equal
+  candidates are idempotent no-ops; stale expectations conflict without
+  overwrite; `next` is never a durable checkpoint value; STIX `modified`
+  and ATI `retrieved_at` never drive the cursor; cancellation before the
+  commit leaves the checkpoint unchanged.
+- settings (`tests/unit/config/test_taxii_settings.py`) and composition
+  (`tests/unit/infrastructure/providers/test_taxii_collection_composition.py`,
+  T33E-R01..R15): blank URL -> no producer/token; URL + exact definition
+  composes; missing/ambiguous definitions fail closed; the MITRE ATT&CK
+  FILE STIX definition can never be selected; HTTPS/FILE instead of
+  TAXII_21, non-JSON, and non-STIX dimensions fail closed; OpenCTI is pure
+  provenance and another explicit source works generically; a missing
+  bearer secret fails at composition before HTTP; the converter registry is
+  selected only by STIX_21; TAXII/OpenCTI is absent from the Investigation
+  provider registry.
+- checkpoint DB matrix (`tests/integration/test_datasource_checkpoint.py`,
+  T33E-DB01..DB10, real PostgreSQL): absent read is `None`; first advance
+  creates version 1; equal advance is an idempotent no-op; a later advance
+  bumps the version; an earlier TAXII date-added candidate is rejected by
+  the kind adapter (never a generic lexical rule); a stale
+  compare-and-advance conflicts without overwrite; datasource and kind
+  isolation; oversized values are rejected; the schema exposes exactly the
+  bounded operational columns.
+
+Real-stack vertical slices (`tests/integration/test_taxii_evidence_pipeline.py`,
+V01..V14, real PostgreSQL + `InMemoryEvidenceLog`): IOC ingestion, the five
+CTI SDO types, Relationship ingestion with exact observation provenance,
+Sighting stays Evidence + entity association with zero edges,
+mixed supported/unsupported (unsupported = zero Evidence), cross-page
+request/message order, the incremental second execution using the durable
+checkpoint, publisher failure without advancement, checkpoint-commit
+failure after broker publication (no rollback, no republish, replay
+legal), replay idempotency with stable deterministic identity, bounded
+max-pages windows advancing only through admitted pages, malformed later
+page atomicity (zero Evidence, unchanged checkpoint), source-namespace
+separation (same STIX ID in OpenCTI and another source: separate Evidence,
+shared Entity), and unresolved-reference safety (no placeholder
+Entity/edge).
+
+## OpenCTI interoperability harness (PR 33E section 10)
+
+The **separate, explicit OpenCTI interoperability gate** is NOT part of
+ordinary `./build.sh --intg` (normal integration stays deterministic and
+OpenCTI-free). Entry point:
+
+```bash
+./scripts/opencti-integration.sh
+# optional flags: --keep-on-failure --incremental --timeout <seconds>
+```
+
+Topology (pinned images only): `opencti/platform:6.9.29` +
+`opencti/worker:6.9.29` + `opencti/connector-import-file-stix:6.9.29`
++ `redis:8.10.1` + `docker.elastic.co/elasticsearch/elasticsearch:8.19.21`
++ `rabbitmq:4.3-management` + `nginx:1.27.5` (TLS terminator for the
+credential-free HTTPS production client) + `chrislusf/seaweedfs:latest`
+(S3-compatible object store; MinIO archived its open-source server and
+revoked public container pulls, so the harness substitutes SeaweedFS's
+S3 gateway, path-style addressing like OpenCTI's `forcePathStyle`) +
+ATI PostgreSQL + ATI Redpanda.
+The harness owns its Compose project, random host ports, synthetic random
+credentials, and an ATI-authored deterministic STIX fake world
+(`tests/interop/opencti/fixtures/opencti_fake_world.py`), whose fixed IDs
+and the expected-state manifest are consumed by both the readiness barrier
+and the assertion suite.
+
+Flow: start isolated topology -> wait infrastructure health -> bootstrap
+OpenCTI (admin user, TAXII collection, restricted consumer bearer token
+via the standard GraphQL surface) -> seed fixtures (bundle upload through
+6.9's `uploadAndAskJobImport` + `INTERNAL_IMPORT_FILE` connector) -> wait
+real TAXII feed convergence -> run the production
+`Taxii21Datasource`/producer over real Redpanda -> wait the PostgreSQL-
+backed ingestion-completion barrier
+(`tests/interop/opencti/status.py --wait`, exit 0 only for
+`READY_FOR_ASSERTIONS`; never fixed sleeps) -> only then run the interop
+assertion suite (`pytest tests/interop -m interop`) -> collect evidence ->
+teardown. `--incremental` additionally seeds v2 objects and proves the
+second acquisition uses the durable checkpoint. `--keep-on-failure` retains
+the topology; `status.py --diagnose` collects a bounded diagnostic bundle
+under `artifacts/opencti-interop/<run-id>/` (gitignored) that classifies
+the failure stage/root cause without ever printing credentials or raw
+payloads.
+
+OpenCTI 6.9 API deltas the harness accommodates (verified against the
+pinned image): the platform health endpoint requires the configured
+`?health_access_key=` query parameter; the TAXII 2.1 server is rooted at
+`/taxii2/root/` (not `/taxii2/`); `APP__ADMIN__TOKEN` must be a strict
+UUIDv4; bundle ingestion uses the module-level `uploadAndAskJobImport`
+mutation (the legacy `importBundle` mutation and `authTokenAdd` are gone,
+replaced by `userEdit { tokenRenew { api_token } }`); the worker reads
+`OPENCTI_URL`/`OPENCTI_TOKEN` (+ the import connector process must run as
+its own service). Known environmental caveat: OpenCTI 6.9's import
+materialization depends on the import connector and the platform's
+internal queue dispatch; on the host used to develop the harness the
+convergence gate + production acquisition were reached, while full
+materialization of every STIX fixture type remained subject to the
+OpenCTI-side workbench/queue behavior — the barrier treats that as a
+non-READY stage and collects a diagnostic bundle rather than ever
+asserting wrong state.
+
+Orchestration-state machine unit tests O01..O14
+(`tests/unit/infrastructure/test_opencti_interop_status.py`) prove the
+gate ordering with fabricated probes: seed-accepted-but-feed-not-visible
+waits; feed-visible-producer-running waits; producer-COMPLETED-consumer-
+incomplete waits; broker-drained-but-rows-absent never READY; all-durable-
+state-present is READY; FAILED/CANCELLED datasource and consumer failures
+are terminal; hard timeouts diagnose non-zero; unrelated traffic is
+ignored; unsupported fixtures converge per manifest; checkpoint
+expectations gate readiness; status reruns recover the same durable stage.
+
 MITRE regressions unchanged: STIX-parser reuse in the batch source keeps
 `SourceRecord` identities, canonical payloads, content hashes, and
 checkpoints identical across the unit source tests, the ATT&CK ingestion

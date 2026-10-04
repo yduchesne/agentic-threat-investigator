@@ -27,6 +27,7 @@ class SourceId(str, Enum):
     MITRE_ATTACK = "urn:ati:source:mitre_attack"
     CISA_KEV = "urn:ati:source:cisa_kev"
     MISP = "urn:ati:source:misp"
+    OPENCTI = "urn:ati:source:opencti"
 
 
 class SemanticFormatId(str, Enum):

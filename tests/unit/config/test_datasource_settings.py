@@ -35,9 +35,9 @@ def _threatfox_definition(datasource_id: str) -> dict[str, object]:
 
 
 def test_default_settings_expose_representative_definitions() -> None:
-    """Settings defaults carry the two documented representative definitions."""
+    """Settings defaults carry the documented representative definitions."""
     settings = Settings()
-    assert len(settings.datasources) == 2
+    assert len(settings.datasources) == 3
     by_id = {d.datasource_id.value: d for d in settings.datasources}
     assert by_id["threatfox-live"].source_id is SourceId.THREATFOX
     assert by_id["threatfox-live"].protocol is DatasourceProtocol.HTTPS
@@ -45,6 +45,13 @@ def test_default_settings_expose_representative_definitions() -> None:
     assert by_id["mitre-attack-enterprise"].source_id is SourceId.MITRE_ATTACK
     assert by_id["mitre-attack-enterprise"].protocol is DatasourceProtocol.FILE
     assert by_id["mitre-attack-enterprise"].semantic_format is SemanticFormatId.STIX_21
+    # PR 33E: TAXII is protocol; OpenCTI is provenance only; STIX 2.1 remains
+    # the sole semantic format of the TAXII/OpenCTI representative definition.
+    opencti = by_id["opencti-collection"]
+    assert opencti.source_id is SourceId.OPENCTI
+    assert opencti.protocol is DatasourceProtocol.TAXII_21
+    assert opencti.serialization_format is SerializationFormat.JSON
+    assert opencti.semantic_format is SemanticFormatId.STIX_21
     for definition in settings.datasources:
         assert isinstance(definition, DatasourceDefinition)
         assert definition.serialization_format is SerializationFormat.JSON

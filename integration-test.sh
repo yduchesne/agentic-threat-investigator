@@ -247,10 +247,9 @@ echo "== Applying Alembic migrations =="
 uv run alembic upgrade head
 
 echo "== Running integration tests =="
-# The authoritative 85% coverage gate is enforced by build.sh --qa on the
-# unit suite; the integration suite validates database behavior against real
-# PostgreSQL, so coverage is reported without a standalone threshold here.
-uv run pytest tests/integration -m integration \
+# ATI_PYTEST_TARGET narrows the run (e.g. one module while iterating); the
+# default exercises the full integration suite.
+uv run pytest ${ATI_PYTEST_TARGET:-tests/integration -m integration} \
   --cov=agentic_threat_investigator --cov-report=term-missing --cov-fail-under=0
 
 echo "== Building frontend production bundle =="

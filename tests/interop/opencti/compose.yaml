@@ -1,0 +1,235 @@
+# SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Isolated Podman/Compose stack owned exclusively by the OpenCTI interop
+# harness: ATI PostgreSQL 18 + pgvector, ATI Redpanda, and a pinned real
+# OpenCTI 6.9 deployment (platform + worker + the minimum backing services:
+# Redis, Elasticsearch single-node, RabbitMQ), plus a pinned nginx TLS
+# terminator so the real OpenCTI TAXII endpoint is served to ATI's
+# credential-free HTTPS provider client. Every image is pinned; no
+# ``latest`` is used. This file is NOT part of the ordinary developer
+# compose.yaml and normal ``./build.sh --intg`` never starts it.
+#
+# Host ports are randomized per run (above the ephemeral range) and the
+# Compose project name is per-run (``opencti-interop-<id>``), so the harness
+# can never collide with or disturb unrelated developer containers. Cleanup
+# removes only this project's containers/volumes. Synthetic random
+# credentials are injected via environment at run time and never committed.
+
+services:
+  ati-postgres:
+    build: ../../../docker/postgres
+    image: ati-postgres:0.1.0
+    environment:
+      POSTGRES_DB: ${ATI_INTEROP_DB:-ati_interop}
+      POSTGRES_USER: ${ATI_INTEROP_PGUSER:-ati}
+      POSTGRES_PASSWORD: ${ATI_INTEROP_PGPASSWORD}
+    ports:
+      - "${ATI_INTEROP_PG_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [interop]
+
+  ati-redpanda:
+    image: docker.io/redpandadata/redpanda:v24.3.8
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --node-id 0
+      - --check=false
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://ati-redpanda:29092,OUTSIDE://127.0.0.1:${ATI_INTEROP_REDPANDA_PORT}
+    ports:
+      - "${ATI_INTEROP_REDPANDA_PORT}:9092"
+    networks: [interop]
+
+  redis:
+    image: docker.io/library/redis:8.10.1
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [interop]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.21
+    environment:
+      - discovery.type=single-node
+      - xpack.ml.enabled=false
+      - xpack.security.enabled=false
+      - thread_pool.search.queue_size=1000
+      - "ES_JAVA_OPTS=-Xms512m -Xmx1g"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://elasticsearch:9200/_cluster/health?wait_for_status=yellow >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 8s
+      retries: 60
+    networks: [interop]
+
+  rabbitmq:
+    image: docker.io/library/rabbitmq:4.3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${ATI_INTEROP_RABBIT_USER:-ati}
+      RABBITMQ_DEFAULT_PASS: ${ATI_INTEROP_RABBIT_PASS}
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 8s
+      retries: 30
+    networks: [interop]
+
+  seaweedfs:
+    # OpenCTI 6.x requires an S3-compatible object store for its file
+    # storage dependency check and dataset uploads. MinIO archived its
+    # open-source server (and revoked public container pulls), so the
+    # harness uses SeaweedFS's S3 gateway as a drop-in MinIO replacement:
+    # path-style addressing (OpenCTI forces ``forcePathStyle``) is the one
+    # S3 behavior the platform actually depends on here. The S3 gateway is
+    # a separate ``weed s3`` process on top of ``weed server``.
+    image: docker.io/chrislusf/seaweedfs:latest
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      - AWS_ACCESS_KEY_ID=${ATI_INTEROP_S3_USER:-interop}
+      - AWS_SECRET_ACCESS_KEY=${ATI_INTEROP_S3_PASS}
+    command:
+      - 'weed server -dir=/data -volume.max=0 > /tmp/ws-server.log 2>&1 & sleep 8; weed filer -port=8888 > /tmp/ws-filer.log 2>&1 & sleep 8; exec weed s3 -port=9000 -filer=localhost:8888'
+    volumes:
+      - opencti-interop-seaweedfs-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/status >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 8s
+      retries: 30
+    restart: always
+    networks: [interop]
+
+  opencti-platform:
+    image: docker.io/opencti/platform:6.9.29
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=2048
+      - APP__PORT=8080
+      - APP__BASE_URL=http://localhost:${ATI_INTEROP_OPENCTI_PORT}
+      - APP__ADMIN__EMAIL=admin@opencti.io
+      - APP__ADMIN__PASSWORD=${ATI_INTEROP_OPENCTI_ADMIN_PASS}
+      - APP__ADMIN__TOKEN=${ATI_INTEROP_OPENCTI_ADMIN_TOKEN}
+      - APP__ENCRYPTION_KEY=${ATI_INTEROP_ENCRYPTION_KEY}
+      - APP__HEALTH_ACCESS_KEY=interop-health
+      - REDIS__HOSTNAME=redis
+      - REDIS__PORT=6379
+      - ELASTICSEARCH__URL=http://elasticsearch:9200
+      - ELASTICSEARCH__NUMBER_OF_REPLICAS=0
+      - RABBITMQ__HOSTNAME=rabbitmq
+      - RABBITMQ__PORT=5672
+      - RABBITMQ__PORT_MANAGEMENT=15672
+      - RABBITMQ__MANAGEMENT_SSL=false
+      - RABBITMQ__USERNAME=${ATI_INTEROP_RABBIT_USER:-ati}
+      - RABBITMQ__PASSWORD=${ATI_INTEROP_RABBIT_PASS}
+      - PROVIDERS__LOCAL__STRATEGY=LocalStrategy
+      - MINIO__ENDPOINT=seaweedfs
+      - MINIO__PORT=9000
+      - MINIO__USE_SSL=false
+      - MINIO__ACCESS_KEY=${ATI_INTEROP_S3_USER:-interop}
+      - MINIO__SECRET_KEY=${ATI_INTEROP_S3_PASS}
+      - MINIO__BUCKET_NAME=opencti
+    depends_on:
+      redis: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      seaweedfs: { condition: service_healthy }
+    ports:
+      - "${ATI_INTEROP_OPENCTI_PORT}:8080"
+    healthcheck:
+      # The OpenCTI image has no curl; probe with wget on the same port, and
+      # pass the health access key OpenCTI requires on /health as a query
+      # parameter (``$${...}`` survives Compose interpolation to reach sh).
+      test: ["CMD-SHELL", "wget -q -O /dev/null \"http://localhost:8080/health?health_access_key=$${APP__HEALTH_ACCESS_KEY}\" || exit 1"]
+      interval: 10s
+      timeout: 8s
+      retries: 90
+    # podman-compose 1.0.6 ignores ``condition: service_healthy`` dependency
+    # gating, so the platform commonly races Elasticsearch/RabbitMQ startup;
+    # the official OpenCTI deployment pattern restarts until ready.
+    restart: always
+    networks: [interop]
+
+  opencti-tls:
+    # TLS termination for the ATI production HTTP client: ATI's provider
+    # boundary requires credential-free HTTPS, so the harness fronts the
+    # OpenCTI TAXII 2.1 endpoint with a pinned nginx TLS proxy carrying the
+    # harness-generated self-signed certificate (the CA file is injected into
+    # the ATI driver so certificate verification stays fully on).
+    image: docker.io/library/nginx:1.27.5
+    volumes:
+      - "${ATI_INTEROP_TLS_DIR}:/etc/nginx/tls:ro"
+      - "${ATI_INTEROP_NGINX_CONF}:/etc/nginx/conf.d/default.conf:ro"
+    ports:
+      - "${ATI_INTEROP_TAXII_TLS_PORT}:443"
+    depends_on:
+      opencti-platform: { condition: service_healthy }
+    networks: [interop]
+
+  opencti-worker:
+    image: docker.io/opencti/worker:6.9.29
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=1024
+      # The 6.9 worker drives bundled imports through the pycti API client,
+      # which reads these OPENCTI_* keys (APP__BASE_URL is not enough).
+      - OPENCTI_URL=http://opencti-platform:8080
+      - OPENCTI_TOKEN=${ATI_INTEROP_OPENCTI_ADMIN_TOKEN}
+      - OPENCTI_SSL_VERIFY=false
+      - APP__BASE_URL=http://opencti-platform:8080
+      - REDIS__HOSTNAME=redis
+      - REDIS__PORT=6379
+      - ELASTICSEARCH__URL=http://elasticsearch:9200
+      - ELASTICSEARCH__NUMBER_OF_REPLICAS=0
+      - RABBITMQ__HOSTNAME=rabbitmq
+      - RABBITMQ__PORT=5672
+      - RABBITMQ__PORT_MANAGEMENT=15672
+      - RABBITMQ__USERNAME=${ATI_INTEROP_RABBIT_USER:-ati}
+      - RABBITMQ__PASSWORD=${ATI_INTEROP_RABBIT_PASS}
+      - MINIO__ENDPOINT=seaweedfs
+      - MINIO__PORT=9000
+      - MINIO__USE_SSL=false
+      - MINIO__ACCESS_KEY=${ATI_INTEROP_S3_USER:-interop}
+      - MINIO__SECRET_KEY=${ATI_INTEROP_S3_PASS}
+      - MINIO__BUCKET_NAME=opencti
+    restart: always
+    depends_on:
+      opencti-platform: { condition: service_healthy }
+    networks: [interop]
+
+  opencti-import-stix:
+    # OpenCTI 6.9 processes uploaded STIX bundles through a dedicated
+    # ``INTERNAL_IMPORT_FILE`` connector; without it the uploaded bundle
+    # never materializes into entities (and the TAXII feed stays empty).
+    image: docker.io/opencti/connector-import-file-stix:6.9.29
+    environment:
+      - OPENCTI_URL=http://opencti-platform:8080
+      - OPENCTI_TOKEN=${ATI_INTEROP_OPENCTI_ADMIN_TOKEN}
+      - CONNECTOR_ID=${ATI_INTEROP_CONNECTOR_ID}
+      - CONNECTOR_NAME=ATIInteropImportFileStix
+      - CONNECTOR_SCOPE=application/json,text/xml
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_VALIDATE_BEFORE_IMPORT=false
+    restart: always
+    depends_on:
+      opencti-platform: { condition: service_healthy }
+    networks: [interop]
+
+networks:
+  interop:
+    name: ${COMPOSE_PROJECT_NAME:-opencti-interop}_net
+volumes:
+  opencti-interop-seaweedfs-data: {}
