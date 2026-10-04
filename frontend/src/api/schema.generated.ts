@@ -1887,7 +1887,7 @@ export interface components {
          * @description Stable ATI relationship type URNs.
          * @enum {string}
          */
-        RelationshipType: "urn:ati:relationship:dns:resolves_to" | "urn:ati:relationship:dns:cname_of" | "urn:ati:relationship:dns:uses_name_server" | "urn:ati:relationship:dns:uses_mail_server" | "urn:ati:relationship:network:belongs_to" | "urn:ati:relationship:routing:announced_by" | "urn:ati:relationship:registration:registered_to" | "urn:ati:relationship:organization:operated_by" | "urn:ati:relationship:threat:associated_with" | "urn:ati:relationship:attack:uses_technique" | "urn:ati:relationship:vulnerability:exploits";
+        RelationshipType: "urn:ati:relationship:dns:resolves_to" | "urn:ati:relationship:dns:cname_of" | "urn:ati:relationship:dns:uses_name_server" | "urn:ati:relationship:dns:uses_mail_server" | "urn:ati:relationship:network:belongs_to" | "urn:ati:relationship:routing:announced_by" | "urn:ati:relationship:registration:registered_to" | "urn:ati:relationship:organization:operated_by" | "urn:ati:relationship:threat:associated_with" | "urn:ati:relationship:attack:uses_technique" | "urn:ati:relationship:vulnerability:exploits" | "urn:ati:relationship:threat:uses" | "urn:ati:relationship:threat:targets" | "urn:ati:relationship:threat:attributed_to" | "urn:ati:relationship:threat:controls";
         /**
          * ReportFindingResponse
          * @description Application-copied snapshot of one authoritative Assessment finding.

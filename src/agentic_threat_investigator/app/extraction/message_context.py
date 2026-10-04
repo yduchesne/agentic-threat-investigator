@@ -25,11 +25,15 @@ provider invocation Entity. This module owns that message-to-view seam:
   remaining IOC identities are returned nowhere here — the deterministic
   MISP extractor owns the additional represented Entities;
 - the STIX 2.1 invocation identity is derived deterministically from the
-  durable normalized facts: the single represented ``facts.cti_entity``
-  block for a supported CTI SDO (the evidence's own subject, never a
+  durable normalized facts: a PR 33D source assertion (Relationship/
+  Sighting Evidence) derives the transient invocation Entity from the
+  normalized assertion (a Relationship's **source endpoint**, a Sighting's
+  ``sighting_of`` endpoint) with contradictory shapes failing closed; a
+  supported CTI SDO derives it from the single represented
+  ``facts.cti_entity`` block (the evidence's own subject, never a
   fabricated owner), otherwise the first ordered ``facts.iocs`` entry
   exactly like MISP — the deterministic STIX extractor owns the additional
-  represented IOC Entities;
+  represented Entities/assertion endpoints;
 - unsupported sources/evidence types and malformed facts fail closed with
   typed :class:`EvidenceExtractionError` subclasses, so an unprocessable
   message never fabricates graph structure.
@@ -52,6 +56,10 @@ from agentic_threat_investigator.app.extraction.models import (
     EvidenceExtractionError,
     EvidenceExtractionView,
     ExtractionErrorReason,
+)
+from agentic_threat_investigator.app.extraction.source_assertion import (
+    validate_relationship_body,
+    validate_sighting_body,
 )
 from agentic_threat_investigator.app.extraction.stix import (
     validate_stix_cti_entity_fact,
@@ -179,15 +187,25 @@ def extraction_view_from_message(
 def _stix_invocation_entity(message: EvidenceMessage) -> Entity:
     """Derive the transient STIX invocation Entity from durable facts.
 
-    For a supported CTI SDO the represented ``facts.cti_entity`` block IS the
-    evidence subject, so the invocation Entity is derived from that durable
-    fact (this is source-fact-derived execution context, never a fabricated
-    semantic owner). Otherwise the first ordered ``facts.iocs`` entry is the
-    transient invocation Entity exactly as the MISP boundary does; both
-    helpers fail closed with :class:`MalformedMessageExtractionError` on any
-    malformed or non-canonical durable fact and never echo fact content.
+    Dispatch priority is unambiguous: a PR 33D source assertion derives the
+    invocation identity from the normalized assertion (Relationship evidence
+    -> the assertion's **source endpoint**; Sighting evidence -> the
+    ``sighting_of`` endpoint), with every contradictory/shared shape
+    (assertion plus ``cti_entity``, assertion plus nonempty ``iocs``, a
+    missing/mismatched relationship/sighting body, an unknown kind, or a
+    tampered endpoint) failing closed. For a supported CTI SDO the
+    represented ``facts.cti_entity`` block IS the evidence subject, so the
+    invocation Entity is derived from that durable fact (this is
+    source-fact-derived execution context, never a fabricated semantic
+    owner). Otherwise the first ordered ``facts.iocs`` entry is the
+    transient invocation Entity exactly as the MISP boundary does. All
+    helpers fail closed with :class:`MalformedMessageExtractionError` on
+    any malformed or non-canonical durable fact and never echo fact content.
     """
     facts = message.facts
+    source_assertion = facts.get("source_assertion")
+    if source_assertion is not None:
+        return _stix_assertion_invocation_entity(message)
     cti_entity = facts.get("cti_entity")
     if cti_entity is not None:
         try:
@@ -217,6 +235,91 @@ def _stix_invocation_entity(message: EvidenceMessage) -> Entity:
             evidence_id=message.evidence_id,
         ) from exc
     return Entity(type=entity_type, value=value)
+
+
+def _stix_assertion_invocation_entity(message: EvidenceMessage) -> Entity:
+    """Derive the transient invocation Entity of one durable STIX assertion.
+
+    The assertion profile is mutually exclusive with the CTI/IOC profiles:
+    ``cti_entity`` must be absent and ``iocs`` must be empty. A
+    ``kind=relationship`` assertion uses its normalized **source endpoint**
+    as the transient invocation Entity (execution context only, never
+    persisted ownership); a ``kind=sighting`` assertion uses its
+    ``sighting_of`` endpoint. Unknown kinds, missing/mismatched
+    relationship/sighting bodies, and any shape contradiction fail closed.
+    The STIX extractor returns both Relationship endpoints and the Sighting
+    Entity, so consumer preflight observes complete assertion closure.
+    """
+    facts = message.facts
+    if facts.get("cti_entity") is not None:
+        raise MalformedMessageExtractionError(
+            message.source_id.value,
+            "STIX assertion evidence cannot carry cti_entity",
+            evidence_id=message.evidence_id,
+        )
+    iocs = facts.get("iocs")
+    if not isinstance(iocs, (list, tuple)) or iocs:
+        raise MalformedMessageExtractionError(
+            message.source_id.value,
+            "STIX assertion evidence must carry an empty iocs array",
+            evidence_id=message.evidence_id,
+        )
+    source_assertion = facts.get("source_assertion")
+    if not isinstance(source_assertion, Mapping):
+        raise MalformedMessageExtractionError(
+            message.source_id.value,
+            "STIX source assertion facts are malformed",
+            evidence_id=message.evidence_id,
+        )
+    kind = source_assertion.get("kind")
+    try:
+        if kind == "relationship":
+            if source_assertion.get("sighting") is not None:
+                raise MalformedMessageExtractionError(
+                    message.source_id.value,
+                    "STIX relationship assertion carries a sighting body",
+                    evidence_id=message.evidence_id,
+                )
+            body = source_assertion.get("relationship")
+            if not isinstance(body, Mapping):
+                raise MalformedMessageExtractionError(
+                    message.source_id.value,
+                    "STIX relationship assertion body is missing",
+                    evidence_id=message.evidence_id,
+                )
+            assertion = validate_relationship_body(dict(body))
+            endpoint_type, endpoint_value = assertion.source
+            return Entity(type=endpoint_type, value=endpoint_value)
+        if kind == "sighting":
+            if source_assertion.get("relationship") is not None:
+                raise MalformedMessageExtractionError(
+                    message.source_id.value,
+                    "STIX sighting assertion carries a relationship body",
+                    evidence_id=message.evidence_id,
+                )
+            body = source_assertion.get("sighting")
+            if not isinstance(body, Mapping):
+                raise MalformedMessageExtractionError(
+                    message.source_id.value,
+                    "STIX sighting assertion body is missing",
+                    evidence_id=message.evidence_id,
+                )
+            sighting = validate_sighting_body(dict(body))
+            endpoint_type, endpoint_value = sighting.sighting_of
+            return Entity(type=endpoint_type, value=endpoint_value)
+        raise MalformedMessageExtractionError(
+            message.source_id.value,
+            "STIX source assertion carries an unknown kind",
+            evidence_id=message.evidence_id,
+        )
+    except MalformedMessageExtractionError:
+        raise
+    except ValueError as exc:
+        raise MalformedMessageExtractionError(
+            message.source_id.value,
+            "STIX source assertion facts are malformed",
+            evidence_id=message.evidence_id,
+        ) from exc
 
 
 _MISP_IOC_TYPE_DOMAIN = EntityType.DOMAIN.value

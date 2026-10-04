@@ -1430,6 +1430,111 @@ graph/render tests, and the untouched `ENTITY_TYPE_OPTIONS` Investigation
 seed form. No CTI-specific endpoint, icon, or broad UI redesign is
 introduced; type differentiation remains textual.
 
+### Source-asserted relationships and STIX Sightings (PR 33D)
+
+PR 33D adds the four source-neutral RelationshipType URNs (`USES`,
+`TARGETS`, `ATTRIBUTED_TO`, `CONTROLS`), the stable `source_assertion`
+normalized-fact key, and the bounded STIX 2.1 Relationship/Sighting
+conversion+extraction+persistence profile over the existing global Evidence
+path. Matrices are deterministic, offline where possible, and real-PG/real
+Redpanda in the slices:
+
+- `tests/unit/domain/test_relationship_types.py` (M33D-D01..D07): the
+  four URNs are exact, all pre-existing URNs are byte-unchanged, the URNs
+  are free-text for the generic persistence path (no migration), and the
+  OpenAPI + frontend registries (`labels.ts`, `relationships.json`
+  i18n) represent all four;
+- `tests/unit/infrastructure/datasources/test_stix21_assertion_evidence.py`
+  (M33D-R01..R38 + M33D-S01..S25): the exact §5.3 Relationship matrix
+  (13 admitted pairs -> exactly one Evidence each with pinned normalized
+  assertion facts), exact Evidence identity from the STIX Relationship ID
+  + source namespace, `observed_at=None`, context retrieval provenance,
+  normalized `start_time`/`stop_time` with ordering enforcement,
+  same-edge/different-ID and different-namespace identity separation,
+  admitted-prefix malformed UUID as bounded `ConversionError`, the
+  no-echo error rule, `indicates`/`related-to`/malware/domain/attack-
+  pattern/vulnerability endpoints and out-of-profile endpoint pairs as
+  zero Evidence, blank/non-string `relationship_type` as bounded failure,
+  the exact Sighting profile (one Evidence per CTI `sighting_of_ref`,
+  pinned shape, normalized first/last, positive count, boolean summary,
+  bounded ordered reference lists with the 256 maximum and malformed-
+  member rejection, out-of-order rejection, malware/indicator/domain/IP
+  sightings as zero), no synthetic Sighting edge, the converter's
+  profile table and reference-list bound pinned to the extraction-side
+  table/seam, and converter isolation from persistence/graph imports;
+- `tests/unit/app/extraction/test_stix_assertion_extraction.py`
+  (M33D-X01..X16): one Relationship assertion extracts exactly the two
+  canonical endpoint Entities (first-seen source order) and one approved
+  RelationshipAssertion in source-asserted direction; a Sighting extracts
+  exactly the sighted Entity and zero assertions; `where_sighted_refs` /
+  `observed_data_refs` create no Entity or edge; self-edges, tampered
+  STIX/ATI mapping pairs, inconsistent endpoint types, unknown kinds,
+  contradictory profiles (assertion + `cti_entity` or nonempty `iocs`),
+  and missing/mismatched bodies fail closed with `MALFORMED_FACTS`
+  without echoing content; the legacy IOC/CTI-SDO paths and the pure-
+  no-I/O module guarantee stay intact;
+- `tests/unit/app/extraction/test_stix_assertion_message_context.py`
+  (M33D-M01..M13): a Relationship derives its transient invocation Entity
+  from the durable **source endpoint**, a Sighting from `sighting_of`;
+  assertion + `cti_entity`, assertion + nonempty `iocs`, unknown kinds,
+  missing/mismatched relationship/sighting bodies, and tampered endpoint
+  canonicality fail closed with `MalformedMessageExtractionError` without
+  echoing content; the old IOC and CTI-SDO paths are unchanged.
+
+The PostgreSQL vertical slices
+(`tests/integration/test_stix_assertion_pipeline.py`, M33D-V01..V10) run
+the same real all-production slice as M33C-V01..V07 over real PostgreSQL:
+
+- M33D-V01: threat actor USES tool — one Evidence, one
+  EvidenceObservation, two canonical Entities with two `
+  EvidenceObservationEntity` associations, one `USES` Relationship A->B,
+  one RelationshipObservation whose `evidence_observation_id` equals the
+  exact persisted observation ID, `observed_at` null, `retrieved_at` from
+  the context, `source` the ATI source namespace;
+- M33D-V02: one supported assertion of each of the four relationship types
+  persists the four exact URNs with asserted directions;
+- M33D-V03: the same semantic edge asserted by two different STIX
+  Relationship IDs yields two Evidence identities, two observations, one
+  stable Relationship, and two RelationshipObservations with distinct
+  per-Evidence provenance;
+- M33D-V04: the same Relationship ID with same edge but later material
+  `modified`/`start_time`/`stop_time` appends a second observation and a
+  second RelationshipObservation reusing the one Relationship;
+- M33D-V05: the same Relationship ID changing its semantic edge
+  (A USES tool B -> A USES infrastructure C) keeps one Evidence identity,
+  appends a new observation, and preserves the old Relationship without
+  deletion or end inference;
+- M33D-V06: a Sighting with full first/last/count/summary/reference facts
+  persists one Evidence + observation + one sighted Entity association
+  and zero Relationship/RelationshipObservation rows;
+- M33D-V07: a later Sighting material version appends a second observation
+  and associates the same canonical Entity, still with zero graph edges;
+- M33D-V08: a mixed batch of supported Relationship / unsupported
+  `indicates` / supported Sighting / malware Sighting converts exactly
+  two messages and persists only the supported structure;
+- M33D-V09: the same Relationship ID + edge under two ATI source
+  namespaces yields two Evidence identities and two
+  RelationshipObservations sharing the one canonical Relationship;
+- M33D-V10: a batch containing a valid supported Relationship message and
+  a tampered assertion message fails atomically in consumer preflight
+  with zero PostgreSQL rows (no partial write, no receipt).
+
+The distributed durable-ingestion acceptance
+(`tests/integration/kafka/test_stix_assertion_distributed_ingestion.py`,
+M33D-K01..K03) reuses the existing real Redpanda + PostgreSQL harness:
+
+- M33D-K01: a Relationship published through `EvidencePublisher` -> real
+  Redpanda -> `EvidencePersistenceConsumer` -> real PostgreSQL persists
+  the full V01 result (evidence, observation, both endpoint Entities,
+  one Relationship, one RelationshipObservation with exact observation
+  provenance);
+- M33D-K02: a Sighting persists evidence + observation + sighted Entity
+  association with zero relationship rows, and `first_seen`/`last_seen`
+  never become an ATI observation time;
+- M33D-K03: a tampered assertion fails consumer preflight before any
+  PostgreSQL write and the Kafka position stays uncommitted — a
+  same-group reader still sees the message for redelivery.
+
 ### Native MISP REST acquisition (PR 32C)
 
 PR 32C adds bounded native MISP Event acquisition tests

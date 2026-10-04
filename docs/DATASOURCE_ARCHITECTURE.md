@@ -592,7 +592,8 @@ Evidence):
   },
   "indicator": null,
   "iocs": [{"type": "domain", "value": "example.test"}],
-  "cti_entity": null
+  "cti_entity": null,
+  "source_assertion": null
 }
 ```
 
@@ -617,12 +618,13 @@ model, and future TAXII sources may carry it under any ATI source
 namespace. A valid unsupported object and a valid-but-unsupported pattern
 each return zero Evidence deterministically.
 
-TAXII discovery/collections/pagination/authentication, CTI Entity
-expansion (PR 33C), Relationship/Sighting semantics (PR 33D), TAXII
-acquisition/runtime integration (PR 33E), URL/file/hash/email/certificate
-IOC support, exhaustive STIX SCO support, and full STIX Patterning are
-explicitly out of scope; `DATA_SOURCES.md` does not claim TAXII support
-and no all-STIX-objects-produce-Evidence claim is made.
+TAXII discovery/collections/pagination/authentication, URL/file/hash/email/certificate
+IOC support, exhaustive STIX SCO support, exhaustive STIX relationship/
+sighting coverage, and full STIX Patterning are explicitly out of scope
+(PR 33B/33C): a bounded Relationship/Sighting profile lands in PR 33D and
+TAXII acquisition/runtime integration in PR 33E. `DATA_SOURCES.md` does
+not claim TAXII support and no all-STIX-objects-produce-Evidence claim is
+made.
 
 ## Source-neutral CTI Entity expansion (PR 33C, delivered)
 
@@ -670,7 +672,7 @@ by `SemanticFormatId.STIX_21`) now admits exactly five CTI SDO types:
 A selected CTI type with a malformed required identity/name raises a
 bounded `ConversionError` (zero converted output for the batch call); a
 valid unsupported object still yields zero Evidence. The normalized facts
-now use one stable four-block shape shared by every supported object:
+now use one stable five-key shape shared by every supported object:
 
 ```json
 {
@@ -681,7 +683,8 @@ now use one stable four-block shape shared by every supported object:
     "type": "threat_actor",
     "value": "threat-actor--11111111-1111-1111-1111-111111111111",
     "display_name": "Example Group"
-  }
+  },
+  "source_assertion": null
 }
 ```
 
@@ -690,7 +693,9 @@ IOC/Indicator Evidence keeps `cti_entity: null`; CTI SDO Evidence keeps
 `value` the exact validated machine ID, and `display_name` the exact source
 name. `relationship`/`sighting` objects, `created_by_ref`, `object_refs`,
 `aliases`, `labels`, `external_references`, and `object_marking_refs` stay
-unconsumed source facts — never Entity or edge state. Generic STIX
+unconsumed source facts in PR 33C (PR 33D later consumes the bounded
+Relationship/Sighting profiles while every other reference stays a fact) —
+never Entity or edge state. Generic STIX
 `attack-pattern`/`malware`/`vulnerability` remain unsupported because ATI's
 `ATTACK_TECHNIQUE`/`MALWARE`/`VULNERABILITY` contracts are narrower
 canonical identity contracts and name-based mapping would be unsafe.
@@ -699,14 +704,18 @@ canonical identity contracts and name-based mapping would be unsafe.
 
 The PR 28E durable seam (`app/extraction/message_context.py`) reconstructs
 the STIX invocation target from normalized facts — never a fabricated
-semantic owner: the single `cti_entity` block is the represented subject of
+semantic owner: a PR 33D source assertion derives it from the normalized
+assertion (a Relationship's **source endpoint**, a Sighting's
+`sighting_of`), a single `cti_entity` block is the represented subject of
 a CTI SDO, otherwise the first ordered `iocs` entry exactly as the MISP
 collection solution does. The source-neutral STIX extractor
 (`app/extraction/stix.py`) is dispatched by semantic format (STIX 2.1 has
 deliberately no fixed `SourceId` guard) and consumes only durable facts. It
 produces exactly one canonical CTI Entity per `cti_entity` block (or every
 represented IOC identity for PR 33B Evidence, first-seen deduplicated) and
-**zero relationships**. Malformed durable facts fail closed with
+**zero relationships**; the PR 33D assertion path produces the endpoint
+Entities plus exactly one approved RelationshipAssertion (or zero for
+Sighting). Malformed durable facts fail closed with
 `EvidenceExtractionError(MALFORMED_FACTS)` without echoing source values.
 
 Persistence reuses the global Evidence batch path unchanged
@@ -728,6 +737,154 @@ CTI types, so no provider or orchestration capability is invented.
 
 PR 33D owns source-asserted Relationship/Sighting semantics; PR 33E owns
 TAXII acquisition. No relationship/sighting/TAXII work happened in 33C.
+
+## Source-asserted CTI relationships and STIX 2.1 Sightings (PR 33D, delivered)
+
+PR 33D adds the first source-neutral durable assertion contract for
+external CTI relationships and a deliberately bounded STIX 2.1
+`relationship`/`sighting` Evidence profile. The dominant architectural
+rule is unchanged: a source assertion becomes ATI graph state **only**
+through durable Evidence and deterministic extraction. The converter
+preserves source semantics as Evidence facts; it never persists and never
+constructs durable graph rows.
+
+### Normalized source-assertion fact contract
+
+Every supported STIX Evidence now carries the stable five-key fact shape
+(key order pinned by the regression tests):
+
+```json
+{
+  "stix": {},
+  "indicator": null,
+  "iocs": [],
+  "cti_entity": null,
+  "source_assertion": null
+}
+```
+
+`source_assertion` is **never conditionally absent**: PR 33B/33C objects
+carry explicit `null`; supported Relationship/Sighting objects carry one
+`kind`-discriminated block (`"relationship"` or `"sighting"`).
+
+Relationship form:
+
+```json
+{
+  "kind": "relationship",
+  "relationship": {
+    "type": "uses",
+    "ati_type": "urn:ati:relationship:threat:uses",
+    "source": { "type": "threat_actor", "value": "threat-actor--..." },
+    "target": { "type": "tool", "value": "tool--..." },
+    "start_time": null,
+    "stop_time": null
+  },
+  "sighting": null
+}
+```
+
+Sighting form:
+
+```json
+{
+  "kind": "sighting",
+  "relationship": null,
+  "sighting": {
+    "sighting_of": { "type": "threat_actor", "value": "threat-actor--..." },
+    "first_seen": null,
+    "last_seen": null,
+    "count": null,
+    "summary": null,
+    "where_sighted_refs": [],
+    "observed_data_refs": []
+  }
+}
+```
+
+Endpoint identities are canonical machine identities only (no display
+names are fabricated); relationship `start_time`/`stop_time` and Sighting
+`first_seen`/`last_seen` are normalized UTC `Z` facts that never become
+ATI `observed_at`; `where_sighted_refs`/`observed_data_refs` are bounded
+ordered provenance lists (single maximum 256, never sorted, never
+deduplicated, never interpreted as edges).
+
+### Approved Relationship profile
+
+Only the exact §5.3 matrix produces Evidence (STIX relationship string + endpoint
+type pair -> ATI RelationshipType):
+
+| STIX `relationship_type` | allowed source types | allowed target types | ATI URN |
+|---|---|---|---|
+| `uses` | threat-actor, campaign, intrusion-set | tool, infrastructure | `urn:ati:relationship:threat:uses` |
+| `targets` | threat-actor, campaign, intrusion-set | infrastructure | `urn:ati:relationship:threat:targets` |
+| `attributed-to` | campaign, intrusion-set | threat-actor | `urn:ati:relationship:threat:attributed_to` |
+| `controls` | threat-actor, intrusion-set | infrastructure | `urn:ati:relationship:threat:controls` |
+
+A semantically valid Relationship outside this table — `indicates`,
+`related-to`, an admitted string whose endpoint types are outside the
+profile, or an endpoint reference to `malware`/`domain-name`/etc. — is
+**valid but Evidence-unsupported** and returns zero Evidence. Unsupported
+strings are never mapped to `ASSOCIATED_WITH` or any other existing URN.
+Once an object claims an admitted profile candidate, a malformed consumed
+field (blank `relationship_type`/`source_ref`/`target_ref`, an admitted
+endpoint prefix with a non-canonical UUID, malformed/out-of-order
+`start_time`/`stop_time`) raises a bounded `ConversionError` that never
+echoes source content.
+
+Endpoint identity is the PR 33C CTI machine-ID contract: an endpoint
+reference resolves only for the five `threat-actor--`/`campaign--`/
+`intrusion-set--`/`tool--`/`infrastructure--` prefixes, and the canonical
+value is the exact validated STIX object ID. No cross-message object
+lookup, name/alias-derived identity, hidden reference cache, or placeholder
+Entity ever exists. Relationship direction follows the source assertion
+(`source_ref -> target_ref`); no reciprocal or symmetric edge is inferred.
+
+### Approved Sighting profile
+
+A Sighting is Evidence-supported only when `sighting_of_ref` is an exact
+canonical reference to one of the five CTI Entity types; a Sighting of
+malware/indicator/domain/IP/attack-pattern/etc. returns zero Evidence.
+`where_sighted_refs`/`observed_data_refs` produce **zero** Entities and
+**zero** RelationshipAssertions (no `SIGHTED_AT`-style invented edge).
+Malformed consumed fields (bad `sighting_of_ref` UUID, out-of-order
+`first_seen`/`last_seen`, non-positive/`count`, non-boolean `summary`,
+over-bound/malformed reference lists) raise a bounded `ConversionError`.
+
+### Ownership boundaries (unchanged)
+
+- `Stix21ToEvidenceConverter` (still the sole STIX converter, keyed only by
+  `SemanticFormatId.STIX_21`) decides whether a validated object produces
+  Evidence and preserves normalized source facts; it has no persistence or
+  graph imports.
+- `app/extraction/source_assertion.py` is the source-neutral normalized-fact
+  validation seam (reusable by a future MISP adapter); it imports no STIX
+  parser, persistence, broker, or API code, and the STIX→ATI profile
+  mapping stays in the STIX adapter.
+- `app/extraction/message_context.py` reconstructs only the execution
+  identity required by extraction: a Relationship's invocation Entity is
+  its **source endpoint**, a Sighting's is `sighting_of`; contradictory
+  durable shapes fail closed with `MalformedMessageExtractionError`.
+- the STIX extractor deterministically derives the endpoint Entities and
+  exactly one approved `RelationshipAssertion` (or zero for Sighting),
+  revalidating the full durable fact and the exact profile mapping so a
+  tampered message (for example `type: "uses"` paired with
+  `ati_type: "...targets"`) fails closed.
+- the existing Evidence consumer/batch persistence path persists everything
+  unchanged: `Evidence`, `EvidenceObservationEntity` associations for both
+  endpoints, the stable `Relationship`, and the immutable
+  `RelationshipObservation` backed by the exact authoritative
+  `EvidenceObservation`. Distinct assertions of the same semantic edge
+  reuse one Relationship while retaining per-Evidence observation
+  provenance; a semantic-edge change under one stable Evidence identity
+  appends new observations and relationships without mutating or deleting
+  the historical edge.
+
+Investigation admission is unchanged: the five CTI Entity types remain
+excluded from `INVESTIGATION_SEED_TYPES`, and Relationship/Sighting
+Evidence never launches provider or orchestration work. No migration was
+introduced (the relationship-type URN stays free text). TAXII remains out
+of scope (PR 33E).
 
 ## Native MISP REST acquisition (PR 32C, delivered)
 

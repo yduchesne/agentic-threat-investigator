@@ -378,9 +378,25 @@ class RelationshipType(str, Enum):
     ASSOCIATED_WITH = "urn:ati:relationship:threat:associated_with"
     USES_TECHNIQUE = "urn:ati:relationship:attack:uses_technique"
     EXPLOITS = "urn:ati:relationship:vulnerability:exploits"
+    # PR 33D: the four source-neutral CTI assertion types.
+    USES = "urn:ati:relationship:threat:uses"
+    TARGETS = "urn:ati:relationship:threat:targets"
+    ATTRIBUTED_TO = "urn:ati:relationship:threat:attributed_to"
+    CONTROLS = "urn:ati:relationship:threat:controls"
 ```
 
 URN values are durable external identifiers stored in the database/API. Enum member names are implementation conveniences.
+
+The four PR 33D values are the minimum **source-neutral** assertion
+vocabulary admitted by external CTI sources. They are produced only through
+the durable Evidence source-assertion seam (STIX 2.1 Relationship/Sighting
+conversion today, MISP Object References later) and are never lossy aliases
+of the existing URNs above. They follow the same direction and provenance
+rules as every other relationship: the source Entity is the assertion's
+left endpoint (STIX ``source_ref``), the target Entity the right endpoint
+(``target_ref``), no reciprocal/symmetric edge is inferred, and each
+immutable ``RelationshipObservation`` is backed by the exact
+``EvidenceObservation`` that carried the source assertion.
 
 ```python
 class Relationship(BaseModel):
@@ -405,6 +421,21 @@ class RelationshipObservation(BaseModel):
 Relationship identity is unique by source entity, relationship URN, and target entity.
 
 A Relationship is the durable semantic edge. RelationshipObservation records when and why ATI observed or imported the assertion and is frozen after validation. Since PR 28A the observation references the exact supporting ``EvidenceObservation`` (``evidence_observation_id``) and carries no Investigation correlation: relationships are global per observation, and reusing an observation in multiple Investigations never duplicates the observation. In v0.1 persistence the Evidence row *is* the observation, so the v0.1 adapter maps its ``evidence_id`` onto this field until PR 28B migrates the schema. Historical relationships are not deleted merely because they are no longer current.
+
+#### Source assertions (PR 33D)
+
+Source-asserted edges (STIX Relationship/Sighting Evidence) reuse this same
+durable model with no new persistence path. Repeated source assertions of
+the identical ``(source, type, target)`` semantic edge reuse one stable
+``Relationship`` while each distinct source assertion keeps its own
+immutable ``RelationshipObservation``; a material change of the same STIX
+object appends observations; and a source-asserted change of the endpoint
+or type under one stable Evidence identity appends new relationships
+without mutating or deleting historical edges. A STIX Sighting never
+creates a Relationship (it only associates the sighted Entity with the
+Evidence observation). Relationship ``start_time``/``stop_time`` and
+Sighting ``first_seen``/``last_seen`` remain normalized source facts and
+never become ``RelationshipObservation.observed_at``.
 
 ### Graph read projections (PR 31A)
 

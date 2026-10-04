@@ -344,6 +344,21 @@ It records which canonical Entities are materially represented in the exact obse
 
 `RelationshipObservation` becomes global and references the exact supporting `EvidenceObservation`, not Evidence, Investigation, or InvestigationEvidence. Extraction is therefore global per EvidenceObservation. Reusing an observation in multiple Investigations does not duplicate the relationship observation merely because another Investigation admitted it.
 
+#### Source assertions (PR 33D)
+
+External CTI source assertions (STIX 2.1 Relationship/Sighting Evidence) follow
+the same Evidence-backed path: a converter preserves the normalized source
+assertion as Evidence facts, deterministic extraction derives the endpoint
+Entities and exactly one approved RelationshipAssertion (Sightings derive
+only the sighted Entity and zero assertions), and the existing batch
+persistence resolves/upserts the stable `Relationship` and appends one
+immutable `RelationshipObservation` referencing the exact authoritative
+`EvidenceObservation`. Repeated assertions of the same semantic edge reuse
+one Relationship while keeping per-Evidence observation provenance; a
+source-asserted change of endpoint or type under one stable Evidence
+identity appends new observations and relationships without mutating or
+deleting historical edges. No new persistence path exists.
+
 ### InvestigationEvidence
 
 Investigations admit exact immutable observations:

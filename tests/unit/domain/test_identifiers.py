@@ -72,6 +72,11 @@ def test_relationship_type_urns_are_stable() -> None:
         "urn:ati:relationship:threat:associated_with",
         "urn:ati:relationship:attack:uses_technique",
         "urn:ati:relationship:vulnerability:exploits",
+        # PR 33D: the four source-neutral CTI assertion URNs.
+        "urn:ati:relationship:threat:uses",
+        "urn:ati:relationship:threat:targets",
+        "urn:ati:relationship:threat:attributed_to",
+        "urn:ati:relationship:threat:controls",
     }
 
 

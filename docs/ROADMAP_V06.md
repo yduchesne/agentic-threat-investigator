@@ -437,23 +437,65 @@ MISP Galaxy/cluster conversion, cross-source entity resolution, new
 persistence path, second STIX converter, or generic STIX ontology mirror
 was introduced.
 
-## PR 33D — Source-asserted relationships and STIX sightings
+## PR 33D — Source-asserted relationships and STIX sightings [DONE]
 
-Introduce source-neutral deterministic handling for external intelligence that
-asserts relationships, then map supported STIX Relationship and Sighting
-objects through that mechanism.
+Introduced source-neutral deterministic handling for external intelligence that
+asserts relationships, then mapped the approved bounded STIX Relationship and
+Sighting profile through that mechanism.
 
 A STIX converter preserves the source assertion as Evidence facts; the
 existing deterministic extraction/application persistence boundary owns
 canonical ATI Relationship and immutable RelationshipObservation creation.
-Do not create a `StixRelationshipPersistenceService` or permit converters to
+No `StixRelationshipPersistenceService` was created and converters never
 write graph state directly.
 
-Preserve `observed_at`, source first/last-seen fields, retrieval time, and
-source assertion timestamps as distinct concepts. Never infer relationship
-start/end or continuous validity from isolated source observations.
+Delivered scope:
 
-The source-neutral assertion seam should be reusable by MISP Object References
+- four source-neutral RelationshipType URNs (`USES`, `TARGETS`,
+  `ATTRIBUTED_TO`, `CONTROLS`) with all pre-existing relationship URNs
+  unchanged;
+- the stable `source_assertion` normalized-fact key (never conditionally
+  absent; `null` for PR 33B/33C Evidence) and the source-neutral
+  normalized-fact validation seam (`app/extraction/source_assertion.py`)
+  reusable by a future MISP Object Reference adapter;
+- supported STIX Relationships: the exact §5.3 profile (admitted
+  relationship string + five-CTI endpoint type pairs) -> exactly one
+  Evidence with pinned assertion facts, canonical endpoint machine
+  identities, normalized `start_time`/`stop_time`, and
+  `observed_at=None`; valid-but-unsupported Relationships yield zero
+  Evidence; malformed consumed fields of admitted-profile candidates raise
+  bounded `ConversionError` without echoing source content;
+- supported STIX Sightings: `sighting_of_ref` canonical to one of the five
+  CTI Entity types -> exactly one Evidence preserving
+  `first_seen`/`last_seen`/`count`/`summary` and bounded ordered
+  `where_sighted_refs`/`observed_data_refs` (maximum 256) with
+  `observed_at=None`; Sighting conversion creates zero graph edges;
+- durable message reconstruction derives only safe transient invocation
+  identities (a Relationship's source endpoint, a Sighting's
+  `sighting_of`) and fails closed on contradictory durable shapes;
+- deterministic extraction revalidates the full durable assertion,
+  cross-checks the STIX/ATI/endpoint profile mapping (tampered messages
+  fail closed), and yields the endpoint Entities plus exactly one approved
+  RelationshipAssertion (Sightings yield the sighted Entity only);
+- reuse of the existing global Evidence batch persistence path with exact
+  `EvidenceObservation` -> `RelationshipObservation` provenance:
+  repeated assertions of the same semantic edge reuse one Relationship
+  with per-Evidence observations, material version updates append
+  observations, and a semantic-edge change under one stable Evidence
+  identity preserves historical edges without deletion or end inference;
+- real PostgreSQL vertical slices (M33D-V01..V10) and real
+  Redpanda + PostgreSQL distributed-ingestion acceptance (M33D-K01..K03);
+- no migration, no STIX-specific persistence path/repository/table/topic,
+  no new converter, no Investigation admission expansion, and no TAXII
+  code (PR 33E keeps ownership).
+
+Preserved `observed_at`, source first/last-seen fields, retrieval time, and
+source assertion timestamps as distinct concepts. No relationship
+start/end, continuity, currentness, or absence-after-`stop_time` is ever
+inferred, and no Sighting `where_sighted_refs`/`observed_data_refs` edge or
+placeholder Identity/Location/ObservedData Entity is fabricated.
+
+The source-neutral assertion seam is reusable by MISP Object References
 when/if their richer relationship semantics are enabled.
 
 ## PR 33E — TAXII 2.1 acquisition and runtime integration

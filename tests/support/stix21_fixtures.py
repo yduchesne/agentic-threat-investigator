@@ -219,27 +219,49 @@ def stix_malware(**overrides: Any) -> dict[str, Any]:
     return value
 
 
-def stix_relationship(**overrides: Any) -> dict[str, Any]:
-    """Build one synthetic valid (unsupported) STIX 2.1 ``relationship`` SDO."""
+def stix_relationship(
+    *,
+    relationship_type: str = "indicates",
+    source_ref: str = INDICATOR_ID,
+    target_ref: str = MALWARE_ID,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Build one synthetic valid STIX 2.1 ``relationship`` SDO (PR 33D).
+
+    The default profile is the PR 33B/33C valid-but-unsupported shape
+    (``indicates`` between an Indicator and malware) so existing zero-
+    Evidence tests stay valid; PR 33D tests pass a supported
+    ``relationship_type`` plus exact ``source_ref``/``target_ref`` pairs
+    from the five CTI fixture IDs.
+    """
     value: dict[str, Any] = {
         "type": "relationship",
         "id": RELATIONSHIP_ID,
         "spec_version": "2.1",
-        "relationship_type": "indicates",
-        "source_ref": INDICATOR_ID,
-        "target_ref": MALWARE_ID,
+        "relationship_type": relationship_type,
+        "source_ref": source_ref,
+        "target_ref": target_ref,
     }
     value.update(overrides)
     return value
 
 
-def stix_sighting(**overrides: Any) -> dict[str, Any]:
-    """Build one synthetic valid (unsupported) STIX 2.1 ``sighting`` SDO."""
+def stix_sighting(
+    *,
+    sighting_of_ref: str = MALWARE_ID,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Build one synthetic valid STIX 2.1 ``sighting`` SDO (PR 33D).
+
+    The default ``sighting_of_ref`` targets malware (the PR 33B/33C
+    valid-but-unsupported shape) so existing zero-Evidence tests stay
+    valid; PR 33D tests pass one of the five CTI fixture IDs.
+    """
     value: dict[str, Any] = {
         "type": "sighting",
         "id": SIGHTING_ID,
         "spec_version": "2.1",
-        "sighting_of_ref": MALWARE_ID,
+        "sighting_of_ref": sighting_of_ref,
     }
     value.update(overrides)
     return value

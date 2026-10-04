@@ -1888,6 +1888,50 @@ persistence path: durable extraction produces one canonical Entity and
 zero Relationships/RelationshipObservations per object, and no
 relationship/sighting/TAXII/cross-source-equivalence feature is claimed.
 
+### STIX 2.1 Relationship and Sighting Evidence profile (PR 33D)
+
+PR 33D extends the same converter (still one STIX converter, selected only
+by `SemanticFormatId.STIX_21`) with the first source-neutral durable
+assertion contract. Valid STIX must be distinguished from
+ATI-Evidence-supported STIX; both are documented here.
+
+Supported Relationships (exact §5.3 matrix):
+
+| STIX `relationship_type` | source types | target types | ATI RelationshipType URN |
+|---|---|---|---|
+| `uses` | threat-actor / campaign / intrusion-set | tool / infrastructure | `urn:ati:relationship:threat:uses` |
+| `targets` | threat-actor / campaign / intrusion-set | infrastructure | `urn:ati:relationship:threat:targets` |
+| `attributed-to` | campaign / intrusion-set | threat-actor | `urn:ati:relationship:threat:attributed_to` |
+| `controls` | threat-actor / intrusion-set | infrastructure | `urn:ati:relationship:threat:controls` |
+
+A supported Relationship produces exactly one Evidence carrying one
+`source_assertion` block: the admitted STIX relationship string, the exact
+ATI RelationshipType wire URN, canonical endpoint machine identities (the
+five PR 33C CTI object IDs), and normalized `start_time`/`stop_time`
+facts. `observed_at` stays `None`. A valid Relationship outside the table
+(`indicates`, `related-to`, an admitted string with non-admitted endpoint
+types, or an endpoint referencing `malware`/`domain-name`/etc.) yields
+zero Evidence; malformed consumed fields of an admitted-profile candidate
+raise a bounded `ConversionError` that never echoes source content.
+
+Supported Sightings are exactly those whose `sighting_of_ref` is a
+canonical reference to one of the five CTI Entity types; each produces one
+Evidence whose `source_assertion` preserves `sighting_of`, normalized
+`first_seen`/`last_seen`, positive `count`, boolean `summary`, and bounded
+ordered `where_sighted_refs`/`observed_data_refs` (maximum 256, source
+order preserved). `where_sighted_refs`/`observed_data_refs` create no
+Entities and no edges, `first_seen`/`last_seen` never set `observed_at`,
+and a Sighting of malware/indicator/domain/IP/etc. yields zero Evidence.
+
+Both assertion forms flow through the existing global Evidence batch path:
+durable extraction revalidates the facts and yields the endpoint Entities
+plus one approved RelationshipAssertion (or only the sighted Entity for a
+Sighting), and persistence creates the stable Relationship plus immutable
+RelationshipObservations backed by the exact EvidenceObservation. No new
+persistence path, no STIX-specific repository/service/table, and no
+migration were introduced. As before, no TAXII capability is claimed
+(PR 33E owns TAXII acquisition/runtime integration).
+
 ## Structured batch sources
 
 ### MITRE ATT&CK
