@@ -111,6 +111,7 @@ async def reset_application_data(
         "geo_resolution",
         "location",
         "datasource_log",
+        "datasource_checkpoint",
     )
     async with integration_engine.begin() as connection:
         # Migration round-trip tests (test_migration) downgrade the schema
@@ -153,6 +154,7 @@ async def reset_application_data(
             "geo_resolution",
             "location",
             "datasource_log",
+            "datasource_checkpoint",
         )
         existing = tuple(name for name in tables if name.strip('"') in present)
         if existing:

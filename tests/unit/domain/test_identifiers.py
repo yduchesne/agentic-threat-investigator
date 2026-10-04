@@ -29,6 +29,7 @@ def test_source_identifier_urns_are_stable() -> None:
         "urn:ati:source:mitre_attack",
         "urn:ati:source:cisa_kev",
         "urn:ati:source:misp",
+        "urn:ati:source:opencti",
     }
 
 

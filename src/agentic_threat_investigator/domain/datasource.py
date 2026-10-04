@@ -86,6 +86,7 @@ class DatasourceProtocol(StrEnum):
 
     HTTPS = "https"
     FILE = "file"
+    TAXII_21 = "taxii21"
 
 
 class SerializationFormat(StrEnum):
@@ -142,12 +143,23 @@ REPRESENTATIVE_DATASOURCE_DEFINITIONS: tuple[DatasourceDefinition, ...] = (
         serialization_format=SerializationFormat.JSON,
         semantic_format=SemanticFormatId.STIX_21,
     ),
+    DatasourceDefinition(
+        datasource_id=DatasourceId("opencti-collection"),
+        source_id=SourceId.OPENCTI,
+        protocol=DatasourceProtocol.TAXII_21,
+        serialization_format=SerializationFormat.JSON,
+        semantic_format=SemanticFormatId.STIX_21,
+    ),
 )
-"""Repository-owned representative datasource definitions (PR 27A).
+"""Repository-owned representative datasource definitions (PR 27A + PR 33E).
 
 Proves the architectural separation without migrating runtime ingestion:
-ThreatFox is HTTPS + JSON with its own proprietary semantic format, while
-MITRE ATT&CK is FILE + JSON with the shared STIX 2.1 semantic format.
+ThreatFox is HTTPS + JSON with its own proprietary semantic format, MITRE
+ATT&CK is FILE + JSON with the shared STIX 2.1 semantic format, and OpenCTI
+is TAXII 2.1 + JSON with the same shared STIX 2.1 semantic format — the
+TAXII/STIX dimensions are orthogonal and STIX remains the sole semantic
+format for every STIX-carrying datasource (never an OpenCTI/TAXII semantic
+dimension).
 """
 
 

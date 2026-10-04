@@ -1001,6 +1001,77 @@ remains a **collection** datasource: it never becomes an Investigation
   metadata remains source fact, never ATI authorization; collection
   ingestion never creates `InvestigationEvidence`.
 
+## TAXII 2.1 acquisition and runtime integration (PR 33E, delivered)
+
+PR 33E adds TAXII 2.1 as a **generic acquisition protocol** and closes
+v0.6 by feeding the existing STIX 2.1 semantic/Evidence pipeline through
+one configured collection. TAXII only retrieves STIX objects; it never
+interprets STIX. The dominant ordering invariant: *a TAXII execution may
+advance its durable incremental-retrieval checkpoint only after the
+corresponding ordered Evidence publication has succeeded.*
+
+- **Dimensions.** `DatasourceProtocol.TAXII_21 = "taxii21"` joins the
+  protocol vocabulary (HTTPS/FILE unchanged); serialization stays JSON;
+  `SemanticFormatId.STIX_21` is unchanged; `SourceId.OPENCTI` is added
+  for provenance only. OpenCTI has no special semantic path: it is
+  consumed through the same generic `Taxii21Datasource`, the same
+  `parse_stix21_object()`, and the same `Stix21ToEvidenceConverter`.
+- **Protocol module.** `infrastructure/datasources/taxii21.py` owns the
+  narrow TAXII contract: the immutable `Taxii21ObjectPage` model
+  (`objects` order preserved, `more` + opaque `next`, canonical
+  date-added headers), envelope validation (empty envelopes are
+  successful empty semantics; `more=true` without a nonblank `next`
+  fails closed; malformed pages fail the whole acquisition with zero
+  objects), and the bounded `Taxii21Datasource` acquirer. A TAXII
+  envelope is never rewritten into a synthetic STIX Bundle; every member
+  passes through `parse_stix21_object()` individually.
+- **Ordered bounded acquisition.** Pages are strictly sequential
+  (`next` is response-dependent); `ProviderHttpClient` owns timeout,
+  retries, response-size bounds, content-type verification, concurrency
+  admission, optional rate limiting, and cancellation — no second limiter
+  or `TaskGroup` is stacked. `added_after` (durable checkpoint or
+  configured initial cursor) is sent on the first page only. Reaching
+  `max_pages` with `more=true` is successful bounded-window completion.
+- **Safe errors.** HTTP/auth failures map to the bounded stage-aware
+  codes (timeout, rate_limited, authentication_failed, forbidden,
+  not_found, provider_unavailable, serialization_failed,
+  protocol_validation_failed, semantic_validation_failed); 401/403/404
+  semantics stay intentionally uninterpreted, and raw server bodies are
+  never promoted into errors/logs.
+- **Durable checkpoint (Part 7).** `ati.datasource_checkpoint` (SQL API
+  v0032) stores one row per `(datasource_id, checkpoint_kind)` with a
+  bounded canonical value, `updated_at`, and an optimistic-concurrency
+  version. The stored functions `ati.get_datasource_checkpoint` /
+  `ati.advance_datasource_checkpoint` own row creation, stale
+  compare-and-advance rejection (`U32A2`), and equal-value idempotent
+  no-ops. The `taxii_added_after` kind interprets values as canonical
+  fixed-width UTC date-added timestamps; ordering policy belongs to the
+  TAXII kind adapter (never a generic lexical contract). The checkpoint
+  is loaded in a short committed UoW **before** any HTTP and committed
+  **after** PUBLISHED and **before** COMPLETED. `next` tokens, STIX
+  timestamps, and ATI retrieval time never become durable checkpoint
+  values.
+- **Publication-safe progress seam.**
+  `CollectionAcquisitionProgress(kind, previous, candidate)` is an
+  optional source-neutral member of `SemanticAcquisitionResult`;
+  `CollectionDatasourceEvidenceProducer` invokes an injected
+  source-neutral progress committer after PUBLISHED and before COMPLETED.
+  Publication-success + checkpoint-failure replays are safe through
+  deterministic Evidence identity (at-least-once, never at-most-once); no
+  distributed transaction exists between Kafka and PostgreSQL; no
+  UnitOfWork is ever held across TAXII HTTP or broker I/O; cancellation
+  propagates unchanged and never advances the cursor before its commit
+  point (and never rolls it back after).
+- **Composition.** `infrastructure/providers/composition.py` owns
+  `resolve_taxii_datasource_definition(settings)` (exactly one
+  TAXII_21 + JSON + STIX_21 definition; the MITRE ATT&CK FILE definition
+  can never match), `build_taxii_checkpoint_committer(uow_factory)`, and
+  `compose_taxii_collection_producer(...)`; `ProviderComposition`
+  composes `taxii_datasource` only when `taxii_api_root_url` is set
+  (resolving the bearer token at composition time, never before HTTP).
+  TAXII/OpenCTI stays absent from the Investigation provider registry; no
+  scheduler exists.
+
 ## Evidence wire boundary (PR 28C, delivered)
 
 PR 28C defines the versioned, broker-independent `EvidenceMessage`

@@ -7,6 +7,7 @@ narrow single-operation interfaces are intentional.
 
 # Filtered audit listing deliberately exposes several independent query fields.
 
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from agentic_threat_investigator.domain.assessment import Assessment
 from agentic_threat_investigator.domain.audit import AuditEvent, AuditOutcome
 from agentic_threat_investigator.domain.datasource import (
     DatasourceLogEvent,
+    validate_datasource_id,
 )
 from agentic_threat_investigator.domain.documents import Document, DocumentChunk
 from agentic_threat_investigator.domain.entities import Entity
@@ -59,6 +61,39 @@ from agentic_threat_investigator.domain.relationships import (
 from agentic_threat_investigator.domain.report import InvestigationReport
 from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.domain.source import SourceRecord
+
+_DATASOURCE_CHECKPOINT_KIND_MAX_LENGTH = 64
+"""Bounded length of one checkpoint-kind identifier."""
+
+_DATASOURCE_CHECKPOINT_VALUE_MAX_LENGTH = 512
+"""Bounded length of one canonical checkpoint value."""
+
+_CHECKPOINT_KIND_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+"""Stable canonical lowercase snake-case grammar of one checkpoint kind."""
+
+
+def validate_checkpoint_kind(value: str) -> str:
+    """Validate a canonical bounded checkpoint-kind identifier and return it.
+
+    The kind identifies the interpretation of the checkpoint value (for
+    example ``taxii_added_after``) and follows the stable bounded snake-case
+    grammar used by datasource error codes.
+    """
+    if not value:
+        raise ValueError("checkpoint_kind must not be blank")
+    if value != value.strip():
+        raise ValueError("checkpoint_kind must not be whitespace-padded")
+    if len(value) > _DATASOURCE_CHECKPOINT_KIND_MAX_LENGTH:
+        raise ValueError(
+            "checkpoint_kind must not exceed "
+            f"{_DATASOURCE_CHECKPOINT_KIND_MAX_LENGTH} characters"
+        )
+    if _CHECKPOINT_KIND_RE.fullmatch(value) is None:
+        raise ValueError(
+            "checkpoint_kind must match ^[a-z][a-z0-9_]{0,63}$ "
+            "with no surrounding whitespace"
+        )
+    return value
 
 
 class BatchOutcome(str, Enum):
@@ -926,6 +961,97 @@ class IngestionCheckpoint:
             raise ValueError("checkpoint normalization_version must be positive")
         if self.checkpoint is not None and not self.checkpoint:
             raise ValueError("checkpoint value must not be blank")
+
+
+@dataclass(frozen=True)
+class DatasourceCheckpoint:
+    """Operational acquisition progress for one datasource instance (PR 33E).
+
+    ``datasource_id`` is the semantic owner (the configured datasource
+    instance, never a source provider) and ``checkpoint_kind`` identifies the
+    interpretation (for example ``taxii_added_after`` for a TAXII 2.1
+    date-added cursor). ``checkpoint_value`` is a bounded opaque/canonical
+    string whose ordering policy belongs to the checkpoint-kind adapter —
+    the generic storage never pretends every kind is lexically ordered.
+    ``version`` is an optimistic-concurrency counter owned by the database;
+    ``updated_at`` is the operational UTC timestamp of the latest durable
+    advance. A checkpoint is never Evidence, never a lifecycle-log event,
+    never a Kafka offset, and never carries credentials, tokens, or source
+    payloads.
+    """
+
+    datasource_id: str
+    checkpoint_kind: str
+    checkpoint_value: str
+    updated_at: datetime
+    version: int = 0
+
+    def __post_init__(self) -> None:
+        """Reject unsafe or ambiguous operational checkpoint identities."""
+        validate_datasource_id(self.datasource_id)
+        validate_checkpoint_kind(self.checkpoint_kind)
+        if not self.checkpoint_value.strip():
+            raise ValueError("checkpoint_value must not be blank")
+        if len(self.checkpoint_value) > _DATASOURCE_CHECKPOINT_VALUE_MAX_LENGTH:
+            raise ValueError(
+                "checkpoint_value must not exceed "
+                f"{_DATASOURCE_CHECKPOINT_VALUE_MAX_LENGTH} characters"
+            )
+        if self.checkpoint_value != self.checkpoint_value.strip():
+            raise ValueError(
+                "checkpoint_value must not have leading or trailing whitespace"
+            )
+        if self.updated_at.tzinfo is None or self.updated_at.utcoffset() is None:
+            raise ValueError("checkpoint updated_at must be timezone-aware")
+        if self.version < 1:
+            raise ValueError("checkpoint version must be positive")
+
+
+class DatasourceCheckpointConflictError(RuntimeError):
+    """Raised when a compare-and-advance sees a stale expected checkpoint.
+
+    A concurrent execution advanced the durable checkpoint between this
+    execution's load and its commit point. The conflict is deterministic;
+    no row is overwritten and the caller's execution must be re-run from the
+    newer checkpoint (at-least-once replay remains safe).
+    """
+
+
+class DatasourceCheckpointRepository(ABC):  # pragma: no cover
+    """Repository for datasource operational acquisition checkpoints.
+
+    One row per ``(datasource_id, checkpoint_kind)``. The database owns
+    compare-and-advance concurrency: the stored function rejects stale
+    expectations deterministically and never moves a checkpoint backward.
+    """
+
+    @abstractmethod
+    async def get(
+        self, *, datasource_id: str, checkpoint_kind: str
+    ) -> DatasourceCheckpoint | None:
+        """Read the current checkpoint row, or ``None`` when absent."""
+
+    @abstractmethod
+    async def advance(
+        self,
+        *,
+        datasource_id: str,
+        checkpoint_kind: str,
+        expected_value: str | None,
+        new_value: str,
+        updated_at: datetime,
+    ) -> DatasourceCheckpoint:
+        """Compare-and-advance one checkpoint in the caller's transaction.
+
+        ``expected_value`` is the value this execution actually started from
+        (``None`` when no durable checkpoint existed at load time): the
+        stored function rejects the advance when the durable row does not
+        match that expectation, so a concurrent execution can never be
+        silently overwritten. Advancing to the current value is an
+        idempotent no-op that returns the existing row unchanged. The
+        caller's UnitOfWork remains the commit/rollback boundary and no
+        repository method may commit on its own.
+        """
 
 
 @dataclass(frozen=True)
@@ -2178,6 +2304,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     geo_resolutions: GeoResolutionRepository
     datasource_logs: DatasourceLogRepository
     evidence_batches: EvidenceBatchRepository
+    datasource_checkpoints: DatasourceCheckpointRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:

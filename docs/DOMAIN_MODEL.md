@@ -1105,3 +1105,39 @@ Every autonomous pivot must have a provenance chain to user input or observed ev
 Every persisted ATI domain resource exposes a database-assigned `version`. A new version is created only for a successful CREATE, semantic UPDATE, or soft DELETE. `UNCHANGED` persistence outcomes do not change version. Version numbers are monotonically increasing table-wide revisions and need not be contiguous for an individual object.
 
 Domain-object history records the complete state after each mutation plus a shallow JSONB diff. This is distinct from `AuditEvent`: history answers how state evolved; audit answers who attempted/performed a business or security action and its outcome.
+
+## Datasource operational checkpoint (PR 33E)
+
+The datasource incremental-retrieval cursor is **operational state**, not a
+domain resource and never Evidence:
+
+```python
+@dataclass(frozen=True)
+class DatasourceCheckpoint:
+    datasource_id: str      # semantic owner: the configured datasource instance
+    checkpoint_kind: str    # interpretation, e.g. "taxii_added_after"
+    checkpoint_value: str   # bounded canonical value
+    updated_at: datetime    # operational UTC timestamp
+    version: int            # optimistic-concurrency counter (database-owned)
+```
+
+Invariants:
+
+- one row per `(datasource_id, checkpoint_kind)`; the datasource instance
+  is the owner, never the source provider (two TAXII datasource instances
+  have independent cursors);
+- the value is bounded (<= 512 chars), trimmed, credential-free, and never
+  a source payload, `next` token, Kafka offset, or STIX timestamp;
+- `taxii_added_after` values are canonical fixed-width UTC RFC 3339
+  date-added timestamps (lexical == chronological ordering at the kind
+  adapter); the generic store never pretends every kind is ordered;
+- `ati.datasource_checkpoint` is written only through the SQL API v0032
+  stored functions (`get`/advance-with-expected-value`), which own row
+  creation, stale compare-and-advance rejection (`U32A2`), equal-value
+  idempotent no-ops, and the version counter; no trigger or application
+  SQL path exists;
+- the cursor advances only after the corresponding Evidence publication
+  succeeded (after `PUBLISHED`, before `COMPLETED`); publication-success +
+  commit-failure replays are safe through deterministic Evidence identity,
+  and cancellation never advances the cursor before its commit point (nor
+  rolls it back after).

@@ -18,12 +18,13 @@ import random as _random
 import re
 import time as _time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from numbers import Real
-from typing import Any
+from types import MappingProxyType
+from typing import AbstractSet, Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -91,6 +92,12 @@ class HttpOutcome:
     classify as ACQUISITION, while content-type, content-encoding, and
     UTF-8/JSON decoding failures classify as SERIALIZATION. Response-size
     bounding failures classify as ACQUISITION (transport limits).
+
+    ``response_headers`` (PR 33E) is populated only when the caller opted
+    into it with ``request_json(response_headers=...)`` and only for success
+    outcomes; it carries a read-only lowercase-name view of exactly the
+    requested, non-credential header values (for example TAXII date-added
+    headers). It is never logged and never appears in error outcomes.
     """
 
     attempt_count: int
@@ -103,6 +110,26 @@ class HttpOutcome:
     response_bytes: bytes | None = None
     response_json: Any = None
     final_error_stage: DatasourceStage | None = None
+    response_headers: Mapping[str, str] | None = None
+
+
+_SENSITIVE_RESPONSE_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "proxy-authenticate",
+        "www-authenticate",
+        "set-cookie",
+        "cookie",
+    }
+)
+"""Response header names never captured by the bounded metadata seam.
+
+:class:`ProviderHttpClient` captures only headers a caller explicitly opts
+into through ``request_json(response_headers=...)``, and it refuses to
+capture credential-bearing header names even when explicitly requested so
+secrets can never enter caller-held metadata, errors, or logs.
+"""
 
 
 @dataclass(frozen=True)
@@ -305,6 +332,30 @@ def validate_entity_url_path(base: str, path: str) -> str:
     normalised_base = canonical_base.rstrip("/") + "/"
     joined = normalised_base + path.lstrip("/")
     return validate_provider_url(joined)
+
+
+def _capture_response_headers(
+    response: httpx.Response,
+    requested: AbstractSet[str] | None,
+) -> Mapping[str, str] | None:
+    """Capture an opt-in, lowercased, read-only view of safe response headers.
+
+    Returns ``None`` when the caller requested no headers. Only successes
+    call this (error outcomes never carry headers). Header names are
+    normalized to lowercase; credential-bearing header names are never
+    captured even if explicitly requested. The returned mapping is read-only
+    so callers cannot mutate shared response state.
+    """
+    if requested is None:
+        return None
+    captured: dict[str, str] = {}
+    for name, value in response.headers.items():
+        lowered = name.lower()
+        if lowered in _SENSITIVE_RESPONSE_HEADER_NAMES:
+            continue
+        if lowered in requested:
+            captured[lowered] = value
+    return MappingProxyType(captured) if captured else MappingProxyType({})
 
 
 def check_content_type(
@@ -743,6 +794,7 @@ class ProviderHttpClient:
         form_body: dict[str, str] | None = None,
         accept_statuses: set[int] | None = None,
         accepted_media_types: tuple[str, ...] | None = None,
+        response_header_names: AbstractSet[str] | None = None,
     ) -> HttpOutcome:
         """Execute a bounded, retry-capable HTTP request and return parsed JSON.
 
@@ -754,6 +806,12 @@ class ProviderHttpClient:
         ``application/x-www-form-urlencoded`` body. Exactly one of the two
         may be supplied. The body is replayed unchanged on retries.
         GET-based providers leave both as ``None``.
+
+        ``response_header_names`` (PR 33E) is an optional opt-in set of
+        response header names to capture on success into
+        ``HttpOutcome.response_headers`` (lowercased names, read-only view).
+        Credential-bearing header names are never captured even if requested;
+        error outcomes never carry response headers.
         """
         if json_body is not None and form_body is not None:
             raise ValueError("json_body and form_body are mutually exclusive")
@@ -781,6 +839,7 @@ class ProviderHttpClient:
             form_body,
             accepted_statuses,
             media_types,
+            response_header_names,
         )
 
     async def _execute_retry_loop(
@@ -793,6 +852,7 @@ class ProviderHttpClient:
         form_body: dict[str, str] | None,
         accepted_statuses: set[int],
         media_types: tuple[str, ...],
+        response_header_names: AbstractSet[str] | None = None,
     ) -> HttpOutcome:
         """Execute request attempts up to max_retries with backoff.
 
@@ -822,6 +882,7 @@ class ProviderHttpClient:
                         accepted_statuses,
                         media_types,
                         start_time,
+                        response_header_names,
                     )
             else:
                 raw_outcome = await self._execute_attempt(
@@ -834,6 +895,7 @@ class ProviderHttpClient:
                     accepted_statuses,
                     media_types,
                     start_time,
+                    response_header_names,
                 )
 
             result = dataclasses.replace(
@@ -892,6 +954,7 @@ class ProviderHttpClient:
         accept_statuses: set[int],
         accepted_media_types: tuple[str, ...],
         start_time: float,
+        response_header_names: AbstractSet[str] | None = None,
     ) -> HttpOutcome:
         """Execute a single attempt with streaming, Content-Type, and bounds checks."""
         # The per-outcome HttpOutcome construction blocks are the accepted
@@ -916,7 +979,11 @@ class ProviderHttpClient:
 
                 if error_code is None:
                     return await self._handle_accepted_response(
-                        response, status, accepted_media_types, duration
+                        response,
+                        status,
+                        accepted_media_types,
+                        duration,
+                        response_header_names,
                     )
 
                 # The plan authorizes provider-directed Retry-After handling
@@ -967,6 +1034,7 @@ class ProviderHttpClient:
         status: int,
         accepted_media_types: tuple[str, ...],
         duration: float,
+        response_header_names: AbstractSet[str] | None = None,
     ) -> HttpOutcome:
         """Validate content type, stream bounded body, and parse JSON."""
         content_type = response.headers.get("Content-Type")
@@ -1048,4 +1116,5 @@ class ProviderHttpClient:
             duration_seconds=duration,
             response_bytes=body,
             response_json=parsed,
+            response_headers=_capture_response_headers(response, response_header_names),
         )

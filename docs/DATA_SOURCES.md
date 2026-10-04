@@ -1932,6 +1932,76 @@ persistence path, no STIX-specific repository/service/table, and no
 migration were introduced. As before, no TAXII capability is claimed
 (PR 33E owns TAXII acquisition/runtime integration).
 
+### TAXII 2.1 collection (PR 33E)
+
+TAXII 2.1 is ATI's second configured **collection** acquisition protocol
+and the first protocol that carries the shared STIX 2.1 semantic format:
+one bounded acquisition of one TAXII 2.1 collection feeds the same
+STIX/Evidence pipeline as the MITRE FILE bundle path and MISP — no
+TAXII-specific semantic format, converter, or Evidence path exists.
+
+#### Protocol and dimensions
+
+- TAXII is `DatasourceProtocol.TAXII_21 = "taxii21"` (acquisition
+  protocol, never a semantic/serialization format); a TAXII datasource
+  declares protocol `taxii21` + serialization `json` + semantic
+  `urn:ati:datasource:semanticformat:stix21`.
+- The generic acquirer is `Taxii21Datasource`
+  (`infrastructure/datasources/taxii21.py`), a `CollectionSemanticAcquirer`
+  structural implementation: `acquire(definition, recorder)` plus an
+  optional durable-checkpoint reader seam.
+- One configured TAXII datasource instance represents **one API root +
+  one collection**; multiple collections are multiple datasource
+  definitions, never an implicit fan-out. OpenCTI is supported purely as
+  a source (`SourceId.OPENCTI`) through exactly this generic path.
+
+#### Acquisition contract (PR 33E)
+
+- Endpoint: `GET {api_root}/collections/{collection_id}/objects/` with
+  `Accept: application/taxii+json;version=2.1`, optional
+  `Authorization: Bearer <token>`, and query parameters `limit`, the
+  first page's `added_after` (from the durable checkpoint or the
+  configured initial cursor), and the opaque `next` token of continuation
+  pages.
+- The TAXII envelope is validated here (`objects` array, `more`/`next`,
+  date-added headers) and every member passes individually through
+  `parse_stix21_object()` (PR 33A). A STIX Bundle is never manufactured
+  around envelope members.
+- Pagination is strictly sequential and explicitly bounded by
+  `taxii_page_size`/`taxii_max_pages`; reaching `max_pages` with
+  `more=true` is successful bounded-window completion.
+- HTTP admission is owned by the shared `ProviderHttpClient`/
+  `BoundedLimiter`; no second limiter or page prefetch exists.
+- The bearer token travels only in the `Authorization` header; errors,
+  logs, source references, and checkpoints never carry it or raw server
+  bodies or `next` tokens.
+
+#### Durable incremental retrieval (Part 7)
+
+- The per-datasource checkpoint (`ati.datasource_checkpoint`) is
+  operational state with kind `taxii_added_after` and canonical
+  fixed-width UTC date-added values; it is read in a short committed
+  UnitOfWork **before** any HTTP.
+- The candidate comes only from the TAXII date-added semantics
+  (`X-TAXII-Date-Added-Last` of pages that returned objects), never from
+  STIX `created`/`modified`, Sighting/Relationship times, or ATI
+  `retrieved_at`/`observed_at`; the opaque `next` token is never a
+  durable checkpoint.
+- The producer commits the candidate **after** the execution's one
+  ordered `EvidencePublisher.publish` succeeded and `PUBLISHED` was
+  appended, and **before** `COMPLETED`; no UnitOfWork is ever held across
+  HTTP or broker I/O, and publication-success + checkpoint-failure
+  replay is safe through deterministic Evidence identity.
+
+#### Supported and interpreted into Evidence
+
+The exact STIX 2.1 Evidence profile remains the PR 33B–33D profile:
+supported SCO IOCs, the five CTI SDO types, the approved Relationship
+profile (`uses`/`targets`/`attributed-to`/`controls` between the exact
+endpoint types), and Sighting-of-a-CTI-Entity. Valid-but-unsupported STIX
+objects yield zero Evidence; unresolved references never fabricate
+placeholder Entities or edges.
+
 ## Structured batch sources
 
 ### MITRE ATT&CK

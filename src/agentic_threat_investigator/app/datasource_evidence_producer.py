@@ -57,7 +57,7 @@ publish and synchronously persist the same Evidence (no dual write).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -74,6 +74,7 @@ from agentic_threat_investigator.app.datasource_provider import (
     observe_semantic_acquisition,
 )
 from agentic_threat_investigator.app.datasource_semantics import (
+    CollectionAcquisitionProgress,
     SemanticAcquisitionResult,
     SemanticSourceContext,
 )
@@ -88,7 +89,10 @@ from agentic_threat_investigator.app.evidence_message import (
     evidence_message_from_converted,
 )
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
-from agentic_threat_investigator.domain.datasource import DatasourceDefinition
+from agentic_threat_investigator.domain.datasource import (
+    DatasourceDefinition,
+    DatasourceId,
+)
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 
@@ -423,6 +427,10 @@ class CollectionDatasourceEvidenceProducer(Generic[T]):
         uow_factory: Callable[[], UnitOfWork],
         clock: Callable[[], datetime] | None = None,
         execution_id: UUID | None = None,
+        progress_committer: (
+            Callable[[DatasourceId, CollectionAcquisitionProgress], Awaitable[None]]
+            | None
+        ) = None,
     ) -> None:
         """Bind the producer to its configured collection datasource and seams.
 
@@ -433,6 +441,14 @@ class CollectionDatasourceEvidenceProducer(Generic[T]):
         ``None`` (the recorder generates a fresh UUID per execution);
         injecting a fixed value is supported only for deterministic test
         fixtures, mirroring the recorder's own fixture seam.
+
+        ``progress_committer`` (PR 33E) is the source-neutral post-publication
+        progress seam: when the acquirer returned an acquisition-progress
+        candidate (TAXII ``added_after``), the producer invokes this committer
+        **after** PUBLISHED and **before** COMPLETED so the durable
+        checkpoint can never advance past publication. ``None`` means the
+        producer has no progress to commit; an acquirer that does return
+        progress while no committer is injected fails closed.
         """
         self._definition = definition
         self._acquirer = acquirer
@@ -441,6 +457,7 @@ class CollectionDatasourceEvidenceProducer(Generic[T]):
         self._uow_factory = uow_factory
         self._clock: Callable[[], datetime] = clock if clock is not None else _utc_now
         self._execution_id = execution_id
+        self._progress_committer = progress_committer
 
     @property
     def definition(self) -> DatasourceDefinition:
@@ -497,6 +514,22 @@ class CollectionDatasourceEvidenceProducer(Generic[T]):
             registry=self._registry,
             publisher=self._publisher,
         )
+        if result.progress is not None:
+            if self._progress_committer is None:
+                raise ValueError(
+                    "acquisition returned progress but no progress committer "
+                    "was injected"
+                )
+            # Publication-safe checkpoint advancement (PR 33E Part 7): the
+            # durable candidate is committed only after the execution's one
+            # ordered EvidencePublisher call succeeded and PUBLISHED was
+            # appended. A commit failure propagates without COMPLETED and
+            # without republishing: the execution may be replayed from the
+            # old checkpoint because deterministic Evidence identity makes
+            # replay safe (at-least-once, never at-most-once).
+            await self._progress_committer(
+                self._definition.datasource_id, result.progress
+            )
         await recorder.complete()
         return DatasourceProducerResult(
             outcome=DatasourceProducerOutcome.COMPLETED,

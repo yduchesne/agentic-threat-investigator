@@ -304,6 +304,46 @@ MISP REST
   distribution/sharing-group metadata is source fact, never ATI
   authorization.
 
+## TAXII collection Evidence path (PR 33E, delivered)
+
+TAXII is the second configured **collection** path and reuses the exact
+same distributed pipeline with the shared STIX semantic format — no
+TAXII-specific converter, message version, topic, or Evidence persistence
+path exists:
+
+```text
+TAXII 2.1 server / OpenCTI
+ -> Taxii21Datasource             (CollectionSemanticAcquirer, PR 33E)
+ -> parse_stix21_object()         (PR 33A single-object seam, never a Bundle)
+ -> Stix21ToEvidenceConverter     (selected by SemanticFormatId.STIX_21)
+ -> CollectionDatasourceEvidenceProducer
+ -> EvidenceMessage v1            (PR 28C, unchanged)
+ -> EvidencePublisher / Kafka-Redpanda (PR 28G, unchanged)
+ -> EvidencePersistenceConsumer   (PR 28E, unchanged)
+ -> EvidenceBatchPersistenceService
+ -> PostgreSQL global Evidence    (SQL API v0027, unchanged)
+```
+
+- Source references stay credential-free (`{api_root}/collections/...`),
+  the bearer token exists only at the secret-resolution/header boundary,
+  and raw server bodies/`next` tokens never enter errors, logs, or the
+  durable log.
+- A TAXII execution records the standard lifecycle
+  `STARTED, ACQUIRED, DECODED, CONVERTED(N), PUBLISHED(N), COMPLETED` and
+  publishes exactly once; zero conversion is a valid zero-output
+  execution.
+- The durable `taxii_added_after` checkpoint is **datasource operational
+  state**, persisted only through the SQL API v0032 stored functions, and
+  advances only after the execution's ordered publication succeeded and
+  `PUBLISHED` was appended (and before `COMPLETED`). Publication-success
+  + checkpoint-failure leaves a replayable at-least-once state with
+  deterministic Evidence identity; no outbox/distributed-transaction
+  fiction is introduced.
+- Producer `COMPLETED` never proves broker consumption or PostgreSQL
+  persistence: the standard consumer continues to own durable
+  persistence, and the OpenCTI interoperability harness explicitly waits
+  on a PostgreSQL-backed ingestion-completion barrier before assertions.
+
 ## Domain model
 
 ```text

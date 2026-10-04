@@ -41,6 +41,9 @@ from agentic_threat_investigator.telemetry.tracing import SpanNames, get_tracer
 from .assessment_repositories import PostgresAssessmentRepository
 from .audit_repositories import PostgresAuditEventRepository
 from .composites import register_batch_composites
+from .datasource_checkpoint_repositories import (
+    PostgresDatasourceCheckpointRepository,
+)
 from .datasource_log_repositories import PostgresDatasourceLogRepository
 from .evidence_batch_repositories import PostgresEvidenceBatchRepository
 from .evidence_repositories import (
@@ -143,6 +146,7 @@ class PostgresUnitOfWork(UnitOfWork):
         self.geo_resolutions = cast(PostgresGeoResolutionRepository, None)
         self.datasource_logs = cast(PostgresDatasourceLogRepository, None)
         self.evidence_batches = cast(PostgresEvidenceBatchRepository, None)
+        self.datasource_checkpoints = cast(PostgresDatasourceCheckpointRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -197,6 +201,9 @@ class PostgresUnitOfWork(UnitOfWork):
         self.datasource_logs = PostgresDatasourceLogRepository(self.session)
         self.evidence_batches = PostgresEvidenceBatchRepository(
             self.session, self._batch_size
+        )
+        self.datasource_checkpoints = PostgresDatasourceCheckpointRepository(
+            self.session
         )
         return self
 

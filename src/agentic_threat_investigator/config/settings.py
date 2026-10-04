@@ -3,6 +3,7 @@
 """Typed application settings and the configuration bootstrap bridge."""
 
 import logging
+from datetime import datetime
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -283,6 +284,28 @@ class Settings(BaseSettings):
     )
     misp_page_size: int = Field(default=100, ge=1, le=1000)
     misp_max_pages: int = Field(default=10, ge=1, le=1000)
+    # TAXII 2.1 acquisition settings (PR 33E). TAXII is an explicit
+    # acquisition protocol (``DatasourceProtocol.TAXII_21``), never a semantic
+    # format: the retrieved STIX 2.1 objects flow through the existing STIX
+    # semantic/conversion pipeline. The API-root URL is blank by default so an
+    # unset URL remains legal (no datasource, no token requirement); a
+    # configured URL requires exactly one resolvable TAXII/STIX datasource
+    # definition and a nonblank collection ID. The bearer-token setting
+    # carries only the NAME of the environment variable holding the token;
+    # the value is resolved outside configuration during composition and
+    # never stored or logged here. ``taxii_initial_added_after`` is an
+    # optional RFC3339/TAXII date-added cursor used only when no durable
+    # checkpoint exists yet; it is never manufactured from wall-clock time.
+    taxii_api_root_url: str = ""
+    taxii_collection_id: str = ""
+    taxii_bearer_token_secret: str = "ATI_TAXII_BEARER_TOKEN"
+    taxii_max_concurrency: int = Field(default=4, ge=1)
+    taxii_requests_per_second: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    taxii_page_size: int = Field(default=100, ge=1, le=1000)
+    taxii_max_pages: int = Field(default=100, ge=1, le=1000)
+    taxii_initial_added_after: str = ""
     # LLM settings (PR 20B). The secret setting carries only the NAME of the
     # environment variable holding the provider API key; the key value is
     # resolved outside configuration during composition and never stored or
@@ -431,6 +454,9 @@ class Settings(BaseSettings):
         "misp_max_concurrency",
         "misp_page_size",
         "misp_max_pages",
+        "taxii_max_concurrency",
+        "taxii_page_size",
+        "taxii_max_pages",
         mode="before",
     )
     @classmethod
@@ -452,6 +478,7 @@ class Settings(BaseSettings):
         "threatfox_requests_per_second",
         "urlhaus_requests_per_second",
         "misp_requests_per_second",
+        "taxii_requests_per_second",
         mode="before",
     )
     @classmethod
@@ -530,6 +557,90 @@ class Settings(BaseSettings):
         if parsed.query or parsed.fragment:
             raise ValueError("misp_base_url must not contain a query or fragment")
         return value.strip()
+
+    @field_validator("taxii_bearer_token_secret")
+    @classmethod
+    def validate_taxii_bearer_token_secret(cls, value: str) -> str:
+        """Require a non-blank secret reference name (never a token value)."""
+        if not value.strip():
+            raise ValueError("taxii_bearer_token_secret must not be blank")
+        return value.strip()
+
+    @field_validator("taxii_api_root_url")
+    @classmethod
+    def validate_taxii_api_root_url(cls, value: str) -> str:
+        """Require a blank or credential-free HTTPS TAXII API-root URL.
+
+        A blank value is legal (TAXII not configured; no token required). A
+        non-blank value must use ``https``, contain a hostname, carry no
+        username/password (so a URL can never embed a token), and carry no
+        query or fragment. Path components are preserved exactly; no DNS
+        resolution or network probing happens here.
+        """
+        if not value.strip():
+            return ""
+        try:
+            parsed = urlsplit(value.strip())
+            hostname = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("taxii_api_root_url is malformed") from exc
+        if parsed.scheme != "https":
+            raise ValueError("taxii_api_root_url must use the https scheme")
+        if not hostname:
+            raise ValueError("taxii_api_root_url must contain a hostname")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("taxii_api_root_url must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("taxii_api_root_url must not contain a query or fragment")
+        return value.strip()
+
+    @field_validator("taxii_collection_id")
+    @classmethod
+    def validate_taxii_collection_id(cls, value: str) -> str:
+        """Require a blank or bounded whitespace-clean collection identifier.
+
+        Blank is legal only when the API-root URL is also blank (enforced by
+        the model validator). A non-blank value is trimmed, bounded to 128
+        characters, and must not contain whitespace or control characters:
+        TAXII collection IDs are server-assigned opaque identifiers. The
+        value is never a credential and is never used outside a path segment
+        that is URL-escaped during acquisition.
+        """
+        if not value.strip():
+            return ""
+        stripped = value.strip()
+        if len(stripped) > 128:
+            raise ValueError("taxii_collection_id must not exceed 128 characters")
+        if any(char.isspace() for char in stripped):
+            raise ValueError("taxii_collection_id must not contain whitespace")
+        return stripped
+
+    @field_validator("taxii_initial_added_after")
+    @classmethod
+    def validate_taxii_initial_added_after(cls, value: str) -> str:
+        """Require a blank or timezone-aware RFC 3339 TAXII timestamp.
+
+        The optional initial ``added_after`` cursor must be an RFC 3339/
+        TAXII date-added moment with an explicit UTC offset (``Z`` or
+        ``+HH:MM``); values without a timezone are rejected because TAXII
+        date-added comparison requires an unambiguous moment. The value is
+        stored non-canonicalized exactly as configured here; the TAXII
+        acquirer canonicalizes it to the deterministic checkpoint form when
+        it is actually used.
+        """
+        if not value.strip():
+            return ""
+        stripped = value.strip()
+        try:
+            parsed = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                "taxii_initial_added_after must be an RFC 3339 timestamp"
+            ) from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("taxii_initial_added_after must be timezone-aware")
+        return stripped
 
     @field_validator("llm_driver", mode="before")
     @classmethod
@@ -765,6 +876,22 @@ class Settings(BaseSettings):
         ids = [definition.datasource_id.value for definition in self.datasources]
         if len(ids) != len(set(ids)):
             raise ValueError("datasource definitions must have unique datasource IDs")
+        return self
+
+    @model_validator(mode="after")
+    def validate_taxii_collection_identity(self) -> "Settings":
+        """Require the collection ID exactly when the API root is configured.
+
+        A blank ``taxii_api_root_url`` means TAXII is not configured and no
+        collection ID or token is required. A configured API root must be
+        bound to exactly one nonblank collection ID: PR 33E represents one
+        API root + one collection per datasource instance, never an implicit
+        fan-out.
+        """
+        if self.taxii_api_root_url and not self.taxii_collection_id:
+            raise ValueError(
+                "taxii_collection_id is required when taxii_api_root_url is configured"
+            )
         return self
 
     @model_validator(mode="after")

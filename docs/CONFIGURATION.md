@@ -819,6 +819,14 @@ type before bounds are enforced. The bounds below apply on top of those type req
 | `misp_requests_per_second` | `ATI_MISP_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional MISP rate limit (omission disables) |
 | `misp_page_size` | `ATI_MISP_PAGE_SIZE` | `int` | `100` | `1..1000` | MISP `events/restSearch` page size (explicit, per-request `limit`) |
 | `misp_max_pages` | `ATI_MISP_MAX_PAGES` | `int` | `10` | `1..1000` | Maximum sequential pages fetched before the bounded acquisition window completes |
+| `taxii_api_root_url` | `ATI_TAXII_API_ROOT_URL` | `str` | `""` (blank) | HTTPS only, no credentials/query/fragment | Credential-free HTTPS API-root URL of the configured TAXII 2.1 server (PR 33E); blank disables TAXII composition and requires no bearer token. A configured URL requires a nonblank `taxii_collection_id` and exactly one resolvable TAXII/STIX datasource definition |
+| `taxii_collection_id` | `ATI_TAXII_COLLECTION_ID` | `str` | `""` (blank) | nonblank when URL configured; `<= 128`, whitespace-free | Server-assigned TAXII 2.1 collection identifier of the one configured API root (one datasource instance = one API root + one collection) |
+| `taxii_bearer_token_secret` | `ATI_TAXII_BEARER_TOKEN_SECRET` | `str` | `ATI_TAXII_BEARER_TOKEN` | non-blank | Environment variable NAME carrying the TAXII bearer token (secret reference, never a token value) |
+| `taxii_max_concurrency` | `ATI_TAXII_MAX_CONCURRENCY` | `int` | `4` | `> 0` | TAXII maximum in-flight requests (ProviderHttpClient limiter; page parallelism is always sequential) |
+| `taxii_requests_per_second` | `ATI_TAXII_REQUESTS_PER_SECOND` | `float?` | `None` | `> 0` when set | Optional TAXII rate limit (omission disables) |
+| `taxii_page_size` | `ATI_TAXII_PAGE_SIZE` | `int` | `100` | `1..1000` | TAXII collection-object page size (per-request `limit`) |
+| `taxii_max_pages` | `ATI_TAXII_MAX_PAGES` | `int` | `100` | `1..1000` | Maximum sequential pages fetched before the bounded acquisition window completes (reaching it with `more=true` is success, never an error) |
+| `taxii_initial_added_after` | `ATI_TAXII_INITIAL_ADDED_AFTER` | `str` | `""` (blank) | RFC 3339, timezone-aware | Optional initial TAXII date-added cursor used only when no durable checkpoint exists yet; never manufactured from wall-clock time |
 | `dbip_city_lite_artifact_uri` | `ATI_DBIP_CITY_LITE_ARTIFACT_URI` | `str` | `""` (blank) | see notes | Credential-free local `file://` artifact URI of the DB-IP IP to City Lite MMDB. Blank (default) disables composition of the DB-IP City Lite provider. v0.1 requires an authority-free absolute `file://` URI; query, fragment, credential, and non-file URIs are rejected by the settings validator, and artifact paths outside `${ATI_DATA_DIR}/datasets` are rejected by the storage boundary. The configured artifact must already exist and be readable at composition time; there is no downloader and no API key. |
 
 When `requests_per_second` is omitted or `None`, no start-rate limiting is enforced for that provider.
@@ -1005,6 +1013,49 @@ MISP HTTP admission (timeout, retries, response-size bounding, concurrency,
 rate limiting, cancellation) is owned entirely by the shared
 `ProviderHttpClient`/`BoundedLimiter` infrastructure configured through the
 standard provider settings; the acquirer stacks no second limiter.
+
+### TAXII 2.1 acquisition (PR 33E)
+
+TAXII 2.1 is an **acquisition protocol** (`DatasourceProtocol.TAXII_21`),
+never a semantic format and never a serialization format: the STIX 2.1
+objects it retrieves flow through the existing shared STIX semantic and
+Evidence pipeline (`parse_stix21_object` + `Stix21ToEvidenceConverter`),
+and no synthetic STIX Bundle is ever manufactured around TAXII envelope
+members.
+
+- the bearer-token setting carries only the NAME of the environment variable
+  holding the token (default reference: `ATI_TAXII_BEARER_TOKEN`); the value
+  is resolved outside configuration during composition, travels only in the
+  `Authorization` header, and must never be committed, logged, persisted,
+  placed in a URL/query, or promoted into errors/provenance/telemetry;
+- a blank `taxii_api_root_url` yields no TAXII datasource, no producer, and
+  no token requirement; a configured URL requires a nonblank
+  `taxii_collection_id` and fails closed if settings.datasources does not
+  declare exactly one TAXII/STIX (TAXII_21 + JSON + STIX_21) definition;
+- `taxii_initial_added_after` is an optional RFC 3339 cursor used only when
+  no durable per-datasource checkpoint exists; the durable checkpoint
+  (kind `taxii_added_after`, canonical fixed-width UTC timestamps) always
+  wins over the initial value;
+- the API-root URL validator enforces HTTPS, hostname presence, no
+  credentials, and no query/fragment (path components are preserved);
+- `taxii_page_size`/`taxii_max_pages` pin the explicit bounded acquisition
+  window; pagination is strictly sequential (opaque `next` tokens, no
+  prefetch), and reaching `max_pages` with `more=true` is successful
+  bounded-window completion, never an error;
+- OpenCTI is supported **as a source** (`SourceId.OPENCTI`) through its
+  standard TAXII 2.1 collection interface with the generic TAXII/STIX path;
+  there is no OpenCTI-specific converter, acquirer branch, or Evidence
+  persistence path, and OpenCTI Live Streams/GraphQL are not part of v0.6.
+
+### TAXII checkpoint configuration notes (PR 33E)
+
+The durable incremental cursor is datasource operational state persisted in
+`ati.datasource_checkpoint` through stored functions only. It is advanced
+**only after** the execution's ordered Evidence publication succeeded
+(`after PUBLISHED, before COMPLETED`), never before; publication-success +
+checkpoint-failure replay is safe because deterministic Evidence identity
+prevents semantic duplication. See `docs/DATASOURCE_ARCHITECTURE.md` and
+`docs/GLOBAL_EVIDENCE_ARCHITECTURE.md`.
 
 ## Testing requirements
 

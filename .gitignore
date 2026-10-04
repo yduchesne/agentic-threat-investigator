@@ -214,6 +214,9 @@ frontend/playwright-report/
 data/
 out/
 
+# Interop harness run artifacts (TLS material, consumer tokens, diagnostics)
+artifacts/
+
 # Ruff stuff:
 .ruff_cache/
 

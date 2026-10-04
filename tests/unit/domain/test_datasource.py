@@ -69,6 +69,7 @@ def test_d27a_02_source_id_values_remain_exact() -> None:
         SourceId.MITRE_ATTACK: "urn:ati:source:mitre_attack",
         SourceId.CISA_KEV: "urn:ati:source:cisa_kev",
         SourceId.MISP: "urn:ati:source:misp",
+        SourceId.OPENCTI: "urn:ati:source:opencti",
     }
 
 
@@ -150,7 +151,11 @@ def test_d27a_07_unknown_protocol_fails_closed(invalid: str) -> None:
 
 def test_d27a_07b_protocol_vocabulary_is_exact() -> None:
     """The typed protocol vocabulary contains exactly the current values."""
-    assert {member.value for member in DatasourceProtocol} == {"https", "file"}
+    assert {member.value for member in DatasourceProtocol} == {
+        "https",
+        "file",
+        "taxii21",
+    }
 
 
 @pytest.mark.parametrize("invalid", ["", "xml", "csv", "jsonl"])
@@ -261,9 +266,9 @@ def test_definition_requires_all_five_dimensions() -> None:
         _definition(extra_dimension="x")
 
 
-def test_representative_definitions_are_the_documented_pair() -> None:
-    """The repository-owned default pair is ThreatFox and MITRE ATT&CK."""
-    assert len(REPRESENTATIVE_DATASOURCE_DEFINITIONS) == 2
+def test_representative_definitions_are_the_documented_set() -> None:
+    """The repository-owned default set is ThreatFox, MITRE, and OpenCTI."""
+    assert len(REPRESENTATIVE_DATASOURCE_DEFINITIONS) == 3
     by_id = {d.datasource_id.value: d for d in REPRESENTATIVE_DATASOURCE_DEFINITIONS}
     assert by_id["threatfox-live"].source_id is SourceId.THREATFOX
     assert by_id["threatfox-live"].protocol is DatasourceProtocol.HTTPS
@@ -273,6 +278,12 @@ def test_representative_definitions_are_the_documented_pair() -> None:
     assert by_id["mitre-attack-enterprise"].semantic_format is (
         SemanticFormatId.STIX_21
     )
+    # PR 33E: TAXII + JSON + STIX_21 are orthogonal — OpenCTI is provenance only.
+    opencti = by_id["opencti-collection"]
+    assert opencti.source_id is SourceId.OPENCTI
+    assert opencti.protocol is DatasourceProtocol.TAXII_21
+    assert opencti.serialization_format is SerializationFormat.JSON
+    assert opencti.semantic_format is SemanticFormatId.STIX_21
     assert all(
         d.serialization_format is SerializationFormat.JSON
         for d in REPRESENTATIVE_DATASOURCE_DEFINITIONS
