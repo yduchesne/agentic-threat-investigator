@@ -889,7 +889,84 @@ These tests never require a live stack. PromQL/Loki/panel runtime health is
 verified by the manual developer smoke procedure in
 `docs/OBSERVABILITY.md` (`Grafana dashboards (PR 29D)` section; PR 29D-1
 re-validates it against pinned Grafana 13.2.2) — the
-no-telemetry-integration-test rule is unchanged.
+no-telemetry-integration-test rule is unchanged *for the PR 29 dashboard/
+config-validations layer*; PR 34 (below) is now the one authoritative
+telemetry-delivery integration gate.
+
+### End-to-end OpenTelemetry delivery integration tests (PR 34)
+
+PR 34 closes the delivery gap with one authoritative, isolated, real-stack
+gate proving that ATI telemetry traverses the deployed observability stack
+in a single real execution:
+
+```text
+ati-telemetry-test (production composition)
+  -> OTLP/HTTP
+  -> OpenTelemetry Collector (otel/opentelemetry-collector-contrib:0.161.0)
+  -> Prometheus (prom/prometheus:v3.14.0) / Jaeger (jaegertracing/jaeger:2.21.0)
+     / Loki (grafana/loki:3.7.8)
+  -> Grafana (grafana/grafana:13.2.2) provisioning/health
+```
+
+Authoritative command (feature acceptance):
+
+```bash
+./scripts/observability-integration.sh [--keep-on-failure] [--timeout N]
+```
+
+The harness starts an isolated five-service Compose
+topology (`compose.observability.test.yaml`, reusing the exact
+source-controlled `infra/observability/` configs and pinned images), waits
+for bounded topology readiness (`TOPOLOGY_READY`), builds the repository ATI
+image, runs the real one-shot generator attached to the isolated network
+(producing the unique run UUID and receiving only
+`ATI_OBSERVABILITY_ENABLED=true` + the standard
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`), bounded-polls
+per-backend convergence (Prometheus / Jaeger / Loki) plus Grafana
+verification until `READY_FOR_ASSERTIONS`, runs the authoritative
+`-m observability` pytest gate, records bounded run-state
+(`artifacts/observability-integration/<run-id>/run-state.json`), and tears
+down only harness-owned resources.
+
+Generator boundary: `ati-telemetry-test --run-id <uuid>` uses ATI's
+production composition (`configure_telemetry(service=ati-telemetry-test)`
+-> emit -> `shutdown_telemetry()`); it knows **only the Collector** and
+refuses emission when observability is disabled, when the standard endpoint
+is absent, or when signal-specific OTLP endpoint/header overrides are set
+(even empty — the pinned OTel exporters resolve signal-specific variables
+in preference to the standard endpoint). Diagnostic names
+(`ati.telemetry.test.*`, `telemetry_test_signal`) stay strictly separate
+from the frozen production vocabulary.
+
+
+Assertion matrix (T34-I01..I15): Collector/health check, generator exit 0,
+Prometheus counter exactly 1 / duration count 1 sum 0.125s on the run's
+series, Jaeger root/child spans with exact names/run attribute and child
+parent = root, Loki structured log with exact event/run ID, Loki trace ID
+== Jaeger trace ID (cross-signal), the three exact Grafana datasource UIDs
+(`ati-prometheus`/`ati-jaeger`/`ati-loki`) healthy/queryable through the
+proxy (never container health), `ati-telemetry-test` service attribution,
+and ordering: assertions run only after `READY_FOR_ASSERTIONS`.
+
+Failure classification uses the section-20 taxonomy (TOPOLOGY_START,
+COLLECTOR_READY, PROMETHEUS_READY, JAEGER_READY, LOKI_READY, GRAFANA_READY,
+GENERATOR, OTLP_EXPORT, PROMETHEUS_CONVERGENCE, JAEGER_CONVERGENCE,
+LOKI_CONVERGENCE, GRAFANA_PROVISIONING, CROSS_SIGNAL_CORRELATION,
+TEARDOWN) with bounded diagnostics into the artifact directory.
+
+Resource prerequisites: Podman + podman-compose, `uv`, ~2-4 GB free image
+disk, and the first run builds the ATI image (subsequent runs reuse layer
+cache). The stack is **not** part of `./build.sh --intg`: ordinary
+integration stays lightweight and never requires observability services.
+
+Unit coverage of the harness logic (no containers/network):
+`tests/unit/observability/test_pr34_harness_logic.py` proves the convergence
+gate ordering (T34-I14), the failure taxonomy (T34-F01..F10),
+run-scoped matching (stale other runs can never satisfy), bounded
+malformed-response classification, and secret-safe summaries;
+`tests/unit/telemetry/test_diagnostic.py` and
+`tests/unit/infrastructure/test_telemetry_test_cli.py` cover the generator
+contract (T34-G01..G15).
 
 Priority unit-test areas include:
 

@@ -933,11 +933,50 @@ metadata, not high-cardinality Loki indexed labels.
 - ``ati-geo-resolver`` (``cli.geo_resolver_main``): ``ServiceNames.GEO_RESOLVER``;
   telemetry starts only when the resolver is enabled, and shuts down after the
   engine is disposed.
+- ``ati-telemetry-test`` (``cli.telemetry_test_main``): ``ServiceNames.TELEMETRY_TEST``;
+  the PR 34 one-shot deterministic diagnostic generator (see the dedicated
+  section below).
 
 The one-shot utilities (fake-data-bootstrap, migrate, geography-import,
 geography-build) are deliberately not wired: they run once and exit, so an
 OTLP export pipeline is pointless. PR 29C does not add telemetry to
 placeholder processes merely to satisfy the service-name list.
+
+### Diagnostic telemetry generator (PR 34)
+
+PR 34 adds the dedicated one-shot process ``ati-telemetry-test`` proving, in
+one real execution, that ATI telemetry traverses the deployed observability
+stack (Collector -> Prometheus/Jaeger/Loki -> Grafana provisioning). It is
+diagnostic telemetry, **not** production-domain telemetry: its names
+(``ati.telemetry.test.counter``, ``ati.telemetry.test.duration``,
+``ati.telemetry.test``, ``ati.telemetry.test.child``,
+``telemetry_test_signal``) live in ``telemetry/diagnostic.py`` and are never
+added to the frozen production ``Metrics``/``DurationMetrics``/``SpanNames``
+sets. The generator reuses ATI's normal OTel tracer/meter/logging providers
+and knows only the Collector — it never knows Prometheus/Jaeger/Loki/
+Grafana URLs and never exports directly to a backend.
+
+Usage (deployment/diagnostic and the PR 34 acceptance harness):
+
+```text
+ATI_OBSERVABILITY_ENABLED=true \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
+ati-telemetry-test --run-id <uuid>
+```
+
+Every invocation carries one caller-supplied UUID that correlates the
+counter, duration observation, root/child spans, and structured log. The run
+ID is diagnostic-only: it is never a dimension on normal production metrics
+and never carries Investigation/Evidence/user identity, credentials,
+secrets, or source payloads. The process refuses emission (exit 2) when
+observability is disabled, the standard endpoint is absent, or signal-
+specific OTLP endpoint/header overrides are set (even empty).
+
+No configuration profile change is needed; deployment uses the same two
+standard environment variables as every other ATI process. The authoritative
+acceptance harness is ``./scripts/observability-integration.sh`` (see
+``docs/TESTING.md``); the ordinary ``./build.sh --intg`` gate stays
+observability-free.
 
 ### Backends
 
@@ -1047,14 +1086,17 @@ indexed labels.
 
 ### Manual developer smoke procedure
 
-The stack is **not** covered by an automated telemetry integration-test
-gate. Manual smoke (developer-only) flow:
+PR 34 provides the **automated** telemetry-delivery gate
+(``./scripts/observability-integration.sh``, see ``docs/TESTING.md``); the
+manual flow below remains a quick developer-only smoke of the running stack
+for development-time investigation:
 
 ```text
 1. enable observability: ATI_OBSERVABILITY_ENABLED=true and
    OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 2. start core + observability stack (compose.yaml + compose.observability.yaml)
-3. issue one API request / run one worker operation
+3. issue one API request / run one worker operation, or run the PR 34
+   deterministic generator: ati-telemetry-test --run-id <uuid>
 4. confirm Collector is healthy (http://otel-collector:13131)
 5. confirm Prometheus target health: http://localhost:9090/targets
 6. inspect one ATI metric: http://localhost:9090/graph

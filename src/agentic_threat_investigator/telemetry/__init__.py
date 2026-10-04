@@ -27,6 +27,17 @@ from agentic_threat_investigator.telemetry.decorators import (
     timed,
     traced,
 )
+from agentic_threat_investigator.telemetry.diagnostic import (
+    TELEMETRY_TEST_CHILD_SPAN,
+    TELEMETRY_TEST_COUNTER,
+    TELEMETRY_TEST_DURATION,
+    TELEMETRY_TEST_LOG_EVENT,
+    TELEMETRY_TEST_ROOT_SPAN,
+    TELEMETRY_TEST_RUN_ID_ATTRIBUTE,
+    TelemetryTestSignalSummary,
+    canonical_run_id,
+    emit_telemetry_test_signal,
+)
 from agentic_threat_investigator.telemetry.logging import (
     TraceCorrelation,
     TraceCorrelationFilter,
@@ -52,6 +63,7 @@ from agentic_threat_investigator.telemetry.setup import (
     ServiceNames,
     TelemetryRuntime,
     configure_telemetry,
+    otlp_endpoint,
     shutdown_telemetry,
 )
 from agentic_threat_investigator.telemetry.tracing import (
@@ -71,6 +83,15 @@ __all__ = [
     "telemetry_operation",
     "postgres_repository_operation",
     "registered_postgres_repository_operations",
+    "TELEMETRY_TEST_CHILD_SPAN",
+    "TELEMETRY_TEST_COUNTER",
+    "TELEMETRY_TEST_DURATION",
+    "TELEMETRY_TEST_LOG_EVENT",
+    "TELEMETRY_TEST_ROOT_SPAN",
+    "TELEMETRY_TEST_RUN_ID_ATTRIBUTE",
+    "TelemetryTestSignalSummary",
+    "canonical_run_id",
+    "emit_telemetry_test_signal",
     "TraceCorrelation",
     "TraceCorrelationFilter",
     "current_correlation",
@@ -89,6 +110,7 @@ __all__ = [
     "TelemetryRuntime",
     "ServiceNames",
     "configure_telemetry",
+    "otlp_endpoint",
     "shutdown_telemetry",
     "CANONICAL_SPAN_NAMES",
     "INSTRUMENTATION_SCOPE",

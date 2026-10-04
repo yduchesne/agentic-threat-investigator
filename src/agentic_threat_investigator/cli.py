@@ -148,10 +148,16 @@ from agentic_threat_investigator.infrastructure.report_writer_composition import
 from agentic_threat_investigator.infrastructure.research_agent_composition import (
     build_research_agent,
 )
+from agentic_threat_investigator.telemetry.diagnostic import (
+    TelemetryTestSignalSummary,
+    canonical_run_id,
+    emit_telemetry_test_signal,
+)
 from agentic_threat_investigator.telemetry.logging import TraceCorrelationFilter
 from agentic_threat_investigator.telemetry.setup import (
     ServiceNames,
     configure_telemetry,
+    otlp_endpoint,
     shutdown_telemetry,
 )
 
@@ -875,6 +881,103 @@ def geo_resolver_main(argv: list[str] | None = None) -> int:
         return 0
 
     return asyncio.run(run())
+
+
+# Signal-specific OTLP endpoint/header overrides must never bypass the one
+# Collector destination (PR 34 Step 15). The generator refuses them so a
+# developer environment variable can never silently redirect delivery.
+_SIGNAL_SPECIFIC_ENDPOINT_VARIABLES = (
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+)
+_OTLP_HEADER_OVERRIDE_VARIABLES = ("OTEL_EXPORTER_OTLP_HEADERS",)
+
+
+def _telemetry_test_refusals(settings: Settings, endpoint: str | None) -> list[str]:
+    """Return the bounded emission refusals for the diagnostic generator.
+
+    Acceptance emission requires observability enabled (typed settings), an
+    explicit standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` (the Collector), and a
+    clean OTLP environment: signal-specific endpoint overrides and unexpected
+    OTLP header overrides are rejected when **set at all** — even to an empty
+    string, because the pinned OTel exporters prefer the signal-specific
+    variable over the standard endpoint and would silently export to an
+    empty URL. The delivery test must always target the harness Collector
+    through ATI's production composition.
+    """
+    refusals: list[str] = []
+    if not settings.observability_enabled:
+        refusals.append("ATI_OBSERVABILITY_ENABLED must be true")
+    if not endpoint:
+        refusals.append(
+            "OTEL_EXPORTER_OTLP_ENDPOINT must be set to the Collector OTLP/HTTP endpoint"
+        )
+    for name in _SIGNAL_SPECIFIC_ENDPOINT_VARIABLES:
+        if name in os.environ:
+            refusals.append(f"{name} must not be set (single Collector destination)")
+    for name in _OTLP_HEADER_OVERRIDE_VARIABLES:
+        if name in os.environ:
+            refusals.append(f"{name} must not be set (unexpected OTLP override)")
+    return refusals
+
+
+def telemetry_test_main(argv: list[str] | None = None) -> int:
+    """Run the one-shot diagnostic telemetry generator (PR 34).
+
+    ``ati-telemetry-test --run-id <uuid>`` emits a deterministic,
+    run-correlated diagnostic signal set (counter, duration observation,
+    root/child spans, and structured in-span log) through ATI's **production**
+    telemetry composition — ``configure_telemetry(service=ati-telemetry-test)``
+    then ``shutdown_telemetry()`` — so the process exports only to the one
+    standard Collector destination and never knows backend topology.
+
+    The generator refuses (exit 2) when observability is disabled, when no
+    standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` is set, or when a signal-specific
+    endpoint/header override would bypass the Collector. Emission failure
+    returns non-zero after ``shutdown_telemetry()`` has run. The success
+    marker ``telemetry test emitted run_id=<uuid>`` proves local emit/flush
+    only; backend convergence is the harness's bounded-polling concern.
+    """
+    parser = argparse.ArgumentParser(prog="ati-telemetry-test")
+    parser.add_argument(
+        "--run-id",
+        required=True,
+        help="unique UUID correlating every signal of this diagnostic run",
+    )
+    args = parser.parse_args(argv)
+    try:
+        run_id = canonical_run_id(args.run_id)
+    except ValueError as exc:
+        LOGGER.error("telemetry test refused: %s", exc)
+        return 2
+    _configure_logging()
+    settings = get_settings()
+    endpoint = otlp_endpoint()
+    refusals = _telemetry_test_refusals(settings, endpoint)
+    for refusal in refusals:
+        LOGGER.error("telemetry test refused: %s", refusal)
+    if refusals:
+        return 2
+    configure_telemetry(
+        enabled=True,
+        service_name=ServiceNames.TELEMETRY_TEST,
+    )
+    summary: TelemetryTestSignalSummary | None = None
+    try:
+        summary = emit_telemetry_test_signal(run_id)
+    except Exception:
+        LOGGER.exception("telemetry test emission failed")
+        return 1
+    finally:
+        shutdown_telemetry()
+    assert summary is not None
+    LOGGER.info(
+        "telemetry test emitted run_id=%s trace_id=%s",
+        summary.run_id,
+        summary.trace_id,
+    )
+    return 0
 
 
 async def _write_missing_current_report(

@@ -39,7 +39,7 @@ class TestServiceIdentity:
     """Canonical service names are exact and deterministic."""
 
     def test_exact_service_name_set(self) -> None:
-        """The frozen service-name set matches the PR 29 contract."""
+        """The frozen service-name set matches the PR 29/PR 34 contract."""
         assert {
             "ati-api",
             "ati-worker",
@@ -47,6 +47,7 @@ class TestServiceIdentity:
             "ati-scheduler",
             "ati-migrate",
             "ati-fake-data-bootstrap",
+            "ati-telemetry-test",
         } == SERVICE_NAMES
 
     def test_constants_belong_to_set(self) -> None:
@@ -58,6 +59,7 @@ class TestServiceIdentity:
             ServiceNames.SCHEDULER,
             ServiceNames.MIGRATE,
             ServiceNames.FAKE_DATA_BOOTSTRAP,
+            ServiceNames.TELEMETRY_TEST,
         } == SERVICE_NAMES
 
     def test_api_resource_identity(self, fresh_setup: None) -> None:
@@ -238,7 +240,7 @@ def export_telemetry(
     monkeypatch.setattr(setup, "_span_exporter", lambda: span_exporter)
     monkeypatch.setattr(setup, "_metric_exporter", lambda: metric_exporter)
     monkeypatch.setattr(setup, "_log_exporter", lambda: log_exporter)
-    monkeypatch.setattr(setup, "_otlp_endpoint", lambda: "http://otel-collector:4318")
+    monkeypatch.setattr(setup, "otlp_endpoint", lambda: "http://otel-collector:4318")
     try:
         yield span_exporter, metric_exporter, log_exporter
     finally:
@@ -255,7 +257,7 @@ class TestOtlpEndpointContract:
         import agentic_threat_investigator.telemetry.setup as setup
 
         calls: list[str] = []
-        monkeypatch.setattr(setup, "_otlp_endpoint", lambda: None)
+        monkeypatch.setattr(setup, "otlp_endpoint", lambda: None)
         monkeypatch.setattr(setup, "_span_exporter", lambda: calls.append("span"))
         monkeypatch.setattr(setup, "_metric_exporter", lambda: calls.append("metric"))
         monkeypatch.setattr(setup, "_log_exporter", lambda: calls.append("log"))
@@ -274,7 +276,7 @@ class TestOtlpEndpointContract:
         import agentic_threat_investigator.telemetry.setup as setup
 
         calls: list[str] = []
-        monkeypatch.setattr(setup, "_otlp_endpoint", lambda: None)
+        monkeypatch.setattr(setup, "otlp_endpoint", lambda: None)
         monkeypatch.setattr(setup, "_span_exporter", lambda: calls.append("span"))
         monkeypatch.setattr(setup, "_metric_exporter", lambda: calls.append("metric"))
         monkeypatch.setattr(setup, "_log_exporter", lambda: calls.append("log"))
@@ -291,11 +293,11 @@ class TestOtlpEndpointContract:
         import agentic_threat_investigator.telemetry.setup as setup
 
         monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4318")
-        assert setup._otlp_endpoint() == "http://otel-collector:4318"
+        assert setup.otlp_endpoint() == "http://otel-collector:4318"
         monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-        assert setup._otlp_endpoint() is None
+        assert setup.otlp_endpoint() is None
         monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "   ")
-        assert setup._otlp_endpoint() is None
+        assert setup.otlp_endpoint() is None
 
     def test_real_exporters_resolve_standard_paths(
         self, monkeypatch: pytest.MonkeyPatch

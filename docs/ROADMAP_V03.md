@@ -541,9 +541,13 @@ instrumentation. For example, a deterministic Evidence-consumer unit test may
 assert exact sent/received/create/append/ignore counter behavior through an
 in-memory meter provider.
 
-There is **no dedicated telemetry integration-testing PR** and no PR 29E.
-The series does not require integration tests whose purpose is to prove
-Prometheus, Jaeger, Loki, Grafana, LangSmith, or Langfuse themselves work.
+There is **no dedicated telemetry integration-testing PR** within the
+PR 29 series itself and no PR 29E. The series does not require integration
+tests whose purpose is to prove Prometheus, Jaeger, Loki, Grafana,
+LangSmith, or Langfuse themselves work. PR 34 (tracked in
+`ROADMAP_V06.md`) later adds the one authoritative end-to-end
+telemetry-delivery gate (`./scripts/observability-integration.sh`) on top of
+the completed PR 29/29C/29D observability infrastructure.
 
 ## Boundaries to preserve
 
@@ -558,7 +562,9 @@ PR 29 must not:
 - conflate general distributed tracing with LLM/agent observability;
 - change Kafka Evidence delivery or PostgreSQL transaction semantics;
 - create a second Evidence-processing path for observability;
-- introduce a PR 29E telemetry integration-test phase.
+- introduce an integration-test phase inside the PR 29 series (PR 34 in
+  `ROADMAP_V06.md` is the dedicated telemetry-delivery gate, kept out of
+  the PR 29 scope and out of `./build.sh --intg`).
 
 ## Exit criteria
 
