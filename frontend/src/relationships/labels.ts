@@ -21,6 +21,11 @@ export const RELATIONSHIP_TYPE_KEYS: Readonly<Record<RelationshipTypeName, strin
   "urn:ati:relationship:threat:associated_with": "types.associatedWith",
   "urn:ati:relationship:attack:uses_technique": "types.usesTechnique",
   "urn:ati:relationship:vulnerability:exploits": "types.exploits",
+  // PR 33D: source-neutral CTI assertion types.
+  "urn:ati:relationship:threat:uses": "types.uses",
+  "urn:ati:relationship:threat:targets": "types.targets",
+  "urn:ati:relationship:threat:attributed_to": "types.attributedTo",
+  "urn:ati:relationship:threat:controls": "types.controls",
 };
 
 /**
@@ -46,4 +51,9 @@ export const RELATIONSHIP_TYPES: readonly RelationshipTypeName[] = [
   "urn:ati:relationship:threat:associated_with",
   "urn:ati:relationship:attack:uses_technique",
   "urn:ati:relationship:vulnerability:exploits",
+  // PR 33D: source-neutral CTI assertion types.
+  "urn:ati:relationship:threat:uses",
+  "urn:ati:relationship:threat:targets",
+  "urn:ati:relationship:threat:attributed_to",
+  "urn:ati:relationship:threat:controls",
 ];

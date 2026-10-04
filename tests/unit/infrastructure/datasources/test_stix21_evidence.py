@@ -182,11 +182,13 @@ def _expected_facts(
     iocs: list[dict[str, str]],
     common: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return the pinned normalized three-block fact object."""
+    """Return the pinned normalized fact object (PR 33D includes source_assertion)."""
     return {
         "stix": _expected_common_facts(object_id, object_type, **(common or {})),
         "indicator": indicator,
         "iocs": iocs,
+        "cti_entity": None,
+        "source_assertion": None,
     }
 
 
@@ -713,7 +715,14 @@ class TestFactsProvenance:
         """M33B-49: the common STIX fact key set is exact and ordered."""
         (converted,) = _convert_single(fixtures.stix_indicator())
         facts = _thaw_facts(converted.observation)
-        assert list(facts.keys()) == ["stix", "indicator", "iocs", "cti_entity"]
+        assert list(facts.keys()) == [
+            "stix",
+            "indicator",
+            "iocs",
+            "cti_entity",
+            "source_assertion",
+        ]
+        assert facts["source_assertion"] is None
         assert list(facts["stix"].keys()) == [
             "id",
             "type",
@@ -888,7 +897,14 @@ class TestFactsProvenance:
         """M33B-65: no verdict/risk/attribution/relationship semantics exist."""
         (converted,) = _convert_single(fixtures.stix_indicator())
         facts = _thaw_facts(converted.observation)
-        assert set(facts.keys()) == {"stix", "indicator", "iocs", "cti_entity"}
+        assert set(facts.keys()) == {
+            "stix",
+            "indicator",
+            "iocs",
+            "cti_entity",
+            "source_assertion",
+        }
+        assert facts["source_assertion"] is None
         assert all(set(ioc.keys()) == {"type", "value"} for ioc in facts["iocs"])
         flattened = str(facts).lower()
         for banned in (
@@ -1210,8 +1226,15 @@ class TestVerticalSlices:
             {"type": "ip_address", "value": "2001:db8::42"},
         ]
         # No verdict/relationship semantics anywhere in the slice.
-        assert set(facts.keys()) == {"stix", "indicator", "iocs", "cti_entity"}
+        assert set(facts.keys()) == {
+            "stix",
+            "indicator",
+            "iocs",
+            "cti_entity",
+            "source_assertion",
+        }
         assert facts["cti_entity"] is None
+        assert facts["source_assertion"] is None
 
     def test_m33b_v03_mixed_objects_supported_order(self) -> None:
         """M33B-V03: mixed objects yield exactly three outputs in source order."""
@@ -1464,8 +1487,15 @@ class TestCtiSdoIsolation:
         """M33C-S24: CTI SDO blocks never leak into IOC-only facts."""
         (converted,) = _convert_single(fixtures.stix_indicator())
         facts = _thaw_facts(converted.observation)
-        assert list(facts.keys()) == ["stix", "indicator", "iocs", "cti_entity"]
+        assert list(facts.keys()) == [
+            "stix",
+            "indicator",
+            "iocs",
+            "cti_entity",
+            "source_assertion",
+        ]
         assert facts["cti_entity"] is None
+        assert facts["source_assertion"] is None
         assert facts["iocs"] == [{"type": "domain", "value": fixtures.DOMAIN_VALUE}]
 
     @pytest.mark.parametrize(

@@ -45,6 +45,15 @@ class RelationshipType(str, Enum):
     ASSOCIATED_WITH = "urn:ati:relationship:threat:associated_with"
     USES_TECHNIQUE = "urn:ati:relationship:attack:uses_technique"
     EXPLOITS = "urn:ati:relationship:vulnerability:exploits"
+    # PR 33D: the minimum source-neutral CTI assertion vocabulary. These
+    # four values are source assertions about external intelligence (STIX
+    # 2.1 Relationship/Sighting today, MISP Object References later); they
+    # are never lossy aliases of the existing URNs above and existing
+    # relationship identities are unchanged.
+    USES = "urn:ati:relationship:threat:uses"
+    TARGETS = "urn:ati:relationship:threat:targets"
+    ATTRIBUTED_TO = "urn:ati:relationship:threat:attributed_to"
+    CONTROLS = "urn:ati:relationship:threat:controls"
 
 
 class Relationship(BaseModel):

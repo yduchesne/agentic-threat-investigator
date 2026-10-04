@@ -2236,7 +2236,11 @@
           "urn:ati:relationship:organization:operated_by",
           "urn:ati:relationship:threat:associated_with",
           "urn:ati:relationship:attack:uses_technique",
-          "urn:ati:relationship:vulnerability:exploits"
+          "urn:ati:relationship:vulnerability:exploits",
+          "urn:ati:relationship:threat:uses",
+          "urn:ati:relationship:threat:targets",
+          "urn:ati:relationship:threat:attributed_to",
+          "urn:ati:relationship:threat:controls"
         ],
         "title": "RelationshipType",
         "type": "string"
