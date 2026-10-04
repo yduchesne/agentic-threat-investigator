@@ -528,12 +528,19 @@ envelope validation, typed safe errors, the datasource checkpoint system
 (compare-and-advance stored functions), runtime composition, the
 real-Redpanda vertical slices, and the OpenCTI 6.9 interoperability
 harness are implemented. Unit, integration, and real-broker TLS-free
-gates pass; the optional OpenCTI harness additionally validates real
-OpenCTI 6.9 boot, health, GraphQL seeding (`uploadAndAskJobImport` +
-`INTERNAL_IMPORT_FILE`), TAXII 2.1 serving (`/taxii2/root/`), and the
+gates pass; the optional OpenCTI harness validates real OpenCTI 6.9
+boot, health, GraphQL seeding (`uploadImport` + `askJobImport`, the
+one-call `uploadAndAskJobImport` hardcodes `forceValidation: true` and
+cannot materialize bundles), TAXII 2.1 serving (`/taxii2/root/`), the
+seed -> OpenCTI canonical identity mapping (PR 33E-1 Option C:
+`x_opencti_stix_ids` -> `standard_id`, verified against the real TAXII
+collection, canonical manifests drive the barrier and assertions), and the
 production acquisition path — see `docs/TESTING.md` for the pinned-image
-topology and the environmental caveat around OpenCTI's import
-materialization.
+topology, the materializable/unsupported/rejected lifecycle categories,
+and the verified real-OpenCTI import materialization (fixture STIX IDs
+must be RFC 4122 UUIDv4, the relationship-schema matrix limits supported
+Relationship instances to `uses`/`attributed-to`, and the Sighting needs
+its STIX-required `where_sighted_refs` Identity).
 ## Deferred beyond v0.6
 
 The following are not implied by this roadmap and require separate approval:
