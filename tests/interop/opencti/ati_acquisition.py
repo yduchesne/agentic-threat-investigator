@@ -126,10 +126,17 @@ class _RequestCounter:
         """Bind the counter to the run-state dict it updates."""
         self._state = state
         self._count = 0
+        # Preserve per-run counts: the second (incremental) acquisition would
+        # otherwise overwrite the first run's pagination proof.
+        self._seen_previous = isinstance(state.get("requests_count"), int)
+        self._previous = state.get("requests_count") if self._seen_previous else None
 
     async def on_request(self, request: object) -> None:
         """Increment the bounded request counter (metadata only)."""
         self._count += 1
+        if self._seen_previous and self._previous is not None:
+            self._state.setdefault("requests_count_first", self._previous)
+            self._state["requests_count_second"] = self._count
         self._state["requests_count"] = self._count
 
     def requests_count(self) -> int:

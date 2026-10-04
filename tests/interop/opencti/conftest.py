@@ -37,7 +37,10 @@ def _database_url() -> str:
         pytest.fail("DATABASE_URL must point at the isolated interop database")
     if "ati-interop" not in url and "ati-test" not in url and "ati_interop" not in url:
         pytest.fail("interop assertions require an isolated interop database URL")
-    ensure_test_database_safe(url)
+    # The isolated harness database is ati_interop_<run-id>; the shared
+    # settings guard still has to recognize the marker for this opt-in.
+    marker = "ati_interop" if "ati_interop" in url else "ati-test"
+    ensure_test_database_safe(url, expected_marker=marker)
     return url
 
 

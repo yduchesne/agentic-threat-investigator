@@ -1759,7 +1759,7 @@ Topology (pinned images only): `opencti/platform:6.9.29` +
 `opencti/worker:6.9.29` + `opencti/connector-import-file-stix:6.9.29`
 + `redis:8.10.1` + `docker.elastic.co/elasticsearch/elasticsearch:8.19.21`
 + `rabbitmq:4.3-management` + `nginx:1.27.5` (TLS terminator for the
-credential-free HTTPS production client) + `chrislusf/seaweedfs:latest`
+credential-free HTTPS production client) + `chrislusf/seaweedfs:4.48`
 (S3-compatible object store; MinIO archived its open-source server and
 revoked public container pulls, so the harness substitutes SeaweedFS's
 S3 gateway, path-style addressing like OpenCTI's `forcePathStyle`) +
@@ -1772,11 +1772,18 @@ and the assertion suite.
 
 Flow: start isolated topology -> wait infrastructure health -> bootstrap
 OpenCTI (admin user, TAXII collection, restricted consumer bearer token
-via the standard GraphQL surface) -> seed fixtures (bundle upload through
-6.9's `uploadAndAskJobImport` + `INTERNAL_IMPORT_FILE` connector) -> wait
-real TAXII feed convergence -> run the production
-`Taxii21Datasource`/producer over real Redpanda -> wait the PostgreSQL-
-backed ingestion-completion barrier
+via the standard GraphQL surface) -> seed fixtures (bundle stored through
+6.9's `uploadImport` and dispatched with `askJobImport(bypassValidation:
+true)` to the `INTERNAL_IMPORT_FILE` connector; the one-call
+`uploadAndAskJobImport` mutation hardcodes `forceValidation: true` and
+routes into the validation workbench so it never materializes bundles,
+verified against the pinned platform source) -> wait real TAXII feed
+convergence -> resolve the seed -> OpenCTI canonical identity mapping from
+OpenCTI materialization state (`x_opencti_stix_ids` -> `standard_id`) and
+verify every canonical identity (including relationship endpoints and the
+Sighting references) against the real TAXII collection -> run the
+production `Taxii21Datasource`/producer over real Redpanda -> wait the
+PostgreSQL-backed ingestion-completion barrier
 (`tests/interop/opencti/status.py --wait`, exit 0 only for
 `READY_FOR_ASSERTIONS`; never fixed sleeps) -> only then run the interop
 assertion suite (`pytest tests/interop -m interop`) -> collect evidence ->
@@ -1787,22 +1794,69 @@ under `artifacts/opencti-interop/<run-id>/` (gitignored) that classifies
 the failure stage/root cause without ever printing credentials or raw
 payloads.
 
+### Seed -> canonical identity mapping (PR 33E-1 Option C)
+
+Real OpenCTI 6.9 regenerates deterministic `standard_id`s (UUIDv5) and
+never preserves external STIX IDs in its TAXII export; the fixture seed IDs
+are kept only in the platform's durable materialization state
+(`x_opencti_stix_ids`). The harness therefore:
+
+1. establishes the seed -> canonical mapping from OpenCTI materialization
+   state (Elasticsearch `x_opencti_stix_ids.keyword`, published on a
+   per-run randomized host port for the identity resolver only), never by
+   accepting arbitrary TAXII output;
+2. independently verifies every mapped canonical identity appears in the
+   real TAXII collection, that the four legal Relationship instances'
+   `source_ref`/`target_ref` and the Sighting's `sighting_of_ref` /
+   `where_sighted_refs` are all rewritten to canonical identities, and that
+   REJECTED_BY_OPENCTI_PROFILE objects stayed out of both ES and the feed;
+3. builds the canonical manifests (`manifest-v1-canonical.json`,
+   `manifest-v2-canonical.json`) that drive the readiness barrier and the
+   assertion suite, so ATI `source_record_id` and CTI Entity canonical
+   identities are exactly the identities ATI received through TAXII.
+
+The fixture partitions every seeded object into - present in the manifest -
+`MATERIALIZABLE_AND_ATI_SUPPORTED`, `MATERIALIZABLE_BUT_ATI_UNSUPPORTED`,
+and `REJECTED_BY_OPENCTI_PROFILE`. Rejected objects (real OpenCTI 6.9's
+relationship-schema matrix rejects `targets` toward Infrastructure and
+`controls` from Intrusion-Set for the supported CTI types; the unresolved-
+reference relationship fails with `MISSING_REFERENCE_ERROR`) are **never**
+counted as ATI unsupported-object coverage; the Sighting carries the STIX
+2.1-required `where_sighted_refs` (a deterministic Identity, which is
+itself ATI-unsupported and must produce zero semantics beyond the Sighting
+handling). Ground truth was verified empirically on a live pinned stack:
+all 16 materializable objects materialize and export with canonical IDs and
+canonical refs; the three rejected relationships are absent from ES and the
+feed.
+
+Seed-availability machinery: the seeder waits for the ATI worker to bind
+its RabbitMQ push queue (worker-mailbox gate) so the connector's bundle
+publish is never dropped by a not-yet-bound exchange route, and the import
+job must be dispatched with `forceValidation: false`/`bypassValidation:
+true` (PR 33E-1 import-path fix).
+
 OpenCTI 6.9 API deltas the harness accommodates (verified against the
 pinned image): the platform health endpoint requires the configured
 `?health_access_key=` query parameter; the TAXII 2.1 server is rooted at
 `/taxii2/root/` (not `/taxii2/`); `APP__ADMIN__TOKEN` must be a strict
-UUIDv4; bundle ingestion uses the module-level `uploadAndAskJobImport`
-mutation (the legacy `importBundle` mutation and `authTokenAdd` are gone,
-replaced by `userEdit { tokenRenew { api_token } }`); the worker reads
+UUIDv4; bundle ingestion uses the supported two-step surface - `uploadImport`
+(file only) followed by `askJobImport(bypassValidation: true,
+forceValidation: false)` - because the legacy `importBundle` mutation and
+`authTokenAdd` are gone (replaced by `userEdit { tokenRenew { api_token } }`)
+and the one-call `uploadAndAskJobImport` hardcodes `forceValidation: true`
+(workbench detour, no materialization); the worker reads
 `OPENCTI_URL`/`OPENCTI_TOKEN` (+ the import connector process must run as
-its own service). Known environmental caveat: OpenCTI 6.9's import
-materialization depends on the import connector and the platform's
-internal queue dispatch; on the host used to develop the harness the
-convergence gate + production acquisition were reached, while full
-materialization of every STIX fixture type remained subject to the
-OpenCTI-side workbench/queue behavior — the barrier treats that as a
-non-READY stage and collects a diagnostic bundle rather than ever
-asserting wrong state.
+its own service); the seeder waits for the worker's RabbitMQ push-queue
+consumer before seeding (worker-mailbox gate); fixture STIX IDs must be
+RFC 4122 UUIDv4 (the platform validates every incoming id with
+`uuidValidate`); OpenCTI regenerates canonical `standard_id`s on export
+(seed -> canonical mapping, see above); its relationship-schema matrix
+rejects `targets`/`controls` for the supported CTI type pairs and the
+STIX Sighting requires `where_sighted_refs` (all verified in the pinned
+source and live). The readiness barrier and assertion suite consume the
+canonical manifests and the recorded `identity_map`/`feed_verification`;
+OpenCTI-rejected objects are tracked as REJECTED_BY_OPENCTI_PROFILE and
+ever asserted as nothing but absent.
 
 Orchestration-state machine unit tests O01..O14
 (`tests/unit/infrastructure/test_opencti_interop_status.py`) prove the

@@ -56,6 +56,22 @@ _TAXII_ACCEPT = "application/taxii+json;version=2.1"
 _TAXII_MEDIA_TYPE = "application/taxii+json"
 
 
+def _relationship_urn(stix_type: str) -> str:
+    """Map the manifest's STIX 2.1 relationship type to its ATI URN."""
+    prefix = "urn:ati:relationship:threat:"
+    return prefix + stix_type.replace("-", "_")
+
+
+_MAX_FEED_PROBE_PAGES = 20
+"""Bounded page cap of the TAXII feed probe.
+
+OpenCTI caps a single TAXII page at ``app:data_sharing:taxii:
+max_pagination_result`` (default 500) and signals continuation through
+``more``/``next``; the probe follows the server's opaque ``next`` token up
+to this bound instead of trusting one request to hold the whole feed.
+"""
+
+
 def _require(env: str) -> str:
     value = os.environ.get(env, "")
     if not value:
@@ -81,12 +97,55 @@ def _pg() -> Any:
     return psycopg.connect(sync_url, connect_timeout=10)
 
 
+def _fetch_taxii_page(
+    url: str,
+    headers: dict[str, str],
+    context: ssl.SSLContext,
+    *,
+    params: dict[str, str],
+) -> tuple[list[str], bool, dict[str, str] | None]:
+    """Fetch one TAXII collection-object page and return (ids, more, next_params).
+
+    Returns ``more=False`` on a non-converged response so the probe treats
+    the page as complete rather than crashing; media-type, JSON, and schema
+    violations all map to "not yet converged" (the readiness gate waits and
+    re-probes). The opaque ``next`` token returned by the server is never
+    parsed, only passed back verbatim for the next request (TAXII 2.1).
+    """
+    separator = "&" if "?" in url else "?"
+    request = urllib.request.Request(
+        f"{url}{separator}{urllib.parse.urlencode(params)}", headers=headers
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30, context=context) as response:
+            content_type = response.headers.get("Content-Type", "")
+            if _TAXII_MEDIA_TYPE not in content_type:
+                return [], False, None
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 - a failed feed probe means "not yet converged"
+        return [], False, None
+    if not isinstance(payload, dict) or not isinstance(payload.get("objects"), list):
+        return [], False, None
+    ids: list[str] = []
+    for obj in payload["objects"]:
+        if isinstance(obj, dict) and isinstance(obj.get("id"), str):
+            ids.append(obj["id"])
+    more = bool(payload.get("more"))
+    next_token = payload.get("next")
+    if more and isinstance(next_token, str) and next_token.strip():
+        return ids, True, {"next": next_token.strip()}
+    return ids, False, None
+
+
 def _taxii_feed_ids() -> list[str]:
     """Return the object IDs currently visible through the real TAXII endpoint.
 
     The harness TLS terminator presents a self-signed certificate generated
     per run; the same CA injected into the ATI driver is honored here so the
     probe verifies the real TLS boundary (never ``ssl._create_unverified``).
+    The probe follows the server's opaque ``next`` pagination up to a bounded
+    page count (OpenCTI caps single-page sizes) and is never used to decide
+    ATI persistence readiness on its own.
     """
     url = _require("OPENCTI_TAXII_URL")
     headers = {"Accept": _TAXII_ACCEPT, "User-Agent": "ati-interop-status/0.1"}
@@ -99,15 +158,101 @@ def _taxii_feed_ids() -> list[str]:
         if ca_file
         else ssl.create_default_context()
     )
-    request = urllib.request.Request(f"{url}?limit=500", headers=headers)
-    with urllib.request.urlopen(request, timeout=30, context=context) as response:
-        content_type = response.headers.get("Content-Type", "")
-        if _TAXII_MEDIA_TYPE not in content_type:
-            return []
-        payload = json.loads(response.read().decode("utf-8"))
-    objects = payload.get("objects", [])
-    ids = [obj.get("id") for obj in objects if isinstance(obj, dict)]
-    return [str(item) for item in ids if isinstance(item, str)]
+    collected: list[str] = []
+    page_params: dict[str, str] = {"limit": "500"}
+    for _ in range(_MAX_FEED_PROBE_PAGES):
+        ids, more, next_params = _fetch_taxii_page(
+            url, headers, context, params=page_params
+        )
+        if ids:
+            collected.extend(ids)
+        if not more or next_params is None:
+            break
+        page_params = dict(next_params)
+    return collected
+
+
+def _taxii_feed_objects() -> list[dict[str, Any]]:
+    """Return a bounded object representation of the real TAXII collection.
+
+    Only the identity-relevant fields are retained (type, id, value/name,
+    relationship refs, Sighting refs); pagination is honored up to the same
+    bounded page cap as :func:`_taxii_feed_ids`. Used by the convergence
+    type-count gate (seed manifests) and by diagnostics.
+    """
+    url = _require("OPENCTI_TAXII_URL")
+    headers = {"Accept": _TAXII_ACCEPT, "User-Agent": "ati-interop-status/0.1"}
+    token = os.environ.get("OPENCTI_TAXII_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    ca_file = os.environ.get("ATI_OPENCTI_CA_CERT")
+    context = (
+        ssl.create_default_context(cafile=ca_file)
+        if ca_file
+        else ssl.create_default_context()
+    )
+    collected: list[dict[str, Any]] = []
+    page_params: dict[str, str] = {"limit": "500"}
+    keep = [
+        "type",
+        "id",
+        "name",
+        "value",
+        "relationship_type",
+        "source_ref",
+        "target_ref",
+        "sighting_of_ref",
+        "where_sighted_refs",
+    ]
+    for _ in range(_MAX_FEED_PROBE_PAGES):
+        try:
+            separator = "&" if "?" in url else "?"
+            request = urllib.request.Request(
+                f"{url}{separator}{urllib.parse.urlencode(page_params)}",
+                headers=headers,
+            )
+            with urllib.request.urlopen(
+                request, timeout=30, context=context
+            ) as response:
+                content_type = response.headers.get("Content-Type", "")
+                if _TAXII_MEDIA_TYPE not in content_type:
+                    break
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001 - a failed feed probe means "not yet converged"
+            break
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("objects"), list
+        ):
+            break
+        for obj in payload["objects"]:
+            if isinstance(obj, dict) and isinstance(obj.get("id"), str):
+                collected.append({key: obj[key] for key in keep if key in obj})
+        more = bool(payload.get("more"))
+        next_token = payload.get("next")
+        if not more or not isinstance(next_token, str) or not next_token.strip():
+            break
+        page_params = {"next": next_token.strip()}
+    return collected
+
+
+def _feed_type_counts(objects: list[dict[str, Any]]) -> dict[str, int]:
+    """Return the observed object-type counts of one feed snapshot."""
+    counts: dict[str, int] = {}
+    for obj in objects:
+        o_type = obj.get("type")
+        if isinstance(o_type, str):
+            counts[o_type] = counts.get(o_type, 0) + 1
+    return counts
+
+
+def _feed_type_counts_cover(expected: dict[str, int], observed: dict[str, int]) -> bool:
+    """True when every expected type-count is met (or exceeded) by the feed.
+
+    Materializable type composition is deterministic per seed manifest; a
+    superset is tolerated so OpenCTI-side bookkeeping objects can never block
+    the pre-mapping convergence gate.
+    """
+    return all(observed.get(o_type, 0) >= count for o_type, count in expected.items())
 
 
 class PostgresProbe:
@@ -143,9 +288,18 @@ class PostgresProbe:
             checkpoint = self._checkpoint_ok(cursor)
         feed_ok = False
         try:
-            expected_ids = self._manifest.get("stix_ids")
-            stix_ids = expected_ids if isinstance(expected_ids, list) else []
-            feed_ok = set(_taxii_feed_ids()) >= set(stix_ids)
+            expected_counts = self._manifest.get("expected_feed_type_counts")
+            if isinstance(expected_counts, dict) and expected_counts:
+                # Seed manifest: deterministic materializable feed composition
+                # (type counts), used before canonical identities are resolved.
+                observed = _feed_type_counts(_taxii_feed_objects())
+                feed_ok = _feed_type_counts_cover(expected_counts, observed)
+            else:
+                # Canonical manifest: exact-id convergence on the identities
+                # ATI actually receives through TAXII.
+                expected_ids = self._manifest.get("stix_ids")
+                stix_ids = expected_ids if isinstance(expected_ids, list) else []
+                feed_ok = set(_taxii_feed_ids()) >= set(stix_ids)
         except Exception:  # noqa: BLE001 - a feed probe failure means "not yet converged", never a crash
             feed_ok = False
         return ProbeSnapshot(
@@ -218,13 +372,14 @@ class PostgresProbe:
             if int(cursor.fetchone()[0]) != len(values):
                 return False
         for rel in self._manifest.get("expected_relationships") or []:
+            rel_urn = _relationship_urn(rel["type"])
             cursor.execute(
                 "SELECT count(*) FROM ati.relationship r "
                 "JOIN ati.entity s ON s.id = r.source_entity_id "
                 "JOIN ati.entity t ON t.id = r.target_entity_id "
-                "WHERE r.relationship_type = %s AND s.canonical_value = %s "
+                "WHERE r.relationship_type_urn = %s AND s.canonical_value = %s "
                 "AND t.canonical_value = %s",
-                (rel["type"], rel["source"], rel["target"]),
+                (rel_urn, rel["source"], rel["target"]),
             )
             if int(cursor.fetchone()[0]) != 1:
                 return False
@@ -379,16 +534,71 @@ def _diagnose(
         "manifest_expectations": {
             "fixture": manifest.get("fixture"),
             "evidence": len(manifest.get("expected_evidence_ids", [])),
+            "categories": {
+                category: len(seed_ids)
+                for category, seed_ids in (
+                    manifest.get("object_categories") or {}
+                ).items()
+            },
             "entities": {
                 k: len(v) for k, v in (manifest.get("expected_entities") or {}).items()
             },
             "relationships": len(manifest.get("expected_relationships", [])),
             "unsupported": len(manifest.get("unsupported_stix_ids", [])),
+            "sighting": bool(manifest.get("expected_sighting_evidence")),
             "checkpoint": manifest.get("checkpoint"),
         },
         "current_stage_probe": _probe_dict(probe.snapshot()),
         "container_health": _container_health(args.run_id),
+        "seed_correlation": {
+            "seed_stage": state.get("seed_stage"),
+            "work_id": state.get("work_id"),
+            "import_connector_id": state.get("import_connector_id"),
+            "push_queue": state.get("push_queue"),
+            "worker_mailbox_ready": state.get("worker_mailbox_ready"),
+            "identity_map": state.get("identity_map"),
+            "feed_verification": state.get("feed_verification"),
+        },
+        "image_digests": dict((state.get("image_digests") or {}).items()),
     }
+    expected_ids = manifest.get("stix_ids")
+    if isinstance(expected_ids, list):
+        try:
+            visible = set(_taxii_feed_ids())
+            expected = set(expected_ids)
+            bundle["taxii_feed"] = {
+                "expected_count": len(expected),
+                "visible_count": len(visible),
+                "missing": sorted(expected - visible),
+                "unexpected": sorted(visible - expected),
+            }
+        except Exception:  # noqa: BLE001 - diagnosis must survive feed-probe failures
+            bundle["taxii_feed"] = {"probe_failed": True}
+    expected_counts = manifest.get("expected_feed_type_counts")
+    if isinstance(expected_counts, dict) and expected_counts:
+        try:
+            observed = _feed_type_counts(_taxii_feed_objects())
+            bundle["taxii_feed_type_counts"] = {
+                "expected": expected_counts,
+                "observed": observed,
+                "covered": _feed_type_counts_cover(expected_counts, observed),
+            }
+        except Exception:  # noqa: BLE001 - diagnosis must survive feed-probe failures
+            bundle["taxii_feed_type_counts"] = {"probe_failed": True}
+    if os.environ.get("ATI_INTEROP_RABBITMQ_API_URL"):
+        try:
+            from tests.interop.opencti.seed_opencti import (
+                _rabbitmq_queue_consumers,
+            )
+
+            bundle["worker_mailbox"] = _rabbitmq_queue_consumers(
+                os.environ["ATI_INTEROP_RABBITMQ_API_URL"],
+                os.environ.get("ATI_INTEROP_RABBIT_USER", ""),
+                os.environ.get("ATI_INTEROP_RABBIT_PASS", ""),
+                str(state.get("push_queue") or ""),
+            )
+        except Exception:  # noqa: BLE001 - diagnosis must survive probe failures
+            bundle["worker_mailbox"] = "probe_failed"
     execution_id = state.get("execution_id")
     if execution_id:
         with _pg() as connection, connection.cursor() as cursor:
@@ -401,7 +611,7 @@ def _diagnose(
             bundle["checkpoint"] = cursor.fetchone()
             cursor.execute(
                 "SELECT count(*) FROM ati.evidence_message_receipt r JOIN ati.evidence e "
-                "ON e.id = r.evidence_id WHERE e.source_id = 'urn:ati:source:opencti'"
+                "ON e.id = r.evidence_id WHERE e.source = 'urn:ati:source:opencti'"
             )
             bundle["receipt_count"] = int(cursor.fetchone()[0])
     bundle_path = state_dir / "diagnose-bundle.json"
