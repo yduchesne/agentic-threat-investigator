@@ -14,7 +14,7 @@
 import { Box, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import type {
   Investigation,
@@ -40,7 +40,7 @@ import { runningNotice } from "../analyst-table/running";
 import { TableToolbar } from "../analyst-table/TableToolbar";
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
-import { sourceLabelWithUrn } from "../components/source-labels";
+import { sourceLabel, sourceLabelWithUrn } from "../components/source-labels";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { observationActions, relationshipObservationsAction } from "../pivots/pivot-capabilities";
 import { useObservationDetail, useObservationsPage } from "./relationships-queries";
@@ -127,7 +127,10 @@ function draftError(t: (key: string) => string, draft: ObservationDraft): string
 }
 
 /** Analyst-facing observation columns (from the exact list DTO). */
-export function observationColumns(t: (key: string) => string): Column<RelationshipObservation>[] {
+export function observationColumns(
+  t: (key: string) => string,
+  tCommon: (key: string) => string,
+): Column<RelationshipObservation>[] {
   return [
     {
       id: "relationship",
@@ -146,8 +149,8 @@ export function observationColumns(t: (key: string) => string): Column<Relations
     {
       id: "source",
       header: t("columns.source"),
-      render: (observation) => observation.source,
-      exportValue: (observation) => observation.source,
+      render: (observation) => sourceLabel(observation.source, tCommon),
+      exportValue: (observation) => sourceLabel(observation.source, tCommon),
     },
     {
       id: "observedAt",
@@ -167,12 +170,13 @@ export function observationColumns(t: (key: string) => string): Column<Relations
       header: t("columns.evidence"),
       render: (observation) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          <Link
+            to={`/investigations/${observation.investigation_id}/evidence?selection=${observation.evidence_id}`}
+            style={{ textDecoration: "none" }}
+          >
+            {observation.evidence_id.slice(0, 8)}
+          </Link>
           <CompactId id={observation.evidence_id} label={t("columns.evidence")} />
-          <PivotMenu
-            actions={observationActions(observation, "table_cell").filter((action) => action.key === "evidenceExact")}
-            ariaLabel={t("columns.evidence")}
-            actionTooltip={t("columns.evidenceTooltip")}
-          />
         </Box>
       ),
       exportValue: (observation) => observation.evidence_id,
@@ -313,7 +317,7 @@ export function RelationshipObservationsWorkspace({
             </Typography>
           ) : null}
           <AnalystTable<RelationshipObservation>
-            columns={observationColumns(t)}
+            columns={observationColumns(t, tCommon)}
             rows={page?.items ?? []}
             getRowId={(observation) => observation.id}
             ariaLabel={t("observations.title")}
