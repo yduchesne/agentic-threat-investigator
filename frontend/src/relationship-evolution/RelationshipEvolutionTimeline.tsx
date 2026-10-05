@@ -17,6 +17,8 @@ import { useState } from "react";
 
 import type { RelationshipObservation } from "../api/schema-types";
 import { CompactId } from "../components/CompactId";
+import { sourceLabel } from "../components/source-labels";
+import { useTranslation } from "react-i18next";
 import { Timestamp } from "../components/Timestamp";
 import { shortUuid } from "../analyst-table/present";
 import {
@@ -268,6 +270,7 @@ function ObservationTable({
   entityTypeLabel: (type: string) => string;
   onActivate: (observationId: string) => void;
 }): ReactElement {
+  const { t: tCommon } = useTranslation("common");
   return (
     <Box sx={{ overflowX: "auto" }}>
       <table aria-label={labels.tableLabel} style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -313,7 +316,7 @@ function ObservationTable({
                   counterpartyColumn={labels.tableColumns.counterparty}
                 />
               </td>
-              <td style={{ padding: 6 }}>{row.source}</td>
+              <td style={{ padding: 6 }}>{sourceLabel(row.source, tCommon)}</td>
               <td style={{ padding: 6 }}>
                 {row.observed_at !== null ? <Timestamp iso={row.observed_at} /> : "—"}
               </td>
