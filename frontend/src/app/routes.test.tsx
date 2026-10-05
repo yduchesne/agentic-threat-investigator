@@ -30,7 +30,7 @@ describe("route topology", () => {
     setHttpHandlers(authMeSuccess, runtimeFake, investigationsListHandler([]));
     renderAtPath("/investigations");
     expect(
-      await screen.findByRole("heading", { name: "Agentic Threat Investigator" }),
+      await screen.findByRole("heading", { name: /A T I.*Agentic Threat Investigator/ }),
     ).toBeInTheDocument();
     expect(await screen.findByText(ANALYST_USER.alias)).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Investigations" })).toBeInTheDocument();
