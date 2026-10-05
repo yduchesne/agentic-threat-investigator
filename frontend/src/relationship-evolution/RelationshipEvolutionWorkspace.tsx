@@ -18,7 +18,7 @@ import { Alert, Box, Button, ToggleButton, ToggleButtonGroup, Typography } from 
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import type { Investigation, RelationshipObservation } from "../api/schema-types";
 import { DetailRows } from "../analyst-table/DetailRows";
@@ -144,11 +144,6 @@ export function RelationshipEvolutionWorkspace({
   const { t: tCommon } = useTranslation("common");
   const { t: tRelationships } = useTranslation("relationships");
   const [searchParams, setSearchParams] = useSearchParams();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const returnTo = typeof (location.state as { returnTo?: unknown } | null)?.returnTo === "string"
-    ? (location.state as { returnTo: string }).returnTo
-    : null;
 
   const filters = parseEvolutionParams(searchParams);
   const view = parseViewParam(searchParams);
