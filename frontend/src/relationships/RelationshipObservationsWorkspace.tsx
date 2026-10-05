@@ -171,7 +171,7 @@ export function observationColumns(
       render: (observation) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
           <Link
-            to={`/investigations/${observation.investigation_id}/evidence?selection=${observation.evidence_id}`}
+            to={`/investigations/${observation.investigation_id ?? ""}/evidence?selection=${observation.evidence_id}`}
             style={{ textDecoration: "none" }}
           >
             {observation.evidence_id.slice(0, 8)}
