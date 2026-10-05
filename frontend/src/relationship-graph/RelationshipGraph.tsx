@@ -122,14 +122,14 @@ function EvolutionGraphNode({ data }: NodeProps): ReactElement {
        * paths, and a canonical self-loop draws a visible arc instead of a
        * zero-length sliver. Slot handles reuse the historical bottom/top
        * idiom with distinct x offsets. */}
-      <Handle type="target" id="target-top-0" position={Position.Top} style={{ left: "50%" }} />
-      <Handle type="target" id="target-top-1" position={Position.Top} style={{ left: "25%" }} />
-      <Handle type="target" id="target-top-2" position={Position.Top} style={{ left: "75%" }} />
-      <Handle type="target" id="target-loop" position={Position.Top} style={{ left: "80%" }} />
-      <Handle type="source" id="source-bottom-0" position={Position.Bottom} style={{ left: "50%" }} />
-      <Handle type="source" id="source-bottom-1" position={Position.Bottom} style={{ left: "25%" }} />
-      <Handle type="source" id="source-bottom-2" position={Position.Bottom} style={{ left: "75%" }} />
-      <Handle type="source" id="source-loop" position={Position.Bottom} style={{ left: "20%" }} />
+      <Handle type="target" id="target-top-0" position={Position.Top} style={{ left: "50%", opacity: 0 }} />
+      <Handle type="target" id="target-top-1" position={Position.Top} style={{ left: "25%", opacity: 0 }} />
+      <Handle type="target" id="target-top-2" position={Position.Top} style={{ left: "75%", opacity: 0 }} />
+      <Handle type="target" id="target-loop" position={Position.Top} style={{ left: "80%", opacity: 0 }} />
+      <Handle type="source" id="source-bottom-0" position={Position.Bottom} style={{ left: "50%", opacity: 0 }} />
+      <Handle type="source" id="source-bottom-1" position={Position.Bottom} style={{ left: "25%", opacity: 0 }} />
+      <Handle type="source" id="source-bottom-2" position={Position.Bottom} style={{ left: "75%", opacity: 0 }} />
+      <Handle type="source" id="source-loop" position={Position.Bottom} style={{ left: "20%", opacity: 0 }} />
       <Box
         component="span"
         aria-label="Entity type"
