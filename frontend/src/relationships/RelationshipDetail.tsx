@@ -24,6 +24,7 @@ import {
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
 import { EntityReference } from "../components/EntityReference";
+import { sourceLabelWithUrn } from "../components/source-labels";
 import { PivotMenu } from "../pivots/PivotMenu";
 import {
   relationshipObservationsAction,
@@ -53,6 +54,7 @@ export function RelationshipDetail({
   embedded = false,
 }: RelationshipDetailProps): ReactElement {
   const { t } = useTranslation("relationships");
+  const { t: tCommon } = useTranslation("common");
   const preview = useRelationshipObservationPreview(investigationId, relationship.id);
 
   return (
@@ -89,7 +91,12 @@ export function RelationshipDetail({
             rows={[
               {
                 label: t("detail.relationshipType"),
-                value: t(relationshipTypeKey(relationship.type)),
+                value: (() => {
+                  const label = t(relationshipTypeKey(relationship.type));
+                  return label === relationship.type
+                    ? label
+                    : `${label} (${relationship.type})`;
+                })(),
               },
               {
                 label: t("detail.relationshipId"),
@@ -143,7 +150,7 @@ export function RelationshipDetail({
                 rows={[
                   {
                     label: t("detail.observations.source"),
-                    value: observation.source,
+                    value: sourceLabelWithUrn(observation.source, tCommon),
                   },
                   {
                     label: t("detail.observations.observedAt"),
