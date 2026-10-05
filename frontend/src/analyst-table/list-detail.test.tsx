@@ -224,7 +224,7 @@ describe("Evidence list/detail workspace (PR 31F-6 A4)", () => {
     expect(await screen.findByText("update-package.test")).toBeInTheDocument();
   });
 
-  it("A4-LD14/LD15: Pivot actions are inline in the detail and Cancel collapses only the action bar", async () => {
+  it("A4-LD14/LD15: Pivot actions are inline in the detail and Hide collapses only the action bar", async () => {
     setHttpHandlers(
       ...AUTH,
       workspaceHandler(),
@@ -238,8 +238,8 @@ describe("Evidence list/detail workspace (PR 31F-6 A4)", () => {
     await userEvent.click(trigger);
     const bar = await screen.findByRole("group", { name: "Pivot actions" });
     expect(within(bar).getByRole("link", { name: "Relationships where source" })).toBeInTheDocument();
-    // Cancel collapses only the bar: no URL mutation, detail intact.
-    await userEvent.click(within(bar).getByRole("button", { name: "Cancel" }));
+    // Hide collapses only the bar: no URL mutation, detail intact.
+    await userEvent.click(within(bar).getByRole("button", { name: "Hide" }));
     await waitFor(() =>
       expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull(),
     );
