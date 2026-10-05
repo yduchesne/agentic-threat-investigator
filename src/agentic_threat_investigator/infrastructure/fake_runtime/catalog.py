@@ -72,6 +72,7 @@ _LIVE_PROVIDER_SOURCE_IDS = frozenset(
         SourceId.GOOGLE_PUBLIC_DNS.value,
         SourceId.RDAP.value,
         SourceId.IPINFO_LITE.value,
+        SourceId.DBIP_CITY_LITE.value,
         SourceId.ABUSEIPDB.value,
         SourceId.THREATFOX.value,
         SourceId.URLHAUS.value,
