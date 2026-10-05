@@ -393,8 +393,11 @@ export function RelationshipGraph({
 
   const edges: Edge[] = useMemo(() => {
     const renderedEntityIds = new Set(nodes.map((node) => entityIdFromNodeId(node.id)).filter((id): id is string => id !== null));
+    const canonicalEntityIds = new Set(model.nodes.map((node) => node.entityId));
     const renderableEdges = model.edges.filter(
       (edge) =>
+        canonicalEntityIds.has(edge.sourceEntityId) &&
+        canonicalEntityIds.has(edge.targetEntityId) &&
         renderedEntityIds.has(edge.sourceEntityId) &&
         renderedEntityIds.has(edge.targetEntityId),
     );
