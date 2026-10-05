@@ -1,5 +1,6 @@
 {
   "title": "Agentic Threat Investigator",
+  "brand.mark": "A T I",
   "appbar.workbench": "Analyst workbench",
   "nav.label": "Primary",
   "nav.investigations": "Investigations",
