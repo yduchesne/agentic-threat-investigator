@@ -130,6 +130,12 @@ export function evidenceColumns(
       exportValue: (evidence) => evidence.subject_value ?? "",
     },
     {
+      id: "description",
+      header: t("columns.description"),
+      render: (evidence) => evidenceDescription(evidence.facts),
+      exportValue: (evidence) => evidenceDescription(evidence.facts),
+    },
+    {
       id: "evidenceType",
       header: t("columns.evidenceType"),
       render: (evidence) => t(evidenceTypeKey(evidence.type)),
@@ -155,6 +161,35 @@ export function evidenceColumns(
       exportValue: (evidence) => evidence.retrieved_at,
     },
   ];
+}
+
+/** Deterministic bounded summary of the Evidence facts for list disambiguation. */
+export function evidenceDescription(facts: Evidence["facts"]): string {
+  if (facts === undefined || facts === null) {
+    return "—";
+  }
+  const entries = Object.entries(facts);
+  if (entries.length === 0) {
+    return "—";
+  }
+  const renderValue = (value: unknown): string => {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      return value.slice(0, 2).map(renderValue).join(", ");
+    }
+    if (value !== null && typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>)
+        .slice(0, 2)
+        .map(([key, nested]) => `${key}: ${renderValue(nested)}`)
+        .join(", ");
+    }
+    return String(value ?? "—");
+  };
+  const [key, value] = entries[0];
+  const primary = `${key}: ${renderValue(value)}`;
+  return entries.length > 1 ? `${primary} (+${entries.length - 1} more)` : primary;
 }
 
 /** Whether the backend page offers a next page. */
@@ -217,6 +252,7 @@ export function EvidenceWorkspace({
       t("columns.subjectValue"),
       t("columns.subjectType"),
       t("columns.subjectEntityId"),
+      t("columns.description"),
       t("columns.evidenceType"),
       t("columns.source"),
       t("columns.observedAt"),
@@ -229,6 +265,7 @@ export function EvidenceWorkspace({
       evidence.subject_value ?? "",
       evidence.subject_type ?? "",
       evidence.subject_entity_id ?? "",
+      evidenceDescription(evidence.facts),
       t(evidenceTypeKey(evidence.type)),
       evidence.source,
       evidence.observed_at ?? "",
