@@ -199,7 +199,7 @@ export function PivotMenu({
     const commonProps = {
       size: "small" as const,
       variant: "text" as const,
-      "aria-label": ariaLabel ?? undefined,
+      "aria-label": ariaLabel ?? entry.label,
       sx: { textTransform: "none", minWidth: 0, p: 0.5 },
     };
     if (entry.kind === "local") {
@@ -246,6 +246,7 @@ export function PivotMenu({
             const commonProps = {
               size: "small" as const,
               variant: "text" as const,
+              "aria-label": entry.label,
               sx: { textTransform: "none", minWidth: 0, p: 0.5 },
             };
             return entry.kind === "local" ? (
@@ -273,6 +274,7 @@ export function PivotMenu({
             size="small"
             variant="text"
             onClick={closeBar}
+            aria-label={t("hide")}
             sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
           >
             {"["}{t("hide")}{"]"}
