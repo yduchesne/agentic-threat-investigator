@@ -41,7 +41,7 @@ export function RelationshipDetailPage(): ReactElement {
     <RouteDetailView
       backTo={backTo}
       backLabel={tCommon("backToList", { resource: t("title") })}
-      heading={tCommon("detail.title", { resource: t("title") })}
+      heading={t("detail.pageTitle")}
     >
       {relationshipDetailBody(t, detail, investigationId, false)}
     </RouteDetailView>
