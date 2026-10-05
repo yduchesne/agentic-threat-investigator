@@ -158,6 +158,19 @@ function themeComponents(
     },
     MuiLink: {
       defaultProps: { underline: "hover" },
+      styleOverrides: {
+        root: {
+          color: interactiveColor,
+          "&:visited": { color: interactiveColor },
+        },
+      },
+    },
+    MuiCssBaseline: {
+      styleOverrides: {
+        "a, a:visited": {
+          color: interactiveColor,
+        },
+      },
     },
     MuiTextField: {
       defaultProps: { size: "medium" },
