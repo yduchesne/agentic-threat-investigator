@@ -19,7 +19,7 @@
 //
 // Presentation (PR 31F-6 amendment 2, unchanged): expanding a multi-target
 // trigger renders ordinary in-flow action links (a labelled action region
-// with a Cancel control) — no Portal, no MUI Menu/Popover, no fixed
+// with a Hide control) — no Portal, no MUI Menu/Popover, no fixed
 // popup, no backdrop, no anchor bookkeeping, no document outside-click/
 // pointerdown listener, no focus trap or floating-menu focus transfer, and
 // no body scroll mutation. ``expanded`` is transient presentation state
@@ -126,7 +126,7 @@ function isSameRoutedSurface(
  *
  * Multi-target triggers expand into an ordinary in-flow action bar
  * (PR 31F-6 amendment 2): a labelled group of semantic links/buttons with
- * a Cancel control. ``expanded`` is presentation-only.
+ * a Hide control. ``expanded`` is presentation-only.
  */
 export function PivotMenu({
   actions,
@@ -209,13 +209,13 @@ export function PivotMenu({
           disabled={entry.disabled}
           onClick={entry.onSelect}
         >
-          {entry.label}
+          {"["}{entry.label}{"]"}
         </Button>
       );
     }
     return (
       <Button {...commonProps} component={RouterLink} to={entry.to}>
-        {entry.label}
+        {"["}{entry.label}{"]"}
       </Button>
     );
   }
@@ -255,7 +255,7 @@ export function PivotMenu({
                 disabled={entry.disabled}
                 onClick={entry.onSelect}
               >
-                {entry.label}
+                {"["}{entry.label}{"]"}
               </Button>
             ) : (
               <Button
@@ -265,7 +265,7 @@ export function PivotMenu({
                 to={entry.to}
                 onClick={closeBar}
               >
-                {entry.label}
+                {"["}{entry.label}{"]"}
               </Button>
             );
           })}
@@ -275,7 +275,7 @@ export function PivotMenu({
             onClick={closeBar}
             sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
           >
-            {t("cancel")}
+            {"["}{t("hide")}{"]"}
           </Button>
         </Box>
       ) : null}
