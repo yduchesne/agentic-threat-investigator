@@ -1050,8 +1050,7 @@ function EdgeList({
                 <td style={{ padding: 6, textAlign: "left" }}>
                   <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 0.5 }}>
                   <Link
-                    href
-={`/investigations/${investigationId}/relationships?selected=${edge.relationshipId}`}
+                    href={`/investigations/${investigationId}/relationships?selected=${edge.relationshipId}`}
                     underline="hover"
                     sx={{ fontSize: "inherit" }}
                   >
