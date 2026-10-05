@@ -13,10 +13,13 @@
 # The script is idempotent: already-running healthy containers are left as
 # they are (`up --no-recreate`). Every expected service is then health
 # checked -- at the container level and, where the service exposes one, at
-# the service level -- and unhealthy services are repaired when possible
-# (restart/recreate/re-run). Every decision is logged. At the end the
-# reachable endpoints are printed: HTTP services show the URL to their
-# login/home page, everything else shows host:port or "internal".
+# the service level -- and unhealthy services are repaired synchronously
+# (restart/recreate/re-run). Every decision is logged. A service that
+# cannot be repaired stops the run immediately (fail fast): its logs are
+# collected and the commands used are shown so the operator can reproduce
+# them. Only once every service is healthy are the reachable endpoints
+# printed: HTTP services show the URL to their login/home page, everything
+# else shows host:port or "internal".
 #
 #   ./start.sh            start (or verify) the full local stack
 #   ./start.sh --rebuild  rebuild all project images (backend + frontend)
@@ -39,9 +42,10 @@ the observability stack (OpenTelemetry Collector, Prometheus, Jaeger, Loki,
 Grafana, postgres-exporter).
 
 The script is idempotent: already-running healthy containers are left as
-they are. It checks the health of every expected container and service,
-repairs unhealthy ones when possible, logs every decision, and prints the
-reachable endpoints when done.
+they are. It checks the health of every expected container and service and
+repairs unhealthy ones synchronously. If a service cannot be repaired the
+run fails immediately with diagnostics and its logs; the reachable
+endpoints are printed only when the whole stack is healthy.
 
 Options:
   -r, --rebuild   Rebuild every project image (backend, PostgreSQL, and
@@ -437,6 +441,50 @@ podman_start_project() {
   podman start $cids >/dev/null 2>&1 || warn "podman start reported a problem for one or more containers"
 }
 
+# The observability backends and Grafana must be ready before the application
+# containers start: the apps export OTLP to the Collector from process start,
+# and the pinned podman-compose 1.0.6 ignores `depends_on` conditions (it only
+# records `--requires` edges). Readiness is therefore enforced here with the
+# same probes as the final health check. The observability stack is fail-open,
+# so a bounded readiness timeout warns and continues rather than failing ATI.
+OBSERVABILITY_SERVICES=(loki jaeger otel-collector prometheus grafana)
+OBSERVABILITY_BACKEND_SERVICES=(loki jaeger otel-collector prometheus)
+
+# wait_for_service_ready <service> [timeout_s]: bounded readiness wait.
+wait_for_service_ready() {
+  local service="$1" timeout_s="${2:-120}" deadline
+  deadline=$(($(date +%s) + timeout_s))
+  until daemon_healthy "$service"; do
+    if (($(date +%s) >= deadline)); then
+      warn "$service: not ready after ${timeout_s}s; continuing (observability is fail-open)"
+      return 1
+    fi
+    sleep 2
+  done
+  ok "$service: ready"
+}
+
+# start_observability_stack: start the observability containers first and wait
+# for the backends, then Grafana, before any application container starts.
+start_observability_stack() {
+  local service cid cids=""
+  for service in "${OBSERVABILITY_SERVICES[@]}"; do
+    cid=$(cid_for "$service")
+    [[ -n "$cid" ]] && cids="${cids}${cid} "
+  done
+  if [[ -z "${cids// /}" ]]; then
+    warn "no observability containers found; skipping observability-first start"
+    return 0
+  fi
+  step "starting observability stack first: ${OBSERVABILITY_SERVICES[*]}"
+  # shellcheck disable=SC2086
+  podman start $cids >/dev/null 2>&1 || warn "podman start reported a problem for one or more observability containers"
+  for service in "${OBSERVABILITY_BACKEND_SERVICES[@]}"; do
+    wait_for_service_ready "$service" 120 || true
+  done
+  wait_for_service_ready grafana 120 || true
+}
+
 repair_create() {
   local service="$1"
   step "repair: creating missing service: $service"
@@ -492,6 +540,33 @@ container_may_still_start() {
     running) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# report_failed_service <service> <reason>: fail-fast diagnostics for a
+# service that could not be repaired. Prints the observed container state
+# and captures/prints as much container log output as possible, always
+# printing the exact podman command(s) used so the operator can reproduce
+# the collection manually. Always returns 0; callers decide when to exit.
+report_failed_service() {
+  local service="$1" reason="$2" cid state health exit_code
+  cid=$(cid_for "$service")
+  state=$(container_state "$service")
+  err "$service: ${reason}; failing fast (the final summary is suppressed)"
+  if [[ -z "$cid" ]]; then
+    err "$service: no container exists, so no logs can be collected"
+    log "inspect the compose state manually: ${COMPOSE[*]} ${COMPOSE_FILES[*]} ps ${service}"
+    return 0
+  fi
+  health=$(podman inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || true)
+  exit_code=$(podman inspect -f '{{.State.ExitCode}}' "$cid" 2>/dev/null || true)
+  log "reason: service=${service} container=${cid} state=${state} health=${health} exit_code=${exit_code}"
+  log "collecting logs (command: podman logs --tail 500 ${cid})"
+  if ! run_with_timeout 30 podman logs --tail 500 "$cid"; then
+    warn "$service: the log command above could not read the container logs"
+  fi
+  log "for full container details: podman inspect ${cid}"
+  log "for compose-scoped logs: ${COMPOSE[*]} ${COMPOSE_FILES[*]} logs --tail 500 ${service}"
+  return 0
 }
 
 # health_check_daemon <service>: wait (bounded) for the service to become
@@ -556,7 +631,8 @@ health_check_daemon() {
     ok "$service: healthy after one repair"
     return 0
   fi
-  err "$service: NOT healthy after one repair attempt (container state: $(container_state "$service")); see its logs: podman logs $(cid_for "$service")"
+  # The caller decides how to report/exit; keep this bounded and quiet so
+  # the fail-fast diagnostics (report_failed_service) own the message.
   return 1
 }
 
@@ -575,7 +651,7 @@ health_check_one_shot() {
     ok "$service: completed after one re-run (exit 0)"
     return 0
   fi
-  err "$service: still did not complete after one re-run"
+  # The caller owns the fail-fast diagnostics for this failure.
   return 1
 }
 
@@ -650,9 +726,10 @@ print_summary() {
   done
   if ((lines > 0)); then
     err "some services are not healthy; see the log above for repair attempts"
-  else
-    ok "all expected services are healthy"
+    return 1
   fi
+  ok "all expected services are healthy"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -753,6 +830,7 @@ if stack_already_up; then
   step "entire stack is already up and consistent; leaving every container as-is"
 else
   note "Starting containers. This operation might take a while (typically ~1-2 minutes; a few minutes when the database data directory is fresh)."
+  start_observability_stack
   podman_start_project
 fi
 
@@ -766,16 +844,30 @@ done
 
 step "running one-shot services to completion (migrations, fake-data bootstrap)"
 note "One-shot services re-run deterministically on every start; migrations take seconds and the fake-data bootstrap typically ~10-60s, occasionally a few minutes."
-OVERALL=0
-health_check_one_shot migrate || OVERALL=1
-health_check_one_shot fake-data-bootstrap || OVERALL=1
-health_check_one_shot scheduler || OVERALL=1
+# Fail fast: a service that cannot be repaired stops the run immediately
+# with diagnostics and logs. The final summary is printed only when every
+# one-shot and daemon is healthy.
+if ! health_check_one_shot migrate; then
+  report_failed_service migrate "did not complete after one re-run"
+  exit 1
+fi
+if ! health_check_one_shot fake-data-bootstrap; then
+  report_failed_service fake-data-bootstrap "did not complete after one re-run"
+  exit 1
+fi
+if ! health_check_one_shot scheduler; then
+  report_failed_service scheduler "did not complete after one re-run"
+  exit 1
+fi
 
 step "checking and repairing container/service health"
 for service in "${DAEMON_SERVICES[@]}"; do
-  health_check_daemon "$service" || OVERALL=1
+  if ! health_check_daemon "$service"; then
+    report_failed_service "$service" "still unhealthy after one repair attempt"
+    exit 1
+  fi
 done
 
-print_summary
+print_summary || exit 1
 
-exit "$OVERALL"
+exit 0

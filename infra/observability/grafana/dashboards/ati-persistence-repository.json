@@ -39,7 +39,7 @@
     {
       "id": 1,
       "gridPos": {
-        "h": 1,
+        "h": 4,
         "w": 24,
         "x": 0,
         "y": 0
@@ -55,7 +55,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 1
+        "y": 4
       },
       "title": "Repository failures",
       "type": "timeseries",
@@ -74,7 +74,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "{{ati_postgres_repository}}.{{ati_postgres_operation}}",
           "limit": 0,
           "logQuery": "",
@@ -90,7 +89,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 1
+        "y": 4
       },
       "title": "Repository outcomes & UoW",
       "type": "timeseries",
@@ -109,7 +108,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "UoW commits",
           "limit": 0,
           "logQuery": "",
@@ -127,7 +125,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "UoW rollbacks",
           "limit": 0,
           "logQuery": "",
@@ -145,7 +142,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "UoW failures",
           "limit": 0,
           "logQuery": "",
@@ -161,7 +157,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 4
+        "y": 7
       },
       "title": "Repository latency p50/p95/p99 (s)",
       "type": "timeseries",
@@ -180,7 +176,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50",
           "limit": 0,
           "logQuery": "",
@@ -198,7 +193,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -216,7 +210,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p99",
           "limit": 0,
           "logQuery": "",
@@ -232,7 +225,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 11
       },
       "title": "UoW latency p50/p95/p99 (s)",
       "type": "timeseries",
@@ -251,7 +244,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50",
           "limit": 0,
           "logQuery": "",
@@ -269,7 +261,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -287,7 +278,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p99",
           "limit": 0,
           "logQuery": "",
@@ -303,7 +293,7 @@
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 15
       },
       "title": "Transaction operation latency p50/p95 (s)",
       "type": "timeseries",
@@ -322,7 +312,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50 {{ati_postgres_operation}}",
           "limit": 0,
           "logQuery": "",
@@ -340,7 +329,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95 {{ati_postgres_operation}}",
           "limit": 0,
           "logQuery": "",
@@ -356,7 +344,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 15
+        "y": 18
       },
       "title": "Evidence persistence latency p50/p95 (s)",
       "type": "timeseries",
@@ -375,7 +363,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50",
           "limit": 0,
           "logQuery": "",
@@ -393,7 +380,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -409,7 +395,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 15
+        "y": 18
       },
       "title": "Evidence persistence outcomes",
       "type": "timeseries",
@@ -428,7 +414,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "created",
           "limit": 0,
           "logQuery": "",
@@ -446,7 +431,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "appended",
           "limit": 0,
           "logQuery": "",
@@ -464,7 +448,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "UNCHANGED",
           "limit": 0,
           "logQuery": "",
@@ -480,7 +463,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 21
       },
       "title": "PostgreSQL server health summary",
       "type": "timeseries",
@@ -499,7 +482,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "pg_up",
           "limit": 0,
           "logQuery": "",
@@ -517,7 +499,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "exporter scrapes",
           "limit": 0,
           "logQuery": "",
@@ -535,7 +516,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "last scrape error",
           "limit": 0,
           "logQuery": "",

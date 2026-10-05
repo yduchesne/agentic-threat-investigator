@@ -115,3 +115,21 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
     networks: [ati]
+
+  # Application containers depend on the Collector lifecycle so their OTLP
+  # exporters are wired against a running gateway. The pinned podman-compose
+  # 1.0.6 records only the `--requires` edge and ignores `condition`, so
+  # `start.sh` additionally enforces backend readiness before starting the
+  # application containers (the observability stack stays fail-open).
+  api:
+    depends_on:
+      otel-collector: { condition: service_started }
+  worker:
+    depends_on:
+      otel-collector: { condition: service_started }
+  geo-resolver:
+    depends_on:
+      otel-collector: { condition: service_started }
+  fake-data-bootstrap:
+    depends_on:
+      otel-collector: { condition: service_started }

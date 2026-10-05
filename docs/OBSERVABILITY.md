@@ -936,11 +936,16 @@ metadata, not high-cardinality Loki indexed labels.
 - ``ati-telemetry-test`` (``cli.telemetry_test_main``): ``ServiceNames.TELEMETRY_TEST``;
   the PR 34 one-shot deterministic diagnostic generator (see the dedicated
   section below).
+- ``ati-fake-data-bootstrap`` (``cli.fake_data_bootstrap_main``):
+  ``ServiceNames.FAKE_DATA_BOOTSTRAP``; the ingestion one-shot composes the
+  OTLP pipelines so ingestion logs/metrics/spans reach the backends, and
+  flushes the providers (``shutdown_telemetry``) before the process exits.
 
-The one-shot utilities (fake-data-bootstrap, migrate, geography-import,
-geography-build) are deliberately not wired: they run once and exit, so an
-OTLP export pipeline is pointless. PR 29C does not add telemetry to
-placeholder processes merely to satisfy the service-name list.
+The remaining one-shot utilities (``migrate``, ``geography-import``,
+``geography-build``) are deliberately not wired: they are thin infrastructure
+or import steps that run once and exit, so an OTLP export pipeline is not
+worth the added flush-on-exit complexity. ``ati-scheduler`` remains a
+placeholder process and emits no telemetry.
 
 ### Diagnostic telemetry generator (PR 34)
 
@@ -1092,8 +1097,8 @@ manual flow below remains a quick developer-only smoke of the running stack
 for development-time investigation:
 
 ```text
-1. enable observability: ATI_OBSERVABILITY_ENABLED=true and
-   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+1. enable observability: ATI_OBSERVABILITY_ENABLED=true (``compose.yaml``
+   defaults OTEL_EXPORTER_OTLP_ENDPOINT to http://otel-collector:4318)
 2. start core + observability stack (compose.yaml + compose.observability.yaml)
 3. issue one API request / run one worker operation, or run the PR 34
    deterministic generator: ati-telemetry-test --run-id <uuid>

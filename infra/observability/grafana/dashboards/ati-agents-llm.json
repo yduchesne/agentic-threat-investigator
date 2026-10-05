@@ -39,7 +39,7 @@
     {
       "id": 1,
       "gridPos": {
-        "h": 1,
+        "h": 4,
         "w": 24,
         "x": 0,
         "y": 0
@@ -55,7 +55,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 1
+        "y": 4
       },
       "title": "Agent failures",
       "type": "timeseries",
@@ -74,7 +74,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "{{ati_agent}}",
           "limit": 0,
           "logQuery": "",
@@ -90,7 +89,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 1
+        "y": 4
       },
       "title": "Agent latency p50/p95/p99 (s)",
       "type": "timeseries",
@@ -109,7 +108,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50",
           "limit": 0,
           "logQuery": "",
@@ -127,7 +125,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -145,7 +142,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p99",
           "limit": 0,
           "logQuery": "",
@@ -161,7 +157,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 4
+        "y": 7
       },
       "title": "LLM failures & latency",
       "type": "timeseries",
@@ -180,7 +176,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "failures",
           "limit": 0,
           "logQuery": "",
@@ -198,7 +193,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50",
           "limit": 0,
           "logQuery": "",
@@ -216,7 +210,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -232,7 +225,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 4
+        "y": 7
       },
       "title": "Provider execution",
       "type": "timeseries",
@@ -251,7 +244,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "work failures",
           "limit": 0,
           "logQuery": "",
@@ -269,7 +261,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95 {{ati_provider}}",
           "limit": 0,
           "logQuery": "",
@@ -285,7 +276,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 7
+        "y": 10
       },
       "title": "Provider HTTP attempts/retries/failures",
       "type": "timeseries",
@@ -304,7 +295,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "attempts",
           "limit": 0,
           "logQuery": "",
@@ -322,7 +312,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "retries",
           "limit": 0,
           "logQuery": "",
@@ -340,7 +329,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "failures",
           "limit": 0,
           "logQuery": "",
@@ -356,7 +344,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 7
+        "y": 10
       },
       "title": "Provider HTTP latency p50/p95 (s)",
       "type": "timeseries",
@@ -375,7 +363,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50",
           "limit": 0,
           "logQuery": "",
@@ -393,7 +380,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -409,7 +395,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 10
+        "y": 13
       },
       "title": "Embedding failures & latency",
       "type": "timeseries",
@@ -428,7 +414,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "failures",
           "limit": 0,
           "logQuery": "",
@@ -446,7 +431,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95 {{ati_component}}",
           "limit": 0,
           "logQuery": "",
@@ -462,7 +446,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 10
+        "y": 13
       },
       "title": "Report generation",
       "type": "timeseries",
@@ -481,7 +465,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "failures",
           "limit": 0,
           "logQuery": "",
@@ -499,7 +482,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -515,7 +497,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 16
       },
       "title": "Recent worker logs",
       "type": "logs",
@@ -555,7 +537,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 23
       },
       "title": "Recent API logs",
       "type": "logs",
