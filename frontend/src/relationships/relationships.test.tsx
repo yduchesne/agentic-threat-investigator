@@ -137,7 +137,7 @@ describe("Relationships page", () => {
     expect(await screen.findByRole("heading", { name: "Source entity" })).toBeInTheDocument();
     expect(screen.getAllByText("update-package.test").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Malware").length).toBeGreaterThan(0);
-    expect(await screen.findByText(/Observations \(first page\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Recent relationship history/)).toBeInTheDocument();
     expect(
       screen.getByTitle("2026-06-01T09:00:00Z"),
     ).toBeInTheDocument();
