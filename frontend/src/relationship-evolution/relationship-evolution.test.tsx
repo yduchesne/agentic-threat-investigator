@@ -272,7 +272,7 @@ describe("Relationship Evolution workspace", () => {
     await userEvent.click(
       within(drawer).getByRole("button", { name: "Observation provenance actions" }),
     );
-    expect(await screen.findByRole("link", { name: "Open evidence" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Evidence" })).toBeInTheDocument();
   });
 
   it("E-U14: honest no-results wording, never an existence claim", async () => {
