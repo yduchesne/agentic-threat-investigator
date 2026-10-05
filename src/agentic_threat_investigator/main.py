@@ -19,12 +19,19 @@ from agentic_threat_investigator.telemetry.http import instrument_fastapi_http
 from agentic_threat_investigator.telemetry.lifecycle import (
     arrange_fastapi_telemetry_shutdown,
 )
+from agentic_threat_investigator.telemetry.logging import (
+    configure_application_logging,
+)
 from agentic_threat_investigator.telemetry.setup import (
     ServiceNames,
     configure_telemetry,
     shutdown_telemetry,
 )
 
+# Install the shared bounded INFO root logging before the additive OTel log
+# handler is attached; at the root default WARNING level the API's INFO logs
+# (startup operating mode, per-request middleware) never reach OTLP.
+configure_application_logging()
 _settings = get_settings()
 _telemetry_runtime = configure_telemetry(
     enabled=_settings.observability_enabled,

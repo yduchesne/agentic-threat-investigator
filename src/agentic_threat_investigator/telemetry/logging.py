@@ -78,6 +78,32 @@ class OtelLoggerNamespaceFilter(logging.Filter):
         )
 
 
+def configure_application_logging() -> None:
+    """Configure ATI's standard INFO console logging with trace correlation.
+
+    Every ATI process installs this bounded root logging configuration before
+    the additive OTel ``LoggingHandler`` is attached. At the default root
+    ``WARNING`` level, application ``INFO`` records are discarded before any
+    handler sees them, so they would never reach OTLP. The PR 29A
+    :class:`TraceCorrelationFilter` is installed on each root handler so
+    records carry ``otel_trace_id``/``otel_span_id`` when a valid span is
+    current. The bootstrap is additive and idempotent: existing handlers are
+    kept, an existing lower root level is preserved, and existing record
+    attributes are never overwritten.
+    """
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=logging.INFO)
+    if root.getEffectiveLevel() > logging.INFO:
+        root.setLevel(logging.INFO)
+    for handler in root.handlers:
+        if not any(
+            isinstance(installed, TraceCorrelationFilter)
+            for installed in handler.filters
+        ):
+            handler.addFilter(TraceCorrelationFilter())
+
+
 def attach_otlp_log_handler(handler: LoggingHandler) -> None:
     """Attach an OTel ``LoggingHandler`` to the root logger additively.
 
@@ -114,6 +140,7 @@ __all__ = [
     "TraceCorrelation",
     "TraceCorrelationFilter",
     "OtelLoggerNamespaceFilter",
+    "configure_application_logging",
     "attach_otlp_log_handler",
     "detach_otlp_log_handler",
     "current_correlation",

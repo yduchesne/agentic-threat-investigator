@@ -599,9 +599,14 @@ service's logs as it can collect, along with the exact ``podman logs`` and
 ``podman inspect`` commands used so the operator can reproduce the
 collection, then exits non-zero without printing the service summary. The
 final summary (the reachable endpoints, with HTTP URLs for HTTP services)
-is printed only once every service is healthy. Because the script builds
-images only when they are missing and never recreates healthy containers,
-source-code changes are
+is printed only once every service is healthy. Before starting the
+application containers, ``./start.sh`` starts the observability stack
+(Loki, Jaeger, Collector, Prometheus, then Grafana) and waits for those
+services to be ready, so their OTLP pipelines are live when the applications
+and the ingestion one-shot begin exporting; the observability stack stays
+fail-open, so a readiness timeout warns and continues. Because the script
+builds images only when they are missing and never recreates healthy
+containers, source-code changes are
 **not** picked up automatically: run ``./start.sh --rebuild`` after
 editing Python, migration, or frontend sources to rebuild every project
 image (backend, PostgreSQL, frontend) and recreate the corresponding

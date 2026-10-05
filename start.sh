@@ -441,6 +441,50 @@ podman_start_project() {
   podman start $cids >/dev/null 2>&1 || warn "podman start reported a problem for one or more containers"
 }
 
+# The observability backends and Grafana must be ready before the application
+# containers start: the apps export OTLP to the Collector from process start,
+# and the pinned podman-compose 1.0.6 ignores `depends_on` conditions (it only
+# records `--requires` edges). Readiness is therefore enforced here with the
+# same probes as the final health check. The observability stack is fail-open,
+# so a bounded readiness timeout warns and continues rather than failing ATI.
+OBSERVABILITY_SERVICES=(loki jaeger otel-collector prometheus grafana)
+OBSERVABILITY_BACKEND_SERVICES=(loki jaeger otel-collector prometheus)
+
+# wait_for_service_ready <service> [timeout_s]: bounded readiness wait.
+wait_for_service_ready() {
+  local service="$1" timeout_s="${2:-120}" deadline
+  deadline=$(($(date +%s) + timeout_s))
+  until daemon_healthy "$service"; do
+    if (($(date +%s) >= deadline)); then
+      warn "$service: not ready after ${timeout_s}s; continuing (observability is fail-open)"
+      return 1
+    fi
+    sleep 2
+  done
+  ok "$service: ready"
+}
+
+# start_observability_stack: start the observability containers first and wait
+# for the backends, then Grafana, before any application container starts.
+start_observability_stack() {
+  local service cid cids=""
+  for service in "${OBSERVABILITY_SERVICES[@]}"; do
+    cid=$(cid_for "$service")
+    [[ -n "$cid" ]] && cids="${cids}${cid} "
+  done
+  if [[ -z "${cids// /}" ]]; then
+    warn "no observability containers found; skipping observability-first start"
+    return 0
+  fi
+  step "starting observability stack first: ${OBSERVABILITY_SERVICES[*]}"
+  # shellcheck disable=SC2086
+  podman start $cids >/dev/null 2>&1 || warn "podman start reported a problem for one or more observability containers"
+  for service in "${OBSERVABILITY_BACKEND_SERVICES[@]}"; do
+    wait_for_service_ready "$service" 120 || true
+  done
+  wait_for_service_ready grafana 120 || true
+}
+
 repair_create() {
   local service="$1"
   step "repair: creating missing service: $service"
@@ -786,6 +830,7 @@ if stack_already_up; then
   step "entire stack is already up and consistent; leaving every container as-is"
 else
   note "Starting containers. This operation might take a while (typically ~1-2 minutes; a few minutes when the database data directory is fresh)."
+  start_observability_stack
   podman_start_project
 fi
 

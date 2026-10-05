@@ -39,7 +39,7 @@
     {
       "id": 1,
       "gridPos": {
-        "h": 1,
+        "h": 4,
         "w": 24,
         "x": 0,
         "y": 0
@@ -55,7 +55,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 1
+        "y": 4
       },
       "title": "Execution rate & failures",
       "type": "timeseries",
@@ -74,7 +74,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "executions/sec",
           "limit": 0,
           "logQuery": "",
@@ -92,7 +91,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "failures",
           "limit": 0,
           "logQuery": "",
@@ -108,7 +106,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 1
+        "y": 4
       },
       "title": "Execution latency p50/p95/p99 (s)",
       "type": "timeseries",
@@ -127,7 +125,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50",
           "limit": 0,
           "logQuery": "",
@@ -145,7 +142,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -163,7 +159,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p99",
           "limit": 0,
           "logQuery": "",
@@ -179,7 +174,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 4
+        "y": 7
       },
       "title": "Report generation",
       "type": "timeseries",
@@ -198,7 +193,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "failures",
           "limit": 0,
           "logQuery": "",
@@ -216,7 +210,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "generations/sec",
           "limit": 0,
           "logQuery": "",
@@ -232,7 +225,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 4
+        "y": 7
       },
       "title": "Report latency p50/p95 (s)",
       "type": "timeseries",
@@ -251,7 +244,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p50",
           "limit": 0,
           "logQuery": "",
@@ -269,7 +261,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "p95",
           "limit": 0,
           "logQuery": "",
@@ -285,7 +276,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 7
+        "y": 10
       },
       "title": "Agents & LLM dependency summary",
       "type": "timeseries",
@@ -304,7 +295,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "agent failures",
           "limit": 0,
           "logQuery": "",
@@ -322,7 +312,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "LLM failures",
           "limit": 0,
           "logQuery": "",
@@ -340,7 +329,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "report failures",
           "limit": 0,
           "logQuery": "",
@@ -356,7 +344,7 @@
         "h": 3,
         "w": 12,
         "x": 12,
-        "y": 7
+        "y": 10
       },
       "title": "Agent/LLM latency p95 (s)",
       "type": "timeseries",
@@ -375,7 +363,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "agent",
           "limit": 0,
           "logQuery": "",
@@ -393,7 +380,6 @@
           "instant": false,
           "format": 0,
           "hideEmpty": false,
-          "interval": 1,
           "legendFormat": "LLM",
           "limit": 0,
           "logQuery": "",
@@ -409,7 +395,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 13
       },
       "title": "Recent worker logs",
       "type": "logs",

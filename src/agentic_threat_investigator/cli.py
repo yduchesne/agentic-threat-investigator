@@ -153,7 +153,9 @@ from agentic_threat_investigator.telemetry.diagnostic import (
     canonical_run_id,
     emit_telemetry_test_signal,
 )
-from agentic_threat_investigator.telemetry.logging import TraceCorrelationFilter
+from agentic_threat_investigator.telemetry.logging import (
+    configure_application_logging,
+)
 from agentic_threat_investigator.telemetry.setup import (
     ServiceNames,
     configure_telemetry,
@@ -165,21 +167,14 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _configure_logging() -> None:
-    """Configure bounded structured logging with trace/span correlation.
+    """Configure ATI's standard console logging with trace/span correlation.
 
-    Installs the PR 29A :class:`TraceCorrelationFilter` on the root handler so
-    every structured log record carries ``otel_trace_id`` / ``otel_span_id``
-    when a valid OTel span is current. The filter is additive and idempotent:
-    existing attributes are never overwritten and log semantics are
-    unchanged (``docs/OBSERVABILITY.md``).
+    Delegates to the shared :func:`configure_application_logging` bootstrap so
+    the CLI and the API install the same root ``INFO`` level and the additive
+    PR 29A correlation filter before telemetry composition
+    (``docs/OBSERVABILITY.md``).
     """
-    logging.basicConfig(level=logging.INFO)
-    for handler in logging.getLogger().handlers:
-        if not any(
-            isinstance(installed, TraceCorrelationFilter)
-            for installed in handler.filters
-        ):
-            handler.addFilter(TraceCorrelationFilter())
+    configure_application_logging()
 
 
 def _make_engine(settings: Settings) -> AsyncEngine:
@@ -661,46 +656,56 @@ def fake_data_bootstrap_main(argv: list[str] | None = None) -> int:
     parser.parse_args(argv)
     _configure_logging()
     settings = get_settings()
-    _log_operating_mode(settings)
-    if settings.operating_mode is not OperatingMode.FAKE:
-        LOGGER.error(
-            "fake-data bootstrap refused: ATI_OPERATING_MODE must be fake (got %s)",
-            settings.operating_mode.value,
-        )
-        return 2
-
-    from agentic_threat_investigator.infrastructure.bootstrap import (
-        FakeDataBootstrap,
+    # The bootstrap is a telemetry-bearing one-shot: ingestion logs, metrics,
+    # and spans must flow through the same OTel pipeline as the long-running
+    # processes, and the providers must be flushed before the process exits.
+    configure_telemetry(
+        enabled=settings.observability_enabled,
+        service_name=ServiceNames.FAKE_DATA_BOOTSTRAP,
     )
-
-    engine = _make_engine(settings)
-    factory = _session_factory(engine)
-    uow_factory = _uow_factory(factory, settings)
-
-    async def run() -> int:
-        try:
-            summary = await FakeDataBootstrap(
-                settings=settings, uow_factory=uow_factory
-            ).run()
-        except Exception:
-            LOGGER.exception("fake-data bootstrap failed")
-            return 1
-        finally:
-            await engine.dispose()
-        for fixture in summary.fixtures:
-            LOGGER.info(
-                "fake-data bootstrap fixture source=%s inserted=%d updated=%d "
-                "unchanged=%d complete=%s documents_indexed=%d",
-                fixture.source_id,
-                fixture.inserted,
-                fixture.updated,
-                fixture.unchanged,
-                fixture.complete,
-                fixture.documents_indexed,
+    try:
+        _log_operating_mode(settings)
+        if settings.operating_mode is not OperatingMode.FAKE:
+            LOGGER.error(
+                "fake-data bootstrap refused: ATI_OPERATING_MODE must be fake (got %s)",
+                settings.operating_mode.value,
             )
-        return 0
+            return 2
 
-    return asyncio.run(run())
+        from agentic_threat_investigator.infrastructure.bootstrap import (
+            FakeDataBootstrap,
+        )
+
+        engine = _make_engine(settings)
+        factory = _session_factory(engine)
+        uow_factory = _uow_factory(factory, settings)
+
+        async def run() -> int:
+            try:
+                summary = await FakeDataBootstrap(
+                    settings=settings, uow_factory=uow_factory
+                ).run()
+            except Exception:
+                LOGGER.exception("fake-data bootstrap failed")
+                return 1
+            finally:
+                await engine.dispose()
+            for fixture in summary.fixtures:
+                LOGGER.info(
+                    "fake-data bootstrap fixture source=%s inserted=%d updated=%d "
+                    "unchanged=%d complete=%s documents_indexed=%d",
+                    fixture.source_id,
+                    fixture.inserted,
+                    fixture.updated,
+                    fixture.unchanged,
+                    fixture.complete,
+                    fixture.documents_indexed,
+                )
+            return 0
+
+        return asyncio.run(run())
+    finally:
+        shutdown_telemetry()
 
 
 def worker_main(argv: list[str] | None = None) -> int:
@@ -723,11 +728,13 @@ def worker_main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _configure_logging()
     settings = get_settings()
-    _log_operating_mode(settings)
+    # Attach the observability providers before the first ATI log line so the
+    # startup operating-mode log is exported through the OTel log pipeline.
     configure_telemetry(
         enabled=settings.observability_enabled,
         service_name=ServiceNames.WORKER,
     )
+    _log_operating_mode(settings)
     engine = _make_engine(settings)
     factory = _session_factory(engine)
     uow_factory = _uow_factory(factory, settings)
@@ -849,14 +856,16 @@ def geo_resolver_main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _configure_logging()
     settings = get_settings()
-    _log_operating_mode(settings)
     if not settings.geo_resolver_enabled:
         LOGGER.info("geo resolver disabled by configuration; exiting")
         return 0
+    # Attach the observability providers before the first ATI log line so the
+    # startup operating-mode log is exported through the OTel log pipeline.
     configure_telemetry(
         enabled=settings.observability_enabled,
         service_name=ServiceNames.GEO_RESOLVER,
     )
+    _log_operating_mode(settings)
     engine = _make_engine(settings)
     factory = _session_factory(engine)
     uow_factory = _uow_factory(factory, settings)

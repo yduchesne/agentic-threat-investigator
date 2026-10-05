@@ -87,6 +87,10 @@ services:
       ATI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ati}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ati}
       ATI_DATA_DIR: /var/lib/ati
       ATI_OPERATING_MODE: ${ATI_OPERATING_MODE:-fake}
+      # PR 29C: the ingestion one-shot exports OTLP to the in-network
+      # Collector so ingestion logs/metrics/traces reach the backends.
+      ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
     volumes:
       - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/datasets:/var/lib/ati/datasets"
     command: ["ati-fake-data-bootstrap"]
