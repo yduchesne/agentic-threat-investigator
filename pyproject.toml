@@ -108,6 +108,7 @@ ati-worker = "agentic_threat_investigator.cli:worker_main"
 ati-geography-import = "agentic_threat_investigator.cli:geography_import_main"
 ati-geography-build = "agentic_threat_investigator.cli:geography_build_main"
 ati-geo-resolver = "agentic_threat_investigator.cli:geo_resolver_main"
+ati-telemetry-test = "agentic_threat_investigator.cli:telemetry_test_main"
 ati-eval = "agentic_threat_investigator.cli:evaluation_main"
 
 [tool.ruff]
@@ -221,6 +222,7 @@ markers = [
   "unit: fast isolated tests",
   "integration: tests requiring external services",
   "interop: tests requiring the OpenCTI interoperability harness topology",
+  "observability: tests requiring the isolated observability harness topology (PR 34)",
   "provider_contract: provider contract tests",
 ]
 addopts = "--strict-markers"

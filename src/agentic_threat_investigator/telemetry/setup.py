@@ -71,6 +71,7 @@ class ServiceNames:
     SCHEDULER = "ati-scheduler"
     MIGRATE = "ati-migrate"
     FAKE_DATA_BOOTSTRAP = "ati-fake-data-bootstrap"
+    TELEMETRY_TEST = "ati-telemetry-test"
 
 
 SERVICE_NAMES: frozenset[str] = frozenset(
@@ -81,6 +82,7 @@ SERVICE_NAMES: frozenset[str] = frozenset(
         ServiceNames.SCHEDULER,
         ServiceNames.MIGRATE,
         ServiceNames.FAKE_DATA_BOOTSTRAP,
+        ServiceNames.TELEMETRY_TEST,
     }
 )
 """The exact tested set of canonical ATI service names."""
@@ -121,7 +123,7 @@ _runtime: TelemetryRuntime = TelemetryRuntime()
 _installed_log_handler: LoggingHandler | None = None
 
 
-def _otlp_endpoint() -> str | None:
+def otlp_endpoint() -> str | None:
     """Return the standard OTLP endpoint when explicitly configured.
 
     ATI exports remotely only when an explicit endpoint is present; we never
@@ -129,7 +131,8 @@ def _otlp_endpoint() -> str | None:
     default is a developer convenience of the SDK, not an ATI production
     contract). An absent or blank variable means offline mode: local
     providers remain usable and no exporter thread/network requirement is
-    created.
+    created. ``configure_telemetry`` and PR 34's ``ati-telemetry-test`` CLI
+    both read this single standard destination.
     """
     value = os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT)
     if value is None:
@@ -219,7 +222,7 @@ def configure_telemetry(
             meter_provider = MeterProvider(resource=resource)
             logger_provider: LoggerProvider | None = None
             log_handler = None
-            if _otlp_endpoint() is not None:
+            if otlp_endpoint() is not None:
                 tracer_provider.add_span_processor(BatchSpanProcessor(_span_exporter()))
                 meter_provider = MeterProvider(
                     metric_readers=[PeriodicExportingMetricReader(_metric_exporter())],
@@ -288,5 +291,6 @@ __all__ = [
     "ServiceNames",
     "TelemetryRuntime",
     "configure_telemetry",
+    "otlp_endpoint",
     "shutdown_telemetry",
 ]

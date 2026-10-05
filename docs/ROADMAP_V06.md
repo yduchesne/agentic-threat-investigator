@@ -541,6 +541,54 @@ and the verified real-OpenCTI import materialization (fixture STIX IDs
 must be RFC 4122 UUIDv4, the relationship-schema matrix limits supported
 Relationship instances to `uses`/`attributed-to`, and the Sighting needs
 its STIX-required `where_sighted_refs` Identity).
+
+## PR 34 — End-to-end OpenTelemetry delivery and observability-stack integration tests `[DONE]`
+
+Add one authoritative, isolated, real-stack integration gate proving that
+ATI telemetry travels through the deployed observability stack in a single
+real execution:
+
+```text
+ATI process (production configure_telemetry/shutdown_telemetry seam)
+  -> OTLP/HTTP
+  -> OpenTelemetry Collector
+  -> Prometheus / Jaeger / Loki
+  -> Grafana provisioning/health
+```
+
+Acceptance command: `./scripts/observability-integration.sh`
+(`--keep-on-failure` retains the topology; `--timeout N` bounds
+convergence). The harness brings up an isolated five-service Compose
+topology (`compose.observability.test.yaml`, pinned images, reusing the
+exact source-controlled `infra/observability/` configs), waits for bounded
+readiness, builds the repository ATI image, runs the one-shot PR 34
+generator (`ati-telemetry-test --run-id <uuid>`, production composition,
+service identity `ati-telemetry-test`, knows only the Collector), bounded-polls
+convergence to `READY_FOR_ASSERTIONS`, runs the `-m observability` pytest
+assertion gate, records bounded run-state
+(`artifacts/observability-integration/<run-id>/run-state.json`), and tears
+down only harness-owned resources.
+
+Assertions (T34-I01..I15): Collector health; generator exit 0; Prometheus
+counter exactly 1 with duration count 1 / sum 0.125s on the run's series;
+Jaeger root/child spans with exact names, run attribute, and child-parent
+link; Loki structured log with exact event/run ID and trace ID == Jaeger
+trace ID (cross-signal); the three exact Grafana datasource UIDs
+(`ati-prometheus`/`ati-jaeger`/`ati-loki`) healthy through the proxy;
+`ati-telemetry-test` service attribution; ordering (assertions only after
+convergence). The generator refuses emission (exit 2) when observability is
+disabled, the endpoint is absent, or signal-specific OTLP override variables
+are set, and its diagnostic names (`ati.telemetry.test.*`,
+`telemetry_test_signal`) are strictly separate from the frozen production
+vocabulary — no privacy leakage, no direct-to-backend OTLP clients, no
+second SDK provider set.
+
+The observability stack stays out of `./build.sh --intg`; PR 34 leaves the
+ordinary integration gate unchanged and is the implementation of the
+v0.3 roadmap's forward pointer (the PR 29 series has no internal
+telemetry-integration-testing PR). See `docs/TESTING.md` (PR 34 section)
+and `docs/OBSERVABILITY.md` (diagnostic generator section).
+
 ## Deferred beyond v0.6
 
 The following are not implied by this roadmap and require separate approval:

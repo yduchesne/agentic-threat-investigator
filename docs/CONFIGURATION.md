@@ -698,7 +698,14 @@ infrastructure. See `docs/OBSERVABILITY.md` for the runtime topology, the
 optional override file (`compose.observability.yaml`) used with the
 repository's pinned podman-compose 1.0.6 (which does not implement the
 standard `profiles:` filter), and the local UI host-port variables
+
 (`ATI_GRAFANA_HOST_PORT`, `ATI_PROMETHEUS_HOST_PORT`, `ATI_JAEGER_HOST_PORT`).
+
+The PR 34 diagnostic generator (`ati-telemetry-test --run-id <uuid>`, see
+`docs/OBSERVABILITY.md` and `docs/TESTING.md`) adds **no new settings**: it
+uses the same two variables (`ATI_OBSERVABILITY_ENABLED` and the standard
+`OTEL_EXPORTER_OTLP_ENDPOINT`) as every other ATI process and refuses to
+run when signal-specific OTLP override variables are set.
 
 ## Embedding settings (PR 22A)
 
