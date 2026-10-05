@@ -108,7 +108,7 @@ describe("deferred navigation boundary (A2-DC)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Subject" }));
     // Expansion is transient presentation only — no URL mutation.
     expect(router.state.location.search).not.toContain("pivot=");
-    fireEvent.click(await screen.findByRole("link", { name: "Relationships where source" }));
+    fireEvent.click(await screen.findByTestId("pivot-action-relationshipsSource"));
     // The router transition lands the canonical route with the exact
     // filter query; no legacy pivot envelope is ever produced.
     await waitFor(() => {
@@ -125,7 +125,7 @@ describe("deferred navigation boundary (A2-DC)", () => {
     await screen.findByText("update-package.test");
     await screen.findByRole("button", { name: "Subject" });
     fireEvent.click(screen.getByRole("button", { name: "Subject" }));
-    fireEvent.click(await screen.findByRole("link", { name: "Research for this entity" }));
+    fireEvent.click(await screen.findByTestId("pivot-action-researchForEntity"));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`${BASE}/research`);
     });
