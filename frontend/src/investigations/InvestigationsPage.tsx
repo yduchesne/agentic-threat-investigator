@@ -93,7 +93,7 @@ export function InvestigationsPage(): ReactElement {
     <Box sx={{ width: "100%", minWidth: 0, py: 2 }}>
       <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", mb: 2 }}>
         <Typography variant="h1">{t("title")}</Typography>
-        <Button component={Link} to="/investigations/new" variant="contained" color="primary" sx={{ textTransform: "none", color: "primary.contrastText" }}>
+        <Button component={Link} to="/investigations/new" variant="contained" color="primary" sx={{ textTransform: "none" }}>
           {t("newInvestigation")}
         </Button>
       </Stack>
