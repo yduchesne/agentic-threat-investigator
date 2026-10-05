@@ -93,7 +93,7 @@ describe("login page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     // Authenticated shell on /investigations (return path), user state seeded
     // from the real API contract.
-    expect(await screen.findByRole("heading", { name: "Agentic Threat Investigator" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /A T I.*Agentic Threat Investigator/ })).toBeInTheDocument();
     expect(await screen.findByText(ANALYST_USER.alias)).toBeInTheDocument();
     expect(await screen.findByText("FAKE DATA")).toBeInTheDocument();
   });
@@ -103,7 +103,7 @@ describe("login page", () => {
     renderAtPath({ path: "/login", state: { returnTo: "https://evil.example.com/steal" } });
     await fillLoginPage();
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(await screen.findByRole("heading", { name: "Agentic Threat Investigator" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /A T I.*Agentic Threat Investigator/ })).toBeInTheDocument();
   });
 
   it("does not submit empty submissions", async () => {
