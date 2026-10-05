@@ -31,6 +31,7 @@
 - [No quality-gate bypass](#no-quality-gate-bypass)
 - [CI quality gate](#ci-quality-gate)
 - [Frontend quality](#frontend-quality)
+- [PR 35-1 UI correctness testing](#pr-35-1-ui-correctness-testing)
 - [PR 26 GEOINT testing strategy](#pr-26-geoint-testing-strategy)
 - [Definition of done](#definition-of-done)
 - [Configuration tests](#configuration-tests)
@@ -5868,6 +5869,87 @@ No canonical closure fixture directly inserts derived geographic truth
 production worker completion), `FakeLlmClient` is the only model fake, no
 live network/geocoder/LLM is required, and no PR 27 generic
 evaluator/release framework is introduced.
+
+## PR 35-1 UI correctness testing
+
+PR 35-1 fixes navigational, Evidence-presentation, temporal-input, and
+graph-depth defects without changing the Investigation, Evidence, Pivot,
+graph-traversal, or frame-based temporal architecture. Its testing is
+deterministic and offline at unit level and uses the authoritative
+`scripts/e2e.sh` real-stack topology for browser acceptance.
+
+### Evidence description presenter
+
+`tests/unit/api/test_evidence_description.py` pins the deterministic
+backend `description` projection (`E01`-`E08`): the Fake World
+`update-package.test` A/CNAME, MX, NS, and TXT DNS observations produce
+distinguishable descriptions; threat-intelligence and registration
+records are characterized from normalized fields; an unhandled type falls
+back to a bounded type-oriented string; the public DTO carries the
+description and never the raw provider payload. Descriptions are bounded
+and deterministic and the frontend no longer serializes arbitrary `facts`.
+
+### Relationship-history Evidence and contextual Back
+
+Frontend component tests cover the linked compact Evidence ID contract
+(`L01`-`L03`: one visible short ID, exact href, adjacent copy control),
+contextual Back state (`B01`-`B04`: valid origin shown and restored with
+query/hash, absent/deep link and external/malformed origins render no
+Back), and the shared internal-origin validator
+(`analyst-table/return-to.test.ts`).
+
+### Provenance Observation Hide
+
+`GraphRelationshipProvenance.test.tsx` covers `P01`-`P03`: an observation
+opens, nested supporting Evidence opens, Observation **Hide** clears both
+the observation and the nested Evidence selection, and the parent
+provenance and bounded observation list remain usable.
+
+### Date-only local date/time parsing
+
+`analyst-table/filters.test.ts` pins the PR 35-1 parser matrix (`T1`-`T8`):
+empty input is absent, date-only normalizes to local midnight before UTC
+serialization, explicit time and seconds are preserved, malformed dates
+and partial times are rejected, impossible calendar dates are rejected,
+and a date-only range remains valid. `relationship-evolution.test.tsx`
+`FE31` proves the temporal conversion path commits local-midnight bounds
+with no false start-before-end error. The native `datetime-local` control
+cannot emit a date-only value, so the date-only behavior is asserted at the
+shared parser and temporal-conversion boundary rather than through a
+browser fill.
+
+### Graph HOPS depth propagation
+
+`relationship-evolution.test.tsx` `H01`-`H04` drives the routed Graph
+workspace: committed depth 1 issues no traversal request, depth 2 commits
+`graph_depth=2` and requests `max_depth=2`, depth 3 commits
+`graph_depth=3` and requests `max_depth=3`, and the committed URL identity
+follows the depth. Existing `graph-queries.test.tsx` and
+`graph-context-url.test.ts` continue to pin the traversal/neighborhood
+query-key distinction and the depth URL codec.
+
+### Browser acceptance
+
+`frontend/e2e/zz-35-1-ui-correctness.spec.ts` runs against the
+`scripts/e2e.sh` topology with `retries=0`, one worker, normal locator
+clicks, and a bounded page heartbeat after every transition:
+
+- **W1** Evidence table Subject pivot -> `Evidence for this entity`;
+- **W2** Relationships history -> row `View` -> exact observation detail;
+- Evidence linked ID -> exact routed Evidence details;
+- contextual Back from Relationship history to the exact originating route;
+- graph 1 -> 2 -> 3 HOPS depth propagation;
+- provenance Observation -> View supporting evidence -> Observation Hide;
+- a five same-page-cycle W1/W2 stability journey.
+
+W1 and W2 were reproduced from the recorded PR 35-1 base commit through
+the authoritative harness and **did not wedge**: both already commit past
+the native pointer event (`useResourceTable` defers the selection commit;
+`PivotMenu` route actions are ordinary React Router links from the PR
+31F-6 in-flow rehaul). The journeys therefore assert the non-wedging
+behavior directly (bounded heartbeat, clean product console/pageerror,
+five cycles, `retries=0`) rather than applying a speculative timing
+change. The spec runs in Chromium and Firefox.
 
 ## Definition of done
 

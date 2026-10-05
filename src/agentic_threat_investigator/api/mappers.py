@@ -62,6 +62,9 @@ from agentic_threat_investigator.api.dto.support import (
     SupportPresentationResponse,
 )
 from agentic_threat_investigator.api.dto.timeline import TimelineEventResponse
+from agentic_threat_investigator.api.evidence_description import (
+    evidence_description,
+)
 from agentic_threat_investigator.app.query.evidence import EvidenceReadItem
 from agentic_threat_investigator.app.query.geoint import (
     GeointEntityLocationItem,
@@ -169,6 +172,7 @@ def to_evidence_response(item: EvidenceReadItem) -> EvidenceResponse:
         observed_at=item.observation.observed_at,
         retrieved_at=item.observation.retrieved_at,
         facts=dict(item.observation.facts),
+        description=evidence_description(item),
     )
 
 

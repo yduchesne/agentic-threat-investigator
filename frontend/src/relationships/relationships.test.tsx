@@ -6,7 +6,7 @@
 // the first-class observations route preserving observed/retrieved
 // independence.
 
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -277,5 +277,70 @@ describe("Relationship observations page", () => {
     renderAtPath(OBS_BASE);
     await screen.findByText("fake-dns");
     expect(historyCalls).toBe(0);
+  });
+
+  it("L01/L02/L03: the observation row Evidence ID is one linked compact ID (PR 35-1)", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/relationship-observations",
+        pages: [[obsA()]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(OBS_BASE);
+    await screen.findByText("fake-dns");
+    const link = await screen.findByRole("link", { name: "Evidence" });
+    expect(link).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/evidence/40000000-0000-4000-8000-000000000001`,
+    );
+    // The visible short ID appears exactly once in the evidence cell and the
+    // full UUID remains copyable.
+    const cell = link.parentElement as HTMLElement;
+    expect(within(cell).getAllByText("40000000")).toHaveLength(1);
+    expect(
+      within(cell).getByRole("button", { name: "Copy ID 40000000" }),
+    ).toBeInTheDocument();
+  });
+
+  it("B01/B04: a valid returnTo renders Back and restores the exact origin (PR 35-1)", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/relationship-observations",
+        pages: [[obsA()]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    const origin = `/investigations/${INVESTIGATION_ID}/relationships?selected=40000000-0000-4000-8000-000000000021#top`;
+    const { router } = renderAtPath({
+      pathname: OBS_BASE,
+      state: { returnTo: origin },
+    });
+    await screen.findByText("fake-dns");
+    await userEvent.click(await screen.findByRole("button", { name: "< Back" }));
+    await waitFor(() => {
+      expect(
+        `${router.state.location.pathname}${router.state.location.search}${router.state.location.hash}`,
+      ).toBe(origin);
+    });
+  });
+
+  it("B02: a direct link with no returnTo renders no Back control (PR 35-1)", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/relationship-observations",
+        pages: [[obsA()]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(OBS_BASE);
+    await screen.findByText("fake-dns");
+    expect(screen.queryByRole("button", { name: "< Back" })).not.toBeInTheDocument();
   });
 });

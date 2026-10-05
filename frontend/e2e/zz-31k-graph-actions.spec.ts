@@ -149,7 +149,7 @@ async function openGraphWorkspace(page: Page, base: string): Promise<string> {
     timeout: 30_000,
   });
   const firstEntityLink = page
-    .getByRole("link", { name: /relationship evolution/i })
+    .getByRole("link", { name: /relationship history/i })
     .first();
   await expect(firstEntityLink).toBeVisible({ timeout: 30_000 });
   const href = await firstEntityLink.getAttribute("href");

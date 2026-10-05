@@ -747,6 +747,7 @@ export function buildEvidence(overrides: Partial<Evidence> = {}): Evidence {
     observed_at: "2026-06-01T09:00:00Z",
     retrieved_at: "2026-06-01T09:05:00Z",
     facts: { resolver: "8.8.8.8" },
+    description: "A: update-package.test -> 203.0.113.81",
     ...overrides,
   };
 }

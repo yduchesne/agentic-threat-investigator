@@ -34,6 +34,7 @@ import {
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, localDateTimeToIso, parseUuidParam } from "../analyst-table/filters";
+import { validatedReturnTo } from "../analyst-table/return-to";
 import { isNotFound404 } from "../analyst-table/detail-error";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import { runningNotice } from "../analyst-table/running";
@@ -170,15 +171,11 @@ export function observationColumns(
       id: "evidence",
       header: t("columns.evidence"),
       render: (observation) => (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <Link
-            to={`/investigations/${investigationId}/evidence?selection=${observation.evidence_id}`}
-            style={{ textDecoration: "none" }}
-          >
-            {observation.evidence_id.slice(0, 8)}
-          </Link>
-          <CompactId id={observation.evidence_id} label={t("columns.evidence")} />
-        </Box>
+        <CompactId
+          id={observation.evidence_id}
+          label={t("columns.evidence")}
+          to={`/investigations/${investigationId}/evidence/${observation.evidence_id}`}
+        />
       ),
       exportValue: (observation) => observation.evidence_id,
     },
@@ -209,9 +206,9 @@ export function RelationshipObservationsWorkspace({
   const { t: tCommon } = useTranslation("common");
   const location = useLocation();
   const navigate = useNavigate();
-  const returnTo = typeof (location.state as { returnTo?: unknown } | null)?.returnTo === "string"
-    ? (location.state as { returnTo: string }).returnTo
-    : null;
+  const returnTo = validatedReturnTo(
+    (location.state as { returnTo?: unknown } | null)?.returnTo,
+  );
 
   const { page, isLoading, error, refetch } = useObservationsPage(
     investigationId,
@@ -297,7 +294,7 @@ export function RelationshipObservationsWorkspace({
             <Box sx={{ mb: 1 }}>
               {returnTo !== null ? (
                 <Button size="small" onClick={() => navigate(returnTo)} sx={{ textTransform: "none", px: 0, mb: 0.5 }}>
-                  &lt; Back
+                  {tCommon("back")}
                 </Button>
               ) : null}
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>

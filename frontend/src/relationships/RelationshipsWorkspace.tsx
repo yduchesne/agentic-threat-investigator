@@ -12,7 +12,7 @@
 import { Box, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import type { Investigation, Relationship, RelationshipTypeName } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
@@ -185,6 +185,8 @@ export function RelationshipsWorkspace({
   embedded = false,
 }: RelationshipsWorkspaceProps): ReactElement {
   const { t } = useTranslation("relationships");
+  const location = useLocation();
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
   const { t: tCommon } = useTranslation("common");
 
   const { page, isLoading, error, refetch } = useRelationshipsPage(
@@ -267,7 +269,7 @@ export function RelationshipsWorkspace({
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
               <Typography variant="h2">{t("title")}</Typography>
               <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
-                <Link to={`/investigations/${investigationId}/relationships/observations`} style={{ textDecoration: "none" }}>
+                <Link to={`/investigations/${investigationId}/relationships/observations`} state={{ returnTo }} style={{ textDecoration: "none" }}>
                   {t("nav.observations")}
                 </Link>
               </Typography>

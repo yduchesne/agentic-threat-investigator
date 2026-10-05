@@ -227,6 +227,12 @@
         "additionalProperties": false,
         "description": "One exact admitted EvidenceObservation, normalized facts only (PR 28B).\n\n``id`` is the exact EvidenceObservation identity, never the stable\nEvidence ID. The legacy ``subject_*`` field names are retained for wire\ncompatibility: they resolve to the observation's first associated Entity\nin deterministic order (or ``None`` when the observation has none). They\nare presentation compatibility only; there is no privileged Evidence\nsubject and no role semantics.",
         "properties": {
+          "description": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
           "facts": {
             "additionalProperties": true,
             "title": "Facts",
@@ -324,7 +330,8 @@
           "source_record_id",
           "source_url",
           "observed_at",
-          "retrieved_at"
+          "retrieved_at",
+          "description"
         ],
         "title": "EvidenceResponse",
         "type": "object"

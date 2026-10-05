@@ -55,7 +55,7 @@ export default defineConfig({
       // graph-driven investigation action journey + 20-cycle action-selection
       // stability also run in both engines.
       testMatch:
-        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop|zz-31i-path-finding|zz-31j-temporal-graph|zz-31k-graph-actions)\.spec\.ts/,
+        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop|zz-31i-path-finding|zz-31j-temporal-graph|zz-31k-graph-actions|zz-35-1-ui-correctness)\.spec\.ts/,
     },
   ],
 });

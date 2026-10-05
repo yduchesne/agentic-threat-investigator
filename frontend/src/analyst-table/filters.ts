@@ -80,25 +80,60 @@ export function parseTimestampParam(value: string | null | undefined): string | 
   return value;
 }
 
-/** Loose shape check for a ``datetime-local`` value. */
-const LOCAL_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+/** Exact ``YYYY-MM-DD`` local date (date-only means local midnight). */
+const LOCAL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Exact local ``YYYY-MM-DDTHH:MM`` value, with optional seconds. Partial
+ * times (``YYYY-MM-DDT``, ``YYYY-MM-DDTHH``, ``YYYY-MM-DDTHH:``) never match.
+ */
+const LOCAL_DATETIME_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 
 /**
  * Convert one HTML ``datetime-local`` input value to a UTC ISO-8601
- * timestamp (PR 24C §14).
+ * timestamp (PR 24C §14; PR 35-1 Part 5).
  *
  * The browser supplies a local wall-clock value; it is parsed as browser
  * local time and serialized to UTC seconds (matching the app ISO format).
- * Invalid/empty values normalize to absence.
+ * A date-only value means local midnight (``YYYY-MM-DDT00:00:00``).
+ * Malformed partial times and impossible calendar dates normalize to
+ * absence so they are never present as valid filters or sent to the API.
  */
 export function localDateTimeToIso(value: string): string | undefined {
-  if (value === "" || !LOCAL_DATETIME_PATTERN.test(value)) {
+  if (value === "") {
     return undefined;
   }
-  const normalized = value.includes("T") ? value : `${value}T00:00`;
+  const dateOnly = LOCAL_DATE_PATTERN.exec(value);
+  const dateTime = LOCAL_DATETIME_PATTERN.exec(value);
+  if (dateOnly === null && dateTime === null) {
+    return undefined;
+  }
+  const match = dateOnly ?? dateTime;
+  if (match === null) {
+    return undefined;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const normalized = dateOnly === null ? value : `${value}T00:00`;
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) {
     return undefined;
+  }
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() + 1 !== month ||
+    date.getDate() !== day
+  ) {
+    return undefined;
+  }
+  if (dateTime !== null) {
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    if (date.getHours() !== hour || date.getMinutes() !== minute) {
+      return undefined;
+    }
   }
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }

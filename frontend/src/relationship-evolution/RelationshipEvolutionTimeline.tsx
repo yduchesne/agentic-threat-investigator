@@ -56,6 +56,8 @@ export interface EvolutionTimelineLabels {
 }
 
 export interface RelationshipEvolutionTimelineProps {
+  /** The Investigation that scopes every Evidence link opened from the table. */
+  investigationId: string;
   /** The focal entity of the loaded page (table direction labels need it). */
   focalEntityId: string;
   model: EvolutionModel;
@@ -142,6 +144,7 @@ function counterpartyRowText(
 
 /** The swimlane temporal surface plus an accessible table alternative. */
 export function RelationshipEvolutionTimeline({
+  investigationId,
   focalEntityId,
   model,
   span,
@@ -191,6 +194,7 @@ export function RelationshipEvolutionTimeline({
       ) : null}
       {tableView ? (
         <ObservationTable
+          investigationId={investigationId}
           focalEntityId={focalEntityId}
           rows={rows}
           labels={labels}
@@ -256,6 +260,7 @@ export function RelationshipEvolutionTimeline({
 
 /** The accessible tabular/list equivalent of the loaded page. */
 function ObservationTable({
+  investigationId,
   focalEntityId,
   rows,
   labels,
@@ -263,6 +268,7 @@ function ObservationTable({
   entityTypeLabel,
   onActivate,
 }: {
+  investigationId: string;
   focalEntityId: string;
   rows: readonly RelationshipObservation[];
   labels: EvolutionTimelineLabels;
@@ -338,7 +344,11 @@ function ObservationTable({
                 <Timestamp iso={row.retrieved_at} />
               </td>
               <td style={{ padding: 6 }}>
-                <CompactId id={row.evidence_id} label={labels.tableColumns.evidence} />
+                <CompactId
+                  id={row.evidence_id}
+                  label={labels.tableColumns.evidence}
+                  to={`/investigations/${investigationId}/evidence/${row.evidence_id}`}
+                />
               </td>
             </tr>
           ))}

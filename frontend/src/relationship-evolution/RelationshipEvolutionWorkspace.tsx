@@ -18,11 +18,12 @@ import { Alert, Box, Button, ToggleButton, ToggleButtonGroup, Typography } from 
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 
 import type { Investigation, RelationshipObservation } from "../api/schema-types";
 import { DetailRows } from "../analyst-table/DetailRows";
 import { isUuidValue } from "../analyst-table/filters";
+import { validatedReturnTo } from "../analyst-table/return-to";
 import { useFilterForm } from "../analyst-table/filter-form";
 import {
   clearSelectedParam,
@@ -144,6 +145,11 @@ export function RelationshipEvolutionWorkspace({
   const { t: tCommon } = useTranslation("common");
   const { t: tRelationships } = useTranslation("relationships");
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const returnTo = validatedReturnTo(
+    (location.state as { returnTo?: unknown } | null)?.returnTo,
+  );
 
   const filters = parseEvolutionParams(searchParams);
   const view = parseViewParam(searchParams);
@@ -626,7 +632,14 @@ export function RelationshipEvolutionWorkspace({
   if (filters === null) {
     return (
       <Box>
-        <WorkspaceTitle investigationId={investigationId} t={t} />
+        <WorkspaceTitle
+          investigationId={investigationId}
+          t={t}
+          backLabel={returnTo !== null ? tCommon("back") : null}
+          onBack={() => {
+            if (returnTo !== null) navigate(returnTo);
+          }}
+        />
         <Typography variant="h4" sx={{ py: 3, textAlign: "center", fontWeight: 600 }}>
           {t("empty.entity.title")}
         </Typography>
@@ -656,7 +669,14 @@ export function RelationshipEvolutionWorkspace({
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      <WorkspaceTitle investigationId={investigationId} t={t} />
+      <WorkspaceTitle
+        investigationId={investigationId}
+        t={t}
+        backLabel={returnTo !== null ? tCommon("back") : null}
+        onBack={() => {
+          if (returnTo !== null) navigate(returnTo);
+        }}
+      />
       <Box sx={{ mb: 1 }}>
         <ToggleButtonGroup
           value={view}
@@ -723,6 +743,7 @@ export function RelationshipEvolutionWorkspace({
               t={t as never}
               investigationId={investigationId}
               observation={selectedObservation}
+              returnTo={returnTo}
             />
           ) : (
             <Box role="status" sx={{ py: 2, textAlign: "center" }}>
@@ -781,6 +802,7 @@ export function RelationshipEvolutionWorkspace({
           {observations.page !== null && evolutionModel !== null ? (
             <Box sx={{ mt: 1 }}>
               <RelationshipEvolutionTimeline
+                investigationId={investigationId}
                 focalEntityId={filters.entityId}
                 model={evolutionModel}
                 span={span}
@@ -912,18 +934,33 @@ export function RelationshipEvolutionWorkspace({
 function WorkspaceTitle({
   investigationId,
   t,
+  backLabel = null,
+  onBack,
 }: {
   investigationId: string;
   t: (key: string) => string;
+  backLabel?: string | null;
+  onBack?: () => void;
 }): ReactElement {
   return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-      <Typography variant="h2">{t("title")}</Typography>
-      <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
-        <Link to={`/investigations/${investigationId}/relationships`} style={{ textDecoration: "none" }}>
-          {t("nav.relationships")}
-        </Link>
-      </Typography>
+    <Box sx={{ mb: 1 }}>
+      {backLabel !== null && onBack !== undefined ? (
+        <Button
+          size="small"
+          onClick={onBack}
+          sx={{ textTransform: "none", px: 0, mb: 0.5, display: "block" }}
+        >
+          {backLabel}
+        </Button>
+      ) : null}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Typography variant="h2">{t("title")}</Typography>
+        <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
+          <Link to={`/investigations/${investigationId}/relationships`} style={{ textDecoration: "none" }}>
+            {t("nav.relationships")}
+          </Link>
+        </Typography>
+      </Box>
     </Box>
   );
 }
@@ -933,10 +970,12 @@ function ObservationDetailBody({
   t,
   investigationId,
   observation,
+  returnTo,
 }: {
   t: (key: string) => string;
   investigationId: string;
   observation: RelationshipObservation;
+  returnTo: string | null;
 }): ReactElement {
   return (
     <Box>
@@ -1011,6 +1050,7 @@ function ObservationDetailBody({
             <Typography variant="caption" component="div">
               <Link
                 to={`/investigations/${investigationId}/relationships/evolution?entity_id=${observation.relationship_source_entity_id}`}
+                state={returnTo === null ? undefined : { returnTo }}
                 style={{ textDecoration: "none" }}
               >
                 {t("detail.evolutionSource")}
@@ -1021,6 +1061,7 @@ function ObservationDetailBody({
             <Typography variant="caption" component="div">
               <Link
                 to={`/investigations/${investigationId}/relationships/evolution?entity_id=${observation.relationship_target_entity_id}`}
+                state={returnTo === null ? undefined : { returnTo }}
                 style={{ textDecoration: "none" }}
               >
                 {t("detail.evolutionTarget")}

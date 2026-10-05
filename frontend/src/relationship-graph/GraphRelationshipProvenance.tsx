@@ -347,6 +347,17 @@ export function GraphRelationshipProvenance({
                 >
                   {t("graph.provenance.viewEvidence")}
                 </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => {
+                    setSelectedObservationId(null);
+                    setSelectedEvidenceId(null);
+                  }}
+                  sx={{ textTransform: "none" }}
+                >
+                  {t("graph.provenance.hideObservation")}
+                </Button>
               </Box>
             </Box>
           ) : null}

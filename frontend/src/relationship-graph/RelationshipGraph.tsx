@@ -35,6 +35,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { Link as RouterLink, useLocation } from "react-router";
 
 import { CompactId } from "../components/CompactId";
 import type { AtiSemanticTokens } from "../app/theme";
@@ -215,6 +216,11 @@ export function RelationshipGraph({
   emptyMessage = undefined,
 }: RelationshipGraphProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
+  const location = useLocation();
+  // PR 35-1 Part 3: the graph is an internal entry point to Relationship
+  // history; carry the exact origin route so the workspace can offer a
+  // contextual Back to this graph surface.
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
   // PR 31F-4: the active theme's semantic graph tokens drive canvas, edge,
   // node and control presentation. Topology/query/expansion semantics never
   // read theme state: only the presentation boundary below consumes tokens.
@@ -572,8 +578,9 @@ export function RelationshipGraph({
             />
             <Button
               size="small"
-              component="a"
-              href={evolutionLink(investigationId, selectedNode.entityId)}
+              component={RouterLink}
+              to={evolutionLink(investigationId, selectedNode.entityId)}
+              state={{ returnTo }}
               sx={{ textTransform: "none" }}
             >
               {t("graph.viewEvolution")}
@@ -715,6 +722,7 @@ export function RelationshipGraph({
           nodeById={nodeById}
           typeLabel={typeLabel}
           entityTypeLabel={entityTypeLabel}
+          returnTo={returnTo}
           onInspectObservations={(relationshipId) =>
             setProvenanceRelationshipId(relationshipId)
           }
@@ -967,6 +975,7 @@ function EdgeList({
   nodeById,
   typeLabel,
   entityTypeLabel,
+  returnTo,
   onInspectObservations,
 }: {
   t: TFunction;
@@ -976,6 +985,8 @@ function EdgeList({
   nodeById: Map<string, RelationshipGraphNode>;
   typeLabel: (type: string) => string;
   entityTypeLabel: (type: string) => string;
+  /** Exact origin route carried to Relationship history. */
+  returnTo: string;
   /** PR 31F: open the graph-local provenance panel for one canonical edge. */
   onInspectObservations: (relationshipId: string) => void;
 }): ReactElement {
@@ -1052,7 +1063,9 @@ function EdgeList({
                     {t("graph.list.view")}
                   </Link>
                   <Link
-                    href={evolutionLink(investigationId, counterpartyId)}
+                    component={RouterLink}
+                    to={evolutionLink(investigationId, counterpartyId)}
+                    state={{ returnTo }}
                     underline="hover"
                     sx={{ fontSize: "inherit" }}
                   >

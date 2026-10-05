@@ -13,7 +13,7 @@
 import { Box, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import type { Relationship } from "../api/schema-types";
 import { DetailRows, DetailRow, DetailSection } from "../analyst-table/DetailRows";
@@ -55,6 +55,8 @@ export function RelationshipDetail({
 }: RelationshipDetailProps): ReactElement {
   const { t } = useTranslation("relationships");
   const { t: tCommon } = useTranslation("common");
+  const location = useLocation();
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
   const preview = useRelationshipObservationPreview(investigationId, relationship.id);
 
   return (
@@ -187,6 +189,7 @@ export function RelationshipDetail({
           <Box sx={{ mt: 1 }}>
             <Link
               to={`/investigations/${investigationId}/relationships/observations?relationship_id=${relationship.id}`}
+              state={{ returnTo }}
               style={{ textDecoration: "none" }}
             >
               <Typography variant="body2" sx={{ color: "primary.main" }}>

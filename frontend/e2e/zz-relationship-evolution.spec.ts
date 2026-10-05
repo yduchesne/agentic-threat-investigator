@@ -116,7 +116,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await page.goto(`/investigations/${investigationId}/relationships`);
     const firstRow = page.getByRole("table", { name: "Relationships" }).getByRole("row").nth(1);
     await expect(firstRow).toBeVisible({ timeout: 20_000 });
-    await firstRow.getByRole("link", { name: "View relationship evolution for source entity" })
+    await firstRow.getByRole("link", { name: "View relationship history for source entity" })
       .first()
       .click();
     await expect(page).toHaveURL(/\/relationships\/evolution\?entity_id=/);
@@ -400,14 +400,14 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expandedCanvasEdge.click();
     const edgeSelectionPanel = page.getByText(/^Relationship: /).first().locator("xpath=..");
     await expect(
-      edgeSelectionPanel.getByRole("button", { name: "Inspect observations" }),
+      edgeSelectionPanel.getByRole("button", { name: "Provenance" }),
     ).toBeVisible({ timeout: 20_000 });
     const nodesBefore31F = await graphCanvas.locator(".react-flow__node").count();
     const draggedFocalBefore31F = await nodeOffsetInCanvas(graphCanvas, canvasNode);
     const graphRequestsBefore31F = graphNeighborhoodRequests.length;
     await activate(
       page,
-      edgeSelectionPanel.getByRole("button", { name: "Inspect observations" }),
+      edgeSelectionPanel.getByRole("button", { name: "Provenance" }),
     );
     const provenance = page.getByRole("region", {
       name: "Relationship provenance",

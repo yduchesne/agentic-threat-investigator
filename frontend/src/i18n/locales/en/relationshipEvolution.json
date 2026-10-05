@@ -124,6 +124,7 @@
   "graph.provenance.evidence": "Supporting evidence",
   "graph.provenance.evidenceFrom": "Evidence from {{source}}",
   "graph.provenance.heading": "Relationship provenance",
+  "graph.provenance.hideObservation": "Hide",
   "graph.provenance.inspect": "Provenance",
   "graph.provenance.loading.evidence": "Loading supporting evidence…",
   "graph.provenance.loading.observation": "Loading observation…",
