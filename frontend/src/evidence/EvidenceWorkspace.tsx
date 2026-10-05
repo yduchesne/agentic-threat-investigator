@@ -35,6 +35,7 @@ import { SafeJsonView } from "../analyst-table/SafeJsonView";
 import { TableToolbar } from "../analyst-table/TableToolbar";
 import { Timestamp } from "../components/Timestamp";
 import { EntityReference } from "../components/EntityReference";
+import { sourceLabel } from "../components/source-labels";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { evidenceSubjectActions } from "../pivots/pivot-capabilities";
 import { EvidenceDetail } from "./EvidenceDetail";
@@ -109,7 +110,10 @@ function draftError(t: (key: string) => string, draft: EvidenceDraft): string | 
  * right beside it in one wrapping Box — no separate Subject Type column and
  * never a UUID as primary Subject text.
  */
-export function evidenceColumns(t: (key: string) => string): Column<Evidence>[] {
+export function evidenceColumns(
+  t: (key: string) => string,
+  tCommon: (key: string) => string,
+): Column<Evidence>[] {
   return [
     {
       id: "subject",
@@ -134,8 +138,8 @@ export function evidenceColumns(t: (key: string) => string): Column<Evidence>[] 
     {
       id: "source",
       header: t("columns.source"),
-      render: (evidence) => evidence.source,
-      exportValue: (evidence) => evidence.source,
+      render: (evidence) => sourceLabel(evidence.source, tCommon),
+      exportValue: (evidence) => sourceLabel(evidence.source, tCommon),
     },
     {
       id: "observedAt",
@@ -275,7 +279,7 @@ export function EvidenceWorkspace({
             </Typography>
           ) : null}
           <AnalystTable<Evidence>
-            columns={evidenceColumns(t)}
+            columns={evidenceColumns(t, tCommon)}
             rows={page?.items ?? []}
             getRowId={(evidence) => evidence.id}
             ariaLabel={t("title")}
@@ -350,64 +354,68 @@ export function EvidenceFiltersForm({
     }
   };
   return (
-    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-      <TextField
-        size="small"
-        label={t("filters.source.label")}
-        value={form.draft.source}
-        onChange={(event) => form.setDraft({ ...form.draft, source: event.target.value })}
-        onKeyDown={enter}
-      />
-      <TextField
-        size="small"
-        label={t("filters.subjectEntity.label")}
-        value={form.draft.subjectEntityId}
-        onChange={(event) =>
-          form.setDraft({ ...form.draft, subjectEntityId: event.target.value })}
-        onKeyDown={enter}
-      />
-      <FormControl size="small" sx={{ minWidth: 170 }}>
-        <InputLabel id="evidence-type-filter-label">{t("filters.type.label")}</InputLabel>
-        <Select
-          labelId="evidence-type-filter-label"
-          label={t("filters.type.label")}
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+        <TextField
           size="small"
-          value={form.draft.type}
+          label={t("filters.source.label")}
+          value={form.draft.source}
+          onChange={(event) => form.setDraft({ ...form.draft, source: event.target.value })}
+          onKeyDown={enter}
+        />
+        <TextField
+          size="small"
+          label={t("filters.subjectEntity.label")}
+          value={form.draft.subjectEntityId}
           onChange={(event) =>
-            form.setDraft({
-              ...form.draft,
-              type: event.target.value as EvidenceTypeName | "",
-            })}
-          sx={{ minWidth: 170 }}
-        >
-          <MenuItem value="">{tCommon("filters.all")}</MenuItem>
-          {EVIDENCE_TYPES.map((type) => (
-            <MenuItem key={type} value={type}>
-              {t(evidenceTypeKey(type))}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-      <TextField
-        type="datetime-local"
-        slotProps={{ inputLabel: { shrink: true } }}
-        size="small"
-        label={t("filters.retrievedFrom.label")}
-        value={form.draft.retrievedFrom}
-        onChange={(event) =>
-          form.setDraft({ ...form.draft, retrievedFrom: event.target.value })}
-        onKeyDown={enter}
-      />
-      <TextField
-        type="datetime-local"
-        slotProps={{ inputLabel: { shrink: true } }}
-        size="small"
-        label={t("filters.retrievedTo.label")}
-        value={form.draft.retrievedTo}
-        onChange={(event) =>
-          form.setDraft({ ...form.draft, retrievedTo: event.target.value })}
-        onKeyDown={enter}
-      />
+            form.setDraft({ ...form.draft, subjectEntityId: event.target.value })}
+          onKeyDown={enter}
+        />
+        <FormControl size="small" sx={{ minWidth: 170 }}>
+          <InputLabel id="evidence-type-filter-label">{t("filters.type.label")}</InputLabel>
+          <Select
+            labelId="evidence-type-filter-label"
+            label={t("filters.type.label")}
+            size="small"
+            value={form.draft.type}
+            onChange={(event) =>
+              form.setDraft({
+                ...form.draft,
+                type: event.target.value as EvidenceTypeName | "",
+              })}
+            sx={{ minWidth: 170 }}
+          >
+            <MenuItem value="">{tCommon("filters.all")}</MenuItem>
+            {EVIDENCE_TYPES.map((type) => (
+              <MenuItem key={type} value={type}>
+                {t(evidenceTypeKey(type))}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+        <TextField
+          type="datetime-local"
+          slotProps={{ inputLabel: { shrink: true } }}
+          size="small"
+          label={t("filters.retrievedFrom.label")}
+          value={form.draft.retrievedFrom}
+          onChange={(event) =>
+            form.setDraft({ ...form.draft, retrievedFrom: event.target.value })}
+          onKeyDown={enter}
+        />
+        <TextField
+          type="datetime-local"
+          slotProps={{ inputLabel: { shrink: true } }}
+          size="small"
+          label={t("filters.retrievedTo.label")}
+          value={form.draft.retrievedTo}
+          onChange={(event) =>
+            form.setDraft({ ...form.draft, retrievedTo: event.target.value })}
+          onKeyDown={enter}
+        />
+      </Box>
     </Box>
   );
 }
