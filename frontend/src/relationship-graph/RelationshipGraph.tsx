@@ -236,41 +236,32 @@ export function RelationshipGraph({
   }, [selection]);
 
   const counterpartyIds = useMemo(
-    () => model.counterparties.map((node) => node.entityId),
-    [model.counterparties],
+    () => model.nodes.filter((node) => node.entityId !== focalEntityId).map((node) => node.entityId),
+    [model.nodes, focalEntityId],
   );
   const positions = useMemo(
-    () => layeredPositions(model.focal.entityId, model.nodes, model.edges),
-    [model.focal.entityId, model.nodes, model.edges],
+    () => layeredPositions(focalEntityId, model.nodes, model.edges),
+    [focalEntityId, model.nodes, model.edges],
   );
   const size = useMemo(() => layoutSize(counterpartyIds.length), [counterpartyIds.length]);
 
   const initialNodes: Node<EvolutionNodeData>[] = useMemo(
-    () => [
-      {
-        id: nodeId(model.focal.entityId),
-        type: "evolutionNode",
-        position: positions.focal,
-        data: {
-          entityValue: model.focal.value,
-          role: "focal",
-          entityTypeText: entityTypeLabel(model.focal.entityType),
-          displayName: model.focal.displayName,
-        },
-      },
-      ...model.counterparties.map((node) => ({
+    () =>
+      model.nodes.map((node) => ({
         id: nodeId(node.entityId),
         type: "evolutionNode" as const,
-        position: positions.positions.get(node.entityId) ?? { x: 0, y: 0 },
+        position:
+          node.entityId === focalEntityId
+            ? positions.focal
+            : (positions.positions.get(node.entityId) ?? { x: 0, y: 0 }),
         data: {
           entityValue: node.value,
-          role: node.role,
+          role: node.entityId === focalEntityId ? "focal" : "counterparty",
           entityTypeText: entityTypeLabel(node.entityType),
           displayName: node.displayName,
         },
       })),
-    ],
-    [model, positions, entityTypeLabel],
+    [model.nodes, focalEntityId, positions, entityTypeLabel],
   );
 
   // PR 31I: path-mode presentation decorations are derived per render so
@@ -492,7 +483,7 @@ export function RelationshipGraph({
       ))}
       <Box sx={{ mb: 1 }}>
         <Link
-          href={`/investigations/${investigationId}/relationships?entity_id=${model.focal.entityId}`}
+          href={`/investigations/${investigationId}/relationships?entity_id=${focalEntityId}`}
           underline="hover"
         >
           {t("graph.openTable")}
@@ -689,6 +680,9 @@ export function RelationshipGraph({
         <GraphRelationshipProvenance
           investigationId={investigationId}
           relationshipId={provenanceRelationshipId}
+          sourceNode={nodeById.get(model.edges.find((edge) => edge.relationshipId === provenanceRelationshipId)?.sourceEntityId ?? "") ?? null}
+          targetNode={nodeById.get(model.edges.find((edge) => edge.relationshipId === provenanceRelationshipId)?.targetEntityId ?? "") ?? null}
+          entityTypeLabel={entityTypeLabel}
           knownOnly={
             model.edges.find(
               (edge) => edge.relationshipId === provenanceRelationshipId,
@@ -705,9 +699,6 @@ export function RelationshipGraph({
       ) : null}
 
       <Box component="section" aria-label={t("graph.listHeading")} sx={{ mt: 2 }}>
-        <Typography variant="h4" sx={{ fontWeight: 600 }}>
-          {t("graph.listHeading")}
-        </Typography>
         <EdgeList
           t={t}
           investigationId={investigationId}
@@ -715,6 +706,7 @@ export function RelationshipGraph({
           model={model}
           nodeById={nodeById}
           typeLabel={typeLabel}
+          entityTypeLabel={entityTypeLabel}
           onInspectObservations={(relationshipId) =>
             setProvenanceRelationshipId(relationshipId)
           }
@@ -966,6 +958,7 @@ function EdgeList({
   model,
   nodeById,
   typeLabel,
+  entityTypeLabel,
   onInspectObservations,
 }: {
   t: TFunction;
@@ -974,6 +967,7 @@ function EdgeList({
   model: RelationshipGraphModel;
   nodeById: Map<string, RelationshipGraphNode>;
   typeLabel: (type: string) => string;
+  entityTypeLabel: (type: string) => string;
   /** PR 31F: open the graph-local provenance panel for one canonical edge. */
   onInspectObservations: (relationshipId: string) => void;
 }): ReactElement {
@@ -1015,13 +1009,13 @@ function EdgeList({
                 <td style={{ padding: 6 }}>{typeLabel(edge.relationshipType)}</td>
                 <td style={{ padding: 6 }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box component="span">{source?.label ?? graphLabel(edge.sourceEntityId)}</Box>
+                    <Box component="span">{source !== undefined ? `${entityTypeLabel(source.entityType)} ${source.value}` : graphLabel(edge.sourceEntityId)}</Box>
                     <CompactId id={edge.sourceEntityId} label={t("graph.detail.entityId")} />
                   </Box>
                 </td>
                 <td style={{ padding: 6 }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box component="span">{target?.label ?? graphLabel(edge.targetEntityId)}</Box>
+                    <Box component="span">{target !== undefined ? `${entityTypeLabel(target.entityType)} ${target.value}` : graphLabel(edge.targetEntityId)}</Box>
                     <CompactId id={edge.targetEntityId} label={t("graph.detail.entityId")} />
                   </Box>
                 </td>
@@ -1048,7 +1042,7 @@ function EdgeList({
                     ? <Timestamp iso={edge.lastObservedAt} />
                     : t("graph.detail.unavailable")}
                 </td>
-                <td style={{ padding: 6 }}>
+                <td style={{ padding: 6, textAlign: "left" }}>
                   <Button
                     size="small"
                     component="a"
@@ -1065,14 +1059,16 @@ function EdgeList({
                   >
                     {t("graph.list.viewEvolution")}
                   </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => onInspectObservations(edge.relationshipId)}
-                    sx={{ textTransform: "none" }}
+                  <Link
+                    href={`#relationship-provenance-${edge.relationshipId}`}
+                    underline="hover"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onInspectObservations(edge.relationshipId);
+                    }}
                   >
                     {t("graph.provenance.inspect")}
-                  </Button>
+                  </Link>
                 </td>
               </tr>
             );
