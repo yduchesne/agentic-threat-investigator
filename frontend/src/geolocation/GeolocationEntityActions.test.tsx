@@ -289,7 +289,7 @@ describe("map-origin entity actions (C-P01..C-P12)", () => {
     await userEvent.click(within(row).getByRole("button", { name: /Explore/ }));
     await screen.findByRole("group", { name: "Pivot actions" });
     await userEvent.click(
-      screen.getByRole("link", { name: "Evidence for this entity" }),
+      screen.getByTestId("pivot-action-evidenceForEntity"),
     );
     // PR 31F-8: one canonical route navigation, no encoded pivot envelope.
     await waitFor(() => {
