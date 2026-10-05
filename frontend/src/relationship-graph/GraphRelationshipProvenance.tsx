@@ -43,7 +43,7 @@ import { isNotFound404 } from "../analyst-table/detail-error";
 import { hasPrevious, popBackStack, pushNextStack } from "../analyst-table/cursor-stack";
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
-import { sourceLabel, sourceLabelWithUrn } from "../components/source-labels";
+import { sourceLabel } from "../components/source-labels";
 import { EvidenceDetail } from "../evidence/EvidenceDetail";
 import { useEvidenceDetail } from "../evidence/evidence-queries";
 import { relationshipTypeKey } from "../relationships/labels";
