@@ -88,7 +88,7 @@ describe("deferred navigation boundary (A2-DC)", () => {
     await waitFor(() => {
       expect(router.state.location.search).toContain("selected=");
     });
-    fireEvent.click(screen.getByRole("button", { name: "Back to Evidence" }));
+    fireEvent.click(screen.getByTestId("resource-route-detail-back"));
     // The close selection commit is also deferred one macrotask.
     expect(router.state.location.search).toContain("selected=");
     await waitFor(() => {
