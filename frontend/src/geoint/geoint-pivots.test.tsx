@@ -99,15 +99,15 @@ describe("GEOINT routed resource navigation (PV10..PV13, PV17, PV18)", () => {
     // Opening the current-context Explore menu must not prefetch the
     // location surface.
     await userEvent.click(screen.getByRole("button", { name: /Explore/ }));
-    const menu = screen.getByRole("group", { name: "Pivot actions" });
-    expect(within(menu).getByRole("link", { name: "Entities at this location" })).toBeVisible();
+    const menu = screen.getByTestId("pivot-action-bar");
+    expect(within(menu).getByTestId("pivot-action-geointLocationEntities")).toBeVisible();
     await waitFor(() => expect(locationEntitiesCalls.count).toBe(0));
 
     // Activating the semantic action navigates to the exact Location
     // Entities route: only now is the bounded page fetched, and the Entity
     // surface is replaced by the Location surface (one routed content
     // surface at a time, N07/N08).
-    await userEvent.click(within(menu).getByRole("link", { name: "Entities at this location" }));
+    await userEvent.click(within(menu).getByTestId("pivot-action-geointLocationEntities"));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(
         `${BASE}/geoint/locations/${LOCATION_ID}/entities`,
@@ -131,7 +131,7 @@ describe("GEOINT routed resource navigation (PV10..PV13, PV17, PV18)", () => {
     await screen.findByText("Current in this Investigation");
     await userEvent.click(screen.getByRole("button", { name: /Explore/ }));
     await userEvent.click(
-      within(screen.getByRole("group", { name: "Pivot actions" })).getByRole(
+      within(screen.getByTestId("pivot-action-bar")).getByRole(
         "link",
         { name: "Entities at this location" },
       ),
