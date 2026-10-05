@@ -279,17 +279,17 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     );
     renderAtPath(graphEntry("graph_scope=known"));
     const list = await screen.findByRole("table", { name: "Relationship list (this page)" });
-    // FE26/FE27: supported edge carries the Investigation cue; known-only
-    // edge carries the explicit known-to-ATI cue. FE28: the cue is text
-    // (never color-only), so it is present in the accessible list.
+    // FE26/FE27/FE28: the redundant Context text column was removed.
+    // Investigation support remains explicit and non-color-only through the
+    // exact total and in-this-Investigation observation-count columns.
     const supportedRow = within(list).getByRole("row", { name: /Resolves to/ });
     // The redundant Context column was intentionally removed; the exact
     // total + in-this-Investigation counts carry the support semantics.
     expect(within(supportedRow).getAllByText("3")).toHaveLength(2);
     const knownOnlyRow = within(list).getByRole("row", { name: /CNAME of/ });
     expect(
-      within(knownOnlyRow).getByText("Known to ATI; not admitted to this Investigation"),
-    ).toBeInTheDocument();
+      within(knownOnlyRow).queryByText("Known to ATI; not admitted to this Investigation"),
+    ).not.toBeInTheDocument();
     expect(within(knownOnlyRow).getByText("2")).toBeInTheDocument();
     expect(within(knownOnlyRow).getByText("0")).toBeInTheDocument();
   });
