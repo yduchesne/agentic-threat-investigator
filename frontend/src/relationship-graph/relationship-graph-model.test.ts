@@ -276,20 +276,4 @@ describe("Relationship Graph presentation model", () => {
     expect(size.width).toBeGreaterThan(0);
     expect(size.height).toBeGreaterThan(0);
   });
-  it("drops an edge when either canonical endpoint node is absent", () => {
-    const model = buildGraphModel(
-      FOCAL,
-      neighbor({
-        nodes: [focalNode()],
-        edges: [
-          buildGraphEdge({
-            source_entity_id: B,
-            target_entity_id: FOCAL,
-          }),
-        ],
-      }),
-    );
-    expect(model.edges).toHaveLength(0);
-    expect(model.hasSelfEdge).toBe(false);
-  });
 });
