@@ -317,7 +317,7 @@ def test_fake_world_geolocation_is_linked_to_existing_ip_entities() -> None:
             SourceId.DBIP_CITY_LITE.value,
             EntityType.IP_ADDRESS,
             ip,
-            _FIXED_TS,
+            datetime(2026, 10, 1, tzinfo=UTC),
         )
         assert len(response.observations) == 1
         observation = response.observations[0]
