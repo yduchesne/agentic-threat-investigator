@@ -25,7 +25,7 @@ export function AnalystShell(): ReactElement {
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <AppHeader user={me.user} />
       <FakeDataBanner />
-      <Box component="main" role="main" sx={{ flexGrow: 1, px: 2, py: 2 }}>
+      <Box component="main" role="main" sx={{ flexGrow: 1, px: { xs: 1.5, sm: 2 }, py: 2, minWidth: 0 }}>
         <Outlet />
       </Box>
     </Box>
