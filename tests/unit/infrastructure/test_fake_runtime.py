@@ -303,6 +303,32 @@ def test_u33_pivot_lookup_continues_deterministically() -> None:
     assert related.observations[0].facts["answers"][0]["value"] == "203.0.113.81"
 
 
+def test_fake_world_geolocation_is_linked_to_existing_ip_entities() -> None:
+    """Existing fake-world IPs expose deterministic DB-IP GEOLOCATION evidence."""
+    catalog = _packaged_catalog()
+    expected = {
+        "203.0.113.10": ("US", "Seattle", 47.6062, -122.3321),
+        "203.0.113.81": ("US", "Dallas", 32.7792, -96.8),
+        "203.0.113.60": ("US", "Portland", 45.5152, -122.6784),
+        "198.51.100.77": ("DE", "Berlin", 52.52, 13.405),
+    }
+    for ip, (country, city, latitude, longitude) in expected.items():
+        response = catalog.provider_response(
+            SourceId.DBIP_CITY_LITE.value,
+            EntityType.IP_ADDRESS,
+            ip,
+            datetime(2026, 10, 1, tzinfo=UTC),
+        )
+        assert len(response.observations) == 1
+        observation = response.observations[0]
+        assert observation.evidence_type is EvidenceType.GEOLOCATION
+        assert observation.facts["country_code"] == country
+        assert observation.facts["city"] == city
+        assert observation.facts["latitude"] == latitude
+        assert observation.facts["longitude"] == longitude
+        assert observation.facts["precision"] == "city"
+
+
 def test_u34_unknown_pivot_is_bounded_dead_end() -> None:
     """An unknown pivot entity yields a bounded deterministic no-result."""
     catalog = _packaged_catalog()
@@ -561,6 +587,7 @@ def test_u18_fake_mode_composition_only_fake_live_providers() -> None:
         SourceId.GOOGLE_PUBLIC_DNS,
         SourceId.RDAP,
         SourceId.IPINFO_LITE,
+        SourceId.DBIP_CITY_LITE,
         SourceId.ABUSEIPDB,
         SourceId.THREATFOX,
         SourceId.URLHAUS,
@@ -631,6 +658,7 @@ def test_u20_fake_mode_resolves_no_production_secrets() -> None:
         SourceId.GOOGLE_PUBLIC_DNS,
         SourceId.RDAP,
         SourceId.IPINFO_LITE,
+        SourceId.DBIP_CITY_LITE,
         SourceId.ABUSEIPDB,
         SourceId.THREATFOX,
         SourceId.URLHAUS,

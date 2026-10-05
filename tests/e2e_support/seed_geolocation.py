@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Harness-only deterministic geolocation seeding seam (PR 25C).
 
-The PR 23D fake world composes no DB-IP provider, so a completed fake-world
-Investigation persists no ``GEOLOCATION`` LegacyEvidence and the PR 25A projection
-is honestly empty. The PR 25B E24 browser workflow cannot assert a real
-marker against that empty state. This module is the smallest deterministic
-real-stack seeding option agreed by the PR 25B STOP report: a test-support
+The packaged Fake World now includes ordinary DB-IP GEOLOCATION observations for
+selected existing IP entities. This module remains the explicit harness-only
+scenario seeding seam used by focused geolocation browser tests that require
+specific marker counts, same-location cases, or non-mappable cases independent
+of an investigation's normal provider-planning path. It is a test-support
 CLI that persists ordinary canonical IP Entities and immutable
 ``GEOLOCATION`` LegacyEvidence rows into the isolated throwaway E2E database
 through the normal application persistence seam.

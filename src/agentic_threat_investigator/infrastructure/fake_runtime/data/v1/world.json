@@ -1313,6 +1313,86 @@
         "message": "synthetic provider outage"
       },
       "observations": []
+    },
+    {
+      "provider_id": "urn:ati:source:dbip_city_lite",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.10",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:geolocation",
+          "observed_at": "2026-02-01T08:00:00Z",
+          "facts": {
+            "country_code": "US",
+            "region": "Washington",
+            "city": "Seattle",
+            "latitude": 47.6062,
+            "longitude": -122.3321,
+            "provider": "urn:ati:source:dbip_city_lite",
+            "precision": "city"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:dbip_city_lite",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.81",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:geolocation",
+          "observed_at": "2026-05-02T08:00:00Z",
+          "facts": {
+            "country_code": "US",
+            "region": "Texas",
+            "city": "Dallas",
+            "latitude": 32.7792,
+            "longitude": -96.8,
+            "provider": "urn:ati:source:dbip_city_lite",
+            "precision": "city"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:dbip_city_lite",
+      "entity_type": "ip_address",
+      "entity_value": "203.0.113.60",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:geolocation",
+          "observed_at": "2026-06-15T09:00:00Z",
+          "facts": {
+            "country_code": "US",
+            "region": "Oregon",
+            "city": "Portland",
+            "latitude": 45.5152,
+            "longitude": -122.6784,
+            "provider": "urn:ati:source:dbip_city_lite",
+            "precision": "city"
+          }
+        }
+      ]
+    },
+    {
+      "provider_id": "urn:ati:source:dbip_city_lite",
+      "entity_type": "ip_address",
+      "entity_value": "198.51.100.77",
+      "observations": [
+        {
+          "evidence_type": "urn:ati:evidence:geolocation",
+          "observed_at": "2026-09-01T09:00:00Z",
+          "facts": {
+            "country_code": "DE",
+            "region": "Berlin",
+            "city": "Berlin",
+            "latitude": 52.52,
+            "longitude": 13.405,
+            "provider": "urn:ati:source:dbip_city_lite",
+            "precision": "city"
+          }
+        }
+      ]
     }
   ],
   "batch_artifacts": [

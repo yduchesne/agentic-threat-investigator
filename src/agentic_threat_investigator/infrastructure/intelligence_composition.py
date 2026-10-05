@@ -126,6 +126,9 @@ def build_fake_intelligence_sources(
         SourceId.IPINFO_LITE: FakeWorldEvidenceProvider(
             SourceId.IPINFO_LITE, world_catalog, clock=clock
         ),
+        SourceId.DBIP_CITY_LITE: FakeWorldEvidenceProvider(
+            SourceId.DBIP_CITY_LITE, world_catalog, clock=clock
+        ),
         SourceId.ABUSEIPDB: FakeWorldEvidenceProvider(
             SourceId.ABUSEIPDB, world_catalog, clock=clock
         ),
