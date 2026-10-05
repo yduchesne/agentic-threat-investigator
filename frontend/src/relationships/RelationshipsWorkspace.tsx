@@ -256,7 +256,7 @@ export function RelationshipsWorkspace({
       {table.selection !== null ? (
         <ResourceDetailView
           backLabel={tCommon("backToList", { resource: t("title") })}
-          heading={tCommon("detail.title", { resource: t("title") })}
+          heading={t("detail.pageTitle")}
           onBack={table.closeSelection}
         >
           {relationshipDetailBody(t, detail, investigationId, embedded)}
