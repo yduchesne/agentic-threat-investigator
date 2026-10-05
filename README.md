@@ -214,6 +214,16 @@ ATI_LLM_API_KEY_SECRET=ATI_OPENROUTER_API_KEY
 ATI_OPENROUTER_API_KEY=your-openrouter-api-key
 ```
 
+For DeepSeek, use its OpenAI-compatible API directly with the same driver:
+
+```dotenv
+ATI_LLM_DRIVER=openai
+ATI_LLM_BASE_URL=https://api.deepseek.com
+ATI_LLM_MODEL=deepseek-v4-pro
+ATI_LLM_API_KEY_SECRET=ATI_DEEPSEEK_API_KEY
+ATI_DEEPSEEK_API_KEY=your-deepseek-api-key
+```
+
 OpenRouter can be used with supported Anthropic models by selecting the
 corresponding OpenRouter model ID. ATI's current local stack does **not**
 provide a native Anthropic driver or accept an Anthropic API key directly;
