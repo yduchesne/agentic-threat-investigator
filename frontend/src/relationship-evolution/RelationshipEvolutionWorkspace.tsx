@@ -929,7 +929,6 @@ function WorkspaceTitle({
           {t("nav.relationships")}
         </Link>
       </Typography>
-      </Box>
     </Box>
   );
 }
