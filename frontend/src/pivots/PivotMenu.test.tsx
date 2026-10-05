@@ -9,7 +9,7 @@
 // Investigation-scoped route + query). Local/context actions remain
 // buttons that never touch the URL. Expanding choices changes only
 // transient local presentation state — no Portal/Menu/Popover/backdrop/
-// document pointer listener exists, and Cancel collapses without
+// document pointer listener exists, and Hide collapses without
 // navigating.
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -148,7 +148,7 @@ describe("PivotMenu (PR 31F-8 routed actions)", () => {
       ],
     });
     // The only trigger renders nothing actionable: the group contains just
-    // Cancel when multi-entry, or the trigger is absent when the whole menu
+    // Hide when multi-entry, or the trigger is absent when the whole menu
     // collapses. Here the single malformed action yields no trigger.
     expect(screen.queryByRole("button", { name: "Pivot" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Geographic context for this entity" })).toBeNull();
@@ -189,13 +189,13 @@ describe("PivotMenu (PR 31F-8 routed actions)", () => {
     });
   });
 
-  it("A2-PM04: Cancel collapses the bar without navigating", async () => {
+  it("A2-PM04: Hide collapses the bar without navigating", async () => {
     const { router } = renderMenu(`${BASE}/evidence`, {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
     });
     await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
     const before = router.state.location;
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Hide" }));
     await waitFor(() => {
       expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull();
     });
