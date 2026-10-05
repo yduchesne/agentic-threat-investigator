@@ -6,7 +6,7 @@
   "actions.relationshipsTarget": "Relationships where target",
   "actions.researchForEntity": "Research for this entity",
   "actions.observationsForRelationship": "Observations for this relationship",
-  "actions.evidenceExact": "Open evidence",
+  "actions.evidenceExact": "Evidence",
   "actions.researchExact": "Open research result",
   "actions.observationExact": "View relationship observation",
   "actions.geointEntity": "Geographic context for this entity",
