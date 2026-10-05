@@ -293,7 +293,7 @@ const LIGHT_TOKENS: AtiSemanticTokens = {
 
 const LIGHT_THEME = createTheme({
   palette: {
-    primary: { main: PRIMARY_COLOR, dark: "#13466a", light: "#3d84bb" },
+    primary: { main: PRIMARY_COLOR, dark: "#13466a", light: "#3d84bb", contrastText: "#ffffff" },
     warning: { main: WARNING_COLOR },
     error: { main: ERROR_COLOR },
     success: { main: "#14643a" },
@@ -356,7 +356,7 @@ const DARK_TOKENS: AtiSemanticTokens = {
 
 const DARK_THEME = createTheme({
   palette: {
-    primary: { main: "#4a8dc8", dark: "#31618f", light: "#6ba4dc" },
+    primary: { main: "#4a8dc8", dark: "#31618f", light: "#6ba4dc", contrastText: "#ffffff" },
     warning: { main: "#c7903d" },
     error: { main: "#e05b56" },
     success: { main: "#3f9c6d" },
@@ -420,7 +420,7 @@ const WARGAMES_TOKENS: AtiSemanticTokens = {
 
 const WARGAMES_THEME = createTheme({
   palette: {
-    primary: { main: "#41a85f", dark: "#2e7d46", light: "#5fc47c" },
+    primary: { main: "#41a85f", dark: "#2e7d46", light: "#5fc47c", contrastText: "#ffffff" },
     warning: { main: "#d9a441" },
     error: { main: "#d9534f" },
     success: { main: "#41a85f" },
@@ -484,7 +484,7 @@ const CONTROL_ROOM_TOKENS: AtiSemanticTokens = {
 
 const CONTROL_ROOM_THEME = createTheme({
   palette: {
-    primary: { main: "#2fb8d9", dark: "#1e7fa6", light: "#57cfe8" },
+    primary: { main: "#2fb8d9", dark: "#1e7fa6", light: "#57cfe8", contrastText: "#071018" },
     warning: { main: "#e0963d" },
     error: { main: "#e2554f" },
     success: { main: "#3ec97a" },
