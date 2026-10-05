@@ -154,7 +154,7 @@ describe("Evidence page", () => {
     expect(screen.queryByRole("table", { name: "Evidence" })).not.toBeInTheDocument();
     // A4-LD05/LD06: semantic Back clears only the selection through the
     // existing port and restores the bounded list.
-    await userEvent.click(screen.getByRole("button", { name: "Back to Evidence" }));
+    await userEvent.click(screen.getByTestId("resource-route-detail-back"));
     expect(await screen.findByText("update-package.test")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Evidence details" })).not.toBeInTheDocument();
   });
@@ -175,7 +175,7 @@ describe("Evidence page", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Evidence" })).not.toBeInTheDocument();
     // Back returns to the committed list context.
-    await userEvent.click(screen.getByRole("button", { name: "Back to Evidence" }));
+    await userEvent.click(screen.getByTestId("resource-route-detail-back"));
     expect(await screen.findByText("update-package.test")).toBeInTheDocument();
   });
 
