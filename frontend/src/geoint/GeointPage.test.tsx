@@ -245,7 +245,7 @@ describe("map + top-location table (U08..U13)", () => {
     expect(triggers.length).toBeGreaterThan(0);
     await userEvent.click(triggers[0]);
     const menu = screen.getByRole("group", { name: "Pivot actions" });
-    expect(within(menu).getByText("Entities at this location")).toBeVisible();
+    expect(within(menu).getByRole("link", { name: "Entities at this location" })).toBeVisible();
     expect(within(menu).getByText("Observations at this location")).toBeVisible();
   });
 
