@@ -49,9 +49,42 @@ export function AppHeader({ user }: { user: PublicUser }): ReactElement {
     >
       <Toolbar sx={{ minHeight: 56 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexGrow: 1, minWidth: 0 }}>
-          <Typography variant="h3" component="h1" sx={{ whiteSpace: "nowrap", flexShrink: 0 }}>
-            {t("title")}
-          </Typography>
+          <Box
+            component="h1"
+            sx={{
+              m: 0,
+              display: "flex",
+              flexDirection: "column",
+              flexShrink: 0,
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Typography
+              component="span"
+              sx={{
+                fontFamily: '"OCR A Std", "Lucida Console", "Courier New", monospace',
+                fontSize: { xs: "1.5rem", sm: "1.8rem" },
+                fontWeight: 700,
+                lineHeight: 1,
+              }}
+            >
+              {t("brand.mark")}
+            </Typography>
+            <Typography
+              component="span"
+              sx={{
+                mt: 0.25,
+                fontSize: "0.625rem",
+                fontWeight: 500,
+                lineHeight: 1.2,
+                letterSpacing: "0.015em",
+                color: "text.secondary",
+              }}
+            >
+              {t("title")}
+            </Typography>
+          </Box>
           <Navigation />
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
