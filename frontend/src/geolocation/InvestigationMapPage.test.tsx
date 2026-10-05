@@ -103,7 +103,7 @@ describe("InvestigationMapPage states (B-U01..B-U17)", () => {
     expect(tabs).toEqual([
       "Overview",
       "Evidence",
-      "Relationships",
+      "Graph",
       "Map",
       "Geographic context",
       "Research",
