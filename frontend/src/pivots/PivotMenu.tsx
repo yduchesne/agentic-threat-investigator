@@ -201,23 +201,27 @@ export function PivotMenu({
       variant: "text" as const,
       "aria-label": ariaLabel ?? entry.label,
       "data-testid": `pivot-action-${entry.key}`,
-      sx: { textTransform: "none", minWidth: 0, p: 0.5 },
+      sx: { textTransform: "none", minWidth: 0, p: 0 },
     };
     if (entry.kind === "local") {
       return (
-        <Button
-          {...commonProps}
-          disabled={entry.disabled}
-          onClick={entry.onSelect}
-        >
-          {"["}{entry.label}{"]"}
-        </Button>
+        <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}>
+          <Box component="span" aria-hidden="true">[</Box>
+          <Button {...commonProps} disabled={entry.disabled} onClick={entry.onSelect}>
+            {entry.label}
+          </Button>
+          <Box component="span" aria-hidden="true">]</Box>
+        </Box>
       );
     }
     return (
-      <Button {...commonProps} component={RouterLink} to={entry.to}>
-        {"["}{entry.label}{"]"}
-      </Button>
+      <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}>
+        <Box component="span" aria-hidden="true">[</Box>
+        <Button {...commonProps} component={RouterLink} to={entry.to}>
+          {entry.label}
+        </Button>
+        <Box component="span" aria-hidden="true">]</Box>
+      </Box>
     );
   }
 
@@ -251,39 +255,51 @@ export function PivotMenu({
               variant: "text" as const,
               "aria-label": entry.label,
               "data-testid": `pivot-action-${entry.key}`,
-              sx: { textTransform: "none", minWidth: 0, p: 0.5 },
+              sx: { textTransform: "none", minWidth: 0, p: 0 },
             };
-            return entry.kind === "local" ? (
-              <Button
+            return (
+              <Box
+                component="span"
                 key={entry.key}
-                {...commonProps}
-                disabled={entry.disabled}
-                onClick={entry.onSelect}
+                sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}
               >
-                {"["}{entry.label}{"]"}
-              </Button>
-            ) : (
-              <Button
-                key={entry.key}
-                {...commonProps}
-                component={RouterLink}
-                to={entry.to}
-                onClick={closeBar}
-              >
-                {"["}{entry.label}{"]"}
-              </Button>
+                <Box component="span" aria-hidden="true">[</Box>
+                {entry.kind === "local" ? (
+                  <Button
+                    {...commonProps}
+                    disabled={entry.disabled}
+                    onClick={entry.onSelect}
+                  >
+                    {entry.label}
+                  </Button>
+                ) : (
+                  <Button
+                    {...commonProps}
+                    component={RouterLink}
+                    to={entry.to}
+                    onClick={closeBar}
+                  >
+                    {entry.label}
+                  </Button>
+                )}
+                <Box component="span" aria-hidden="true">]</Box>
+              </Box>
             );
           })}
-          <Button
-            size="small"
-            variant="text"
-            onClick={closeBar}
-            aria-label={t("hide")}
-            data-testid="pivot-hide"
-            sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
-          >
-            {"["}{t("hide")}{"]"}
-          </Button>
+          <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}>
+            <Box component="span" aria-hidden="true">[</Box>
+            <Button
+              size="small"
+              variant="text"
+              onClick={closeBar}
+              aria-label={t("hide")}
+              data-testid="pivot-hide"
+              sx={{ textTransform: "none", minWidth: 0, p: 0 }}
+            >
+              {t("hide")}
+            </Button>
+            <Box component="span" aria-hidden="true">]</Box>
+          </Box>
         </Box>
       ) : null}
     </Box>
