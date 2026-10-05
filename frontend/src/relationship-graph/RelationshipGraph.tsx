@@ -390,21 +390,25 @@ export function RelationshipGraph({
     pathHighlight,
   ]);
 
-  const edges: Edge[] = useMemo(
-    () =>
-      buildSlottedEdges(
-        model.edges,
-        typeLabel,
-        graphTokens.edge.default,
-        {
-          highlightedRelationshipIds: pathHighlight?.relationshipIds ?? null,
-          highlightedColor: graphTokens.edge.selected,
-          dimmedColor: graphTokens.edge.default,
-          dimmedOpacity: 0.3,
-        },
-      ),
-    [model.edges, typeLabel, graphTokens.edge.default, graphTokens.edge.selected, pathHighlight],
-  );
+  const edges: Edge[] = useMemo(() => {
+    const renderedEntityIds = new Set(nodes.map((node) => entityIdFromNodeId(node.id)).filter((id): id is string => id !== null));
+    const renderableEdges = model.edges.filter(
+      (edge) =>
+        renderedEntityIds.has(edge.sourceEntityId) &&
+        renderedEntityIds.has(edge.targetEntityId),
+    );
+    return buildSlottedEdges(
+      renderableEdges,
+      typeLabel,
+      graphTokens.edge.default,
+      {
+        highlightedRelationshipIds: pathHighlight?.relationshipIds ?? null,
+        highlightedColor: graphTokens.edge.selected,
+        dimmedColor: graphTokens.edge.default,
+        dimmedOpacity: 0.3,
+      },
+    );
+  }, [model.edges, nodes, typeLabel, graphTokens.edge.default, graphTokens.edge.selected, pathHighlight]);
 
   const nodeById = useMemo(
     () => new Map(model.nodes.map((node) => [node.entityId, node])),
