@@ -166,7 +166,7 @@ describe("FindingList support presentation", () => {
     expect(screen.getByText(/Evidence ID:/)).toBeInTheDocument();
     // PR 31F-8: the support action is a semantic route link to the exact
     // Evidence surface (canonical ID identity).
-    const action = screen.getByRole("link", { name: "Open evidence" });
+    const action = screen.getByTestId("pivot-action-evidenceExact");
     expect(action).toHaveAttribute(
       "href",
       `/investigations/${INVESTIGATION_ID}/evidence/${EVIDENCE_ID}`,
@@ -219,7 +219,7 @@ describe("FindingList support presentation", () => {
     });
     expect(screen.getByText("Evidence details unavailable")).toBeInTheDocument();
     expect(screen.getByText(/Evidence ID:/)).toBeInTheDocument();
-    const action = screen.getByRole("link", { name: "Open evidence" });
+    const action = screen.getByTestId("pivot-action-evidenceExact");
     expect(action).toHaveAttribute(
       "href",
       `/investigations/${INVESTIGATION_ID}/evidence/${EVIDENCE_ID}`,
