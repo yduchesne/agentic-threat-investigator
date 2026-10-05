@@ -90,10 +90,10 @@ export function InvestigationsPage(): ReactElement {
   const hasPrevious = history.length > 0;
 
   return (
-    <Box sx={{ mx: "auto", maxWidth: 960, py: 2 }}>
+    <Box sx={{ width: "100%", minWidth: 0, py: 2 }}>
       <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", mb: 2 }}>
         <Typography variant="h1">{t("title")}</Typography>
-        <Button component={Link} to="/investigations/new" variant="contained" sx={{ textTransform: "none" }}>
+        <Button component={Link} to="/investigations/new" variant="contained" color="primary" sx={{ textTransform: "none", color: "primary.contrastText" }}>
           {t("newInvestigation")}
         </Button>
       </Stack>
