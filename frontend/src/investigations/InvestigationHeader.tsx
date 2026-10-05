@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import type { Investigation } from "../api/schema-types";
 import { Timestamp } from "../components/Timestamp";
+import { CompactId } from "../components/CompactId";
 import { InvestigationStatusBadge } from "./InvestigationStatusBadge";
 import { stopReasonLabelKey } from "./investigation-stop-reason";
 
@@ -65,9 +66,7 @@ export function InvestigationHeader({
           {investigation.objective}
         </Typography>
         <InvestigationStatusBadge status={investigation.status} />
-        <Typography variant="caption" component="span" title={investigation.id}>
-          {investigation.id.slice(0, 8)}
-        </Typography>
+        <CompactId id={investigation.id} label={t("header.investigationId")} />
       </Stack>
       <Stack direction="row" spacing={3} sx={{ alignItems: "center", flexWrap: "wrap", mt: 0.5 }}>
         <Typography variant="body2">
