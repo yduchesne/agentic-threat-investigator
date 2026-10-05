@@ -432,7 +432,7 @@ describe("InvestigationMapPage provenance (B-P01..B-P06)", () => {
       .find((button) => button.closest("[data-evidence-id]"));
     await userEvent.click(rowButton as HTMLElement);
     await screen.findByRole("heading", { name: "Evidence" });
-    const back = screen.getByRole("button", { name: "Back to Evidence" });
+    const back = screen.getByTestId("resource-detail-back");
     await userEvent.click(back);
     await waitFor(() =>
       expect(screen.queryByRole("heading", { name: "Evidence" })).not.toBeInTheDocument(),
