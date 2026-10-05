@@ -244,9 +244,9 @@ describe("map + top-location table (U08..U13)", () => {
     const triggers = within(table).getAllByRole("button", { name: /Explore/ });
     expect(triggers.length).toBeGreaterThan(0);
     await userEvent.click(triggers[0]);
-    const menu = screen.getByRole("group", { name: "Pivot actions" });
-    expect(within(menu).getByRole("link", { name: "Entities at this location" })).toBeVisible();
-    expect(within(menu).getByText("Observations at this location")).toBeVisible();
+    const menu = screen.getByTestId("pivot-action-bar");
+    expect(within(menu).getByTestId("pivot-action-geointLocationEntities")).toBeVisible();
+    expect(within(menu).getByTestId("pivot-action-geointLocationObservations")).toBeVisible();
   });
 
   it("U13: OSM attribution is present on the tile layer", async () => {
