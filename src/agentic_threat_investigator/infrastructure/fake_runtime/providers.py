@@ -77,6 +77,7 @@ _SUPPORTED_TYPES: dict[SourceId, frozenset[EntityType]] = {
         {EntityType.DOMAIN, EntityType.IP_ADDRESS, EntityType.ASN}
     ),
     SourceId.IPINFO_LITE: frozenset({EntityType.IP_ADDRESS}),
+    SourceId.DBIP_CITY_LITE: frozenset({EntityType.IP_ADDRESS}),
     SourceId.ABUSEIPDB: frozenset({EntityType.IP_ADDRESS}),
     SourceId.THREATFOX: frozenset({EntityType.DOMAIN, EntityType.IP_ADDRESS}),
     SourceId.URLHAUS: frozenset(
