@@ -61,9 +61,9 @@ export interface GraphRelationshipProvenanceProps {
   relationshipId: string;
   /** PR 31G: no matching support is admitted to this Investigation (known-only). */
   knownOnly: boolean;
-  sourceNode: RelationshipGraphNode | null;
-  targetNode: RelationshipGraphNode | null;
-  entityTypeLabel: (type: RelationshipGraphNode["entityType"]) => string;
+  sourceNode?: RelationshipGraphNode | null;
+  targetNode?: RelationshipGraphNode | null;
+  entityTypeLabel?: (type: RelationshipGraphNode["entityType"]) => string;
   /** Hide the provenance surface (graph/expansion state is untouched). */
   onClose: () => void;
 }
@@ -73,9 +73,9 @@ export function GraphRelationshipProvenance({
   investigationId,
   relationshipId,
   knownOnly,
-  sourceNode,
-  targetNode,
-  entityTypeLabel,
+  sourceNode = null,
+  targetNode = null,
+  entityTypeLabel = String,
   onClose,
 }: GraphRelationshipProvenanceProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
