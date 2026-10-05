@@ -11,10 +11,10 @@
 // on the loaded page. The PR 24D modal embeds the same workspace through
 // the pivot-step port.
 
-import { Box, TextField, Typography } from "@mui/material";
+import { Box, Button, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import type {
   Investigation,
@@ -207,6 +207,11 @@ export function RelationshipObservationsWorkspace({
 }: RelationshipObservationsWorkspaceProps): ReactElement {
   const { t } = useTranslation("relationships");
   const { t: tCommon } = useTranslation("common");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const returnTo = typeof (location.state as { returnTo?: unknown } | null)?.returnTo === "string"
+    ? (location.state as { returnTo: string }).returnTo
+    : null;
 
   const { page, isLoading, error, refetch } = useObservationsPage(
     investigationId,
@@ -289,7 +294,13 @@ export function RelationshipObservationsWorkspace({
       ) : (
         <>
           {!embedded ? (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+            <Box sx={{ mb: 1 }}>
+              {returnTo !== null ? (
+                <Button size="small" onClick={() => navigate(returnTo)} sx={{ textTransform: "none", px: 0, mb: 0.5 }}>
+                  &lt; Back
+                </Button>
+              ) : null}
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <Typography variant="h2" sx={{ mr: 1 }}>
                 {t("observations.title")}
               </Typography>
@@ -298,6 +309,7 @@ export function RelationshipObservationsWorkspace({
                   {t("nav.relationships")}
                 </Link>
               </Typography>
+              </Box>
             </Box>
           ) : null}
           {!embedded ? (
