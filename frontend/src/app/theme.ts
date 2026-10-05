@@ -154,7 +154,14 @@ function themeComponents(
   return {
     MuiButton: {
       defaultProps: { disableElevation: true },
-      styleOverrides: { root: { textTransform: "none" } },
+      styleOverrides: {
+        root: { textTransform: "none" },
+        containedPrimary: ({ theme }) => ({
+          color: theme.palette.primary.contrastText,
+          "&:hover": { color: theme.palette.primary.contrastText },
+          "&:visited": { color: theme.palette.primary.contrastText },
+        }),
+      },
     },
     MuiLink: {
       defaultProps: { underline: "hover" },
