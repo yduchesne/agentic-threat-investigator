@@ -761,9 +761,9 @@ describe("GraphRelationshipProvenance exact observation selection (PR 31F U16-U2
       name: "Observation provenance actions",
     });
     fireEvent.click(trigger);
-    await screen.findByRole("link", { name: "Open evidence" });
+    await screen.findByTestId("pivot-action-evidenceExact");
     expect(
-      screen.getByRole("link", { name: "Observations for this relationship" }),
+      screen.getByTestId("pivot-action-observationsForRelationship"),
     ).toBeInTheDocument();
   });
 });

@@ -33,7 +33,8 @@ export interface EvolutionTimelineLabels {
   unavailableTitle: string;
   unavailableHint: string;
   viewAsTable: string;
-  tableView: string;
+  viewAsTimeline: string;
+  tableLabel: string;
   tableColumns: {
     observation: string;
     type: string;
@@ -178,7 +179,7 @@ export function RelationshipEvolutionTimeline({
           onClick={() => setTableView((current) => !current)}
           aria-pressed={tableView}
         >
-          {tableView ? labels.tableView : labels.viewAsTable}
+          {tableView ? labels.viewAsTimeline : labels.viewAsTable}
         </Button>
       </Box>
       {hasNext ? (
@@ -269,7 +270,7 @@ function ObservationTable({
 }): ReactElement {
   return (
     <Box sx={{ overflowX: "auto" }}>
-      <table aria-label={labels.tableView} style={{ borderCollapse: "collapse", width: "100%" }}>
+      <table aria-label={labels.tableLabel} style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>
             {[

@@ -74,7 +74,7 @@
   "tabs.label": "Investigation workspace",
   "tabs.overview": "Overview",
   "tabs.evidence": "Evidence",
-  "tabs.relationships": "Relationships",
+  "tabs.relationships": "Graph",
   "tabs.map": "Map",
   "tabs.geoint": "Geographic context",
   "tabs.research": "Research",

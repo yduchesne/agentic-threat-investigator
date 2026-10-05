@@ -9,7 +9,7 @@
 // Investigation-scoped route + query). Local/context actions remain
 // buttons that never touch the URL. Expanding choices changes only
 // transient local presentation state — no Portal/Menu/Popover/backdrop/
-// document pointer listener exists, and Cancel collapses without
+// document pointer listener exists, and Hide collapses without
 // navigating.
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -33,7 +33,7 @@ const BASE = `/investigations/${INVESTIGATION_ID}`;
 
 /** The expanded in-flow action region. */
 function actionBar(): HTMLElement {
-  return screen.getByRole("group", { name: "Pivot actions" });
+  return screen.getByTestId("pivot-action-bar");
 }
 
 describe("PivotMenu (PR 31F-8 routed actions)", () => {
@@ -72,13 +72,13 @@ describe("PivotMenu (PR 31F-8 routed actions)", () => {
       actions: entityActions(ENTITY_ID, "update-package.test", "table_cell"),
     });
     const trigger = screen.getByRole("button", { name: "Pivot" });
-    expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull();
+    expect(screen.queryByTestId("pivot-action-bar")).toBeNull();
     await userEvent.click(trigger);
     const bar = actionBar();
     expect(bar).toBeInTheDocument();
     // Ordinary links, not menu items.
-    expect(screen.getByRole("link", { name: "Evidence for this entity" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Research for this entity" })).toBeInTheDocument();
+    expect(screen.getByTestId("pivot-action-evidenceForEntity")).toBeInTheDocument();
+    expect(screen.getByTestId("pivot-action-researchForEntity")).toBeInTheDocument();
     expect(screen.queryByRole("menuitem")).toBeNull();
   });
 
@@ -87,12 +87,12 @@ describe("PivotMenu (PR 31F-8 routed actions)", () => {
       actions: entityActions(ENTITY_ID, "update-package.test", "table_cell"),
     });
     await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
-    const evidenceLink = screen.getByRole("link", { name: "Evidence for this entity" });
+    const evidenceLink = screen.getByTestId("pivot-action-evidenceForEntity");
     expect(evidenceLink).toHaveAttribute(
       "href",
       `${BASE}/evidence?subject_entity_id=${ENTITY_ID}`,
     );
-    const relationshipsLink = screen.getByRole("link", { name: /Relationships where source/ });
+    const relationshipsLink = screen.getByTestId("pivot-action-relationshipsSource");
     expect(relationshipsLink).toHaveAttribute(
       "href",
       `${BASE}/relationships?source_entity_id=${ENTITY_ID}`,
@@ -123,7 +123,7 @@ describe("PivotMenu (PR 31F-8 routed actions)", () => {
         },
       ],
     });
-    const direct = screen.getByRole("link", { name: "Open evidence" });
+    const direct = screen.getByTestId("pivot-action-evidenceExact");
     expect(direct).toHaveAttribute("href", `${BASE}/evidence/${evidenceId}`);
     await userEvent.click(direct);
     await waitFor(() => {
@@ -148,10 +148,10 @@ describe("PivotMenu (PR 31F-8 routed actions)", () => {
       ],
     });
     // The only trigger renders nothing actionable: the group contains just
-    // Cancel when multi-entry, or the trigger is absent when the whole menu
+    // Hide when multi-entry, or the trigger is absent when the whole menu
     // collapses. Here the single malformed action yields no trigger.
     expect(screen.queryByRole("button", { name: "Pivot" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Geographic context for this entity" })).toBeNull();
+    expect(screen.queryByTestId("pivot-action-geointEntity")).toBeNull();
   });
 
   it("PM-R04: no investigation route context yields no route actions (locals stay)", async () => {
@@ -185,19 +185,19 @@ describe("PivotMenu (PR 31F-8 routed actions)", () => {
     await userEvent.keyboard("{Enter}");
     // Link activation is native router navigation; the bar collapses.
     await waitFor(() => {
-      expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull();
+      expect(screen.queryByTestId("pivot-action-bar")).toBeNull();
     });
   });
 
-  it("A2-PM04: Cancel collapses the bar without navigating", async () => {
+  it("A2-PM04: Hide collapses the bar without navigating", async () => {
     const { router } = renderMenu(`${BASE}/evidence`, {
       actions: entityActions(ENTITY_ID, "update-package.test", "detail_field"),
     });
     await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
     const before = router.state.location;
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByTestId("pivot-hide"));
     await waitFor(() => {
-      expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull();
+      expect(screen.queryByTestId("pivot-action-bar")).toBeNull();
     });
     expect(router.state.location.pathname).toBe(before.pathname);
     expect(router.state.location.search).toBe(before.search);
@@ -280,8 +280,8 @@ describe("PivotMenu action bar (PR 31E + amendment 2, routed)", () => {
     const bar = actionBar();
     expect(bar).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand known relationships" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Evidence for this entity" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Research for this entity" })).toBeInTheDocument();
+    expect(screen.getByTestId("pivot-action-evidenceForEntity")).toBeInTheDocument();
+    expect(screen.getByTestId("pivot-action-researchForEntity")).toBeInTheDocument();
     const before = router.state.location;
     await userEvent.click(screen.getByRole("button", { name: "Expand known relationships" }));
     expect(local.onSelect).toHaveBeenCalledTimes(1);
@@ -298,7 +298,7 @@ describe("PivotMenu action bar (PR 31E + amendment 2, routed)", () => {
       localActions: [local],
     });
     await userEvent.click(screen.getByRole("button", { name: "Pivot" }));
-    await userEvent.click(await screen.findByRole("link", { name: "Research for this entity" }));
+    await userEvent.click(await screen.findByTestId("pivot-action-researchForEntity"));
     expect(router.state.location.pathname).toBe(`${BASE}/research`);
     expect(router.state.location.search).toBe(`?subject_entity_id=${ENTITY_ID}`);
     expect(local.onSelect).not.toHaveBeenCalled();

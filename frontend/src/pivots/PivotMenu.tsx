@@ -19,7 +19,7 @@
 //
 // Presentation (PR 31F-6 amendment 2, unchanged): expanding a multi-target
 // trigger renders ordinary in-flow action links (a labelled action region
-// with a Cancel control) — no Portal, no MUI Menu/Popover, no fixed
+// with a Hide control) — no Portal, no MUI Menu/Popover, no fixed
 // popup, no backdrop, no anchor bookkeeping, no document outside-click/
 // pointerdown listener, no focus trap or floating-menu focus transfer, and
 // no body scroll mutation. ``expanded`` is transient presentation state
@@ -126,7 +126,7 @@ function isSameRoutedSurface(
  *
  * Multi-target triggers expand into an ordinary in-flow action bar
  * (PR 31F-6 amendment 2): a labelled group of semantic links/buttons with
- * a Cancel control. ``expanded`` is presentation-only.
+ * a Hide control. ``expanded`` is presentation-only.
  */
 export function PivotMenu({
   actions,
@@ -199,24 +199,29 @@ export function PivotMenu({
     const commonProps = {
       size: "small" as const,
       variant: "text" as const,
-      "aria-label": ariaLabel ?? undefined,
-      sx: { textTransform: "none", minWidth: 0, p: 0.5 },
+      "aria-label": ariaLabel ?? entry.label,
+      "data-testid": `pivot-action-${entry.key}`,
+      sx: { textTransform: "none", minWidth: 0, p: 0 },
     };
     if (entry.kind === "local") {
       return (
-        <Button
-          {...commonProps}
-          disabled={entry.disabled}
-          onClick={entry.onSelect}
-        >
-          {entry.label}
-        </Button>
+        <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}>
+          <Box component="span" aria-hidden="true">[</Box>
+          <Button {...commonProps} disabled={entry.disabled} onClick={entry.onSelect}>
+            {entry.label}
+          </Button>
+          <Box component="span" aria-hidden="true">]</Box>
+        </Box>
       );
     }
     return (
-      <Button {...commonProps} component={RouterLink} to={entry.to}>
-        {entry.label}
-      </Button>
+      <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}>
+        <Box component="span" aria-hidden="true">[</Box>
+        <Button {...commonProps} component={RouterLink} to={entry.to}>
+          {entry.label}
+        </Button>
+        <Box component="span" aria-hidden="true">]</Box>
+      </Box>
     );
   }
 
@@ -230,6 +235,7 @@ export function PivotMenu({
         aria-expanded={expanded}
         aria-controls={expanded ? actionBarId : undefined}
         aria-label={ariaLabel ?? undefined}
+        data-testid="pivot-trigger"
         sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
       >
         {triggerLabel ?? t("trigger.label")}
@@ -240,43 +246,60 @@ export function PivotMenu({
           id={actionBarId}
           role="group"
           aria-label={t("trigger.aria")}
+          data-testid="pivot-action-bar"
           sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, alignItems: "center", mt: 0.5 }}
         >
           {entries.map((entry) => {
             const commonProps = {
               size: "small" as const,
               variant: "text" as const,
-              sx: { textTransform: "none", minWidth: 0, p: 0.5 },
+              "aria-label": entry.label,
+              "data-testid": `pivot-action-${entry.key}`,
+              sx: { textTransform: "none", minWidth: 0, p: 0 },
             };
-            return entry.kind === "local" ? (
-              <Button
+            return (
+              <Box
+                component="span"
                 key={entry.key}
-                {...commonProps}
-                disabled={entry.disabled}
-                onClick={entry.onSelect}
+                sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}
               >
-                {entry.label}
-              </Button>
-            ) : (
-              <Button
-                key={entry.key}
-                {...commonProps}
-                component={RouterLink}
-                to={entry.to}
-                onClick={closeBar}
-              >
-                {entry.label}
-              </Button>
+                <Box component="span" aria-hidden="true">[</Box>
+                {entry.kind === "local" ? (
+                  <Button
+                    {...commonProps}
+                    disabled={entry.disabled}
+                    onClick={entry.onSelect}
+                  >
+                    {entry.label}
+                  </Button>
+                ) : (
+                  <Button
+                    {...commonProps}
+                    component={RouterLink}
+                    to={entry.to}
+                    onClick={closeBar}
+                  >
+                    {entry.label}
+                  </Button>
+                )}
+                <Box component="span" aria-hidden="true">]</Box>
+              </Box>
             );
           })}
-          <Button
-            size="small"
-            variant="text"
-            onClick={closeBar}
-            sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
-          >
-            {t("cancel")}
-          </Button>
+          <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}>
+            <Box component="span" aria-hidden="true">[</Box>
+            <Button
+              size="small"
+              variant="text"
+              onClick={closeBar}
+              aria-label={t("hide")}
+              data-testid="pivot-hide"
+              sx={{ textTransform: "none", minWidth: 0, p: 0 }}
+            >
+              {t("hide")}
+            </Button>
+            <Box component="span" aria-hidden="true">]</Box>
+          </Box>
         </Box>
       ) : null}
     </Box>

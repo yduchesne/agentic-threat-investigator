@@ -21,7 +21,7 @@
 // ``{{resource}} details`` label); technical identities stay secondary
 // inside the detail bodies.
 
-import { Box, Divider, Typography } from "@mui/material";
+import { Box, Divider, Link as MuiLink, Typography } from "@mui/material";
 import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link as RouterLink } from "react-router";
@@ -53,29 +53,33 @@ export function ResourceDetailView({
   return (
     <Box sx={{ minWidth: 0 }}>
       <Box
-        component="button"
-        type="button"
-        onClick={onBack}
-        data-testid="resource-detail-back"
-        sx={{
-          px: 1,
-          py: 0.5,
-          fontSize: "0.875rem",
-          lineHeight: 1.2,
-          fontFamily: "inherit",
-          cursor: "pointer",
-          color: "text.primary",
-          borderRadius: 1,
-          bgcolor: "transparent",
-          "&:hover": { bgcolor: "action.hover" },
-          "&:focus-visible": {
-            outline: "2px solid",
-            outlineColor: "focus.visible",
-          },
-          "&:active": { bgcolor: "action.hover" },
-        }}
+        component="span"
+        sx={{ color: "primary.main", fontSize: "0.875rem", lineHeight: 1.2 }}
       >
-        {backLabel}
+        <Box component="span" aria-hidden="true">{"< "}</Box>
+        <MuiLink
+          component="button"
+          type="button"
+          onClick={onBack}
+          data-testid="resource-detail-back"
+          aria-label={backLabel}
+          sx={{
+            p: 0,
+            fontSize: "inherit",
+            lineHeight: "inherit",
+            fontFamily: "inherit",
+            cursor: "pointer",
+            color: "inherit",
+            border: 0,
+            bgcolor: "transparent",
+            "&:focus-visible": {
+              outline: "2px solid",
+              outlineColor: "focus.visible",
+            },
+          }}
+        >
+          {backLabel}
+        </MuiLink>
       </Box>
       <Typography variant="h2" sx={{ mt: 0.5 }}>
         {heading}
@@ -116,30 +120,31 @@ export function RouteDetailView({
   return (
     <Box sx={{ minWidth: 0 }}>
       <Box
-        component={RouterLink}
-        to={backTo}
-        data-testid="resource-route-detail-back"
-        sx={{
-          display: "inline-block",
-          px: 1,
-          py: 0.5,
-          fontSize: "0.875rem",
-          lineHeight: 1.2,
-          fontFamily: "inherit",
-          cursor: "pointer",
-          color: "text.primary",
-          borderRadius: 1,
-          bgcolor: "transparent",
-          textDecoration: "none",
-          "&:hover": { bgcolor: "action.hover" },
-          "&:focus-visible": {
-            outline: "2px solid",
-            outlineColor: "focus.visible",
-          },
-          "&:active": { bgcolor: "action.hover" },
-        }}
+        component="span"
+        sx={{ color: "primary.main", fontSize: "0.875rem", lineHeight: 1.2 }}
       >
-        {backLabel}
+        <Box component="span" aria-hidden="true">{"< "}</Box>
+        <MuiLink
+          component={RouterLink}
+          to={backTo}
+          data-testid="resource-route-detail-back"
+          aria-label={backLabel}
+          sx={{
+            display: "inline-block",
+            p: 0,
+            fontSize: "inherit",
+            lineHeight: "inherit",
+            fontFamily: "inherit",
+            cursor: "pointer",
+            color: "inherit",
+            "&:focus-visible": {
+              outline: "2px solid",
+              outlineColor: "focus.visible",
+            },
+          }}
+        >
+          {backLabel}
+        </MuiLink>
       </Box>
       <Typography variant="h2" sx={{ mt: 0.5 }}>
         {heading}

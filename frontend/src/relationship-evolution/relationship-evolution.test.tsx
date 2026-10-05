@@ -347,7 +347,7 @@ describe("Relationship Evolution workspace", () => {
     await screen.findByRole("button", { name: /observed 2026-06-01/ });
     await userEvent.click(screen.getByRole("button", { name: "View as table" }));
     const table = await screen.findByRole("table", {
-      name: "Relationship observations (this page)",
+      name: "Relationship history (this page)",
     });
     expect(within(table).getByText("fake-dns")).toBeInTheDocument();
     expect(within(table).getByText("Resolves to")).toBeInTheDocument();
@@ -397,7 +397,7 @@ describe("Relationship Evolution counterparty presentation (PR 31F-1)", () => {
     await screen.findByRole("button", { name: /observed 2026-06-01/ });
     await userEvent.click(screen.getByRole("button", { name: "View as table" }));
     const table = await screen.findByRole("table", {
-      name: "Relationship observations (this page)",
+      name: "Relationship history (this page)",
     });
     expect(within(table).getByText("IP address 192.0.2.1")).toBeInTheDocument();
     // Canonical identity is retained through the compact ID control.

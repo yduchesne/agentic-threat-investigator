@@ -212,7 +212,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     await screen.findByText("Supports");
     await screen.findByText(REPORT_STATEMENT);
 
-    await userEvent.click(screen.getByRole("link", { name: "Open evidence" }));
+    await userEvent.click(screen.getByTestId("pivot-action-evidenceExact"));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`${BASE}/evidence/${EVIDENCE_ID}`);
     });
@@ -237,7 +237,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
-      screen.getByRole("link", { name: "View relationship observation" }),
+      screen.getByTestId("pivot-action-observationExact"),
     );
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(
@@ -288,7 +288,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
-      screen.getByRole("link", { name: "View relationship observation" }),
+      screen.getByTestId("pivot-action-observationExact"),
     );
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(
@@ -309,7 +309,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
-      screen.getByRole("link", { name: "View relationship observation" }),
+      screen.getByTestId("pivot-action-observationExact"),
     );
     const dialogHeading = await screen.findByRole("heading", {
       name: "Relationship observation detail",
@@ -324,7 +324,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
         name: "Observation provenance actions",
       }),
     );
-    await userEvent.click(await within(drawer).findByRole("link", { name: "Open evidence" }));
+    await userEvent.click(await within(drawer).findByTestId("pivot-action-evidenceExact"));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`${BASE}/evidence/${EVIDENCE_ID}`);
     });
@@ -343,7 +343,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
-      screen.getByRole("link", { name: "View relationship observation" }),
+      screen.getByTestId("pivot-action-observationExact"),
     );
     await screen.findByRole("heading", { name: "Relationship observation detail" });
 
@@ -362,7 +362,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     const { router } = renderAtPath(`${BASE}/overview/report`);
     await screen.findByText("Contextual research claim about the delivery infrastructure.");
 
-    await userEvent.click(screen.getByRole("link", { name: "Open research result" }));
+    await userEvent.click(screen.getByTestId("pivot-action-researchExact"));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`${BASE}/research`);
     });
@@ -392,7 +392,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     renderAtPath(`${BASE}/overview`);
     await screen.findByText("Reference without usable identity.");
     // The unknown reference renders as text only; no action exists.
-    expect(screen.queryAllByRole("link", { name: "Open evidence" })).toHaveLength(0);
+    expect(screen.queryAllByTestId("pivot-action-evidenceExact")).toHaveLength(0);
   });
 
   it("navigation does not mutate Assessment/Report (single current fetches)", async () => {
@@ -418,7 +418,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     );
     const { router } = renderAtPath(`${BASE}/overview`);
     await screen.findByText("Supports");
-    await userEvent.click(screen.getByRole("link", { name: "Open evidence" }));
+    await userEvent.click(screen.getByTestId("pivot-action-evidenceExact"));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`${BASE}/evidence/${EVIDENCE_ID}`);
     });
