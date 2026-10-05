@@ -353,7 +353,7 @@ export function RelationshipGraph({
         const id = nodeId(node.entityId);
         const data: EvolutionNodeData = {
           entityValue: node.value,
-          role: node.role,
+          role: node.entityId === focalEntityId ? "focal" : "counterparty",
           entityTypeText: entityTypeLabel(node.entityType),
           displayName: node.displayName,
           pathEndpoint:
@@ -384,6 +384,7 @@ export function RelationshipGraph({
     rootGraphKey,
     decoratedInitialNodes,
     model,
+    focalEntityId,
     expansion.lastExpansion,
     entityTypeLabel,
     pathEndpoints,
