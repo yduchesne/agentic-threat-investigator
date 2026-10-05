@@ -303,6 +303,7 @@ function ObservationTable({
                 >
                   {shortUuid(row.id)}
                 </Button>
+                <CompactId id={row.id} label={labels.tableColumns.observation} />
               </td>
               <td style={{ padding: 6 }}>
                 {row.relationship_type === null ? "—" : typeLabel(row.relationship_type ?? "")}
