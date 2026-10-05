@@ -985,18 +985,21 @@ function EdgeList({
         <thead>
           <tr>
             {[
-              t("graph.list.type"),
-              t("graph.list.source"),
-              t("graph.list.target"),
-              t("graph.list.supportingObservations"),
-              t("graph.list.matchingInThisInvestigation"),
-              t("graph.list.context"),
-              t("graph.list.firstObserved"),
-              t("graph.list.lastObserved"),
-              t("graph.list.action"),
-            ].map((header) => (
-              <th key={header} scope="col" style={{ textAlign: "left", padding: 6 }}>
-                {header}
+              { label: t("graph.list.type") },
+              { label: t("graph.list.source") },
+              { label: t("graph.list.target") },
+              { label: t("graph.list.supportingObservations"), tooltip: t("graph.list.supportingObservationsTooltip") },
+              { label: t("graph.list.matchingInThisInvestigation"), tooltip: t("graph.list.matchingInThisInvestigationTooltip") },
+              { label: t("graph.list.firstObserved") },
+              { label: t("graph.list.lastObserved") },
+              { label: t("graph.list.action") },
+            ].map(({ label, tooltip }) => (
+              <th key={label} scope="col" style={{ textAlign: "left", padding: 6 }}>
+                {tooltip === undefined ? label : (
+                  <Tooltip title={tooltip}>
+                    <Box component="span" sx={{ cursor: "help" }}>{label}</Box>
+                  </Tooltip>
+                )}
               </th>
             ))}
           </tr>
@@ -1026,17 +1029,6 @@ function EdgeList({
                 </td>
                 <td style={{ padding: 6 }}>{String(edge.observationCount)}</td>
                 <td style={{ padding: 6 }}>{String(edge.investigationObservationCount)}</td>
-                <td style={{ padding: 6 }}>
-                  <Typography
-                    variant="caption"
-                    component="span"
-                    role="note"
-                    aria-label={edgeContextLabel(t, edge)}
-                    sx={{ fontWeight: 600 }}
-                  >
-                    {edgeContextLabel(t, edge)}
-                  </Typography>
-                </td>
                 <td style={{ padding: 6 }}>
                   {edge.firstObservedAt !== null
                     ? <Timestamp iso={edge.firstObservedAt} />
