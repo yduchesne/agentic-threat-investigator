@@ -120,6 +120,7 @@
   "graph.provenance.error.observations": "Unable to load observations.",
   "graph.provenance.error.relationship": "Unable to load relationship.",
   "graph.provenance.evidence": "Supporting evidence",
+  "graph.provenance.evidenceFrom": "Evidence from {{source}}",
   "graph.provenance.heading": "Relationship provenance",
   "graph.provenance.inspect": "Inspect provenance",
   "graph.provenance.loading.evidence": "Loading supporting evidence…",
