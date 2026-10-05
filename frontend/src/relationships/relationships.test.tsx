@@ -144,7 +144,7 @@ describe("Relationships page", () => {
     expect(
       screen.getByTitle("2026-06-01T09:05:00Z"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /View all observations/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /View all history/ })).toBeInTheDocument();
   });
 });
 
