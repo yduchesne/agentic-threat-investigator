@@ -1320,7 +1320,7 @@
       "entity_value": "203.0.113.10",
       "observations": [
         {
-          "evidence_type": "geolocation",
+          "evidence_type": "urn:ati:evidence:geolocation",
           "observed_at": "2026-02-01T08:00:00Z",
           "facts": {
             "country_code": "US",
@@ -1340,7 +1340,7 @@
       "entity_value": "203.0.113.81",
       "observations": [
         {
-          "evidence_type": "geolocation",
+          "evidence_type": "urn:ati:evidence:geolocation",
           "observed_at": "2026-05-02T08:00:00Z",
           "facts": {
             "country_code": "US",
@@ -1360,7 +1360,7 @@
       "entity_value": "203.0.113.60",
       "observations": [
         {
-          "evidence_type": "geolocation",
+          "evidence_type": "urn:ati:evidence:geolocation",
           "observed_at": "2026-06-15T09:00:00Z",
           "facts": {
             "country_code": "US",
@@ -1380,7 +1380,7 @@
       "entity_value": "198.51.100.77",
       "observations": [
         {
-          "evidence_type": "geolocation",
+          "evidence_type": "urn:ati:evidence:geolocation",
           "observed_at": "2026-09-01T09:00:00Z",
           "facts": {
             "country_code": "DE",
