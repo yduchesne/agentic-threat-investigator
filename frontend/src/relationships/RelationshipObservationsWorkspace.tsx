@@ -171,6 +171,7 @@ export function observationColumns(t: (key: string) => string): Column<Relations
           <PivotMenu
             actions={observationActions(observation, "table_cell").filter((action) => action.key === "evidenceExact")}
             ariaLabel={t("columns.evidence")}
+            actionTooltip={t("columns.evidenceTooltip")}
           />
         </Box>
       ),
