@@ -149,7 +149,7 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     // Entity-aware presentation: value/display name in the list, exact
     // identity via CompactId.
     expect(within(list).getByText("Domain update-package.test")).toBeInTheDocument();
-    expect(within(list).getByText("203.0.113.10")).toBeInTheDocument();
+    expect(within(list).getByText("IP address 203.0.113.10")).toBeInTheDocument();
     // The canvas renders each label plus a visible non-color type cue.
     const canvas = screen.getByRole("group", { name: "Relationship graph (one-hop)" });
     expect(
@@ -220,7 +220,7 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     expect(within(scope).getByText("Entity ID")).toBeInTheDocument();
     expect(within(scope).getByText("Domain")).toBeInTheDocument();
     expect(within(scope).getByText("update-package.test")).toBeInTheDocument();
-    expect(within(scope).getByText("Domain update-package.test")).toBeInTheDocument();
+    expect(within(scope).getByText("update-package.test")).toBeInTheDocument();
   });
 
   it("G31D-U06: edge data exposes identity, endpoints, count and observed summary", async () => {
@@ -233,7 +233,7 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     const list = await screen.findByRole("table", { name: "Relationship list (this page)" });
     const row = within(list).getByRole("row", { name: /Resolves to/ });
     expect(within(row).getByText("Domain update-package.test")).toBeInTheDocument();
-    expect(within(row).getByText("203.0.113.10")).toBeInTheDocument();
+    expect(within(row).getByText("IP address 203.0.113.10")).toBeInTheDocument();
     expect(within(row).getByText("3")).toBeInTheDocument();
     expect(within(row).getByTitle("2026-06-01T09:00:00Z")).toBeInTheDocument();
     expect(within(row).getByTitle("2026-06-10T09:00:00Z")).toBeInTheDocument();
@@ -283,10 +283,8 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     // edge carries the explicit known-to-ATI cue. FE28: the cue is text
     // (never color-only), so it is present in the accessible list.
     const supportedRow = within(list).getByRole("row", { name: /Resolves to/ });
-    expect(
-      within(supportedRow).getByText("Supported by this Investigation"),
-    ).toBeInTheDocument();
-    // FE29: exact server counts (total + in-this-Investigation) are shown.
+    // The redundant Context column was intentionally removed; the exact
+    // total + in-this-Investigation counts carry the support semantics.
     expect(within(supportedRow).getAllByText("3")).toHaveLength(2);
     const knownOnlyRow = within(list).getByRole("row", { name: /CNAME of/ });
     expect(
@@ -644,7 +642,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     // Accessible list now includes the accumulated edges (3 rows + header).
     await waitFor(() => {
       expect(within(list).getByText("Malware malware.test")).toBeInTheDocument();
-      expect(within(list).getByText("198.51.100.7")).toBeInTheDocument();
+      expect(within(list).getByText("IP address 198.51.100.7")).toBeInTheDocument();
     });
     expect(within(list).getAllByRole("row")).toHaveLength(4);
   });
@@ -1055,7 +1053,7 @@ describe("Relationship Graph node presentation (PR 31F-1 F1-U24..U26, U31)", () 
     // Hierarchy: translated type + canonical value + distinct display name.
     expect(await within(canvas).findByText("Domain")).toBeInTheDocument();
     expect(within(canvas).getByText("update-package.test")).toBeInTheDocument();
-    expect(within(canvas).getByText("Domain update-package.test")).toBeInTheDocument();
+    expect(within(canvas).getByText("Update Package Service")).toBeInTheDocument();
     // A display name equal to the value is deduplicated (not rendered twice).
     expect(within(canvas).getAllByText("203.0.113.10")).toHaveLength(1);
     expect(within(canvas).getByText("IP address")).toBeInTheDocument();
@@ -1164,7 +1162,7 @@ describe("Relationship Graph theming (PR 31F-4 G01..G08)", () => {
     expect(within(list).getAllByRole("row").length).toBe(rowsBefore);
     expect(within(list).getByText("Resolves to")).toBeInTheDocument();
     expect(within(list).getByText("Domain update-package.test")).toBeInTheDocument();
-    expect(within(list).getByText("203.0.113.10")).toBeInTheDocument();
+    expect(within(list).getByText("IP address 203.0.113.10")).toBeInTheDocument();
     expect(within(list).getAllByRole("link", { name: "Details" })[0].getAttribute("href")).toBe(
       hrefBefore,
     );
