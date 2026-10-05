@@ -42,7 +42,7 @@ import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
 import { sourceLabelWithUrn } from "../components/source-labels";
 import { PivotMenu } from "../pivots/PivotMenu";
-import { observationActions } from "../pivots/pivot-capabilities";
+import { observationActions, relationshipObservationsAction } from "../pivots/pivot-capabilities";
 import { useObservationDetail, useObservationsPage } from "./relationships-queries";
 import {
   emptyObservationFilters,
@@ -136,7 +136,7 @@ export function observationColumns(t: (key: string) => string): Column<Relations
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
           <CompactId id={observation.relationship_id} label={t("columns.relationship")} />
           <PivotMenu
-            actions={observationActions(observation, "table_cell")}
+            actions={[relationshipObservationsAction(observation.relationship_id, "table_cell")]}
             ariaLabel={t("columns.relationship")}
           />
         </Box>
@@ -169,7 +169,7 @@ export function observationColumns(t: (key: string) => string): Column<Relations
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
           <CompactId id={observation.evidence_id} label={t("columns.evidence")} />
           <PivotMenu
-            actions={observationActions(observation, "table_cell")}
+            actions={observationActions(observation, "table_cell").filter((action) => action.key === "evidenceExact")}
             ariaLabel={t("columns.evidence")}
           />
         </Box>
