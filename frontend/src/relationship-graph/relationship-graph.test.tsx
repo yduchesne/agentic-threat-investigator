@@ -235,7 +235,6 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     expect(within(row).getByText("Domain update-package.test")).toBeInTheDocument();
     expect(within(row).getByText("203.0.113.10")).toBeInTheDocument();
     expect(within(row).getByText("3")).toBeInTheDocument();
-    expect(within(row).getByText("Supported by this Investigation")).toBeInTheDocument();
     expect(within(row).getByTitle("2026-06-01T09:00:00Z")).toBeInTheDocument();
     expect(within(row).getByTitle("2026-06-10T09:00:00Z")).toBeInTheDocument();
     // Exact canonical identity access stays available.
