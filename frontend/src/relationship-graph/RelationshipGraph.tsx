@@ -15,7 +15,7 @@
 // alternative (an edge list with exact navigation links) is always
 // rendered, so canvas exploration is never required.
 
-import { Alert, Box, Button, Link, Typography } from "@mui/material";
+import { Alert, Box, Button, Link, Tooltip, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import {
   Background,
