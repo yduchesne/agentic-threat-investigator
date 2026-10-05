@@ -1048,25 +1048,26 @@ function EdgeList({
                     : t("graph.detail.unavailable")}
                 </td>
                 <td style={{ padding: 6, textAlign: "left" }}>
-                  <Button
-                    size="small"
-                    component="a"
-                    href={`/investigations/${investigationId}/relationships?selected=${edge.relationshipId}`}
-                    sx={{ textTransform: "none" }}
+                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 0.5 }}>
+                  <Link
+                    href
+={`/investigations/${investigationId}/relationships?selected=${edge.relationshipId}`}
+                    underline="hover"
+                    sx={{ fontSize: "inherit" }}
                   >
                     {t("graph.list.view")}
-                  </Button>
-                  <Button
-                    size="small"
-                    component="a"
+                  </Link>
+                  <Link
                     href={evolutionLink(investigationId, counterpartyId)}
-                    sx={{ textTransform: "none" }}
+                    underline="hover"
+                    sx={{ fontSize: "inherit" }}
                   >
                     {t("graph.list.viewEvolution")}
-                  </Button>
+                  </Link>
                   <Link
                     href={`#relationship-provenance-${edge.relationshipId}`}
                     underline="hover"
+                    sx={{ fontSize: "inherit" }}
                     onClick={(event) => {
                       event.preventDefault();
                       onInspectObservations(edge.relationshipId);
@@ -1074,6 +1075,7 @@ function EdgeList({
                   >
                     {t("graph.provenance.inspect")}
                   </Link>
+                  </Box>
                 </td>
               </tr>
             );
