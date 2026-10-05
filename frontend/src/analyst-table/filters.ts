@@ -95,7 +95,8 @@ export function localDateTimeToIso(value: string): string | undefined {
   if (value === "" || !LOCAL_DATETIME_PATTERN.test(value)) {
     return undefined;
   }
-  const date = new Date(value);
+  const normalized = value.includes("T") ? value : `${value}T00:00`;
+  const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) {
     return undefined;
   }

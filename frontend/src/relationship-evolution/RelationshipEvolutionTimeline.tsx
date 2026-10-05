@@ -11,12 +11,14 @@
 // same loaded page, so no second query and no spatial exploration is ever
 // required to reach the data.
 
-import { Alert, Box, Button, Typography } from "@mui/material";
+import { Alert, Box, Button, IconButton, SvgIcon, Tooltip, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useState } from "react";
 
 import type { RelationshipObservation } from "../api/schema-types";
-import { CompactId } from "../components/CompactId";
+import { CompactId, copyText } from "../components/CompactId";
+import { sourceLabel } from "../components/source-labels";
+import { useTranslation } from "react-i18next";
 import { Timestamp } from "../components/Timestamp";
 import { shortUuid } from "../analyst-table/present";
 import {
@@ -268,6 +270,7 @@ function ObservationTable({
   entityTypeLabel: (type: string) => string;
   onActivate: (observationId: string) => void;
 }): ReactElement {
+  const { t: tCommon } = useTranslation("common");
   return (
     <Box sx={{ overflowX: "auto" }}>
       <table aria-label={labels.tableLabel} style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -293,13 +296,27 @@ function ObservationTable({
           {rows.map((row) => (
             <tr key={row.id}>
               <td style={{ padding: 6 }}>
-                <Button
-                  size="small"
-                  onClick={() => onActivate(row.id)}
-                  sx={{ textTransform: "none" }}
-                >
-                  {shortUuid(row.id)}
-                </Button>
+                <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.25 }}>
+                  <Button
+                    size="small"
+                    onClick={() => onActivate(row.id)}
+                    sx={{ textTransform: "none" }}
+                  >
+                    {shortUuid(row.id)}
+                  </Button>
+                  <Tooltip title={tCommon("copyId.tooltip")}>
+                    <IconButton
+                      size="small"
+                      onClick={() => void copyText(row.id)}
+                      aria-label={tCommon("copyId.action", { id: shortUuid(row.id) })}
+                      sx={{ p: 0.25, color: "text.secondary" }}
+                    >
+                      <SvgIcon fontSize="inherit" aria-hidden="true">
+                        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1Zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2Zm0 16H8V7h11v14Z" />
+                      </SvgIcon>
+                    </IconButton>
+                  </Tooltip>
+                </Box>
               </td>
               <td style={{ padding: 6 }}>
                 {row.relationship_type === null ? "—" : typeLabel(row.relationship_type ?? "")}
@@ -313,7 +330,7 @@ function ObservationTable({
                   counterpartyColumn={labels.tableColumns.counterparty}
                 />
               </td>
-              <td style={{ padding: 6 }}>{row.source}</td>
+              <td style={{ padding: 6 }}>{sourceLabel(row.source, tCommon)}</td>
               <td style={{ padding: 6 }}>
                 {row.observed_at !== null ? <Timestamp iso={row.observed_at} /> : "—"}
               </td>

@@ -32,6 +32,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 import type { Relationship, RelationshipObservation } from "../api/schema-types";
+import type { RelationshipGraphNode } from "./relationship-graph-model";
 import { DetailRows, DetailSection } from "../analyst-table/DetailRows";
 import {
   DetailError,
@@ -42,6 +43,7 @@ import { isNotFound404 } from "../analyst-table/detail-error";
 import { hasPrevious, popBackStack, pushNextStack } from "../analyst-table/cursor-stack";
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
+import { sourceLabel } from "../components/source-labels";
 import { EvidenceDetail } from "../evidence/EvidenceDetail";
 import { useEvidenceDetail } from "../evidence/evidence-queries";
 import { relationshipTypeKey } from "../relationships/labels";
@@ -59,6 +61,9 @@ export interface GraphRelationshipProvenanceProps {
   relationshipId: string;
   /** PR 31G: no matching support is admitted to this Investigation (known-only). */
   knownOnly: boolean;
+  sourceNode?: RelationshipGraphNode | null;
+  targetNode?: RelationshipGraphNode | null;
+  entityTypeLabel?: (type: RelationshipGraphNode["entityType"]) => string;
   /** Hide the provenance surface (graph/expansion state is untouched). */
   onClose: () => void;
 }
@@ -68,10 +73,14 @@ export function GraphRelationshipProvenance({
   investigationId,
   relationshipId,
   knownOnly,
+  sourceNode = null,
+  targetNode = null,
+  entityTypeLabel = String,
   onClose,
 }: GraphRelationshipProvenanceProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
   const { t: tRelationships } = useTranslation("relationships");
+  const { t: tCommon } = useTranslation("common");
 
   // Transient drill-down state (PR 31F §10): the bounded observation
   // cursor, its browser-local back stack, and the exact observation /
@@ -191,6 +200,9 @@ export function GraphRelationshipProvenance({
             rows={stableRelationshipRows(
               tRelationships as never,
               relationshipDetail.relationship,
+              sourceNode,
+              targetNode,
+              entityTypeLabel,
             )}
           />
         ) : null}
@@ -229,9 +241,9 @@ export function GraphRelationshipProvenance({
                       tRelationships("detail.confidence"),
                       tRelationships("columns.observationId"),
                       tRelationships("columns.evidence"),
-                      t("graph.provenance.selectObservation"),
-                    ].map((header) => (
-                      <th key={header} scope="col" style={{ textAlign: "left", padding: 6 }}>
+                      "",
+                    ].map((header, index) => (
+                      <th key={header || `action-${index}`} scope="col" style={{ textAlign: "left", padding: 6 }}>
                         {header}
                       </th>
                     ))}
@@ -240,7 +252,7 @@ export function GraphRelationshipProvenance({
                 <tbody>
                   {page.items.map((observation) => (
                     <tr key={observation.id}>
-                      <td style={{ padding: 6 }}>{observation.source}</td>
+                      <td style={{ padding: 6 }}>{sourceLabel(observation.source, tCommon)}</td>
                       <td style={{ padding: 6 }}>
                         {observation.observed_at !== null ? (
                           <Timestamp iso={observation.observed_at} />
@@ -263,10 +275,17 @@ export function GraphRelationshipProvenance({
                         />
                       </td>
                       <td style={{ padding: 6 }}>
-                        <CompactId
-                          id={observation.evidence_id}
-                          label={tRelationships("columns.evidence")}
-                        />
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <Box component="span">
+                            {t("graph.provenance.evidenceFrom", {
+                              source: sourceLabel(observation.source, tCommon),
+                            })}
+                          </Box>
+                          <CompactId
+                            id={observation.evidence_id}
+                            label={tRelationships("columns.evidence")}
+                          />
+                        </Box>
                       </td>
                       <td style={{ padding: 6 }}>
                         <Button
@@ -318,7 +337,7 @@ export function GraphRelationshipProvenance({
         <DetailSection title={t("graph.provenance.observation")}>
           {activeObservation !== null ? (
             <Box>
-              {observationDetailRows(tRelationships as never, activeObservation)}
+              {observationDetailRows(tRelationships as never, activeObservation, tCommon)}
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 1 }}>
                 <Button
                   size="small"
@@ -407,6 +426,9 @@ export function hasNext(page: { next_cursor?: string | null } | null): boolean {
 function stableRelationshipRows(
   t: TFunction,
   relationship: Relationship,
+  sourceNode: RelationshipGraphNode | null,
+  targetNode: RelationshipGraphNode | null,
+  entityTypeLabel: (type: RelationshipGraphNode["entityType"]) => string,
 ): {
   label: string;
   value: ReactNode;
@@ -415,10 +437,15 @@ function stableRelationshipRows(
     {
       label: t("detail.sourceEntity"),
       value: (
-        <CompactId
-          id={relationship.source_entity_id}
-          label={t("detail.sourceEntity")}
-        />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          {sourceNode !== null ? (
+            <Box component="span">{`${entityTypeLabel(sourceNode.entityType)} ${sourceNode.value}`}</Box>
+          ) : null}
+          <CompactId
+            id={relationship.source_entity_id}
+            label={t("detail.sourceEntity")}
+          />
+        </Box>
       ),
     },
     {
@@ -428,10 +455,15 @@ function stableRelationshipRows(
     {
       label: t("detail.targetEntity"),
       value: (
-        <CompactId
-          id={relationship.target_entity_id}
-          label={t("detail.targetEntity")}
-        />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          {targetNode !== null ? (
+            <Box component="span">{`${entityTypeLabel(targetNode.entityType)} ${targetNode.value}`}</Box>
+          ) : null}
+          <CompactId
+            id={relationship.target_entity_id}
+            label={t("detail.targetEntity")}
+          />
+        </Box>
       ),
     },
     {

@@ -272,7 +272,7 @@ describe("Relationship Evolution workspace", () => {
     await userEvent.click(
       within(drawer).getByRole("button", { name: "Observation provenance actions" }),
     );
-    expect(await screen.findByRole("link", { name: "Open evidence" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Evidence" })).toBeInTheDocument();
   });
 
   it("E-U14: honest no-results wording, never an existence claim", async () => {
@@ -377,8 +377,8 @@ describe("Relationship Evolution counterparty presentation (PR 31F-1)", () => {
     expect(await screen.findByText("IP address 192.0.2.1")).toBeInTheDocument();
     // Compact technical identity stays available as secondary metadata.
     expect(
-      screen.getByRole("button", { name: /Copy ID/ }),
-    ).toBeInTheDocument();
+      screen.getAllByRole("button", { name: /Copy ID/ }).length,
+    ).toBeGreaterThan(0);
     // The point aria label carries the semantic counterparty.
     expect(
       screen.getByRole("button", {

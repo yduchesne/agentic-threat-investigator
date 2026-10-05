@@ -948,7 +948,7 @@ describe("GraphRelationshipProvenance exact Evidence drill-down (PR 31F U22-U31)
     // closing it back to the observation.
     await screen.findByText("update-package.test");
     const backToObservation = await screen.findByRole("button", {
-      name: "Back to observation",
+      name: "Hide",
     });
     fireEvent.click(backToObservation);
     await waitFor(() => {
@@ -1191,7 +1191,7 @@ describe("GraphRelationshipProvenance graph isolation (PR 31F U32-U37, Q08)", ()
       name: "Relationship list (this page)",
     });
     fireEvent.click(
-      within(list).getAllByRole("button", { name: "Inspect observations" })[0],
+      within(list).getAllByRole("link", { name: "Provenance" })[0],
     );
     await provenanceVisible();
   }

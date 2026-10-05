@@ -15,6 +15,7 @@
   "columns.observedAt": "Observed at",
   "columns.retrievedAt": "Retrieved at",
   "columns.evidence": "Evidence",
+  "columns.evidenceTooltip": "View this evidence record.",
   "columns.observationId": "Observation ID",
   "list.loading": "Loading relationships…",
   "list.error.title": "Unable to load Relationships",

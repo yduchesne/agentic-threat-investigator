@@ -57,6 +57,7 @@
   "detail.notFound.message": "The investigation does not exist or you do not have access to it.",
   "poll.error.title": "Refresh in progress",
   "poll.error.message": "The latest state could not be refreshed; showing the last known state.",
+  "header.investigationId": "Investigation ID",
   "header.started": "Started:",
   "header.completed": "Completed:",
   "header.stopReason": "Stop reason: {{reason}}",

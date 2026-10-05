@@ -11,7 +11,7 @@
 import { Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 /** The Evolution route for one focal entity. */
 export function evolutionRoute(investigationId: string, entityId: string): string {
@@ -29,9 +29,11 @@ export function EvolutionLink({
   ariaLabel: string;
 }): ReactElement {
   const { t } = useTranslation("relationships");
+  const location = useLocation();
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
   return (
     <Typography variant="caption" component="span">
-      <Link to={evolutionRoute(investigationId, entityId)} style={{ textDecoration: "none" }} aria-label={ariaLabel}>
+      <Link to={evolutionRoute(investigationId, entityId)} state={{ returnTo }} style={{ textDecoration: "none" }} aria-label={ariaLabel}>
         {t("evolution.view")}
       </Link>
     </Typography>

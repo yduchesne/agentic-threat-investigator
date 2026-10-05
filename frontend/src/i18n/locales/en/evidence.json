@@ -1,6 +1,7 @@
 {
   "title": "Evidence",
   "columns.subject": "Subject",
+  "columns.description": "Description",
   "columns.evidenceType": "Evidence type",
   "columns.source": "Source",
   "columns.observedAt": "Observed at",

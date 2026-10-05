@@ -143,6 +143,13 @@ describe("Semantic theme factory (T01..T09)", () => {
     }
   });
 
+  it("contained primary actions have explicit readable foregrounds", () => {
+    for (const theme of Object.values(ATI_THEMES)) {
+      expect(theme.palette.primary.contrastText).not.toBe(theme.palette.primary.main);
+      expect(theme.palette.primary.contrastText.length).toBeGreaterThan(0);
+    }
+  });
+
   it("Light preserves the historical primary color", () => {
     expect(ATI_THEMES.light.palette.primary.main).toBe("#1b5e8c");
     expect(ATI_THEMES.light.ati.accent.primary).toBe("#1b5e8c");

@@ -251,7 +251,7 @@ export function InvestigationWorkspace(): ReactElement {
   }
 
   return (
-    <Box sx={{ mx: "auto", maxWidth: 1024, py: 2 }}>
+    <Box sx={{ width: "100%", minWidth: 0, py: 2 }}>
       <LegacyPivotRedirect investigationId={investigationId} />
       {isError ? (
         <Box sx={{ mb: 1 }}>

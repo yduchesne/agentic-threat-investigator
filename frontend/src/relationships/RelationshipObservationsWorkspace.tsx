@@ -11,10 +11,10 @@
 // on the loaded page. The PR 24D modal embeds the same workspace through
 // the pivot-step port.
 
-import { Box, TextField, Typography } from "@mui/material";
+import { Box, Button, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import type {
   Investigation,
@@ -40,8 +40,9 @@ import { runningNotice } from "../analyst-table/running";
 import { TableToolbar } from "../analyst-table/TableToolbar";
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
+import { sourceLabel, sourceLabelWithUrn } from "../components/source-labels";
 import { PivotMenu } from "../pivots/PivotMenu";
-import { observationActions } from "../pivots/pivot-capabilities";
+import { observationActions, relationshipObservationsAction } from "../pivots/pivot-capabilities";
 import { useObservationDetail, useObservationsPage } from "./relationships-queries";
 import {
   emptyObservationFilters,
@@ -126,7 +127,11 @@ function draftError(t: (key: string) => string, draft: ObservationDraft): string
 }
 
 /** Analyst-facing observation columns (from the exact list DTO). */
-export function observationColumns(t: (key: string) => string): Column<RelationshipObservation>[] {
+export function observationColumns(
+  t: (key: string) => string,
+  tCommon: (key: string) => string,
+  investigationId = "",
+): Column<RelationshipObservation>[] {
   return [
     {
       id: "relationship",
@@ -135,7 +140,7 @@ export function observationColumns(t: (key: string) => string): Column<Relations
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
           <CompactId id={observation.relationship_id} label={t("columns.relationship")} />
           <PivotMenu
-            actions={observationActions(observation, "table_cell")}
+            actions={[relationshipObservationsAction(observation.relationship_id, "table_cell")]}
             ariaLabel={t("columns.relationship")}
           />
         </Box>
@@ -145,8 +150,8 @@ export function observationColumns(t: (key: string) => string): Column<Relations
     {
       id: "source",
       header: t("columns.source"),
-      render: (observation) => observation.source,
-      exportValue: (observation) => observation.source,
+      render: (observation) => sourceLabel(observation.source, tCommon),
+      exportValue: (observation) => sourceLabel(observation.source, tCommon),
     },
     {
       id: "observedAt",
@@ -166,11 +171,13 @@ export function observationColumns(t: (key: string) => string): Column<Relations
       header: t("columns.evidence"),
       render: (observation) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          <Link
+            to={`/investigations/${investigationId}/evidence?selection=${observation.evidence_id}`}
+            style={{ textDecoration: "none" }}
+          >
+            {observation.evidence_id.slice(0, 8)}
+          </Link>
           <CompactId id={observation.evidence_id} label={t("columns.evidence")} />
-          <PivotMenu
-            actions={observationActions(observation, "table_cell")}
-            ariaLabel={t("columns.evidence")}
-          />
         </Box>
       ),
       exportValue: (observation) => observation.evidence_id,
@@ -200,6 +207,11 @@ export function RelationshipObservationsWorkspace({
 }: RelationshipObservationsWorkspaceProps): ReactElement {
   const { t } = useTranslation("relationships");
   const { t: tCommon } = useTranslation("common");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const returnTo = typeof (location.state as { returnTo?: unknown } | null)?.returnTo === "string"
+    ? (location.state as { returnTo: string }).returnTo
+    : null;
 
   const { page, isLoading, error, refetch } = useObservationsPage(
     investigationId,
@@ -277,12 +289,18 @@ export function RelationshipObservationsWorkspace({
           heading={t("observations.detail.title")}
           onBack={table.closeSelection}
         >
-          {observationDetailBody(t, page, detail, table.selection ?? "")}
+          {observationDetailBody(t, tCommon, page, detail, table.selection ?? "")}
         </ResourceDetailView>
       ) : (
         <>
           {!embedded ? (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+            <Box sx={{ mb: 1 }}>
+              {returnTo !== null ? (
+                <Button size="small" onClick={() => navigate(returnTo)} sx={{ textTransform: "none", px: 0, mb: 0.5 }}>
+                  &lt; Back
+                </Button>
+              ) : null}
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <Typography variant="h2" sx={{ mr: 1 }}>
                 {t("observations.title")}
               </Typography>
@@ -291,6 +309,7 @@ export function RelationshipObservationsWorkspace({
                   {t("nav.relationships")}
                 </Link>
               </Typography>
+              </Box>
             </Box>
           ) : null}
           {!embedded ? (
@@ -311,7 +330,7 @@ export function RelationshipObservationsWorkspace({
             </Typography>
           ) : null}
           <AnalystTable<RelationshipObservation>
-            columns={observationColumns(t)}
+            columns={observationColumns(t, tCommon, investigationId)}
             rows={page?.items ?? []}
             getRowId={(observation) => observation.id}
             ariaLabel={t("observations.title")}
@@ -351,13 +370,14 @@ export function RelationshipObservationsWorkspace({
  */
 function observationDetailBody(
   t: (key: string) => string,
+  tCommon: (key: string) => string,
   page: { items: readonly RelationshipObservation[] } | null,
   detail: ReturnType<typeof useObservationDetail>,
   selectedId: string,
 ): ReactElement {
   const row = page?.items.find((candidate) => candidate.id === selectedId);
   if (row !== undefined) {
-    return observationDetailRows(t, row);
+    return observationDetailRows(t, row, tCommon);
   }
   if (detail.isLoading && detail.observation === null) {
     return <DetailLoading label={t("detail.loading")} />;
@@ -380,13 +400,14 @@ function observationDetailBody(
       </Box>
     );
   }
-  return observationDetailRows(t, detail.observation);
+  return observationDetailRows(t, detail.observation, tCommon);
 }
 
 /** One exact list-DTO observation detail (shared by page row and GET). */
 export function observationDetailRows(
   t: (key: string) => string,
   observation: RelationshipObservation,
+  tCommon?: (key: string) => string,
 ): ReactElement {
   return (
     <Box>
@@ -396,7 +417,13 @@ export function observationDetailRows(
             label: t("detail.relationshipId"),
             value: <CompactId id={observation.relationship_id} label={t("detail.relationshipId")} />,
           },
-          { label: t("detail.source"), value: observation.source },
+          {
+            label: t("detail.source"),
+            value:
+              tCommon === undefined
+                ? observation.source
+                : sourceLabelWithUrn(observation.source, tCommon),
+          },
           {
             label: t("detail.observedAt"),
             value:

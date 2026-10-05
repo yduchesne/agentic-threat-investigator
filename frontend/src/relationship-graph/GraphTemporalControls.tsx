@@ -29,6 +29,7 @@ import {
   MenuItem,
   Select,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import type { ReactElement } from "react";
@@ -218,6 +219,7 @@ export function GraphTemporalControls({
           value={draft.rangeEnd}
           onChange={(event) => set({ rangeEnd: event.target.value })}
         />
+        <Tooltip title={t("graph.temporal.framesTooltip")}>
         <FormControl size="small" sx={{ minWidth: 120 }}>
           <InputLabel id="graph-temporal-frames-label">
             {t("graph.temporal.frames")}
@@ -238,6 +240,7 @@ export function GraphTemporalControls({
             ))}
           </Select>
         </FormControl>
+        </Tooltip>
         <Button size="small" variant="contained" onClick={onApply} sx={{ textTransform: "none" }}>
           {t("graph.temporal.apply")}
         </Button>
