@@ -144,7 +144,13 @@ function themeTypography() {
 }
 
 /** Primal, theme-wide MUI component overrides (PR 31F-4 shared integration). */
-function themeComponents(borderColor: string): Components<Theme> {
+function themeComponents(
+  borderColor: string,
+  interactiveColor: string,
+  inputBorderColor: string,
+  inputTextColor: string,
+  colorScheme: "light" | "dark",
+): Components<Theme> {
   return {
     MuiButton: {
       defaultProps: { disableElevation: true },
@@ -155,6 +161,69 @@ function themeComponents(borderColor: string): Components<Theme> {
     },
     MuiTextField: {
       defaultProps: { size: "medium" },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          color: inputTextColor,
+          colorScheme,
+          "& .MuiOutlinedInput-notchedOutline": {
+            borderColor: inputBorderColor,
+          },
+          "&:hover .MuiOutlinedInput-notchedOutline": {
+            borderColor: inputBorderColor,
+          },
+          "&.Mui-disabled": {
+            color: inputTextColor,
+            WebkitTextFillColor: inputTextColor,
+          },
+          "&.Mui-disabled .MuiOutlinedInput-notchedOutline": {
+            borderColor: inputBorderColor,
+          },
+          "& input.Mui-disabled": {
+            WebkitTextFillColor: inputTextColor,
+          },
+        },
+      },
+    },
+    MuiInputLabel: {
+      styleOverrides: {
+        root: {
+          color: inputTextColor,
+          "&.Mui-disabled": { color: inputTextColor },
+        },
+      },
+    },
+    MuiSelect: {
+      styleOverrides: {
+        select: {
+          color: inputTextColor,
+          "&.Mui-disabled": {
+            color: inputTextColor,
+            WebkitTextFillColor: inputTextColor,
+          },
+        },
+        icon: {
+          color: inputTextColor,
+          "&.Mui-disabled": { color: inputTextColor },
+        },
+      },
+    },
+    MuiToggleButton: {
+      styleOverrides: {
+        root: {
+          color: interactiveColor,
+          borderColor,
+          "&.Mui-selected": {
+            color: interactiveColor,
+          },
+          "&.Mui-disabled": {
+            color: interactiveColor,
+            borderColor,
+            opacity: 0.55,
+          },
+        },
+      },
     },
     MuiCard: {
       styleOverrides: { root: { border: `1px solid ${borderColor}` } },
@@ -215,7 +284,13 @@ const LIGHT_THEME = createTheme({
   },
   shape: { borderRadius: 6 },
   typography: themeTypography(),
-  components: themeComponents(LIGHT_TOKENS.border.default),
+  components: themeComponents(
+    LIGHT_TOKENS.border.default,
+    LIGHT_TOKENS.accent.primary,
+    LIGHT_TOKENS.border.default,
+    LIGHT_TOKENS.text.primary,
+    "light",
+  ),
   ati: LIGHT_TOKENS,
 });
 
@@ -272,7 +347,13 @@ const DARK_THEME = createTheme({
   },
   shape: { borderRadius: 6 },
   typography: themeTypography(),
-  components: themeComponents(DARK_TOKENS.border.default),
+  components: themeComponents(
+    DARK_TOKENS.border.default,
+    DARK_TOKENS.accent.primary,
+    "#ffffff",
+    "#ffffff",
+    "dark",
+  ),
   ati: DARK_TOKENS,
 });
 
@@ -330,7 +411,13 @@ const WARGAMES_THEME = createTheme({
   },
   shape: { borderRadius: 3 },
   typography: themeTypography(),
-  components: themeComponents(WARGAMES_TOKENS.border.default),
+  components: themeComponents(
+    WARGAMES_TOKENS.border.default,
+    WARGAMES_TOKENS.accent.primary,
+    "#ffffff",
+    "#ffffff",
+    "dark",
+  ),
   ati: WARGAMES_TOKENS,
 });
 
@@ -388,7 +475,13 @@ const CONTROL_ROOM_THEME = createTheme({
   },
   shape: { borderRadius: 2 },
   typography: themeTypography(),
-  components: themeComponents(CONTROL_ROOM_TOKENS.border.default),
+  components: themeComponents(
+    CONTROL_ROOM_TOKENS.border.default,
+    CONTROL_ROOM_TOKENS.accent.primary,
+    "#ffffff",
+    "#ffffff",
+    "dark",
+  ),
   ati: CONTROL_ROOM_TOKENS,
 });
 
