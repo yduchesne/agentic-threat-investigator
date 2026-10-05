@@ -21,7 +21,7 @@
 // ``{{resource}} details`` label); technical identities stay secondary
 // inside the detail bodies.
 
-import { Box, Divider, Typography } from "@mui/material";
+import { Box, Divider, Link as MuiLink, Typography } from "@mui/material";
 import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link as RouterLink } from "react-router";
@@ -52,31 +52,29 @@ export function ResourceDetailView({
 }: ResourceDetailViewProps): ReactElement {
   return (
     <Box sx={{ minWidth: 0 }}>
-      <Box
+      <MuiLink
         component="button"
         type="button"
         onClick={onBack}
         data-testid="resource-detail-back"
+        aria-label={backLabel}
         sx={{
-          px: 1,
-          py: 0.5,
+          p: 0,
           fontSize: "0.875rem",
           lineHeight: 1.2,
           fontFamily: "inherit",
           cursor: "pointer",
-          color: "text.primary",
-          borderRadius: 1,
+          color: "primary.main",
+          border: 0,
           bgcolor: "transparent",
-          "&:hover": { bgcolor: "action.hover" },
           "&:focus-visible": {
             outline: "2px solid",
             outlineColor: "focus.visible",
           },
-          "&:active": { bgcolor: "action.hover" },
         }}
       >
-        {backLabel}
-      </Box>
+        {"< "}{backLabel}
+      </MuiLink>
       <Typography variant="h2" sx={{ mt: 0.5 }}>
         {heading}
       </Typography>
@@ -115,32 +113,27 @@ export function RouteDetailView({
 }: RouteDetailViewProps): ReactElement {
   return (
     <Box sx={{ minWidth: 0 }}>
-      <Box
+      <MuiLink
         component={RouterLink}
         to={backTo}
         data-testid="resource-route-detail-back"
+        aria-label={backLabel}
         sx={{
           display: "inline-block",
-          px: 1,
-          py: 0.5,
+          p: 0,
           fontSize: "0.875rem",
           lineHeight: 1.2,
           fontFamily: "inherit",
           cursor: "pointer",
-          color: "text.primary",
-          borderRadius: 1,
-          bgcolor: "transparent",
-          textDecoration: "none",
-          "&:hover": { bgcolor: "action.hover" },
+          color: "primary.main",
           "&:focus-visible": {
             outline: "2px solid",
             outlineColor: "focus.visible",
           },
-          "&:active": { bgcolor: "action.hover" },
         }}
       >
-        {backLabel}
-      </Box>
+        {"< "}{backLabel}
+      </MuiLink>
       <Typography variant="h2" sx={{ mt: 0.5 }}>
         {heading}
       </Typography>
