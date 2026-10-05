@@ -70,7 +70,7 @@ describe("ResourceDetailView primitive (PR 31F-6 A4)", () => {
         <div>detail body</div>
       </ResourceDetailView>,
     );
-    const back = screen.getByRole("button", { name: "Back to Evidence" });
+    const back = screen.getByTestId("resource-detail-back");
     expect(back.tagName).toBe("BUTTON");
     back.focus();
     await userEvent.keyboard("{Enter}");
@@ -116,7 +116,7 @@ describe("ResourceDetailView primitive (PR 31F-6 A4)", () => {
       ),
     ).toBe(false);
     // The detail never uses fixed/absolute presentation.
-    const back = screen.getByRole("button", { name: "Back to Evidence" });
+    const back = screen.getByTestId("resource-detail-back");
     expect(back.closest("div")?.classList.length ?? 0).toBeGreaterThan(0);
     expect(screen.getByText("Evidence details").closest("h2")).not.toBeNull();
   });
@@ -134,7 +134,7 @@ describe("Evidence list/detail workspace (PR 31F-6 A4)", () => {
     expect(
       screen.queryByRole("heading", { name: "Evidence details" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Back to Evidence" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("resource-detail-back")).not.toBeInTheDocument();
   });
 
   it("A4-LD06: Back preserves the committed filters/order/cursor list context", async () => {
@@ -158,7 +158,7 @@ describe("Evidence list/detail workspace (PR 31F-6 A4)", () => {
     // View -> Back: the same URL list context returns.
     await userEvent.click(screen.getByRole("button", { name: /^View / }));
     await screen.findByRole("heading", { name: "Evidence details" });
-    await userEvent.click(screen.getByRole("button", { name: "Back to Evidence" }));
+    await userEvent.click(screen.getByTestId("resource-detail-back"));
     expect(await screen.findByRole("table", { name: "Evidence" })).toBeInTheDocument();
     await waitFor(() => {
       expect(recorder.requests.at(-1)?.params.source).toBe("fake-dns");
