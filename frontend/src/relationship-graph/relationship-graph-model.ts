@@ -146,16 +146,23 @@ function assembleGraphModel(
 ): RelationshipGraphModel {
   const focal =
     nodes.find((node) => node.entityId === focalEntityId) ??
-    // The server guarantees the focal node; this fallback keeps the model
-    // total without inventing topology.
+    // The API contract requires the focal node. Keep the model total for
+    // defensive rendering, but presentation code derives focal styling from
+    // the requested focalEntityId and must never highlight this fallback.
     nodes[0];
   const counterparties = nodes.filter((node) => node.entityId !== focalEntityId);
+  const nodeIds = new Set(nodes.map((node) => node.entityId));
+  // Never hand React Flow an edge with a missing endpoint. A malformed or
+  // partially accumulated topology must not render a dangling edge.
+  const renderableEdges = edges.filter(
+    (edge) => nodeIds.has(edge.sourceEntityId) && nodeIds.has(edge.targetEntityId),
+  );
   return {
     focal,
     nodes,
     counterparties,
-    edges,
-    hasSelfEdge: edges.some(
+    edges: renderableEdges,
+    hasSelfEdge: renderableEdges.some(
       (edge) => edge.sourceEntityId === edge.targetEntityId,
     ),
     truncated,
