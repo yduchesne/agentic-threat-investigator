@@ -1092,8 +1092,8 @@ manual flow below remains a quick developer-only smoke of the running stack
 for development-time investigation:
 
 ```text
-1. enable observability: ATI_OBSERVABILITY_ENABLED=true and
-   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+1. enable observability: ATI_OBSERVABILITY_ENABLED=true (``compose.yaml``
+   defaults OTEL_EXPORTER_OTLP_ENDPOINT to http://otel-collector:4318)
 2. start core + observability stack (compose.yaml + compose.observability.yaml)
 3. issue one API request / run one worker operation, or run the PR 34
    deterministic generator: ati-telemetry-test --run-id <uuid>

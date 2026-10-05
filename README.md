@@ -236,14 +236,14 @@ LANGSMITH_API_KEY=your-langsmith-api-key
 LangSmith is optional; ATI does not depend on it for investigation state,
 persistence, retries, or job execution.
 
-At present, the repository's local Compose worker does not forward
-`ATI_LLM_OBSERVABILITY_BACKEND` and `LANGSMITH_API_KEY` into the worker
-container, so adding these values to `.env` alone does not enable LangSmith
-for a `./start.sh` stack. The local stack still includes the OpenTelemetry
-observability services (Collector, Prometheus, Jaeger, Loki, and Grafana).
-See `docs/OBSERVABILITY.md` for the observability architecture and current
-runtime configuration. This limitation should be removed before documenting
-LangSmith as a one-step local-stack option.
+The local Compose worker forwards `ATI_LLM_OBSERVABILITY_BACKEND` and
+`LANGSMITH_API_KEY` into the worker container, so the values above enable
+LangSmith for a `./start.sh` stack. The local stack also includes the
+OpenTelemetry observability services (Collector, Prometheus, Jaeger, Loki,
+and Grafana); with `ATI_OBSERVABILITY_ENABLED=true` the application
+containers export OTLP to the in-network Collector by default. See
+`docs/OBSERVABILITY.md` for the observability architecture and runtime
+configuration.
 
 ### 5. Start ATI
 

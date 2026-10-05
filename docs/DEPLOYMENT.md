@@ -591,12 +591,17 @@ plus the observability stack (Collector, Prometheus, Jaeger, Loki,
 Grafana, postgres-exporter). It is idempotent: already-running healthy
 containers are left as-is, every expected container/service is health
 checked (including one-shot completion and in-network health endpoints
-for container-internal services), unhealthy services receive at most one
-repair attempt (re-run/restart/re-create) before being reported, every
-decision is logged, and the final summary prints the reachable endpoints
-(with HTTP URLs for HTTP services) and exits non-zero when any service
-stays unhealthy. Because the script builds images only when they are
-missing and never recreates healthy containers, source-code changes are
+for container-internal services), unhealthy services receive exactly one
+synchronous repair attempt (re-run/restart/re-create), and every decision
+is logged. If a service is still unhealthy after its repair attempt,
+``./start.sh`` fails fast: it prints the reason and as much of the
+service's logs as it can collect, along with the exact ``podman logs`` and
+``podman inspect`` commands used so the operator can reproduce the
+collection, then exits non-zero without printing the service summary. The
+final summary (the reachable endpoints, with HTTP URLs for HTTP services)
+is printed only once every service is healthy. Because the script builds
+images only when they are missing and never recreates healthy containers,
+source-code changes are
 **not** picked up automatically: run ``./start.sh --rebuild`` after
 editing Python, migration, or frontend sources to rebuild every project
 image (backend, PostgreSQL, frontend) and recreate the corresponding
@@ -672,6 +677,24 @@ ATI_LLM_MODEL=<openrouter-model-id>
 ATI_LLM_API_KEY_SECRET=ATI_OPENROUTER_API_KEY
 ATI_OPENROUTER_API_KEY=<runtime secret>
 ```
+
+DeepSeek example (no real keys committed):
+
+```bash
+ATI_LLM_DRIVER=openai
+ATI_LLM_BASE_URL=https://api.deepseek.com
+ATI_LLM_MODEL=<deepseek-model-id>
+ATI_LLM_API_KEY_SECRET=ATI_DEEPSEEK_API_KEY
+ATI_DEEPSEEK_API_KEY=<runtime secret>
+```
+
+Under Compose the worker service injects only the secret value variables
+explicitly listed in its ``environment:`` block in ``compose.yaml``
+(``ATI_OPENAI_API_KEY``, ``ATI_OPENROUTER_API_KEY``, and
+``ATI_DEEPSEEK_API_KEY``). A custom ``ATI_LLM_API_KEY_SECRET`` reference
+must therefore have its value variable forwarded there, and the worker
+container must be recreated (not the image rebuilt) for the change to take
+effect.
 
 Arbitrary OpenAI-compatible endpoint example (for example a local server):
 
@@ -769,16 +792,20 @@ behavior with the tooling the repository actually pins):
 # core stack (unchanged)
 podman-compose -f compose.yaml up -d
 
-# core + observability stack
+# core + observability stack (the endpoint is the in-container default)
 ATI_OBSERVABILITY_ENABLED=true \
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
 podman-compose -f compose.yaml -f compose.observability.yaml up -d
 ```
 
 `docker compose` users run the same two-file form with `docker compose`.
 Core ATI services never depend on observability services; the Collector may
-be absent and ATI still starts. OTLP export only activates when
-`ATI_OBSERVABILITY_ENABLED=true` **and** `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+be absent and ATI still starts. OTLP export activates when
+`ATI_OBSERVABILITY_ENABLED=true`; `compose.yaml` defaults
+`OTEL_EXPORTER_OTLP_ENDPOINT` to the in-network Collector
+(`http://otel-collector:4318`) for the `api`, `worker`, and `geo-resolver`
+services, so the explicit variable is optional. Set
+`ATI_OBSERVABILITY_ENABLED=false` to keep those processes offline/fail-open
+with no remote export.
 
 Local developer UIs (host-port overridable via `ATI_GRAFANA_HOST_PORT`,
 `ATI_PROMETHEUS_HOST_PORT`, `ATI_JAEGER_HOST_PORT`):

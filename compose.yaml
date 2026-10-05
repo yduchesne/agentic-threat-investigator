@@ -66,11 +66,11 @@ services:
       # origin (http://localhost:8080) served by the frontend, not the API
       # container port.
       ATI_PUBLIC_BASE_URL: ${ATI_PUBLIC_BASE_URL:-http://localhost:8080}
-      # PR 29C: optional OTLP export. ATI processes export only when the master
-      # switch is on AND a standard OTEL_EXPORTER_OTLP_ENDPOINT is set; blank
-      # keeps the process offline/fail-open with no Collector requirement.
+      # PR 29C: OTLP export. ATI processes export only when the master switch
+      # is on; the endpoint (unset or blank) defaults to the in-network
+      # Collector. Set ATI_OBSERVABILITY_ENABLED=false for offline/fail-open.
       ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       # First-run bootstrap administrator (docs/CONFIGURATION.md). Seeded only
       # while the user table is empty; never resets an existing account.
       ATI_BOOTSTRAP_ADMIN_USERNAME: ${ATI_BOOTSTRAP_ADMIN_USERNAME:-}
@@ -115,9 +115,20 @@ services:
       ATI_OPENAI_API_KEY: ${ATI_OPENAI_API_KEY:-}
       # OpenRouter example secret reference (PR 30A); see docs/DEPLOYMENT.md.
       ATI_OPENROUTER_API_KEY: ${ATI_OPENROUTER_API_KEY:-}
-      # PR 29C: optional OTLP export for the worker process (ati-worker).
+      # DeepSeek example secret reference. compose injects only the secret
+      # value NAMES listed in this environment block, so a custom
+      # ATI_LLM_API_KEY_SECRET reference (for example ATI_DEEPSEEK_API_KEY)
+      # must have its value variable forwarded explicitly here.
+      ATI_DEEPSEEK_API_KEY: ${ATI_DEEPSEEK_API_KEY:-}
+      # PR 29A: the worker composes the selected LLM-observability backend,
+      # so the typed backend selector and its LangSmith credential must reach
+      # the container environment.
+      ATI_LLM_OBSERVABILITY_BACKEND: ${ATI_LLM_OBSERVABILITY_BACKEND:-none}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      # PR 29C: OTLP export for the worker process (ati-worker); the standard
+      # endpoint defaults to the in-network Collector.
       ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
     volumes:
       - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/datasets:/var/lib/ati/datasets:ro"
     command: ["ati-worker", "--poll-seconds", "1.0"]
@@ -145,9 +156,10 @@ services:
       ATI_GEO_RESOLVER_MAX_ATTEMPTS: ${ATI_GEO_RESOLVER_MAX_ATTEMPTS:-3}
       ATI_GEO_RESOLVER_RETRY_BASE_SECONDS: ${ATI_GEO_RESOLVER_RETRY_BASE_SECONDS:-60.0}
       ATI_GEO_RESOLVER_RETRY_MAX_SECONDS: ${ATI_GEO_RESOLVER_RETRY_MAX_SECONDS:-3600.0}
-      # PR 29C: optional OTLP export for the GEO resolver process.
+      # PR 29C: OTLP export for the GEO resolver process; the standard
+      # endpoint defaults to the in-network Collector.
       ATI_OBSERVABILITY_ENABLED: ${ATI_OBSERVABILITY_ENABLED:-false}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
     command: ["ati-geo-resolver"]
     depends_on:
       fake-data-bootstrap: { condition: service_completed_successfully }
