@@ -40,6 +40,7 @@ import { runningNotice } from "../analyst-table/running";
 import { TableToolbar } from "../analyst-table/TableToolbar";
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
+import { sourceLabelWithUrn } from "../components/source-labels";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { observationActions } from "../pivots/pivot-capabilities";
 import { useObservationDetail, useObservationsPage } from "./relationships-queries";
@@ -387,6 +388,7 @@ function observationDetailBody(
 export function observationDetailRows(
   t: (key: string) => string,
   observation: RelationshipObservation,
+  tCommon?: (key: string) => string,
 ): ReactElement {
   return (
     <Box>
@@ -396,7 +398,13 @@ export function observationDetailRows(
             label: t("detail.relationshipId"),
             value: <CompactId id={observation.relationship_id} label={t("detail.relationshipId")} />,
           },
-          { label: t("detail.source"), value: observation.source },
+          {
+            label: t("detail.source"),
+            value:
+              tCommon === undefined
+                ? observation.source
+                : sourceLabelWithUrn(observation.source, tCommon),
+          },
           {
             label: t("detail.observedAt"),
             value:
