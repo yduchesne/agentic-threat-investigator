@@ -200,6 +200,7 @@ export function PivotMenu({
       size: "small" as const,
       variant: "text" as const,
       "aria-label": ariaLabel ?? entry.label,
+      "data-testid": `pivot-action-${entry.key}`,
       sx: { textTransform: "none", minWidth: 0, p: 0.5 },
     };
     if (entry.kind === "local") {
@@ -230,6 +231,7 @@ export function PivotMenu({
         aria-expanded={expanded}
         aria-controls={expanded ? actionBarId : undefined}
         aria-label={ariaLabel ?? undefined}
+        data-testid="pivot-trigger"
         sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
       >
         {triggerLabel ?? t("trigger.label")}
@@ -240,6 +242,7 @@ export function PivotMenu({
           id={actionBarId}
           role="group"
           aria-label={t("trigger.aria")}
+          data-testid="pivot-action-bar"
           sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, alignItems: "center", mt: 0.5 }}
         >
           {entries.map((entry) => {
@@ -247,6 +250,7 @@ export function PivotMenu({
               size: "small" as const,
               variant: "text" as const,
               "aria-label": entry.label,
+              "data-testid": `pivot-action-${entry.key}`,
               sx: { textTransform: "none", minWidth: 0, p: 0.5 },
             };
             return entry.kind === "local" ? (
@@ -275,6 +279,7 @@ export function PivotMenu({
             variant="text"
             onClick={closeBar}
             aria-label={t("hide")}
+            data-testid="pivot-hide"
             sx={{ textTransform: "none", minWidth: 0, p: 0.5 }}
           >
             {"["}{t("hide")}{"]"}
