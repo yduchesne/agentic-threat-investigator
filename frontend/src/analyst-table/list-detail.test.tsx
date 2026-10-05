@@ -236,12 +236,12 @@ describe("Evidence list/detail workspace (PR 31F-6 A4)", () => {
     // Expand the inline action bar (ordinary in-flow buttons).
     const trigger = await screen.findByRole("button", { name: "Pivot actions" });
     await userEvent.click(trigger);
-    const bar = await screen.findByRole("group", { name: "Pivot actions" });
-    expect(within(bar).getByRole("link", { name: "Relationships where source" })).toBeInTheDocument();
+    const bar = await screen.findByTestId("pivot-action-bar");
+    expect(within(bar).getByTestId("pivot-action-relationshipsSource")).toBeInTheDocument();
     // Hide collapses only the bar: no URL mutation, detail intact.
-    await userEvent.click(within(bar).getByRole("button", { name: "Hide" }));
+    await userEvent.click(within(bar).getByTestId("pivot-hide"));
     await waitFor(() =>
-      expect(screen.queryByRole("group", { name: "Pivot actions" })).toBeNull(),
+      expect(screen.queryByTestId("pivot-action-bar")).toBeNull(),
     );
     expect(router.state.location.search).toContain("selected=");
     expect(router.state.location.search).not.toContain("pivot=");
