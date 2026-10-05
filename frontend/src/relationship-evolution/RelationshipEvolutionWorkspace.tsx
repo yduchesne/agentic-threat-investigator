@@ -792,7 +792,8 @@ export function RelationshipEvolutionWorkspace({
                   unavailableTitle: t("timeline.unavailable.title"),
                   unavailableHint: t("timeline.unavailable.hint"),
                   viewAsTable: t("timeline.table.viewAs"),
-                  tableView: t("timeline.table.heading"),
+                  viewAsTimeline: t("timeline.table.viewAsTimeline"),
+                  tableLabel: t("timeline.table.heading"),
                   tableColumns: {
                     observation: t("timeline.table.observation"),
                     type: t("timeline.table.type"),
