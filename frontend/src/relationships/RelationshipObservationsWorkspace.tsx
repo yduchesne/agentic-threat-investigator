@@ -130,6 +130,7 @@ function draftError(t: (key: string) => string, draft: ObservationDraft): string
 export function observationColumns(
   t: (key: string) => string,
   tCommon: (key: string) => string,
+  investigationId = "",
 ): Column<RelationshipObservation>[] {
   return [
     {
@@ -171,7 +172,7 @@ export function observationColumns(
       render: (observation) => (
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
           <Link
-            to={`/investigations/${observation.investigation_id ?? ""}/evidence?selection=${observation.evidence_id}`}
+            to={`/investigations/${investigationId}/evidence?selection=${observation.evidence_id}`}
             style={{ textDecoration: "none" }}
           >
             {observation.evidence_id.slice(0, 8)}
@@ -317,7 +318,7 @@ export function RelationshipObservationsWorkspace({
             </Typography>
           ) : null}
           <AnalystTable<RelationshipObservation>
-            columns={observationColumns(t, tCommon)}
+            columns={observationColumns(t, tCommon, investigationId)}
             rows={page?.items ?? []}
             getRowId={(observation) => observation.id}
             ariaLabel={t("observations.title")}
