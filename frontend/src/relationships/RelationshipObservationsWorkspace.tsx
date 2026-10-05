@@ -278,7 +278,7 @@ export function RelationshipObservationsWorkspace({
           heading={t("observations.detail.title")}
           onBack={table.closeSelection}
         >
-          {observationDetailBody(t, page, detail, table.selection ?? "")}
+          {observationDetailBody(t, tCommon, page, detail, table.selection ?? "")}
         </ResourceDetailView>
       ) : (
         <>
@@ -352,13 +352,14 @@ export function RelationshipObservationsWorkspace({
  */
 function observationDetailBody(
   t: (key: string) => string,
+  tCommon: (key: string) => string,
   page: { items: readonly RelationshipObservation[] } | null,
   detail: ReturnType<typeof useObservationDetail>,
   selectedId: string,
 ): ReactElement {
   const row = page?.items.find((candidate) => candidate.id === selectedId);
   if (row !== undefined) {
-    return observationDetailRows(t, row);
+    return observationDetailRows(t, row, tCommon);
   }
   if (detail.isLoading && detail.observation === null) {
     return <DetailLoading label={t("detail.loading")} />;
@@ -381,7 +382,7 @@ function observationDetailBody(
       </Box>
     );
   }
-  return observationDetailRows(t, detail.observation);
+  return observationDetailRows(t, detail.observation, tCommon);
 }
 
 /** One exact list-DTO observation detail (shared by page row and GET). */
