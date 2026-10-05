@@ -131,9 +131,8 @@ describe("GEOINT routed resource navigation (PV10..PV13, PV17, PV18)", () => {
     await screen.findByText("Current in this Investigation");
     await userEvent.click(screen.getByRole("button", { name: /Explore/ }));
     await userEvent.click(
-      within(screen.getByTestId("pivot-action-bar")).getByRole(
-        "link",
-        { name: "Entities at this location" },
+      within(screen.getByTestId("pivot-action-bar")).getByTestId(
+        "pivot-action-geointLocationEntities",
       ),
     );
     await waitFor(() => {
