@@ -61,6 +61,8 @@ export interface PivotMenuProps {
   ariaLabel?: string;
   /** Optional visible trigger label (defaults to the pivots namespace). */
   triggerLabel?: string;
+  /** Optional tooltip for a single direct action. */
+  actionTooltip?: string;
 }
 
 /** One unified action-bar entry (routed resource link or local command). */
@@ -133,6 +135,7 @@ export function PivotMenu({
   localActions = [],
   ariaLabel,
   triggerLabel,
+  actionTooltip,
 }: PivotMenuProps): ReactElement | null {
   const { t } = useTranslation("pivots");
   const { investigationId = "" } = useParams();
@@ -214,7 +217,7 @@ export function PivotMenu({
         </Box>
       );
     }
-    return (
+    const directLink = (
       <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}>
         <Box component="span" aria-hidden="true">[</Box>
         <Button {...commonProps} component={RouterLink} to={entry.to}>
@@ -222,6 +225,9 @@ export function PivotMenu({
         </Button>
         <Box component="span" aria-hidden="true">]</Box>
       </Box>
+    );
+    return actionTooltip === undefined ? directLink : (
+      <Box component="span" title={actionTooltip}>{directLink}</Box>
     );
   }
 
