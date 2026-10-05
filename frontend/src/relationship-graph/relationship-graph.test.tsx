@@ -148,7 +148,7 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     const list = await screen.findByRole("table", { name: "Relationship list (this page)" });
     // Entity-aware presentation: value/display name in the list, exact
     // identity via CompactId.
-    expect(within(list).getByText("Update Package Service")).toBeInTheDocument();
+    expect(within(list).getByText("Domain update-package.test")).toBeInTheDocument();
     expect(within(list).getByText("203.0.113.10")).toBeInTheDocument();
     // The canvas renders each label plus a visible non-color type cue.
     const canvas = screen.getByRole("group", { name: "Relationship graph (one-hop)" });
@@ -195,7 +195,7 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     expect(within(list).getByText("Resolves to")).toBeInTheDocument();
     expect(within(list).getByText("3")).toBeInTheDocument();
     expect(
-      within(list).getByRole("link", { name: "View" }),
+      within(list).getByRole("link", { name: "Details" }),
     ).toHaveAttribute(
       "href",
       `/investigations/${INVESTIGATION_ID}/relationships?selected=${RELATIONSHIP}`,
@@ -220,7 +220,7 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     expect(within(scope).getByText("Entity ID")).toBeInTheDocument();
     expect(within(scope).getByText("Domain")).toBeInTheDocument();
     expect(within(scope).getByText("update-package.test")).toBeInTheDocument();
-    expect(within(scope).getByText("Update Package Service")).toBeInTheDocument();
+    expect(within(scope).getByText("Domain update-package.test")).toBeInTheDocument();
   });
 
   it("G31D-U06: edge data exposes identity, endpoints, count and observed summary", async () => {
@@ -232,14 +232,14 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
     // list.
     const list = await screen.findByRole("table", { name: "Relationship list (this page)" });
     const row = within(list).getByRole("row", { name: /Resolves to/ });
-    expect(within(row).getByText("Update Package Service")).toBeInTheDocument();
+    expect(within(row).getByText("Domain update-package.test")).toBeInTheDocument();
     expect(within(row).getByText("203.0.113.10")).toBeInTheDocument();
     expect(within(row).getByText("3")).toBeInTheDocument();
     expect(within(row).getByText("Supported by this Investigation")).toBeInTheDocument();
     expect(within(row).getByTitle("2026-06-01T09:00:00Z")).toBeInTheDocument();
     expect(within(row).getByTitle("2026-06-10T09:00:00Z")).toBeInTheDocument();
     // Exact canonical identity access stays available.
-    expect(within(row).getByRole("link", { name: "View" })).toHaveAttribute(
+    expect(within(row).getByRole("link", { name: "Details" })).toHaveAttribute(
       "href",
       `/investigations/${INVESTIGATION_ID}/relationships?selected=${RELATIONSHIP}`,
     );
@@ -644,7 +644,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     expect(document.querySelector(`[data-testid="rf__node-${nodeId(B)}"]`)).not.toBeNull();
     // Accessible list now includes the accumulated edges (3 rows + header).
     await waitFor(() => {
-      expect(within(list).getByText("malware.test")).toBeInTheDocument();
+      expect(within(list).getByText("Malware malware.test")).toBeInTheDocument();
       expect(within(list).getByText("198.51.100.7")).toBeInTheDocument();
     });
     expect(within(list).getAllByRole("row")).toHaveLength(4);
@@ -775,7 +775,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     await waitFor(() => {
       expect(renderedNodeCount()).toBe(4);
     });
-    expect(within(list).getByText("malware.test")).toBeInTheDocument();
+    expect(within(list).getByText("Malware malware.test")).toBeInTheDocument();
   });
 
   it("G31E-U15: a failed expansion leaves the graph intact and offers Retry", async () => {
@@ -804,7 +804,7 @@ describe("Relationship Graph expansion (PR 31E)", () => {
     await waitFor(() => {
       expect(renderedNodeCount()).toBe(4);
     });
-    expect(within(list).getByText("malware.test")).toBeInTheDocument();
+    expect(within(list).getByText("Malware malware.test")).toBeInTheDocument();
     expect(rendered.recorder.filter((r) => r.entity === B && r.direction === "either")).toHaveLength(2);
   });
 
@@ -1056,7 +1056,7 @@ describe("Relationship Graph node presentation (PR 31F-1 F1-U24..U26, U31)", () 
     // Hierarchy: translated type + canonical value + distinct display name.
     expect(await within(canvas).findByText("Domain")).toBeInTheDocument();
     expect(within(canvas).getByText("update-package.test")).toBeInTheDocument();
-    expect(within(canvas).getByText("Update Package Service")).toBeInTheDocument();
+    expect(within(canvas).getByText("Domain update-package.test")).toBeInTheDocument();
     // A display name equal to the value is deduplicated (not rendered twice).
     expect(within(canvas).getAllByText("203.0.113.10")).toHaveLength(1);
     expect(within(canvas).getByText("IP address")).toBeInTheDocument();
@@ -1151,7 +1151,7 @@ describe("Relationship Graph theming (PR 31F-4 G01..G08)", () => {
     expect(within(list).getByText("Resolves to")).toBeInTheDocument();
     // Exactly one canonical edge surface (one server Relationship).
     const rowsBefore = within(list).getAllByRole("row").length;
-    const viewBefore = within(list).getAllByRole("link", { name: "View" });
+    const viewBefore = within(list).getAllByRole("link", { name: "Details" });
     expect(viewBefore).toHaveLength(1);
     const hrefBefore = viewBefore[0].getAttribute("href");
     await waitFor(() => {
@@ -1164,9 +1164,9 @@ describe("Relationship Graph theming (PR 31F-4 G01..G08)", () => {
     // Same canonical edges, exact sources/targets and edge-list rows.
     expect(within(list).getAllByRole("row").length).toBe(rowsBefore);
     expect(within(list).getByText("Resolves to")).toBeInTheDocument();
-    expect(within(list).getByText("Update Package Service")).toBeInTheDocument();
+    expect(within(list).getByText("Domain update-package.test")).toBeInTheDocument();
     expect(within(list).getByText("203.0.113.10")).toBeInTheDocument();
-    expect(within(list).getAllByRole("link", { name: "View" })[0].getAttribute("href")).toBe(
+    expect(within(list).getAllByRole("link", { name: "Details" })[0].getAttribute("href")).toBe(
       hrefBefore,
     );
     expect(renderedNodeCount()).toBe(2);
