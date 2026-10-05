@@ -17,6 +17,7 @@ import { SafeExternalLink } from "../components/SafeExternalLink";
 import { Timestamp } from "../components/Timestamp";
 import { DetailRows, DetailSection } from "../analyst-table/DetailRows";
 import { CompactId } from "../components/CompactId";
+import { sourceLabelWithUrn } from "../components/source-labels";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { evidenceSubjectActions } from "../pivots/pivot-capabilities";
 import { evidenceTypeKey } from "./labels";
@@ -24,6 +25,7 @@ import { evidenceTypeKey } from "./labels";
 /** All safe public Evidence fields rendered as a bounded detail surface. */
 export function EvidenceDetail({ evidence }: { evidence: Evidence }): ReactElement {
   const { t } = useTranslation("evidence");
+  const { t: tCommon } = useTranslation("common");
   const { t: tPivots } = useTranslation("pivots");
   const nullish = t("detail.unavailable");
   return (
@@ -39,7 +41,7 @@ export function EvidenceDetail({ evidence }: { evidence: Evidence }): ReactEleme
             value: evidence.subject_type ?? nullish,
           },
           { label: t("detail.evidenceType"), value: t(evidenceTypeKey(evidence.type)) },
-          { label: t("detail.source"), value: evidence.source },
+          { label: t("detail.source"), value: sourceLabelWithUrn(evidence.source, tCommon) },
           {
             label: t("detail.sourceRecordId"),
             value: evidence.source_record_id ?? nullish,
