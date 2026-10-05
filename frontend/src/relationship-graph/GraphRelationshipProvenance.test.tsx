@@ -1191,7 +1191,7 @@ describe("GraphRelationshipProvenance graph isolation (PR 31F U32-U37, Q08)", ()
       name: "Relationship list (this page)",
     });
     fireEvent.click(
-      within(list).getAllByRole("link", { name: "Inspect provenance" })[0],
+      within(list).getAllByRole("link", { name: "Provenance" })[0],
     );
     await provenanceVisible();
   }
