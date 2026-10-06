@@ -259,6 +259,40 @@ describe("Relationship observations page", () => {
     });
   });
 
+  it("N3 (amendment): History -> Current relationship snapshots -> Back preserves context", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/relationship-observations",
+        pages: [[obsA()]],
+        recorder: resourceListRecorder(),
+      }),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/relationships",
+        pages: [[relA()]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    const { router } = renderAtPath({
+      pathname: OBS_BASE,
+      state: { navigation: { returns: [{ pathname: REL_BASE, search: "", hash: "" }] } },
+    });
+    await screen.findByText("fake-dns");
+    // History -> Current relationship snapshots is a drill-down that pushes
+    // the exact history location.
+    await userEvent.click(
+      screen.getByRole("link", { name: "Current relationship snapshots" }),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe(REL_BASE));
+    // Relationships shows a contextual Back to the exact history origin.
+    await userEvent.click(await screen.findByRole("button", { name: "< Back" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(OBS_BASE));
+    // The history workspace retains its own ancestor context.
+    await userEvent.click(await screen.findByRole("button", { name: "< Back" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(REL_BASE));
+  });
+
   it("never routes observations through generic History (R09)", async () => {
     let historyCalls = 0;
     setHttpHandlers(

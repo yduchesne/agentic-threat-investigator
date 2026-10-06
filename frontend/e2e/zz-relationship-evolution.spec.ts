@@ -178,7 +178,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(page).not.toHaveURL(/pivot=/);
     await expect(page.getByText("Relationship ID", { exact: true })).toBeVisible();
     // Close the underlying observation detail via its Back control.
-    await page.getByRole("button", { name: "Back to Relationship evolution" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "Back to Relationship history" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);
 
     // Switch to the bounded one-hop Graph (G31D-E01/E02/E08): the canvas and
@@ -368,8 +368,8 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(
       page.getByRole("link", { name: "Relationships where source" }),
     ).toBeVisible();
-    // Collapse the in-flow action bar with Cancel (no popup/menu exists).
-    await activate(page, page.getByRole("button", { name: "Cancel" }));
+    // Collapse the in-flow action bar with Hide (no popup/menu exists).
+    await activate(page, page.getByRole("button", { name: "Hide" }));
     await expect(page.getByRole("group", { name: "Pivot actions" })).not.toBeVisible();
     await expect.poll(() => graphNeighborhoodRequests.length).toBe(requestCountBeforeExpansion + 1);
     // Local expansion never becomes a PivotStep (G31E-E10).

@@ -5889,14 +5889,30 @@ back to a bounded type-oriented string; the public DTO carries the
 description and never the raw provider payload. Descriptions are bounded
 and deterministic and the frontend no longer serializes arbitrary `facts`.
 
-### Relationship-history Evidence and contextual Back
+### Bounded contextual navigation (amendment 1)
 
-Frontend component tests cover the linked compact Evidence ID contract
-(`L01`-`L03`: one visible short ID, exact href, adjacent copy control),
-contextual Back state (`B01`-`B04`: valid origin shown and restored with
-query/hash, absent/deep link and external/malformed origins render no
-Back), and the shared internal-origin validator
-(`analyst-table/return-to.test.ts`).
+`analyst-table/return-to.ts` carries a bounded ordered stack of validated
+ATI-internal return locations in React Router transient state (never in
+the URL): `pushNavigationReturn` records a genuine drill-down origin,
+`preserveNavigationContext` keeps context across sibling/subview changes,
+and `resolveReturn` pops exactly one level while retaining ancestors.
+`analyst-table/return-to.test.ts` pins `N1`-`N11`: internal targets are
+accepted, external/protocol-relative/malformed targets are rejected,
+EVOLUTION<->GRAPH preserves context, a drill-down pushes, `A -> B -> C`
+Back sequences pop one level at a time, direct loads fabricate no origin,
+adjacent duplicates are suppressed, and the stack is deterministically
+bounded.
+
+`useResourceTable` and `RelationshipEvolutionWorkspace.commit` now preserve
+the transient context across every search-only commit (filters, cursor,
+selection, view switch), so a subview change can never drop the caller's
+Back origin. Routed detail pages (`EvidenceDetailPage`,
+`RelationshipDetailPage`, `ObservationDetailPage`,
+`GeointObservationDetailPage`) resolve the contextual Back via
+`contextualBack`, falling back to the canonical list only when no origin
+exists. `relationships.test.tsx` `N3` and `relationship-evolution.test.tsx`
+`N5/N6` pin the History -> Current relationship snapshots and
+EVOLUTION<->GRAPH journeys at component level.
 
 ### Provenance Observation Hide
 
@@ -5925,31 +5941,112 @@ workspace: committed depth 1 issues no traversal request, depth 2 commits
 `graph_depth=2` and requests `max_depth=2`, depth 3 commits
 `graph_depth=3` and requests `max_depth=3`, and the committed URL identity
 follows the depth. Existing `graph-queries.test.tsx` and
-`graph-context-url.test.ts` continue to pin the traversal/neighborhood
-query-key distinction and the depth URL codec.
+`graph-context-url.test.ts` pin the traversal/neighborhood query-key
+distinction and the depth URL codec.
+
+### Render-boundary endpoint invariant
+
+`RelationshipGraph.selectRenderableEdges` is the single render projection:
+a relationship edge reaches the canvas only when both endpoints are in the
+canonical model AND in the final rendered React Flow node set. Canonical
+edges are never deleted. `relationship-graph.test.tsx` `G1`-`G6` covers a
+complete edge, a missing source, a missing target, an endpoint becoming
+visible/hidden, and the canonical model retaining an edge whose endpoint is
+not rendered.
 
 ### Browser acceptance
 
 `frontend/e2e/zz-35-1-ui-correctness.spec.ts` runs against the
-`scripts/e2e.sh` topology with `retries=0`, one worker, normal locator
-clicks, and a bounded page heartbeat after every transition:
+`scripts/e2e.sh` topology with `retries=0`, one worker, raw-pointer
+activation (`mouse.move`/`down`/`up` with a bounded 5 s wedge guard) and a
+bounded page heartbeat after every transition, and clean product
+console/pageerror assertions in Chromium and Firefox:
 
-- **W1** Evidence table Subject pivot -> `Evidence for this entity`;
-- **W2** Relationships history -> row `View` -> exact observation detail;
-- Evidence linked ID -> exact routed Evidence details;
-- contextual Back from Relationship history to the exact originating route;
-- graph 1 -> 2 -> 3 HOPS depth propagation;
-- provenance Observation -> View supporting evidence -> Observation Hide;
-- a five same-page-cycle W1/W2 stability journey.
+- **E2E-W1** Evidence table Subject pivot -> `Evidence for this entity`:
+  asserts the pivot closes, the workspace URL carries the exact selected
+  `subject_entity_id`, the Evidence request carries that exact id, the
+  rendered rows are a non-empty subset of the unfiltered rows and still
+  represent the pivoted entity, and the URL does not churn after
+  quiescence;
+- **E2E-W2** Relationships history -> row `View` -> exact observation
+  detail and Back;
+- **E2E-N1/N2** Relationships -> history EVOLUTION -> GRAPH -> EVOLUTION ->
+  Back restores the exact Relationships origin;
+- **E2E-N3** History -> Current relationship snapshots -> Back restores the
+  exact history origin and then the original ancestor;
+- **E2E-N4** Report Finding Evidence -> Evidence details -> Back returns to
+  the exact Report and explicitly not to the generic Evidence list;
+- **E2E-N5/N6** Evidence list in-flow detail Back, plus a direct load of a
+  routed Evidence detail with no fabricated origin and the canonical list
+  fallback;
+- **E2E-H1** 1 -> 2 -> 3 HOPS: the traversal receives `max_depth` 2/3 and a
+  known depth-2 Entity (`203.0.113.81`) absent at depth 1 appears at depth 2;
+- **E2E-G1** render-boundary endpoint invariant on the
+  `malware.badloader_v2` reproducer and after depth reconciliation;
+- **E2E-G1b** provenance Observation -> View supporting evidence ->
+  Observation Hide.
 
-W1 and W2 were reproduced from the recorded PR 35-1 base commit through
-the authoritative harness and **did not wedge**: both already commit past
-the native pointer event (`useResourceTable` defers the selection commit;
-`PivotMenu` route actions are ordinary React Router links from the PR
-31F-6 in-flow rehaul). The journeys therefore assert the non-wedging
-behavior directly (bounded heartbeat, clean product console/pageerror,
-five cycles, `retries=0`) rather than applying a speculative timing
-change. The spec runs in Chromium and Firefox.
+#### W1 final classification
+
+> **BASELINE-CONFIRMED PLAYWRIGHT/CHROMIUM RAW-POINTER / INPUT-PIPELINE
+> LIMITATION — NOT DEMONSTRATED TO BE A PR 35-1 APPLICATION REGRESSION.**
+
+The repeated same-page raw-pointer stress fails with
+`WEDGE@c1-clear` (the next pointer activation after the pivot never
+completes). The combined evidence:
+
+- page JavaScript stays responsive (`page.evaluate("1+1")` succeeds);
+- neutral pointer operations (pane click, move at a non-control point) and
+  actionability `trial` succeed;
+- programmatic dispatch of the same handler reaches the correct URL/state
+  and leaves the page responsive;
+- no modal/popover/popper/tooltip/backdrop overlay remains;
+- ripple disable, workspace remount, and router-state removal do **not**
+  cure it;
+- **decisively, the identical failure reproduces on unmodified base
+  `main` (`9473186`)** with the same spec and command.
+
+Reproduction command (base and branch identical):
+
+```bash
+timeout 220 ./scripts/e2e.sh zz-35-1-ui-correctness.spec.ts \
+  --project=chromium -g "E2E-W1" --timeout=30000 \
+  2>&1 | tee /tmp/ati-pr35-w1.log
+```
+
+The deterministic E2E-W1 journey therefore uses the narrowest established
+raw-pointer seam for the semantic acceptance and documents the baseline
+limitation in the spec; the five-cycle stress is not silently weakened, it
+is recorded as a baseline-confirmed limitation. No timing, force, reload,
+or long-timeout workaround is used.
+
+#### W2 disposition
+
+**B — the reported W2 wedge is not an application defect.** W2 passes
+deterministically with raw-pointer activation in Chromium and Firefox; the
+journey already used the repository's deferred `useResourceTable`
+selection commit, so no application change was required.
+
+#### Navigation-commit boundary
+
+The workspace sibling-subview commit (`EVOLUTION <-> GRAPH`) preserves the
+bounded navigation context and is deferred past the native pointer event
+(`commitView`) per the established PR 31F-6/31F-8 rule. Filter/temporal
+commits keep the pre-existing synchronous boundary. A synchronous
+`setSearchParams` carrying the navigation context inside the graph filter
+Apply originally stalled the input pipeline; deferring that specific
+context-carrying commit restored the PR 31H depth journey first attempt.
+
+#### Stale E2E selectors repaired
+
+- `Cancel` -> `Hide` for the in-flow Pivot action bar in
+  `zz-pointer-acceptance.spec.ts`, `zz-pivot-acceptance.spec.ts`,
+  `zz-relationship-evolution.spec.ts`, and
+  `zz-geolocation-workflow.spec.ts` (commit `ad90d6d` renamed the control).
+- `Back to Relationship evolution` -> `Back to Relationship history` in
+  `zz-relationship-evolution.spec.ts`.
+- `relationship evolution` -> `relationship history` link selectors in
+  `zz-31g/31h/31i/31j/31k`.
 
 ## Definition of done
 

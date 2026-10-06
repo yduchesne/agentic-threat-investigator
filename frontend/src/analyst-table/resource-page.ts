@@ -13,7 +13,7 @@
 // invalid/stale cursors. Resource semantics stay in each resource's codec.
 
 import { useState } from "react";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 
 import { isUuidValue } from "./filters";
 import {
@@ -68,7 +68,7 @@ export interface SearchParamsPort {
   readonly searchParams: URLSearchParams;
   setSearchParams: (
     params: URLSearchParams,
-    options?: { replace?: boolean },
+    options?: { replace?: boolean; state?: unknown },
   ) => void;
 }
 
@@ -84,6 +84,7 @@ export function useResourceTable<F>(
   port?: SearchParamsPort,
 ): ResourceTableState<F> {
   const { searchParams, setSearchParams } = port ?? useRouterSearchParamsPort();
+  const location = useLocation();
   const filters = codec.parse(searchParams);
   const cursor = parseCursorParam(searchParams.get(CURSOR_PARAM));
   const selection = parseSelectedParam(searchParams, isUuidValue);
@@ -104,7 +105,22 @@ export function useResourceTable<F>(
     // on the routed GEOINT Location containment toggle (pointer AND
     // keyboard). No controller state change may run inside the native
     // pointer dispatch; the committed URL remains the single authority.
-    window.setTimeout(() => setSearchParams(next, { replace: false }), 0);
+    // PR 35-1 amendment 1: committing a URL EQUIVALENT to the current one is
+    // a same-URL navigation, which reproduced the same deterministic
+    // real-stack pointer stall (e.g. Apply with an unchanged draft, or a
+    // selection toggle that resolves to the current state). Equivalent
+    // commits are therefore no-ops and never reach the router.
+    if (sameSearchParams(next, searchParams)) {
+      return;
+    }
+    // PR 35-1 amendment 1: a search-only change must preserve the transient
+    // navigation context, otherwise filter/cursor/selection commits drop the
+    // caller's Back origin.
+    const state = location.state;
+    window.setTimeout(
+      () => setSearchParams(next, { replace: false, state }),
+      0,
+    );
   };
 
   /** Defer one controller state transition past the native event. */
@@ -144,6 +160,22 @@ export function useResourceTable<F>(
     openSelection: (id: string) => commit(setSelectedParam(searchParams, id)),
     closeSelection: () => commit(clearSelectedParam(searchParams)),
   };
+}
+
+/** Whether two search-parameter sets are semantically identical. */
+function sameSearchParams(
+  a: URLSearchParams,
+  b: URLSearchParams,
+): boolean {
+  if (a.size !== b.size) {
+    return false;
+  }
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Re-export the selection URL parameter name for aria/labels. */

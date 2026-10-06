@@ -35,7 +35,7 @@ import {
   uuidAt,
 } from "../test/handlers";
 import { entityTypeLabelKey } from "./relationship-graph-presentation";
-import { buildSlottedEdges, edgeId, graphCssVariables, nodeId, relationshipIdFromEdgeId } from "./RelationshipGraph";
+import { buildSlottedEdges, edgeId, graphCssVariables, nodeId, relationshipIdFromEdgeId, selectRenderableEdges } from "./RelationshipGraph";
 import { buildGraphModel } from "./relationship-graph-model";
 import type { RelationshipGraphEdge } from "./relationship-graph-model";
 import { ATI_THEMES } from "../app/theme";
@@ -1198,5 +1198,87 @@ describe("Relationship Graph theming (PR 31F-4 G01..G08)", () => {
 
     // Selection panel and expanded pivot menu survive the appearance switch.
     expect(screen.getByText("Entity: 203.0.113.10")).toBeInTheDocument();
+  });
+});
+
+describe("Relationship Graph endpoint invariant (PR 35-1 amendment 1 G1-G6)", () => {
+  const ORPHAN_SOURCE = "40000000-0000-4000-8000-000000000199";
+  const DANGLING_RELATIONSHIP = "40000000-0000-4000-8000-000000000031";
+
+  /** A neighborhood whose second edge references a node the server omits. */
+  function danglingNeighborhood() {
+    const focal = buildGraphNode({
+      entity_id: FOCAL,
+      entity_type: "domain",
+      value: "update-package.test",
+    });
+    const counterparty = buildGraphNode({
+      entity_id: B,
+      entity_type: "ip_address",
+      value: "203.0.113.10",
+    });
+    return buildGraphNeighborhood({
+      nodes: [focal, counterparty],
+      edges: [
+        buildGraphEdge({
+          relationship_id: RELATIONSHIP,
+          source_entity_id: FOCAL,
+          target_entity_id: B,
+        }),
+        buildGraphEdge({
+          relationship_id: DANGLING_RELATIONSHIP,
+          source_entity_id: ORPHAN_SOURCE,
+          target_entity_id: FOCAL,
+        }),
+      ],
+      truncated: false,
+    });
+  }
+
+  it("G1/G2/G3: only edges with both rendered + canonical endpoints are selected", () => {
+    const model = buildGraphModel(FOCAL, danglingNeighborhood());
+    const [, danglingEdge] = model.edges;
+    const focalEdge = model.edges[0];
+    const canonical = new Set(model.nodes.map((node) => node.entityId));
+    // G1: both endpoints rendered -> edge selected.
+    expect(
+      selectRenderableEdges([focalEdge], canonical, new Set([FOCAL, B])),
+    ).toEqual([focalEdge]);
+    // G2: source absent from the canonical model -> omitted.
+    expect(
+      selectRenderableEdges([danglingEdge], canonical, new Set([FOCAL, B])),
+    ).toEqual([]);
+    // G3: target absent from the rendered node set -> omitted.
+    expect(
+      selectRenderableEdges([focalEdge], canonical, new Set([FOCAL])),
+    ).toEqual([]);
+    // G4/G5: an endpoint becoming visible/hidden changes selection exactly.
+    const withOrphan = new Set([FOCAL, B, ORPHAN_SOURCE]);
+    expect(selectRenderableEdges([danglingEdge], withOrphan, withOrphan)).toEqual([
+      danglingEdge,
+    ]);
+    expect(
+      selectRenderableEdges([focalEdge], canonical, new Set([B])),
+    ).toEqual([]);
+  });
+
+  it("G6: canonical edges with a missing endpoint stay in the canonical model", async () => {
+    const neighborhood = danglingNeighborhood();
+    // The canonical model is a faithful copy: the edge is never deleted
+    // merely because its endpoint is not currently rendered.
+    const model = buildGraphModel(FOCAL, neighborhood);
+    expect(model.edges.map((edge) => edge.relationshipId)).toEqual([
+      RELATIONSHIP,
+      DANGLING_RELATIONSHIP,
+    ]);
+    expect(model.nodes.map((node) => node.entityId)).not.toContain(ORPHAN_SOURCE);
+    // The rendering projection, however, never exposes the dangling edge.
+    const canonical = new Set(model.nodes.map((node) => node.entityId));
+    const rendered = new Set(canonical);
+    expect(
+      selectRenderableEdges(model.edges, canonical, rendered).map(
+        (edge) => edge.relationshipId,
+      ),
+    ).toEqual([RELATIONSHIP]);
   });
 });

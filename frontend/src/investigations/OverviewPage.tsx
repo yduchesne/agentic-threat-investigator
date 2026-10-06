@@ -21,6 +21,12 @@ import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link as RouterLink, useLocation, useOutletContext } from "react-router";
 
+import {
+  internalLocationFromPath,
+  navigationState,
+  pushNavigationReturn,
+} from "../analyst-table/return-to";
+
 import type { Assessment, Investigation, Report } from "../api/schema-types";
 import { EmptyState, LoadingState } from "../components/AsyncState";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -154,7 +160,12 @@ function NavigationRow({
   const { t } = useTranslation("overview");
   const { t: tInvestigations } = useTranslation("investigations");
   const location = useLocation();
-  const returnTo = `${location.pathname}${location.search}${location.hash}`;
+  const drillDownState = navigationState(
+    pushNavigationReturn(
+      location.state,
+      internalLocationFromPath(location.pathname, location.search, location.hash),
+    ),
+  );
   const base = `/investigations/${investigationId}`;
   return (
     <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", gap: 1 }}>
@@ -171,7 +182,7 @@ function NavigationRow({
       <RouterLink to={`${base}/evidence`}>{tInvestigations("tabs.evidence")}</RouterLink>
       <RouterLink to={`${base}/relationships`}>{tInvestigations("tabs.relationships")}</RouterLink>
       <RouterLink to={`${base}/timeline`}>{tInvestigations("tabs.timeline")}</RouterLink>
-      <RouterLink to={`${base}/relationships/evolution`} state={{ returnTo }}>{tInvestigations("tabs.graph")}</RouterLink>
+      <RouterLink to={`${base}/relationships/evolution`} state={drillDownState}>{tInvestigations("tabs.graph")}</RouterLink>
     </Stack>
   );
 }

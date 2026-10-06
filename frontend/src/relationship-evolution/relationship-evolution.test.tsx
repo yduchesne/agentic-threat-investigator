@@ -748,6 +748,32 @@ describe("PR 35-1 Relationship history linked Evidence + contextual Back", () =>
     });
   });
 
+  it("N5/N6 (amendment): EVOLUTION <-> GRAPH preserves the return context", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder }),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder: resourceListRecorder(),
+      }),
+    );
+    const origin = `/investigations/${INVESTIGATION_ID}/relationships`;
+    const { router } = renderAtPath({
+      pathname: EVOLUTION_BASE,
+      search: `?entity_id=${FOCAL}`,
+      state: { navigation: { returns: [{ pathname: origin, search: "", hash: "" }] } },
+    });
+    expect(await screen.findByRole("button", { name: "< Back" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Graph" }));
+    await waitFor(() => expect(router.state.location.search).toContain("view=graph"));
+    expect(screen.getByRole("button", { name: "< Back" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Evolution" }));
+    await waitFor(() => expect(router.state.location.search).not.toContain("view=graph"));
+    await userEvent.click(screen.getByRole("button", { name: "< Back" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(origin));
+  });
+
   it("B02: a direct/deep link without returnTo renders no Back control", async () => {
     const recorder = resourceListRecorder();
     setHttpHandlers(

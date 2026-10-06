@@ -132,4 +132,34 @@ describe("deferred navigation boundary (A2-DC)", () => {
     expect(router.state.location.search).toBe(`?subject_entity_id=${uuidAt(101)}`);
     expect(router.state.location.search).not.toContain("pivot=");
   });
+
+  it("amendment 1: a drill-down pivot carries the bounded navigation context", async () => {
+    evidenceHandlers();
+    const { router } = renderAtPath(`${BASE}/evidence`);
+    await screen.findByText("update-package.test");
+    await screen.findByRole("button", { name: "Subject" });
+    fireEvent.click(screen.getByRole("button", { name: "Subject" }));
+    fireEvent.click(await screen.findByTestId("pivot-action-relationshipsSource"));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`${BASE}/relationships`);
+    });
+    const state = router.state.location.state as {
+      navigation?: { returns?: { pathname: string }[] };
+    };
+    expect(state.navigation?.returns?.length).toBe(1);
+    expect(state.navigation?.returns?.[0]?.pathname).toBe(`${BASE}/evidence`);
+  });
+
+  it("amendment 1: Apply with an unchanged draft issues no equivalent-URL commit", async () => {
+    evidenceHandlers();
+    const { router } = renderAtPath(`${BASE}/evidence`);
+    await screen.findByText("update-package.test");
+    const keyBefore = router.state.location.key;
+    const searchBefore = router.state.location.search;
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    // Give the deferred commit a macrotask to (not) run.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(router.state.location.search).toBe(searchBefore);
+    expect(router.state.location.key).toBe(keyBefore);
+  });
 });

@@ -36,6 +36,12 @@ import {
   type PivotAction,
 } from "./pivot-capabilities";
 import { pivotTargetToRoute } from "./pivot-route";
+import {
+  internalLocationFromPath,
+  navigationState,
+  preserveNavigationContext,
+  pushNavigationReturn,
+} from "../analyst-table/return-to";
 
 /**
  * One explicit local/context action (PR 31E §8).
@@ -73,6 +79,8 @@ type ActionEntry =
       label: string;
       /** Canonical Investigation-scoped route destination. */
       to: string;
+      /** Transient bounded navigation context (drill-down origin). */
+      state: unknown;
     }
   | {
       kind: "local";
@@ -151,6 +159,17 @@ export function PivotMenu({
   // no-ops (same-URL navigations are both redundant and the documented
   // native-pointer stall class).
   const pivotEntries: ActionEntry[] = [];
+  // Every routed Pivot action is a genuine drill-down: push the current
+  // location as the immediate return target while retaining any ancestor
+  // context, so the destination's Back returns to this exact surface.
+  const currentLocation = internalLocationFromPath(
+    location.pathname,
+    location.search,
+    location.hash,
+  );
+  const drillDownState = navigationState(
+    pushNavigationReturn(location.state, currentLocation),
+  );
   for (const action of actions) {
     if (investigationId === "") {
       continue;
@@ -177,6 +196,13 @@ export function PivotMenu({
         destination.search === undefined
           ? destination.pathname
           : `${destination.pathname}?${destination.search}`,
+      // Same-resource (filter-only) navigation is a lateral change and keeps
+      // the existing context; a different resource is a genuine drill-down
+      // that pushes this exact location as the immediate return target.
+      state:
+        destination.pathname === location.pathname
+          ? navigationState(preserveNavigationContext(location.state))
+          : drillDownState,
     });
   }
   const localEntries: ActionEntry[] = localActions.map((action) => ({
@@ -220,7 +246,7 @@ export function PivotMenu({
     const directLink = (
       <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: "primary.main", gap: 0.25 }}>
         <Box component="span" aria-hidden="true">[</Box>
-        <Button {...commonProps} component={RouterLink} to={entry.to}>
+        <Button {...commonProps} component={RouterLink} to={entry.to} state={entry.state}>
           {entry.label}
         </Button>
         <Box component="span" aria-hidden="true">]</Box>
@@ -283,6 +309,7 @@ export function PivotMenu({
                     {...commonProps}
                     component={RouterLink}
                     to={entry.to}
+                    state={entry.state}
                     onClick={closeBar}
                   >
                     {entry.label}

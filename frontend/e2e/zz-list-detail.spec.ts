@@ -192,7 +192,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
       await listDetailCycle(
         page,
         page.getByRole("table", { name: "Relationships" }),
-        "Relationships details",
+        "Relationship details",
         "Back to Relationships",
         1 + (index % 3),
         `rel-c${index}`,
@@ -284,7 +284,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
       "rel-view",
     );
     await expect(
-      page.getByRole("heading", { name: "Relationships details" }),
+      page.getByRole("heading", { name: "Relationship details" }),
     ).toBeVisible({ timeout: 30_000 });
     await rawPointer(
       page,

@@ -34,7 +34,13 @@ import {
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, localDateTimeToIso, parseUuidParam } from "../analyst-table/filters";
-import { validatedReturnTo } from "../analyst-table/return-to";
+import {
+  internalLocationFromPath,
+  navigationState,
+  pushNavigationReturn,
+  resolveReturn,
+  returnTargetHref,
+} from "../analyst-table/return-to";
 import { isNotFound404 } from "../analyst-table/detail-error";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import { runningNotice } from "../analyst-table/running";
@@ -132,6 +138,7 @@ export function observationColumns(
   t: (key: string) => string,
   tCommon: (key: string) => string,
   investigationId = "",
+  linkState: unknown = undefined,
 ): Column<RelationshipObservation>[] {
   return [
     {
@@ -175,6 +182,7 @@ export function observationColumns(
           id={observation.evidence_id}
           label={t("columns.evidence")}
           to={`/investigations/${investigationId}/evidence/${observation.evidence_id}`}
+          state={linkState}
         />
       ),
       exportValue: (observation) => observation.evidence_id,
@@ -206,8 +214,21 @@ export function RelationshipObservationsWorkspace({
   const { t: tCommon } = useTranslation("common");
   const location = useLocation();
   const navigate = useNavigate();
-  const returnTo = validatedReturnTo(
-    (location.state as { returnTo?: unknown } | null)?.returnTo,
+  const resolvedReturn = resolveReturn(location.state);
+  const backTarget =
+    resolvedReturn === null ? null : returnTargetHref(resolvedReturn.target);
+  const backState =
+    resolvedReturn === null
+      ? undefined
+      : navigationState(resolvedReturn.remaining);
+  // Genuine drill-downs (this table's Evidence link, Current relationship
+  // snapshots) push the current location so the destination's Back returns
+  // here while retaining any ancestor context.
+  const drillDownState = navigationState(
+    pushNavigationReturn(
+      location.state,
+      internalLocationFromPath(location.pathname, location.search, location.hash),
+    ),
   );
 
   const { page, isLoading, error, refetch } = useObservationsPage(
@@ -292,8 +313,12 @@ export function RelationshipObservationsWorkspace({
         <>
           {!embedded ? (
             <Box sx={{ mb: 1 }}>
-              {returnTo !== null ? (
-                <Button size="small" onClick={() => navigate(returnTo)} sx={{ textTransform: "none", px: 0, mb: 0.5 }}>
+              {backTarget !== null ? (
+                <Button
+                  size="small"
+                  onClick={() => navigate(backTarget, { state: backState })}
+                  sx={{ textTransform: "none", px: 0, mb: 0.5 }}
+                >
                   {tCommon("back")}
                 </Button>
               ) : null}
@@ -302,7 +327,7 @@ export function RelationshipObservationsWorkspace({
                 {t("observations.title")}
               </Typography>
               <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
-                <Link to={`/investigations/${investigationId}/relationships`} style={{ textDecoration: "none" }}>
+                <Link to={`/investigations/${investigationId}/relationships`} state={drillDownState} style={{ textDecoration: "none" }}>
                   {t("nav.relationships")}
                 </Link>
               </Typography>
@@ -327,7 +352,7 @@ export function RelationshipObservationsWorkspace({
             </Typography>
           ) : null}
           <AnalystTable<RelationshipObservation>
-            columns={observationColumns(t, tCommon, investigationId)}
+            columns={observationColumns(t, tCommon, investigationId, drillDownState)}
             rows={page?.items ?? []}
             getRowId={(observation) => observation.id}
             ariaLabel={t("observations.title")}
