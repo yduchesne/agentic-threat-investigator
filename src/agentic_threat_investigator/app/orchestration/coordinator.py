@@ -21,6 +21,7 @@ from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     AnalysisDisposition,
     InvestigationState,
+    MandatoryEnrichmentWorkItem,
     PivotClass,
     PivotRequest,
     PivotStatus,
@@ -135,6 +136,8 @@ class CoordinatorAction(str, Enum):
     REQUEST_ANALYSIS = "request_analysis"
     AUTHORIZE_PIVOT = "authorize_pivot"
     REQUEST_RESEARCH = "request_research"
+    SCHEDULE_MANDATORY_ENRICHMENT = "schedule_mandatory_enrichment"
+    SELECT_MANDATORY_ENRICHMENT = "select_mandatory_enrichment"
     STOP = "stop"
 
 
@@ -148,6 +151,7 @@ class CoordinatorDecision(BaseModel):
     pivots: tuple[PivotRequest, ...] = ()
     research_entity_ids: tuple[UUID, ...] = ()
     research_request: PlannedResearchRequest | None = None
+    mandatory_work_items: tuple[MandatoryEnrichmentWorkItem, ...] = ()
     stop_reason: StopReason | None = None
     rejection_reasons: tuple[PivotRejectionReason, ...] = ()
     rejections: tuple[PivotRejection, ...] = ()
@@ -191,6 +195,36 @@ class CoordinatorDecision(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def mandatory_decision_shape(self) -> "CoordinatorDecision":
+        """Enforce the exact mandatory-enrichment decision shapes.
+
+        A schedule decision carries at least one mandatory work item and no
+        other action payload; every other action carries no mandatory work
+        items. Selection decisions carry no payload at all: the graph selects
+        the durable pending-queue head.
+        """
+        if self.action is CoordinatorAction.SCHEDULE_MANDATORY_ENRICHMENT:
+            if not self.mandatory_work_items:
+                raise ValueError(
+                    "mandatory schedule decisions require at least one work item"
+                )
+            if (
+                self.work_items
+                or self.pivots
+                or self.research_entity_ids
+                or self.research_request is not None
+                or self.stop_reason is not None
+            ):
+                raise ValueError(
+                    "mandatory schedule decisions carry only mandatory work items"
+                )
+        elif self.mandatory_work_items:
+            raise ValueError(
+                "only mandatory schedule decisions may carry mandatory work items"
+            )
+        return self
+
 
 class ProviderWorkPlanner(ABC):
     """Plan deterministic work using an injected applicability matrix."""
@@ -200,6 +234,25 @@ class ProviderWorkPlanner(ABC):
         self, *, entity: CoordinatorEntityView, depth: int, state: InvestigationState
     ) -> tuple[ProviderWorkItem, ...]:
         """Return provider work in explicit stable order."""
+
+
+class MandatoryEnrichmentPlanner(ABC):
+    """Plan deterministic mandatory-enrichment work from Investigation membership.
+
+    A planner is pure and deterministic: it performs no provider I/O, clock,
+    persistence, or network access. Applicability is delegated to each active
+    mandatory provider's own ``supports(Entity)`` contract, so no second
+    Entity-type matrix can drift from execution-time support.
+    """
+
+    @abstractmethod
+    def plan(
+        self,
+        *,
+        state: InvestigationState,
+        context: CoordinatorPolicyContext,
+    ) -> tuple[MandatoryEnrichmentWorkItem, ...]:
+        """Return due depth-free mandatory work in deterministic order."""
 
 
 class MappingProviderWorkPlanner(ProviderWorkPlanner):
@@ -228,6 +281,7 @@ class CoordinatorPolicy:
         self,
         planner: ProviderWorkPlanner,
         research_planner: ResearchRequestPlanner | None = None,
+        mandatory_planner: MandatoryEnrichmentPlanner | None = None,
     ) -> None:
         """Bind the deterministic provider-work and optional research planners.
 
@@ -235,15 +289,24 @@ class CoordinatorPolicy:
         REQUEST_RESEARCH: the PR 21 marker behavior (``MARK_RESEARCH_REQUIRED``
         through the AUTHORIZE_PIVOT transition) remains fully intact, and
         already-marked requirements simply stay unexecuted. Production
-        composition always binds a deterministic research planner.
+        composition always binds a deterministic research planner. When no
+        mandatory planner is bound, mandatory enrichment scheduling is
+        disabled (the pre-35-4 behavior used by isolated policy tests);
+        production composition always binds a deterministic planner.
         """
         self._planner = planner
         self._research_planner = research_planner
+        self._mandatory_planner = mandatory_planner
 
     @property
     def research_planner(self) -> ResearchRequestPlanner | None:
         """Return the bound research planner, or ``None`` when unbound."""
         return self._research_planner
+
+    @property
+    def mandatory_planner(self) -> MandatoryEnrichmentPlanner | None:
+        """Return the bound mandatory-enrichment planner, or ``None``."""
+        return self._mandatory_planner
 
     def decide(
         self, *, state: InvestigationState, context: CoordinatorPolicyContext
@@ -256,7 +319,34 @@ class CoordinatorPolicy:
                 stop_reason=StopReason(state.stop_reason),
             )
 
-        # 2. Pending provider work always executes first, but never beyond
+        # 2. Mandatory GEOINT enrichment is independent of analyst
+        #    disposition, pivot authorization, depth, entity/provider
+        #    budget, and replans. A persisted current item is a crash
+        #    resume: route through selection so its resume guard fails
+        #    closed rather than silently re-issuing external I/O. An
+        #    already-queued item is selected before any new scheduling.
+        if state.current_mandatory_enrichment is not None:
+            return CoordinatorDecision(
+                action=CoordinatorAction.SELECT_MANDATORY_ENRICHMENT
+            )
+        if state.pending_mandatory_enrichment:
+            return CoordinatorDecision(
+                action=CoordinatorAction.SELECT_MANDATORY_ENRICHMENT
+            )
+
+        # 3. Schedule any newly due mandatory enrichment from durable
+        #    Investigation membership before ordinary investigative work and
+        #    before any terminal disposition. GEOLOCATION Evidence written by
+        #    this work participates in the normal analysis synchronization
+        #    below.
+        due_mandatory = self._due_mandatory_enrichment(state, context)
+        if due_mandatory:
+            return CoordinatorDecision(
+                action=CoordinatorAction.SCHEDULE_MANDATORY_ENRICHMENT,
+                mandatory_work_items=tuple(due_mandatory),
+            )
+
+        # 4. Pending provider work always executes first, but never beyond
         #    the provider budget: the policy reports provider-budget
         #    exhaustion when pre-existing pending work cannot be executed
         #    within the remaining capacity.
@@ -272,7 +362,7 @@ class CoordinatorPolicy:
                 )
             return CoordinatorDecision(action=CoordinatorAction.EXECUTE_PROVIDER_WORK)
 
-        # 3. Derive current disposition. Invalid stored values must fail closed
+        # 5. Derive current disposition. Invalid stored values must fail closed
         #    (typed state validation rejects them before policy runs); the
         #    resolver below only parses values the validator already accepted.
         disposition = self._resolve_disposition(state, context)
@@ -280,7 +370,7 @@ class CoordinatorPolicy:
         current_evidence = set(state.evidence_ids)
         new_evidence = current_evidence - analyzed_ids
 
-        # 3b. Discovered RESEARCHABLE entities are marked research-required
+        # 5b. Discovered RESEARCHABLE entities are marked research-required
         #     with duplicate suppression as soon as the coordinator observes
         #     them, before any analysis or pivot round: marking research is a
         #     pure marker side effect, never a collection round, and never a
@@ -293,7 +383,7 @@ class CoordinatorPolicy:
                 consumes_replan=False,
             )
 
-        # 4. New evidence since the last analysis always requests analysis,
+        # 6. New evidence since the last analysis always requests analysis,
         #    even when the stored disposition says SUFFICIENT: a stale
         #    disposition must never skip the analysis synchronization point.
         if new_evidence:
@@ -302,7 +392,7 @@ class CoordinatorPolicy:
             # Evidence exists but no analysis has been performed yet.
             return CoordinatorDecision(action=CoordinatorAction.REQUEST_ANALYSIS)
 
-        # 4b. After evidence synchronization, one already-marked due research
+        # 6b. After evidence synchronization, one already-marked due research
         #     context executes before any terminal or pivot decision: new
         #     Evidence is always analyzed first, and explicitly scheduled
         #     contextual research is completed before the investigation can
@@ -317,7 +407,7 @@ class CoordinatorPolicy:
                 consumes_replan=False,
             )
 
-        # 5. SUFFICIENT stops only when the disposition is current for the
+        # 7. SUFFICIENT stops only when the disposition is current for the
         #    exact analyzed evidence set (guaranteed above).
         if disposition is AnalysisDisposition.SUFFICIENT:
             return CoordinatorDecision(
@@ -325,7 +415,7 @@ class CoordinatorPolicy:
                 stop_reason=StopReason.SUFFICIENT_EVIDENCE,
             )
 
-        # 6. NEEDS_MORE_EVIDENCE — try another round if replan budget allows.
+        # 8. NEEDS_MORE_EVIDENCE — try another round if replan budget allows.
         if disposition is AnalysisDisposition.NEEDS_MORE_EVIDENCE:
             if state.budget.replans_used >= state.budget.max_replans:
                 return CoordinatorDecision(
@@ -334,12 +424,23 @@ class CoordinatorPolicy:
                 )
             return self._authorize_candidates(state, context, consumes_replan=True)
 
-        # 7. EXHAUSTED — try candidates; stop if none remain.
+        # 9. EXHAUSTED — try candidates; stop if none remain.
         if disposition is AnalysisDisposition.EXHAUSTED:
             return self._authorize_candidates(state, context, consumes_replan=False)
 
-        # 8. No disposition yet and no new evidence — try candidates.
+        # 10. No disposition yet and no new evidence — try candidates.
         return self._authorize_candidates(state, context, consumes_replan=False)
+
+    def _due_mandatory_enrichment(
+        self,
+        state: InvestigationState,
+        context: CoordinatorPolicyContext,
+    ) -> list[MandatoryEnrichmentWorkItem]:
+        """Return due mandatory-enrichment work from the bound planner."""
+        planner = self._mandatory_planner
+        if planner is None:
+            return []
+        return list(planner.plan(state=state, context=context))
 
     @staticmethod
     def _resolve_disposition(

@@ -29,6 +29,7 @@ from agentic_threat_investigator.app.providers import (
     EvidenceProvider,
     ProviderError,
     ProviderErrorCode,
+    ProviderExecutionPolicy,
     ProviderResult,
     normalize_retrieval_timestamp,
     validate_investigation_entity,
@@ -291,6 +292,11 @@ class DbIpCityLiteProvider(EvidenceProvider):
     def id(self) -> str:
         """Return the stable ``urn:ati:source:dbip_city_lite`` identifier."""
         return SourceId.DBIP_CITY_LITE.value
+
+    @property
+    def execution_policy(self) -> ProviderExecutionPolicy:
+        """Classify DB-IP City Lite as mandatory GEOINT enrichment."""
+        return ProviderExecutionPolicy.MANDATORY_GEOINT
 
     def supports(self, entity: Entity) -> bool:
         """Restrict applicability to IP-address entities only."""

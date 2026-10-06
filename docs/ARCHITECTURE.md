@@ -710,6 +710,41 @@ ordinal and minimum depth), never from set/dict iteration or default-zero
 fallbacks. A persisted in-progress provider work item (no retry token exists)
 fails to a bounded fatal stop rather than re-issuing an external call.
 
+**Mandatory GEOINT enrichment (PR 35-4).** A distinct, budget-neutral
+execution class runs mandatory context enrichment for every applicable
+Investigation Entity, independently of analyst disposition, pivot
+authorization, depth, entity capacity, provider-call budget, and replans.
+`EvidenceProvider.execution_policy` classifies a provider as
+`INVESTIGATIVE` (default) or `MANDATORY_GEOINT`; DB-IP City Lite is
+`MANDATORY_GEOINT` in both fake and production composition. Applicability is
+still each provider's own `supports(Entity)` — there is no second type
+matrix. `RegistryProviderWorkPlanner` excludes mandatory-only providers from
+ordinary investigative work, so DB-IP is never scheduled (and never
+budgeted) twice for one Entity.
+
+The pure `MandatoryEnrichmentPlanner`/`RegistryMandatoryEnrichmentPlanner`
+returns due depth-free `MandatoryEnrichmentWorkItem(provider, entity_id)`
+identities for durable Investigation members (unique roots then discoveries
+in first-discovery ordinal order), excluding pending/current/completed
+identities and deleted/missing entities. Discovery membership is not
+truncated by `budget.max_entities`. The Coordinator schedules due work before
+ordinary provider work and before any terminal disposition, so `SUFFICIENT`,
+`EXHAUSTED`, depth/entity/provider/replan limits cannot finalize while
+mandatory work is due. `SCHEDULE_MANDATORY_ENRICHMENT`,
+`SELECT_MANDATORY_ENRICHMENT`, and `RECORD_MANDATORY_ENRICHMENT_OUTCOME` are
+narrow stored-function transitions that enforce unchanged investigative
+budget counters, append-only/deduplicated completion, queue-head selection,
+and exact provenance; `provider_calls_used` is never incremented by mandatory
+work. `LocalMandatoryEnrichmentExecutor` delegates to the same
+`ProviderWorkExecutor.run_request` kernel (depth-free) so
+`ProviderObservationPersistenceService` remains the sole Evidence/graph
+persistence seam and the existing GEOLOCATION -> `GeoResolution` ->
+Geo Resolver path owns canonical Locations. Provider misses/failures are
+bounded completed attempts; no location is fabricated and no infinite retry
+occurs. `recursion_limit` derives a finite additional allowance from durable
+membership and remaining provider calls so mandatory supersteps are not
+charged to the investigative budget.
+
 PR 22C adds one bounded coordinator action, `REQUEST_RESEARCH`, consuming
 the persisted `research_required_for_entity_ids` markers: after evidence
 synchronization and before any terminal/pivot decision, the Coordinator
