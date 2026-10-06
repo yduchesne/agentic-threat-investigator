@@ -86,7 +86,7 @@ After final cutover, `web/` remains the permanent name of ATI's human-facing HTM
 16. **Accessibility, keyboard operation, responsive layout, themes/appearance, and error presentation remain migration parity requirements.**
 17. **No migration PR may weaken security controls to simplify HTML delivery.**
 18. **Authentication, session, CSRF, authorization, and mutation semantics must be explicitly designed for server-rendered and HTMX requests.**
-19. **Browser E2E remains production-path testing.** `scripts/e2e.sh` remains the authoritative E2E harness unless a later PR explicitly replaces it.
+19. **Browser E2E remains production-path testing, but acceptance follows frontend ownership.** During V07 coexistence, the new web UI uses its own `scripts/e2e-web.sh` harness. The legacy React `scripts/e2e.sh` suite is not a routine V07 acceptance gate; run it only when a PR changes React or shared behavior for which targeted compatibility coverage is insufficient.
 20. **Feature parity is behavioral, not DOM parity.** The new UI need not reproduce React component structure.
 21. **React is removed only after the parity matrix and final acceptance gates pass.**
 22. **Do not redesign unrelated backend/domain architecture merely to facilitate the frontend migration.**
@@ -434,13 +434,28 @@ Playwright remains required for actual analyst journeys and browser semantics, i
 - report navigation;
 - responsive/keyboard behavior where browser semantics matter.
 
-The authoritative harness remains:
+During V07 coexistence the harness ownership is:
 
 ```text
-./scripts/e2e.sh
+./scripts/e2e.sh       -> legacy React frontend
+./scripts/e2e-web.sh   -> new FastAPI/Jinja2/HTMX frontend
 ```
 
-unless a V07 PR explicitly changes and documents that contract.
+`scripts/e2e-web.sh` is the normal browser acceptance harness for V07 migration work. It should support targeted PR-specific specifications so a migration PR does not need to execute every accumulated browser journey when narrower coverage proves the affected behavior.
+
+The full legacy React `scripts/e2e.sh` suite is **not** a normal V07-1 through V07-6 gate. Require it only when the PR:
+
+- modifies `frontend/` or legacy React behavior;
+- changes an existing API contract consumed by React;
+- changes authentication/session/CSRF semantics in a way that can affect React;
+- changes Nginx/Compose/routing behavior used by React; or
+- changes another shared runtime contract for which targeted compatibility testing is insufficient.
+
+When a shared change can affect React but a small compatibility journey proves the relevant contract, prefer that targeted compatibility test over the full legacy suite.
+
+V07-1 is a special case because it establishes parallel authentication/origin/runtime behavior. It must provide targeted React compatibility coverage for the affected security/runtime contract, but it does **not** require the complete legacy React E2E suite solely for migration acceptance.
+
+At V07-7, after the React frontend is removed and the new-web harness has proven the retained parity journeys, consolidate the harnesses so the web harness becomes the canonical `scripts/e2e.sh` and delete obsolete React E2E infrastructure.
 
 Direct lower-level Playwright invocation may be diagnostic; it must not silently replace the repository-prescribed acceptance topology.
 
@@ -522,8 +537,9 @@ Introduce the production `web/` presentation adapter and make it runnable alongs
 - parallel runtime/container/process topology;
 - explicit URL/public-origin behavior for both frontends;
 - Python tests for full-page and HTMX rendering;
-- initial Playwright smoke path through the new frontend;
-- documentation of package ownership and coding conventions.
+- dedicated `scripts/e2e-web.sh` production-path harness and initial Playwright smoke path through the new frontend;
+- targeted React authentication/origin/runtime compatibility coverage sufficient to prove the parallel-foundation changes did not break the affected React contract, without requiring the full legacy React E2E suite;
+- documentation of package ownership, coding conventions, and dual-harness lifecycle.
 
 ### Must preserve
 
@@ -753,7 +769,9 @@ ATI has one supported human frontend: `agentic_threat_investigator.web`, using F
 
 ### Keep React healthy until cutover
 
-Migration PRs must not deliberately break the React frontend before V07-7. If shared backend/API behavior changes, existing React regression tests remain relevant until cutover.
+Migration PRs must not deliberately break the React frontend before V07-7. This does not make the full legacy React browser suite a routine gate for replacement-frontend work.
+
+If a migration PR changes a contract used by React, test the affected compatibility surface at the cheapest layer that completely proves it. Prefer focused server/integration coverage or a targeted React browser journey when sufficient. Run the full legacy `scripts/e2e.sh` suite only when the affected surface is broad enough that targeted coverage is insufficient.
 
 ### Prefer vertical capability migration
 
@@ -919,10 +937,11 @@ Before each V07 PR:
 3. follow `docs/DETAILED_PR_PLAN_AUTHORING_GUIDE.md`;
 4. reconcile what is already implemented;
 5. identify exact files and reusable abstractions;
-6. define unit/integration/E2E matrices;
-7. define STOP conditions;
-8. define mandatory acceptance gates;
-9. classify every failing mandatory gate before completion.
+6. define unit/integration/E2E matrices, distinguishing new-web acceptance from any legacy React compatibility coverage;
+7. make `scripts/e2e-web.sh` the normal V07 browser gate and require full legacy `scripts/e2e.sh` only when the PR's actual change surface justifies it;
+8. define STOP conditions;
+9. define mandatory acceptance gates;
+10. classify every failing mandatory gate before completion.
 
 Do not implement a V07 PR directly from this roadmap when a detailed execution plan is required.
 
@@ -961,8 +980,8 @@ V07 is complete only when:
 4. Graph/temporal/map functionality works through bounded JS islands without a SPA framework.
 5. Authentication, authorization, CSRF, escaping, and session behavior pass their required tests.
 6. Browser Back/Forward, refresh, and deep links work for required analyst journeys.
-7. Required Chromium/Firefox E2E passes through the authoritative harness.
-8. Required repeated stability journeys pass with retries disabled where specified.
+7. Required Chromium/Firefox E2E passes through the new-web production-path harness; after V07-7 cutover that harness is the canonical `scripts/e2e.sh`.
+8. Required repeated stability journeys pass with retries disabled where specified; legacy React full-suite execution is not required merely because React coexisted during earlier migration PRs.
 9. React/Vite/React Router/React Flow and obsolete SPA infrastructure have been removed.
 10. Deployment runs one human frontend.
 11. Architecture, testing, deployment, and contributor documentation describe the final implementation accurately.
