@@ -1,31 +1,37 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Deterministic Report provenance validation and authoritative assembly (PR 23B).
+"""Deterministic Report provenance validation and authoritative assembly.
 
 :func:`build_investigation_report` stamps every application-owned field onto
 the authoritative :class:`InvestigationReport` from a
-:class:`ReportWriterInput` and a :class:`ReportWriterOutput`: verdict and
-confidence are copied exactly from the current Assessment, Assessment
-findings are snapshotted application-side, Research claims/citations are
-snapshotted from persisted ResearchResults, caveat lists are copied exactly,
-and the top-level source identity sets are derived from the actual included
-provenance.
+:class:`ReportWriterInput` and a :class:`ReportWriterOutput`. The canonical
+finding set is the complete current Assessment finding set, ordered
+deterministically criticality-first (tie-broken by ascending Assessment
+ordinal) and numbered contiguously from one. The model contributes only one
+bounded presentation (short title + Summary sentence) per canonical finding
+plus research-context selections; it can never select, omit, reorder,
+renumber, or change analytical fields.
 
 :class:`ReportProvenanceValidator` then proves deterministic closure before
 persistence:
 
 - Assessment authority (investigation binding, assessment identity,
-  verdict/confidence equality);
-- finding closure (ordinals resolve, snapshots match the authoritative
-  Assessment finding exactly, no new findings);
-- narrative support closure (every reference resolves to a supplied
-  Assessment finding or supplied persisted ResearchClaim of the current
-  Investigation);
+  verdict/confidence/caveat equality);
+- presentation closure (exactly one presentation per canonical finding, no
+  unknown/duplicate/missing ordinals);
+- finding closure (every Assessment finding appears exactly once, snapshots
+  match the authoritative finding exactly, numbering is contiguous, and the
+  order is canonical);
+- Summary closure (exactly the critical/high/medium findings in order, text
+  equal to the canonical presentation sentence, exactly one typed
+  Assessment-finding support reference each);
+- Verdict/confidence/criticality authority (overall criticality is the
+  deterministic maximum finding criticality);
+- Status snapshot closure (lifecycle fields equal the persisted input);
 - research closure (snapshots match the persisted claim/citation snapshots);
-- Assessment caveats preserved exactly;
 - source-set closure (top-level ID sets equal the derived sets).
 
 This validator proves reference integrity, never semantic entailment:
-whether a narrative statement faithfully paraphrases its cited material is a
+whether a presentation faithfully paraphrases its cited finding is a
 behavioral-evaluation question, not a deterministic property.
 """
 
@@ -37,18 +43,23 @@ from agentic_threat_investigator.app.report_writer.errors import (
     ReportProvenanceError,
 )
 from agentic_threat_investigator.domain.assessment import (
+    CRITICALITY_RANK,
+    AnalyticalFinding,
     EvidenceSupport,
+    FindingCriticality,
 )
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
+    FindingPresentation,
     InvestigationReport,
     ReportFindingSnapshot,
-    ReportNarrativeStatement,
     ReportResearchClaimSnapshot,
     ReportResearchSelection,
+    ReportSummaryItem,
     ReportWriterInput,
     ReportWriterOutput,
-    ResearchClaimRef,
+    criticality_first_ordering,
+    is_summary_eligible,
 )
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
@@ -57,24 +68,89 @@ from agentic_threat_investigator.domain.research import (
 )
 
 
+def maximum_criticality(
+    findings: tuple[AnalyticalFinding, ...],
+) -> FindingCriticality:
+    """Return the deterministic maximum criticality across a finding set.
+
+    The most material criticality wins. An empty finding set is
+    ``informational``: no finding exists, so no stronger claim may be made.
+    """
+    criticalities = [finding.criticality for finding in findings]
+    if not criticalities:
+        return FindingCriticality.INFORMATIONAL
+    return min(criticalities, key=lambda value: CRITICALITY_RANK[value])
+
+
+def _presentations_by_ordinal(
+    output: ReportWriterOutput,
+) -> dict[int, FindingPresentation]:
+    """Return the model presentations keyed by Assessment finding ordinal."""
+    return {
+        presentation.assessment_finding_ordinal: presentation
+        for presentation in output.finding_presentations
+    }
+
+
 def build_investigation_report(
     report_input: ReportWriterInput,
     output: ReportWriterOutput,
 ) -> InvestigationReport:
     """Assemble the authoritative report by application stamping only.
 
-    The model contributes the title, narrative statements, finding
-    ordering/subset, and research claim selections; every other field is
-    copied or derived from the authoritative input snapshot. No model value
-    can replace the Assessment verdict/confidence or caveats.
+    The model contributes the title, one bounded presentation per canonical
+    finding, and research-context selections; every other field is copied or
+    derived from the authoritative input snapshot. Findings are ordered and
+    numbered deterministically; the Summary is the deterministic
+    Summary-eligible projection of the same canonical finding set.
     """
     assessment_id = report_input.assessment.id
     if assessment_id is None:  # pragma: no cover - loaded inputs carry it
         raise ReportProvenanceError("report input assessment has no persisted identity")
 
-    findings = tuple(
-        _snapshot_finding(report_input, ordinal) for ordinal in output.finding_order
+    presentations = _presentations_by_ordinal(output)
+    ordered = criticality_first_ordering(report_input.assessment.findings)
+
+    findings: list[ReportFindingSnapshot] = []
+    for report_number, (ordinal, finding) in enumerate(ordered, start=1):
+        presentation = presentations.get(ordinal)
+        if presentation is None:
+            raise ReportProvenanceError(
+                "report output is missing a presentation for assessment "
+                f"finding ordinal: {ordinal}"
+            )
+        findings.append(
+            ReportFindingSnapshot(
+                assessment_finding_ordinal=ordinal,
+                report_finding_number=report_number,
+                criticality=finding.criticality,
+                title=presentation.title,
+                category=finding.category,
+                disposition=finding.disposition,
+                statement=finding.statement,
+                confidence=finding.confidence,
+                summary=presentation.summary,
+                description=presentation.description,
+                support=finding.support,
+            )
+        )
+
+    summary = tuple(
+        ReportSummaryItem(
+            report_finding_number=finding.report_finding_number,
+            assessment_finding_ordinal=finding.assessment_finding_ordinal,
+            text=finding.summary,
+            support=(
+                AssessmentFindingRef(
+                    assessment_id=assessment_id,
+                    finding_ordinal=finding.assessment_finding_ordinal,
+                ),
+            ),
+        )
+        for finding in findings
+        if is_summary_eligible(finding.criticality)
     )
+
     research_context = tuple(
         _snapshot_research_claim(report_input, selection)
         for selection in output.research_context
@@ -82,8 +158,8 @@ def build_investigation_report(
 
     source_evidence_ids: list[UUID] = []
     source_observation_ids: list[UUID] = []
-    for finding in findings:
-        for support in finding.support:
+    for snapshot in findings:
+        for support in snapshot.support:
             if isinstance(support, EvidenceSupport):
                 source_evidence_ids.append(support.evidence_id)
             else:
@@ -94,37 +170,23 @@ def build_investigation_report(
         assessment_id=assessment_id,
         verdict=report_input.assessment.verdict,
         confidence=report_input.assessment.confidence,
+        criticality=maximum_criticality(report_input.assessment.findings),
         title=output.title,
-        executive_summary=output.executive_summary,
-        findings=findings,
+        summary=summary,
+        findings=tuple(findings),
         research_context=research_context,
         limitations=report_input.assessment.limitations,
         unresolved_questions=report_input.assessment.unresolved_questions,
         recommended_next_steps=report_input.assessment.recommended_next_steps,
+        started_at=report_input.started_at,
+        ended_at=report_input.completed_at,
+        outcome_status=report_input.investigation_status,
+        stop_reason=report_input.stop_reason,
         source_evidence_ids=_deduplicate(source_evidence_ids),
         source_relationship_observation_ids=_deduplicate(source_observation_ids),
         source_research_result_ids=_deduplicate(
             [snapshot.research_result_id for snapshot in research_context]
         ),
-    )
-
-
-def _snapshot_finding(
-    report_input: ReportWriterInput, ordinal: int
-) -> ReportFindingSnapshot:
-    """Snapshot the authoritative Assessment finding at one ordinal."""
-    finding = report_input.finding_by_ordinal(ordinal)
-    if finding is None:
-        raise ReportProvenanceError(
-            f"finding_order references an unknown assessment finding ordinal: {ordinal}"
-        )
-    return ReportFindingSnapshot(
-        assessment_finding_ordinal=ordinal,
-        category=finding.category,
-        disposition=finding.disposition,
-        statement=finding.statement,
-        confidence=finding.confidence,
-        support=finding.support,
     )
 
 
@@ -197,8 +259,7 @@ class ReportProvenanceValidator:
         """Validate the assembled report or raise the first typed failure."""
         self._validate_assessment_authority(report, report_input)
         self._validate_finding_closure(report, report_input)
-        for statement in report.executive_summary:
-            self._validate_narrative_statement(statement, report_input)
+        self._validate_summary_closure(report, report_input)
         self._validate_research_closure(report, report_input)
         self._validate_source_set_closure(report)
 
@@ -224,6 +285,11 @@ class ReportProvenanceValidator:
             raise ReportProvenanceError(
                 "report confidence does not match the current assessment confidence"
             )
+        expected_criticality = maximum_criticality(assessment.findings)
+        if report.criticality is not expected_criticality:
+            raise ReportProvenanceError(
+                "report criticality is not the maximum assessment finding criticality"
+            )
         if report.limitations != assessment.limitations:
             raise ReportProvenanceError(
                 "report limitations do not match the current assessment"
@@ -236,23 +302,51 @@ class ReportProvenanceValidator:
             raise ReportProvenanceError(
                 "report recommended next steps do not match the current assessment"
             )
+        if report.started_at != report_input.started_at:
+            raise ReportProvenanceError(
+                "report started_at does not match the persisted investigation"
+            )
+        if report.ended_at != report_input.completed_at:
+            raise ReportProvenanceError(
+                "report ended_at does not match the persisted investigation"
+            )
+        if report.outcome_status is not report_input.investigation_status:
+            raise ReportProvenanceError(
+                "report outcome status does not match the persisted investigation"
+            )
+        if report.stop_reason != report_input.stop_reason:
+            raise ReportProvenanceError(
+                "report stop reason does not match the persisted investigation"
+            )
 
     @staticmethod
     def _validate_finding_closure(
         report: InvestigationReport, report_input: ReportWriterInput
     ) -> None:
-        """Require every report finding to snapshot the authoritative finding."""
-        for snapshot in report.findings:
-            finding = report_input.finding_by_ordinal(
-                snapshot.assessment_finding_ordinal
+        """Require every canonical finding to appear exactly once in order."""
+        assessment_findings = report_input.assessment.findings
+        ordered = criticality_first_ordering(assessment_findings)
+        if len(report.findings) != len(ordered):
+            raise ReportProvenanceError(
+                "report findings must contain every assessment finding exactly once"
             )
-            if finding is None:
+        expected_numbers = list(range(1, len(ordered) + 1))
+        actual_numbers = [
+            snapshot.report_finding_number for snapshot in report.findings
+        ]
+        if actual_numbers != expected_numbers:
+            raise ReportProvenanceError(
+                "report finding numbers must be contiguous from one in canonical order"
+            )
+        for position, snapshot in enumerate(report.findings):
+            ordinal, finding = ordered[position]
+            if snapshot.assessment_finding_ordinal != ordinal:
                 raise ReportProvenanceError(
-                    "report finding references an unknown assessment finding "
-                    f"ordinal: {snapshot.assessment_finding_ordinal}"
+                    "report finding order is not canonical criticality-first order"
                 )
             if (
-                snapshot.category is not finding.category
+                snapshot.criticality is not finding.criticality
+                or snapshot.category is not finding.category
                 or snapshot.disposition is not finding.disposition
                 or snapshot.statement != finding.statement
                 or snapshot.confidence is not finding.confidence
@@ -260,29 +354,59 @@ class ReportProvenanceValidator:
             ):
                 raise ReportProvenanceError(
                     "report finding snapshot differs from the authoritative "
-                    f"assessment finding at ordinal "
-                    f"{snapshot.assessment_finding_ordinal}"
+                    f"assessment finding at ordinal {ordinal}"
                 )
 
     @staticmethod
-    def _validate_narrative_statement(
-        statement: ReportNarrativeStatement, report_input: ReportWriterInput
+    def _validate_summary_closure(
+        report: InvestigationReport, report_input: ReportWriterInput
     ) -> None:
-        """Require every narrative support reference to resolve to supplied material."""
-        for ref in statement.support:
-            if isinstance(ref, AssessmentFindingRef):
-                if ref.assessment_id != report_input.assessment.id:
-                    raise ReportProvenanceError(
-                        "narrative statement references an assessment other "
-                        "than the current assessment"
-                    )
-                if report_input.finding_by_ordinal(ref.finding_ordinal) is None:
-                    raise ReportProvenanceError(
-                        "narrative statement references an unknown assessment "
-                        f"finding ordinal: {ref.finding_ordinal}"
-                    )
-            else:
-                _validate_research_ref(report_input, ref)
+        """Require the Summary to be the exact eligible canonical projection."""
+        findings_by_ordinal = {
+            finding.assessment_finding_ordinal: finding for finding in report.findings
+        }
+        expected = [
+            finding
+            for finding in report.findings
+            if is_summary_eligible(finding.criticality)
+        ]
+        if len(report.summary) != len(expected):
+            raise ReportProvenanceError(
+                "report summary must contain exactly the summary-eligible findings"
+            )
+        assessment_id = report_input.assessment.id
+        for item, finding in zip(report.summary, expected, strict=True):
+            if item.report_finding_number != finding.report_finding_number:
+                raise ReportProvenanceError(
+                    "report summary item number does not match its finding"
+                )
+            if item.assessment_finding_ordinal != finding.assessment_finding_ordinal:
+                raise ReportProvenanceError(
+                    "report summary item references the wrong assessment finding"
+                )
+            if item.text != finding.summary:
+                raise ReportProvenanceError(
+                    "report summary item text differs from its finding presentation"
+                )
+            if len(item.support) != 1:
+                raise ReportProvenanceError(
+                    "report summary item must reference exactly one assessment finding"
+                )
+            ref = item.support[0]
+            if (
+                not isinstance(ref, AssessmentFindingRef)
+                or ref.assessment_id != assessment_id
+                or ref.finding_ordinal != finding.assessment_finding_ordinal
+            ):
+                raise ReportProvenanceError(
+                    "report summary item support must reference its exact finding"
+                )
+        # Defensive: a Summary item can only ever reference a canonical finding.
+        for item in report.summary:
+            if item.assessment_finding_ordinal not in findings_by_ordinal:
+                raise ReportProvenanceError(
+                    "report summary item references a non-canonical finding"
+                )
 
     @staticmethod
     def _validate_research_closure(
@@ -344,25 +468,6 @@ class ReportProvenanceValidator:
                 "report source_research_result_ids are not derived from the "
                 "included research context"
             )
-
-
-def _validate_research_ref(
-    report_input: ReportWriterInput, ref: ResearchClaimRef
-) -> None:
-    """Require a research claim reference to resolve to a supplied claim."""
-    result = _find_research_result(
-        report_input.research_results, ref.research_result_id
-    )
-    if result is None:
-        raise ReportProvenanceError(
-            "narrative statement references an unsupplied research result: "
-            f"{ref.research_result_id}"
-        )
-    if _find_research_claim(result, ref.research_claim_id) is None:
-        raise ReportProvenanceError(
-            "narrative statement references an unknown research claim: "
-            f"{ref.research_claim_id}"
-        )
 
 
 def _research_citations_for_claim(

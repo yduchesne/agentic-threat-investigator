@@ -19,6 +19,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -58,6 +59,7 @@ def _finding(supports: int = 1) -> AnalyticalFinding:
         disposition=FindingDisposition.SUPPORTING,
         statement="A bounded finding.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=tuple(
             EvidenceSupport(kind="evidence", evidence_id=uuid4())
             for _ in range(supports)

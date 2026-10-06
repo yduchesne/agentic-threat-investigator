@@ -49,6 +49,11 @@ Rules:
   MALICIOUS.
 - confidence expresses confidence in the verdict, not severity of the
   finding.
+- criticality expresses materiality/severity/importance of a finding and is
+  distinct from confidence. Set exactly one bounded criticality per finding:
+  "critical", "high", "medium", "low", or "informational". Never derive
+  criticality from confidence, verdict, category, or disposition, and never
+  derive confidence from criticality.
 - Represent contradictory findings explicitly with disposition
   \"contradicting\".
 - Set the required disposition field to exactly one of the bounded values:

@@ -369,6 +369,7 @@ async def _second_assessment(
         AssessmentConfidence,
         EvidenceSupport,
         FindingCategory,
+        FindingCriticality,
         FindingDisposition,
         Verdict,
     )
@@ -385,6 +386,7 @@ async def _second_assessment(
                 disposition=FindingDisposition.SUPPORTING,
                 statement="Updated analytical statement.",
                 confidence=AssessmentConfidence.MEDIUM,
+                criticality=FindingCriticality.MEDIUM,
                 support=(EvidenceSupport(kind="evidence", evidence_id=evidence_id),),
             ),
         ),

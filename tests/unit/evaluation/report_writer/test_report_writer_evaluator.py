@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.report import (
     ReportResearchClaimSnapshot,
     ReportWriterInput,
@@ -240,6 +241,42 @@ def test_unsupported_research_reference_detected() -> None:
     assert ReportWriterFailureCode.UNSUPPORTED_SOURCE_REFERENCE in result.failures
 
 
+def test_description_hallucination_trap_detected() -> None:
+    """Unsupported attribution in a finding description fails the envelope."""
+    scenario = _scenarios()["rpt-s01-clearly-malicious"]
+    fixture = report_writer_fixture(scenario.fixture)
+    resolution = _resolution(scenario)
+    output = build_canonical_report_output(scenario, resolution, fixture)
+    from agentic_threat_investigator.app.report_writer.validator import (
+        build_investigation_report,
+    )
+
+    report = build_investigation_report(_input(resolution, fixture), output)
+    mutated = report.model_copy(
+        update={
+            "findings": tuple(
+                finding.model_copy(
+                    update={
+                        "description": (
+                            "The indicator is attributed to threat actor Example."
+                        )
+                    }
+                )
+                if index == 0
+                else finding
+                for index, finding in enumerate(report.findings)
+            )
+        }
+    )
+    result = _evaluate(
+        scenario, ReportWriterEvaluationInput(report=mutated, llm_calls=1)
+    )
+    assert not result.passed
+    assert (
+        ReportWriterFailureCode.REPORT_STATEMENT_ENVELOPE_VIOLATION in result.failures
+    )
+
+
 def test_forbidden_phrase_detected() -> None:
     """A forbidden canonical phrase is detected in the narrative envelope."""
     scenario = _scenarios()["rpt-s02-inconclusive-sparse"]
@@ -254,13 +291,15 @@ def test_forbidden_phrase_detected() -> None:
     # The builder produces no statements for S02; inject a forbidden phrase.
     from agentic_threat_investigator.domain.report import (
         AssessmentFindingRef,
-        ReportNarrativeStatement,
+        ReportSummaryItem,
     )
 
     report = report.model_copy(
         update={
-            "executive_summary": (
-                ReportNarrativeStatement(
+            "summary": (
+                ReportSummaryItem(
+                    report_finding_number=1,
+                    assessment_finding_ordinal=1,
                     text="The indicator is benign.",
                     support=(
                         AssessmentFindingRef(
@@ -294,6 +333,7 @@ def _input(
         AnalyticalFinding,
         Assessment,
         EvidenceSupport,
+        FindingCriticality,
     )
     from agentic_threat_investigator.domain.report import ReportWriterInput
     from agentic_threat_investigator.domain.research import (
@@ -317,6 +357,7 @@ def _input(
                 disposition=finding.disposition,
                 statement=finding.statement,
                 confidence=finding.confidence,
+                criticality=FindingCriticality.MEDIUM,
                 support=support,
             )
         )
@@ -377,6 +418,8 @@ def _input(
         objective="Assess the root indicator.",
         assessment=assessment,
         research_results=research_results,
+        investigation_status=InvestigationStatus.RUNNING,
+        started_at=datetime(2026, 1, 2, tzinfo=UTC),
     )
 
 

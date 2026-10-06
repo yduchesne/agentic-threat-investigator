@@ -25,6 +25,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -144,6 +145,7 @@ def canonical_decision(
                 disposition=expectation.disposition.value,
             ),
             confidence=_finding_confidence(expectation, scenario, selected_confidence),
+            criticality=FindingCriticality.MEDIUM,
             support=support,
         )
         key = _expectation_key(finding)
@@ -190,6 +192,7 @@ def evidence_only_finding(
         disposition=disposition,
         statement=statement,
         confidence=confidence,
+        criticality=FindingCriticality.MEDIUM,
         support=tuple(
             EvidenceSupport(kind="evidence", evidence_id=evidence_id)
             for evidence_id in evidence_ids

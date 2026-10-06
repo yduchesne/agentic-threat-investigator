@@ -184,7 +184,8 @@ async def test_f02_worker_writes_current_report(
     assert report_body["verdict"] == Verdict.MALICIOUS.value
     assert report_body["confidence"] == "high"
     assert report_body["title"] == "ATI deterministic investigation report"
-    assert report_body["executive_summary"]
+    assert report_body["criticality"] == "high"
+    assert report_body["summary"]
     assert report_body["findings"]
     for finding in report_body["findings"]:
         assert finding["support"]

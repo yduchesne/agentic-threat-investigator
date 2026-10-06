@@ -43,6 +43,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -50,10 +51,12 @@ from agentic_threat_investigator.domain.assessment import (
 )
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
-from agentic_threat_investigator.domain.investigation import AnalysisDisposition
+from agentic_threat_investigator.domain.investigation import (
+    AnalysisDisposition,
+    InvestigationStatus,
+)
 from agentic_threat_investigator.domain.relationships import RelationshipType
 from agentic_threat_investigator.domain.report import (
-    AssessmentFindingRef,
     ReportWriterInput,
     ReportWriterOutput,
 )
@@ -139,6 +142,7 @@ def _report_input() -> ReportWriterInput:
                 disposition=FindingDisposition.SUPPORTING,
                 statement="threat-intelligence signal associates the root",
                 confidence=AssessmentConfidence.HIGH,
+                criticality=FindingCriticality.MEDIUM,
                 support=(EvidenceSupport(kind="evidence", evidence_id=evidence_id),),
             ),
         ),
@@ -147,6 +151,10 @@ def _report_input() -> ReportWriterInput:
         investigation_id=investigation_id,
         objective="assess the update-package delivery domain",
         assessment=assessment,
+        investigation_status=InvestigationStatus.COMPLETED,
+        started_at=datetime(2026, 1, 2, tzinfo=UTC),
+        completed_at=datetime(2026, 1, 2, 1, tzinfo=UTC),
+        stop_reason="evidence sufficient",
     )
 
 
@@ -261,7 +269,7 @@ async def test_research_synthesis_is_empty_context() -> None:
 
 @pytest.mark.asyncio
 async def test_report_writer_reflects_supplied_assessment() -> None:
-    """Report output supports exactly the rendered Assessment finding ordinal."""
+    """Report output authors exactly one presentation per rendered finding."""
     report_input = _report_input()
     system_prompt, user_prompt = build_report_writer_prompts(report_input)
     client = DeterministicLlmClient()
@@ -270,12 +278,12 @@ async def test_report_writer_reflects_supplied_assessment() -> None:
     )
     assert isinstance(output, ReportWriterOutput)
     assert output.title
-    assert output.finding_order == (1,)
-    assert len(output.executive_summary) == 1
-    ref = output.executive_summary[0].support[0]
-    assert isinstance(ref, AssessmentFindingRef)
-    assert ref.assessment_id == report_input.assessment.id
-    assert ref.finding_ordinal == 1
+    assert len(output.finding_presentations) == 1
+    presentation = output.finding_presentations[0]
+    assert presentation.assessment_finding_ordinal == 1
+    assert presentation.title
+    assert presentation.summary
+    assert presentation.description
 
 
 @pytest.mark.asyncio

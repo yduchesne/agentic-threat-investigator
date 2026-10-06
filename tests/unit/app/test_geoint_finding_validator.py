@@ -36,6 +36,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -534,6 +535,7 @@ def test_g26f_g05_independent_evidence_plus_geographic_context_allowed() -> None
         disposition=FindingDisposition.SUPPORTING,
         statement="A block-list source reports the indicator.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
     )
     decision, context = world.decision(

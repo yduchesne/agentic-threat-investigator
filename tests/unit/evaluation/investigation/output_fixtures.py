@@ -13,6 +13,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -38,8 +39,9 @@ from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
     ReportFindingSnapshot,
-    ReportNarrativeStatement,
     ReportResearchClaimSnapshot,
+    ReportSummaryItem,
+    is_summary_eligible,
 )
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
@@ -192,6 +194,7 @@ def assessment(
                 disposition=FindingDisposition.SUPPORTING,
                 statement="Reputation signal supports the verdict.",
                 confidence=confidence,
+                criticality=FindingCriticality.MEDIUM,
                 support=(EvidenceSupport(kind="evidence", evidence_id=OBSERVATION_ID),),
             ),
         ),
@@ -207,43 +210,57 @@ def report(
     confidence: AssessmentConfidence = AssessmentConfidence.HIGH,
     finding_ordinals: tuple[int, ...] = (1,),
     research_context: tuple[ReportResearchClaimSnapshot, ...] = (),
-    narrative: tuple[ReportNarrativeStatement, ...] = (),
     limitations: tuple[str, ...] = (),
 ) -> InvestigationReport:
     """Build one persisted InvestigationReport fixture."""
+    findings = tuple(
+        ReportFindingSnapshot(
+            assessment_finding_ordinal=ordinal,
+            report_finding_number=number,
+            criticality=FindingCriticality.MEDIUM,
+            title="Reputation signal supports the verdict.",
+            category=FindingCategory.REPUTATION,
+            disposition=FindingDisposition.SUPPORTING,
+            statement="Reputation signal supports the verdict.",
+            confidence=confidence,
+            summary="Reputation signal supports the verdict.",
+            description="Deterministic description.",
+            support=(EvidenceSupport(kind="evidence", evidence_id=OBSERVATION_ID),),
+        )
+        for number, ordinal in enumerate(finding_ordinals, start=1)
+    )
+    summary = tuple(
+        ReportSummaryItem(
+            report_finding_number=finding.report_finding_number,
+            assessment_finding_ordinal=finding.assessment_finding_ordinal,
+            text=finding.summary,
+            support=(
+                AssessmentFindingRef(
+                    kind="assessment_finding",
+                    assessment_id=ASSESSMENT_ID,
+                    finding_ordinal=finding.assessment_finding_ordinal,
+                ),
+            ),
+        )
+        for finding in findings
+        if is_summary_eligible(finding.criticality)
+    )
     return InvestigationReport(
         id=REPORT_ID,
         investigation_id=INVESTIGATION_ID,
         assessment_id=ASSESSMENT_ID,
         verdict=verdict,
         confidence=confidence,
+        criticality=FindingCriticality.MEDIUM
+        if findings
+        else FindingCriticality.INFORMATIONAL,
         title="Deterministic report",
-        executive_summary=narrative
-        or (
-            ReportNarrativeStatement(
-                text="The investigation reached a malicious verdict.",
-                support=(
-                    AssessmentFindingRef(
-                        kind="assessment_finding",
-                        assessment_id=ASSESSMENT_ID,
-                        finding_ordinal=1,
-                    ),
-                ),
-            ),
-        ),
-        findings=tuple(
-            ReportFindingSnapshot(
-                assessment_finding_ordinal=ordinal,
-                category=FindingCategory.REPUTATION,
-                disposition=FindingDisposition.SUPPORTING,
-                statement="Reputation signal supports the verdict.",
-                confidence=confidence,
-                support=(EvidenceSupport(kind="evidence", evidence_id=OBSERVATION_ID),),
-            )
-            for ordinal in finding_ordinals
-        ),
+        summary=summary,
+        findings=findings,
         research_context=research_context,
         limitations=limitations,
+        started_at=_FIXED,
+        outcome_status=InvestigationStatus.COMPLETED,
         source_evidence_ids=(OBSERVATION_ID,),
         source_relationship_observation_ids=(RELATIONSHIP_OBS_ID,),
         source_research_result_ids=tuple(

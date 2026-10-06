@@ -50,6 +50,7 @@ from agentic_threat_investigator.domain.assessment import (
 )
 from agentic_threat_investigator.domain.investigation import InvestigationState
 from agentic_threat_investigator.domain.report import (
+    FindingPresentation,
     ReportResearchSelection,
     ReportWriterOutput,
 )
@@ -241,12 +242,19 @@ def canonical_output(
     )
 
 
-def unsupported_reference_output() -> ReportWriterOutput:
+def unsupported_reference_output(fixture: ReportWriterFixture) -> ReportWriterOutput:
     """Build a schema-valid output carrying an unsupported research reference."""
     return ReportWriterOutput(
         title="Unsupported reference attempt",
-        executive_summary=(),
-        finding_order=(),
+        finding_presentations=tuple(
+            FindingPresentation(
+                assessment_finding_ordinal=ordinal,
+                title=f"Finding {ordinal} factual title",
+                summary=f"Finding {ordinal} factual summary.",
+                description="Deterministic description.",
+            )
+            for ordinal in range(1, len(fixture.findings) + 1)
+        ),
         research_context=(
             ReportResearchSelection(
                 research_result_id=uuid4(),
@@ -256,9 +264,21 @@ def unsupported_reference_output() -> ReportWriterOutput:
     )
 
 
-def empty_output() -> ReportWriterOutput:
-    """Build a runtime-valid output that violates the scenario envelope."""
-    return ReportWriterOutput(title="Canonical report")
+def empty_output(fixture: ReportWriterFixture) -> ReportWriterOutput:
+    """Build a provenance-valid output that violates the scenario envelope."""
+    return ReportWriterOutput(
+        title="Canonical report",
+        finding_presentations=tuple(
+            FindingPresentation(
+                assessment_finding_ordinal=ordinal,
+                title=f"Finding {ordinal} factual title",
+                summary=f"Finding {ordinal} factual summary.",
+                description="Deterministic description.",
+            )
+            for ordinal in range(1, len(fixture.findings) + 1)
+        ),
+        research_context=(),
+    )
 
 
 class RacingFakeLlmClient(FakeLlmClient):
@@ -351,11 +371,11 @@ class TestExpectedNoReport:
         scenario = _scenario(scenarios, S06)
         materializer = MaterializeOnceMaterializer(uow_factory, execution_id=uuid4())
         llm = FakeLlmClient()
-        llm.set_default(unsupported_reference_output())
+        fixture = report_writer_fixture(scenario.fixture)
+        llm.set_default(unsupported_reference_output(fixture))
         result = await _run_case(uow_factory, llm, scenario, materializer)
         assert result.execution_status is EvaluationExecutionStatus.COMPLETED
         assert result.verdict is EvaluationVerdict.PASS
-        fixture = report_writer_fixture(scenario.fixture)
         investigation_id = await _investigation_by_objective(
             uow_factory, fixture.objective
         )
@@ -447,17 +467,17 @@ class TestFailAndError:
         scenario = _scenario(scenarios, S01)
         materializer = MaterializeOnceMaterializer(uow_factory, execution_id=uuid4())
         llm = FakeLlmClient()
-        llm.set_default(empty_output())
+        fixture = report_writer_fixture(scenario.fixture)
+        llm.set_default(empty_output(fixture))
         result = await _run_case(uow_factory, llm, scenario, materializer)
         assert result.execution_status is EvaluationExecutionStatus.COMPLETED
         assert result.verdict is EvaluationVerdict.FAIL
         case = result.cases[0]
         assert case.verdict is EvaluationVerdict.FAIL
         explanation = case.evaluator_results[0].explanation
-        assert "required_assessment_finding_missing" in explanation
+        assert "required_research_claim_missing" in explanation
         # The provenance-valid but behaviorally-wrong report still persisted:
         # behavioral FAIL is not persistence failure.
-        fixture = report_writer_fixture(scenario.fixture)
         investigation_id = await _investigation_by_objective(
             uow_factory, fixture.objective
         )

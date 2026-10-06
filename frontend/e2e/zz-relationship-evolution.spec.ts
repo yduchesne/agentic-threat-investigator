@@ -178,7 +178,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(page).not.toHaveURL(/pivot=/);
     await expect(page.getByText("Relationship ID", { exact: true })).toBeVisible();
     // Close the underlying observation detail via its Back control.
-    await page.getByRole("button", { name: "Back to Relationship history" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);
 
     // Switch to the bounded one-hop Graph (G31D-E01/E02/E08): the canvas and
@@ -510,7 +510,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(
       page.getByRole("heading", { name: "Relationship details" }),
     ).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("button", { name: "Back to Relationships" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);
 
     // Refresh preserves the URL-backed Evolution filter/entity state.

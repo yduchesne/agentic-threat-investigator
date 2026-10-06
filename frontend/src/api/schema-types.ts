@@ -8,6 +8,7 @@
 
 import type {
   AssessmentConfidence,
+  AssessmentFindingRefResponse,
   AssessmentResponse,
   AuthenticatedUserResponse,
   CreateInvestigationRequest,
@@ -17,6 +18,7 @@ import type {
   EvidenceResponse,
   EvidenceSupportPresentationResponse,
   EvidenceType,
+  FindingCriticality,
   FindingResponse,
   FindingSupportResponse,
   GeoPrecision,
@@ -47,7 +49,6 @@ import type {
   LocationType,
   PageResponseGeointObservationResponse,
   LoginRequest,
-  NarrativeStatementResponse,
   PageResponseEvidenceResponse,
   PageResponseHistoryRecordResponse,
   PageResponseInvestigationResponse,
@@ -63,6 +64,7 @@ import type {
   ReportFindingResponse,
   ReportResearchClaimResponse,
   ReportResponse,
+  ReportSummaryItemResponse,
   ResearchCitationResponse,
   ResearchClaimResponse,
   ResearchResultResponse,
@@ -266,8 +268,14 @@ export type HistoryOperationName = HistoryOperation;
 /** One application-copied Report finding snapshot (PR 24B). */
 export type ReportFinding = ReportFindingResponse;
 
-/** One model-authored narrative statement with explicit typed support. */
-export type NarrativeStatement = NarrativeStatementResponse;
+/** The bounded authoritative finding criticality vocabulary (PR 35-5). */
+export type ReportCriticalityName = FindingCriticality;
+
+/** One finding-centric Report Summary projection item (PR 35-5). */
+export type ReportSummaryItem = ReportSummaryItemResponse;
+
+/** One typed reference to a canonical Report Summary finding (PR 35-5). */
+export type ReportSummarySupport = AssessmentFindingRefResponse;
 
 /** One persisted ResearchClaim snapshot in report research context. */
 export type ReportResearchClaim = ReportResearchClaimResponse;

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Shared in-memory Report Writer world for PR 23B unit suites.
+"""Shared in-memory Report Writer world for PR 23B/PR 35-5 unit suites.
 
 One fully-populated :class:`ReportWriterInput` (current Assessment with one
 supported finding, one Evidence, one ResearchResult with one claim/citation)
@@ -22,18 +22,18 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.report import (
-    AssessmentFindingRef,
-    ReportNarrativeStatement,
+    FindingPresentation,
     ReportResearchSelection,
     ReportWriterInput,
     ReportWriterOutput,
-    ResearchClaimRef,
 )
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
@@ -42,6 +42,7 @@ from agentic_threat_investigator.domain.research import (
 )
 
 _FIXED = datetime(2026, 1, 2, tzinfo=UTC)
+_COMPLETED = datetime(2026, 1, 2, 1, 30, tzinfo=UTC)
 
 
 class ReportWriterUnitWorld:
@@ -94,6 +95,7 @@ class ReportWriterUnitWorld:
                     disposition=FindingDisposition.SUPPORTING,
                     statement="Reputation evidence indicates malicious activity.",
                     confidence=AssessmentConfidence.HIGH,
+                    criticality=FindingCriticality.HIGH,
                     support=(
                         EvidenceSupport(kind="evidence", evidence_id=self.evidence_id),
                     ),
@@ -128,16 +130,34 @@ class ReportWriterUnitWorld:
             "assessment": self.assessment,
             "evidence": self.evidence,
             "research_results": (self.research,),
+            "investigation_status": InvestigationStatus.COMPLETED,
+            "started_at": _FIXED,
+            "completed_at": _COMPLETED,
+            "stop_reason": "evidence sufficient",
         }
         payload.update(overrides)
         return ReportWriterInput.model_validate(payload)
 
+    def presentation(
+        self,
+        ordinal: int = 1,
+        *,
+        title: str = "Reputation evidence indicates malicious activity.",
+        summary: str = "Reputation evidence indicates malicious activity.",
+    ) -> FindingPresentation:
+        """Build one canonical presentation for a finding ordinal."""
+        return FindingPresentation(
+            assessment_finding_ordinal=ordinal,
+            title=title,
+            summary=summary,
+            description="Deterministic description.",
+        )
+
     def output(
         self,
         *,
-        finding_order: tuple[int, ...] = (1,),
+        presentations: tuple[FindingPresentation, ...] | None = None,
         research: tuple[ReportResearchSelection, ...] | None = None,
-        statements: tuple[ReportNarrativeStatement, ...] | None = None,
     ) -> ReportWriterOutput:
         """Build a canonical model output for this world."""
         selections = (
@@ -150,29 +170,12 @@ class ReportWriterUnitWorld:
                 ),
             )
         )
-        narrative = statements
-        if narrative is None:
-            narrative = (
-                ReportNarrativeStatement(
-                    text="Canonical statement.",
-                    support=(
-                        AssessmentFindingRef(
-                            kind="assessment_finding",
-                            assessment_id=self.assessment_id,
-                            finding_ordinal=1,
-                        ),
-                        ResearchClaimRef(
-                            kind="research_claim",
-                            research_result_id=self.result_id,
-                            research_claim_id=self.claim_id,
-                        ),
-                    ),
-                ),
-            )
+        finding_presentations = (
+            presentations if presentations is not None else (self.presentation(),)
+        )
         return ReportWriterOutput(
             title="Canonical report title",
-            executive_summary=narrative,
-            finding_order=finding_order,
+            finding_presentations=finding_presentations,
             research_context=selections,
         )
 
@@ -185,5 +188,4 @@ class ReportWriterUnitWorld:
                     research_claim_id=uuid4(),
                 ),
             ),
-            statements=(),
         )

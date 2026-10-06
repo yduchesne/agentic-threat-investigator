@@ -27,12 +27,18 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
+    criticality_rank,
 )
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.report import (
+    AssessmentFindingRef,
     InvestigationReport,
     ReportFindingSnapshot,
+    ReportSummaryItem,
+    is_summary_eligible,
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
@@ -69,6 +75,7 @@ async def seed_assessment(
                 disposition=FindingDisposition.SUPPORTING,
                 statement="Reputation evidence indicates malicious activity.",
                 confidence=AssessmentConfidence.HIGH,
+                criticality=FindingCriticality.MEDIUM,
                 support=(EvidenceSupport(kind="evidence", evidence_id=evidence_id),),
             ),
         ),
@@ -89,26 +96,58 @@ def report_candidate(
     if assessment.id is None:  # pragma: no cover - persisted rows carry it
         raise RuntimeError("assessment has no identity")
     evidence_ids = list(assessment.analyzed_evidence_ids)
+    findings = tuple(
+        ReportFindingSnapshot(
+            assessment_finding_ordinal=ordinal,
+            report_finding_number=ordinal,
+            criticality=finding.criticality,
+            title=finding.statement[:120],
+            category=finding.category,
+            disposition=finding.disposition,
+            statement=finding.statement,
+            confidence=finding.confidence,
+            summary=finding.statement,
+            description="Deterministic description.",
+            support=finding.support,
+        )
+        for ordinal, finding in enumerate(assessment.findings, start=1)
+    )
+    summary = tuple(
+        ReportSummaryItem(
+            report_finding_number=finding.report_finding_number,
+            assessment_finding_ordinal=finding.assessment_finding_ordinal,
+            text=finding.summary,
+            support=(
+                AssessmentFindingRef(
+                    kind="assessment_finding",
+                    assessment_id=assessment.id,
+                    finding_ordinal=finding.assessment_finding_ordinal,
+                ),
+            ),
+        )
+        for finding in findings
+        if is_summary_eligible(finding.criticality)
+    )
     return InvestigationReport(
         investigation_id=investigation_id,
         assessment_id=assessment.id,
         verdict=assessment.verdict,
         confidence=assessment.confidence,
-        title=title,
-        findings=tuple(
-            ReportFindingSnapshot(
-                assessment_finding_ordinal=ordinal,
-                category=finding.category,
-                disposition=finding.disposition,
-                statement=finding.statement,
-                confidence=finding.confidence,
-                support=finding.support,
+        criticality=(
+            min(
+                (finding.criticality for finding in findings),
+                key=lambda value: criticality_rank(value),
             )
-            for ordinal, finding in enumerate(assessment.findings, start=1)
+            if findings
+            else FindingCriticality.INFORMATIONAL
         ),
+        title=title,
+        summary=summary,
+        findings=findings,
         limitations=assessment.limitations,
         unresolved_questions=assessment.unresolved_questions,
         recommended_next_steps=assessment.recommended_next_steps,
+        outcome_status=InvestigationStatus.COMPLETED,
         source_evidence_ids=tuple(evidence_ids),
     )
 
@@ -172,7 +211,8 @@ async def test_i01_append_report_row_version_and_history(
     assert history[0]["version"] == persisted.version
 
     # The authoritative row round-trips exactly.
-    assert persisted.executive_summary == candidate.executive_summary
+    assert persisted.criticality is candidate.criticality
+    assert persisted.summary == candidate.summary
     assert persisted.findings == candidate.findings
     assert persisted.research_context == candidate.research_context
 

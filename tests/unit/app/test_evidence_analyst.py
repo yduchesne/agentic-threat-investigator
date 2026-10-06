@@ -75,6 +75,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -263,6 +264,7 @@ class AnalysisWorld:
                     disposition=FindingDisposition.SUPPORTING,
                     statement="The domain resolves to a block-listed controller.",
                     confidence=AssessmentConfidence.MEDIUM,
+                    criticality=FindingCriticality.MEDIUM,
                     support=(
                         EvidenceSupport(kind="evidence", evidence_id=self.evidence_id),
                     ),
@@ -402,6 +404,7 @@ class AnalysisWorld:
                 disposition=disposition,
                 statement="The domain resolves to the address.",
                 confidence=AssessmentConfidence.MEDIUM,
+                criticality=FindingCriticality.MEDIUM,
                 support=tuple(support),
             ),
         )

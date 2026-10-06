@@ -38,6 +38,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     FindingSupport,
     RelationshipSupport,
@@ -192,6 +193,7 @@ def assessment_factory(
                     disposition=FindingDisposition.SUPPORTING,
                     statement="The domain resolves to the address.",
                     confidence=AssessmentConfidence.MEDIUM,
+                    criticality=FindingCriticality.MEDIUM,
                     support=(
                         EvidenceSupport(kind="evidence", evidence_id=graph.evidence_id),
                     ),
@@ -210,6 +212,7 @@ def direct_finding(graph: Graph) -> AnalyticalFinding:
         disposition=FindingDisposition.SUPPORTING,
         statement="A reputation source flags the subject.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(EvidenceSupport(kind="evidence", evidence_id=graph.evidence_id),),
     )
 
@@ -221,6 +224,7 @@ def graph_finding(graph: Graph) -> AnalyticalFinding:
         disposition=FindingDisposition.SUPPORTING,
         statement="The domain resolves to a suspicious address.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(
             RelationshipSupport(
                 kind="relationship_observation",
@@ -365,6 +369,7 @@ async def test_mixed_support_and_multiple_observations_round_trip(
         disposition=FindingDisposition.SUPPORTING,
         statement="Direct and graph facts agree.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(
             EvidenceSupport(kind="evidence", evidence_id=graph.evidence_id),
             RelationshipSupport(
@@ -493,6 +498,7 @@ async def test_provenance_mismatch_support_is_rejected_by_database(
                 disposition=FindingDisposition.SUPPORTING,
                 statement="observing a wrong-edge observation.",
                 confidence=AssessmentConfidence.MEDIUM,
+                criticality=FindingCriticality.MEDIUM,
                 support=(
                     RelationshipSupport(
                         kind="relationship_observation",
@@ -528,6 +534,7 @@ async def test_duplicate_support_is_rejected_by_database(
                 disposition=FindingDisposition.SUPPORTING,
                 statement="Duplicated citation.",
                 confidence=AssessmentConfidence.MEDIUM,
+                criticality=FindingCriticality.MEDIUM,
                 support=(
                     EvidenceSupport(kind="evidence", evidence_id=graph.evidence_id),
                     EvidenceSupport(kind="evidence", evidence_id=graph.evidence_id),
@@ -606,6 +613,7 @@ async def test_one_relationship_with_many_observations_round_trip(
         disposition=FindingDisposition.SUPPORTING,
         statement="A later observation repeats the same resolution.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(
             RelationshipSupport(
                 kind="relationship_observation",
@@ -872,6 +880,7 @@ async def test_assessment_soft_delete_semantics(
                     disposition=FindingDisposition.SUPPORTING,
                     statement="Graph provenance supports the verdict.",
                     confidence=AssessmentConfidence.MEDIUM,
+                    criticality=FindingCriticality.MEDIUM,
                     support=(
                         RelationshipSupport(
                             kind="relationship_observation",
@@ -966,6 +975,7 @@ async def test_delete_assessment_emits_transactional_audit(
                     disposition=FindingDisposition.SUPPORTING,
                     statement="Graph provenance supports the verdict.",
                     confidence=AssessmentConfidence.MEDIUM,
+                    criticality=FindingCriticality.MEDIUM,
                     support=(
                         RelationshipSupport(
                             kind="relationship_observation",
@@ -1033,6 +1043,7 @@ async def test_stale_version_delete_rolls_back_audit(
                     disposition=FindingDisposition.SUPPORTING,
                     statement="Graph provenance supports the verdict.",
                     confidence=AssessmentConfidence.MEDIUM,
+                    criticality=FindingCriticality.MEDIUM,
                     support=(
                         RelationshipSupport(
                             kind="relationship_observation",
@@ -1115,6 +1126,7 @@ def _finding_construct(
         disposition=FindingDisposition.SUPPORTING,
         statement=statement,
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(
             support
             if support is not None
@@ -1216,7 +1228,7 @@ async def test_database_rejects_unknown_finding_ordinal_support(
         await _call_append_assessment(
             uow_factory,
             candidate,
-            findings=[(1, "network", "supporting", "s", "medium")],
+            findings=[(1, "network", "supporting", "s", "medium", "medium")],
             supports=[(2, 1, "evidence", graph.evidence_id, None)],
         )
     async with uow_factory() as uow:
@@ -1239,8 +1251,8 @@ async def test_database_rejects_duplicate_and_gapped_finding_ordinals(
             uow_factory,
             assessment_factory(graph),
             findings=[
-                (1, "network", "supporting", "first", "medium"),
-                (1, "network", "supporting", "duplicate", "medium"),
+                (1, "network", "supporting", "first", "medium", "medium"),
+                (1, "network", "supporting", "duplicate", "medium", "medium"),
             ],
             supports=[
                 (1, 1, "evidence", graph.evidence_id, None),
@@ -1252,8 +1264,8 @@ async def test_database_rejects_duplicate_and_gapped_finding_ordinals(
             uow_factory,
             assessment_factory(graph),
             findings=[
-                (1, "network", "supporting", "first", "medium"),
-                (3, "network", "supporting", "gap", "medium"),
+                (1, "network", "supporting", "first", "medium", "medium"),
+                (3, "network", "supporting", "gap", "medium", "medium"),
             ],
             supports=[
                 (1, 1, "evidence", graph.evidence_id, None),
@@ -1264,7 +1276,7 @@ async def test_database_rejects_duplicate_and_gapped_finding_ordinals(
         await _call_append_assessment(
             uow_factory,
             assessment_factory(graph),
-            findings=[(0, "network", "supporting", "zero", "medium")],
+            findings=[(0, "network", "supporting", "zero", "medium", "medium")],
             supports=[(0, 0, "evidence", graph.evidence_id, None)],
         )
 
@@ -1283,7 +1295,7 @@ async def test_database_rejects_duplicate_and_gapped_support_ordinals(
         await _call_append_assessment(
             uow_factory,
             assessment_factory(graph, analyzed=(graph.evidence_id, second_evidence)),
-            findings=[(1, "network", "supporting", "s", "medium")],
+            findings=[(1, "network", "supporting", "s", "medium", "medium")],
             supports=[
                 (1, 1, "evidence", graph.evidence_id, None),
                 (1, 1, "evidence", second_evidence, None),
@@ -1293,7 +1305,7 @@ async def test_database_rejects_duplicate_and_gapped_support_ordinals(
         await _call_append_assessment(
             uow_factory,
             assessment_factory(graph, analyzed=(graph.evidence_id, second_evidence)),
-            findings=[(1, "network", "supporting", "s", "medium")],
+            findings=[(1, "network", "supporting", "s", "medium", "medium")],
             supports=[
                 (1, 1, "evidence", graph.evidence_id, None),
                 (1, 3, "evidence", second_evidence, None),
@@ -1314,14 +1326,14 @@ async def test_database_rejects_invalid_support_kind_and_mismatch(
         await _call_append_assessment(
             uow_factory,
             assessment_factory(graph),
-            findings=[(1, "network", "supporting", "s", "medium")],
+            findings=[(1, "network", "supporting", "s", "medium", "medium")],
             supports=[(1, 1, "relationship", graph.evidence_id, None)],
         )
     with pytest.raises(AssessmentProvenanceMismatchError):
         await _call_append_assessment(
             uow_factory,
             assessment_factory(graph),
-            findings=[(1, "network", "supporting", "s", "medium")],
+            findings=[(1, "network", "supporting", "s", "medium", "medium")],
             supports=[(1, 1, "evidence", None, graph.observation_id)],
         )
 
@@ -1547,6 +1559,7 @@ async def test_ordered_collections_round_trip_exactly(
         disposition=FindingDisposition.SUPPORTING,
         statement="First finding with mixed support.",
         confidence=AssessmentConfidence.HIGH,
+        criticality=FindingCriticality.MEDIUM,
         support=(
             EvidenceSupport(kind="evidence", evidence_id=graph.evidence_id),
             RelationshipSupport(
@@ -1560,6 +1573,7 @@ async def test_ordered_collections_round_trip_exactly(
         disposition=FindingDisposition.CONTRADICTING,
         statement="Second finding with direct support.",
         confidence=AssessmentConfidence.LOW,
+        criticality=FindingCriticality.MEDIUM,
         support=(EvidenceSupport(kind="evidence", evidence_id=second_evidence),),
     )
     candidate = Assessment(
@@ -2191,7 +2205,7 @@ async def test_database_defensive_hard_limit_rejects_oversized_inputs(
     hard_plus_one = 10_001
     oversized_ids = [graph.evidence_id] * hard_plus_one
     oversized_findings = [
-        (idx, "network", "supporting", f"finding {idx}", "medium")
+        (idx, "network", "supporting", f"finding {idx}", "medium", "medium")
         for idx in range(1, hard_plus_one + 1)
     ]
     oversized_supports = [

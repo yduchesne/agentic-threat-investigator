@@ -101,13 +101,11 @@ async def test_canonical_report_writer_vertical_slice(
     second_render = format_investigation_report_markdown(persisted)
     assert first_render == second_render
     assert "malicious" in first_render
-    assert "Verdict" in first_render
+    assert "Criticality" in first_render
 
     # No raw model response is stored: the persisted report contains only the
     # stamped authoritative fields.
-    assert persisted.executive_summary[0].text == (
-        "malicious indicator with high confidence"
-    )
+    assert persisted.summary[0].text == ("malicious indicator with high confidence")
     serialized = persisted.model_dump_json()
     assert "research_claim" in serialized
     assert "chain_of_thought" not in serialized

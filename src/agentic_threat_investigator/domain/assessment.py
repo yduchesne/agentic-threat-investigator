@@ -60,6 +60,51 @@ class AssessmentConfidence(str, Enum):
     HIGH = "high"
 
 
+class FindingCriticality(str, Enum):
+    """Materiality of one finding, independent of confidence.
+
+    Criticality expresses how materially a finding bears on the investigation
+    (severity/importance). It is deliberately distinct from
+    :class:`AssessmentConfidence`, which expresses confidence in the
+    analytical conclusion. Neither value may be derived from the other.
+    """
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFORMATIONAL = "informational"
+
+
+CRITICALITY_ORDER: tuple[FindingCriticality, ...] = (
+    FindingCriticality.CRITICAL,
+    FindingCriticality.HIGH,
+    FindingCriticality.MEDIUM,
+    FindingCriticality.LOW,
+    FindingCriticality.INFORMATIONAL,
+)
+"""Canonical most-to-least material criticality order for reporting."""
+
+CRITICALITY_RANK: dict[FindingCriticality, int] = {
+    criticality: rank for rank, criticality in enumerate(CRITICALITY_ORDER)
+}
+"""Deterministic sort rank: smaller rank is more material."""
+
+SUMMARY_CRITICALITIES: frozenset[FindingCriticality] = frozenset(
+    {
+        FindingCriticality.CRITICAL,
+        FindingCriticality.HIGH,
+        FindingCriticality.MEDIUM,
+    }
+)
+"""Criticality values eligible for the final report Summary projection."""
+
+
+def criticality_rank(criticality: FindingCriticality) -> int:
+    """Return the deterministic materiality rank (0 is most material)."""
+    return CRITICALITY_RANK[criticality]
+
+
 class FindingCategory(str, Enum):
     """The smallest stable analytical vocabulary for material Findings.
 
@@ -170,6 +215,7 @@ class AnalyticalFinding(BaseModel):
     disposition: FindingDisposition
     statement: str
     confidence: AssessmentConfidence
+    criticality: FindingCriticality
     support: tuple[FindingSupport, ...]
 
     @field_validator("statement", mode="after")

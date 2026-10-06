@@ -37,6 +37,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -313,6 +314,7 @@ def map_geographic_findings(
             disposition=FindingDisposition.SUPPORTING,
             statement=finding.statement,
             confidence=_mapped_confidence(decision.confidence),
+            criticality=FindingCriticality.INFORMATIONAL,
             support=tuple(
                 EvidenceSupport(kind="evidence", evidence_id=evidence_observation_id)
                 for evidence_observation_id in finding.evidence_observation_ids

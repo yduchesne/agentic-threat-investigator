@@ -75,6 +75,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -377,6 +378,7 @@ def _independent_support_decision(
                 disposition=FindingDisposition.SUPPORTING,
                 statement="The domain resolves to a block-listed controller.",
                 confidence=AssessmentConfidence.MEDIUM,
+                criticality=FindingCriticality.MEDIUM,
                 support=(
                     EvidenceSupport(
                         kind="evidence",

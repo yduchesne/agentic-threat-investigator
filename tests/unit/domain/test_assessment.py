@@ -12,6 +12,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     FindingSupport,
     RelationshipSupport,
@@ -54,6 +55,7 @@ def finding_factory(
         disposition=disposition,
         statement="A reputation source flags the subject.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=support,
     )
 
@@ -148,6 +150,7 @@ def test_finding_requires_nonblank_statement() -> None:
             disposition=FindingDisposition.SUPPORTING,
             statement="   \t ",
             confidence=AssessmentConfidence.LOW,
+            criticality=FindingCriticality.MEDIUM,
             support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
         )
 
@@ -161,6 +164,7 @@ def test_finding_rejects_empty_support() -> None:
             disposition=FindingDisposition.SUPPORTING,
             statement="A claim without support.",
             confidence=AssessmentConfidence.LOW,
+            criticality=FindingCriticality.MEDIUM,
             support=(),
         )
 
@@ -175,6 +179,7 @@ def test_finding_rejects_duplicate_support() -> None:
             disposition=FindingDisposition.SUPPORTING,
             statement="Duplicated citation.",
             confidence=AssessmentConfidence.LOW,
+            criticality=FindingCriticality.MEDIUM,
             support=(
                 EvidenceSupport(kind="evidence", evidence_id=evidence_id),
                 EvidenceSupport(kind="evidence", evidence_id=evidence_id),
@@ -248,6 +253,7 @@ def test_assessment_never_embeds_graph_objects() -> None:
                     disposition=FindingDisposition.SUPPORTING,
                     statement="Resolves downward.",
                     confidence=AssessmentConfidence.MEDIUM,
+                    criticality=FindingCriticality.MEDIUM,
                     support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
                 ),
             ),
@@ -388,6 +394,7 @@ def test_finding_support_union_discriminated_round_trip() -> None:
         disposition=FindingDisposition.SUPPORTING,
         statement="DNS resolves the domain.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(
             EvidenceSupport(kind="evidence", evidence_id=uuid4()),
             RelationshipSupport(

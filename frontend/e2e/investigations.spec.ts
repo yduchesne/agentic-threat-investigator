@@ -113,33 +113,25 @@ test.describe("PR 24B real-stack investigation workflow", () => {
     // terminal lifecycle state without any live LLM.
     await expect(page.getByLabel("Status: Completed").first()).toBeVisible({ timeout: 240_000 });
 
-    // Current Assessment/Report overview: verdict and confidence.
-    await expect(page.getByText(/Verdict: Malicious/)).toBeVisible();
-    await expect(page.getByText("High", { exact: false }).first()).toBeVisible();
+    // PR 35-5: the Overview is the workspace landing surface; the one
+    // canonical Final Report is reachable through a single link, not a
+    // second abbreviated rendering.
+    await expect(page.getByText("Executive summary")).toHaveCount(0);
+    await expect(page.getByText("At a glance")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "View report" })).toBeVisible({
+      timeout: 180_000,
+    });
+    await expect(page.getByText("FAKE DATA")).toBeVisible();
 
-    // Executive summary statement and at least one finding with visible
-    // support references.
+    await page.getByRole("link", { name: "View report" }).click();
     await expect(
-      page.getByText(/The investigation concluded .* malicious delivery/i),
-    ).toBeVisible();
-    // The Findings heading (the Assessment summary also renders a
-    // "Findings: N" recap line, so the text selector is ambiguous — A6
-    // classification: C3 stale selector).
-    await expect(page.getByRole("heading", { name: "Findings" })).toBeVisible();
+      page.getByRole("heading", { name: "ATI deterministic investigation report" }),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Summary").first()).toBeVisible();
+    await expect(page.getByText(/Finding 1: Generated summary/)).toBeVisible();
+    await expect(page.getByText(/Generated finding 1 heading/).first()).toBeVisible();
     await expect(
-      page.getByText(/Threat-intelligence and reputation sources/),
-    ).toBeVisible();
-    await expect(page.getByText("Supports")).toBeVisible();
-    await expect(page.getByText("Evidence").first()).toBeVisible();
-
-    // The full persisted Report is reachable as the secondary surface.
-    await page.getByRole("link", { name: "View full report" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Report", exact: true }),
-    ).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/Version:/)).toBeVisible();
-    await expect(
-      page.getByText(/The investigation concluded .* malicious delivery/i),
+      page.getByText(/Generated reader-facing description for canonical finding 1\./),
     ).toBeVisible();
     await expect(page.getByText("FAKE DATA")).toBeVisible();
 

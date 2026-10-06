@@ -940,8 +940,9 @@ export interface components {
             /** Finding Ordinal */
             finding_ordinal: number;
             /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
+             * Kind
+             * @default assessment_finding
+             * @constant
              */
             kind: "assessment_finding";
         };
@@ -1125,6 +1126,17 @@ export interface components {
          */
         FindingCategory: "reputation" | "geolocation" | "registration" | "network" | "association";
         /**
+         * FindingCriticality
+         * @description Materiality of one finding, independent of confidence.
+         *
+         *     Criticality expresses how materially a finding bears on the investigation
+         *     (severity/importance). It is deliberately distinct from
+         *     :class:`AssessmentConfidence`, which expresses confidence in the
+         *     analytical conclusion. Neither value may be derived from the other.
+         * @enum {string}
+         */
+        FindingCriticality: "critical" | "high" | "medium" | "low" | "informational";
+        /**
          * FindingDisposition
          * @description Whether the Finding supports or contradicts the Assessment verdict.
          * @enum {string}
@@ -1137,6 +1149,7 @@ export interface components {
         FindingResponse: {
             category: components["schemas"]["FindingCategory"];
             confidence: components["schemas"]["AssessmentConfidence"];
+            criticality: components["schemas"]["FindingCriticality"];
             disposition: components["schemas"]["FindingDisposition"];
             /** Statement */
             statement: string;
@@ -1663,16 +1676,6 @@ export interface components {
             /** Username */
             username: string;
         };
-        /**
-         * NarrativeStatementResponse
-         * @description One model-authored narrative statement with explicit typed support.
-         */
-        NarrativeStatementResponse: {
-            /** Support */
-            support: (components["schemas"]["AssessmentFindingRefResponse"] | components["schemas"]["ResearchClaimRefResponse"])[];
-            /** Text */
-            text: string;
-        };
         /** PageResponse[AssessmentResponse] */
         PageResponse_AssessmentResponse_: {
             /** Items */
@@ -1892,18 +1895,27 @@ export interface components {
         RelationshipType: "urn:ati:relationship:dns:resolves_to" | "urn:ati:relationship:dns:cname_of" | "urn:ati:relationship:dns:uses_name_server" | "urn:ati:relationship:dns:uses_mail_server" | "urn:ati:relationship:network:belongs_to" | "urn:ati:relationship:routing:announced_by" | "urn:ati:relationship:registration:registered_to" | "urn:ati:relationship:organization:operated_by" | "urn:ati:relationship:threat:associated_with" | "urn:ati:relationship:attack:uses_technique" | "urn:ati:relationship:vulnerability:exploits" | "urn:ati:relationship:threat:uses" | "urn:ati:relationship:threat:targets" | "urn:ati:relationship:threat:attributed_to" | "urn:ati:relationship:threat:controls";
         /**
          * ReportFindingResponse
-         * @description Application-copied snapshot of one authoritative Assessment finding.
+         * @description Application-copied snapshot of one canonical Assessment finding.
          */
         ReportFindingResponse: {
             /** Assessment Finding Ordinal */
             assessment_finding_ordinal: number;
             category: components["schemas"]["FindingCategory"];
             confidence: components["schemas"]["AssessmentConfidence"];
+            criticality: components["schemas"]["FindingCriticality"];
+            /** Description */
+            description: string;
             disposition: components["schemas"]["FindingDisposition"];
+            /** Report Finding Number */
+            report_finding_number: number;
             /** Statement */
             statement: string;
+            /** Summary */
+            summary: string;
             /** Support */
             support: components["schemas"]["FindingSupportResponse"][];
+            /** Title */
+            title: string;
         };
         /**
          * ReportResearchClaimResponse
@@ -1948,8 +1960,9 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** Executive Summary */
-            executive_summary: components["schemas"]["NarrativeStatementResponse"][];
+            criticality: components["schemas"]["FindingCriticality"];
+            /** Ended At */
+            ended_at: string | null;
             /** Findings */
             findings: components["schemas"]["ReportFindingResponse"][];
             /**
@@ -1964,6 +1977,7 @@ export interface components {
             investigation_id: string;
             /** Limitations */
             limitations: string[];
+            outcome_status: components["schemas"]["InvestigationStatus"];
             /** Recommended Next Steps */
             recommended_next_steps: string[];
             /** Research Context */
@@ -1974,6 +1988,12 @@ export interface components {
             source_relationship_observation_ids: string[];
             /** Source Research Result Ids */
             source_research_result_ids: string[];
+            /** Started At */
+            started_at: string | null;
+            /** Stop Reason */
+            stop_reason: string | null;
+            /** Summary */
+            summary: components["schemas"]["ReportSummaryItemResponse"][];
             /** Title */
             title: string;
             /** Unresolved Questions */
@@ -1981,6 +2001,20 @@ export interface components {
             verdict: components["schemas"]["Verdict"];
             /** Version */
             version: number;
+        };
+        /**
+         * ReportSummaryItemResponse
+         * @description One finding-centric Summary projection item.
+         */
+        ReportSummaryItemResponse: {
+            /** Assessment Finding Ordinal */
+            assessment_finding_ordinal: number;
+            /** Report Finding Number */
+            report_finding_number: number;
+            /** Support */
+            support: components["schemas"]["AssessmentFindingRefResponse"][];
+            /** Text */
+            text: string;
         };
         /**
          * ResearchCitationResponse
@@ -2015,27 +2049,6 @@ export interface components {
             text: string;
             /** Title */
             title: string | null;
-        };
-        /**
-         * ResearchClaimRefResponse
-         * @description Typed reference to one persisted ResearchClaim of a supplied result.
-         */
-        ResearchClaimRefResponse: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "research_claim";
-            /**
-             * Research Claim Id
-             * Format: uuid
-             */
-            research_claim_id: string;
-            /**
-             * Research Result Id
-             * Format: uuid
-             */
-            research_result_id: string;
         };
         /**
          * ResearchClaimResponse
@@ -2234,6 +2247,7 @@ export type EvidenceResponse = components['schemas']['EvidenceResponse'];
 export type EvidenceSupportPresentationResponse = components['schemas']['EvidenceSupportPresentationResponse'];
 export type EvidenceType = components['schemas']['EvidenceType'];
 export type FindingCategory = components['schemas']['FindingCategory'];
+export type FindingCriticality = components['schemas']['FindingCriticality'];
 export type FindingDisposition = components['schemas']['FindingDisposition'];
 export type FindingResponse = components['schemas']['FindingResponse'];
 export type FindingSupportResponse = components['schemas']['FindingSupportResponse'];
@@ -2265,7 +2279,6 @@ export type InvestigationTimelineEventType = components['schemas']['Investigatio
 export type LocationPrecision = components['schemas']['LocationPrecision'];
 export type LocationType = components['schemas']['LocationType'];
 export type LoginRequest = components['schemas']['LoginRequest'];
-export type NarrativeStatementResponse = components['schemas']['NarrativeStatementResponse'];
 export type PageResponseAssessmentResponse = components['schemas']['PageResponse_AssessmentResponse_'];
 export type PageResponseEvidenceResponse = components['schemas']['PageResponse_EvidenceResponse_'];
 export type PageResponseGeointObservationResponse = components['schemas']['PageResponse_GeointObservationResponse_'];
@@ -2284,8 +2297,8 @@ export type RelationshipType = components['schemas']['RelationshipType'];
 export type ReportFindingResponse = components['schemas']['ReportFindingResponse'];
 export type ReportResearchClaimResponse = components['schemas']['ReportResearchClaimResponse'];
 export type ReportResponse = components['schemas']['ReportResponse'];
+export type ReportSummaryItemResponse = components['schemas']['ReportSummaryItemResponse'];
 export type ResearchCitationResponse = components['schemas']['ResearchCitationResponse'];
-export type ResearchClaimRefResponse = components['schemas']['ResearchClaimRefResponse'];
 export type ResearchClaimResponse = components['schemas']['ResearchClaimResponse'];
 export type ResearchResultResponse = components['schemas']['ResearchResultResponse'];
 export type RuntimeInfoResponse = components['schemas']['RuntimeInfoResponse'];

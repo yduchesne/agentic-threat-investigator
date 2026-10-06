@@ -231,7 +231,7 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     await expect(heading).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("203.0.113.10").first()).toBeVisible();
     await expect(page.getByText("Geolocation", { exact: true }).first()).toBeVisible();
-    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     expect(page.getByText("FAKE DATA")).toBeVisible();
@@ -288,14 +288,14 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     const headingA = page.getByRole("heading", { name: "Evidence" });
     await expect(headingA).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("203.0.113.10").first()).toBeVisible();
-    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     await rowB.getByRole("button", { name: "View Evidence" }).click();
     const headingB = page.getByRole("heading", { name: "Evidence" });
     await expect(headingB).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("198.51.100.30").first()).toBeVisible();
-    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     // Both Explore triggers expand the identical in-flow action bar of
@@ -350,7 +350,7 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     await expect(heading).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("192.0.2.40").first()).toBeVisible();
     await expect(page.getByText("Geolocation", { exact: true }).first()).toBeVisible();
-    await page.getByRole("button", { name: "Back to Evidence" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
 
     // A legal Explore action works; an empty target is honestly empty.
