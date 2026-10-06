@@ -66,17 +66,16 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
 )
 from agentic_threat_investigator.domain.investigation import AnalysisDisposition
 from agentic_threat_investigator.domain.report import (
-    AssessmentFindingRef,
-    ReportNarrativeStatement,
+    FindingPresentation,
     ReportResearchSelection,
     ReportWriterOutput,
-    ResearchClaimRef,
 )
 from agentic_threat_investigator.domain.research import ResearchQuery
 from agentic_threat_investigator.domain.research_agent import (
@@ -253,6 +252,7 @@ def _analyst_decision(
                     disposition=FindingDisposition(disposition_code),
                     statement=f"Deterministic {category}:{disposition_code} finding.",
                     confidence=script.confidence,
+                    criticality=FindingCriticality.MEDIUM,
                     support=support,
                 )
             )
@@ -280,7 +280,6 @@ def _report_output_from_prompt(
         assessment_match is None
     ):  # pragma: no cover - production prompt always renders it
         raise AssertionError("report prompt lacks an assessment identity")
-    assessment_id = UUID(assessment_match.group(1))
 
     claim_pairs = re.findall(
         r"ResearchResult \d+ \[result_id (\S+)\].*?claim_id (\S+) \[label RC-",
@@ -293,38 +292,22 @@ def _report_output_from_prompt(
         )
         for result_id, claim_id in claim_pairs[:1]
     )
-    narrative: list[ReportNarrativeStatement] = []
-    if script.findings:
-        narrative.append(
-            ReportNarrativeStatement(
-                text="The first assessment finding supports the verdict.",
-                support=(
-                    AssessmentFindingRef(
-                        kind="assessment_finding",
-                        assessment_id=assessment_id,
-                        finding_ordinal=1,
-                    ),
-                ),
-            )
+    visible_ordinals = sorted(
+        {int(match) for match in re.findall(r"- AF-(\d+):", prompt)}
+    )
+    presentations = tuple(
+        FindingPresentation(
+            assessment_finding_ordinal=ordinal,
+            title=f"Finding {ordinal} factual title",
+            summary=f"Finding {ordinal} factual summary.",
+            description="Deterministic description.",
         )
-    for selection in selections:
-        narrative.append(
-            ReportNarrativeStatement(
-                text="The research context supports the assessment.",
-                support=(
-                    ResearchClaimRef(
-                        kind="research_claim",
-                        research_result_id=selection.research_result_id,
-                        research_claim_id=selection.research_claim_id,
-                    ),
-                ),
-            )
-        )
+        for ordinal in visible_ordinals
+    )
     del research_payload
     return ReportWriterOutput(
         title="Deterministic investigation report",
-        executive_summary=tuple(narrative),
-        finding_order=(1,) if script.findings else (),
+        finding_presentations=presentations,
         research_context=selections,
     )
 

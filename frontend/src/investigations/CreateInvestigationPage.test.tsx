@@ -410,11 +410,11 @@ describe("Create Investigation", () => {
     await fillRequiredForm();
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
-    // Workspace visible immediately: persistent header + Overview tab.
+    // Workspace visible immediately: persistent header + REPORT tab.
     expect(
       await screen.findByRole("heading", { name: "assess the delivery domain" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "REPORT" })).toBeInTheDocument();
     // Fake-mode indicator stays visible inside the workspace.
     expect(screen.getByText("FAKE DATA")).toBeInTheDocument();
   });

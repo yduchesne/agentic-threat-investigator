@@ -457,8 +457,8 @@ class ReportCollectionLimitExceededError(ValueError):
 
 
 REPORT_BOUNDED_COLLECTIONS = (
-    "executive_summary",
-    "narrative_support",
+    "summary",
+    "summary_support",
     "findings",
     "finding_support",
     "research_context",
@@ -476,10 +476,8 @@ REPORT_BOUNDED_COLLECTIONS = (
 def report_collection_sizes(report: InvestigationReport) -> dict[str, int]:
     """Return the size of every bounded report candidate collection."""
     return {
-        "executive_summary": len(report.executive_summary),
-        "narrative_support": sum(
-            len(statement.support) for statement in report.executive_summary
-        ),
+        "summary": len(report.summary),
+        "summary_support": sum(len(item.support) for item in report.summary),
         "findings": len(report.findings),
         "finding_support": sum(len(finding.support) for finding in report.findings),
         "research_context": len(report.research_context),

@@ -43,6 +43,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -200,6 +201,7 @@ class Graph:
                         disposition=disposition,
                         statement="The domain resolves to the address.",
                         confidence=AssessmentConfidence.MEDIUM,
+                        criticality=FindingCriticality.MEDIUM,
                         support=tuple(support),
                     ),
                 )

@@ -439,6 +439,7 @@ class AssessmentFindingRow(Base):
     disposition: Mapped[str] = mapped_column(String)
     statement: Mapped[str] = mapped_column(String)
     confidence: Mapped[str] = mapped_column(String)
+    criticality: Mapped[str] = mapped_column(String)
 
 
 class AssessmentFindingSupportRow(Base):
@@ -478,8 +479,9 @@ class InvestigationReportRow(Base):
     assessment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     verdict: Mapped[str] = mapped_column(String)
     confidence: Mapped[str] = mapped_column(String)
+    criticality: Mapped[str] = mapped_column(String)
     title: Mapped[str] = mapped_column(String)
-    executive_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     findings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     research_context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     limitations: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
@@ -487,6 +489,10 @@ class InvestigationReportRow(Base):
     recommended_next_steps: Mapped[list[str]] = mapped_column(
         ARRAY(String), default=list
     )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome_status: Mapped[str] = mapped_column(String)
+    stop_reason: Mapped[str | None] = mapped_column(String)
     source_evidence_ids: Mapped[list[UUID]] = mapped_column(
         ARRAY(PGUUID(as_uuid=True)), default=list
     )

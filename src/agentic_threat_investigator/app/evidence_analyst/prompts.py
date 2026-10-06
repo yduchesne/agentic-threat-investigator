@@ -49,6 +49,11 @@ Rules:
   MALICIOUS.
 - confidence expresses confidence in the verdict, not severity of the
   finding.
+- criticality expresses materiality/severity/importance of a finding and is
+  distinct from confidence. Set exactly one bounded criticality per finding:
+  "critical", "high", "medium", "low", or "informational". Never derive
+  criticality from confidence, verdict, category, or disposition, and never
+  derive confidence from criticality.
 - Represent contradictory findings explicitly with disposition
   \"contradicting\".
 - Set the required disposition field to exactly one of the bounded values:
@@ -236,6 +241,53 @@ def _render_geoint_context(context: AnalystGeointContext) -> str:
     return "\n".join(lines)
 
 
+def _render_geoint_finding_contract(analyst_input: EvidenceAnalystInput) -> str:
+    """Render the context-aware admissibility contract for geographic findings.
+
+    The contract is derived only from the exact supplied
+    :class:`AnalystGeointContext`: it enumerates the approved descriptive kinds
+    and states whether ``contained_location_context`` is admissible for this
+    invocation. When no containment-selected observation was supplied, the
+    kind is explicitly inadmissible and emitting it is a validation failure.
+    This keeps the fail-closed deterministic validator authoritative while
+    making the model-visible contract match what the policy actually supplied.
+    """
+    context = analyst_input.geoint_context
+    header = "Geographic finding contract (this invocation):"
+    if context is None:
+        return "\n".join(
+            [
+                header,
+                "- No geographic context was supplied; geographic findings are "
+                "inadmissible. Do not emit any geographic_findings.",
+            ]
+        )
+    contained_count = len(context.contained_observation_ids)
+    lines = [
+        header,
+        "- A geographic finding may cite only observation_id/"
+        "evidence_observation_id pairs supplied in the geographic context; "
+        "never manufacture, substitute, or cross-scope a reference.",
+        "- Approved geographic finding kinds for this invocation: "
+        "shared_location, location_history, location_change_observed, "
+        "geographic_distribution.",
+    ]
+    if contained_count == 0:
+        lines.append(
+            "- contained_location_context is INADMISSIBLE for this invocation: "
+            "the geographic context supplied no containment-selected "
+            "observations. Do not emit a contained_location_context finding; "
+            "emitting one fails deterministic validation."
+        )
+    else:
+        lines.append(
+            "- contained_location_context is admissible only when it cites "
+            f"exactly the {contained_count} containment-selected "
+            "observation(s) supplied in the geographic context."
+        )
+    return "\n".join(lines)
+
+
 def build_evidence_analyst_prompts(
     analyst_input: EvidenceAnalystInput,
     *,
@@ -271,6 +323,7 @@ def build_evidence_analyst_prompts(
         sections.append(f"{_OBSERVATIONS_LABEL}:\n{observations}")
     if analyst_input.geoint_context is not None:
         sections.append(_render_geoint_context(analyst_input.geoint_context))
+    sections.append(_render_geoint_finding_contract(analyst_input))
     user_prompt = "\n\n".join(sections)
     if repair:
         user_prompt = f"{user_prompt}\n\n{_REPAIR_NOTE}"

@@ -33,8 +33,10 @@ from agentic_threat_investigator.app.report_writer.errors import (
 )
 from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
+    FindingCriticality,
     Verdict,
 )
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.report import InvestigationReport
 from agentic_threat_investigator.evaluation.common import (
     EvaluationContext,
@@ -102,7 +104,9 @@ def unit_report() -> InvestigationReport:
         assessment_id=UUID(int=2),
         verdict=Verdict.MALICIOUS,
         confidence=AssessmentConfidence.HIGH,
+        criticality=FindingCriticality.INFORMATIONAL,
         title="Unit report",
+        outcome_status=InvestigationStatus.COMPLETED,
     )
 
 

@@ -26,7 +26,7 @@
   "filters.all": "All",
   "filters.clear": "Clear filters",
   "cursor.returnToFirstPage": "Return to first page",
-  "backToList": "Back to {{resource}}",
+  "backToList": "< Back",
   "back": "< Back",
   "detail.title": "{{resource}} details",
   "detail.notFound.scoped": "Resources are scoped to this Investigation.",

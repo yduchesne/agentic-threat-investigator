@@ -32,6 +32,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -1107,6 +1108,7 @@ def test_geographic_evidence_misuse_is_hard_failure() -> None:
                 disposition=FindingDisposition.SUPPORTING,
                 statement="The reputation finding.",
                 confidence=AssessmentConfidence.MEDIUM,
+                criticality=FindingCriticality.MEDIUM,
                 support=(
                     EvidenceSupport(
                         kind="evidence",
@@ -1149,6 +1151,7 @@ def test_reference_location_only_support_is_hard_failure() -> None:
                 disposition=FindingDisposition.SUPPORTING,
                 statement="The location statement.",
                 confidence=AssessmentConfidence.LOW,
+                criticality=FindingCriticality.MEDIUM,
                 support=(
                     EvidenceSupport(
                         kind="evidence",
@@ -1200,6 +1203,7 @@ def test_independent_support_with_descriptive_geography_passes() -> None:
                     disposition=FindingDisposition.SUPPORTING,
                     statement="Independent reputation support.",
                     confidence=AssessmentConfidence.MEDIUM,
+                    criticality=FindingCriticality.MEDIUM,
                     support=(
                         EvidenceSupport(
                             kind="evidence",

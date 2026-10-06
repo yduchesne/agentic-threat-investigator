@@ -48,14 +48,14 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
 )
 from agentic_threat_investigator.domain.investigation import AnalysisDisposition
 from agentic_threat_investigator.domain.report import (
-    AssessmentFindingRef,
-    ReportNarrativeStatement,
+    FindingPresentation,
     ReportWriterOutput,
 )
 from agentic_threat_investigator.domain.research_agent import ResearchAgentDecision
@@ -94,11 +94,6 @@ _LIMITATION = (
 _RECOMMENDED_STEP = (
     "Monitor the resolved delivery infrastructure for further pivot-worthy "
     "observations."
-)
-
-_EXECUTIVE_STATEMENT = (
-    "The investigation concluded that the root indicator participates in "
-    "malicious delivery infrastructure with high confidence."
 )
 
 _REPORT_TITLE = "ATI deterministic investigation report"
@@ -193,6 +188,7 @@ class DeterministicLlmClient(LlmClient):
                         "infrastructure."
                     ),
                     confidence=AssessmentConfidence.HIGH,
+                    criticality=FindingCriticality.HIGH,
                     support=(
                         EvidenceSupport(
                             kind="evidence", evidence_id=UUID(evidence_ids[0])
@@ -211,6 +207,7 @@ class DeterministicLlmClient(LlmClient):
                         "by the delivery campaign."
                     ),
                     confidence=AssessmentConfidence.HIGH,
+                    criticality=FindingCriticality.LOW,
                     support=(
                         RelationshipSupport(
                             kind="relationship_observation",
@@ -243,34 +240,32 @@ class DeterministicLlmClient(LlmClient):
     def _report_output(self, user_prompt: str) -> ReportWriterOutput:
         """Reflect the supplied Assessment into one bounded ReportWriterOutput.
 
-        The executive summary statement supports exactly the first Assessment
-        finding ordinal rendered as ``AF-<n>``; ``finding_order`` carries the
-        same bounded ordinal. Verdict/confidence/limitations/questions/next
-        steps are application-stamped and never authored here.
+        Exactly one bounded presentation is authored for every supplied
+        ``AF-<n>`` finding, matched by ordinal. Verdict, confidence,
+        criticality, finding ordering/numbering, Status, and caveats are
+        application-stamped and never authored here.
         """
-        assessment_id_lines = _ASSESSMENT_ID_LINE.findall(user_prompt)
-        if len(assessment_id_lines) != 1:
+        if len(_ASSESSMENT_ID_LINE.findall(user_prompt)) != 1:
             raise LlmError(LlmErrorCode.INVALID_STRUCTURED_OUTPUT, retryable=False)
-        ordinals = [
-            int(ordinal) for ordinal in _FINDING_ORDINAL_LINE.findall(user_prompt)
-        ]
+        ordinals = sorted(
+            {int(ordinal) for ordinal in _FINDING_ORDINAL_LINE.findall(user_prompt)}
+        )
         if not ordinals:
             raise LlmError(LlmErrorCode.INVALID_STRUCTURED_OUTPUT, retryable=False)
-        first_ordinal = ordinals[0]
+        presentations = tuple(
+            FindingPresentation(
+                assessment_finding_ordinal=ordinal,
+                title=f"Generated finding {ordinal} heading",
+                summary=f"Generated summary for canonical finding {ordinal}.",
+                description=(
+                    f"Generated reader-facing description for canonical finding "
+                    f"{ordinal}."
+                ),
+            )
+            for ordinal in ordinals
+        )
         return ReportWriterOutput(
             title=_REPORT_TITLE,
-            executive_summary=(
-                ReportNarrativeStatement(
-                    text=_EXECUTIVE_STATEMENT,
-                    support=(
-                        AssessmentFindingRef(
-                            kind="assessment_finding",
-                            assessment_id=UUID(assessment_id_lines[0]),
-                            finding_ordinal=first_ordinal,
-                        ),
-                    ),
-                ),
-            ),
-            finding_order=(first_ordinal,),
+            finding_presentations=presentations,
             research_context=(),
         )

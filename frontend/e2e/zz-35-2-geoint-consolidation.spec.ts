@@ -213,7 +213,7 @@ test.describe("PR 35-2 GEOINT consolidation", () => {
     await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible({
       timeout: 30_000,
     });
-    await page.getByRole("button", { name: "Back to Evidence" }).click();
+    await page.getByRole("button", { name: "< Back" }).click();
     await expect(page).toHaveURL(`${base}/geoint/map`);
     await expect(page.getByRole("tab", { name: "MAP" })).toHaveAttribute(
       "aria-selected",

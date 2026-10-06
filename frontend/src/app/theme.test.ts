@@ -155,3 +155,43 @@ describe("Semantic theme factory (T01..T09)", () => {
     expect(ATI_THEMES.light.ati.accent.primary).toBe("#1b5e8c");
   });
 });
+
+/** Parse an ATI typography size expressed in rem. */
+function remSize(value: unknown): number {
+  if (typeof value !== "string" || !value.endsWith("rem")) {
+    throw new Error(`expected a rem typography size, received ${String(value)}`);
+  }
+  return Number.parseFloat(value);
+}
+
+const HEADING_VARIANTS = ["h1", "h2", "h3", "h4", "h5"] as const;
+
+describe("ATI heading typography (PR 35-7)", () => {
+  it("explicitly defines every heading variant so no heading relies on MUI fallback", () => {
+    for (const [appearance, theme] of Object.entries(ATI_THEMES)) {
+      for (const variant of HEADING_VARIANTS) {
+        const style = theme.typography[variant];
+        expect(
+          typeof style.fontSize,
+          `${appearance} ${variant} must define an explicit fontSize`,
+        ).toBe("string");
+        expect(remSize(style.fontSize)).toBeGreaterThan(0);
+        expect(style.fontWeight).toBe(600);
+      }
+    }
+  });
+
+  it("keeps the compact workbench h1..h5 scale strictly descending", () => {
+    for (const [appearance, theme] of Object.entries(ATI_THEMES)) {
+      const sizes = HEADING_VARIANTS.map((variant) =>
+        remSize(theme.typography[variant].fontSize),
+      );
+      for (let index = 1; index < sizes.length; index += 1) {
+        expect(
+          sizes[index],
+          `${appearance} h${index + 1} must be smaller than h${index}`,
+        ).toBeLessThan(sizes[index - 1]);
+      }
+    }
+  });
+});

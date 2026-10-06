@@ -1,42 +1,41 @@
 # SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Structured ``InvestigationReport`` domain contracts (PR 23B).
+"""Structured ``InvestigationReport`` domain contracts (PR 23B, PR 35-5).
 
 The Report Writer is ATI's final analytical presentation agent. It never
 collects Evidence, performs RAG retrieval, changes investigation policy,
-decides the analytical verdict, or creates new threat-intelligence facts. It
-transforms the already-persisted authoritative inputs — the current
-Assessment, its Evidence/RelationshipObservation provenance, and persisted
-ResearchResults — into a structured, provenance-backed report.
+decides the analytical verdict, changes finding criticality, or creates new
+threat-intelligence facts. It transforms the already-persisted authoritative
+inputs — the current Assessment, its Evidence/RelationshipObservation
+provenance, persisted ResearchResults, and the persisted Investigation
+lifecycle — into one canonical, provenance-backed Final Report.
 
 The dominant invariant:
 
-> The current persisted Assessment remains the sole authority for verdict and
-> confidence. A report may organize, summarize, and present existing supported
-> analytical material, but it may never change the Assessment
-> verdict/confidence or introduce a material claim without an explicit
-> reference to authoritative supplied Assessment or Research provenance.
+> ATI has one canonical ordered finding set. Summary and Details are
+> deterministic projections of that same set; they are never independently
+> generated competing interpretations.
 
-Two related contracts exist by design:
+Related contracts exist by design:
 
-- :class:`ReportWriterOutput` — model-authored structured synthesis/selections
-  only. It deliberately carries no verdict, confidence, persistence-owned
-  identifiers, timestamps, limitations, unresolved questions, or recommended
-  next steps.
+- :class:`ReportWriterOutput` — model-authored presentation only. It carries
+  a bounded short title and Summary sentence for exactly one canonical
+  finding, plus a bounded research-context selection. It deliberately
+  carries no verdict, confidence, criticality, finding inclusion/order,
+  numbering, Status, duration, table of contents, or caveat lists.
 - :class:`InvestigationReport` — the authoritative persisted domain resource
   after deterministic validation and application stamping.
 
-Every material model-authored narrative statement must carry at least one
-typed :class:`ReportSourceRef` referencing a supplied Assessment finding or a
-persisted ResearchClaim. Reference closure is proven deterministically by the
-application validator; semantic entailment is a behavioral-evaluation
-concern and is never claimed here.
+The application sorts findings criticality-first (tie-broken by the stable
+Assessment ordinal), assigns contiguous reader-facing numbers, derives the
+Summary projection from the same canonical findings, and snapshots the
+persisted Investigation lifecycle for deterministic later rendering.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import (
@@ -52,14 +51,17 @@ from agentic_threat_investigator.domain.analyst import (
     AnalystRelationshipObservation,
 )
 from agentic_threat_investigator.domain.assessment import (
+    CRITICALITY_RANK,
     AnalyticalFinding,
     Assessment,
     AssessmentConfidence,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     FindingSupport,
     Verdict,
 )
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
     ResearchResult,
@@ -68,8 +70,14 @@ from agentic_threat_investigator.domain.research import (
 MAX_REPORT_TITLE_CHARS = 300
 """Hard ceiling on report titles (model-authored or copied)."""
 
-MAX_NARRATIVE_STATEMENT_CHARS = 2000
-"""Hard ceiling on one model-authored narrative statement."""
+MAX_FINDING_TITLE_CHARS = 300
+"""Hard ceiling on one reader-facing finding short title."""
+
+MAX_SUMMARY_CHARS = 500
+"""Hard ceiling on one finding-centric Summary sentence."""
+
+MAX_DESCRIPTION_CHARS = 2000
+"""Hard ceiling on one reader-facing finding description."""
 
 
 class AssessmentFindingRef(BaseModel):
@@ -86,110 +94,6 @@ class AssessmentFindingRef(BaseModel):
     finding_ordinal: int = Field(ge=1)
 
 
-class ResearchClaimRef(BaseModel):
-    """Typed reference to one persisted ResearchClaim of a supplied result.
-
-    The exact ``(research_result_id, research_claim_id)`` pair must have been
-    supplied to the Report Writer; a claim merely present in the corpus but
-    absent from the input snapshot is rejected identically to an unknown one.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    kind: Literal["research_claim"] = "research_claim"
-    research_result_id: UUID
-    research_claim_id: UUID
-
-
-ReportSourceRef = Annotated[
-    AssessmentFindingRef | ResearchClaimRef, Field(discriminator="kind")
-]
-"""A material narrative statement references Assessment findings or Research claims.
-
-Assessment findings already carry validated Evidence/RelationshipObservation
-provenance; Research claims already carry validated citation closure. The
-report composes these validated artifacts rather than inventing a third
-provenance system, so direct Evidence/Relationship/DocumentChunk IDs are
-never valid report-level material references.
-"""
-
-
-def report_source_ref_key(ref: ReportSourceRef) -> tuple[str, ...]:
-    """Return a stable identity for one report source reference.
-
-    The key is derived from the explicit discriminator and the referenced
-    identities, so duplicate detection never depends on which fields are set.
-    """
-
-    if isinstance(ref, AssessmentFindingRef):
-        return (
-            ref.kind,
-            str(ref.assessment_id),
-            str(ref.finding_ordinal),
-        )
-    return (
-        ref.kind,
-        str(ref.research_result_id),
-        str(ref.research_claim_id),
-    )
-
-
-class ReportNarrativeStatement(BaseModel):
-    """One model-authored narrative statement with explicit typed support.
-
-    Rules: nonblank; bounded length; at least one support reference; no
-    duplicate support references. The statement is a presentation of supplied
-    material — never a new material fact.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    text: str
-    support: tuple[ReportSourceRef, ...]
-
-    @field_validator("text", mode="after")
-    @classmethod
-    def text_not_blank(cls, value: str) -> str:
-        """Reject blank statements."""
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("narrative statement must not be blank")
-        return stripped
-
-    @field_validator("text", mode="after")
-    @classmethod
-    def text_bounded(cls, value: str) -> str:
-        """Reject statements above the hard length ceiling."""
-        if len(value) > MAX_NARRATIVE_STATEMENT_CHARS:
-            raise ValueError(
-                f"narrative statement exceeds {MAX_NARRATIVE_STATEMENT_CHARS} characters"
-            )
-        return value
-
-    @field_validator("support", mode="after")
-    @classmethod
-    def support_nonempty(
-        cls, value: tuple[ReportSourceRef, ...]
-    ) -> tuple[ReportSourceRef, ...]:
-        """Require at least one source reference."""
-        if not value:
-            raise ValueError(
-                "narrative statement must carry at least one source reference"
-            )
-        return value
-
-    @field_validator("support", mode="after")
-    @classmethod
-    def no_duplicate_support(
-        cls, value: tuple[ReportSourceRef, ...]
-    ) -> tuple[ReportSourceRef, ...]:
-        """Reject duplicate source references."""
-        keys = [report_source_ref_key(ref) for ref in value]
-        if len(keys) != len(set(keys)):
-            raise ValueError("narrative statement source references must be unique")
-        return value
-
-
 class ReportResearchSelection(BaseModel):
     """Model-authored selection of one persisted ResearchClaim.
 
@@ -204,26 +108,104 @@ class ReportResearchSelection(BaseModel):
     research_claim_id: UUID
 
 
+class FindingPresentation(BaseModel):
+    """Model-authored bounded presentation for exactly one canonical finding.
+
+    The model supplies a short factual heading, a concise Summary sentence,
+    and detailed reader-facing analytical prose, tied to the referenced
+    Assessment finding ordinal. It may not select, omit, reorder, or
+    renumber findings, and it may not change any analytical field. The
+    generated prose is presentation, not new analytical authority: it must
+    remain entailed by the Finding and its supplied support context.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    assessment_finding_ordinal: int = Field(ge=1)
+    title: str
+    summary: str
+    description: str
+
+    @field_validator("title", mode="after")
+    @classmethod
+    def title_not_blank(cls, value: str) -> str:
+        """Reject blank finding titles."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("finding presentation title must not be blank")
+        return stripped
+
+    @field_validator("title", mode="after")
+    @classmethod
+    def title_bounded(cls, value: str) -> str:
+        """Reject finding titles above the hard length ceiling."""
+        if len(value) > MAX_FINDING_TITLE_CHARS:
+            raise ValueError(
+                f"finding presentation title exceeds "
+                f"{MAX_FINDING_TITLE_CHARS} characters"
+            )
+        return value
+
+    @field_validator("summary", mode="after")
+    @classmethod
+    def summary_not_blank(cls, value: str) -> str:
+        """Reject blank Summary sentences."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("finding presentation summary must not be blank")
+        return stripped
+
+    @field_validator("summary", mode="after")
+    @classmethod
+    def summary_bounded(cls, value: str) -> str:
+        """Reject Summary sentences above the hard length ceiling."""
+        if len(value) > MAX_SUMMARY_CHARS:
+            raise ValueError(
+                f"finding presentation summary exceeds {MAX_SUMMARY_CHARS} characters"
+            )
+        return value
+
+    @field_validator("description", mode="after")
+    @classmethod
+    def description_not_blank(cls, value: str) -> str:
+        """Reject blank finding descriptions."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("finding presentation description must not be blank")
+        return stripped
+
+    @field_validator("description", mode="after")
+    @classmethod
+    def description_bounded(cls, value: str) -> str:
+        """Reject finding descriptions above the hard length ceiling."""
+        if len(value) > MAX_DESCRIPTION_CHARS:
+            raise ValueError(
+                "finding presentation description exceeds "
+                f"{MAX_DESCRIPTION_CHARS} characters"
+            )
+        return value
+
+
 class ReportWriterOutput(BaseModel):
-    """The semantic-only output the Report Writer model returns.
+    """The presentation-only output the Report Writer model returns.
 
-    The model authors a title, bounded narrative statements (each with typed
-    provenance), an ordering/subset of the supplied Assessment findings, and
-    a selection of supplied persisted ResearchClaims. The application stamps
-    every persistence-owned field, verdict, confidence, Assessment caveat
-    lists, and the source-identity sets when it constructs the authoritative
-    :class:`InvestigationReport`.
+    The model authors a title, exactly one bounded presentation per supplied
+    Assessment finding, and a selection of supplied persisted ResearchClaims.
+    The application stamps every persistence-owned field, verdict,
+    confidence, criticality, ordering, numbering, caveat lists, Status
+    snapshot, and the source-identity sets when it constructs the
+    authoritative :class:`InvestigationReport`.
 
-    Deliberate exclusions: no verdict, no confidence, no limitations, no
-    unresolved questions, no recommended next steps, no persistence metadata,
-    no tool/provider requests.
+    Deliberate exclusions: no verdict, no confidence, no criticality, no
+    finding inclusion/order/numbering, no limitations, no unresolved
+    questions, no recommended next steps, no Status/timeline, no persistence
+    metadata, no tool/provider requests.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     title: str
-    executive_summary: tuple[ReportNarrativeStatement, ...] = ()
-    finding_order: tuple[int, ...] = ()
+    finding_presentations: tuple[FindingPresentation, ...] = ()
     research_context: tuple[ReportResearchSelection, ...] = ()
 
     @field_validator("title", mode="after")
@@ -245,14 +227,17 @@ class ReportWriterOutput(BaseModel):
             )
         return value
 
-    @field_validator("finding_order", mode="after")
+    @field_validator("finding_presentations", mode="after")
     @classmethod
-    def finding_order_valid(cls, value: tuple[int, ...]) -> tuple[int, ...]:
-        """Require positive, unique Assessment finding ordinals."""
-        if any(ordinal < 1 for ordinal in value):
-            raise ValueError("finding_order ordinals must be positive")
-        if len(value) != len(set(value)):
-            raise ValueError("finding_order must not contain duplicate ordinals")
+    def presentation_ordinals_unique(
+        cls, value: tuple[FindingPresentation, ...]
+    ) -> tuple[FindingPresentation, ...]:
+        """Reject duplicate presentation ordinals."""
+        ordinals = [presentation.assessment_finding_ordinal for presentation in value]
+        if len(ordinals) != len(set(ordinals)):
+            raise ValueError(
+                "finding_presentations must not contain duplicate ordinals"
+            )
         return value
 
     @field_validator("research_context", mode="after")
@@ -275,19 +260,26 @@ class ReportWriterOutput(BaseModel):
 class ReportFindingSnapshot(BaseModel):
     """Application-copied snapshot of one authoritative Assessment finding.
 
-    Every field except nothing: all fields are copied from the current
-    Assessment finding at the referenced ordinal. The model never authors
-    category, disposition, statement, confidence, or support; it may only
-    order/subset the findings.
+    Analytical fields (category, disposition, statement, confidence,
+    criticality, support) are copied exactly from the current Assessment
+    finding at the referenced ordinal. ``report_finding_number`` is
+    application-assigned after deterministic criticality-first sorting; the
+    model may only contribute the bounded ``title``, ``summary``, and
+    ``description``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     assessment_finding_ordinal: int = Field(ge=1)
+    report_finding_number: int = Field(ge=1)
+    criticality: FindingCriticality
+    title: str
     category: FindingCategory
     disposition: FindingDisposition
     statement: str
     confidence: AssessmentConfidence
+    summary: str
+    description: str
     support: tuple[FindingSupport, ...]
 
     @field_validator("statement", mode="after")
@@ -306,6 +298,53 @@ class ReportFindingSnapshot(BaseModel):
         """Require at least one support reference."""
         if not value:
             raise ValueError("finding must have at least one support reference")
+        return value
+
+
+class ReportSummaryItem(BaseModel):
+    """One finding-centric Summary projection item.
+
+    The item's text is the canonical finding's bounded Summary sentence and
+    its typed support references exactly that one Assessment finding, so a
+    Summary bullet can never combine unrelated findings or cite research.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    report_finding_number: int = Field(ge=1)
+    assessment_finding_ordinal: int = Field(ge=1)
+    text: str
+    support: tuple[AssessmentFindingRef, ...]
+
+    @field_validator("text", mode="after")
+    @classmethod
+    def text_not_blank(cls, value: str) -> str:
+        """Reject blank Summary item text."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("summary item text must not be blank")
+        return stripped
+
+    @field_validator("text", mode="after")
+    @classmethod
+    def text_bounded(cls, value: str) -> str:
+        """Reject Summary item text above the hard length ceiling."""
+        if len(value) > MAX_SUMMARY_CHARS:
+            raise ValueError(
+                f"summary item text exceeds {MAX_SUMMARY_CHARS} characters"
+            )
+        return value
+
+    @field_validator("support", mode="after")
+    @classmethod
+    def support_exactly_one(
+        cls, value: tuple[AssessmentFindingRef, ...]
+    ) -> tuple[AssessmentFindingRef, ...]:
+        """Require exactly one Assessment finding support reference."""
+        if len(value) != 1:
+            raise ValueError(
+                "summary item must reference exactly one assessment finding"
+            )
         return value
 
 
@@ -340,11 +379,13 @@ class ReportWriterInput(BaseModel):
 
     Assembled exclusively from persisted authoritative resources by the
     application input loader: the current Assessment (resolved through the
-    Investigation's durable ``assessment_id`` pointer), its analyzed Evidence,
-    the RelationshipObservations referenced by its Findings (with the stable
-    Relationships/entities needed to render them), and bounded persisted
-    ResearchResults. ``raw_payload`` never appears; the same persisted
-    investigation state always produces the same serialized input.
+    Investigation's durable ``assessment_id`` pointer), its analyzed
+    Evidence, the RelationshipObservations referenced by its Findings (with
+    the stable Relationships/entities needed to render them), bounded
+    persisted ResearchResults, and the persisted Investigation lifecycle
+    fields required for the Status snapshot. ``raw_payload`` never appears;
+    the same persisted investigation state always produces the same
+    serialized input.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -355,6 +396,10 @@ class ReportWriterInput(BaseModel):
     evidence: tuple[AnalystEvidenceItem, ...] = ()
     relationship_observations: tuple[AnalystRelationshipObservation, ...] = ()
     research_results: tuple[ResearchResult, ...] = ()
+    investigation_status: InvestigationStatus
+    started_at: datetime
+    completed_at: datetime | None = None
+    stop_reason: str | None = None
 
     @field_validator("objective", mode="after")
     @classmethod
@@ -392,13 +437,15 @@ class ReportWriterInput(BaseModel):
 
 
 class InvestigationReport(BaseModel):
-    """The authoritative persisted report domain resource (PR 23B).
+    """The authoritative persisted report domain resource (PR 23B, PR 35-5).
 
     Persistence predicates (``id``, ``version``, ``created_at``, deletion
-    metadata) are database-owned; callers must not supply them. Verdict and
-    confidence are copied exactly from the current Assessment; caveat lists
-    are copied exactly; findings and research context are application
-    snapshots; the top-level source identity sets are application-derived.
+    metadata) are database-owned; callers must not supply them. Verdict,
+    confidence, and the Status lifecycle snapshot are copied exactly from the
+    authoritative current Assessment/Investigation; caveat lists are copied
+    exactly; findings and Summary are application-derived projections of the
+    same canonical ordered finding set; research context is an application
+    snapshot.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -408,13 +455,18 @@ class InvestigationReport(BaseModel):
     assessment_id: UUID
     verdict: Verdict
     confidence: AssessmentConfidence
+    criticality: FindingCriticality
     title: str
-    executive_summary: tuple[ReportNarrativeStatement, ...] = ()
+    summary: tuple[ReportSummaryItem, ...] = ()
     findings: tuple[ReportFindingSnapshot, ...] = ()
     research_context: tuple[ReportResearchClaimSnapshot, ...] = ()
     limitations: tuple[str, ...] = ()
     unresolved_questions: tuple[str, ...] = ()
     recommended_next_steps: tuple[str, ...] = ()
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    outcome_status: InvestigationStatus
+    stop_reason: str | None = None
     source_evidence_ids: tuple[UUID, ...] = ()
     source_relationship_observation_ids: tuple[UUID, ...] = ()
     source_research_result_ids: tuple[UUID, ...] = ()
@@ -447,10 +499,13 @@ class InvestigationReport(BaseModel):
     def findings_unique_ordinals(
         cls, value: tuple[ReportFindingSnapshot, ...]
     ) -> tuple[ReportFindingSnapshot, ...]:
-        """Reject duplicate Assessment finding ordinals."""
+        """Reject duplicate Assessment finding ordinals and report numbers."""
         ordinals = [finding.assessment_finding_ordinal for finding in value]
         if len(ordinals) != len(set(ordinals)):
             raise ValueError("report findings must have unique assessment ordinals")
+        numbers = [finding.report_finding_number for finding in value]
+        if len(numbers) != len(set(numbers)):
+            raise ValueError("report findings must have unique report numbers")
         return value
 
     @field_validator("research_context", mode="after")
@@ -466,3 +521,20 @@ class InvestigationReport(BaseModel):
         if len(keys) != len(set(keys)):
             raise ValueError("report research context must not contain duplicates")
         return value
+
+
+def criticality_first_ordering(
+    findings: tuple[AnalyticalFinding, ...],
+) -> tuple[tuple[int, AnalyticalFinding], ...]:
+    """Return ``(assessment_ordinal, finding)`` pairs in canonical report order.
+
+    Findings are ordered criticality-first (critical -> high -> medium -> low
+    -> informational) and tie-broken by ascending authoritative Assessment
+    ordinal. The returned assessment ordinals are the stable internal
+    provenance ordinals; the reader-facing report number is the position in
+    this sequence.
+    """
+
+    indexed = list(enumerate(findings, start=1))
+    indexed.sort(key=lambda item: (CRITICALITY_RANK[item[1].criticality], item[0]))
+    return tuple(indexed)

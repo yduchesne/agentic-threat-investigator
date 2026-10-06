@@ -19,6 +19,7 @@ import pytest
 from agentic_threat_investigator.domain.assessment import (
     Assessment,
     AssessmentConfidence,
+    FindingCriticality,
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
@@ -26,6 +27,7 @@ from agentic_threat_investigator.domain.evidence import (
     ConvertedEvidence,
     EvidenceType,
 )
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
     InvestigationTimelineEventType,
@@ -70,7 +72,9 @@ def _report(
         assessment_id=assessment_id,
         verdict=Verdict.INCONCLUSIVE,
         confidence=AssessmentConfidence.LOW,
+        criticality=FindingCriticality.INFORMATIONAL,
         title=title,
+        outcome_status=InvestigationStatus.COMPLETED,
     )
 
 

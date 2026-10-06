@@ -33,6 +33,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     FindingSupport,
     RelationshipSupport,
@@ -70,6 +71,7 @@ def _finding_from_row(
         disposition=FindingDisposition(row.disposition),
         statement=row.statement,
         confidence=AssessmentConfidence(row.confidence),
+        criticality=FindingCriticality(row.criticality),
         support=supports,
     )
 

@@ -48,6 +48,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -573,6 +574,7 @@ class World:
                     disposition=FindingDisposition.SUPPORTING,
                     statement="The domain resolves to the address.",
                     confidence=AssessmentConfidence.MEDIUM,
+                    criticality=FindingCriticality.MEDIUM,
                     support=(
                         EvidenceSupport(kind="evidence", evidence_id=self.evidence_id),
                         RelationshipSupport(
@@ -801,6 +803,7 @@ def _oversized_candidate(world: World, *, collection: str) -> Assessment:
                         disposition=FindingDisposition.SUPPORTING,
                         statement="Three supports exceed the limit.",
                         confidence=AssessmentConfidence.MEDIUM,
+                        criticality=FindingCriticality.MEDIUM,
                         support=(
                             EvidenceSupport(
                                 kind="evidence", evidence_id=world.evidence_id
@@ -871,6 +874,7 @@ async def test_collection_at_limit_is_accepted(
         disposition=FindingDisposition.SUPPORTING,
         statement="First finding at the limit.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(EvidenceSupport(kind="evidence", evidence_id=world.evidence_id),),
     )
     second = AnalyticalFinding(
@@ -878,6 +882,7 @@ async def test_collection_at_limit_is_accepted(
         disposition=FindingDisposition.SUPPORTING,
         statement="Second finding at the limit.",
         confidence=AssessmentConfidence.LOW,
+        criticality=FindingCriticality.MEDIUM,
         support=(EvidenceSupport(kind="evidence", evidence_id=world.evidence_id),),
     )
     candidate = world.assessment.model_copy(update={"findings": (first, second)})

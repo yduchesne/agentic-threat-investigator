@@ -80,18 +80,24 @@ test.describe("PR 31F-8 routed cross-resource navigation", () => {
     )}`;
     step("overview ready");
 
-    // The completed Overview shows the persisted Report with finding
-    // support references; the semantic support line stays visible.
-    await expect(page.getByText("Supports").first()).toBeVisible({ timeout: 30_000 });
+    // The completed Overview links to the one canonical Final Report, which
+    // renders the finding support references; open it before pivoting.
+    await page.getByRole("link", { name: "View report" }).click();
+    await expect(
+      page.getByRole("heading", { name: /Finding 1 —/ }).first(),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Corroboration").first()).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(
       page.getByText(/urn:ati:source:[a-z_]+ · [A-Za-z ]+ · /).first(),
     ).toBeVisible({ timeout: 30_000 });
 
     // Evidence support -> exact scoped Evidence route (semantic link).
     await expect(
-      page.getByRole("link", { name: "Open evidence" }).first(),
+      page.getByTestId("pivot-action-evidenceExact").first(),
     ).toBeVisible({ timeout: 120_000 });
-    await page.getByRole("link", { name: "Open evidence" }).first().click();
+    await page.getByTestId("pivot-action-evidenceExact").first().click();
     await expect(page).toHaveURL(new RegExp(`${base}/evidence/[0-9a-f-]+$`));
     const evidenceHeading = page.getByRole("heading", { name: "Evidence details" });
     await expect(evidenceHeading).toBeVisible({ timeout: 30_000 });
@@ -184,9 +190,10 @@ test.describe("PR 31F-8 routed cross-resource navigation", () => {
     await page.goBack(); // relationship detail
     await page.goBack(); // relationships route
     await page.goBack(); // evidence exact
+    await page.goBack(); // report
     await page.goBack(); // overview
     await expect(page.getByRole("heading", { name: OBJECTIVE })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Supports").first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "View report" })).toBeVisible();
     expect(page.getByText("FAKE DATA")).toBeVisible();
     expect(page.url()).not.toContain("pivot=");
     expect(consoleErrors).toEqual([]);
@@ -343,7 +350,7 @@ test.describe("PR 31F-8 routed cross-resource navigation", () => {
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(await page.getByTestId("pivot-workbench").count()).toBe(0);
-    await page.getByRole("button", { name: "Back to Evidence" }).click();
+    await page.getByRole("button", { name: "< Back" }).click();
     await expect(evidenceTable).toBeVisible({ timeout: 30_000 });
 
     // Open another detail, Back again: the surface survives repeated
@@ -357,7 +364,7 @@ test.describe("PR 31F-8 routed cross-resource navigation", () => {
     await expect(
       page.getByRole("heading", { name: "Evidence details" }),
     ).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Back to Evidence" }).click();
+    await page.getByRole("button", { name: "< Back" }).click();
     await expect(evidenceTable).toBeVisible({ timeout: 30_000 });
     step("nd: Back closed only the detail");
 

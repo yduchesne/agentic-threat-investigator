@@ -19,7 +19,6 @@ from uuid import UUID
 
 from agentic_threat_investigator.domain.report import (
     InvestigationReport,
-    ResearchClaimRef,
 )
 from agentic_threat_investigator.evaluation.report_writer.models import (
     ExpectedReportWriterOutput,
@@ -100,7 +99,7 @@ class ReportWriterEvaluator:
                 else 1.0
             )
             metrics = ReportWriterMetrics(
-                narrative_statement_count=len(report.executive_summary),
+                narrative_statement_count=len(report.summary),
                 included_finding_ordinals=ordinals,
                 included_research_claim_count=len(report.research_context),
                 required_finding_coverage=finding_coverage,
@@ -181,7 +180,7 @@ class ReportWriterEvaluator:
                 failures.append(ReportWriterFailureCode.REQUIRED_NEXT_STEP_MISSING)
                 break
 
-        statement_count = len(report.executive_summary)
+        statement_count = len(report.summary)
         if statement_count < expected.min_narrative_statements or (
             expected.max_narrative_statements is not None
             and statement_count > expected.max_narrative_statements
@@ -189,7 +188,10 @@ class ReportWriterEvaluator:
             failures.append(ReportWriterFailureCode.REPORT_STATEMENT_ENVELOPE_VIOLATION)
         else:
             narrative_text = " ".join(
-                statement.text for statement in report.executive_summary
+                [item.text for item in report.summary]
+                + [finding.title for finding in report.findings]
+                + [finding.summary for finding in report.findings]
+                + [finding.description for finding in report.findings]
             )
             normalized = normalize_phrase(narrative_text)
             for phrase in expected.required_phrases:
@@ -206,17 +208,13 @@ class ReportWriterEvaluator:
                     break
 
         # Unsupported-source hard gate: every research claim referenced by the
-        # report (research context or narrative support) must belong to the
-        # scenario-declared claim universe. This mirrors the application
-        # validator and is retained as a hard evaluation gate.
+        # report must belong to the scenario-declared claim universe. This
+        # mirrors the application validator and is retained as a hard
+        # evaluation gate.
         allowed_claims = set(resolution.research_claim_ids.values())
         referenced_claims: set[UUID] = {
             snapshot.research_claim_id for snapshot in report.research_context
         }
-        for statement in report.executive_summary:
-            for ref in statement.support:
-                if isinstance(ref, ResearchClaimRef):
-                    referenced_claims.add(ref.research_claim_id)
         if referenced_claims - allowed_claims:
             failures.append(ReportWriterFailureCode.UNSUPPORTED_SOURCE_REFERENCE)
         return failures

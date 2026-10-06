@@ -159,7 +159,7 @@ describe("Timeline page", () => {
     await screen.findByRole("heading", { name: "Timeline details" });
     // The list is an alternative view: not rendered under/beside the detail.
     expect(screen.queryByRole("table", { name: "Timeline" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Back to Timeline" }));
+    fireEvent.click(screen.getByRole("button", { name: "< Back" }));
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Timeline details" })).not.toBeInTheDocument();
     }, { timeout: 3000 });
@@ -168,7 +168,7 @@ describe("Timeline page", () => {
     // Reopen (reopening works) and Back again in the same page process.
     await open();
     await screen.findByRole("heading", { name: "Timeline details" });
-    fireEvent.click(screen.getByRole("button", { name: "Back to Timeline" }));
+    fireEvent.click(screen.getByRole("button", { name: "< Back" }));
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Timeline details" })).not.toBeInTheDocument();
     }, { timeout: 3000 });
@@ -181,7 +181,7 @@ describe("Timeline page", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("presentation")).toBeNull();
     expect(document.body.style.overflow).toBe("");
-    fireEvent.click(screen.getByRole("button", { name: "Back to Timeline" }));
+    fireEvent.click(screen.getByRole("button", { name: "< Back" }));
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Timeline details" })).not.toBeInTheDocument();
     }, { timeout: 3000 });
@@ -196,7 +196,7 @@ describe("Timeline page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
     await open();
     await screen.findByRole("heading", { name: "Timeline details" });
-    fireEvent.click(screen.getByRole("button", { name: "Back to Timeline" }));
+    fireEvent.click(screen.getByRole("button", { name: "< Back" }));
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Timeline details" })).not.toBeInTheDocument();
     }, { timeout: 3000 });

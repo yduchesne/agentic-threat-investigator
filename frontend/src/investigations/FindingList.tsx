@@ -37,6 +37,7 @@ import { evidenceTypeKey } from "../evidence/labels";
 import { relationshipTypeKey } from "../relationships/labels";
 import { entityTypeLabelKey } from "../relationship-graph/relationship-graph-presentation";
 import type { SupportPresentationLookup } from "./support-presentations-queries";
+import { REPORT_TYPOGRAPHY } from "./report-typography";
 
 export const CATEGORY_LABEL_KEYS: Record<string, string> = {
   reputation: "category.reputation",
@@ -116,14 +117,30 @@ function observationSupportLine(
 export function SupportReference({
   support,
   presentation = undefined,
+  presentationMode = "workbench",
 }: {
   support: FindingSupportRef;
   presentation?: SupportPresentationLookup | null;
+  /**
+   * ``report`` renders the readable Final Report support scale (14px / ~10.5pt)
+   * for the semantic line and its secondary identity. ``workbench`` keeps the
+   * compact caption scale used by the bounded findings list.
+   */
+  presentationMode?: "workbench" | "report";
 }): ReactElement {
   const { t } = useTranslation("overview");
   const { t: tEvidence } = useTranslation("evidence");
   const { t: tRelationships } = useTranslation("relationships");
   const { t: tEvolution } = useTranslation("relationshipEvolution");
+  const reportMode = presentationMode === "report";
+  // In report mode neither line uses MUI ``caption``; the readable report
+  // support role replaces it so the primary support text never shrinks below
+  // the 14px / ~10.5pt floor.
+  const supportVariant = reportMode ? undefined : "caption";
+  const supportTextSx = reportMode ? REPORT_TYPOGRAPHY.support : undefined;
+  const supportIdentitySx = reportMode
+    ? { ...REPORT_TYPOGRAPHY.support, color: "text.secondary" }
+    : { color: "text.secondary" };
   if (support.kind === "evidence" && support.evidence_id !== null && support.evidence_id !== undefined) {
     const presentationItem =
       presentation?.[support.evidence_id] as
@@ -136,10 +153,10 @@ export function SupportReference({
     return (
       <li>
         <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", gap: 0.5, flexWrap: "wrap" }}>
-          <Typography variant="caption" component="span">
+          <Typography variant={supportVariant} component="span" sx={supportTextSx}>
             {semantic}
           </Typography>
-          <Typography variant="caption" component="span" sx={{ color: "text.secondary" }}>
+          <Typography variant={supportVariant} component="span" sx={supportIdentitySx}>
             {t("support.evidenceId")} <ShortId id={support.evidence_id} />
           </Typography>
           <PivotMenu
@@ -167,10 +184,10 @@ export function SupportReference({
     return (
       <li>
         <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", gap: 0.5, flexWrap: "wrap" }}>
-          <Typography variant="caption" component="span">
+          <Typography variant={supportVariant} component="span" sx={supportTextSx}>
             {semantic}
           </Typography>
-          <Typography variant="caption" component="span" sx={{ color: "text.secondary" }}>
+          <Typography variant={supportVariant} component="span" sx={supportIdentitySx}>
             {t("support.observationId")} <ShortId id={support.relationship_observation_id} />
           </Typography>
           <PivotMenu

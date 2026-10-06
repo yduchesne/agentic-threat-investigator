@@ -36,6 +36,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     FindingSupport,
     RelationshipSupport,
@@ -176,6 +177,7 @@ def _finding_from_row(
         disposition=FindingDisposition(row.disposition),
         statement=row.statement,
         confidence=AssessmentConfidence(row.confidence),
+        criticality=FindingCriticality(row.criticality),
         support=supports,
     )
 
@@ -243,6 +245,7 @@ class PostgresAssessmentRepository(AssessmentRepository):
                 finding.disposition.value,
                 finding.statement,
                 finding.confidence.value,
+                finding.criticality.value,
             )
             for ordinal, finding in enumerate(assessment.findings, start=1)
         ]

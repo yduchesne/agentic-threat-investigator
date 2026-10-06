@@ -68,6 +68,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -828,6 +829,7 @@ async def test_g26f_i06_independent_support_with_geoint_context(
                 disposition=FindingDisposition.SUPPORTING,
                 statement="The domain resolves to a block-listed controller.",
                 confidence=AssessmentConfidence.MEDIUM,
+                criticality=FindingCriticality.MEDIUM,
                 support=(EvidenceSupport(kind="evidence", evidence_id=dns_evidence),),
             ),
         ),

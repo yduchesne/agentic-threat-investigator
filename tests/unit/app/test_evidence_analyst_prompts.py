@@ -199,10 +199,10 @@ def geoint_input() -> EvidenceAnalystInput:
 
 
 def test_geoint_section_absent_without_context() -> None:
-    """No GEOINT context renders no section (backward compatible)."""
+    """No GEOINT context renders no context section, but an explicit contract."""
     _system, user_prompt = build_evidence_analyst_prompts(analyst_input())
     assert "<geographic_context>" not in user_prompt
-    assert "geographic" not in user_prompt.lower()
+    assert "geographic findings are inadmissible" in user_prompt
 
 
 def test_geoint_section_renders_exact_ids_and_precision() -> None:

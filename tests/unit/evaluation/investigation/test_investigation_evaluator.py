@@ -23,8 +23,6 @@ from agentic_threat_investigator.domain.investigation import (
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
-    ReportNarrativeStatement,
-    ResearchClaimRef,
 )
 from agentic_threat_investigator.evaluation.coordinator import CoordinatorActionRecord
 from agentic_threat_investigator.evaluation.investigation.evaluator import (
@@ -43,9 +41,7 @@ from tests.unit.evaluation.investigation.output_fixtures import (
     INVESTIGATION_ID,
     MALWARE_ID,
     OBSERVATION_ID,
-    RESEARCH_CLAIM_ID,
     RESEARCH_RESULT,
-    RESEARCH_RESULT_ID,
     RESOLVED_IP_ID,
     ROOT_ID,
     assessment,
@@ -278,6 +274,7 @@ def test_unsupported_assessment_reference_fails() -> None:
         AnalyticalFinding,
         EvidenceSupport,
         FindingCategory,
+        FindingCriticality,
         FindingDisposition,
     )
 
@@ -286,6 +283,7 @@ def test_unsupported_assessment_reference_fails() -> None:
         disposition=FindingDisposition.SUPPORTING,
         statement="Unsupported evidence.",
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.MEDIUM,
         support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
     )
     failing = output(final_assessment=assessment(findings=(broken_finding,)))
@@ -522,63 +520,30 @@ def test_values_within_envelope_pass_regardless_of_variation() -> None:
 def test_report_reference_closure_passes_with_research_context() -> None:
     """A report with valid research context passes reference closure."""
     snapshot = research_claim_snapshot()
-    research_report = report(
-        research_context=(snapshot,),
-        narrative=(
-            ReportNarrativeStatement(
-                text="The family context supports the finding.",
-                support=(
-                    ResearchClaimRef(
-                        kind="research_claim",
-                        research_result_id=RESEARCH_RESULT_ID,
-                        research_claim_id=RESEARCH_CLAIM_ID,
-                    ),
-                ),
-            ),
-        ),
-    )
+    research_report = report(research_context=(snapshot,))
     passed, failures = _evaluate_case(scenario(), output(report_value=research_report))
     assert passed
     assert failures == ()
 
 
-def test_report_narrative_assessment_ref_closure_passes() -> None:
-    """A narrative Assessment finding reference resolves against the Assessment."""
-    narrative = report(
-        narrative=(
-            ReportNarrativeStatement(
-                text="The verdict is supported by the first finding.",
-                support=(
-                    AssessmentFindingRef(
-                        kind="assessment_finding",
-                        assessment_id=ASSESSMENT_ID,
-                        finding_ordinal=1,
-                    ),
-                ),
-            ),
-        )
-    )
-    passed, failures = _evaluate_case(scenario(), output(report_value=narrative))
+def test_report_summary_assessment_ref_closure_passes() -> None:
+    """A summary Assessment finding reference resolves against the Assessment."""
+    passed, failures = _evaluate_case(scenario(), output(report_value=report()))
     assert passed
 
 
-def test_report_narrative_unknown_finding_ordinal_fails() -> None:
-    """A narrative reference to an out-of-range finding ordinal fails."""
-    narrative = report(
-        narrative=(
-            ReportNarrativeStatement(
-                text="Invalid finding ordinal.",
-                support=(
-                    AssessmentFindingRef(
-                        kind="assessment_finding",
-                        assessment_id=ASSESSMENT_ID,
-                        finding_ordinal=99,
-                    ),
-                ),
-            ),
-        )
+def test_report_summary_unknown_finding_ordinal_fails() -> None:
+    """A summary reference to an out-of-range finding ordinal fails."""
+    base = report()
+    item = base.summary[0]
+    broken_ref = AssessmentFindingRef(
+        kind="assessment_finding",
+        assessment_id=ASSESSMENT_ID,
+        finding_ordinal=99,
     )
-    passed, failures = _evaluate_case(scenario(), output(report_value=narrative))
+    broken_item = item.model_copy(update={"support": (broken_ref,)})
+    broken = base.model_copy(update={"summary": (broken_item,)})
+    passed, failures = _evaluate_case(scenario(), output(report_value=broken))
     assert not passed
     assert InvestigationFailureCode.INVALID_REPORT_REFERENCE in failures
 

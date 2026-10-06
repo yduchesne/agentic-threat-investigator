@@ -31,6 +31,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -358,6 +359,7 @@ class World:
             disposition=FindingDisposition.SUPPORTING,
             statement="Reputation evidence indicates malicious activity.",
             confidence=AssessmentConfidence.HIGH,
+            criticality=FindingCriticality.MEDIUM,
             support=(
                 EvidenceSupport(kind="evidence", evidence_id=self.evidence_id),
                 RelationshipSupport(

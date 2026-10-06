@@ -179,7 +179,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
         page,
         page.getByRole("table", { name: "Evidence" }),
         "Evidence details",
-        "Back to Evidence",
+        "< Back",
         1 + (index % 3),
         `ev-c${index}`,
       );
@@ -193,7 +193,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
         page,
         page.getByRole("table", { name: "Relationships" }),
         "Relationship details",
-        "Back to Relationships",
+        "< Back",
         1 + (index % 3),
         `rel-c${index}`,
       );
@@ -207,7 +207,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
         page,
         page.getByRole("table", { name: "Timeline" }),
         "Timeline details",
-        "Back to Timeline",
+        "< Back",
         1 + (index % 3),
         `tl-c${index}`,
       );
@@ -230,7 +230,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
         page,
         page.getByRole("table", { name: "History" }),
         "History details",
-        "Back to History",
+        "< Back",
         1 + (index % 3),
         `hist-c${index}`,
         dispatchActivate,
@@ -316,7 +316,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
       expect(await page.getByTestId("pivot-workbench").count()).toBe(0);
       await rawPointer(
         page,
-        page.getByRole("button", { name: "Back to Evidence" }),
+        page.getByRole("button", { name: "< Back" }),
         `ev-c${index}-back`,
       );
       await expect(evidenceTable).toBeVisible({ timeout: 30_000 });
@@ -335,7 +335,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
     await expect(
       page.getByRole("heading", { name: "Evidence details" }),
     ).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Back to Evidence" }).click();
+    await page.getByRole("button", { name: "< Back" }).click();
     await expect(page.getByRole("table", { name: "Evidence" })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("FAKE DATA")).toBeVisible({ timeout: 30_000 });
     expect(page.url()).not.toContain("pivot=");

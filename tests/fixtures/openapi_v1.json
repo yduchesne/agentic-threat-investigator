@@ -421,6 +421,18 @@
         "title": "FindingCategory",
         "type": "string"
       },
+      "FindingCriticality": {
+        "description": "Materiality of one finding, independent of confidence.\n\nCriticality expresses how materially a finding bears on the investigation\n(severity/importance). It is deliberately distinct from\n:class:`AssessmentConfidence`, which expresses confidence in the\nanalytical conclusion. Neither value may be derived from the other.",
+        "enum": [
+          "critical",
+          "high",
+          "medium",
+          "low",
+          "informational"
+        ],
+        "title": "FindingCriticality",
+        "type": "string"
+      },
       "FindingDisposition": {
         "description": "Whether the Finding supports or contradicts the Assessment verdict.",
         "enum": [
@@ -439,6 +451,9 @@
           },
           "confidence": {
             "$ref": "#/components/schemas/AssessmentConfidence"
+          },
+          "criticality": {
+            "$ref": "#/components/schemas/FindingCriticality"
           },
           "disposition": {
             "$ref": "#/components/schemas/FindingDisposition"
@@ -460,6 +475,7 @@
           "disposition",
           "statement",
           "confidence",
+          "criticality",
           "support"
         ],
         "title": "FindingResponse",
@@ -1584,43 +1600,6 @@
         "title": "LoginRequest",
         "type": "object"
       },
-      "NarrativeStatementResponse": {
-        "additionalProperties": false,
-        "description": "One model-authored narrative statement with explicit typed support.",
-        "properties": {
-          "support": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "assessment_finding": "#/components/schemas/AssessmentFindingRefResponse",
-                  "research_claim": "#/components/schemas/ResearchClaimRefResponse"
-                },
-                "propertyName": "kind"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/AssessmentFindingRefResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/ResearchClaimRefResponse"
-                }
-              ]
-            },
-            "title": "Support",
-            "type": "array"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "text",
-          "support"
-        ],
-        "title": "NarrativeStatementResponse",
-        "type": "object"
-      },
       "PageResponse_AssessmentResponse_": {
         "additionalProperties": false,
         "properties": {
@@ -2254,7 +2233,7 @@
       },
       "ReportFindingResponse": {
         "additionalProperties": false,
-        "description": "Application-copied snapshot of one authoritative Assessment finding.",
+        "description": "Application-copied snapshot of one canonical Assessment finding.",
         "properties": {
           "assessment_finding_ordinal": {
             "title": "Assessment Finding Ordinal",
@@ -2266,11 +2245,26 @@
           "confidence": {
             "$ref": "#/components/schemas/AssessmentConfidence"
           },
+          "criticality": {
+            "$ref": "#/components/schemas/FindingCriticality"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
           "disposition": {
             "$ref": "#/components/schemas/FindingDisposition"
           },
+          "report_finding_number": {
+            "title": "Report Finding Number",
+            "type": "integer"
+          },
           "statement": {
             "title": "Statement",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
             "type": "string"
           },
           "support": {
@@ -2279,14 +2273,23 @@
             },
             "title": "Support",
             "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
           }
         },
         "required": [
           "assessment_finding_ordinal",
+          "report_finding_number",
+          "criticality",
+          "title",
           "category",
           "disposition",
           "statement",
           "confidence",
+          "summary",
+          "description",
           "support"
         ],
         "title": "ReportFindingResponse",
@@ -2359,12 +2362,20 @@
             "title": "Created At",
             "type": "string"
           },
-          "executive_summary": {
-            "items": {
-              "$ref": "#/components/schemas/NarrativeStatementResponse"
-            },
-            "title": "Executive Summary",
-            "type": "array"
+          "criticality": {
+            "$ref": "#/components/schemas/FindingCriticality"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
           },
           "findings": {
             "items": {
@@ -2389,6 +2400,9 @@
             },
             "title": "Limitations",
             "type": "array"
+          },
+          "outcome_status": {
+            "$ref": "#/components/schemas/InvestigationStatus"
           },
           "recommended_next_steps": {
             "items": {
@@ -2428,6 +2442,36 @@
             "title": "Source Research Result Ids",
             "type": "array"
           },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          },
+          "summary": {
+            "items": {
+              "$ref": "#/components/schemas/ReportSummaryItemResponse"
+            },
+            "title": "Summary",
+            "type": "array"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2453,13 +2497,18 @@
           "assessment_id",
           "verdict",
           "confidence",
+          "criticality",
           "title",
-          "executive_summary",
+          "summary",
           "findings",
           "research_context",
           "limitations",
           "unresolved_questions",
           "recommended_next_steps",
+          "started_at",
+          "ended_at",
+          "outcome_status",
+          "stop_reason",
           "source_evidence_ids",
           "source_relationship_observation_ids",
           "source_research_result_ids",
@@ -2467,6 +2516,39 @@
           "created_at"
         ],
         "title": "ReportResponse",
+        "type": "object"
+      },
+      "ReportSummaryItemResponse": {
+        "additionalProperties": false,
+        "description": "One finding-centric Summary projection item.",
+        "properties": {
+          "assessment_finding_ordinal": {
+            "title": "Assessment Finding Ordinal",
+            "type": "integer"
+          },
+          "report_finding_number": {
+            "title": "Report Finding Number",
+            "type": "integer"
+          },
+          "support": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingRefResponse"
+            },
+            "title": "Support",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "report_finding_number",
+          "assessment_finding_ordinal",
+          "text",
+          "support"
+        ],
+        "title": "ReportSummaryItemResponse",
         "type": "object"
       },
       "ResearchCitationResponse": {
@@ -2563,34 +2645,6 @@
           "similarity_score"
         ],
         "title": "ResearchCitationResponse",
-        "type": "object"
-      },
-      "ResearchClaimRefResponse": {
-        "additionalProperties": false,
-        "description": "Typed reference to one persisted ResearchClaim of a supplied result.",
-        "properties": {
-          "kind": {
-            "const": "research_claim",
-            "default": "research_claim",
-            "title": "Kind",
-            "type": "string"
-          },
-          "research_claim_id": {
-            "format": "uuid",
-            "title": "Research Claim Id",
-            "type": "string"
-          },
-          "research_result_id": {
-            "format": "uuid",
-            "title": "Research Result Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "research_result_id",
-          "research_claim_id"
-        ],
-        "title": "ResearchClaimRefResponse",
         "type": "object"
       },
       "ResearchClaimResponse": {

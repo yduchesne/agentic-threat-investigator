@@ -49,6 +49,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -73,12 +74,10 @@ from agentic_threat_investigator.domain.relationships import (
     RelationshipObservation,
 )
 from agentic_threat_investigator.domain.report import (
-    AssessmentFindingRef,
-    ReportNarrativeStatement,
+    FindingPresentation,
     ReportResearchSelection,
     ReportWriterInput,
     ReportWriterOutput,
-    ResearchClaimRef,
 )
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
@@ -140,6 +139,7 @@ class FixtureFinding:
     disposition: FindingDisposition
     statement: str
     confidence: AssessmentConfidence
+    criticality: FindingCriticality = FindingCriticality.MEDIUM
     evidence_labels: tuple[str, ...] = ()
     observation_labels: tuple[str, ...] = ()
 
@@ -540,6 +540,7 @@ def build_fixture_assessment(
                 disposition=finding.disposition,
                 statement=finding.statement,
                 confidence=finding.confidence,
+                criticality=finding.criticality,
                 support=tuple(support),
             )
         )
@@ -695,6 +696,10 @@ def build_fixture_report_input(
         evidence=build_fixture_evidence_items(fixture, resolution),
         relationship_observations=build_fixture_observation_items(fixture, resolution),
         research_results=build_fixture_research_results(fixture, resolution),
+        investigation_status=InvestigationStatus.RUNNING,
+        started_at=_FIXED,
+        completed_at=None,
+        stop_reason=None,
     )
 
 
@@ -705,7 +710,6 @@ def build_canonical_report_output(
 ) -> ReportWriterOutput:
     """Build the deterministic output satisfying the scenario envelope."""
     expected = scenario.expected
-    finding_order = tuple(sorted(expected.required_assessment_finding_ordinals))
 
     research_context: list[ReportResearchSelection] = []
     for label in expected.required_research_claim_labels:
@@ -719,36 +723,26 @@ def build_canonical_report_output(
             )
         )
 
-    support: list[AssessmentFindingRef | ResearchClaimRef] = []
-    for ordinal in finding_order:
-        support.append(
-            AssessmentFindingRef(
-                kind="assessment_finding",
-                assessment_id=resolution.assessment_id,
-                finding_ordinal=ordinal,
+    presentations: list[FindingPresentation] = []
+    required_phrase_text = " ".join(expected.required_phrases)
+    for ordinal, finding in enumerate(fixture.findings, start=1):
+        summary = finding.statement
+        if ordinal == 1 and required_phrase_text:
+            summary = required_phrase_text
+        presentations.append(
+            FindingPresentation(
+                assessment_finding_ordinal=ordinal,
+                title=finding.statement[:120],
+                summary=summary,
+                description=(
+                    f"The finding records that {finding.statement} "
+                    "This presentation is entailed by the supplied support."
+                )[:2000],
             )
-        )
-    for selection in research_context:
-        support.append(
-            ResearchClaimRef(
-                kind="research_claim",
-                research_result_id=selection.research_result_id,
-                research_claim_id=selection.research_claim_id,
-            )
-        )
-
-    statements: tuple[ReportNarrativeStatement, ...] = ()
-    if expected.required_phrases:
-        statements = (
-            ReportNarrativeStatement(
-                text=expected.required_phrases[0],
-                support=tuple(support),
-            ),
         )
     return ReportWriterOutput(
         title=f"Canonical report for {scenario.id}",
-        executive_summary=statements,
-        finding_order=finding_order,
+        finding_presentations=tuple(presentations),
         research_context=tuple(research_context),
     )
 
