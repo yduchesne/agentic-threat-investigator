@@ -734,7 +734,7 @@ endpoint_for() {
     postgres) printf 'localhost:%s (PostgreSQL 18 + pgvector + PostGIS)\n' "$POSTGRES_PORT" ;;
     redpanda) printf 'localhost:%s (Kafka-compatible broker)\n' "$REDPANDA_PORT" ;;
     migrate | fake-data-bootstrap | scheduler) printf 'one-shot (no persistent endpoint)\n' ;;
-    api) printf 'http://localhost:%s/docs (FastAPI; health: /health/ready)\n' "$API_PORT" ;;
+    api) printf 'http://localhost:%s/ (server-rendered web UI) | http://localhost:%s/docs (FastAPI; health: /health/ready)\n' "$API_PORT" "$API_PORT" ;;
     worker) printf 'internal (no host port; investigation worker)\n' ;;
     geo-resolver) printf 'internal (no host port; geographic resolution worker)\n' ;;
     frontend) printf 'http://localhost:%s/ (application login/home)\n' "$FRONTEND_PORT" ;;

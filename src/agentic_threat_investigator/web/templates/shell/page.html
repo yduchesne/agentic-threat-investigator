@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{# SPDX-License-Identifier: AGPL-3.0-only #}
+{% block title %}Home · {{ view.title }}{% endblock %}
+{% block header %}
+<nav class="ati-nav" aria-label="Primary">
+  <span class="ati-identity">
+    Signed in as <strong>{{ view.username }}</strong>
+  </span>
+  <form method="post" action="/logout" class="ati-logout-form">
+    <input type="hidden" name="csrf_token" value="{{ view.csrf_token }}">
+    <button type="submit" class="ati-button ati-button-secondary">Sign out</button>
+  </form>
+</nav>
+{% endblock %}
+{% block content %}
+{% include "shell/_content.html" %}
+{% endblock %}

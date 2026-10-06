@@ -1,0 +1,205 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* ATI server-rendered web presentation design tokens and base layout (V07-01).
+   Semantic custom properties are shared by full pages and HTMX fragments;
+   later visualization islands consume the same tokens rather than branching
+   on opaque theme names. */
+
+:root {
+  color-scheme: light dark;
+  --ati-bg: #f5f6f8;
+  --ati-surface: #ffffff;
+  --ati-surface-muted: #eef1f5;
+  --ati-text: #17202a;
+  --ati-text-muted: #5b6672;
+  --ati-border: #d5dae1;
+  --ati-accent: #1f5f99;
+  --ati-accent-contrast: #ffffff;
+  --ati-danger: #a12626;
+  --ati-radius: 8px;
+  --ati-space-1: 0.25rem;
+  --ati-space-2: 0.5rem;
+  --ati-space-3: 1rem;
+  --ati-space-4: 1.5rem;
+  --ati-space-5: 2.5rem;
+  --ati-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --ati-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ati-bg: #10151b;
+    --ati-surface: #18202a;
+    --ati-surface-muted: #202b37;
+    --ati-text: #e8edf2;
+    --ati-text-muted: #9aa7b4;
+    --ati-border: #2c3844;
+    --ati-accent: #6fb0e6;
+    --ati-accent-contrast: #04121f;
+    --ati-danger: #f0a3a3;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ati-bg);
+  color: var(--ati-text);
+  font-family: var(--ati-font-sans);
+  line-height: 1.5;
+}
+
+.ati-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--ati-surface);
+  color: var(--ati-text);
+  padding: var(--ati-space-2) var(--ati-space-3);
+  z-index: 10;
+}
+
+.ati-skip-link:focus {
+  left: 0;
+}
+
+.ati-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ati-space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ati-space-3) var(--ati-space-4);
+  background: var(--ati-surface);
+  border-bottom: 1px solid var(--ati-border);
+}
+
+.ati-brand {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.ati-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ati-space-3);
+  align-items: center;
+}
+
+.ati-identity {
+  color: var(--ati-text-muted);
+}
+
+.ati-main {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: var(--ati-space-4);
+}
+
+.ati-card {
+  background: var(--ati-surface);
+  border: 1px solid var(--ati-border);
+  border-radius: var(--ati-radius);
+  padding: var(--ati-space-4);
+  margin-bottom: var(--ati-space-4);
+}
+
+.ati-auth {
+  max-width: 24rem;
+  margin: var(--ati-space-5) auto;
+}
+
+.ati-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ati-space-1);
+  margin-bottom: var(--ati-space-3);
+}
+
+.ati-field label {
+  font-weight: 600;
+}
+
+.ati-field input {
+  padding: var(--ati-space-2);
+  border: 1px solid var(--ati-border);
+  border-radius: var(--ati-radius);
+  background: var(--ati-surface);
+  color: var(--ati-text);
+  font: inherit;
+}
+
+.ati-button {
+  display: inline-block;
+  padding: var(--ati-space-2) var(--ati-space-3);
+  border: 1px solid var(--ati-accent);
+  border-radius: var(--ati-radius);
+  background: var(--ati-accent);
+  color: var(--ati-accent-contrast);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ati-button-secondary {
+  background: var(--ati-surface);
+  color: var(--ati-accent);
+}
+
+.ati-error {
+  color: var(--ati-danger);
+  font-weight: 600;
+}
+
+.ati-muted {
+  color: var(--ati-text-muted);
+  font-family: var(--ati-font-mono);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.ati-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--ati-space-1) var(--ati-space-3);
+  margin: 0 0 var(--ati-space-3);
+}
+
+.ati-facts dt {
+  color: var(--ati-text-muted);
+  font-weight: 600;
+}
+
+.ati-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ati-footer {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: var(--ati-space-3) var(--ati-space-4);
+  color: var(--ati-text-muted);
+  font-size: 0.85rem;
+}
+
+:focus-visible {
+  outline: 3px solid var(--ati-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 40rem) {
+  .ati-main,
+  .ati-header,
+  .ati-footer {
+    padding-left: var(--ati-space-3);
+    padding-right: var(--ati-space-3);
+  }
+
+  .ati-facts {
+    grid-template-columns: 1fr;
+  }
+}

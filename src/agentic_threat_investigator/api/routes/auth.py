@@ -15,7 +15,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response, status
 
 from agentic_threat_investigator.api.auth_constants import (
-    COOKIE_NAME,
     CSRF_COOKIE,
     CSRF_TOKEN_HEADER,
 )
@@ -33,6 +32,11 @@ from agentic_threat_investigator.api.errors import (
     map_typed_error,
 )
 from agentic_threat_investigator.api.middleware import read_session_cookie
+from agentic_threat_investigator.api.session_cookies import (
+    clear_auth_cookies,
+    set_csrf_cookie,
+    set_session_cookie,
+)
 from agentic_threat_investigator.app.identity import (
     AuthenticationService,
     CsrfError,
@@ -70,23 +74,8 @@ async def login(
     except Exception as error:
         raise map_typed_error(error) from error
     settings = request.app.state.settings
-    response.set_cookie(
-        COOKIE_NAME,
-        token,
-        httponly=True,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
-        max_age=settings.session_absolute_expiry_seconds,
-    )
-    response.set_cookie(
-        CSRF_COOKIE,
-        secrets.token_urlsafe(32),
-        httponly=False,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/",
-    )
+    set_session_cookie(response, settings, token)
+    set_csrf_cookie(response, settings, secrets.token_urlsafe(32))
     return _to_user_response(user)
 
 
@@ -120,8 +109,7 @@ async def logout(
                 ApiErrorCode.FORBIDDEN, "CSRF validation failed.", 403
             ) from error
         await service.logout(session)
-    response.delete_cookie(COOKIE_NAME, path="/")
-    response.delete_cookie(CSRF_COOKIE, path="/")
+    clear_auth_cookies(response)
 
 
 @router.get(

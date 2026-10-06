@@ -27,6 +27,19 @@ from agentic_threat_investigator.domain.datasource import (
 DOCUMENT_CHUNK_EMBEDDING_DIMENSION = 1536
 
 
+def _require_absolute_origin(value: str, field_name: str) -> str:
+    """Require a configured absolute browser origin with a scheme and host."""
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{field_name} is malformed") from exc
+    if not parsed.scheme or not hostname:
+        raise ValueError(f"{field_name} must contain a scheme and hostname")
+    return value
+
+
 class OperatingMode(str, Enum):
     """Selected v0.1 runtime intelligence-source composition mode.
 
@@ -207,6 +220,13 @@ class Settings(BaseSettings):
     login_rate_limit_maximum: int = 5
     login_rate_limit_window_seconds: int = 60
     public_base_url: str = "http://localhost:8000"
+    # Transitional V07-01 browser origin of the server-rendered
+    # ``agentic_threat_investigator.web`` presentation adapter, served by
+    # the same FastAPI process as ``/api/v1``. The React SPA
+    # (``public_base_url``) and the new web UI are separate exact browser
+    # origins that share the same session/CSRF authority; both must be
+    # approved for CSRF Origin/Referer validation while both frontends run.
+    web_base_url: str = "http://localhost:8000"
     bootstrap_admin_username: str | None = None
     bootstrap_admin_password: str | None = None
 
@@ -949,6 +969,25 @@ class Settings(BaseSettings):
         """Return the filesystem object-store root below the data directory."""
         return self.data_dir / "datasets"
 
+    @property
+    def csrf_allowed_origins(self) -> tuple[str, ...]:
+        """Return the exact browser origins accepted as a CSRF proof origin.
+
+        During the V07-01 transition ATI serves two peer browser frontends
+        that share one authentication/session authority: the React SPA
+        (``public_base_url``) and the server-rendered web adapter
+        (``web_base_url``). Both are explicit configured origins and are
+        compared by normalized origin; a third-party origin never matches.
+        ``api_cors_origins`` remains the separate credentialed-CORS
+        contract and is deliberately not treated as a CSRF allowlist.
+        """
+        ordered: list[str] = []
+        for origin in (self.public_base_url, self.web_base_url):
+            stripped = origin.strip().rstrip("/")
+            if stripped and stripped not in ordered:
+                ordered.append(stripped)
+        return tuple(ordered)
+
     @model_validator(mode="after")
     def validate_retry_delays(self) -> "Settings":
         """Require max delay >= base delay."""
@@ -997,15 +1036,13 @@ class Settings(BaseSettings):
     @classmethod
     def validate_public_base_url(cls, value: str) -> str:
         """Require a configured public URL with a scheme and hostname."""
-        try:
-            parsed = urlsplit(value)
-            hostname = parsed.hostname
-            _ = parsed.port
-        except ValueError as exc:
-            raise ValueError("public_base_url is malformed") from exc
-        if not parsed.scheme or not hostname:
-            raise ValueError("public_base_url must contain a scheme and hostname")
-        return value
+        return _require_absolute_origin(value, "public_base_url")
+
+    @field_validator("web_base_url")
+    @classmethod
+    def validate_web_base_url(cls, value: str) -> str:
+        """Require the server-rendered web browser origin to be absolute."""
+        return _require_absolute_origin(value, "web_base_url")
 
 
 def ensure_test_database_safe(
