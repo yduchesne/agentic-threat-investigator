@@ -39,6 +39,7 @@ from uuid import UUID, uuid5
 
 from agentic_threat_investigator.app.providers import (
     EvidenceProvider,
+    ProviderExecutionPolicy,
     ProviderResult,
     normalize_retrieval_timestamp,
     validate_investigation_entity,
@@ -138,6 +139,19 @@ class FakeWorldEvidenceProvider(EvidenceProvider):
     def id(self) -> str:
         """Return the exact production source URN for this provider."""
         return self._source.value
+
+    @property
+    def execution_policy(self) -> ProviderExecutionPolicy:
+        """Mirror the real provider's scheduling execution class (PR 35-4).
+
+        Only DB-IP City Lite participates in mandatory GEOINT enrichment; the
+        fake provider therefore returns the exact same classification as the
+        production provider so the mandatory scheduling architecture is
+        mode-neutral.
+        """
+        if self._source is SourceId.DBIP_CITY_LITE:
+            return ProviderExecutionPolicy.MANDATORY_GEOINT
+        return ProviderExecutionPolicy.INVESTIGATIVE
 
     def supports(self, entity: Entity) -> bool:
         """Return the mirrored real-provider applicability, without I/O."""

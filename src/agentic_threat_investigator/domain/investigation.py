@@ -199,6 +199,23 @@ class ProviderWorkItem(BaseModel):
     depth: int = Field(ge=0)
 
 
+class MandatoryEnrichmentWorkItem(BaseModel):
+    """One mandatory-enrichment unit scheduled from Investigation membership.
+
+    The logical work identity is exactly ``(provider, entity_id)``. Mandatory
+    enrichment follows durable Investigation membership (roots and provider
+    discoveries), never investigative pivot depth, authorization, or budget,
+    so no depth participates in the identity. It carries operational
+    identifiers only: never entity values, provider instances, or
+    infrastructure objects.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: SourceId
+    entity_id: UUID
+
+
 class InvestigationBudget(BaseModel):
     """Deterministic resource budgets for one investigation.
 
@@ -402,6 +419,24 @@ class ProviderExecutionOutcome(BaseModel):
     error: InvestigationError | None = None
 
 
+class MandatoryEnrichmentOutcome(BaseModel):
+    """Typed operational result of one mandatory-enrichment execution.
+
+    Mirrors :class:`ProviderExecutionOutcome` but is bound to the depth-free
+    :class:`MandatoryEnrichmentWorkItem`. It carries operational identifiers
+    only and never consumes the investigative provider-call budget.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    work_item: MandatoryEnrichmentWorkItem
+    status: ProviderExecutionStatus
+    evidence_ids: tuple[UUID, ...] = ()
+    discovered_entity_ids: tuple[UUID, ...] = ()
+    relationship_ids: tuple[UUID, ...] = ()
+    error: InvestigationError | None = None
+
+
 class EntityTraversalState(BaseModel):
     """Durable discovery metadata for one entity in an investigation.
 
@@ -573,6 +608,14 @@ class InvestigationState(BaseModel):
     completed_provider_work: list[ProviderWorkItem] = Field(default_factory=list)
     current_provider_work: ProviderWorkItem | None = None
     last_provider_outcome: ProviderExecutionOutcome | None = None
+    pending_mandatory_enrichment: list[MandatoryEnrichmentWorkItem] = Field(
+        default_factory=list
+    )
+    completed_mandatory_enrichment: list[MandatoryEnrichmentWorkItem] = Field(
+        default_factory=list
+    )
+    current_mandatory_enrichment: MandatoryEnrichmentWorkItem | None = None
+    last_mandatory_enrichment_outcome: MandatoryEnrichmentOutcome | None = None
     investigated_entity_ids: list[UUID] = Field(default_factory=list)
     research_required_for_entity_ids: list[UUID] = Field(default_factory=list)
     research_executions: list[ResearchExecutionState] = Field(default_factory=list)
@@ -787,6 +830,9 @@ class CoordinatorTransitionKind(str, Enum):
 
     SELECT_PROVIDER_WORK = "select_provider_work"
     RECORD_PROVIDER_OUTCOME = "record_provider_outcome"
+    SCHEDULE_MANDATORY_ENRICHMENT = "schedule_mandatory_enrichment"
+    SELECT_MANDATORY_ENRICHMENT = "select_mandatory_enrichment"
+    RECORD_MANDATORY_ENRICHMENT_OUTCOME = "record_mandatory_enrichment_outcome"
     AUTHORIZE_PIVOT = "authorize_pivot"
     MARK_RESEARCH_REQUIRED = "mark_research_required"
     REQUEST_RESEARCH = "request_research"

@@ -17,6 +17,8 @@ from agentic_threat_investigator.domain.investigation import (
     EntityTraversalStateBuilder,
     InvestigationState,
     InvestigationStatus,
+    MandatoryEnrichmentOutcome,
+    MandatoryEnrichmentWorkItem,
     PivotStatus,
     ProviderExecutionOutcome,
     ProviderWorkItem,
@@ -165,6 +167,152 @@ def record_provider_outcome(
             "traversal": traversal,
             "errors": errors,
             "budget": budget,
+        }
+    )
+
+
+def schedule_mandatory_enrichment(
+    state: InvestigationState,
+    work_items: list[MandatoryEnrichmentWorkItem],
+) -> InvestigationState:
+    """Append due mandatory-enrichment work, skipping already-known identities.
+
+    A work item is skipped when the identical ``(provider, entity_id)``
+    identity is already pending, current, or completed. The input state is
+    not mutated; a new state is returned. Scheduling never selects or
+    executes work and never touches the investigative provider budget.
+    """
+
+    known = set(state.pending_mandatory_enrichment)
+    known.update(state.completed_mandatory_enrichment)
+    if state.current_mandatory_enrichment is not None:
+        known.add(state.current_mandatory_enrichment)
+    queued: list[MandatoryEnrichmentWorkItem] = []
+    for work_item in work_items:
+        if work_item in known:
+            continue
+        known.add(work_item)
+        queued.append(work_item)
+    return state.model_copy(
+        update={
+            "pending_mandatory_enrichment": [
+                *state.pending_mandatory_enrichment,
+                *queued,
+            ],
+        }
+    )
+
+
+def select_mandatory_enrichment(state: InvestigationState) -> InvestigationState:
+    """Select the queue head as the current mandatory-enrichment work item.
+
+    Deterministic FIFO selection. A no-op state is returned when a current
+    item already exists or the queue is empty. The selected item remains in
+    the pending queue until its outcome is recorded, mirroring ordinary
+    provider-work selection. Root traversal entries are seeded on the first
+    selection (best investigated depth stays unset: mandatory selection is
+    not an investigative pivot).
+    """
+
+    if state.current_mandatory_enrichment is not None:
+        return state
+    if not state.pending_mandatory_enrichment:
+        return state
+    traversal = list(state.traversal)
+    if not traversal:
+        builder = EntityTraversalStateBuilder(state.root_entity_ids)
+        traversal = list(builder.entries())
+    return state.model_copy(
+        update={
+            "current_mandatory_enrichment": state.pending_mandatory_enrichment[0],
+            "traversal": traversal,
+        }
+    )
+
+
+def _mandatory_parent_depth(state: InvestigationState, entity_id: UUID) -> int:
+    """Return the discovery depth of a mandatory subject entity.
+
+    Roots are depth zero. A mandatory discovery is recorded one hop beyond
+    the subject's durable minimum depth; the subject's own investigative
+    depth is never advanced by mandatory execution.
+    """
+
+    if entity_id in state.root_entity_ids:
+        return 0
+    for entry in state.traversal:
+        if entry.entity_id == entity_id:
+            return entry.minimum_depth
+    return 0
+
+
+def record_mandatory_enrichment_outcome(
+    state: InvestigationState,
+    outcome: MandatoryEnrichmentOutcome,
+) -> InvestigationState:
+    """Apply deterministic bookkeeping for one mandatory-enrichment execution.
+
+    Moves the executed item from current to completed exactly once, clears
+    ``current_mandatory_enrichment``, records the outcome, merges discovered
+    entity/evidence/relationship IDs preserving first-seen order, appends the
+    outcome error when present, and rebuilds traversal metadata. It never
+    increments ``provider_calls_used``, never mutates
+    ``investigated_entity_ids``, and never changes
+    ``best_investigated_depth`` merely because mandatory work executed.
+    """
+
+    work_item = outcome.work_item
+    if state.current_mandatory_enrichment != work_item:
+        raise ValueError(
+            "recorded mandatory outcome does not correspond to the current "
+            "mandatory enrichment work item"
+        )
+    if work_item in state.completed_mandatory_enrichment:
+        raise ValueError("mandatory enrichment work item was already completed")
+
+    pending = [item for item in state.pending_mandatory_enrichment if item != work_item]
+    errors = (
+        [*state.errors, outcome.error] if outcome.error is not None else state.errors
+    )
+
+    builder = EntityTraversalStateBuilder(state.root_entity_ids)
+    for entry in state.traversal:
+        if entry.entity_id in state.root_entity_ids:
+            continue
+        builder.record_discovery_at_ordinal(
+            entry.entity_id,
+            entry.first_discovery_ordinal,
+            entry.minimum_depth,
+            best_depth=entry.best_investigated_depth,
+        )
+    parent_depth = _mandatory_parent_depth(state, work_item.entity_id)
+    for entity_id in outcome.discovered_entity_ids:
+        builder.record_discovery(entity_id, parent_depth)
+    traversal = [
+        entry
+        if entry.entity_id not in state.root_entity_ids
+        else _with_recorded_best_depth(entry, state)
+        for entry in builder.entries()
+    ]
+
+    return state.model_copy(
+        update={
+            "pending_mandatory_enrichment": pending,
+            "completed_mandatory_enrichment": [
+                *state.completed_mandatory_enrichment,
+                work_item,
+            ],
+            "current_mandatory_enrichment": None,
+            "last_mandatory_enrichment_outcome": outcome,
+            "evidence_ids": _merge_unique_ids(state.evidence_ids, outcome.evidence_ids),
+            "relationship_ids": _merge_unique_ids(
+                state.relationship_ids, outcome.relationship_ids
+            ),
+            "discovered_entity_ids": _merge_unique_ids(
+                state.discovered_entity_ids, outcome.discovered_entity_ids
+            ),
+            "traversal": traversal,
+            "errors": errors,
         }
     )
 

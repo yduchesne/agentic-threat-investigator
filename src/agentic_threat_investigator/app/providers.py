@@ -29,6 +29,23 @@ from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 from agentic_threat_investigator.domain.legacy_evidence import LegacyEvidence
 
 
+class ProviderExecutionPolicy(str, Enum):
+    """Scheduling execution class of one evidence provider.
+
+    ``INVESTIGATIVE`` providers are scheduled through analyst/pivot-driven
+    provider work subject to the investigation provider-call budget.
+    ``MANDATORY_GEOINT`` providers are scheduled from durable Investigation
+    Entity membership alone and never consume the investigative
+    provider-call budget. Entity applicability remains the provider's own
+    ``supports(Entity)``; this policy only classifies the execution class and
+    must remain mode-neutral (fake and production implementations of the same
+    source identity return the same policy).
+    """
+
+    INVESTIGATIVE = "investigative"
+    MANDATORY_GEOINT = "mandatory_geoint"
+
+
 class ProviderErrorCode(str, Enum):
     """Stable ATI error code vocabulary for live evidence providers."""
 
@@ -199,6 +216,18 @@ class EvidenceProvider(ABC):
     @abstractmethod
     def id(self) -> str:
         """Return the stable ATI source URN for this provider."""
+
+    @property
+    def execution_policy(self) -> ProviderExecutionPolicy:
+        """Return this provider's scheduling execution class.
+
+        Defaults to :attr:`ProviderExecutionPolicy.INVESTIGATIVE`; providers
+        that participate in the mandatory GEOINT enrichment class override
+        this. The classification is a stable provider capability, not a
+        second Entity-type applicability matrix (``supports`` remains
+        authoritative for applicability).
+        """
+        return ProviderExecutionPolicy.INVESTIGATIVE
 
     @abstractmethod
     def supports(self, entity: Entity) -> bool:

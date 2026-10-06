@@ -90,6 +90,8 @@ from agentic_threat_investigator.domain.evidence import ConvertedEvidence
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     InvestigationError,
+    MandatoryEnrichmentOutcome,
+    MandatoryEnrichmentWorkItem,
     ProviderExecutionOutcome,
     ProviderExecutionStatus,
     ProviderWorkItem,
@@ -212,7 +214,9 @@ def _record_telemetry_exception(span: trace.Span, exc: Exception) -> None:
     span.set_status(Status(StatusCode.ERROR))
 
 
-def _target_binding_error(work_item: ProviderWorkItem, target: Entity) -> str | None:
+def _target_binding_error(
+    work_item: ProviderExecutionRequest, target: Entity
+) -> str | None:
     """Validate the authoritative persisted target against the selected work item.
 
     Returns ``ERROR_PROVIDER_BINDING`` when the target cannot be the
@@ -243,6 +247,38 @@ class ProviderExecutionContext:
     actor_id: UUID | None = None
     request_id: UUID | None = None
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ProviderExecutionRequest:
+    """Depth-class-neutral identity of one provider invocation.
+
+    Carries the provider source, the exact target Entity, and the
+    investigative depth metadata when the invocation belongs to ordinary
+    provider work. Mandatory enrichment uses ``depth=None`` so no
+    investigative pivot depth is fabricated for context-only work.
+    """
+
+    provider: SourceId
+    entity_id: UUID
+    depth: int | None = None
+
+
+@dataclass(frozen=True)
+class ProviderExecutionResult:
+    """Generic provider execution result consumed by both execution adapters.
+
+    The shared kernel returns this depth-class-neutral result; each adapter
+    maps it onto its own domain outcome. It carries operational identifiers
+    only — never provider payloads, evidence objects, or hidden reasoning.
+    """
+
+    request: ProviderExecutionRequest
+    status: ProviderExecutionStatus
+    evidence_ids: tuple[UUID, ...] = ()
+    discovered_entity_ids: tuple[UUID, ...] = ()
+    relationship_ids: tuple[UUID, ...] = ()
+    error: InvestigationError | None = None
 
 
 class EntityReader(ABC):
@@ -309,17 +345,44 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
         self._context = context
 
     async def execute(self, work_item: ProviderWorkItem) -> ProviderExecutionOutcome:
-        """Execute one work item inside the canonical provider-work telemetry.
+        """Execute one ordinary provider work item and map its typed outcome.
+
+        Builds the depth-carrying shared request, runs the canonical kernel,
+        and maps the depth-class-neutral result back onto the existing
+        :class:`ProviderExecutionOutcome` contract. Behavior, telemetry, and
+        outcome semantics are unchanged for ordinary investigative work.
+        """
+        result = await self.run_request(
+            ProviderExecutionRequest(
+                provider=work_item.provider,
+                entity_id=work_item.entity_id,
+                depth=work_item.depth,
+            )
+        )
+        return ProviderExecutionOutcome(
+            work_item=work_item,
+            status=result.status,
+            evidence_ids=result.evidence_ids,
+            discovered_entity_ids=result.discovered_entity_ids,
+            relationship_ids=result.relationship_ids,
+            error=result.error,
+        )
+
+    async def run_request(
+        self, request: ProviderExecutionRequest
+    ) -> ProviderExecutionResult:
+        """Run the shared provider-execution kernel under canonical telemetry.
 
         Opens one ``ati.provider.execute`` span (with the bounded
-        ``ati.provider`` attribute derived from the work item's configured
-        source URN), measures the logical work-item duration in seconds, and
-        counts one failure for a FAILED outcome or an ordinary exception.
+        ``ati.provider`` attribute derived from the request's configured
+        source URN), measures the logical work duration in seconds, and
+        counts one failure for a FAILED result or an ordinary exception.
         Cancellation propagates without telemetry; provider/URL/IOC content is
-        never captured and the existing outcome semantics are unchanged.
+        never captured. This is the reusable execution seam both the ordinary
+        and mandatory-enrichment adapters delegate to.
         """
         provider_attribute = validate_bounded_attributes(
-            {AttributeKeys.PROVIDER: work_item.provider.value}
+            {AttributeKeys.PROVIDER: request.provider.value}
         )
         tracer = get_tracer()
         histogram = get_histogram(DurationMetrics.PROVIDER_EXECUTE, unit=DURATION_UNIT)
@@ -329,7 +392,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             SpanNames.PROVIDER_EXECUTE, attributes=provider_attribute
         ) as span:
             try:
-                outcome = await self._execute_work(work_item)
+                result = await self._execute_work(request)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -341,7 +404,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                 )
                 raise
             else:
-                if outcome.status is ProviderExecutionStatus.FAILED:
+                if result.status is ProviderExecutionStatus.FAILED:
                     span.set_status(Status(StatusCode.ERROR))
                     failures.add(1, provider_attribute)
                     histogram.record(
@@ -359,12 +422,12 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                             AttributeKeys.OUTCOME: "success",
                         },
                     )
-                return outcome
+                return result
 
     async def _execute_work(
-        self, work_item: ProviderWorkItem
-    ) -> ProviderExecutionOutcome:
-        """Execute one work item and return its typed operational outcome."""
+        self, work_item: ProviderExecutionRequest
+    ) -> ProviderExecutionResult:
+        """Execute one request and return its neutral operational result."""
         # The return count is intrinsic to the distinct deterministic failure
         # gates; the narrow disable follows repository convention for such
         # validation-heavy flows.
@@ -443,7 +506,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
     @staticmethod
     def _binding_violation(
-        work_item: ProviderWorkItem,
+        work_item: ProviderExecutionRequest,
         provider: EvidenceProvider,
         result: ProviderResult,
     ) -> str | None:
@@ -516,10 +579,10 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
     async def _process_result(
         self,
-        work_item: ProviderWorkItem,
+        work_item: ProviderExecutionRequest,
         target: Entity,
         result: ProviderResult,
-    ) -> ProviderExecutionOutcome:
+    ) -> ProviderExecutionResult:
         """Process one provider result deterministically in provider-return order.
 
         The accumulated ID lists and per-LegacyEvidence working variables are the
@@ -692,8 +755,8 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                     relationship_ids=relationship_ids,
                 )
 
-        return ProviderExecutionOutcome(
-            work_item=work_item,
+        return ProviderExecutionResult(
+            request=work_item,
             status=ProviderExecutionStatus.SUCCEEDED,
             evidence_ids=tuple(evidence_ids),
             discovered_entity_ids=tuple(discovered),
@@ -703,14 +766,14 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
     async def _fail_work(
         self,
-        work_item: ProviderWorkItem,
+        work_item: ProviderExecutionRequest,
         error_code: str,
         *,
         recoverable: bool = False,
         evidence_ids: list[UUID] | None = None,
         discovered: list[UUID] | None = None,
         relationship_ids: list[UUID] | None = None,
-    ) -> ProviderExecutionOutcome:
+    ) -> ProviderExecutionResult:
         """Fail the work, retaining every committed operational identifier.
 
         All three committed-ID snapshots (LegacyEvidence, discovered Entity, and
@@ -740,16 +803,16 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
     @staticmethod
     def _failed_outcome(
-        work_item: ProviderWorkItem,
+        work_item: ProviderExecutionRequest,
         error: InvestigationError,
         *,
         evidence_ids: list[UUID] | None = None,
         discovered: tuple[UUID, ...] = (),
         relationship_ids: list[UUID] | None = None,
-    ) -> ProviderExecutionOutcome:
+    ) -> ProviderExecutionResult:
         """Build the deterministic failed outcome carrying the typed error."""
-        return ProviderExecutionOutcome(
-            work_item=work_item,
+        return ProviderExecutionResult(
+            request=work_item,
             status=ProviderExecutionStatus.FAILED,
             evidence_ids=tuple(evidence_ids) if evidence_ids else (),
             discovered_entity_ids=discovered,
@@ -759,7 +822,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
     @staticmethod
     def _work_error(
-        work_item: ProviderWorkItem,
+        work_item: ProviderExecutionRequest,
         error_code: str,
         *,
         recoverable: bool = False,
@@ -772,7 +835,9 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
             recoverable=recoverable,
         )
 
-    def _started_event(self, work_item: ProviderWorkItem) -> InvestigationTimelineEvent:
+    def _started_event(
+        self, work_item: ProviderExecutionRequest
+    ) -> InvestigationTimelineEvent:
         """Build the event emitted after target/provider validation succeeds."""
         return InvestigationTimelineEvent(
             id=uuid4(),
@@ -786,7 +851,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
     def _evidence_persisted_event(
         self,
-        work_item: ProviderWorkItem,
+        work_item: ProviderExecutionRequest,
         persisted: ProviderObservationPersistenceResult,
     ) -> InvestigationTimelineEvent:
         """Build the event emitted only after one observation committed.
@@ -814,7 +879,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
     def _completed_event(
         self,
-        work_item: ProviderWorkItem,
+        work_item: ProviderExecutionRequest,
         evidence_ids: list[UUID],
         discovered: list[UUID],
         relationship_ids: list[UUID],
@@ -842,7 +907,7 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
 
     def _failed_event(
         self,
-        work_item: ProviderWorkItem,
+        work_item: ProviderExecutionRequest,
         error_code: str,
     ) -> InvestigationTimelineEvent:
         """Build the safe failure event: no raw bodies, traces, or reasoning."""
@@ -886,3 +951,67 @@ class ProviderWorkExecutor(InvestigationBoundWorkExecutor):
                 recoverable=False,
             )
         return None
+
+
+class MandatoryEnrichmentExecutor(ABC):
+    """Execute one mandatory-enrichment item through the shared provider kernel.
+
+    Mandatory enrichment is an execution class separate from ordinary
+    analyst/pivot-driven provider work: it is scheduled from durable
+    Investigation Entity membership, is depth-free, and never consumes the
+    investigative provider-call budget. Implementations must reuse the
+    canonical provider execution/persistence seams rather than duplicating
+    provider invocation.
+    """
+
+    @property
+    def bound_investigation_id(self) -> UUID | None:
+        """Return the investigation identity this executor may process."""
+        return None
+
+    @abstractmethod
+    async def execute(
+        self, work_item: MandatoryEnrichmentWorkItem
+    ) -> MandatoryEnrichmentOutcome:
+        """Execute one mandatory item and return its depth-free outcome."""
+
+
+class LocalMandatoryEnrichmentExecutor(MandatoryEnrichmentExecutor):
+    """Reuse the canonical provider execution kernel for mandatory enrichment.
+
+    Delegates to the exact same :meth:`ProviderWorkExecutor.run_request`
+    kernel as ordinary provider work (authoritative Entity lookup, registry
+    binding, ``supports``, ``investigate``, binding validation, deterministic
+    extraction, and :class:`ProviderObservationPersistenceService`) with a
+    depth-free request. It owns no provider logic, never consumes the
+    investigative provider budget, and never emits pivot events.
+    """
+
+    def __init__(self, executor: ProviderWorkExecutor) -> None:
+        """Bind the already-composed provider executor kernel."""
+        self._executor = executor
+
+    @property
+    def bound_investigation_id(self) -> UUID:
+        """Return the underlying executor's authoritative binding."""
+        return self._executor.bound_investigation_id
+
+    async def execute(
+        self, work_item: MandatoryEnrichmentWorkItem
+    ) -> MandatoryEnrichmentOutcome:
+        """Execute one depth-free mandatory request through the shared kernel."""
+        result = await self._executor.run_request(
+            ProviderExecutionRequest(
+                provider=work_item.provider,
+                entity_id=work_item.entity_id,
+                depth=None,
+            )
+        )
+        return MandatoryEnrichmentOutcome(
+            work_item=work_item,
+            status=result.status,
+            evidence_ids=result.evidence_ids,
+            discovered_entity_ids=result.discovered_entity_ids,
+            relationship_ids=result.relationship_ids,
+            error=result.error,
+        )

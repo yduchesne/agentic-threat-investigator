@@ -40,8 +40,14 @@ from agentic_threat_investigator.app.orchestration.models import (
     apply_work_selection,
     complete_drained_pivots,
     finalize_stop_state,
+    record_mandatory_enrichment_outcome,
     record_provider_outcome,
+    schedule_mandatory_enrichment,
+    select_mandatory_enrichment,
     select_provider_work,
+)
+from agentic_threat_investigator.app.orchestration.provider_executor import (
+    MandatoryEnrichmentExecutor,
 )
 from agentic_threat_investigator.app.orchestration.research import (
     AmbiguousResearchReconciliationError,
@@ -543,6 +549,262 @@ async def record_outcome(
         expected_version=_require_version(investigation),
         events=events,
     )
+    return {
+        "investigation": persisted,
+        "_coordinator_decision": None,
+    }
+
+
+async def schedule_mandatory_node(
+    transition_service: CoordinatorTransitionService,
+    fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer,
+    state: OrchestrationGraphState,
+) -> OrchestrationGraphState:
+    """Persist newly due mandatory-enrichment work, deduplicated.
+
+    The pure append helper is applied first, the resulting state is fully
+    validated, then the append-only schedule transition is persisted before
+    returning to the Coordinator for selection. No provider I/O, budget
+    accounting, pivot, or investigated-depth mutation occurs here.
+    """
+    decision = _require_decision(state, CoordinatorAction.SCHEDULE_MANDATORY_ENRICHMENT)
+    investigation = state["investigation"]
+    try:
+        updated = schedule_mandatory_enrichment(
+            investigation, list(decision.mandatory_work_items)
+        )
+        validated = InvestigationState.model_validate(updated.model_dump())
+        persisted = await transition_service.persist(
+            investigation.investigation_id,
+            CoordinatorTransitionKind.SCHEDULE_MANDATORY_ENRICHMENT,
+            validated,
+            expected_version=_require_version(investigation),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        if _persistence_error(exc):
+            raise
+        fatal = await fatal_stop_service.fatalize(
+            investigation.investigation_id,
+            InvestigationError(
+                source="orchestration",
+                code="mandatory_schedule_error",
+                message=error_message_sanitizer.from_exception(exc),
+                recoverable=False,
+            ),
+            expected_version=_require_version(investigation),
+        )
+        return {
+            "investigation": fatal,
+            "_coordinator_decision": CoordinatorDecision(
+                action=CoordinatorAction.STOP,
+                stop_reason=StopReason.FATAL_ERROR,
+            ),
+        }
+    return {
+        "investigation": persisted,
+        "_coordinator_decision": None,
+    }
+
+
+async def select_mandatory_node(
+    transition_service: CoordinatorTransitionService,
+    fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer,
+    state: OrchestrationGraphState,
+) -> OrchestrationGraphState:
+    """Select and persist the mandatory pending-queue head before any I/O.
+
+    Selection is durable BEFORE the provider call so a crash cannot repeat
+    external I/O. A persisted (non-null) ``current_mandatory_enrichment`` is a
+    crash resume: PR 35-4 has no delivery-attempt/idempotent retry token, so
+    the graph fails to a bounded fatal stop rather than silently re-issuing
+    the provider call.
+    """
+    investigation = state["investigation"]
+    if investigation.current_mandatory_enrichment is not None:
+        fatal = await fatal_stop_service.fatalize(
+            investigation.investigation_id,
+            InvestigationError(
+                source="orchestration",
+                code="persisted_mandatory_enrichment_resume",
+                message="mandatory enrichment was persisted in-progress and may "
+                "have executed; no retry token exists",
+                recoverable=False,
+            ),
+            expected_version=_require_version(investigation),
+        )
+        return {
+            "investigation": fatal,
+            "_coordinator_decision": CoordinatorDecision(
+                action=CoordinatorAction.STOP,
+                stop_reason=StopReason.FATAL_ERROR,
+            ),
+        }
+    try:
+        updated = select_mandatory_enrichment(investigation)
+        validated = InvestigationState.model_validate(updated.model_dump())
+        persisted = await transition_service.persist(
+            investigation.investigation_id,
+            CoordinatorTransitionKind.SELECT_MANDATORY_ENRICHMENT,
+            validated,
+            expected_version=_require_version(investigation),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        if _persistence_error(exc):
+            raise
+        fatal = await fatal_stop_service.fatalize(
+            investigation.investigation_id,
+            InvestigationError(
+                source="orchestration",
+                code="mandatory_selection_error",
+                message=error_message_sanitizer.from_exception(exc),
+                recoverable=False,
+            ),
+            expected_version=_require_version(investigation),
+        )
+        return {
+            "investigation": fatal,
+            "_coordinator_decision": CoordinatorDecision(
+                action=CoordinatorAction.STOP,
+                stop_reason=StopReason.FATAL_ERROR,
+            ),
+        }
+    return {
+        "investigation": persisted,
+        "_coordinator_decision": None,
+    }
+
+
+async def execute_mandatory_node(
+    executor: MandatoryEnrichmentExecutor,
+    state: OrchestrationGraphState,
+    fatal_stop_service: FatalStopService | None = None,
+    error_message_sanitizer: ErrorMessageSanitizer | None = None,
+) -> OrchestrationGraphState:
+    """Execute the selected mandatory item through the shared provider kernel.
+
+    Provider I/O, extraction, and ``ProviderObservationPersistenceService``
+    happen inside the executor, outside any database transaction. Only
+    unexpected execution failures are fatalized; typed provider misses and
+    provider errors remain bounded outcomes recorded by the record node.
+    """
+    investigation = state["investigation"]
+    work_item = investigation.current_mandatory_enrichment
+    if work_item is None:
+        raise ValueError(
+            "execute_mandatory_node requires a selected mandatory work item"
+        )
+    try:
+        outcome = await executor.execute(work_item)
+        if outcome.work_item != work_item:
+            raise ValueError(
+                "mandatory executor outcome does not match the selected work"
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        if _persistence_error(exc) or fatal_stop_service is None:
+            raise
+        sanitizer = (
+            error_message_sanitizer
+            if error_message_sanitizer is not None
+            else ErrorMessageSanitizer()
+        )
+        fatal = await fatal_stop_service.fatalize(
+            investigation.investigation_id,
+            InvestigationError(
+                source="orchestration",
+                code="mandatory_dispatch_error",
+                message=sanitizer.from_exception(exc),
+                recoverable=False,
+            ),
+            expected_version=_require_version(investigation),
+        )
+        return {
+            "investigation": fatal,
+            "_coordinator_decision": CoordinatorDecision(
+                action=CoordinatorAction.STOP,
+                stop_reason=StopReason.FATAL_ERROR,
+            ),
+        }
+    return {
+        "investigation": investigation.model_copy(
+            update={"last_mandatory_enrichment_outcome": outcome}
+        ),
+        "_coordinator_decision": None,
+    }
+
+
+async def record_mandatory_node(
+    transition_service: CoordinatorTransitionService,
+    timeline_action_service: TimelineActionService,
+    fatal_stop_service: FatalStopService,
+    error_message_sanitizer: ErrorMessageSanitizer,
+    state: OrchestrationGraphState,
+) -> OrchestrationGraphState:
+    """Apply mandatory-outcome bookkeeping and persist it atomically.
+
+    The pure bookkeeping is applied first, the resulting state is fully
+    validated, and the exact outcome (current/completed work, last outcome,
+    merged Evidence/Relationship/discovered IDs, traversal metadata, and safe
+    errors) is persisted. The investigative provider counter and depth are
+    never touched. New discoveries emit one ENTITIES_DISCOVERED action in the
+    same transaction.
+    """
+    investigation = state["investigation"]
+    outcome = investigation.last_mandatory_enrichment_outcome
+    if outcome is None:
+        raise ValueError("record_mandatory_node requires a recorded outcome")
+    try:
+        updated = record_mandatory_enrichment_outcome(investigation, outcome)
+        validated = InvestigationState.model_validate(updated.model_dump())
+        prior_discovered = set(investigation.discovered_entity_ids)
+        new_discoveries = tuple(
+            entity_id
+            for entity_id in updated.discovered_entity_ids
+            if entity_id not in prior_discovered
+        )
+        events: tuple[InvestigationTimelineEvent, ...] = ()
+        if new_discoveries:
+            events = (
+                timeline_action_service.entities_discovered(
+                    entity_ids=new_discoveries, state=validated
+                ),
+            )
+        persisted = await transition_service.persist(
+            investigation.investigation_id,
+            CoordinatorTransitionKind.RECORD_MANDATORY_ENRICHMENT_OUTCOME,
+            validated,
+            expected_version=_require_version(investigation),
+            events=events,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        if _persistence_error(exc):
+            raise
+        fatal = await fatal_stop_service.fatalize(
+            investigation.investigation_id,
+            InvestigationError(
+                source="orchestration",
+                code="mandatory_outcome_error",
+                message=error_message_sanitizer.from_exception(exc),
+                recoverable=False,
+            ),
+            expected_version=_require_version(investigation),
+        )
+        return {
+            "investigation": fatal,
+            "_coordinator_decision": CoordinatorDecision(
+                action=CoordinatorAction.STOP,
+                stop_reason=StopReason.FATAL_ERROR,
+            ),
+        }
     return {
         "investigation": persisted,
         "_coordinator_decision": None,
@@ -1163,6 +1425,10 @@ def _route_after_coordinator(state: OrchestrationGraphState) -> str:
         return "authorize_pivot"
     if action is CoordinatorAction.REQUEST_RESEARCH:
         return "research"
+    if action is CoordinatorAction.SCHEDULE_MANDATORY_ENRICHMENT:
+        return "schedule_mandatory"
+    if action is CoordinatorAction.SELECT_MANDATORY_ENRICHMENT:
+        return "select_mandatory"
     if action is CoordinatorAction.STOP:
         return "finalize_stop"
     raise UnknownCoordinatorActionError(action.value)
@@ -1179,6 +1445,38 @@ def _route_after_execute(state: OrchestrationGraphState) -> str:
 
 def _route_after_record(_state: OrchestrationGraphState) -> str:
     """After recording an outcome, return to the coordinator."""
+    return "coordinator"
+
+
+def _route_after_schedule_mandatory(state: OrchestrationGraphState) -> str:
+    """After scheduling mandatory work, return to the coordinator."""
+    return (
+        "finalize_stop"
+        if is_terminal_status(state["investigation"].status)
+        else "coordinator"
+    )
+
+
+def _route_after_select_mandatory(state: OrchestrationGraphState) -> str:
+    """After selecting mandatory work, execute it unless fatalized."""
+    return (
+        "finalize_stop"
+        if is_terminal_status(state["investigation"].status)
+        else "execute_mandatory"
+    )
+
+
+def _route_after_execute_mandatory(state: OrchestrationGraphState) -> str:
+    """After mandatory execution, record the outcome unless fatalized."""
+    return (
+        "finalize_stop"
+        if is_terminal_status(state["investigation"].status)
+        else "record_mandatory"
+    )
+
+
+def _route_after_record_mandatory(_state: OrchestrationGraphState) -> str:
+    """After recording a mandatory outcome, return to the coordinator."""
     return "coordinator"
 
 
@@ -1223,6 +1521,7 @@ def build_investigation_graph(
     error_message_sanitizer: ErrorMessageSanitizer | None = None,
     research_executor: ResearchExecutor | None = None,
     research_reconciler: ResearchExecutionReconciler | None = None,
+    mandatory_executor: MandatoryEnrichmentExecutor | None = None,
     expected_investigation_id: UUID | None = None,
 ) -> CompiledStateGraph[
     OrchestrationGraphState, None, OrchestrationGraphState, OrchestrationGraphState
@@ -1281,6 +1580,11 @@ def build_investigation_graph(
                 if research_executor is not None
                 else None
             ),
+            (
+                mandatory_executor.bound_investigation_id
+                if mandatory_executor is not None
+                else None
+            ),
         )
         if any(
             binding is not None and binding != effective_investigation_id
@@ -1291,6 +1595,9 @@ def build_investigation_graph(
     if coordinator_policy.research_planner is not None and (
         research_executor is None or research_reconciler is None
     ):
+        raise CoordinatorDependencyError()
+
+    if coordinator_policy.mandatory_planner is not None and mandatory_executor is None:
         raise CoordinatorDependencyError()
 
     builder: StateGraph[OrchestrationGraphState] = StateGraph(OrchestrationGraphState)
@@ -1363,6 +1670,47 @@ def build_investigation_graph(
             }
 
     builder.add_node("record_outcome", record_outcome_node)
+
+    async def schedule_mandatory_entry(
+        state: OrchestrationGraphState,
+    ) -> OrchestrationGraphState:
+        return await schedule_mandatory_node(
+            transition_service, fatal_stop_service, effective_sanitizer, state
+        )
+
+    builder.add_node("schedule_mandatory", schedule_mandatory_entry)
+
+    async def select_mandatory_entry(
+        state: OrchestrationGraphState,
+    ) -> OrchestrationGraphState:
+        return await select_mandatory_node(
+            transition_service, fatal_stop_service, effective_sanitizer, state
+        )
+
+    builder.add_node("select_mandatory", select_mandatory_entry)
+
+    async def execute_mandatory_entry(
+        state: OrchestrationGraphState,
+    ) -> OrchestrationGraphState:
+        assert mandatory_executor is not None
+        return await execute_mandatory_node(
+            mandatory_executor, state, fatal_stop_service, effective_sanitizer
+        )
+
+    builder.add_node("execute_mandatory", execute_mandatory_entry)
+
+    async def record_mandatory_entry(
+        state: OrchestrationGraphState,
+    ) -> OrchestrationGraphState:
+        return await record_mandatory_node(
+            transition_service,
+            timeline_action_service,
+            fatal_stop_service,
+            effective_sanitizer,
+            state,
+        )
+
+    builder.add_node("record_mandatory", record_mandatory_entry)
 
     async def coord_node(
         state: OrchestrationGraphState,
@@ -1457,6 +1805,8 @@ def build_investigation_graph(
             "analyze": "analyze",
             "authorize_pivot": "authorize_pivot",
             "research": "research",
+            "schedule_mandatory": "schedule_mandatory",
+            "select_mandatory": "select_mandatory",
             "finalize_stop": "finalize_stop",
         },
     )
@@ -1477,6 +1827,26 @@ def build_investigation_graph(
     builder.add_conditional_edges(
         "record_outcome",
         _route_after_record,
+        {"coordinator": "coordinator"},
+    )
+    builder.add_conditional_edges(
+        "schedule_mandatory",
+        _route_after_schedule_mandatory,
+        {"coordinator": "coordinator", "finalize_stop": "finalize_stop"},
+    )
+    builder.add_conditional_edges(
+        "select_mandatory",
+        _route_after_select_mandatory,
+        {"execute_mandatory": "execute_mandatory", "finalize_stop": "finalize_stop"},
+    )
+    builder.add_conditional_edges(
+        "execute_mandatory",
+        _route_after_execute_mandatory,
+        {"record_mandatory": "record_mandatory", "finalize_stop": "finalize_stop"},
+    )
+    builder.add_conditional_edges(
+        "record_mandatory",
+        _route_after_record_mandatory,
         {"coordinator": "coordinator"},
     )
     builder.add_conditional_edges(

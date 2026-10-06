@@ -56,8 +56,10 @@ export default defineConfig({
       // stability also run in both engines.
       // PR 35-2: the consolidated GEOINT MAP/TABLE journey + stability
       // loop also runs in Firefox.
+      // PR 35-4: the mandatory-enrichment resolved-GEOINT journey also runs
+      // in Firefox.
       testMatch:
-        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop|zz-31i-path-finding|zz-31j-temporal-graph|zz-31k-graph-actions|zz-35-1-ui-correctness|zz-35-2-geoint-consolidation)\.spec\.ts/,
+        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop|zz-31i-path-finding|zz-31j-temporal-graph|zz-31k-graph-actions|zz-35-1-ui-correctness|zz-35-2-geoint-consolidation|zz-35-4-mandatory-geoint)\.spec\.ts/,
     },
   ],
 });

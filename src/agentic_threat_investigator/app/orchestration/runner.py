@@ -48,7 +48,10 @@ from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationVersionConflictError,
     UnitOfWork,
 )
-from agentic_threat_investigator.app.providers import EvidenceProvider
+from agentic_threat_investigator.app.providers import (
+    EvidenceProvider,
+    ProviderExecutionPolicy,
+)
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     InvestigationBudget,
@@ -75,6 +78,18 @@ _RECURSION_SUPERSTEPS_PER_BUDGET_UNIT = 4
 
 #: Fixed supersteps reserved for graph startup/teardown nodes.
 _RECURSION_LIMIT_HEADROOM = 16
+
+#: Supersteps one mandatory-enrichment item may consume (schedule, coordinator,
+#: select, execute, record, coordinator).
+_RECURSION_SUPERSTEPS_PER_MANDATORY_ITEM = 6
+
+#: Conservative per-provider-call allowance for newly persisted discoveries.
+#: Provider results are bounded by their transport/page contracts, not by
+#: ``budget.max_entities`` (discoveries beyond investigative capacity are
+#: still durable Investigation members and still receive mandatory
+#: enrichment). The constant keeps the recursion safety net finite and
+#: generous without turning mandatory enrichment into investigative budget.
+_MANDATORY_DISCOVERY_ALLOWANCE_PER_PROVIDER_CALL = 64
 
 #: Error code recorded when the graph engine aborts outside any node.
 _GRAPH_ABORT_ERROR_CODE = "graph_execution_aborted"
@@ -105,6 +120,36 @@ def recursion_limit_for_budget(budget: InvestigationBudget) -> int:
         + budget.max_depth
     )
     return _RECURSION_SUPERSTEPS_PER_BUDGET_UNIT * units + _RECURSION_LIMIT_HEADROOM
+
+
+def mandatory_recursion_allowance(
+    state: InvestigationState, *, mandatory_provider_count: int
+) -> int:
+    """Return finite extra recursion headroom for mandatory enrichment.
+
+    Mandatory enrichment is outside the investigative budgets, so its
+    supersteps must be deducted from a separate deterministic bound rather
+    than by inflating a budget maximum. The bound is the current durable
+    Investigation membership plus a conservative allowance for discoveries
+    that can still arise under the remaining ordinary provider calls, scaled
+    by the number of active mandatory providers and the fixed supersteps per
+    mandatory item. It is a runaway safety net, never accounting state.
+    """
+    if mandatory_provider_count <= 0:
+        return 0
+    member_count = len(set(state.root_entity_ids) | set(state.discovered_entity_ids))
+    remaining_calls = max(
+        0, state.budget.max_provider_calls - state.budget.provider_calls_used
+    )
+    member_upper_bound = (
+        member_count
+        + remaining_calls * _MANDATORY_DISCOVERY_ALLOWANCE_PER_PROVIDER_CALL
+    )
+    return (
+        _RECURSION_SUPERSTEPS_PER_MANDATORY_ITEM
+        * member_upper_bound
+        * mandatory_provider_count
+    )
 
 
 def _record_investigation_failure() -> None:
@@ -271,7 +316,17 @@ class LocalInvestigationRunner(InvestigationRunner):
             fatal_stop_service=fatal_stop_service,
         )
         effective_recursion_limit = max(
-            self._recursion_limit, recursion_limit_for_budget(loaded.budget)
+            self._recursion_limit,
+            recursion_limit_for_budget(loaded.budget)
+            + mandatory_recursion_allowance(
+                loaded,
+                mandatory_provider_count=sum(
+                    1
+                    for provider in self._provider_registry.values()
+                    if provider.execution_policy
+                    is ProviderExecutionPolicy.MANDATORY_GEOINT
+                ),
+            ),
         )
         try:
             result = await graph.ainvoke(

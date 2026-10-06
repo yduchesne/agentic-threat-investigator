@@ -16,6 +16,7 @@ exhaustion never terminates the graph.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from uuid import UUID
 
 from langgraph.graph.state import CompiledStateGraph
 
@@ -28,6 +29,8 @@ from agentic_threat_investigator.app.orchestration.coordinator import (
     AnalysisExecutor,
     CoordinatorEntityView,
     CoordinatorPolicy,
+    CoordinatorPolicyContext,
+    MandatoryEnrichmentPlanner,
     ProviderWorkPlanner,
     ResearchRequestPlanner,
 )
@@ -37,6 +40,8 @@ from agentic_threat_investigator.app.orchestration.graph import (
     build_investigation_graph,
 )
 from agentic_threat_investigator.app.orchestration.provider_executor import (
+    LocalMandatoryEnrichmentExecutor,
+    MandatoryEnrichmentExecutor,
     ProviderExecutionContext,
     ProviderWorkExecutor,
     UowEntityReader,
@@ -65,11 +70,15 @@ from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.provider_observation_persistence import (
     ProviderObservationPersistenceService,
 )
-from agentic_threat_investigator.app.providers import EvidenceProvider
+from agentic_threat_investigator.app.providers import (
+    EvidenceProvider,
+    ProviderExecutionPolicy,
+)
 from agentic_threat_investigator.domain.entities import Entity
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
+    MandatoryEnrichmentWorkItem,
     ProviderWorkItem,
 )
 
@@ -143,6 +152,12 @@ class RegistryProviderWorkPlanner(ProviderWorkPlanner):
             provider = self._registry[source]
             if provider.id != source.value:
                 continue
+            # Mandatory-only providers are scheduled exclusively by the
+            # mandatory-enrichment class; scheduling them here as ordinary
+            # investigative work would consume provider budget and could
+            # execute the same provider twice for one Entity.
+            if provider.execution_policy is ProviderExecutionPolicy.MANDATORY_GEOINT:
+                continue
             if provider.supports(real_entity):
                 items.append(
                     ProviderWorkItem(
@@ -154,6 +169,109 @@ class RegistryProviderWorkPlanner(ProviderWorkPlanner):
         return tuple(items)
 
 
+def _mandatory_member_order(state: InvestigationState) -> tuple[UUID, ...]:
+    """Return durable Investigation members in deterministic mandatory order.
+
+    Unique roots in ``root_entity_ids`` order first, then discoveries in
+    durable first-discovery ordinal order. Discovery membership is not
+    truncated by ``budget.max_entities``: a discovered Entity persisted into
+    the Investigation graph must not lose mandatory GEOINT merely because
+    investigative entity capacity has been reached. A discovered Entity
+    without traversal metadata is appended as a defensive fallback (validated
+    domain state requires traversal once discoveries exist).
+    """
+
+    ordered: list[UUID] = []
+    seen: set[UUID] = set()
+    for entity_id in state.root_entity_ids:
+        if entity_id not in seen:
+            seen.add(entity_id)
+            ordered.append(entity_id)
+    for entry in state.traversal:
+        if entry.entity_id in seen:
+            continue
+        seen.add(entry.entity_id)
+        ordered.append(entry.entity_id)
+    for entity_id in state.discovered_entity_ids:
+        if entity_id not in seen:
+            seen.add(entity_id)
+            ordered.append(entity_id)
+    return tuple(ordered)
+
+
+class RegistryMandatoryEnrichmentPlanner(MandatoryEnrichmentPlanner):
+    """Deterministic mandatory-enrichment planner over the active registry.
+
+    Only providers classified ``MANDATORY_GEOINT`` participate. Eligibility is
+    durable Investigation membership (unique roots in ``root_entity_ids``
+    order, then discoveries in first-discovery ordinal order) restricted to
+    visible, non-deleted entities; applicability remains each provider's own
+    ``supports(Entity)`` contract. Already pending, current, or completed
+    work identities are never re-scheduled. No provider I/O happens during
+    planning.
+    """
+
+    def __init__(
+        self,
+        registry: Mapping[SourceId, EvidenceProvider],
+        source_order: Sequence[SourceId] = (),
+    ) -> None:
+        """Retain the active registry and its deterministic ordering."""
+        self._registry = dict(registry)
+        self._order = tuple(source_order)
+        ordered_keys = {source: index for index, source in enumerate(self._order)}
+
+        def sort_key(source: SourceId) -> tuple[int, str]:
+            return (ordered_keys.get(source, len(self._order)), source.value)
+
+        self._ordered_sources: tuple[SourceId, ...] = tuple(
+            source
+            for source in sorted(self._registry, key=sort_key)
+            if self._registry[source].execution_policy
+            is ProviderExecutionPolicy.MANDATORY_GEOINT
+        )
+
+    def plan(
+        self,
+        *,
+        state: InvestigationState,
+        context: CoordinatorPolicyContext,
+    ) -> tuple[MandatoryEnrichmentWorkItem, ...]:
+        """Return due mandatory work for visible, applicable members."""
+        views = {entity.entity_id: entity for entity in context.entities}
+        missing = set(context.missing_entity_ids)
+        known: set[MandatoryEnrichmentWorkItem] = set(
+            state.pending_mandatory_enrichment
+        )
+        known.update(state.completed_mandatory_enrichment)
+        if state.current_mandatory_enrichment is not None:
+            known.add(state.current_mandatory_enrichment)
+
+        due: list[MandatoryEnrichmentWorkItem] = []
+        for entity_id in _mandatory_member_order(state):
+            view = views.get(entity_id)
+            if entity_id in missing or view is None or view.deleted:
+                continue
+            real_entity = Entity(
+                id=view.entity_id,
+                type=view.entity_type,
+                value=view.value,
+                display_name=view.value,
+            )
+            for source in self._ordered_sources:
+                provider = self._registry[source]
+                if provider.id != source.value:
+                    continue
+                if not provider.supports(real_entity):
+                    continue
+                item = MandatoryEnrichmentWorkItem(provider=source, entity_id=entity_id)
+                if item in known:
+                    continue
+                known.add(item)
+                due.append(item)
+        return tuple(due)
+
+
 def build_provider_investigation_graph(
     *,
     uow_factory: Callable[[], UnitOfWork],
@@ -161,6 +279,7 @@ def build_provider_investigation_graph(
     context: ProviderExecutionContext,
     analysis_executor: AnalysisExecutor,
     planner: ProviderWorkPlanner | None = None,
+    mandatory_planner: MandatoryEnrichmentPlanner | None = None,
     research_request_planner: ResearchRequestPlanner | None = None,
     research_executor: ResearchExecutor | None = None,
     research_reconciler: ResearchExecutionReconciler | None = None,
@@ -209,12 +328,20 @@ def build_provider_investigation_graph(
     coordinator_planner = planner or RegistryProviderWorkPlanner(
         provider_registry, source_order=PROVIDER_SOURCE_ORDER
     )
+    coordinator_mandatory_planner = (
+        mandatory_planner
+        if mandatory_planner is not None
+        else RegistryMandatoryEnrichmentPlanner(
+            provider_registry, source_order=PROVIDER_SOURCE_ORDER
+        )
+    )
     policy = CoordinatorPolicy(
         coordinator_planner,
         research_planner=(
             research_request_planner
             or (DeterministicResearchRequestPlanner() if research_executor else None)
         ),
+        mandatory_planner=coordinator_mandatory_planner,
     )
 
     executor = ProviderWorkExecutor(
@@ -224,6 +351,9 @@ def build_provider_investigation_graph(
         persistence_service=ProviderObservationPersistenceService(uow_factory),
         timeline_service=UnitOfWorkInvestigationTimelineSink(uow_factory),
         context=context,
+    )
+    mandatory_executor: MandatoryEnrichmentExecutor = LocalMandatoryEnrichmentExecutor(
+        executor
     )
     dispatcher = LocalTaskDispatcher(executor)
     return build_investigation_graph(
@@ -250,6 +380,7 @@ def build_provider_investigation_graph(
         ),
         research_executor=research_executor,
         research_reconciler=effective_reconciler,
+        mandatory_executor=mandatory_executor,
         error_message_sanitizer=error_message_sanitizer,
         expected_investigation_id=context.investigation_id,
     )
