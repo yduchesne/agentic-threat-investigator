@@ -11,7 +11,7 @@
 
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useSearchParams } from "react-router";
+import { useLocation, useParams, useSearchParams } from "react-router";
 
 import { parseUuidParam } from "../analyst-table/filters";
 import { isNotFound404 } from "../analyst-table/detail-error";
@@ -21,6 +21,7 @@ import {
   DetailNotFound,
   RouteDetailView,
 } from "../analyst-table/ResourceDetailView";
+import { contextualBack } from "../analyst-table/return-to";
 import {
   listBackPath,
   ROUTE_LIST_PARAMS,
@@ -34,18 +35,23 @@ export function ObservationDetailPage(): ReactElement {
   const { t: tCommon } = useTranslation("common");
   const { investigationId = "", observationId = "" } = useParams();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
 
   const validObservationId = parseUuidParam(observationId) ?? null;
   const detail = useObservationDetail(investigationId, validObservationId);
-  const backTo = listBackPath(
-    `/investigations/${investigationId}/relationships/observations`,
-    searchParams,
-    ROUTE_LIST_PARAMS.observations,
+  const { backTo, backState } = contextualBack(
+    location.state,
+    listBackPath(
+      `/investigations/${investigationId}/relationships/observations`,
+      searchParams,
+      ROUTE_LIST_PARAMS.observations,
+    ),
   );
 
   return (
     <RouteDetailView
       backTo={backTo}
+      backState={backState}
       backLabel={tCommon("backToList", { resource: t("observations.title") })}
       heading={t("observations.detail.title")}
     >

@@ -143,9 +143,9 @@ test.describe("PR 31F-6 raw-pointer list/detail Evidence journey", () => {
       await expect(actionBar).toBeVisible({ timeout: 20_000 });
       await assertResponsive(page, `c${cycle}-bar-expanded`);
 
-      // RAW valid action or Cancel: Cancel collapses only the action bar.
+      // RAW valid action or Hide: Hide collapses only the action bar.
       // (The valid-action path is covered by the PivotWorkspace journey.)
-      await rawPointer(page, actionBar.getByRole("button", { name: "Cancel" }), `c${cycle}-cancel`);
+      await rawPointer(page, actionBar.getByRole("button", { name: "Hide" }), `c${cycle}-hide`);
       await expect(actionBar).not.toBeVisible({ timeout: 20_000 });
       await assertResponsive(page, `c${cycle}-bar-collapsed`);
 

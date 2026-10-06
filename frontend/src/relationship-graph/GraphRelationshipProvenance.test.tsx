@@ -923,6 +923,65 @@ describe("GraphRelationshipProvenance exact Evidence drill-down (PR 31F U22-U31)
     ).toBeInTheDocument();
   });
 
+  it("P01/P02/P03: Observation Hide removes the observation and any nested Evidence", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      http.get(
+        "*/api/v1/investigations/:id/relationships/:relationshipId",
+        () => jsonResponse(buildRelationship({ id: RELATIONSHIP })),
+      ),
+      pagedResourceHandler<RelationshipObservation>({
+        path: "*/api/v1/investigations/:id/relationship-observations",
+        pages: [[OBS_A, OBS_B]],
+        recorder,
+      }),
+      evidenceDetailRecorder().handler,
+    );
+    renderProvenance();
+    await provenanceVisible();
+    const table = await screen.findByRole("table", {
+      name: "Supporting observations",
+    });
+    // P01: an observation opens its detail section.
+    fireEvent.click(
+      within(table).getAllByRole("button", { name: "View observation" })[0],
+    );
+    const observationHeading = await screen.findByRole("heading", {
+      name: "Observation",
+    });
+    expect(observationHeading).toBeInTheDocument();
+    // P02: open nested Evidence, then Hide the Observation.
+    fireEvent.click(await viewEvidenceButton());
+    await screen.findByRole("heading", { name: "Supporting evidence" });
+    fireEvent.click(
+      within(observationHeading.closest("div") as HTMLElement).getByRole("button", {
+        name: "Hide",
+      }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", { name: "Observation" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "Supporting evidence" }),
+      ).not.toBeInTheDocument();
+    });
+    // P03: the parent provenance and bounded observation list are preserved.
+    expect(
+      screen.getByRole("region", { name: "Relationship provenance" }),
+    ).toBeInTheDocument();
+    const stillListed = screen.getByRole("table", {
+      name: "Supporting observations",
+    });
+    // Selecting an observation again works on the same instance.
+    fireEvent.click(
+      within(stillListed).getAllByRole("button", { name: "View observation" })[0],
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Observation" }),
+    ).toBeInTheDocument();
+  });
+
   it("U29: closing Evidence retains the selected observation", async () => {
     const recorder = resourceListRecorder();
     setHttpHandlers(
@@ -947,9 +1006,9 @@ describe("GraphRelationshipProvenance exact Evidence drill-down (PR 31F U22-U31)
     // Wait for the Evidence detail itself (not just its heading) before
     // closing it back to the observation.
     await screen.findByText("update-package.test");
-    const backToObservation = await screen.findByRole("button", {
-      name: "Hide",
-    });
+    const backToObservation = await within(
+      screen.getByRole("heading", { name: "Supporting evidence" }).closest("div") as HTMLElement,
+    ).findByRole("button", { name: "Hide" });
     fireEvent.click(backToObservation);
     await waitFor(() => {
       expect(

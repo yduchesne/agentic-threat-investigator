@@ -39,3 +39,4 @@ class EvidenceResponse(BaseModel):
     observed_at: datetime | None
     retrieved_at: datetime
     facts: dict[str, Any] = Field(default_factory=dict)
+    description: str = Field(min_length=1, max_length=240)

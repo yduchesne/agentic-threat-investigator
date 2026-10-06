@@ -93,6 +93,8 @@ export function ResourceDetailView({
 export interface RouteDetailViewProps {
   /** Canonical parent route (list) with preserved query state. */
   backTo: string;
+  /** Optional transient navigation context for the Back link. */
+  backState?: unknown;
   /** Accessible + visible Back label (e.g. "Back to Evidence"). */
   backLabel: string;
   /** Human-readable detail heading (e.g. "Evidence details"). */
@@ -113,6 +115,7 @@ export interface RouteDetailViewProps {
  */
 export function RouteDetailView({
   backTo,
+  backState = undefined,
   backLabel,
   heading,
   children,
@@ -127,6 +130,7 @@ export function RouteDetailView({
         <MuiLink
           component={RouterLink}
           to={backTo}
+          state={backState}
           data-testid="resource-route-detail-back"
           aria-label={backLabel}
           sx={{

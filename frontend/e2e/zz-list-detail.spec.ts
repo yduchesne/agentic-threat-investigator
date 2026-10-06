@@ -192,7 +192,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
       await listDetailCycle(
         page,
         page.getByRole("table", { name: "Relationships" }),
-        "Relationships details",
+        "Relationship details",
         "Back to Relationships",
         1 + (index % 3),
         `rel-c${index}`,
@@ -260,10 +260,14 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
 
     // Evidence -> subject Pivot -> Relationships where source (semantic
     // link). The root domain row always carries fake-world edges, so the
-    // routed Relationships surface deterministically has rows.
+    // routed Relationships surface deterministically has rows. Select the
+    // row whose SUBJECT cell is the root domain (matching any cell can pick
+    // an observation for another associated Entity that merely mentions the
+    // domain in its description).
     const rootRow = page
-      .getByRole("row")
-      .filter({ hasText: F02_ROOT_DOMAIN })
+      .getByRole("table", { name: "Evidence" })
+      .locator("tbody tr")
+      .filter({ has: page.locator("td:first-child", { hasText: F02_ROOT_DOMAIN }) })
       .first();
     await rawPointer(page, rootRow.getByRole("button", { name: "Subject" }), "pivot-subject");
     await expect(page.getByRole("group", { name: "Pivot actions" })).toBeVisible({ timeout: 15_000 });
@@ -284,7 +288,7 @@ test.describe("PR 31F-6 list/detail lifecycle", () => {
       "rel-view",
     );
     await expect(
-      page.getByRole("heading", { name: "Relationships details" }),
+      page.getByRole("heading", { name: "Relationship details" }),
     ).toBeVisible({ timeout: 30_000 });
     await rawPointer(
       page,

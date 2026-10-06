@@ -35,6 +35,13 @@ import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { Link as RouterLink, useLocation } from "react-router";
+
+import {
+  internalLocationFromPath,
+  navigationState,
+  pushNavigationReturn,
+} from "../analyst-table/return-to";
 
 import { CompactId } from "../components/CompactId";
 import type { AtiSemanticTokens } from "../app/theme";
@@ -215,6 +222,16 @@ export function RelationshipGraph({
   emptyMessage = undefined,
 }: RelationshipGraphProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
+  const location = useLocation();
+  // PR 35-1 Part 3: the graph is an internal entry point to Relationship
+  // history; push the exact graph surface so the workspace can offer a
+  // contextual Back to this graph view while retaining ancestors.
+  const drillDownState = navigationState(
+    pushNavigationReturn(
+      location.state,
+      internalLocationFromPath(location.pathname, location.search, location.hash),
+    ),
+  );
   // PR 31F-4: the active theme's semantic graph tokens drive canvas, edge,
   // node and control presentation. Topology/query/expansion semantics never
   // read theme state: only the presentation boundary below consumes tokens.
@@ -394,12 +411,10 @@ export function RelationshipGraph({
   const edges: Edge[] = useMemo(() => {
     const renderedEntityIds = new Set(nodes.map((node) => entityIdFromNodeId(node.id)).filter((id): id is string => id !== null));
     const canonicalEntityIds = new Set(model.nodes.map((node) => node.entityId));
-    const renderableEdges = model.edges.filter(
-      (edge) =>
-        canonicalEntityIds.has(edge.sourceEntityId) &&
-        canonicalEntityIds.has(edge.targetEntityId) &&
-        renderedEntityIds.has(edge.sourceEntityId) &&
-        renderedEntityIds.has(edge.targetEntityId),
+    const renderableEdges = selectRenderableEdges(
+      model.edges,
+      canonicalEntityIds,
+      renderedEntityIds,
     );
     return buildSlottedEdges(
       renderableEdges,
@@ -572,8 +587,9 @@ export function RelationshipGraph({
             />
             <Button
               size="small"
-              component="a"
-              href={evolutionLink(investigationId, selectedNode.entityId)}
+              component={RouterLink}
+              to={evolutionLink(investigationId, selectedNode.entityId)}
+              state={drillDownState}
               sx={{ textTransform: "none" }}
             >
               {t("graph.viewEvolution")}
@@ -715,6 +731,7 @@ export function RelationshipGraph({
           nodeById={nodeById}
           typeLabel={typeLabel}
           entityTypeLabel={entityTypeLabel}
+          drillDownState={drillDownState}
           onInspectObservations={(relationshipId) =>
             setProvenanceRelationshipId(relationshipId)
           }
@@ -777,6 +794,30 @@ export function graphCssVariables(tokens: AtiSemanticTokens): CSSProperties {
   // The custom-property keys are intentionally not part of the standard
   // CSSProperties index; the cast keeps the public React Flow API typed.
   return variables as unknown as CSSProperties;
+}
+
+/**
+ * The render-boundary endpoint invariant (PR 35-1 amendment 1 Part 6).
+ *
+ * A relationship edge may reach the canvas only when BOTH endpoints exist in
+ * the canonical model AND are present in the final rendered React Flow node
+ * set. Canonical edges are never deleted: only this rendering projection is
+ * filtered, so an edge whose endpoint is temporarily absent (bounded depth,
+ * filter, truncation, or transient reconciliation) can never draw a dangling
+ * line.
+ */
+export function selectRenderableEdges(
+  edges: readonly RelationshipGraphEdge[],
+  canonicalEntityIds: ReadonlySet<string>,
+  renderedEntityIds: ReadonlySet<string>,
+): RelationshipGraphEdge[] {
+  return edges.filter(
+    (edge) =>
+      canonicalEntityIds.has(edge.sourceEntityId) &&
+      canonicalEntityIds.has(edge.targetEntityId) &&
+      renderedEntityIds.has(edge.sourceEntityId) &&
+      renderedEntityIds.has(edge.targetEntityId),
+  );
 }
 
 /**
@@ -967,6 +1008,7 @@ function EdgeList({
   nodeById,
   typeLabel,
   entityTypeLabel,
+  drillDownState,
   onInspectObservations,
 }: {
   t: TFunction;
@@ -976,6 +1018,8 @@ function EdgeList({
   nodeById: Map<string, RelationshipGraphNode>;
   typeLabel: (type: string) => string;
   entityTypeLabel: (type: string) => string;
+  /** Transient bounded navigation context carried to Relationship history. */
+  drillDownState: unknown;
   /** PR 31F: open the graph-local provenance panel for one canonical edge. */
   onInspectObservations: (relationshipId: string) => void;
 }): ReactElement {
@@ -1052,7 +1096,9 @@ function EdgeList({
                     {t("graph.list.view")}
                   </Link>
                   <Link
-                    href={evolutionLink(investigationId, counterpartyId)}
+                    component={RouterLink}
+                    to={evolutionLink(investigationId, counterpartyId)}
+                    state={drillDownState}
                     underline="hover"
                     sx={{ fontSize: "inherit" }}
                   >

@@ -116,7 +116,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await page.goto(`/investigations/${investigationId}/relationships`);
     const firstRow = page.getByRole("table", { name: "Relationships" }).getByRole("row").nth(1);
     await expect(firstRow).toBeVisible({ timeout: 20_000 });
-    await firstRow.getByRole("link", { name: "View relationship evolution for source entity" })
+    await firstRow.getByRole("link", { name: "View relationship history for source entity" })
       .first()
       .click();
     await expect(page).toHaveURL(/\/relationships\/evolution\?entity_id=/);
@@ -167,7 +167,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       page,
       page.getByRole("button", { name: "Observation provenance actions" }),
     );
-    await activate(page, page.getByRole("link", { name: "Open evidence" }));
+    await activate(page, page.getByRole("link", { name: "Evidence" }));
     await expect(page).toHaveURL(/\/evidence\/[0-9a-f-]+$/);
     await expect(
       page.getByRole("heading", { name: "Evidence details" }),
@@ -178,7 +178,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(page).not.toHaveURL(/pivot=/);
     await expect(page.getByText("Relationship ID", { exact: true })).toBeVisible();
     // Close the underlying observation detail via its Back control.
-    await page.getByRole("button", { name: "Back to Relationship evolution" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "Back to Relationship history" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);
 
     // Switch to the bounded one-hop Graph (G31D-E01/E02/E08): the canvas and
@@ -282,7 +282,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     });
     const edgePanel = edgePanelHeading.locator("xpath=..");
     await expect(
-      edgePanel.getByText("Supporting observations", { exact: true }),
+      edgePanel.getByText("Matching observations", { exact: true }),
     ).toBeVisible();
     await expect(
       edgePanel.getByText("First observed", { exact: true }),
@@ -368,8 +368,8 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(
       page.getByRole("link", { name: "Relationships where source" }),
     ).toBeVisible();
-    // Collapse the in-flow action bar with Cancel (no popup/menu exists).
-    await activate(page, page.getByRole("button", { name: "Cancel" }));
+    // Collapse the in-flow action bar with Hide (no popup/menu exists).
+    await activate(page, page.getByRole("button", { name: "Hide" }));
     await expect(page.getByRole("group", { name: "Pivot actions" })).not.toBeVisible();
     await expect.poll(() => graphNeighborhoodRequests.length).toBe(requestCountBeforeExpansion + 1);
     // Local expansion never becomes a PivotStep (G31E-E10).
@@ -400,14 +400,14 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expandedCanvasEdge.click();
     const edgeSelectionPanel = page.getByText(/^Relationship: /).first().locator("xpath=..");
     await expect(
-      edgeSelectionPanel.getByRole("button", { name: "Inspect observations" }),
+      edgeSelectionPanel.getByRole("button", { name: "Provenance" }),
     ).toBeVisible({ timeout: 20_000 });
     const nodesBefore31F = await graphCanvas.locator(".react-flow__node").count();
     const draggedFocalBefore31F = await nodeOffsetInCanvas(graphCanvas, canvasNode);
     const graphRequestsBefore31F = graphNeighborhoodRequests.length;
     await activate(
       page,
-      edgeSelectionPanel.getByRole("button", { name: "Inspect observations" }),
+      edgeSelectionPanel.getByRole("button", { name: "Provenance" }),
     );
     const provenance = page.getByRole("region", {
       name: "Relationship provenance",
@@ -473,10 +473,15 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     ).toBeVisible({ timeout: 20_000 });
     await expect(provenance.getByText("Subject", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/raw payload|raw_payload/i)).toHaveCount(0);
-    // Back to the observation, then back to the graph (G31F-E11).
+    // Back to the observation, then back to the graph (G31F-E11). The
+    // evidence section's Hide and the observation section's Hide now share
+    // the localized label, so scope to the Supporting evidence section.
+    const supportingEvidenceSection = provenance
+      .getByRole("heading", { name: "Supporting evidence" })
+      .locator("xpath=..");
     await activate(
       page,
-      provenance.getByRole("button", { name: "Back to observation" }),
+      supportingEvidenceSection.getByRole("button", { name: "Hide" }),
     );
     await expect(
       provenance.getByRole("button", { name: "View supporting evidence" }),
@@ -499,11 +504,11 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
 
     // Graph edge -> exact Relationship table context (bounded, no recursion).
     const firstEdgeRow = graphList.getByRole("row").nth(1);
-    const relationshipLink = firstEdgeRow.getByRole("link", { name: "View", exact: true });
+    const relationshipLink = firstEdgeRow.getByRole("link", { name: "Details", exact: true });
     await relationshipLink.click();
     await expect(page).toHaveURL(/\/relationships\?selected=/);
     await expect(
-      page.getByRole("heading", { name: "Relationships details" }),
+      page.getByRole("heading", { name: "Relationship details" }),
     ).toBeVisible({ timeout: 20_000 });
     await page.getByRole("button", { name: "Back to Relationships" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);

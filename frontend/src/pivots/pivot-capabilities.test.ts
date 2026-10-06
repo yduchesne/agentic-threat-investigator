@@ -45,6 +45,7 @@ function evidence(): Evidence {
     observed_at: "2026-06-01T09:00:00Z",
     retrieved_at: "2026-06-01T09:05:00Z",
     facts: {},
+    description: "A: update-package.test -> 203.0.113.81",
   };
 }
 

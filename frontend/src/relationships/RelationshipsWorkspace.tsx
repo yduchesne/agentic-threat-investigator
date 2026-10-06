@@ -9,10 +9,10 @@
 // observation preview (PR 31F-6 amendment 4). The normal route and the
 // PR 24D pivot modal share this one component.
 
-import { Box, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from "@mui/material";
+import { Box, Button, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import type { Investigation, Relationship, RelationshipTypeName } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
@@ -28,6 +28,13 @@ import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, parseUuidParam } from "../analyst-table/filters";
 import type { ResourceTableState } from "../analyst-table/resource-page";
+import {
+  internalLocationFromPath,
+  navigationState,
+  pushNavigationReturn,
+  resolveReturn,
+  returnTargetHref,
+} from "../analyst-table/return-to";
 import { runningNotice } from "../analyst-table/running";
 import { TableToolbar } from "../analyst-table/TableToolbar";
 import { EntityReference } from "../components/EntityReference";
@@ -185,7 +192,24 @@ export function RelationshipsWorkspace({
   embedded = false,
 }: RelationshipsWorkspaceProps): ReactElement {
   const { t } = useTranslation("relationships");
+  const location = useLocation();
+  const navigate = useNavigate();
   const { t: tCommon } = useTranslation("common");
+  const resolvedReturn = resolveReturn(location.state);
+  const backTarget =
+    resolvedReturn === null ? null : returnTargetHref(resolvedReturn.target);
+  const backState =
+    resolvedReturn === null
+      ? undefined
+      : navigationState(resolvedReturn.remaining);
+  // Relationships -> Relationship history is a genuine drill-down: push this
+  // exact list location so the history workspace's Back returns here.
+  const drillDownState = navigationState(
+    pushNavigationReturn(
+      location.state,
+      internalLocationFromPath(location.pathname, location.search, location.hash),
+    ),
+  );
 
   const { page, isLoading, error, refetch } = useRelationshipsPage(
     investigationId,
@@ -264,13 +288,24 @@ export function RelationshipsWorkspace({
       ) : (
         <>
           {!embedded ? (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+            <Box sx={{ mb: 1 }}>
+              {backTarget !== null ? (
+                <Button
+                  size="small"
+                  onClick={() => navigate(backTarget, { state: backState })}
+                  sx={{ textTransform: "none", px: 0, mb: 0.5, display: "block" }}
+                >
+                  {tCommon("back")}
+                </Button>
+              ) : null}
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <Typography variant="h2">{t("title")}</Typography>
               <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
-                <Link to={`/investigations/${investigationId}/relationships/observations`} style={{ textDecoration: "none" }}>
+                <Link to={`/investigations/${investigationId}/relationships/observations`} state={drillDownState} style={{ textDecoration: "none" }}>
                   {t("nav.observations")}
                 </Link>
               </Typography>
+              </Box>
             </Box>
           ) : null}
           <TableToolbar

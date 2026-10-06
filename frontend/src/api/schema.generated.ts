@@ -1044,6 +1044,8 @@ export interface components {
          *     subject and no role semantics.
          */
         EvidenceResponse: {
+            /** Description */
+            description: string;
             /** Facts */
             facts?: {
                 [key: string]: unknown;

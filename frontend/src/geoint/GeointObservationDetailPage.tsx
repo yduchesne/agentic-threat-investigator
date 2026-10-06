@@ -13,7 +13,7 @@
 import { Alert, Box } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 
 import { parseUuidParam } from "../analyst-table/filters";
 import { isNotFound404 } from "../analyst-table/detail-error";
@@ -22,6 +22,12 @@ import {
   DetailLoading,
   RouteDetailView,
 } from "../analyst-table/ResourceDetailView";
+import {
+  contextualBack,
+  internalLocationFromPath,
+  navigationState,
+  pushNavigationReturn,
+} from "../analyst-table/return-to";
 import { EmptyState } from "../components/AsyncState";
 import { GeointBreadcrumbs } from "./GeointBreadcrumbs";
 import { GeointObservationDetailBody } from "./GeointObservationDetail";
@@ -32,15 +38,28 @@ export function GeointObservationDetailPage(): ReactElement {
   const { t } = useTranslation("geoint");
   const { investigationId = "", observationId = "" } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const validObservationId = parseUuidParam(observationId) ?? null;
   const { detail, isLoading, isError, error, refetch } = useGeointObservation(
     investigationId,
     validObservationId,
   );
+  const { backTo, backState } = contextualBack(
+    location.state,
+    `/investigations/${investigationId}/geoint`,
+  );
+  const evidenceState = navigationState(
+    pushNavigationReturn(
+      location.state,
+      internalLocationFromPath(location.pathname, location.search, location.hash),
+    ),
+  );
 
   const onViewEvidence = (evidenceId: string): void => {
-    navigate(`/investigations/${investigationId}/evidence/${evidenceId}`);
+    navigate(`/investigations/${investigationId}/evidence/${evidenceId}`, {
+      state: evidenceState,
+    });
   };
 
   if (validObservationId === null) {
@@ -56,7 +75,8 @@ export function GeointObservationDetailPage(): ReactElement {
         crumbs={[{ key: "observation", label: t("detail.observation.title") }]}
       />
       <RouteDetailView
-        backTo={`/investigations/${investigationId}/geoint`}
+        backTo={backTo}
+        backState={backState}
         backLabel={t("detail.observation.backToContext")}
         heading={t("detail.observation.detailTitle")}
       >

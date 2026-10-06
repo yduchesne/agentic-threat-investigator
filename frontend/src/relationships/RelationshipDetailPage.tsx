@@ -11,10 +11,11 @@
 
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useSearchParams } from "react-router";
+import { useLocation, useParams, useSearchParams } from "react-router";
 
 import { parseUuidParam } from "../analyst-table/filters";
 import { RouteDetailView } from "../analyst-table/ResourceDetailView";
+import { contextualBack } from "../analyst-table/return-to";
 import {
   listBackPath,
   ROUTE_LIST_PARAMS,
@@ -28,18 +29,23 @@ export function RelationshipDetailPage(): ReactElement {
   const { t: tCommon } = useTranslation("common");
   const { investigationId = "", relationshipId = "" } = useParams();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
 
   const validRelationshipId = parseUuidParam(relationshipId) ?? null;
   const detail = useRelationshipDetail(investigationId, validRelationshipId);
-  const backTo = listBackPath(
-    `/investigations/${investigationId}/relationships`,
-    searchParams,
-    ROUTE_LIST_PARAMS.relationships,
+  const { backTo, backState } = contextualBack(
+    location.state,
+    listBackPath(
+      `/investigations/${investigationId}/relationships`,
+      searchParams,
+      ROUTE_LIST_PARAMS.relationships,
+    ),
   );
 
   return (
     <RouteDetailView
       backTo={backTo}
+      backState={backState}
       backLabel={tCommon("backToList", { resource: t("title") })}
       heading={t("detail.pageTitle")}
     >

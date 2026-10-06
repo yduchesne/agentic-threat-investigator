@@ -78,3 +78,64 @@ describe("filter codec primitives", () => {
     expect(next.get("selected")).toBe("abc");
   });
 });
+
+/** Build the expected local-wall-clock UTC ISO without assuming a zone. */
+function localIso(
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+): string {
+  return new Date(year, month - 1, day, hour, minute)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z");
+}
+
+describe("PR 35-1 local date/time parsing", () => {
+  it("T1: empty input is absent", () => {
+    expect(localDateTimeToIso("")).toBeUndefined();
+  });
+
+  it("T2: date-only means local midnight", () => {
+    expect(localDateTimeToIso("2026-06-01")).toBe(localIso(2026, 6, 1));
+  });
+
+  it("T3: explicit date+time is preserved", () => {
+    expect(localDateTimeToIso("2026-06-01T13:45")).toBe(
+      localIso(2026, 6, 1, 13, 45),
+    );
+  });
+
+  it("T4: a malformed date is invalid", () => {
+    expect(localDateTimeToIso("2026-6-1")).toBeUndefined();
+    expect(localDateTimeToIso("01/06/2026")).toBeUndefined();
+  });
+
+  it("T5: partial times are invalid", () => {
+    expect(localDateTimeToIso("2026-06-01T")).toBeUndefined();
+    expect(localDateTimeToIso("2026-06-01T10")).toBeUndefined();
+    expect(localDateTimeToIso("2026-06-01T10:")).toBeUndefined();
+  });
+
+  it("T6: an impossible calendar date is invalid", () => {
+    expect(localDateTimeToIso("2026-02-30")).toBeUndefined();
+    expect(localDateTimeToIso("2026-13-01T00:00")).toBeUndefined();
+  });
+
+  it("T7: date-only start before end is a valid range", () => {
+    const start = localDateTimeToIso("2026-06-01");
+    const end = localDateTimeToIso("2026-06-02");
+    expect(start).not.toBeUndefined();
+    expect(end).not.toBeUndefined();
+    expect(new Date(start as string).getTime()).toBeLessThan(
+      new Date(end as string).getTime(),
+    );
+  });
+
+  it("T8: equal normalized bounds are equal for existing range validation", () => {
+    expect(localDateTimeToIso("2026-06-01")).toBe(
+      localDateTimeToIso("2026-06-01T00:00"),
+    );
+  });
+});

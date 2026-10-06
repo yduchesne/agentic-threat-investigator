@@ -11,9 +11,10 @@
 // implementation serves both contexts. Empty evidence never implies
 // benign: the empty state says exactly what it is.
 
-import { Box, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from "@mui/material";
+import { Box, Button, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router";
 
 import type { Evidence, EvidenceTypeName, Investigation } from "../api/schema-types";
 import type { Column } from "../analyst-table/types";
@@ -23,6 +24,11 @@ import { isNotFound404 } from "../analyst-table/detail-error";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { useFilterForm } from "../analyst-table/filter-form";
 import { isUuidValue, localDateTimeToIso, parseUuidParam } from "../analyst-table/filters";
+import {
+  navigationState,
+  resolveReturn,
+  returnTargetHref,
+} from "../analyst-table/return-to";
 import type { ResourceTableState } from "../analyst-table/resource-page";
 import {
   DetailError,
@@ -132,8 +138,8 @@ export function evidenceColumns(
     {
       id: "description",
       header: t("columns.description"),
-      render: (evidence) => evidenceDescription(evidence.facts),
-      exportValue: (evidence) => evidenceDescription(evidence.facts),
+      render: (evidence) => evidence.description,
+      exportValue: (evidence) => evidence.description,
     },
     {
       id: "evidenceType",
@@ -163,35 +169,6 @@ export function evidenceColumns(
   ];
 }
 
-/** Deterministic bounded summary of the Evidence facts for list disambiguation. */
-export function evidenceDescription(facts: Evidence["facts"]): string {
-  if (facts === undefined || facts === null) {
-    return "—";
-  }
-  const entries = Object.entries(facts);
-  if (entries.length === 0) {
-    return "—";
-  }
-  const renderValue = (value: unknown): string => {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-    if (Array.isArray(value)) {
-      return value.slice(0, 2).map(renderValue).join(", ");
-    }
-    if (value !== null && typeof value === "object") {
-      return Object.entries(value as Record<string, unknown>)
-        .slice(0, 2)
-        .map(([key, nested]) => `${key}: ${renderValue(nested)}`)
-        .join(", ");
-    }
-    return String(value ?? "—");
-  };
-  const [key, value] = entries[0];
-  const primary = `${key}: ${renderValue(value)}`;
-  return entries.length > 1 ? `${primary} (+${entries.length - 1} more)` : primary;
-}
-
 /** Whether the backend page offers a next page. */
 function hasNext(page: { next_cursor?: string | null } | null): boolean {
   return page !== null && page.next_cursor !== null && page.next_cursor !== undefined;
@@ -214,6 +191,15 @@ export function EvidenceWorkspace({
 }: EvidenceWorkspaceProps): ReactElement {
   const { t } = useTranslation("evidence");
   const { t: tCommon } = useTranslation("common");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const resolvedReturn = resolveReturn(location.state);
+  const backTarget =
+    resolvedReturn === null ? null : returnTargetHref(resolvedReturn.target);
+  const backState =
+    resolvedReturn === null
+      ? undefined
+      : navigationState(resolvedReturn.remaining);
 
   const { page, isLoading, error, refetch } = useEvidencePage(
     investigationId,
@@ -265,7 +251,7 @@ export function EvidenceWorkspace({
       evidence.subject_value ?? "",
       evidence.subject_type ?? "",
       evidence.subject_entity_id ?? "",
-      evidenceDescription(evidence.facts),
+      evidence.description,
       t(evidenceTypeKey(evidence.type)),
       evidence.source,
       evidence.observed_at ?? "",
@@ -299,9 +285,20 @@ export function EvidenceWorkspace({
       ) : (
         <>
           {!embedded ? (
-            <Typography variant="h2" sx={{ mb: 1 }}>
-              {t("title")}
-            </Typography>
+            <Box sx={{ mb: 1 }}>
+              {backTarget !== null ? (
+                <Button
+                  size="small"
+                  onClick={() => navigate(backTarget, { state: backState })}
+                  sx={{ textTransform: "none", px: 0, mb: 0.5, display: "block" }}
+                >
+                  {tCommon("back")}
+                </Button>
+              ) : null}
+              <Typography variant="h2">
+                {t("title")}
+              </Typography>
+            </Box>
           ) : null}
           <TableToolbar
             filters={<EvidenceFiltersForm t={t} tCommon={tCommon} form={filterForm} />}

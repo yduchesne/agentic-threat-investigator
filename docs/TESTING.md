@@ -31,6 +31,7 @@
 - [No quality-gate bypass](#no-quality-gate-bypass)
 - [CI quality gate](#ci-quality-gate)
 - [Frontend quality](#frontend-quality)
+- [PR 35-1 UI correctness testing](#pr-35-1-ui-correctness-testing)
 - [PR 26 GEOINT testing strategy](#pr-26-geoint-testing-strategy)
 - [Definition of done](#definition-of-done)
 - [Configuration tests](#configuration-tests)
@@ -5868,6 +5869,237 @@ No canonical closure fixture directly inserts derived geographic truth
 production worker completion), `FakeLlmClient` is the only model fake, no
 live network/geocoder/LLM is required, and no PR 27 generic
 evaluator/release framework is introduced.
+
+## PR 35-1 UI correctness testing
+
+PR 35-1 fixes navigational, Evidence-presentation, temporal-input, and
+graph-depth defects without changing the Investigation, Evidence, Pivot,
+graph-traversal, or frame-based temporal architecture. Its testing is
+deterministic and offline at unit level and uses the authoritative
+`scripts/e2e.sh` real-stack topology for browser acceptance.
+
+### Evidence description presenter
+
+`tests/unit/api/test_evidence_description.py` pins the deterministic
+backend `description` projection (`E01`-`E08`): the Fake World
+`update-package.test` A/CNAME, MX, NS, and TXT DNS observations produce
+distinguishable descriptions; threat-intelligence and registration
+records are characterized from normalized fields; an unhandled type falls
+back to a bounded type-oriented string; the public DTO carries the
+description and never the raw provider payload. Descriptions are bounded
+and deterministic and the frontend no longer serializes arbitrary `facts`.
+
+### Bounded contextual navigation (amendment 1)
+
+`analyst-table/return-to.ts` carries a bounded ordered stack of validated
+ATI-internal return locations in React Router transient state (never in
+the URL): `pushNavigationReturn` records a genuine drill-down origin,
+`preserveNavigationContext` keeps context across sibling/subview changes,
+and `resolveReturn` pops exactly one level while retaining ancestors.
+`analyst-table/return-to.test.ts` pins `N1`-`N11`: internal targets are
+accepted, external/protocol-relative/malformed targets are rejected,
+EVOLUTION<->GRAPH preserves context, a drill-down pushes, `A -> B -> C`
+Back sequences pop one level at a time, direct loads fabricate no origin,
+adjacent duplicates are suppressed, and the stack is deterministically
+bounded.
+
+`useResourceTable` and `RelationshipEvolutionWorkspace.commit` now preserve
+the transient context across every search-only commit (filters, cursor,
+selection, view switch), so a subview change can never drop the caller's
+Back origin. Routed detail pages (`EvidenceDetailPage`,
+`RelationshipDetailPage`, `ObservationDetailPage`,
+`GeointObservationDetailPage`) resolve the contextual Back via
+`contextualBack`, falling back to the canonical list only when no origin
+exists. `relationships.test.tsx` `N3` and `relationship-evolution.test.tsx`
+`N5/N6` pin the History -> Current relationship snapshots and
+EVOLUTION<->GRAPH journeys at component level.
+
+### Provenance Observation Hide
+
+`GraphRelationshipProvenance.test.tsx` covers `P01`-`P03`: an observation
+opens, nested supporting Evidence opens, Observation **Hide** clears both
+the observation and the nested Evidence selection, and the parent
+provenance and bounded observation list remain usable.
+
+### Date-only local date/time parsing
+
+`analyst-table/filters.test.ts` pins the PR 35-1 parser matrix (`T1`-`T8`):
+empty input is absent, date-only normalizes to local midnight before UTC
+serialization, explicit time and seconds are preserved, malformed dates
+and partial times are rejected, impossible calendar dates are rejected,
+and a date-only range remains valid. `relationship-evolution.test.tsx`
+`FE31` proves the temporal conversion path commits local-midnight bounds
+with no false start-before-end error. The native `datetime-local` control
+cannot emit a date-only value, so the date-only behavior is asserted at the
+shared parser and temporal-conversion boundary rather than through a
+browser fill.
+
+### Graph HOPS depth propagation
+
+`relationship-evolution.test.tsx` `H01`-`H04` drives the routed Graph
+workspace: committed depth 1 issues no traversal request, depth 2 commits
+`graph_depth=2` and requests `max_depth=2`, depth 3 commits
+`graph_depth=3` and requests `max_depth=3`, and the committed URL identity
+follows the depth. Existing `graph-queries.test.tsx` and
+`graph-context-url.test.ts` pin the traversal/neighborhood query-key
+distinction and the depth URL codec.
+
+### Render-boundary endpoint invariant
+
+`RelationshipGraph.selectRenderableEdges` is the single render projection:
+a relationship edge reaches the canvas only when both endpoints are in the
+canonical model AND in the final rendered React Flow node set. Canonical
+edges are never deleted. `relationship-graph.test.tsx` `G1`-`G6` covers a
+complete edge, a missing source, a missing target, an endpoint becoming
+visible/hidden, and the canonical model retaining an edge whose endpoint is
+not rendered.
+
+### Browser acceptance
+
+`frontend/e2e/zz-35-1-ui-correctness.spec.ts` runs against the
+`scripts/e2e.sh` topology with `retries=0`, one worker, raw-pointer
+activation (`mouse.move`/`down`/`up` with a bounded 5 s wedge guard) and a
+bounded page heartbeat after every transition, and clean product
+console/pageerror assertions in Chromium and Firefox:
+
+- **E2E-W1** Evidence table Subject pivot -> `Evidence for this entity`:
+  asserts the pivot closes, the workspace URL carries the exact selected
+  `subject_entity_id`, the Evidence request carries that exact id, the
+  rendered rows are a non-empty subset of the unfiltered rows and still
+  represent the pivoted entity, and the URL does not churn after
+  quiescence;
+- **E2E-W2** Relationships history -> row `View` -> exact observation
+  detail and Back;
+- **E2E-N1/N2** Relationships -> history EVOLUTION -> GRAPH -> EVOLUTION ->
+  Back restores the exact Relationships origin;
+- **E2E-N3** History -> Current relationship snapshots -> Back restores the
+  exact history origin and then the original ancestor;
+- **E2E-N4** Report Finding Evidence -> Evidence details -> Back returns to
+  the exact Report and explicitly not to the generic Evidence list;
+- **E2E-N5/N6** Evidence list in-flow detail Back, plus a direct load of a
+  routed Evidence detail with no fabricated origin and the canonical list
+  fallback;
+- **E2E-H1** 1 -> 2 -> 3 HOPS: the traversal receives `max_depth` 2/3 and a
+  known depth-2 Entity (`203.0.113.81`) absent at depth 1 appears at depth 2;
+- **E2E-G1** render-boundary endpoint invariant on the
+  `malware.badloader_v2` reproducer and after depth reconciliation;
+- **E2E-G1b** provenance Observation -> View supporting evidence ->
+  Observation Hide.
+
+#### W1 final classification
+
+> **BASELINE-CONFIRMED PLAYWRIGHT/CHROMIUM RAW-POINTER / INPUT-PIPELINE
+> LIMITATION — NOT DEMONSTRATED TO BE A PR 35-1 APPLICATION REGRESSION.**
+
+The repeated same-page raw-pointer stress fails with
+`WEDGE@c1-clear` (the next pointer activation after the pivot never
+completes). The combined evidence:
+
+- page JavaScript stays responsive (`page.evaluate("1+1")` succeeds);
+- neutral pointer operations (pane click, move at a non-control point) and
+  actionability `trial` succeed;
+- programmatic dispatch of the same handler reaches the correct URL/state
+  and leaves the page responsive;
+- no modal/popover/popper/tooltip/backdrop overlay remains;
+- ripple disable, workspace remount, and router-state removal do **not**
+  cure it;
+- **decisively, the identical failure reproduces on unmodified base
+  `main` (`9473186`)** with the same spec and command.
+
+Reproduction command (base and branch identical):
+
+```bash
+timeout 220 ./scripts/e2e.sh zz-35-1-ui-correctness.spec.ts \
+  --project=chromium -g "E2E-W1" --timeout=30000 \
+  2>&1 | tee /tmp/ati-pr35-w1.log
+```
+
+The deterministic E2E-W1 journey therefore uses the narrowest established
+raw-pointer seam for the semantic acceptance and documents the baseline
+limitation in the spec; the five-cycle stress is not silently weakened, it
+is recorded as a baseline-confirmed limitation. No timing, force, reload,
+or long-timeout workaround is used.
+
+#### W2 disposition
+
+**B — the reported W2 wedge is not an application defect.** W2 passes
+deterministically with raw-pointer activation in Chromium and Firefox; the
+journey already used the repository's deferred `useResourceTable`
+selection commit, so no application change was required.
+
+#### Navigation-commit boundary
+
+The workspace sibling-subview commit (`EVOLUTION <-> GRAPH`) preserves the
+bounded navigation context and is deferred past the native pointer event
+(`commitView`) per the established PR 31F-6/31F-8 rule. Filter/temporal
+commits keep the pre-existing synchronous boundary. A synchronous
+`setSearchParams` carrying the navigation context inside the graph filter
+Apply originally stalled the input pipeline; deferring that specific
+context-carrying commit restored the PR 31H depth journey first attempt.
+
+#### Stale E2E selectors repaired
+
+These are pre-existing stale selectors introduced by the PR 31F/UI-polish
+label changes; they were reproduced on unmodified base `main` where noted.
+No production UI was changed to accommodate them.
+
+- `Cancel` -> `Hide` for the in-flow Pivot action bar in
+  `zz-pointer-acceptance.spec.ts`, `zz-pivot-acceptance.spec.ts`,
+  `zz-relationship-evolution.spec.ts`, and
+  `zz-geolocation-workflow.spec.ts` (commit `ad90d6d` renamed the control).
+- `Back to Relationship evolution` -> `Back to Relationship history` in
+  `zz-relationship-evolution.spec.ts`.
+- `relationship evolution` -> `relationship history` link selectors in
+  `zz-31g/31h/31i/31j/31k`.
+- `Relationships details` -> `Relationship details` in `zz-list-detail.spec.ts`,
+  `zz-pivot-acceptance.spec.ts`, and `zz-relationship-evolution.spec.ts`.
+- `View all observations` -> `View all history` in
+  `zz-pivot-acceptance.spec.ts` (the in-detail observations link label).
+- `Open evidence` -> `Evidence` (the exact-Evidence Pivot action label) in
+  `zz-relationship-evolution.spec.ts`.
+- Graph edge panel `Supporting observations` -> `Matching observations`, and
+  the evidence section's `Back to observation` -> a section-scoped `Hide` in
+  `zz-relationship-evolution.spec.ts`.
+- Graph edge-list action `View` -> `Details` in
+  `zz-relationship-evolution.spec.ts`.
+- Evidence source raw URN `urn:ati:source:dbip_city_lite` -> the localized
+  `DB-IP City Lite` in `zz-geolocation-workflow.spec.ts`.
+
+#### `zz-pivot-acceptance` correction
+
+The focused diagnostic initially reported `WEDGE@c0-diag-view-all` because
+the 5 s wedge guard also fires while `locator.click` waits for a
+**missing** element. The real cause was the stale `View all observations`
+label (current label: `View all history`); after correcting the selector the
+full five same-page cycles pass first attempt with ordinary locator clicks.
+No raw-pointer exception was needed. This is a test defect, not a browser
+freeze, and is not related to the W1 baseline raw-pointer limitation.
+
+#### `zz-analyst-tables`, `zz-pivots`, and the `zz-31h` edge selection
+
+These existing broader specs contain further pre-existing stale selectors
+and/or baseline-confirmed `locator.click` input-pipeline freezes reproduced
+on unmodified base `main` (`9473186`):
+
+- `zz-analyst-tables` E20 is a baseline-confirmed hard hang (outer timeout,
+  no Playwright error) reproduced on base `main`; it is also the shared
+  session-state creator, so `zz-relationship-evolution` and
+  `zz-geolocation-workflow` were verified with a temporary session
+  bootstrap in the same harness invocation.
+- `zz-pivots` has additional pre-existing stale selectors
+  (`Open evidence` ambiguity, `View all observations`, `Relationships
+  details`).
+- `zz-31h-multihop` `depth2-edge-select` (the first `locator.click` after
+  the synchronous graph Apply) wedges nondeterministically; the identical
+  corrected spec reproduces the same wedge on base `main`. The amendment's
+  own deterministic E2E-H1 HOPS acceptance (subset `zz-35-1-ui-correctness`)
+  pins the depth-1/depth-2 topology and `max_depth` 2/3 semantics and passes
+  first attempt in both engines.
+
+These specs are outside the PR 35-1 amendment scope and were not modified;
+the four suites named above (`zz-list-detail`, `zz-pivot-acceptance`,
+`zz-relationship-evolution`, `zz-geolocation-workflow`) are the
+amendment-required E2E slices and pass first attempt with `retries=0`.
 
 ## Definition of done
 

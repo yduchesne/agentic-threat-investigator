@@ -73,9 +73,16 @@ test.describe("PR 31F-8 routed cross-resource navigation acceptance", () => {
 
       // Routed capability activation: Evidence subject -> Relationships
       // where source (semantic link in the in-flow action bar).
+      // Select the row whose SUBJECT cell is the root domain. Matching any
+      // cell is ambiguous: a ThreatFox observation for another associated
+      // Entity can mention the domain in its description while its subject
+      // is not the domain, which would pivot to an unrelated Entity.
       const rootRow = page
-        .getByRole("row")
-        .filter({ hasText: F02_ROOT_DOMAIN })
+        .getByRole("table", { name: "Evidence" })
+        .locator("tbody tr")
+        .filter({
+          has: page.locator("td:first-child", { hasText: F02_ROOT_DOMAIN }),
+        })
         .first();
       await rootRow.getByRole("button", { name: "Subject" }).click();
       const bar = page.getByRole("group", { name: "Pivot actions" });
@@ -100,7 +107,7 @@ test.describe("PR 31F-8 routed cross-resource navigation acceptance", () => {
         .getByRole("button", { name: /^View / })
         .click();
       await expect(
-        page.getByRole("heading", { name: "Relationships details" }),
+        page.getByRole("heading", { name: "Relationship details" }),
       ).toBeVisible({ timeout: 30_000 });
       await assertResponsive(page, `c${cycle}-detail`);
       await page.getByRole("button", { name: "Back to Relationships" }).click();
@@ -116,7 +123,7 @@ test.describe("PR 31F-8 routed cross-resource navigation acceptance", () => {
       await rowPivot.click();
       const inlineBar = page.getByRole("group", { name: "Pivot actions" });
       await expect(inlineBar).toBeVisible({ timeout: 15_000 });
-      await inlineBar.getByRole("button", { name: "Cancel" }).click();
+      await inlineBar.getByRole("button", { name: "Hide" }).click();
       await expect(inlineBar).not.toBeVisible({ timeout: 15_000 });
       await assertResponsive(page, `c${cycle}-cancel`);
 
@@ -130,14 +137,14 @@ test.describe("PR 31F-8 routed cross-resource navigation acceptance", () => {
         .getByRole("button", { name: /^View / })
         .click();
       await expect(
-        page.getByRole("heading", { name: "Relationships details" }),
+        page.getByRole("heading", { name: "Relationship details" }),
       ).toBeVisible({ timeout: 30_000 });
-      // Let the bounded observations preview settle (its rows render after
-      // the exact detail query) before activating the semantic link, so
-      // the FF click dispatches against a stable node.
       await expect(page.getByText(/Confidence/).first()).toBeVisible({ timeout: 30_000 });
-      await page.getByRole("link", { name: "View all observations" }).click();
-      await expect(page).toHaveURL(new RegExp(`${base}/relationships/observations\\?relationship_id=`));
+      await page.getByRole("link", { name: "View all history" }).click();
+      await page.waitForURL(
+        new RegExp(`${base}/relationships/observations\\?relationship_id=`),
+        { timeout: 5_000 },
+      );
       await expect(
         page.getByRole("textbox", { name: "Relationship ID" }),
       ).toBeVisible({ timeout: 30_000 });
@@ -149,7 +156,7 @@ test.describe("PR 31F-8 routed cross-resource navigation acceptance", () => {
       await page.goBack();
       await expect(page).toHaveURL(new RegExp(`${base}/relationships\\?source_entity_id=`));
       await expect(
-        page.getByRole("heading", { name: "Relationships details" }),
+        page.getByRole("heading", { name: "Relationship details" }),
       ).toBeVisible({ timeout: 30_000 });
       await assertResponsive(page, `c${cycle}-back-detail`);
       // The semantic Back control closes the detail (the Relationships tab

@@ -18,11 +18,19 @@ import { Alert, Box, Button, ToggleButton, ToggleButtonGroup, Typography } from 
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 
 import type { Investigation, RelationshipObservation } from "../api/schema-types";
 import { DetailRows } from "../analyst-table/DetailRows";
 import { isUuidValue } from "../analyst-table/filters";
+import {
+  internalLocationFromPath,
+  navigationState,
+  preserveNavigationContext,
+  pushNavigationReturn,
+  resolveReturn,
+  returnTargetHref,
+} from "../analyst-table/return-to";
 import { useFilterForm } from "../analyst-table/filter-form";
 import {
   clearSelectedParam,
@@ -144,6 +152,28 @@ export function RelationshipEvolutionWorkspace({
   const { t: tCommon } = useTranslation("common");
   const { t: tRelationships } = useTranslation("relationships");
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const resolvedReturn = resolveReturn(location.state);
+  const backTarget =
+    resolvedReturn === null ? null : returnTargetHref(resolvedReturn.target);
+  const backState =
+    resolvedReturn === null
+      ? undefined
+      : navigationState(resolvedReturn.remaining);
+  // Sibling/subview transitions (EVOLUTION <-> GRAPH, focal changes) keep
+  // the existing navigation context unchanged.
+  const preservedState = navigationState(
+    preserveNavigationContext(location.state),
+  );
+  // Current relationship snapshots is a genuine drill-down: push the exact
+  // history location so the Relationships list can offer a contextual Back.
+  const relationshipsLinkState = navigationState(
+    pushNavigationReturn(
+      location.state,
+      internalLocationFromPath(location.pathname, location.search, location.hash),
+    ),
+  );
 
   const filters = parseEvolutionParams(searchParams);
   const view = parseViewParam(searchParams);
@@ -531,6 +561,21 @@ export function RelationshipEvolutionWorkspace({
     setSearchParams(next, { replace: false });
   };
 
+  /**
+   * Commit a sibling subview change (EVOLUTION <-> GRAPH) while retaining
+   * the transient navigation context, so the workspace Back returns to the
+   * original origin. Deferred past the native pointer event per the
+   * repository's established navigation-commit boundary; the destination's
+   * Back reads the context from the committed location state.
+   */
+  const commitView = (next: URLSearchParams): void => {
+    const state = location.state;
+    window.setTimeout(
+      () => setSearchParams(next, { replace: false, state }),
+      0,
+    );
+  };
+
   function applyFilters(next: RelationshipEvolutionFilters): void {
     setBackStack([]);
     commit(applyEvolutionFilters(searchParams, next));
@@ -600,7 +645,7 @@ export function RelationshipEvolutionWorkspace({
     if (nextView === null) {
       return;
     }
-    commit(setEvolutionView(searchParams, nextView));
+    commitView(setEvolutionView(searchParams, nextView));
   };
 
   // Stable label functions: the graph keeps its own local node state, and an
@@ -626,7 +671,17 @@ export function RelationshipEvolutionWorkspace({
   if (filters === null) {
     return (
       <Box>
-        <WorkspaceTitle investigationId={investigationId} t={t} />
+        <WorkspaceTitle
+          investigationId={investigationId}
+          t={t}
+          relationshipsState={relationshipsLinkState}
+          backLabel={backTarget === null ? null : tCommon("back")}
+          onBack={() => {
+            if (backTarget !== null) {
+              navigate(backTarget, { state: backState });
+            }
+          }}
+        />
         <Typography variant="h4" sx={{ py: 3, textAlign: "center", fontWeight: 600 }}>
           {t("empty.entity.title")}
         </Typography>
@@ -656,7 +711,17 @@ export function RelationshipEvolutionWorkspace({
         t("running.notice"),
         tCommon("table.refresh"),
       )}
-      <WorkspaceTitle investigationId={investigationId} t={t} />
+      <WorkspaceTitle
+        investigationId={investigationId}
+        t={t}
+        relationshipsState={relationshipsLinkState}
+        backLabel={backTarget === null ? null : tCommon("back")}
+        onBack={() => {
+          if (backTarget !== null) {
+            navigate(backTarget, { state: backState });
+          }
+        }}
+      />
       <Box sx={{ mb: 1 }}>
         <ToggleButtonGroup
           value={view}
@@ -723,6 +788,7 @@ export function RelationshipEvolutionWorkspace({
               t={t as never}
               investigationId={investigationId}
               observation={selectedObservation}
+              preservedState={preservedState}
             />
           ) : (
             <Box role="status" sx={{ py: 2, textAlign: "center" }}>
@@ -781,6 +847,7 @@ export function RelationshipEvolutionWorkspace({
           {observations.page !== null && evolutionModel !== null ? (
             <Box sx={{ mt: 1 }}>
               <RelationshipEvolutionTimeline
+                investigationId={investigationId}
                 focalEntityId={filters.entityId}
                 model={evolutionModel}
                 span={span}
@@ -912,18 +979,35 @@ export function RelationshipEvolutionWorkspace({
 function WorkspaceTitle({
   investigationId,
   t,
+  backLabel = null,
+  relationshipsState = undefined,
+  onBack,
 }: {
   investigationId: string;
   t: (key: string) => string;
+  backLabel?: string | null;
+  relationshipsState?: unknown;
+  onBack?: () => void;
 }): ReactElement {
   return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-      <Typography variant="h2">{t("title")}</Typography>
-      <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
-        <Link to={`/investigations/${investigationId}/relationships`} style={{ textDecoration: "none" }}>
-          {t("nav.relationships")}
-        </Link>
-      </Typography>
+    <Box sx={{ mb: 1 }}>
+      {backLabel !== null && onBack !== undefined ? (
+        <Button
+          size="small"
+          onClick={onBack}
+          sx={{ textTransform: "none", px: 0, mb: 0.5, display: "block" }}
+        >
+          {backLabel}
+        </Button>
+      ) : null}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Typography variant="h2">{t("title")}</Typography>
+        <Typography variant="body2" component="span" role="navigation" aria-label={t("nav.label")}>
+          <Link to={`/investigations/${investigationId}/relationships`} state={relationshipsState} style={{ textDecoration: "none" }}>
+            {t("nav.relationships")}
+          </Link>
+        </Typography>
+      </Box>
     </Box>
   );
 }
@@ -933,10 +1017,12 @@ function ObservationDetailBody({
   t,
   investigationId,
   observation,
+  preservedState,
 }: {
   t: (key: string) => string;
   investigationId: string;
   observation: RelationshipObservation;
+  preservedState: unknown;
 }): ReactElement {
   return (
     <Box>
@@ -1011,6 +1097,7 @@ function ObservationDetailBody({
             <Typography variant="caption" component="div">
               <Link
                 to={`/investigations/${investigationId}/relationships/evolution?entity_id=${observation.relationship_source_entity_id}`}
+                state={preservedState}
                 style={{ textDecoration: "none" }}
               >
                 {t("detail.evolutionSource")}
@@ -1021,6 +1108,7 @@ function ObservationDetailBody({
             <Typography variant="caption" component="div">
               <Link
                 to={`/investigations/${investigationId}/relationships/evolution?entity_id=${observation.relationship_target_entity_id}`}
+                state={preservedState}
                 style={{ textDecoration: "none" }}
               >
                 {t("detail.evolutionTarget")}

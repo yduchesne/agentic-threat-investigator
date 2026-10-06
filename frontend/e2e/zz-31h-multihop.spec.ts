@@ -86,7 +86,7 @@ async function openGraphWorkspace(page: Page, base: string): Promise<string> {
     timeout: 30_000,
   });
   const firstEntityLink = page
-    .getByRole("link", { name: /relationship evolution/i })
+    .getByRole("link", { name: /relationship history/i })
     .first();
   await expect(firstEntityLink).toBeVisible({ timeout: 30_000 });
   const href = await firstEntityLink.getAttribute("href");
@@ -136,7 +136,7 @@ test.describe("PR 31H multi-hop traversal (real stack)", () => {
     const firstEdge = page.locator(".react-flow__edge").first();
     await expect(firstEdge).toBeVisible({ timeout: 30_000 });
     await click(page, firstEdge, "depth2-edge-select");
-    const provenanceButton = page.getByRole("button", { name: /Inspect observations/ }).first();
+    const provenanceButton = page.getByRole("button", { name: /Provenance/ }).first();
     await expect(provenanceButton).toBeVisible({ timeout: 20_000 });
     await click(page, provenanceButton, "depth2-provenance");
     await expect(

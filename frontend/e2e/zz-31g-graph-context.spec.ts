@@ -97,7 +97,7 @@ test.describe("PR 31G graph context + filters (real stack)", () => {
       timeout: 30_000,
     });
     const firstEntityLink = page
-      .getByRole("link", { name: /relationship evolution/i })
+      .getByRole("link", { name: /relationship history/i })
       .first();
     await expect(firstEntityLink).toBeVisible({ timeout: 30_000 });
 
@@ -186,7 +186,7 @@ test.describe("PR 31G graph context + filters (real stack)", () => {
     const base = `/investigations/${investigationId}`;
     await page.goto(`${base}/relationships`);
     const firstEntityLink = page
-      .getByRole("link", { name: /relationship evolution/i })
+      .getByRole("link", { name: /relationship history/i })
       .first();
     await expect(firstEntityLink).toBeVisible({ timeout: 30_000 });
     const href = await firstEntityLink.getAttribute("href");

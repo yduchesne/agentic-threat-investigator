@@ -102,7 +102,7 @@ test.describe("PR 31F-4/31F-7 real-stack appearance preference workflow", () => 
     const firstRow = page.getByRole("table", { name: "Relationships" }).getByRole("row").nth(1);
     await expect(firstRow).toBeVisible({ timeout: 20_000 });
     await firstRow
-      .getByRole("link", { name: "View relationship evolution for source entity" })
+      .getByRole("link", { name: "View relationship history for source entity" })
       .first()
       .click();
     await expect(page).toHaveURL(/\/relationships\/evolution\?entity_id=/);

@@ -11,10 +11,16 @@
 // Evidence provenance.
 
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { http } from "msw";
 import { describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 
 import type { RelationshipObservation } from "../api/schema-types";
+import { localDateTimeToIso } from "../analyst-table/filters";
+import {
+  graphTemporalDraftToCommitted,
+  type GraphTemporalDraft,
+} from "../relationship-graph/GraphTemporalControls";
 import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
 import {
@@ -25,6 +31,7 @@ import {
   evolutionObservationsHandler,
   graphNeighborhoodHandler,
   investigationDetailHandler,
+  jsonResponse,
   resourceListRecorder,
   runtimeFake,
   relationshipObservationsNetworkErrorHandler,
@@ -675,5 +682,159 @@ describe("PR 31J temporal graph workspace (FE10..FE30)", () => {
     await screen.findByRole("status", {
       name: "Frame 3 of 8 — observations from 2026-02-03T00:00:00Z through before 2026-02-04T00:00:00Z",
     });
+  });
+
+  it("FE31 (PR 35-1): date-only temporal bounds normalize to local midnight", () => {
+    const draft: GraphTemporalDraft = {
+      temporal: true,
+      rangeStart: "2026-02-01",
+      rangeEnd: "2026-02-09",
+      frameCount: 8,
+    };
+    const committed = graphTemporalDraftToCommitted(draft);
+    // A valid date-only range commits local-midnight bounds (no malformed
+    // range and no false ``start >= end`` result).
+    expect(committed.temporal).toBe(true);
+    expect(committed.rangeStart).toBe(localDateTimeToIso("2026-02-01"));
+    expect(committed.rangeEnd).toBe(localDateTimeToIso("2026-02-09"));
+    expect(committed.frameIndex).toBe(0);
+  });
+});
+
+describe("PR 35-1 Relationship history linked Evidence + contextual Back", () => {
+  it("L01/L02/L03: the history table Evidence ID is one linked compact ID with a copy control", async () => {
+    const recorder = resourceListRecorder();
+    const row = obsA({ evidence_id: "40000000-0000-4000-8000-000000000001" });
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[row]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    await screen.findByRole("button", { name: /observed 2026-06-01/ });
+    await userEvent.click(screen.getByRole("button", { name: "View as table" }));
+    const table = await screen.findByRole("table", {
+      name: "Relationship history (this page)",
+    });
+    const link = within(table).getByRole("link", { name: "Evidence" });
+    expect(link).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/evidence/40000000-0000-4000-8000-000000000001`,
+    );
+    // The short ID renders once; the full UUID stays copyable.
+    expect(within(table).getAllByText("40000000").length).toBeGreaterThan(0);
+    expect(
+      within(table).getAllByRole("button", { name: /Copy ID/ }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("B01/B04: a valid internal returnTo renders Back and restores query + hash", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder }),
+    );
+    const origin = `/investigations/${INVESTIGATION_ID}/evidence?source=rdap#top`;
+    const { router } = renderAtPath({
+      pathname: EVOLUTION_BASE,
+      search: `?entity_id=${FOCAL}`,
+      state: { returnTo: origin },
+    });
+    const back = await screen.findByRole("button", { name: "< Back" });
+    await userEvent.click(back);
+    await waitFor(() => {
+      expect(
+        `${router.state.location.pathname}${router.state.location.search}${router.state.location.hash}`,
+      ).toBe(origin);
+    });
+  });
+
+  it("N5/N6 (amendment): EVOLUTION <-> GRAPH preserves the return context", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder }),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder: resourceListRecorder(),
+      }),
+    );
+    const origin = `/investigations/${INVESTIGATION_ID}/relationships`;
+    const { router } = renderAtPath({
+      pathname: EVOLUTION_BASE,
+      search: `?entity_id=${FOCAL}`,
+      state: { navigation: { returns: [{ pathname: origin, search: "", hash: "" }] } },
+    });
+    expect(await screen.findByRole("button", { name: "< Back" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Graph" }));
+    await waitFor(() => expect(router.state.location.search).toContain("view=graph"));
+    expect(screen.getByRole("button", { name: "< Back" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Evolution" }));
+    await waitFor(() => expect(router.state.location.search).not.toContain("view=graph"));
+    await userEvent.click(screen.getByRole("button", { name: "< Back" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(origin));
+  });
+
+  it("B02: a direct/deep link without returnTo renders no Back control", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    await screen.findByRole("button", { name: /observed 2026-06-01/ });
+    expect(screen.queryByRole("button", { name: "< Back" })).not.toBeInTheDocument();
+  });
+
+  it("B03: an external/invalid returnTo renders no Back control", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder }),
+    );
+    renderAtPath({
+      pathname: EVOLUTION_BASE,
+      search: `?entity_id=${FOCAL}`,
+      state: { returnTo: "https://evil.example/steal" },
+    });
+    await screen.findByRole("button", { name: /observed 2026-06-01/ });
+    expect(screen.queryByRole("button", { name: "< Back" })).not.toBeInTheDocument();
+  });
+});
+
+describe("PR 31H HOPS depth propagation (PR 35-1 Part 6)", () => {
+  it("H01/H02/H03/H04: 1 -> 2 -> 3 hops changes the traversal request depth", async () => {
+    const neighborhood = buildGraphNeighborhood();
+    const traversalRequests: (string | null)[] = [];
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({ neighborhood, recorder: resourceListRecorder() }),
+      http.get(
+        "*/api/v1/investigations/:id/graph/entities/:entityId/traversal",
+        ({ request }) => {
+          const url = new URL(request.url);
+          traversalRequests.push(url.searchParams.get("max_depth"));
+          return jsonResponse(neighborhood);
+        },
+      ),
+    );
+    const { router } = renderAtPath(
+      evolutionEntry(`entity_id=${FOCAL}&view=graph`),
+    );
+    await screen.findByRole("group", { name: "Graph context and filters" });
+    // H01: committed depth 1 is the neighborhood endpoint; no traversal.
+    expect(traversalRequests).toHaveLength(0);
+    // H02: depth 2 commits and requests a bounded depth-2 traversal.
+    await userEvent.click(screen.getByRole("button", { name: "2 hops" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Apply$/ }));
+    await waitFor(() => expect(traversalRequests).toHaveLength(1));
+    expect(traversalRequests[0]).toBe("2");
+    expect(router.state.location.search).toContain("graph_depth=2");
+    // H03: depth 3 replaces the depth-2 topology request.
+    await userEvent.click(screen.getByRole("button", { name: "3 hops" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Apply$/ }));
+    await waitFor(() => expect(traversalRequests).toHaveLength(2));
+    expect(traversalRequests[1]).toBe("3");
+    // H04: committed URL identity reflects the new depth.
+    expect(router.state.location.search).toContain("graph_depth=3");
   });
 });
