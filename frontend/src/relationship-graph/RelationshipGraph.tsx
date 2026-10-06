@@ -202,6 +202,12 @@ export interface RelationshipGraphProps {
     relationshipIds: ReadonlySet<string>;
     entityIds: ReadonlySet<string>;
   } | null;
+  /**
+   * PR 35-8: invoke the graph-local focal Explore command with the exact
+   * canonical Entity ID of a right-clicked node. The graph never owns URL
+   * navigation; the workspace commits the focal change.
+   */
+  onExploreEntity?: (entityId: string) => void;
 }
 
 /** The bounded accumulated graph surface with an always-available list path. */
@@ -220,6 +226,7 @@ export function RelationshipGraph({
   onActionSelect,
   pathHighlight = null,
   emptyMessage = undefined,
+  onExploreEntity = undefined,
 }: RelationshipGraphProps): ReactElement {
   const { t } = useTranslation("relationshipEvolution");
   const location = useLocation();
@@ -248,9 +255,21 @@ export function RelationshipGraph({
   const [provenanceRelationshipId, setProvenanceRelationshipId] = useState<
     string | null
   >(null);
+  // PR 35-8: the bounded in-flow right-click context-action surface. It is
+  // local presentation state only (no global popup, no document listener)
+  // and closes on dismissal, after Explore, or when the graph root changes.
+  const [contextEntityId, setContextEntityId] = useState<string | null>(null);
   useEffect(() => {
     setProvenanceRelationshipId(null);
   }, [selection]);
+  // A root semantic change (focal Explore re-roots the graph) clears stale
+  // selection, provenance and context-action state so no prior-root detail
+  // survives the transition.
+  useEffect(() => {
+    setSelection(null);
+    setProvenanceRelationshipId(null);
+    setContextEntityId(null);
+  }, [rootGraphKey]);
 
   const counterpartyIds = useMemo(
     () => model.nodes.filter((node) => node.entityId !== focalEntityId).map((node) => node.entityId),
@@ -452,6 +471,13 @@ export function RelationshipGraph({
     return id === null ? null : (nodeById.get(id) ?? null);
   }, [selection, nodeById]);
 
+  // The canonical node backing the right-click context surface; a stale or
+  // non-canonical Entity ID resolves to null and suppresses the surface.
+  const contextNode = useMemo(
+    () => (contextEntityId === null ? null : nodeById.get(contextEntityId) ?? null),
+    [contextEntityId, nodeById],
+  );
+
   const truncatedEntities = useMemo(() => {
     const seen = new Set<string>();
     const result: { entityId: string; label: string }[] = [];
@@ -506,12 +532,63 @@ export function RelationshipGraph({
       ))}
       <Box sx={{ mb: 1 }}>
         <Link
-          href={`/investigations/${investigationId}/relationships?entity_id=${focalEntityId}`}
+          component={RouterLink}
+          to={`/investigations/${investigationId}/relationships?entity_id=${focalEntityId}`}
+          state={drillDownState}
           underline="hover"
         >
           {t("graph.openTable")}
         </Link>
       </Box>
+      {contextNode !== null ? (
+        <Box
+          data-ati-id="graph.entity-context-actions"
+          role="group"
+          aria-label={t("graph.contextMenu.aria")}
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            flexWrap: "wrap",
+            mb: 1,
+            p: 1,
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+          }}
+        >
+          <Typography variant="subtitle2" component="span">
+            {t("graph.contextMenu.heading", { label: contextNode.label })}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            data-testid="graph-explore-entity"
+            disabled={
+              contextNode.entityId === focalEntityId || onExploreEntity === undefined
+            }
+            onClick={() => {
+              if (onExploreEntity === undefined) {
+                return;
+              }
+              onExploreEntity(contextNode.entityId);
+              setContextEntityId(null);
+            }}
+            sx={{ textTransform: "none" }}
+          >
+            {t("graph.explore")}
+          </Button>
+          <Button
+            size="small"
+            variant="text"
+            data-testid="graph-context-close"
+            onClick={() => setContextEntityId(null)}
+            sx={{ textTransform: "none" }}
+          >
+            {t("graph.contextMenu.close")}
+          </Button>
+        </Box>
+      ) : null}
       <Box
         sx={{ height: size.height, border: 1, borderColor: "divider", borderRadius: 1 }}
         style={graphFlowStyle}
@@ -547,6 +624,16 @@ export function RelationshipGraph({
           }}
           onEdgeClick={(_event, edge) => setSelection({ kind: "edge", edgeId: edge.id })}
           onPaneClick={() => setSelection(null)}
+          onNodeContextMenu={(event, node) => {
+            // The graph node is an app surface with a graph-local context
+            // action: never let the browser menu take over a handled node.
+            event.preventDefault();
+            const entityId = entityIdFromNodeId(node.id);
+            if (entityId === null || !nodeById.has(entityId)) {
+              return;
+            }
+            setContextEntityId(entityId);
+          }}
         >
           <Background />
           <Controls />

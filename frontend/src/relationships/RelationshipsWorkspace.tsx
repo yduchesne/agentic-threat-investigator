@@ -38,6 +38,8 @@ import {
 import { runningNotice } from "../analyst-table/running";
 import { TableToolbar } from "../analyst-table/TableToolbar";
 import { EntityReference } from "../components/EntityReference";
+import { FocalEntityReference } from "../components/FocalEntityReference";
+import { useEntityDetail } from "../entities/entity-queries";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { relationshipSourceActions, relationshipTargetActions } from "../pivots/pivot-capabilities";
 import { relationshipTypeKey, RELATIONSHIP_TYPES } from "./labels";
@@ -229,6 +231,11 @@ export function RelationshipsWorkspace({
   });
 
   const detail = useRelationshipDetail(investigationId, table.selection);
+  const focalEntityState = useEntityDetail(
+    investigationId,
+    table.filters.entityId ?? "",
+    table.filters.entityId !== undefined,
+  );
   const filtersActive = relationshipFiltersActive(table.filters);
 
   const goNext = (): void => {
@@ -307,6 +314,13 @@ export function RelationshipsWorkspace({
               </Typography>
               </Box>
             </Box>
+          ) : null}
+          {table.filters.entityId !== undefined ? (
+            <FocalEntityReference
+              investigationId={investigationId}
+              entityId={table.filters.entityId}
+              state={focalEntityState}
+            />
           ) : null}
           <TableToolbar
             filters={<RelationshipFiltersForm t={t} tCommon={tCommon} form={filterForm} />}

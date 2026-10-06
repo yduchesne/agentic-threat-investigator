@@ -319,6 +319,12 @@ describe("Relationship Evolution workspace", () => {
     const recorder = resourceListRecorder();
     setHttpHandlers(
       ...authHandlers(),
+      // The focal indicator's exact Entity read succeeds; only the
+      // observation query fails, so the bounded Retry surface is unambiguous.
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder,
+      }),
       relationshipObservationsNetworkErrorHandler,
     );
     renderAtPath(evolutionEntry(`entity_id=${FOCAL}&direction=source`));
@@ -836,5 +842,126 @@ describe("PR 31H HOPS depth propagation (PR 35-1 Part 6)", () => {
     expect(traversalRequests[1]).toBe("3");
     // H04: committed URL identity reflects the new depth.
     expect(router.state.location.search).toContain("graph_depth=3");
+  });
+});
+
+describe("PR 35-8 focal exploration", () => {
+  it("U21/U23: Explore re-roots History/Graph and clears stale transient graph state", async () => {
+    const graphRecorder = resourceListRecorder();
+    const obsRecorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder: graphRecorder,
+      }),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder: obsRecorder }),
+    );
+    const { router } = renderAtPath(
+      evolutionEntry(`entity_id=${FOCAL}&view=graph`),
+    );
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    // Select the focal node so a stale selection panel exists pre-Explore.
+    fireEvent.click(await screen.findByTestId(`rf__node-n:${FOCAL}`));
+    expect(await screen.findByText("Entity: update-package.test")).toBeInTheDocument();
+    // Right-click the counterparty and Explore it.
+    fireEvent.contextMenu(
+      document.querySelector(`[data-testid="rf__node-n:${COUNTERPARTY}"]`) as Element,
+    );
+    await userEvent.click(await screen.findByTestId("graph-explore-entity"));
+    await waitFor(() => {
+      expect(router.state.location.search).toContain(`entity_id=${COUNTERPARTY}`);
+    });
+    // The stale focal selection panel is cleared on the root change.
+    await waitFor(() => {
+      expect(screen.queryByText("Entity: update-package.test")).not.toBeInTheDocument();
+    });
+    // The re-root issued a fresh graph request rooted at the new focal.
+    expect(graphRecorder.requests.at(-1)?.params.entity_id).toBe(COUNTERPARTY);
+    // The History observation query follows the new focal Entity.
+    await userEvent.click(screen.getByRole("button", { name: "Evolution" }));
+    await waitFor(() => {
+      expect(obsRecorder.requests.at(-1)?.params.entity_id).toBe(COUNTERPARTY);
+    });
+  });
+
+  it("U25/U27: History shows the canonical focal value linked to Entity details", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder: resourceListRecorder(),
+      }),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    const value = await screen.findByTestId("focal-entity-value");
+    expect(value).toHaveTextContent("update-package.test");
+    expect(value).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/entities/${FOCAL}`,
+    );
+    expect(
+      document.querySelector('[data-ati-id="relationship.focal-entity"]'),
+    ).not.toBeNull();
+  });
+
+  it("U26: the Graph view shows the same canonical focal value", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder,
+      }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}&view=graph`));
+    const value = await screen.findByTestId("focal-entity-value");
+    expect(value).toHaveTextContent("update-package.test");
+  });
+
+  it("U28: zero history rows still shows the focal value from the exact read", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder: resourceListRecorder(),
+      }),
+      evolutionObservationsHandler({ pages: [[]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    expect(await screen.findByTestId("focal-entity-value")).toHaveTextContent(
+      "update-package.test",
+    );
+  });
+
+  it("U29: an empty graph still shows the focal value", async () => {
+    const recorder = resourceListRecorder();
+    const focalOnly = buildGraphNeighborhood({
+      nodes: [buildGraphNeighborhood().nodes[0]],
+      edges: [],
+    });
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({ neighborhood: focalOnly, recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}&view=graph`));
+    expect(await screen.findByTestId("focal-entity-value")).toHaveTextContent(
+      "update-package.test",
+    );
+  });
+
+  it("U30: no valid focal Entity renders no fabricated indicator", async () => {
+    setHttpHandlers(...authHandlers());
+    renderAtPath(EVOLUTION_BASE);
+    expect(
+      await screen.findByText("Choose an entity to view relationship evolution."),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-ati-id="relationship.focal-entity"]'),
+    ).toBeNull();
+    expect(screen.queryByTestId("focal-entity-value")).not.toBeInTheDocument();
   });
 });

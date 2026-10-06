@@ -28,6 +28,7 @@ import {
   errorResponse,
   graphNeighborhoodHandler,
   graphNeighborhoodNetworkErrorHandler,
+  graphRelationshipsHandler,
   investigationDetailHandler,
   jsonResponse,
   resourceListRecorder,
@@ -1280,5 +1281,133 @@ describe("Relationship Graph endpoint invariant (PR 35-1 amendment 1 G1-G6)", ()
         (edge) => edge.relationshipId,
       ),
     ).toEqual([RELATIONSHIP]);
+  });
+});
+
+describe("PR 35-8 focal Explore (graph context action)", () => {
+  function renderGraphWithRouter(params: string = "") {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      authMeSuccess,
+      runtimeFake,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      graphNeighborhoodHandler({
+        neighborhood: neighbors().neighborhood,
+        recorder,
+      }),
+    );
+    const { router } = renderAtPath(graphEntry(params));
+    return { recorder, router };
+  }
+
+  function nodeElement(entityId: string): Element {
+    const node = document.querySelector(
+      `[data-testid="rf__node-${nodeId(entityId)}"]`,
+    );
+    expect(node).not.toBeNull();
+    return node as Element;
+  }
+
+  it("U11/U12/U19/U20: right-click non-focal node -> Explore re-roots the graph at that canonical Entity", async () => {
+    const { recorder, router } = renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(B));
+    const explore = await screen.findByTestId("graph-explore-entity");
+    expect(explore).toBeEnabled();
+    // Opening the context surface (or its Close) never re-roots the graph.
+    expect(router.state.location.search).toContain(`entity_id=${FOCAL}`);
+    // The canonical Entity backing the surface is the right-clicked node.
+    expect(screen.getByText("Entity: 203.0.113.10")).toBeInTheDocument();
+    const requestsBefore = recorder.requests.length;
+    await userEventLib.click(explore);
+    await waitFor(() => {
+      expect(router.state.location.search).toContain(`entity_id=${B}`);
+    });
+    expect(router.state.location.search).toContain("view=graph");
+    // The re-root triggers exactly one new graph request rooted at B.
+    await waitFor(() => {
+      expect(recorder.requests.length).toBeGreaterThan(requestsBefore);
+    });
+    expect(recorder.requests.at(-1)?.params.entity_id).toBe(B);
+    // The Explore surface closes after the command.
+    expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+  });
+
+  it("U13: right-clicking the current focal node disables Explore", async () => {
+    renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(FOCAL));
+    const explore = await screen.findByTestId("graph-explore-entity");
+    expect(explore).toBeDisabled();
+  });
+
+  it("U14: a handled graph node suppresses the browser context menu", async () => {
+    renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    const notCancelled = fireEvent.contextMenu(nodeElement(B));
+    expect(notCancelled).toBe(false);
+  });
+
+  it("U15: the context surface has an explicit dismiss path", async () => {
+    renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(B));
+    expect(await screen.findByTestId("graph-explore-entity")).toBeInTheDocument();
+    await userEventLib.click(screen.getByTestId("graph-context-close"));
+    expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+  });
+
+  it("U16: ordinary left-click selection is unchanged by the context action", async () => {
+    renderGraphWithRouter();
+    const focalNode = await screen.findByTestId(`rf__node-${nodeId(FOCAL)}`);
+    fireEvent.click(focalNode);
+    expect(await screen.findByText("Entity: Update Package Service")).toBeInTheDocument();
+    // The right-click surface never opened as a side effect of selection.
+    expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+  });
+
+  it("U34/U35: Open Relationships table for focal entity drills down and Back restores the exact graph origin", async () => {
+    setHttpHandlers(
+      authMeSuccess,
+      runtimeFake,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      graphNeighborhoodHandler({
+        neighborhood: neighbors().neighborhood,
+        recorder: resourceListRecorder(),
+      }),
+      graphRelationshipsHandler({ pages: [[]], recorder: resourceListRecorder() }),
+    );
+    const { router } = renderAtPath(
+      graphEntry("graph_scope=known&direction=source"),
+    );
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    await userEventLib.click(
+      screen.getByRole("link", {
+        name: "Open Relationships table for focal entity",
+      }),
+    );
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `/investigations/${INVESTIGATION_ID}/relationships`,
+      );
+    });
+    expect(router.state.location.search).toBe(`?entity_id=${FOCAL}`);
+    // The focal Relationships table offers the contextual Back.
+    const back = await screen.findByRole("button", { name: "< Back" });
+    await userEventLib.click(back);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `/investigations/${INVESTIGATION_ID}/relationships/evolution`,
+      );
+    });
+    // The exact graph origin (view + graph filters + focal) is restored.
+    expect(router.state.location.search).toContain("view=graph");
+    expect(router.state.location.search).toContain("graph_scope=known");
+    expect(router.state.location.search).toContain("direction=source");
+    expect(router.state.location.search).toContain(`entity_id=${FOCAL}`);
   });
 });

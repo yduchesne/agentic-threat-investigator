@@ -46,5 +46,16 @@
   "sources.mitreAttack": "MITRE ATT&CK",
   "sources.cisaKev": "CISA KEV",
   "sources.misp": "MISP",
-  "sources.openCti": "OpenCTI"
+  "sources.openCti": "OpenCTI",
+  "focalEntity.label": "Focal entity",
+  "focalEntity.loading": "Loading focal entity…",
+  "focalEntity.error": "Unable to load the focal entity.",
+  "focalEntity.unavailable": "Entity unavailable",
+  "entityDetails.title": "Entity details",
+  "entityDetails.loading": "Loading entity…",
+  "entityDetails.error": "Unable to load this entity.",
+  "entityDetails.notFound": "Entity not found or not accessible.",
+  "entityDetails.value": "Value",
+  "entityDetails.type": "Type",
+  "entityDetails.id": "Entity ID"
 }

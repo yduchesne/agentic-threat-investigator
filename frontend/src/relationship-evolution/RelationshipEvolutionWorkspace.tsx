@@ -48,6 +48,12 @@ import { runningNotice } from "../analyst-table/running";
 import { buildCsv, downloadCsv, exportFilename } from "../analyst-table/export";
 import { Timestamp } from "../components/Timestamp";
 import { CompactId } from "../components/CompactId";
+import { FocalEntityReference } from "../components/FocalEntityReference";
+import { entityDetailFromNeighborhood } from "../entities/entity-api";
+import {
+  useEntityDetail,
+  type EntityDetailState,
+} from "../entities/entity-queries";
 import { PivotMenu } from "../pivots/PivotMenu";
 import { observationActions } from "../pivots/pivot-capabilities";
 import { relationshipTypeKey } from "../relationships/labels";
@@ -127,6 +133,7 @@ import {
   parseEvolutionParams,
   parseViewParam,
   setEvolutionCursor,
+  setEvolutionFocalEntity,
   setEvolutionView,
   type EvolutionWorkspaceView,
   type RelationshipEvolutionFilters,
@@ -239,6 +246,32 @@ export function RelationshipEvolutionWorkspace({
   );
   const graphResult = useOneHop ? graphNeighborhood : graphTraversal;
 
+  // PR 35-8: the Graph view already holds the canonical focal node in its
+  // loaded neighborhood, so the indicator derives the exact Entity from it
+  // and never issues a redundant graph query. The Evolution view does not
+  // consume the graph result, so it reads the same canonical Entity through
+  // the shared exact read (enabled only in Evolution).
+  const evolutionFocalEntity = useEntityDetail(
+    investigationId,
+    filters?.entityId ?? "",
+    view === "evolution",
+  );
+  const graphFocalEntity =
+    filters === null || graphResult.neighborhood === null
+      ? null
+      : entityDetailFromNeighborhood(graphResult.neighborhood, filters.entityId);
+  const focalEntityState: EntityDetailState =
+    view === "graph"
+      ? {
+          entity: graphFocalEntity,
+          isLoading: graphResult.isLoading && graphResult.neighborhood === null,
+          isError: false,
+          notFound: graphResult.error !== null && graphResult.neighborhood === null,
+          error: graphResult.error,
+          refetch: graphResult.refetch,
+        }
+      : evolutionFocalEntity;
+
   // PR 31E: accumulated expansion state is owned by this controller; the
   // root neighborhood seeds it and every explicit expansion reuses the
   // same PR 31C one-hop endpoint. Root changes (including any graph
@@ -302,20 +335,22 @@ export function RelationshipEvolutionWorkspace({
   );
   const pathResult = pathRequest !== null ? pathQuery.paths : null;
 
-  // A committed graph-context change resets path state deterministically:
-  // the displayed path result is cleared and both endpoint selections are
-  // cleared (the simple option the PR 31I plan explicitly allows), so a stale
-  // prior-context result can never render. PR 31J A4: the effective context
-  // (active-frame bounds) participates in this identity, so a frame
-  // transition is a real semantic graph-context transition for the path
-  // workbench and expansion/key identity.
+  // A committed graph-context change or a lateral focal change resets path
+  // state deterministically: the displayed path result is cleared and both
+  // endpoint selections are cleared (the simple option the PR 31I plan
+  // explicitly allows), so a stale prior-context result can never render.
+  // PR 31J A4: the effective context (active-frame bounds) participates in
+  // this identity, so a frame transition is a real semantic graph-context
+  // transition for the path workbench and expansion/key identity. PR 35-8:
+  // a focal Explore is a root semantic change even though the graph context
+  // itself is unchanged, so the focal Entity is part of this reset identity.
   const committedGraphKey = graphContextKey(effectiveGraphContext);
   useEffect(() => {
     setPathRequest(null);
     setPathEndpoints({ source: null, target: null });
     setPathSelected("all");
     setSelectedActionEntityId(null);
-  }, [committedGraphKey]);
+  }, [committedGraphKey, filters?.entityId]);
 
   const choosePathEndpoint = (entityId: string): void => {
     setPathRequest(null);
@@ -562,11 +597,12 @@ export function RelationshipEvolutionWorkspace({
   };
 
   /**
-   * Commit a sibling subview change (EVOLUTION <-> GRAPH) while retaining
-   * the transient navigation context, so the workspace Back returns to the
-   * original origin. Deferred past the native pointer event per the
-   * repository's established navigation-commit boundary; the destination's
-   * Back reads the context from the committed location state.
+   * Commit a lateral workspace change (EVOLUTION <-> GRAPH or a focal
+   * Explore re-root) while retaining the transient navigation context, so
+   * the workspace Back returns to the original origin. Deferred past the
+   * native pointer event per the repository's established
+   * navigation-commit boundary; the destination's Back reads the context
+   * from the committed location state.
    */
   const commitView = (next: URLSearchParams): void => {
     const state = location.state;
@@ -574,6 +610,26 @@ export function RelationshipEvolutionWorkspace({
       () => setSearchParams(next, { replace: false, state }),
       0,
     );
+  };
+
+  /**
+   * PR 35-8 Explore: make the right-clicked canonical Entity the URL-backed
+   * focal Entity. A malformed candidate or the current focal Entity is a
+   * no-op (the codec returns the same parameter set and no navigation
+   * happens). The observation back-stack is cleared because the focal
+   * transition resets the opaque observation cursor, and the codec clears
+   * the focal-relative transient observation state in the same transition.
+   */
+  const exploreFocalEntity = (entityId: string): void => {
+    if (filters === null) {
+      return;
+    }
+    const next = setEvolutionFocalEntity(searchParams, entityId);
+    if (next.toString() === searchParams.toString()) {
+      return;
+    }
+    setBackStack([]);
+    commitView(next);
   };
 
   function applyFilters(next: RelationshipEvolutionFilters): void {
@@ -721,6 +777,11 @@ export function RelationshipEvolutionWorkspace({
             navigate(backTarget, { state: backState });
           }
         }}
+      />
+      <FocalEntityReference
+        investigationId={investigationId}
+        entityId={filters.entityId}
+        state={focalEntityState}
       />
       <Box sx={{ mb: 1 }}>
         <ToggleButtonGroup
@@ -947,6 +1008,7 @@ export function RelationshipEvolutionWorkspace({
                 pathEndpoints={pathMode ? pathEndpoints : null}
                 onPathEndpointClick={pathMode ? choosePathEndpoint : undefined}
                 onActionSelect={pathMode ? undefined : selectActionEntity}
+                onExploreEntity={exploreFocalEntity}
                 pathHighlight={
                   pathRequest !== null && pathResult !== null
                     ? pathHighlight
