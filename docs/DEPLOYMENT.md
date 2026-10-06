@@ -162,8 +162,9 @@ to avoid collisions with host PostgreSQL.
 ## Canonical reference geography (PR 26B / PR 26B-2)
 
 Reference geography is data, not schema: it is loaded separately from
-migrations by an explicit operator action, and schema migrations never
-download or import reference geography. The complete operator workflow is:
+migrations, and schema migrations never download or import reference
+geography. Production loads it through an explicit operator action (below);
+local `./start.sh` performs the same import automatically.
 
 ```text
 obtain supported local source files
@@ -208,6 +209,38 @@ Re-running the same corpus is a true no-op; a refresh that changes approved
 reference geometry enriches the same canonical row with a new version.
 Both commands require neither a database connection nor network access
 merely to display `--help`.
+
+### Local startup (`./start.sh`)
+
+`./start.sh` is the local demo/manual bootstrap. After PostgreSQL migrations
+complete and the services are healthy, it loads canonical reference
+geography through the same production importer before reporting success:
+
+```text
+./start.sh
+  -> PostgreSQL + migrations
+  -> ati-geography-import <ATI Geography Corpus>
+  -> canonical ati.location hierarchy
+  -> success reported only after the import succeeds
+```
+
+- The default corpus is the repository's tracked synthetic local demo
+  corpus (`tests/fixtures/geoint/corpus_small.jsonl`). It needs no network
+  access and no upstream download or corpus build at startup.
+- Set `ATI_GEOGRAPHY_CORPUS` (process environment or `.env`) to an
+  operator-built corpus (`ati-geography-build` output) to load a real
+  reference dataset instead.
+- The import runs inside the running worker container through the installed
+  `ati-geography-import`, so no host Python environment is required.
+- Repeated starts are safe: re-importing an identical corpus is a true
+  no-op (no duplicate hierarchy, no version churn).
+- The step is bounded and fails closed: a missing/invalid corpus, a nonzero
+  importer exit, or a timeout makes `./start.sh` print the failure and exit
+  nonzero **without** the final success/endpoint summary. Already-started
+  containers are left in place for diagnosis.
+
+The manual `ati-geography-build`/`ati-geography-import` workflow above
+remains available (for example to refresh real upstream geography).
 
 ## Database migrations
 

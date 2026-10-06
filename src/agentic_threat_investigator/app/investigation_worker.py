@@ -20,6 +20,7 @@ never expands into PR 26 job administration/monitoring.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID
@@ -142,19 +143,19 @@ class InvestigationJobWorker:
         return executed
 
 
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
 def _bounded_error_code(exception_name: str) -> str:
     """Derive a bounded snake-case error code from an exception class name.
 
     The code is an operational marker only: it never embeds messages, SQL
-    text, provider payloads, or stack traces.
+    text, provider payloads, or stack traces. Every CamelCase boundary is
+    preserved as an underscore separator (``GraphRecursionError`` becomes
+    ``worker_graph_recursion_error``); the previous per-character rewrite
+    corrupted the code by dropping the leading letter of each word.
     """
-    lowered = (
-        "".join(
-            "_" if character.isupper() else character for character in exception_name
-        )
-        .lower()
-        .strip("_")
-    )
+    lowered = _CAMEL_BOUNDARY_RE.sub("_", exception_name).lower()
     if not lowered:
         return "worker_failed"
     return f"worker_{lowered[:63]}"

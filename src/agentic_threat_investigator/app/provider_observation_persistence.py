@@ -58,10 +58,12 @@ from agentic_threat_investigator.domain.evidence import (
     ConvertedEvidence,
     Evidence,
     EvidenceObservation,
+    EvidenceType,
     InvestigationEvidence,
     InvestigationEvidenceActor,
     InvestigationEvidenceReason,
 )
+from agentic_threat_investigator.domain.geoint import GeoResolution
 from agentic_threat_investigator.domain.relationships import (
     Relationship,
     RelationshipObservation,
@@ -159,6 +161,10 @@ class ProviderObservationPersistenceService:
                     persisted.observation.id, entity.id
                 )
 
+            await self._enqueue_geographic_resolution_if_applicable(
+                uow, invocation_entity, persisted_entities, persisted
+            )
+
             relationships: list[Relationship] = []
             observations: list[RelationshipObservation] = []
             if persisted.outcome is not EvidencePersistenceOutcome.UNCHANGED:
@@ -199,6 +205,53 @@ class ProviderObservationPersistenceService:
             entities=tuple(persisted_entities),
             relationships=tuple(relationships),
             observations=tuple(observations),
+        )
+
+    async def _enqueue_geographic_resolution_if_applicable(
+        self,
+        uow: UnitOfWork,
+        invocation_entity: Entity,
+        persisted_entities: list[Entity],
+        persisted: EvidencePersistenceResult,
+    ) -> None:
+        """Queue canonical geographic resolution for a new GEOLOCATION subject.
+
+        A persisted ``GEOLOCATION`` observation is the normal production
+        source of geographic-enrichment work. Enqueueing the exact
+        ``(subject Entity, EvidenceObservation)`` pair through the existing
+        PR 26A/26C repository is therefore the production creator of a PENDING
+        :class:`GeoResolution`; the database validates that the observation is
+        ``GEOLOCATION`` and is associated with the subject. The subject is the
+        provider invocation entity (the geographic subject of the
+        observation), never an unrelated extracted Entity.
+
+        An ``UNCHANGED`` retrieval reuses an already-persisted observation,
+        whose geographic work (if any) already exists; re-enqueueing could
+        collide with a terminal resolution, so unchanged observations never
+        create new work. The Geo Resolver worker, not this service, owns the
+        resolution lifecycle.
+        """
+        if (
+            persisted.evidence.type is not EvidenceType.GEOLOCATION
+            or persisted.outcome is EvidencePersistenceOutcome.UNCHANGED
+        ):
+            return
+        subject = next(
+            (
+                entity
+                for entity in persisted_entities
+                if entity.type is invocation_entity.type
+                and entity.value == invocation_entity.value
+            ),
+            None,
+        )
+        if subject is None or subject.id is None:  # pragma: no cover - invariant
+            return
+        await uow.geo_resolutions.create_pending(
+            GeoResolution(
+                entity_id=subject.id,
+                evidence_observation_id=persisted.observation.id,
+            )
         )
 
     @staticmethod

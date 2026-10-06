@@ -595,6 +595,91 @@ async def test_empty_extraction_persists_observation_only(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_geolocation_persist_enqueues_one_pending_resolution(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """A GEOLOCATION observation enqueues exactly one PENDING GeoResolution.
+
+    Normal GEOLOCATION persistence is the production source of geographic
+    enrichment work: without it the Geo Resolver has nothing to claim and no
+    canonical EntityLocationObservation is ever produced. Non-GEOLOCATION
+    Evidence must never enqueue geographic work.
+    """
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+    service = extraction_service(uow_factory)
+
+    await _persist(
+        service,
+        dns_converted(),
+        investigation_id,
+        dns_extraction(),
+        invocation_entity_domain(),
+    )
+    async with uow_factory() as uow:
+        assert await table_count(uow, "geo_resolution") == 0
+
+    converted = fact_only_converted(
+        investigation_id,
+        source=_GEOLOCATION_SOURCE,
+        evidence_type=EvidenceType.GEOLOCATION,
+        facts={"country_code": "US", "region": "Texas", "city": "Dallas"},
+    )
+    result = await _persist(
+        service, converted, investigation_id, ExtractionResult(), invocation_entity_ip()
+    )
+
+    ip_entity = next(
+        entity for entity in result.entities if entity.type is EntityType.IP_ADDRESS
+    )
+    async with uow_factory() as uow:
+        assert await table_count(uow, "geo_resolution") == 1
+        assert uow.session is not None
+        row = (
+            await uow.session.execute(
+                text(
+                    "SELECT entity_id, evidence_observation_id, status "
+                    "FROM ati.geo_resolution"
+                )
+            )
+        ).one()
+    assert row.entity_id == ip_entity.id
+    assert row.evidence_observation_id == result.observation.id
+    assert row.status == "pending"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_unchanged_geolocation_replay_does_not_duplicate_resolution(
+    uow_factory: Callable[[], PostgresUnitOfWork],
+) -> None:
+    """An UNCHANGED GEOLOCATION replay never re-enqueues or duplicates work."""
+    async with uow_factory() as uow:
+        investigation_id = await seed_investigation(uow)
+    service = extraction_service(uow_factory)
+    converted = fact_only_converted(
+        investigation_id,
+        source=_GEOLOCATION_SOURCE,
+        evidence_type=EvidenceType.GEOLOCATION,
+        facts={"country_code": "US", "region": "Texas", "city": "Dallas"},
+    )
+
+    first = await _persist(
+        service, converted, investigation_id, ExtractionResult(), invocation_entity_ip()
+    )
+    second = await _persist(
+        service, converted, investigation_id, ExtractionResult(), invocation_entity_ip()
+    )
+
+    assert first.outcome.value == "CREATED"
+    assert second.outcome.value == "UNCHANGED"
+    assert second.observation.id == first.observation.id
+    async with uow_factory() as uow:
+        assert await table_count(uow, "geo_resolution") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_fact_only_and_urlhaus_entities_do_not_invent_edges(
     uow_factory: Callable[[], PostgresUnitOfWork],
 ) -> None:

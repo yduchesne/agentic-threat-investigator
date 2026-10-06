@@ -298,11 +298,13 @@ def _compose_runner(
     The provider registry comes from the operating-mode intelligence-source
     composition; the LLM is the injected configured runtime implementation in
     every driver mode (automated tests inject ``FakeLlmClient``
-    independently of ``worker_main``). The recursion bound mirrors the
-    measured production trajectory (40) at normal runtime; the deterministic
-    offline driver uses the generous bound measured by the canonical
-    multi-hop fake-world slices (120), since the optional deterministic
-    boundary is only ever composed for test/demo stacks.
+    independently of ``worker_main``). The ``recursion_limit`` passed here is
+    a floor: ``LocalInvestigationRunner`` always raises the effective
+    LangGraph bound to cover the persisted investigation budget so a legal
+    trajectory can never be cut off by graph superstep accounting. The
+    deterministic offline driver keeps its generous floor measured by the
+    canonical multi-hop fake-world slices (120); the normal-runtime floor is
+    the measured production trajectory (40).
     """
     recursion_limit = 120 if settings.llm_driver is LlmDriver.DETERMINISTIC else 40
     analyst = _compose_evaluation_analyst(
