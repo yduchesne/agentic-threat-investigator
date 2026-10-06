@@ -131,6 +131,12 @@ function themeTypography() {
     h1: { fontSize: "1.5rem", lineHeight: 1.25, fontWeight: 600 },
     h2: { fontSize: "1.25rem", lineHeight: 1.3, fontWeight: 600 },
     h3: { fontSize: "1.0625rem", lineHeight: 1.35, fontWeight: 600 },
+    // PR 35-7: explicit h4/h5 keep every heading variant ATI-controlled so no
+    // report/workbench heading falls back to MUI's oversized defaults. They
+    // continue the compact workbench scale below h3; the Final Report owns a
+    // separate, larger readable scale in ``report-typography.ts``.
+    h4: { fontSize: "0.9375rem", lineHeight: 1.4, fontWeight: 600 },
+    h5: { fontSize: "0.8125rem", lineHeight: 1.4, fontWeight: 600 },
     subtitle1: { fontSize: "0.9375rem", lineHeight: 1.4, fontWeight: 700 },
     subtitle2: { fontSize: "0.8125rem", lineHeight: 1.4, fontWeight: 700 },
     caption: { fontSize: "0.75rem", lineHeight: 1.4 },

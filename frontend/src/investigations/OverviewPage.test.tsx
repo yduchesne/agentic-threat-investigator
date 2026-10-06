@@ -7,7 +7,7 @@
 // Lifecycle Overview, no Corroboration wrapper, no Details Back to contents,
 // and relationship-observation support is presented as `Graph Analysis`.
 
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -27,6 +27,7 @@ import {
   runtimeFake,
 } from "../test/handlers";
 import { CSRF_COOKIE_NAME } from "../api/csrf";
+import { REPORT_TYPOGRAPHY } from "./report-typography";
 import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
 
@@ -125,6 +126,49 @@ describe("REPORT workspace surface", () => {
     );
   });
 
+  it("uses the readable Final Report typography hierarchy (PR 35-7)", async () => {
+    renderReport(twoFindingReport());
+    await screen.findByText(/Reader-facing description 1\./);
+
+    // Stable report anchors, not mutable English labels, identify the tree.
+    const status = document.querySelector("#status");
+    const detailsSection = document.querySelector("#details") as HTMLElement;
+    const findingsSection = document.querySelector("#findings") as HTMLElement;
+    const finding = document.querySelector("#finding-1") as HTMLElement;
+    expect(status?.parentElement).not.toBeNull();
+    const reportRoot = status?.parentElement as HTMLElement;
+
+    const title = within(reportRoot).getByRole("heading", { level: 1 });
+    const details = within(detailsSection).getByRole("heading", { level: 2 });
+    const findings = within(findingsSection).getByRole("heading", { level: 3 });
+    const findingHeading = within(finding).getByRole("heading", { level: 4 });
+    const supportHeading = within(finding).getByRole("heading", { level: 5 });
+
+    // Semantic nesting: every child heading sits inside its parent.
+    expect(detailsSection).toContainElement(findingsSection);
+    expect(findingsSection).toContainElement(finding);
+    expect(finding).toContainElement(findingHeading);
+    expect(finding).toContainElement(supportHeading);
+
+    // Rendered readable scale: every report element resolves to the
+    // centralized contract (jsdom preserves the authored rem value).
+    const fontSize = (element: HTMLElement): string =>
+      window.getComputedStyle(element).fontSize;
+    expect(fontSize(title)).toBe(REPORT_TYPOGRAPHY.h1.fontSize);
+    expect(fontSize(details)).toBe(REPORT_TYPOGRAPHY.h2.fontSize);
+    expect(fontSize(findings)).toBe(REPORT_TYPOGRAPHY.h3.fontSize);
+    expect(fontSize(findingHeading)).toBe(REPORT_TYPOGRAPHY.h4.fontSize);
+    expect(fontSize(supportHeading)).toBe(REPORT_TYPOGRAPHY.h5.fontSize);
+    // The support line itself uses the readable support role, not ``caption``.
+    const supportList = supportHeading.nextElementSibling as HTMLElement;
+    const supportLine = supportList.querySelector("li span") as HTMLElement;
+    expect(supportLine).not.toBeNull();
+    expect(fontSize(supportLine)).toBe(REPORT_TYPOGRAPHY.support.fontSize);
+    expect(
+      fontSize(within(finding).getByText(/Reader-facing description 1\./)),
+    ).toBe(REPORT_TYPOGRAPHY.body.fontSize);
+  });
+
   it("retains every canonical Finding in Summary and Details", async () => {
     renderReport(twoFindingReport());
     await screen.findByText(/Finding 1: Summary sentence 1\./);
@@ -141,10 +185,10 @@ describe("REPORT workspace surface", () => {
     renderReport(twoFindingReport());
     await screen.findByRole("heading", { name: "Status" });
     expect(
-      screen.getByRole("heading", { name: "Evidence" }),
+      screen.getByRole("heading", { name: "Evidence", level: 5 }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Graph Analysis" }),
+      screen.getByRole("heading", { name: "Graph Analysis", level: 5 }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Corroboration")).toBeNull();
     expect(
