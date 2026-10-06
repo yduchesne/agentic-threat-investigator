@@ -26,6 +26,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
 
 from agentic_threat_investigator.config import OperatingMode
 from agentic_threat_investigator.domain.assessment import Verdict
@@ -166,6 +167,31 @@ async def test_f02_canonical_fake_mode_vertical_slice(
     assert llm.calls
     for call in llm.calls:
         assert call.operation_name == "urn:ati:llm:evidence_analysis"
+
+    # 8b. The normal pipeline enqueues canonical geographic-enrichment work
+    #     for the discovered IP's DB-IP GEOLOCATION observation, so the
+    #     production Geo Resolver (not a read API and not a seeder) can
+    #     produce canonical GEOINT truth through the real PR 26 path.
+    async with uow_factory() as uow:
+        assert uow.session is not None
+        resolutions = (
+            await uow.session.execute(
+                text(
+                    "SELECT gr.status FROM ati.geo_resolution gr "
+                    "JOIN ati.entity ent ON ent.id = gr.entity_id "
+                    "JOIN ati.evidence_observation eo "
+                    "  ON eo.id = gr.evidence_observation_id "
+                    "JOIN ati.evidence e ON e.id = eo.evidence_id "
+                    "JOIN ati.investigation_evidence ie "
+                    "  ON ie.evidence_observation_id = eo.id "
+                    "WHERE ent.canonical_value = :ip "
+                    "  AND e.evidence_type = 'urn:ati:evidence:geolocation' "
+                    "  AND ie.investigation_id = :investigation_id"
+                ),
+                {"ip": "203.0.113.81", "investigation_id": investigation_id},
+            )
+        ).all()
+    assert {row.status for row in resolutions} == {"pending"}
 
     # 9-14. HTTP reads resolve the persisted analyst artifacts.
     with api_client(_fake_api_settings()) as client:

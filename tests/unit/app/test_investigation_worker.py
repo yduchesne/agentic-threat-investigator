@@ -9,6 +9,7 @@ deterministic fakes; no real provider, LLM, or database is involved.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ import pytest
 
 from agentic_threat_investigator.app.investigation_worker import (
     InvestigationJobWorker,
+    _bounded_error_code,
 )
 from agentic_threat_investigator.domain.investigation import (
     InvestigationState,
@@ -275,3 +277,26 @@ async def test_worker_run_until_empty_executes_all_jobs() -> None:
     assert all(
         status is InvestigationJobStatus.SUCCEEDED for _, status in jobs.completed
     )
+
+
+@pytest.mark.parametrize(
+    ("exception_name", "expected"),
+    [
+        ("GraphRecursionError", "worker_graph_recursion_error"),
+        ("RuntimeError", "worker_runtime_error"),
+        ("HTTPError", "worker_http_error"),
+        ("APIKeyError", "worker_api_key_error"),
+        ("", "worker_failed"),
+    ],
+)
+def test_bounded_error_code_preserves_every_camel_case_word(
+    exception_name: str, expected: str
+) -> None:
+    """The bounded code keeps the leading letter of every CamelCase word."""
+    assert _bounded_error_code(exception_name) == expected
+
+
+@pytest.mark.parametrize("exception_name", ["GraphRecursionError", "HTTPError"])
+def test_bounded_error_code_is_a_valid_bounded_code(exception_name: str) -> None:
+    """The derived code satisfies the persisted bounded-code contract."""
+    assert re.fullmatch(r"[a-z][a-z0-9_]{0,63}", _bounded_error_code(exception_name))

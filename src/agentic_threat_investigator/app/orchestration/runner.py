@@ -19,11 +19,15 @@ UnitOfWork is ever held across graph/provider/LLM execution.
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from uuid import UUID
 
+from langgraph.errors import GraphRecursionError
+
+from agentic_threat_investigator.app.error_messages import ErrorMessageSanitizer
 from agentic_threat_investigator.app.orchestration.composition import (
     build_provider_investigation_graph,
 )
@@ -34,13 +38,21 @@ from agentic_threat_investigator.app.orchestration.provider_executor import (
     ProviderExecutionContext,
 )
 from agentic_threat_investigator.app.orchestration.research import ResearchExecutor
+from agentic_threat_investigator.app.orchestration.services import (
+    FatalStopService,
+    UowFatalStopService,
+)
 from agentic_threat_investigator.app.persistence.repositories import (
+    CoordinatorTransitionPersistenceError,
     InvestigationNotFoundError,
+    InvestigationVersionConflictError,
     UnitOfWork,
 )
 from agentic_threat_investigator.app.providers import EvidenceProvider
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
+    InvestigationBudget,
+    InvestigationError,
     InvestigationState,
     InvestigationStatus,
     is_terminal_status,
@@ -52,6 +64,47 @@ from agentic_threat_investigator.telemetry.metrics import (
     get_counter,
 )
 from agentic_threat_investigator.telemetry.tracing import SpanNames
+
+#: LangGraph supersteps one budget unit (provider call, replan, analysis,
+#: entity admission, or depth) may legitimately consume. Each provider work
+#: item costs roughly four graph supersteps (``select_work``,
+#: ``execute_work``, ``record_outcome``, ``coordinator``); the remaining
+#: budget units cost at most a couple. The bound is generous because it is a
+#: safety net against runaway graphs, not the investment budget itself.
+_RECURSION_SUPERSTEPS_PER_BUDGET_UNIT = 4
+
+#: Fixed supersteps reserved for graph startup/teardown nodes.
+_RECURSION_LIMIT_HEADROOM = 16
+
+#: Error code recorded when the graph engine aborts outside any node.
+_GRAPH_ABORT_ERROR_CODE = "graph_execution_aborted"
+
+#: Persistence failures propagate unchanged; a fatal stop is never claimed
+#: when the fatal write itself could not be persisted.
+_PERSISTENCE_ERRORS = (
+    CoordinatorTransitionPersistenceError,
+    InvestigationNotFoundError,
+    InvestigationVersionConflictError,
+)
+
+
+def recursion_limit_for_budget(budget: InvestigationBudget) -> int:
+    """Return a LangGraph recursion bound large enough for one budget.
+
+    The previous fixed production bound (40) was smaller than the number of
+    supersteps a full provider budget requires, so a legitimate
+    investigation aborted with LangGraph's ``GraphRecursionError`` before it
+    could consume its budget. Deriving the bound from the persisted budget
+    keeps the safety net above any trajectory the budget authorizes.
+    """
+    units = (
+        budget.max_provider_calls
+        + budget.max_replans
+        + budget.max_llm_calls
+        + budget.max_entities
+        + budget.max_depth
+    )
+    return _RECURSION_SUPERSTEPS_PER_BUDGET_UNIT * units + _RECURSION_LIMIT_HEADROOM
 
 
 def _record_investigation_failure() -> None:
@@ -135,13 +188,15 @@ class LocalInvestigationRunner(InvestigationRunner):
     ) -> None:
         """Bind the injected application seams and validate the recursion bound.
 
-        ``recursion_limit`` bounds the LangGraph recursion depth for one
-        invocation; the canonical trajectory measured value (40) is the
-        default. The provider registry is copied defensively so a later caller
-        mutation cannot change a compiled graph's enabled provider set. A
-        ``research_executor_factory`` is optional: when absent the graph
-        never executes research (already-marked requirements stay marked),
-        preserving the pre-22C lifecycle for callers that opt out.
+        ``recursion_limit`` is the minimum LangGraph recursion depth for one
+        invocation; the effective per-invocation bound is raised when needed
+        so the graph can always consume the persisted investigation budget
+        (see :func:`recursion_limit_for_budget`). The provider registry is
+        copied defensively so a later caller mutation cannot change a compiled
+        graph's enabled provider set. A ``research_executor_factory`` is
+        optional: when absent the graph never executes research
+        (already-marked requirements stay marked), preserving the pre-22C
+        lifecycle for callers that opt out.
         """
         if recursion_limit <= 0:
             raise ValueError("recursion_limit must be positive")
@@ -170,7 +225,12 @@ class LocalInvestigationRunner(InvestigationRunner):
         compiled graph are created, the graph is invoked with the persisted
         state, and the final durable Investigation is reloaded and returned
         after requiring the graph output to be terminal and consistent with
-        the durable row. ``asyncio.CancelledError`` propagates unchanged.
+        the durable row. An unexpected graph-engine abort (an error raised by
+        LangGraph itself rather than inside a graph node, such as the
+        recursion bound) is first persisted as a bounded fatal stop so the
+        Investigation can never be stranded non-terminal, then re-raised.
+        ``asyncio.CancelledError`` propagates unchanged and persistence
+        failures propagate un-fatalized.
 
         Telemetry records one ``ati.investigation.execute`` span and seconds
         duration for the whole invocation, counts exactly one executed
@@ -197,17 +257,36 @@ class LocalInvestigationRunner(InvestigationRunner):
         context = ProviderExecutionContext(
             investigation_id=investigation_id, clock=self._clock
         )
+        fatal_stop_service = UowFatalStopService(
+            self._uow_factory,
+            self._clock,
+            bound_investigation_id=investigation_id,
+        )
         graph = build_provider_investigation_graph(
             uow_factory=self._uow_factory,
             provider_registry=self._provider_registry,
             context=context,
             analysis_executor=analysis_executor,
             research_executor=research_executor,
+            fatal_stop_service=fatal_stop_service,
         )
-        result = await graph.ainvoke(
-            {"investigation": loaded},
-            config={"recursion_limit": self._recursion_limit},
+        effective_recursion_limit = max(
+            self._recursion_limit, recursion_limit_for_budget(loaded.budget)
         )
+        try:
+            result = await graph.ainvoke(
+                {"investigation": loaded},
+                config={"recursion_limit": effective_recursion_limit},
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            if isinstance(error, _PERSISTENCE_ERRORS):
+                raise
+            await self._fatalize_graph_abort(
+                investigation_id, error, fatal_stop_service
+            )
+            raise
         # One actual runner execution: the graph ran to (possibly failed)
         # completion, never an idempotent no-op or a lifecycle rejection.
         get_counter(Metrics.INVESTIGATION_EXECUTED).add(1)
@@ -242,6 +321,48 @@ class LocalInvestigationRunner(InvestigationRunner):
         if investigation is None:
             raise InvestigationNotFoundError(str(investigation_id))
         return investigation
+
+    async def _fatalize_graph_abort(
+        self,
+        investigation_id: UUID,
+        error: BaseException,
+        fatal_stop_service: FatalStopService,
+    ) -> None:
+        """Persist a bounded fatal stop after a graph-engine abort.
+
+        LangGraph can abort a run outside any node (for example when its
+        recursion bound is reached), so no node-level fatal boundary claims
+        the failure. Left unhandled, the Investigation would stay
+        non-terminal forever while its durable job is already failed. The
+        same fatal-stop lifecycle the graph nodes use is therefore applied
+        here, with the sanitized root-cause diagnostic, before the original
+        error is re-raised. An already-terminal Investigation is left
+        untouched, and a state without a persisted version cannot authorize a
+        transition.
+        """
+        try:
+            current = await self._load_investigation(investigation_id)
+        except InvestigationNotFoundError:
+            # The Investigation disappeared during execution: there is no
+            # durable state to terminalize, so the original abort propagates.
+            return
+        if is_terminal_status(current.status) or current.version is None:
+            return
+        code = (
+            "graph_recursion_limit"
+            if isinstance(error, GraphRecursionError)
+            else _GRAPH_ABORT_ERROR_CODE
+        )
+        await fatal_stop_service.fatalize(
+            investigation_id,
+            InvestigationError(
+                source="orchestration",
+                code=code,
+                message=ErrorMessageSanitizer().from_exception(error),
+                recoverable=False,
+            ),
+            expected_version=current.version,
+        )
 
     @staticmethod
     def _validate_durable(

@@ -19,6 +19,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from langgraph.errors import GraphRecursionError
 
 from agentic_threat_investigator.app.orchestration import runner as runner_module
 from agentic_threat_investigator.app.orchestration.coordinator import (
@@ -29,14 +30,17 @@ from agentic_threat_investigator.app.orchestration.runner import (
     InvestigationRunnerLifecycleError,
     InvestigationRunnerPersistenceMismatchError,
     LocalInvestigationRunner,
+    recursion_limit_for_budget,
 )
 from agentic_threat_investigator.app.persistence.repositories import (
     InvestigationNotFoundError,
+    InvestigationVersionConflictError,
 )
 from agentic_threat_investigator.app.providers import EvidenceProvider, ProviderResult
 from agentic_threat_investigator.domain.entities import Entity, EntityType
 from agentic_threat_investigator.domain.identifiers import SourceId
 from agentic_threat_investigator.domain.investigation import (
+    InvestigationError,
     InvestigationState,
     InvestigationStatus,
     InvestigationTriggerType,
@@ -244,6 +248,31 @@ class _GraphFactorySpy:
 def _default_registry() -> dict[SourceId, EvidenceProvider]:
     """Return the default never-call provider registry."""
     return {SourceId.GOOGLE_PUBLIC_DNS: _NeverCallProvider()}
+
+
+class _RecordingFatalStopService:
+    """Record fatal stops without touching persistence."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        del args
+        self.bound_investigation_id = cast(
+            UUID | None, kwargs.get("bound_investigation_id")
+        )
+        self.calls: list[tuple[UUID, InvestigationError, int]] = []
+
+    async def fatalize(
+        self,
+        investigation_id: UUID,
+        error: InvestigationError,
+        *,
+        actor_id: UUID | None = None,
+        request_id: UUID | None = None,
+        expected_version: int,
+    ) -> InvestigationState:
+        """Record the fatal stop and return a synthetic FAILED state."""
+        del actor_id, request_id
+        self.calls.append((investigation_id, error, expected_version))
+        return _state(investigation_id, status=InvestigationStatus.FAILED)
 
 
 def _runner(
@@ -742,3 +771,149 @@ async def test_non_state_graph_output_fails_closed(
     with pytest.raises(InvestigationRunnerLifecycleError):
         await runner.run(INVESTIGATION_A)
     assert tracker.current_open == 0
+
+
+def test_recursion_limit_for_budget_covers_provider_budget() -> None:
+    """The derived bound leaves room for every authorized provider call."""
+    budget = default_investigation_budget()
+    limit = recursion_limit_for_budget(budget)
+    # Each provider call costs multiple graph supersteps; the old fixed bound
+    # of 40 was smaller than the provider budget itself.
+    assert limit >= 4 * budget.max_provider_calls
+    assert limit > 40
+
+
+@pytest.mark.asyncio
+async def test_recursion_limit_is_raised_to_cover_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The effective graph bound is derived from the persisted budget."""
+
+    async def handler(input: object, config: object) -> dict[str, object]:
+        del config
+        assert isinstance(input, dict)
+        investigation = input["investigation"]
+        assert isinstance(investigation, InvestigationState)
+        terminal = _terminal_like(investigation)
+        store[INVESTIGATION_A] = terminal
+        return {"investigation": terminal}
+
+    persisted = _state(INVESTIGATION_A, status=InvestigationStatus.RUNNING)
+    store = {INVESTIGATION_A: persisted}
+    tracker = _UowTracker()
+    graph = _FakeGraph(handler)
+    spy = _GraphFactorySpy(graph)
+    monkeypatch.setattr(runner_module, "build_provider_investigation_graph", spy)
+    runner = _runner(store, tracker, _AnalysisFactorySpy(), recursion_limit=40)
+
+    await runner.run(INVESTIGATION_A)
+
+    assert graph.configs[0] == {
+        "recursion_limit": recursion_limit_for_budget(persisted.budget)
+    }
+
+
+@pytest.mark.asyncio
+async def test_graph_abort_is_fatalized_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A graph-engine abort terminalizes the Investigation, then re-raises."""
+    persisted = _state(INVESTIGATION_A, status=InvestigationStatus.RUNNING)
+    store = {INVESTIGATION_A: persisted}
+    tracker = _UowTracker()
+
+    async def handler(input: object, config: object) -> dict[str, object]:
+        del input, config
+        raise GraphRecursionError("Recursion limit of 40 reached")
+
+    graph = _FakeGraph(handler)
+    spy = _GraphFactorySpy(graph)
+    monkeypatch.setattr(runner_module, "build_provider_investigation_graph", spy)
+    fatal_services: list[_RecordingFatalStopService] = []
+
+    def factory(*args: object, **kwargs: object) -> _RecordingFatalStopService:
+        service = _RecordingFatalStopService(*args, **kwargs)
+        fatal_services.append(service)
+        return service
+
+    monkeypatch.setattr(runner_module, "UowFatalStopService", factory)
+    runner = _runner(store, tracker, _AnalysisFactorySpy())
+
+    with pytest.raises(GraphRecursionError):
+        await runner.run(INVESTIGATION_A)
+
+    assert len(fatal_services) == 1
+    assert len(fatal_services[0].calls) == 1
+    investigation_id, error, expected_version = fatal_services[0].calls[0]
+    assert investigation_id == INVESTIGATION_A
+    assert error.code == "graph_recursion_limit"
+    assert error.recoverable is False
+    assert expected_version == persisted.version
+    assert tracker.current_open == 0
+
+
+@pytest.mark.asyncio
+async def test_graph_abort_on_already_terminal_investigation_skips_fatal_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An Investigation already terminal at abort time is left untouched."""
+    persisted = _state(INVESTIGATION_A, status=InvestigationStatus.RUNNING)
+    store = {INVESTIGATION_A: persisted}
+    tracker = _UowTracker()
+
+    async def handler(input: object, config: object) -> dict[str, object]:
+        del input, config
+        store[INVESTIGATION_A] = _terminal_like(persisted)
+        raise GraphRecursionError("Recursion limit reached")
+
+    graph = _FakeGraph(handler)
+    spy = _GraphFactorySpy(graph)
+    monkeypatch.setattr(runner_module, "build_provider_investigation_graph", spy)
+    fatal_services: list[_RecordingFatalStopService] = []
+
+    def factory(*args: object, **kwargs: object) -> _RecordingFatalStopService:
+        service = _RecordingFatalStopService(*args, **kwargs)
+        fatal_services.append(service)
+        return service
+
+    monkeypatch.setattr(runner_module, "UowFatalStopService", factory)
+    runner = _runner(store, tracker, _AnalysisFactorySpy())
+
+    with pytest.raises(GraphRecursionError):
+        await runner.run(INVESTIGATION_A)
+
+    assert len(fatal_services) == 1
+    assert fatal_services[0].calls == []
+
+
+@pytest.mark.asyncio
+async def test_persistence_failure_is_not_fatalized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A persistence failure propagates without claiming a fatal stop."""
+    persisted = _state(INVESTIGATION_A, status=InvestigationStatus.RUNNING)
+    store = {INVESTIGATION_A: persisted}
+    tracker = _UowTracker()
+
+    async def handler(input: object, config: object) -> dict[str, object]:
+        del input, config
+        raise InvestigationVersionConflictError(INVESTIGATION_A, 5)
+
+    graph = _FakeGraph(handler)
+    spy = _GraphFactorySpy(graph)
+    monkeypatch.setattr(runner_module, "build_provider_investigation_graph", spy)
+    fatal_services: list[_RecordingFatalStopService] = []
+
+    def factory(*args: object, **kwargs: object) -> _RecordingFatalStopService:
+        service = _RecordingFatalStopService(*args, **kwargs)
+        fatal_services.append(service)
+        return service
+
+    monkeypatch.setattr(runner_module, "UowFatalStopService", factory)
+    runner = _runner(store, tracker, _AnalysisFactorySpy())
+
+    with pytest.raises(InvestigationVersionConflictError):
+        await runner.run(INVESTIGATION_A)
+
+    assert len(fatal_services) == 1
+    assert fatal_services[0].calls == []
