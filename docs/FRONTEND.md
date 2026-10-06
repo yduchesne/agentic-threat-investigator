@@ -12,7 +12,7 @@
 - [Investigation Overview](#investigation-overview)
 - [Evidence](#evidence)
 - [Relationships](#relationships)
-- [Map](#map)
+- [GEOINT](#geoint)
 - [Research](#research)
 - [Timeline](#timeline)
 - [Report](#report)
@@ -56,8 +56,7 @@ Tabs:
 1. Overview
 2. Evidence
 3. Relationships
-4. Map
-5. Geographic context (GEOINT)
+4. GEOINT (MAP | TABLE)
 6. Research
 7. Timeline
 8. Report
@@ -260,9 +259,21 @@ represented in the graph workbench.
   expansion keeps working, and the Graph route/Investigation shell never
   remounts.
 
-## Map
+## GEOINT
 
-Use Leaflet.
+Geographic investigation is one first-class Investigation capability. It
+exposes exactly two URL-owned presentation sub-views, `MAP` and `TABLE`:
+`/investigations/:id/geoint` deterministically enters `MAP`, the legacy
+`/investigations/:id/map` URL is a compatibility redirect to
+`/geoint/map`, and `/investigations/:id/geoint/table` is the analytical
+TABLE. Both sub-views stay Investigation-scoped, evidence-backed, bounded
+and non-attributive; their cardinalities may differ because they project
+the existing bounded IP-geolocation and canonical GEOINT datasets
+without silently unifying them.
+
+### MAP
+
+Use Leaflet over the bounded current IP-geolocation projection.
 
 Show approximate geolocation for relevant IP entities.
 
@@ -272,13 +283,27 @@ Always include a clear qualification equivalent to:
 
 > Approximate IP geolocation; this does not identify the physical location of an attacker or device.
 
-Map markers link back to entity/evidence details.
+Map markers link back to entity/evidence details, and the always-available
+non-map list keeps coordinate-less records inspectable with their exact
+`evidence_id` provenance. The MAP presentation never scans generic Evidence
+pages and never substitutes an Evidence-list lookup for the geolocation
+projection.
 
-### Geographic context (GEOINT)
+### TABLE
 
 Show the bounded PR 26D canonical geographic summary for the Investigation: entities with geographic context, observations, canonical Locations, type/precision counts and top Locations, with the persistent semantic disclaimer that shared or nearby locations do not establish a cyber relationship, ownership, coordination, targeting, or attribution.
 
-Map markers plot only the currently loaded top Locations' representative coordinates (never all pages) with neutral markers; an always-available non-map table covers every map action. Entities show Investigation-relative current context and pageable immutable observation history; Locations expose scoped Entities/observations with the exact/contained controller (server-owned containment, `containment_applied` rendered honestly). Every observation reaches its exact Evidence through the returned `evidence_id`; geographic exploration uses PR 31F-8 canonical Investigation-scoped routes (`/geoint/entities/:entityId`, `/geoint/locations/:locationId/entities|observations`, exact Evidence and observation routes) — the former encoded PivotWorkspace host is retired.
+TABLE is the non-map analytical presentation: it owns the bounded summary,
+the Top Locations neutral table and the typed `Explore` actions, and it
+never embeds a second Leaflet map. Entities show Investigation-relative
+current context and pageable immutable observation history; Locations
+expose scoped Entities/observations with the exact/contained controller
+(server-owned containment, `containment_applied` rendered honestly). Every
+observation reaches its exact Evidence through the returned `evidence_id`;
+geographic exploration uses PR 31F-8 canonical Investigation-scoped routes
+(`/geoint/entities/:entityId`,
+`/geoint/locations/:locationId/entities|observations`, exact Evidence and
+observation routes) — the former encoded PivotWorkspace host is retired.
 
 ## Research
 

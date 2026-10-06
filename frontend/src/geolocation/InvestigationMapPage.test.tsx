@@ -86,9 +86,12 @@ function evidenceDetailHandler() {
 /** Install handlers, render the Map route, and wait for the projection. */
 async function renderMap(handlers: ReturnType<typeof http.get>[]) {
   setHttpHandlers(...AUTH, workspace(), ...handlers);
-  renderAtPath(`/investigations/${INVESTIGATION_ID}/map`);
-  await screen.findByRole("tab", { name: "Map" });
-  // Wait for the authoritative geolocation request to resolve (or fail).
+  renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint/map`);
+  // Wait for the workspace shell, then for the authoritative geolocation
+  // request to resolve (or fail).
+  await screen.findByRole("heading", {
+    name: "assess the update-package delivery domain",
+  });
   await waitFor(() =>
     expect(
       screen.queryByText("Loading geolocation context…"),
@@ -97,23 +100,34 @@ async function renderMap(handlers: ReturnType<typeof http.get>[]) {
 }
 
 describe("InvestigationMapPage states (B-U01..B-U17)", () => {
-  it("B-U01: Map is a primary route-owned tab selected on the route", async () => {
+  it("B-U01: MAP is the selected GEOINT presentation sub-tab on the canonical route", async () => {
     await renderMap([geolocationsHandler(collection())]);
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
     expect(tabs).toEqual([
       "Overview",
       "Evidence",
       "Graph",
-      "Map",
-      "Geographic context",
+      "GEOINT",
       "Research",
       "Timeline",
+      "MAP",
+      "TABLE",
     ]);
-    const mapTab = screen.getByRole("tab", { name: "Map" });
+    // PR 35-2: GEOINT is the single primary capability tab and stays
+    // selected across every GEOINT presentation/resource surface.
+    const geointTab = screen.getByRole("tab", { name: "GEOINT" });
+    expect(geointTab).toHaveAttribute("aria-selected", "true");
+    expect(geointTab.closest("a")).toBeNull();
+    // The active MAP sub-tab is inert; TABLE remains a semantic link.
+    const mapTab = screen.getByRole("tab", { name: "MAP" });
     expect(mapTab).toHaveAttribute("aria-selected", "true");
-    // PR 31F-8: the ACTIVE tab is inert (no same-URL link/navigation);
-    // destination tabs remain semantic links.
     expect(mapTab.closest("a")).toBeNull();
+    const tableTab = screen.getByRole("tab", { name: "TABLE" });
+    expect(tableTab.closest("a")).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/geoint/table`,
+    );
+    // Destination primary tabs remain semantic links.
     const evidenceTab = screen.getByRole("tab", { name: "Evidence" });
     expect(evidenceTab.closest("a")).toHaveAttribute(
       "href",
@@ -131,10 +145,10 @@ describe("InvestigationMapPage states (B-U01..B-U17)", () => {
       return jsonResponse(collection());
     });
     setHttpHandlers(...AUTH, workspace(), pending);
-    renderAtPath(`/investigations/${INVESTIGATION_ID}/map`);
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint/map`);
     await screen.findByText("Loading geolocation context…");
     release?.();
-    await screen.findByText("Investigation Map");
+    await screen.findByRole("heading", { name: "GEOINT" });
   });
 
   it("B-U03: API failure renders the error notice and Retry recovers", async () => {
@@ -313,7 +327,7 @@ describe("InvestigationMapPage states (B-U01..B-U17)", () => {
         return jsonResponse({ items: [], next_cursor: null });
       }),
     ]);
-    await screen.findByRole("tab", { name: "Map" });
+    await screen.findByRole("tab", { name: "MAP" });
     await waitFor(() => expect(geoRequests).toHaveLength(1));
     expect(geoRequests[0]).not.toContain("?");
     expect(evidenceListRequests).toHaveLength(0);
@@ -438,16 +452,16 @@ describe("InvestigationMapPage provenance (B-P01..B-P06)", () => {
       expect(screen.queryByRole("heading", { name: "Evidence" })).not.toBeInTheDocument(),
     );
     expect(
-      screen.getByRole("heading", { name: "Investigation Map" }),
+      screen.getByRole("heading", { name: "GEOINT" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("203.0.113.1").length).toBeGreaterThan(0);
   });
 });
 
 describe("InvestigationMapPage accessibility (B-A11Y01..B-A11Y08)", () => {
-  it("B-A11Y01: translated route heading", async () => {
+  it("B-A11Y01: translated GEOINT route heading", async () => {
     await renderMap([geolocationsHandler(collection())]);
-    expect(screen.getByRole("heading", { name: "Investigation Map" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "GEOINT" })).toBeInTheDocument();
   });
 
   it("B-A11Y02: the disclaimer is visible normal text (not hover-only)", async () => {

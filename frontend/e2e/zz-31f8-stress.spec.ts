@@ -5,7 +5,7 @@
 // The canonical routed acceptance journey repeated AT LEAST 20 consecutive
 // cycles in ONE page process/session:
 //
-//   Geographic context
+//   GEOINT TABLE
 //   -> Location Explore (semantic link)
 //   -> Location Entities route
 //   -> Entity Explore (semantic link)
@@ -96,10 +96,17 @@ test.describe("PR 31F-8 routed GEOINT native-pointer stress", () => {
     seedGeoint(investigationId);
     const base = `/investigations/${investigationId}`;
 
-    // Start on the canonical GEOINT surface.
-    await page.getByRole("tab", { name: "Geographic context" }).click();
+    // Start on the canonical GEOINT analytical TABLE surface.
+    await page.getByRole("tab", { name: "GEOINT" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/geoint/map$`),
+    );
+    await page.getByRole("tab", { name: "TABLE" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/geoint/table$`),
+    );
     await expect(
-      page.getByRole("heading", { name: "Geographic context" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible({ timeout: 30_000 });
 
     const topLocations = () =>
@@ -197,15 +204,15 @@ test.describe("PR 31F-8 routed GEOINT native-pointer stress", () => {
       await heartbeat(page, `${C}-forward-evidence`);
 
       // ---- semantic parent/back: Back to Entity, then the GEOINT
-      // breadcrumb root link -> Geographic context (next cycle start) ----
+      // breadcrumb root link -> GEOINT TABLE (next cycle start) ----
       await page.goBack();
       await expect(page).toHaveURL(
         new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/geoint/entities/[0-9a-f-]+$`),
       );
       await page.getByRole("link", { name: "Geographic context" }).click();
-      await expect(page).toHaveURL(`${base}/geoint`);
+      await expect(page).toHaveURL(`${base}/geoint/table`);
       await expect(
-        page.getByRole("heading", { name: "Geographic context" }),
+        page.getByRole("heading", { name: "GEOINT" }),
       ).toBeVisible({ timeout: 30_000 });
       await heartbeat(page, `${C}-back-to-context`);
 

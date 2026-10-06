@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Route-derived GEOINT breadcrumb navigation (PR 31F-8 §11).
+// Route-derived GEOINT breadcrumb navigation (PR 31F-8 §11; PR 35-2).
 //
 // The former Pivot-stack breadcrumbs/Close are replaced by route-derived
-// semantic navigation: the chain starts at the canonical ``Geographic
-// context`` route and reflects the current routed surface. Labels are
+// semantic navigation: the chain starts at the canonical GEOINT TABLE
+// presentation (the analytical surface every routed GEOINT resource is
+// explored from) and reflects the current routed surface. Labels are
 // presentation only — canonical IDs stay in the path; a navigated display
 // label (e.g. the canonical Location name) is carried in transient router
 // state and falls back to a compact identity on refresh/deep links, which
@@ -43,7 +44,7 @@ export function GeointBreadcrumbs({
     {
       key: "context",
       label: t("title"),
-      to: `/investigations/${investigationId}/geoint`,
+      to: `/investigations/${investigationId}/geoint/table`,
     },
     ...crumbs,
   ];

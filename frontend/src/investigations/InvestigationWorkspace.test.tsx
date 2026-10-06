@@ -53,6 +53,30 @@ describe("Investigation workspace routes", () => {
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
   });
 
+  it("exposes exactly the consolidated primary tabs (PR 35-2 U01)", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      investigationLifecycleHandler([
+        buildInvestigation({ id: INVESTIGATION_ID, status: "pending" }),
+      ]),
+    );
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
+    await screen.findByText("Investigation in progress");
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabs).toEqual([
+      "Overview",
+      "Evidence",
+      "Graph",
+      "GEOINT",
+      "Research",
+      "Timeline",
+    ]);
+    expect(screen.queryByRole("tab", { name: "Map" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Geographic context" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders the real Evidence route with one bounded collection query (U44)", async () => {
     const recorder = listRequestRecorder();
     setHttpHandlers(

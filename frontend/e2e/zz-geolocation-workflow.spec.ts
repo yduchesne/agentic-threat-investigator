@@ -90,11 +90,12 @@ async function completeInvestigation(
   return investigationId ?? "";
 }
 
-/** Open the Map tab and wait for its authoritative projection rendering. */
+/** Open the GEOINT MAP presentation and wait for its projection. */
 async function openMap(page: Page): Promise<void> {
-  await page.getByRole("tab", { name: "Map" }).click();
+  await page.getByRole("tab", { name: "GEOINT" }).click();
+  await expect(page).toHaveURL(/\/geoint\/map$/);
   await expect(
-    page.getByRole("heading", { name: "Investigation Map" }),
+    page.getByRole("heading", { name: "GEOINT" }),
   ).toBeVisible({ timeout: 30_000 });
   await expect(
     page.getByText(/IP geolocation is approximate network-address context/i),
@@ -188,7 +189,7 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     // Browser Back returns to the Map surface; disclaimer remains.
     await page.goBack();
     await expect(
-      page.getByRole("heading", { name: "Investigation Map" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible();
     await expect(
       page.getByText(/IP geolocation is approximate network-address context/i),
@@ -220,7 +221,7 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     ).toBeVisible({ timeout: 30_000 });
     await page.goBack();
     await expect(
-      page.getByRole("heading", { name: "Investigation Map" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible();
 
     // Exact Evidence drill-down still works through the non-map row.
@@ -373,7 +374,7 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     // Browser Back returns to the Map.
     await page.goBack();
     await expect(
-      page.getByRole("heading", { name: "Investigation Map" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible();
 
     expect(page.getByText("FAKE DATA")).toBeVisible();
@@ -412,9 +413,9 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     await expect(
       page.getByRole("heading", { name: "Evidence" }),
     ).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("tab", { name: "Map" }).click();
+    await page.getByRole("tab", { name: "GEOINT" }).click();
     await expect(
-      page.getByRole("heading", { name: "Investigation Map" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible({ timeout: 30_000 });
 
     expect(page.getByText("FAKE DATA")).toBeVisible();

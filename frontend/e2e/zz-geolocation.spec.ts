@@ -120,9 +120,9 @@ test.describe("PR 25B real-stack Investigation Map", () => {
     seedGeolocation(investigationId, "single_mappable");
 
     // Open the Map primary tab.
-    await page.getByRole("tab", { name: "Map" }).click();
+    await page.getByRole("tab", { name: "GEOINT" }).click();
     await expect(
-      page.getByRole("heading", { name: "Investigation Map" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible({ timeout: 30_000 });
 
     // The persistent approximation disclaimer is visible normal text.
@@ -164,7 +164,7 @@ test.describe("PR 25B real-stack Investigation Map", () => {
     await activate(page, page.getByRole("button", { name: "Back to Evidence" }));
     await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Investigation Map" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible();
 
     // The existing global fake-data indicator remains visible; the browser

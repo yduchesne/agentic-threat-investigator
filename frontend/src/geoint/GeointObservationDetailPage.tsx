@@ -47,7 +47,7 @@ export function GeointObservationDetailPage(): ReactElement {
   );
   const { backTo, backState } = contextualBack(
     location.state,
-    `/investigations/${investigationId}/geoint`,
+    `/investigations/${investigationId}/geoint/table`,
   );
   const evidenceState = navigationState(
     pushNavigationReturn(
