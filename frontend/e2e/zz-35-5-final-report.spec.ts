@@ -1,18 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Real-stack browser E2E: PR 35-5 canonical Final Report (Chromium + Firefox).
+// Real-stack browser E2E: PR 35-5 REPORT tab consolidation (Chromium).
 //
 // Runs against the production-path stack created by scripts/e2e.sh: built
 // static React + Nginx -> real FastAPI -> real PostgreSQL -> the durable
 // production worker executing the coordinator/runner/persistence with the
 // deterministic offline LLM boundary over the packaged fake world.
 //
-// The journey proves the browser displays the *persisted Report Writer
-// prose* (title/summary/description) rather than the canonical
-// `AnalyticalFinding.statement`, that the Summary/Details are deterministic
-// projections of one canonical ordered finding set, that Contents uses
-// stable title-independent anchors, and that contextual drill-down returns
-// with the normalized `< Back` label.
+// Amendment scope: the primary REPORT tab renders the one canonical persisted
+// Final Report directly. This focused journey asserts the consolidated
+// hierarchy (Status before Summary, Summary/Details closure, direct
+// Evidence/Graph Analysis support, no Corroboration, no Details
+// Back-to-contents), stable Contents anchors, and deep-link retention. It
+// deliberately does not drill into resources, test Markdown, or run the
+// broader E2E suite.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -60,7 +61,9 @@ async function completeInvestigation(page: Page): Promise<string> {
 test.describe("PR 35-5 canonical Final Report", () => {
   test.describe.configure({ timeout: 600_000, retries: 0 });
 
-  test("persisted prose, Contents, deep links, and < Back", async ({ page }) => {
+  test("REPORT tab renders the canonical Final Report hierarchy", async ({
+    page,
+  }) => {
     await login(page);
     const consoleErrors = trackConsoleErrors(page);
     const failedResponses: string[] = [];
@@ -78,99 +81,85 @@ test.describe("PR 35-5 canonical Final Report", () => {
     const investigationId = await completeInvestigation(page);
     const base = `/investigations/${investigationId}`;
 
-    // Overview: one Final Report link; no abbreviated terminal report. The
-    // report pointer is set just after the terminal status transition, so
-    // the link is awaited with a bounded generous timeout.
-    await expect(page.getByRole("link", { name: "View report" })).toBeVisible({
-      timeout: 180_000,
-    });
-    expect(await page.getByText("Executive summary").count()).toBe(0);
-    expect(await page.getByText("At a glance").count()).toBe(0);
-
-    await page.getByRole("link", { name: "View report" }).click();
-    await expect(page).toHaveURL(/\/overview\/report/);
+    // The primary REPORT tab is the surface; the old Overview indirection is
+    // gone. The report pointer is set just after the terminal status
+    // transition, so the canonical Report is awaited with a bounded timeout.
+    await expect(page.getByRole("tab", { name: "REPORT" })).toBeVisible();
+    expect(
+      await page.getByRole("tab", { name: "Overview" }).count(),
+    ).toBe(0);
+    expect(await page.getByRole("link", { name: "View report" }).count()).toBe(0);
     await expect(
       page.getByRole("heading", { name: "ATI deterministic investigation report" }),
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible({ timeout: 240_000 });
+    expect(await page.getByText("Lifecycle").count()).toBe(0);
 
-    // Summary is finding-centric and never the old Executive Summary.
-    await expect(page.getByText("Summary").first()).toBeVisible();
-    expect(await page.getByText("Executive summary").count()).toBe(0);
+    // Status precedes Summary in the rendered hierarchy.
+    const headingOrder = await page.evaluate(() => {
+      const status = document.querySelector("#status");
+      const summary = document.querySelector("#summary");
+      if (status === null || summary === null) {
+        return "missing";
+      }
+      return status.compareDocumentPosition(summary) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+        ? "status-first"
+        : "summary-first";
+    });
+    expect(headingOrder).toBe("status-first");
+
+    // Summary retains every canonical Finding with deterministic numbering.
     await expect(
       page.getByText(/Finding 1: Generated summary for canonical finding 1\./),
     ).toBeVisible();
-    // The Summary now contains every canonical finding (including the LOW
-    // finding 2); there is no conditional additional-findings note.
     await expect(
       page.getByText(/Finding 2: Generated summary for canonical finding 2\./),
     ).toBeVisible();
-    expect(
-      await page.getByText("Additional findings are detailed below.").count(),
-    ).toBe(0);
     expect(await page.getByText(/Assessment 1/).count()).toBe(0);
 
-    // Status replaces Lifecycle.
-    await expect(page.getByText("Status").first()).toBeVisible();
-    expect(await page.getByText("Lifecycle").count()).toBe(0);
-    await expect(page.getByText(/Criticality:/).first()).toBeVisible();
-    await expect(page.getByText(/Confidence:/).first()).toBeVisible();
-    await expect(page.getByText(/Started at:/)).toBeVisible();
-    await expect(page.getByText(/Ended at:/)).toBeVisible();
-    await expect(page.getByText(/Duration:/)).toBeVisible();
-    await expect(page.getByText(/Outcome \/ stop reason:/)).toBeVisible();
-
-    // Contents + Details -> Findings.
-    await expect(page.getByRole("heading", { name: "Contents" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Findings" })).toBeVisible();
-
-    // Details renders the persisted Report Writer title and description, not
-    // the canonical statement.
+    // Details retains every canonical Finding with the persisted prose.
     await expect(
       page.getByText(/Finding 1 — Generated finding 1 heading/).first(),
     ).toBeVisible();
     await expect(
       page.getByText(/Generated reader-facing description for canonical finding 1\./),
     ).toBeVisible();
-    // The canonical statement is not substituted for the description.
-    expect(
-      await page
-        .getByText(/Threat-intelligence and reputation sources associate/)
-        .count(),
-    ).toBe(0);
-    // The low finding is retained in Details.
     await expect(
       page.getByText(/Finding 2 — Generated finding 2 heading/).first(),
     ).toBeVisible();
-    await expect(page.getByText("Corroboration").first()).toBeVisible();
+    await expect(
+      page.getByText(/Generated reader-facing description for canonical finding 2\./),
+    ).toBeVisible();
 
-    // Contents finding link uses a stable, title-independent anchor.
+    // Direct support subsections; no Corroboration wrapper and no
+    // relationship-observation report heading.
+    await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Graph Analysis" }),
+    ).toBeVisible();
+    expect(await page.getByText("Corroboration").count()).toBe(0);
+    expect(
+      await page.getByRole("heading", { name: "Relationship observation" }).count(),
+    ).toBe(0);
+
+    // No Back-to-contents inside Details.
+    expect(await page.getByText("Back to contents").count()).toBe(0);
+
+    // Contents uses a stable, title-independent anchor and the target exists.
     await page.getByRole("link", { name: /Finding 2 —/ }).first().click();
     await expect(page).toHaveURL(/#finding-2/);
     await expect(page.locator("#finding-2")).toBeVisible();
-    await page
-      .locator("#finding-2")
-      .getByRole("link", { name: "Back to contents" })
-      .click();
-    await expect(page).toHaveURL(/#contents/);
 
-    // Direct deep link survives refresh and shows the same persisted prose.
+    // Deep-link + legacy-URL compatibility both retain the persisted Report
+    // and the stable fragment without regenerating anything.
     await page.goto(`${base}/overview/report#finding-1`);
+    await expect(page).toHaveURL(new RegExp(`${base}/overview#finding-1$`));
     await expect(page.locator("#finding-1")).toBeVisible();
     await expect(
       page.getByText(/Generated reader-facing description for canonical finding 1\./),
     ).toBeVisible();
-
-    // A corroborating routed Evidence action returns with `< Back`.
-    await page
-      .locator("#finding-1")
-      .getByTestId("pivot-action-evidenceExact")
-      .first()
-      .click();
-    await expect(page).toHaveURL(new RegExp(`${base}/evidence/`));
-    await expect(page.getByRole("link", { name: "< Back" })).toBeVisible();
-    await page.getByRole("link", { name: "< Back" }).click();
-    await expect(page).toHaveURL(/\/overview\/report/);
+    await page.reload();
+    await expect(page.locator("#finding-1")).toBeVisible();
     await expect(
       page.getByText(/Generated reader-facing description for canonical finding 1\./),
     ).toBeVisible();

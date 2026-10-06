@@ -219,7 +219,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     const capture = { reports: 0, assessments: 0 };
     setHttpHandlers(...baseOverviewHandlers(reportWithEvidenceSupport(), capture));
     const { router } = renderAtPath(`${BASE}/overview/report`);
-    await screen.findByText("Corroboration");
+    await screen.findByRole("heading", { name: "Status" });
     await screen.findByText(REPORT_STATEMENT);
 
     await userEvent.click(screen.getByTestId("pivot-action-evidenceExact"));
@@ -349,7 +349,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     const capture = { reports: 0, assessments: 0 };
     const observationDetail = { requests: [] as string[] };
     setHttpHandlers(...baseOverviewHandlers(reportWithObservationSupport(), capture, observationDetail));
-    const { router } = renderAtPath(`${BASE}/overview/report`);
+    const { router } = renderAtPath(`${BASE}/overview`);
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
@@ -357,11 +357,11 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     );
     await screen.findByRole("heading", { name: "Relationship observation detail" });
 
-    // Browser Back walks the entry: the Overview surface returns and the
-    // Report support reference stays visible.
+    // Browser Back walks the entry: the canonical REPORT surface returns and
+    // the Report support reference stays visible.
     await router.navigate(-1);
     await screen.findByText("Reported by two independent observation sources.");
-    expect(router.state.location.pathname).toBe(`${BASE}/overview/report`);
+    expect(router.state.location.pathname).toBe(`${BASE}/overview`);
   });
 
   it("Research claim support opens the exact Research result selection", async () => {
@@ -432,7 +432,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
         jsonResponse({ items: [evidenceFixture()], next_cursor: null })),
     );
     const { router } = renderAtPath(`${BASE}/overview/report`);
-    await screen.findByText("Corroboration");
+    await screen.findByRole("heading", { name: "Status" });
     await userEvent.click(screen.getByTestId("pivot-action-evidenceExact"));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`${BASE}/evidence/${EVIDENCE_ID}`);

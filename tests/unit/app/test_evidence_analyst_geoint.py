@@ -30,6 +30,9 @@ from agentic_threat_investigator.app.evidence_analyst import (
 from agentic_threat_investigator.app.evidence_analyst.geoint_validation import (
     GeographicFindingValidationError,
 )
+from agentic_threat_investigator.app.evidence_analyst.prompts import (
+    build_evidence_analyst_prompts,
+)
 from agentic_threat_investigator.app.geoint.analysis_context import (
     GeointAnalysisContextPolicy,
     GeointAnalystContextLoader,
@@ -38,7 +41,11 @@ from agentic_threat_investigator.app.geoint.analysis_tools import GeointAnalysis
 from agentic_threat_investigator.app.geoint.errors import GeointAnalysisInputBoundsError
 from agentic_threat_investigator.domain.analyst import (
     AnalystGeointContext,
+    EvidenceAnalystDecision,
     EvidenceAnalystInput,
+    GeographicFinding,
+    GeographicFindingKind,
+    GeographicTemporalInterpretation,
 )
 from agentic_threat_investigator.domain.assessment import (
     Assessment,
@@ -62,7 +69,11 @@ from tests.unit.app.test_evidence_analyst import (
 class Harness:
     """One fully-bound analyst over a GEOINT world with observable fakes."""
 
-    def __init__(self, world: AnalysisWorld) -> None:
+    def __init__(
+        self,
+        world: AnalysisWorld,
+        analyst_input: EvidenceAnalystInput | None = None,
+    ) -> None:
         """Bind the analyst and every observable fake over the world."""
         self.world = world
         self.llm = FakeLlmClient()
@@ -82,7 +93,7 @@ class Harness:
             lambda: self.persistence_uow, batch_size=100
         )
         self.analyst = EvidenceAnalyst(
-            input_loader=FakeLoaderGeoint(world.analyst_input()),
+            input_loader=FakeLoaderGeoint(analyst_input or world.analyst_input()),
             llm_client=self.llm,
             assessment_persistence=self.assessments,
             llm_accounting=self.accounting,
@@ -306,6 +317,100 @@ async def test_persistence_failure_leaves_no_geographic_mutation() -> None:
 
     assert harness.persistence_uow.investigations.pointer_calls == []
     assert harness.persistence_uow.assessments.inserted == []
+
+
+def _contained_decision(world: AnalysisWorld) -> EvidenceAnalystDecision:
+    """Build a schema-valid decision claiming unsupplied containment context."""
+    valid = world.geoint_decision()
+    contained = GeographicFinding(
+        kind=GeographicFindingKind.CONTAINED_LOCATION_CONTEXT,
+        statement="The entity is inside a containment boundary.",
+        temporal_interpretation=GeographicTemporalInterpretation.NONE,
+        observation_ids=(world.geoint_obs_seattle_id,),
+        evidence_observation_ids=(world.evidence_id,),
+        entity_ids=(world.source_id,),
+        location_ids=(world.geoint_loc_seattle_id,),
+    )
+    return valid.model_copy(update={"geographic_findings": (contained,)})
+
+
+def _input_with_containment(world: AnalysisWorld) -> EvidenceAnalystInput:
+    """Return the world input with Seattle tagged as containment-selected."""
+    context = world.geoint_context().model_copy(
+        update={"contained_observation_ids": (world.geoint_obs_seattle_id,)}
+    )
+    return world.analyst_input().model_copy(update={"geoint_context": context})
+
+
+def test_geoint_contract_inadmissible_without_containment() -> None:
+    """The model-visible contract declares the kind inadmissible."""
+    world = AnalysisWorld(with_geoint=True)
+    _, user_prompt = build_evidence_analyst_prompts(world.analyst_input())
+    assert "contained_location_context is INADMISSIBLE" in user_prompt
+    assert "contained_location_context is admissible" not in user_prompt
+
+
+def test_geoint_contract_admissible_with_containment() -> None:
+    """The contract allows the kind when containment was supplied."""
+    world = AnalysisWorld(with_geoint=True)
+    _, user_prompt = build_evidence_analyst_prompts(_input_with_containment(world))
+    assert "contained_location_context is admissible only when it cites" in user_prompt
+    assert "INADMISSIBLE" not in user_prompt
+
+
+def test_geoint_contract_inadmissible_without_context() -> None:
+    """No geographic context makes all geographic findings inadmissible."""
+    world = AnalysisWorld(with_geoint=False)
+    _, user_prompt = build_evidence_analyst_prompts(world.analyst_input())
+    assert "geographic findings are inadmissible" in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_contained_context_finding_valid_when_supplied() -> None:
+    """A contained finding is accepted when the context tags the observation."""
+    world = AnalysisWorld(with_geoint=True)
+    harness = Harness(world, _input_with_containment(world))
+    harness.llm.set_default(_contained_decision(world))
+
+    persisted = await harness.analyst.analyze(world.investigation_id)
+
+    assert persisted.id is not None
+    assert len(harness.llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_impossible_containment_repairs_to_valid() -> None:
+    """A repairable containment failure succeeds on the bounded repair."""
+    world = AnalysisWorld(with_geoint=True)
+    harness = Harness(world)
+    harness.llm.enqueue(_contained_decision(world))
+    harness.llm.enqueue(world.geoint_decision())
+
+    persisted = await harness.analyst.analyze(world.investigation_id)
+
+    assert persisted.id is not None
+    assert len(harness.llm.calls) == 2
+    assert len(harness.accounting_repo.budget_writes) == 2
+    # The repair attempt carries the declared inadmissibility.
+    assert "INADMISSIBLE" in harness.llm.calls[1].user_prompt
+
+
+@pytest.mark.asyncio
+async def test_impossible_containment_repair_exhaustion_is_hard_failure() -> None:
+    """Unrepaired containment output fails hard and persists nothing."""
+    world = AnalysisWorld(with_geoint=True)
+    harness = Harness(world)
+    harness.llm.set_default(_contained_decision(world))
+
+    with pytest.raises(
+        GeographicFindingValidationError, match="contained_location_context"
+    ):
+        await harness.analyst.analyze(world.investigation_id)
+
+    assert len(harness.llm.calls) == 2
+    assert harness.persistence_uow.assessments.inserted == []
+    assert harness.persistence_uow.investigations.pointer_calls == []
+    assert harness.persistence_uow.commits == 0
 
 
 class _FailingGeointContextLoader(GeointAnalystContextLoader):

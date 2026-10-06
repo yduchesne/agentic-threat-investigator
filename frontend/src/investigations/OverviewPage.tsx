@@ -1,85 +1,31 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Investigation Overview route (PR 24B; PR 35-5).
+// Investigation REPORT workspace route (PR 24B; PR 35-5; PR 35-5 amendment).
 //
-// The Overview is the Investigation workspace landing surface: lifecycle,
-// running/failed/partial state, the current analytical outcome, and
-// navigation. PR 35-5 removes the abbreviated terminal report from the
-// Overview: there is one canonical Final Report, reachable through a single
-// link. The Overview never renders a second bounded copy of the Summary,
-// findings, recommendations, or report-only at-a-glance counts, and never
-// synthesizes Report content in the browser.
+// The primary Investigation surface is the one canonical persisted Final
+// Report. `/overview` loads the current Report through the durable report
+// pointer and renders it directly with the shared `ReportSurface`; there is no
+// `View report` indirection and no separate abbreviated Overview lifecycle
+// rendering. Nonterminal Investigations keep a bounded in-progress state, and
+// terminal Investigations without a persisted Report show an explicit
+// unavailable state. No Report content is synthesized in the browser.
 
-import {
-  Alert,
-  Box,
-  Button,
-  LinearProgress,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Alert, Box, LinearProgress, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Link as RouterLink, useLocation, useOutletContext } from "react-router";
+import { useOutletContext } from "react-router";
 
-import {
-  internalLocationFromPath,
-  navigationState,
-  pushNavigationReturn,
-} from "../analyst-table/return-to";
-
-import type { Assessment, Investigation, Report } from "../api/schema-types";
 import { EmptyState, LoadingState } from "../components/AsyncState";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { Timestamp } from "../components/Timestamp";
-import { InvestigationStatusBadge } from "./InvestigationStatusBadge";
+import type { Investigation } from "../api/schema-types";
 import { statusLabelKey } from "./investigation-status";
-import { stopReasonLabelKey } from "./investigation-stop-reason";
 import type { WorkspaceOutletContext } from "./InvestigationWorkspace";
 import {
   isPointerRace404,
-  useCurrentAssessment,
   useCurrentReport,
 } from "./investigation-queries";
-
-/** Lifecycle block: status, timestamps, stop reason. */
-function LifecycleBlock({
-  investigation,
-}: {
-  investigation: Investigation;
-}): ReactElement {
-  const { t } = useTranslation("investigations");
-  return (
-    <Box>
-      <Stack
-        direction="row"
-        spacing={1.5}
-        sx={{ alignItems: "center", flexWrap: "wrap" }}
-      >
-        <Typography variant="h2">{t("overview.lifecycle.title")}</Typography>
-        <InvestigationStatusBadge status={investigation.status} />
-      </Stack>
-      <Typography variant="body2">
-        {t("overview.lifecycle.started")}{" "}
-        <Timestamp iso={investigation.started_at ?? investigation.created_at} />
-      </Typography>
-      {investigation.completed_at !== null ? (
-        <Typography variant="body2">
-          {t("overview.lifecycle.completed")}{" "}
-          <Timestamp iso={investigation.completed_at} />
-        </Typography>
-      ) : null}
-      {investigation.stop_reason !== null ? (
-        <Typography variant="body2">
-          {t("overview.lifecycle.stopReason", {
-            reason: t(stopReasonLabelKey(investigation.stop_reason)),
-          })}
-        </Typography>
-      ) : null}
-    </Box>
-  );
-}
+import { ReportSurface } from "./ReportSurface";
 
 /** pending/running surface: indeterminate progress, no invented metrics. */
 function RunningOverview({
@@ -107,220 +53,11 @@ function RunningOverview({
   );
 }
 
-/** The navigation/action row: one Final Report link plus workspace routes. */
-function NavigationRow({
-  investigationId,
-  reportAvailable,
-}: {
-  investigationId: string;
-  reportAvailable: boolean;
-}): ReactElement {
-  const { t } = useTranslation("overview");
-  const { t: tInvestigations } = useTranslation("investigations");
-  const location = useLocation();
-  const drillDownState = navigationState(
-    pushNavigationReturn(
-      location.state,
-      internalLocationFromPath(location.pathname, location.search, location.hash),
-    ),
-  );
-  const base = `/investigations/${investigationId}`;
-  return (
-    <Stack
-      direction="row"
-      spacing={1.5}
-      sx={{ alignItems: "center", flexWrap: "wrap", gap: 1 }}
-    >
-      {reportAvailable ? (
-        <Button
-          component={RouterLink}
-          to={`${base}/overview/report`}
-          variant="contained"
-          sx={{ textTransform: "none" }}
-        >
-          {t("report.action")}
-        </Button>
-      ) : null}
-      <RouterLink to={`${base}/evidence`}>
-        {tInvestigations("tabs.evidence")}
-      </RouterLink>
-      <RouterLink to={`${base}/relationships`}>
-        {tInvestigations("tabs.relationships")}
-      </RouterLink>
-      <RouterLink to={`${base}/timeline`}>
-        {tInvestigations("tabs.timeline")}
-      </RouterLink>
-      <RouterLink to={`${base}/relationships/evolution`} state={drillDownState}>
-        {tInvestigations("tabs.graph")}
-      </RouterLink>
-    </Stack>
-  );
-}
-
-/** One pointer-gated resource error with a bounded retry. */
-function ResourceError({
-  title,
-  error,
-  onRetry,
-}: {
-  title: string;
-  error: unknown;
-  onRetry: () => void;
-}): ReactElement {
-  const { t } = useTranslation("common");
-  const message =
-    error !== null &&
-    typeof error === "object" &&
-    "message" in error &&
-    typeof (error as { message?: unknown }).message === "string"
-      ? (error as { message: string }).message
-      : null;
-  return (
-    <ErrorNotice
-      title={title}
-      message={message}
-      onRetry={onRetry}
-      retryLabel={t("retry")}
-    />
-  );
-}
-
 /**
- * Terminal Report surface: a single link to the canonical Final Report plus
- * the consistency warning. It never renders Report content.
+ * The terminal-without-Report state.
  */
-function TerminalReportSurface({
-  investigation,
-  report,
-  assessment,
-}: {
-  investigation: Investigation;
-  report: Report;
-  assessment: Assessment | null;
-}): ReactElement {
+function NoReportState(): ReactElement {
   const { t } = useTranslation("overview");
-  const mismatch =
-    assessment !== null &&
-    (report.verdict !== assessment.verdict ||
-      report.confidence !== assessment.confidence);
-  void report;
-  return (
-    <Stack spacing={2}>
-      <NavigationRow investigationId={investigation.id} reportAvailable />
-      {mismatch ? (
-        <Alert severity="warning">{t("report.consistency")}</Alert>
-      ) : null}
-    </Stack>
-  );
-}
-
-/** Assessment-only fallback: Report unavailable, analytical summary only. */
-function AssessmentFallback({
-  investigation,
-  assessment,
-}: {
-  investigation: Investigation;
-  assessment: Assessment;
-}): ReactElement {
-  const { t } = useTranslation("overview");
-  return (
-    <Stack spacing={2}>
-      <Alert severity="info">{t("reportAvailable.notice")}</Alert>
-      <Box>
-        <Typography variant="h2">{t("assessment.summary.title")}</Typography>
-        <Typography variant="body1">{assessment.summary}</Typography>
-      </Box>
-      <NavigationRow investigationId={investigation.id} reportAvailable={false} />
-    </Stack>
-  );
-}
-
-/** Render the terminal artifact surface with its loading/error guards. */
-function ArtifactSurface({
-  investigation,
-  report,
-  reportLoading,
-  reportError,
-  reportErrorState,
-  refetchReport,
-  assessment,
-  assessmentLoading,
-  assessmentError,
-  assessmentErrorState,
-  refetchAssessment,
-}: {
-  investigation: Investigation;
-  report: Report | null;
-  reportLoading: boolean;
-  reportError: unknown;
-  reportErrorState: boolean;
-  refetchReport: () => void;
-  assessment: Assessment | null;
-  assessmentLoading: boolean;
-  assessmentError: unknown;
-  assessmentErrorState: boolean;
-  refetchAssessment: () => void;
-}): ReactElement | null {
-  const { t } = useTranslation("overview");
-  const hasReport = investigation.report_id !== null;
-  const hasAssessment = investigation.assessment_id !== null;
-
-  if (hasReport) {
-    if (reportLoading && report === null) {
-      return <LoadingState label={t("loading.report")} />;
-    }
-    if (reportErrorState && report === null) {
-      return (
-        <ResourceError
-          title={t("error.report.title")}
-          error={reportError}
-          onRetry={refetchReport}
-        />
-      );
-    }
-    if (report !== null) {
-      return (
-        <Stack spacing={2}>
-          <TerminalReportSurface
-            investigation={investigation}
-            report={report}
-            assessment={assessment}
-          />
-          {reportErrorState ? (
-            <ResourceError
-              title={t("error.report.title")}
-              error={reportError}
-              onRetry={refetchReport}
-            />
-          ) : null}
-        </Stack>
-      );
-    }
-    return null;
-  }
-  if (hasAssessment) {
-    if (assessmentLoading && assessment === null) {
-      return <LoadingState label={t("loading.assessment")} />;
-    }
-    if (assessmentErrorState && assessment === null) {
-      return (
-        <ResourceError
-          title={t("error.assessment.title")}
-          error={assessmentError}
-          onRetry={refetchAssessment}
-        />
-      );
-    }
-    if (assessment !== null) {
-      return (
-        <AssessmentFallback
-          investigation={investigation}
-          assessment={assessment}
-        />
-      );
-    }
-    return null;
-  }
   return (
     <EmptyState
       title={t("artifacts.unavailable.title")}
@@ -329,33 +66,25 @@ function ArtifactSurface({
   );
 }
 
-/** The substantive Overview route. */
+/** The canonical REPORT surface. */
 export function OverviewPage(): ReactElement {
   const { investigation } = useOutletContext<WorkspaceOutletContext>();
   if (investigation === null) {
     // The workspace renders the outlet only with data; defensively safe.
     return <EmptyState title="" />;
   }
-  return <OverviewContent investigation={investigation} />;
+  return <ReportContentSurface investigation={investigation} />;
 }
 
-function OverviewContent({
+function ReportContentSurface({
   investigation,
 }: {
   investigation: Investigation;
-}): ReactElement {
+}): ReactElement | null {
   const { t } = useTranslation("overview");
   const { refetchDetail } = useOutletContext<WorkspaceOutletContext>();
 
-  const assessmentEnabled = investigation.assessment_id !== null;
   const reportEnabled = investigation.report_id !== null;
-  const {
-    assessment,
-    isLoading: assessmentLoading,
-    isError: assessmentErrorState,
-    error: assessmentError,
-    refetch: refetchAssessment,
-  } = useCurrentAssessment(investigation.id, assessmentEnabled);
   const {
     report,
     isLoading: reportLoading,
@@ -368,50 +97,42 @@ function OverviewContent({
   // pointer/error combination when a current-resource 404 contradicts the
   // durable pointer; never an infinite loop.
   const lastRaceKey = useRef<string>("");
-  const raceKey = `${assessmentError !== null ? "a" : ""}${
-    reportError !== null ? "r" : ""
-  }`;
+  const raceKey = reportError !== null ? "r" : "";
   useEffect(() => {
-    const race =
-      (assessmentError !== null && isPointerRace404(assessmentError)) ||
-      (reportError !== null && isPointerRace404(reportError));
-    if (race && lastRaceKey.current !== raceKey) {
+    if (
+      reportError !== null &&
+      isPointerRace404(reportError) &&
+      lastRaceKey.current !== raceKey
+    ) {
       lastRaceKey.current = raceKey;
       refetchDetail();
     }
-  }, [assessmentError, reportError, raceKey, refetchDetail]);
+  }, [reportError, raceKey, refetchDetail]);
+
+  if (reportEnabled) {
+    if (reportLoading && report === null) {
+      return <LoadingState label={t("loading.report")} />;
+    }
+    if (reportErrorState && report === null) {
+      return (
+        <ErrorNotice
+          title={t("error.report.title")}
+          onRetry={refetchReport}
+        />
+      );
+    }
+    if (report !== null) {
+      return (
+        <ReportSurface investigationId={investigation.id} report={report} />
+      );
+    }
+    return null;
+  }
 
   const nonTerminal =
     investigation.status === "pending" || investigation.status === "running";
-
-  return (
-    <Stack spacing={3}>
-      <LifecycleBlock investigation={investigation} />
-
-      {investigation.status === "partial" ? (
-        <Alert severity="warning">{t("partial.warning")}</Alert>
-      ) : null}
-      {investigation.status === "failed" ? (
-        <Alert severity="error">{t("failed.state")}</Alert>
-      ) : null}
-
-      {nonTerminal ? (
-        <RunningOverview investigation={investigation} />
-      ) : (
-        <ArtifactSurface
-          investigation={investigation}
-          report={report}
-          reportLoading={reportLoading}
-          reportError={reportError}
-          reportErrorState={reportErrorState}
-          refetchReport={refetchReport}
-          assessment={assessment}
-          assessmentLoading={assessmentLoading}
-          assessmentError={assessmentError}
-          assessmentErrorState={assessmentErrorState}
-          refetchAssessment={refetchAssessment}
-        />
-      )}
-    </Stack>
-  );
+  if (nonTerminal) {
+    return <RunningOverview investigation={investigation} />;
+  }
+  return <NoReportState />;
 }

@@ -9,7 +9,9 @@ EvidenceAnalystInputLoader (read-only UnitOfWork, then closed)
  -> deterministic prompt
  -> LlmClient.generate_structured(...)
  -> EvidenceAnalystDecision  (semantic output only)
- -> GeointFindingValidator (geographic findings + independent-support gate)
+ -> GeointFindingValidator (geographic findings + independent-support gate);
+    a typed geographic validation failure is repaired within the same bounded
+    structured-output budget, and exhaustion persists nothing
  -> Assessment (application stamps investigation_id and analyzed_evidence_ids)
  -> AssessmentPersistenceService (PR 20A validation/persistence seam)
  -> persisted Assessment + Investigation assessment pointer
@@ -39,6 +41,7 @@ from agentic_threat_investigator.app.evidence_analyst.accounting import (
     LlmAccountingService,
 )
 from agentic_threat_investigator.app.evidence_analyst.geoint_validation import (
+    GeographicFindingValidationError,
     GeointFindingValidator,
     map_geographic_findings,
 )
@@ -178,11 +181,6 @@ class EvidenceAnalyst:
             investigation_id,
             expected_version=expected_investigation_version,
         )
-        # Deterministic geographic-output validation and the independent-
-        # support gate run after the model call and before any Assessment
-        # persistence; a rejected decision persists nothing and never starts
-        # an unbounded model loop.
-        GeointFindingValidator(analyst_input.geoint_context).validate(decision)
         return await self._persist_decision_result(
             analyst_input,
             decision,
@@ -205,8 +203,17 @@ class EvidenceAnalyst:
         prompt-construction failure consumes no budget and no model call is
         attempted; the returned version chains through the attempts and into
         the final persistence guard.
+
+        The deterministic geographic-output validation runs inside the same
+        bounded loop: schema-valid but semantically invalid geographic output
+        (for example a ``contained_location_context`` finding when the context
+        supplied no containment selection) is treated as a repairable
+        structured-output failure. A successful repair continues normally;
+        exhaustion re-raises the typed validation failure and persists
+        nothing.
         """
         latest_version: int | None = expected_version
+        geoint_validator = GeointFindingValidator(analyst_input.geoint_context)
         for attempt in range(1, self._max_structured_output_attempts + 1):
             # Build this attempt's deterministic prompt BEFORE durably
             # reserving its model invocation: a prompt-construction failure is
@@ -228,6 +235,7 @@ class EvidenceAnalyst:
                     response_model=EvidenceAnalystDecision,
                     operation_name=OPERATION_EVIDENCE_ANALYSIS,
                 )
+                geoint_validator.validate(decision)
             except asyncio.CancelledError:
                 # Cooperative cancellation propagates unchanged; the handler
                 # only prevents the LlmError mapping below from catching it.
@@ -241,6 +249,14 @@ class EvidenceAnalyst:
                     and error.retryable
                     and attempt < self._max_structured_output_attempts
                 ):
+                    continue
+                raise
+            except GeographicFindingValidationError:
+                # The model returned a schema-valid decision whose geographic
+                # findings are semantically invalid for the supplied context.
+                # Repair within the same bounded budget; exhaustion remains a
+                # hard validation failure (never a silent drop or downgrade).
+                if attempt < self._max_structured_output_attempts:
                     continue
                 raise
             return decision, latest_version

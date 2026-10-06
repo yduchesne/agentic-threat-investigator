@@ -8,7 +8,11 @@ one of the exact observation/Evidence pairs supplied to that invocation.
 Unknown, substituted, cross-scope, or structurally unsupported references
 are rejected with :class:`GeographicFindingValidationError`, and no
 geographic finding can by itself support a non-INCONCLUSIVE verdict
-(independent non-geographic support is required).
+(independent non-geographic support is required). Because the rejection is
+caused by model output, the Evidence Analyst routes it through the existing
+bounded structured-output repair budget; a successful repair continues and
+exhaustion remains a hard validation failure (findings are never silently
+dropped, downgraded, or reinterpreted).
 
 The main safeguard is structural: the approved finding kinds are descriptive
 only, the temporal interpretation is a closed enum, and geography alone
@@ -58,8 +62,10 @@ _ALL_TEMPORAL = frozenset(GeographicTemporalInterpretation)
 class GeographicFindingValidationError(ValueError):
     """A model-returned geographic finding is unsupported or invalid.
 
-    Deterministic rejection happens before Assessment persistence; failed
-    geographic validation never triggers an unbounded model loop.
+    Deterministic rejection happens before Assessment persistence. Because the
+    rejection is caused by model output, the Evidence Analyst treats it as a
+    repairable structured-output failure within the existing bounded attempt
+    budget; exhaustion re-raises this typed error and persists nothing.
     """
 
 

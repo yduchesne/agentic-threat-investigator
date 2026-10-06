@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Canonical Final Report presentation (PR 35-5).
+// Canonical Final Report presentation (PR 35-5; PR 35-5 amendment).
 //
-// One evidence-backed Final Report: Summary, Status, Contents, and Details
-// (Findings with nested Corroboration, then the optional Research Context,
-// Limitations, Unresolved Questions, and Recommended Next Steps). The
-// Summary and Details are deterministic projections of the same canonical
-// ordered finding set; the browser never sorts, filters, ranks, or invents
-// findings, criticality, numbers, or anchors. Every string renders as
-// escaped React text.
+// One evidence-backed Final Report: Status, Summary, Contents, and Details
+// (Findings with direct Evidence / Graph Analysis support, then the optional
+// Research Context, Limitations, Unresolved Questions, and Recommended Next
+// Steps). The Summary and Details are deterministic projections of the same
+// canonical ordered finding set; the browser never sorts, filters, ranks, or
+// invents findings, criticality, numbers, or anchors. Every string renders as
+// escaped React text. `Graph Analysis` is only the report presentation label
+// for existing relationship-observation support; no domain/API type changes.
 //
 // Stable anchors are centralized here and never derived from model-authored
 // titles, so direct fragment navigation survives refresh.
@@ -100,15 +101,6 @@ function confidenceText(
   return t(`confidence.${confidence}`);
 }
 
-/** A real in-page anchor link that updates the fragment on activation. */
-function BackToContents({ label }: { label: string }): ReactElement {
-  return (
-    <Typography variant="body2" sx={{ mt: 1 }}>
-      <a href={`#${REPORT_ANCHORS.contents}`}>{label}</a>
-    </Typography>
-  );
-}
-
 /** One Summary bullet: the same finding number used everywhere else. */
 function SummarySection({
   report,
@@ -196,10 +188,10 @@ function ContentsSection({ report }: { report: Report }): ReactElement {
       <Typography variant="h2">{t("contents.title")}</Typography>
       <Stack component="ul" sx={{ m: 0, pl: 3, gap: 0.25 }}>
         <li>
-          <a href={`#${REPORT_ANCHORS.summary}`}>{t("summary.title")}</a>
+          <a href={`#${REPORT_ANCHORS.status}`}>{t("status.title")}</a>
         </li>
         <li>
-          <a href={`#${REPORT_ANCHORS.status}`}>{t("status.title")}</a>
+          <a href={`#${REPORT_ANCHORS.summary}`}>{t("summary.title")}</a>
         </li>
         <li>
           <a href={`#${REPORT_ANCHORS.details}`}>{t("details.title")}</a>
@@ -246,8 +238,8 @@ function ContentsSection({ report }: { report: Report }): ReactElement {
   );
 }
 
-/** Evidence and RelationshipObservation support grouped for one finding. */
-function Corroboration({
+/** Evidence and Graph Analysis support rendered directly for one finding. */
+function FindingSupport({
   finding,
   presentation,
 }: {
@@ -263,11 +255,10 @@ function Corroboration({
     return null;
   }
   return (
-    <Box sx={{ mt: 1 }}>
-      <Typography variant="h4">{t("corroboration.title")}</Typography>
+    <>
       {evidence.length > 0 ? (
-        <Box sx={{ mt: 0.5 }}>
-          <Typography variant="h5">{t("support.evidence")}</Typography>
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="h4">{t("support.evidence")}</Typography>
           <Stack component="ul" sx={{ listStyle: "none", m: 0, p: 0, gap: 0.25 }}>
             {evidence.map((support, index) => (
               <SupportReference
@@ -280,8 +271,8 @@ function Corroboration({
         </Box>
       ) : null}
       {relationships.length > 0 ? (
-        <Box sx={{ mt: 0.5 }}>
-          <Typography variant="h5">{t("support.relationshipObservation")}</Typography>
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="h4">{t("support.graphAnalysis")}</Typography>
           <Stack component="ul" sx={{ listStyle: "none", m: 0, p: 0, gap: 0.25 }}>
             {relationships.map((support, index) => (
               <SupportReference
@@ -293,19 +284,17 @@ function Corroboration({
           </Stack>
         </Box>
       ) : null}
-    </Box>
+    </>
   );
 }
 
-/** One detailed finding with numbered short title and Corroboration. */
+/** One detailed finding with numbered short title and direct support. */
 function ReportFindingItem({
   finding,
   presentation,
-  backLabel,
 }: {
   finding: ReportFinding;
   presentation?: SupportPresentationLookup | null;
-  backLabel: string;
 }): ReactElement {
   const { t } = useTranslation("overview");
   return (
@@ -334,8 +323,7 @@ function ReportFindingItem({
       <Typography variant="body1" sx={{ mt: 0.75 }}>
         {finding.description}
       </Typography>
-      <Corroboration finding={finding} presentation={presentation} />
-      <BackToContents label={backLabel} />
+      <FindingSupport finding={finding} presentation={presentation} />
     </Box>
   );
 }
@@ -345,12 +333,10 @@ function OptionalSection({
   id,
   title,
   items,
-  backLabel,
 }: {
   id: string;
   title: string;
   items: readonly string[];
-  backLabel: string;
 }): ReactElement | null {
   if (items.length === 0) {
     return null;
@@ -365,19 +351,12 @@ function OptionalSection({
           </Typography>
         ))}
       </Stack>
-      <BackToContents label={backLabel} />
     </Box>
   );
 }
 
 /** Research context: visibly contextual claims, never Evidence. */
-function ResearchContext({
-  report,
-  backLabel,
-}: {
-  report: Report;
-  backLabel: string;
-}): ReactElement | null {
+function ResearchContext({ report }: { report: Report }): ReactElement | null {
   const { t } = useTranslation("overview");
   const claims = report.research_context;
   if (claims.length === 0) {
@@ -419,7 +398,6 @@ function ResearchContext({
           </Box>
         ))}
       </Stack>
-      <BackToContents label={backLabel} />
     </Box>
   );
 }
@@ -441,14 +419,13 @@ export function ReportContent({
   presentation?: SupportPresentationLookup | null;
 }): ReactElement {
   const { t } = useTranslation("overview");
-  const backLabel = t("backToContents");
   return (
     <Stack spacing={2.5}>
       <Box>
         <Typography variant="h1">{report.title}</Typography>
       </Box>
-      <SummarySection report={report} />
       <StatusSection report={report} />
+      <SummarySection report={report} />
       <ContentsSection report={report} />
       <Box component="section" id={REPORT_ANCHORS.details}>
         <Typography variant="h2">{t("details.title")}</Typography>
@@ -460,33 +437,28 @@ export function ReportContent({
                 key={finding.report_finding_number}
                 finding={finding}
                 presentation={presentation}
-                backLabel={backLabel}
               />
             ))}
           </Stack>
         </Box>
         <Box sx={{ mt: 2 }}>
-          <ResearchContext report={report} backLabel={backLabel} />
+          <ResearchContext report={report} />
           <OptionalSection
             id={REPORT_ANCHORS.limitations}
             title={t("limitations.title")}
             items={report.limitations}
-            backLabel={backLabel}
           />
           <OptionalSection
             id={REPORT_ANCHORS.unresolved}
             title={t("unresolved.title")}
             items={report.unresolved_questions}
-            backLabel={backLabel}
           />
           <OptionalSection
             id={REPORT_ANCHORS.nextSteps}
             title={t("nextSteps.title")}
             items={report.recommended_next_steps}
-            backLabel={backLabel}
           />
         </Box>
-        <BackToContents label={backLabel} />
       </Box>
     </Stack>
   );
