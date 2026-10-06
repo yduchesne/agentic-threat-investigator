@@ -441,6 +441,23 @@ npm run test:e2e        # Playwright (requires the E2E stack; see scripts/e2e.sh
 ./scripts/e2e.sh        # repository real-stack browser E2E harness
 ```
 
+### OpenStreetMap tiles and Referrer-Policy (PR 35-6)
+
+The browser loads OpenStreetMap Standard raster tiles directly from
+`https://tile.openstreetmap.org/{z}/{x}/{y}.png`; the ATI backend and the
+frontend Nginx container never proxy tile requests. Leaflet renders the
+required visible OSM attribution. ATI holds no OSM credentials and never adds
+prefetch, offline, bulk-download, caching, or retry behavior around tiles.
+
+The OSMF Standard Tile Usage Policy requires web pages to send a valid
+`Referer` and prohibits a restrictive `Referrer-Policy` that suppresses it.
+`frontend/nginx.conf` therefore emits
+`Referrer-Policy: strict-origin-when-cross-origin`. On a cross-origin tile
+request the browser sends only the ATI origin as the referrer, not the full
+Investigation route, and still sends nothing on an HTTPS to HTTP downgrade.
+Changing the policy back to `no-referrer` (or another referrer-suppressing
+value) would reintroduce the OSM tile rejection.
+
 ## Configuration
 
 Environment-based configuration is loaded into a typed settings object.
