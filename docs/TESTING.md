@@ -6039,6 +6039,10 @@ context-carrying commit restored the PR 31H depth journey first attempt.
 
 #### Stale E2E selectors repaired
 
+These are pre-existing stale selectors introduced by the PR 31F/UI-polish
+label changes; they were reproduced on unmodified base `main` where noted.
+No production UI was changed to accommodate them.
+
 - `Cancel` -> `Hide` for the in-flow Pivot action bar in
   `zz-pointer-acceptance.spec.ts`, `zz-pivot-acceptance.spec.ts`,
   `zz-relationship-evolution.spec.ts`, and
@@ -6047,6 +6051,55 @@ context-carrying commit restored the PR 31H depth journey first attempt.
   `zz-relationship-evolution.spec.ts`.
 - `relationship evolution` -> `relationship history` link selectors in
   `zz-31g/31h/31i/31j/31k`.
+- `Relationships details` -> `Relationship details` in `zz-list-detail.spec.ts`,
+  `zz-pivot-acceptance.spec.ts`, and `zz-relationship-evolution.spec.ts`.
+- `View all observations` -> `View all history` in
+  `zz-pivot-acceptance.spec.ts` (the in-detail observations link label).
+- `Open evidence` -> `Evidence` (the exact-Evidence Pivot action label) in
+  `zz-relationship-evolution.spec.ts`.
+- Graph edge panel `Supporting observations` -> `Matching observations`, and
+  the evidence section's `Back to observation` -> a section-scoped `Hide` in
+  `zz-relationship-evolution.spec.ts`.
+- Graph edge-list action `View` -> `Details` in
+  `zz-relationship-evolution.spec.ts`.
+- Evidence source raw URN `urn:ati:source:dbip_city_lite` -> the localized
+  `DB-IP City Lite` in `zz-geolocation-workflow.spec.ts`.
+
+#### `zz-pivot-acceptance` correction
+
+The focused diagnostic initially reported `WEDGE@c0-diag-view-all` because
+the 5 s wedge guard also fires while `locator.click` waits for a
+**missing** element. The real cause was the stale `View all observations`
+label (current label: `View all history`); after correcting the selector the
+full five same-page cycles pass first attempt with ordinary locator clicks.
+No raw-pointer exception was needed. This is a test defect, not a browser
+freeze, and is not related to the W1 baseline raw-pointer limitation.
+
+#### `zz-analyst-tables`, `zz-pivots`, and the `zz-31h` edge selection
+
+These existing broader specs contain further pre-existing stale selectors
+and/or baseline-confirmed `locator.click` input-pipeline freezes reproduced
+on unmodified base `main` (`9473186`):
+
+- `zz-analyst-tables` E20 is a baseline-confirmed hard hang (outer timeout,
+  no Playwright error) reproduced on base `main`; it is also the shared
+  session-state creator, so `zz-relationship-evolution` and
+  `zz-geolocation-workflow` were verified with a temporary session
+  bootstrap in the same harness invocation.
+- `zz-pivots` has additional pre-existing stale selectors
+  (`Open evidence` ambiguity, `View all observations`, `Relationships
+  details`).
+- `zz-31h-multihop` `depth2-edge-select` (the first `locator.click` after
+  the synchronous graph Apply) wedges nondeterministically; the identical
+  corrected spec reproduces the same wedge on base `main`. The amendment's
+  own deterministic E2E-H1 HOPS acceptance (subset `zz-35-1-ui-correctness`)
+  pins the depth-1/depth-2 topology and `max_depth` 2/3 semantics and passes
+  first attempt in both engines.
+
+These specs are outside the PR 35-1 amendment scope and were not modified;
+the four suites named above (`zz-list-detail`, `zz-pivot-acceptance`,
+`zz-relationship-evolution`, `zz-geolocation-workflow`) are the
+amendment-required E2E slices and pass first attempt with `retries=0`.
 
 ## Definition of done
 

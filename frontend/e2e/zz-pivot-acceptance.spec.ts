@@ -139,12 +139,12 @@ test.describe("PR 31F-8 routed cross-resource navigation acceptance", () => {
       await expect(
         page.getByRole("heading", { name: "Relationship details" }),
       ).toBeVisible({ timeout: 30_000 });
-      // Let the bounded observations preview settle (its rows render after
-      // the exact detail query) before activating the semantic link, so
-      // the FF click dispatches against a stable node.
       await expect(page.getByText(/Confidence/).first()).toBeVisible({ timeout: 30_000 });
-      await page.getByRole("link", { name: "View all observations" }).click();
-      await expect(page).toHaveURL(new RegExp(`${base}/relationships/observations\\?relationship_id=`));
+      await page.getByRole("link", { name: "View all history" }).click();
+      await page.waitForURL(
+        new RegExp(`${base}/relationships/observations\\?relationship_id=`),
+        { timeout: 5_000 },
+      );
       await expect(
         page.getByRole("textbox", { name: "Relationship ID" }),
       ).toBeVisible({ timeout: 30_000 });

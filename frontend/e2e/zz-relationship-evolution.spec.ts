@@ -167,7 +167,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       page,
       page.getByRole("button", { name: "Observation provenance actions" }),
     );
-    await activate(page, page.getByRole("link", { name: "Open evidence" }));
+    await activate(page, page.getByRole("link", { name: "Evidence" }));
     await expect(page).toHaveURL(/\/evidence\/[0-9a-f-]+$/);
     await expect(
       page.getByRole("heading", { name: "Evidence details" }),
@@ -282,7 +282,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     });
     const edgePanel = edgePanelHeading.locator("xpath=..");
     await expect(
-      edgePanel.getByText("Supporting observations", { exact: true }),
+      edgePanel.getByText("Matching observations", { exact: true }),
     ).toBeVisible();
     await expect(
       edgePanel.getByText("First observed", { exact: true }),
@@ -473,10 +473,15 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     ).toBeVisible({ timeout: 20_000 });
     await expect(provenance.getByText("Subject", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/raw payload|raw_payload/i)).toHaveCount(0);
-    // Back to the observation, then back to the graph (G31F-E11).
+    // Back to the observation, then back to the graph (G31F-E11). The
+    // evidence section's Hide and the observation section's Hide now share
+    // the localized label, so scope to the Supporting evidence section.
+    const supportingEvidenceSection = provenance
+      .getByRole("heading", { name: "Supporting evidence" })
+      .locator("xpath=..");
     await activate(
       page,
-      provenance.getByRole("button", { name: "Back to observation" }),
+      supportingEvidenceSection.getByRole("button", { name: "Hide" }),
     );
     await expect(
       provenance.getByRole("button", { name: "View supporting evidence" }),
@@ -499,11 +504,11 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
 
     // Graph edge -> exact Relationship table context (bounded, no recursion).
     const firstEdgeRow = graphList.getByRole("row").nth(1);
-    const relationshipLink = firstEdgeRow.getByRole("link", { name: "View", exact: true });
+    const relationshipLink = firstEdgeRow.getByRole("link", { name: "Details", exact: true });
     await relationshipLink.click();
     await expect(page).toHaveURL(/\/relationships\?selected=/);
     await expect(
-      page.getByRole("heading", { name: "Relationships details" }),
+      page.getByRole("heading", { name: "Relationship details" }),
     ).toBeVisible({ timeout: 20_000 });
     await page.getByRole("button", { name: "Back to Relationships" }).dispatchEvent("click");
     await expect(page).not.toHaveURL(/selected=/);

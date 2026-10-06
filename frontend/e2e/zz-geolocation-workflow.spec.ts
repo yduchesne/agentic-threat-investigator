@@ -180,7 +180,7 @@ test.describe("PR 25C real-stack Map workflow matrix", () => {
     await expect(
       page
         .getByRole("table", { name: "Evidence" })
-        .getByText("urn:ati:source:dbip_city_lite")
+        .getByText("DB-IP City Lite")
         .first(),
     ).toBeVisible({ timeout: 30_000 });
     expect(page.url()).not.toContain("pivot=");
