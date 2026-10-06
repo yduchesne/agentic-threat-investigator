@@ -41,7 +41,6 @@ from agentic_threat_investigator.domain.report import (
     ReportFindingSnapshot,
     ReportResearchClaimSnapshot,
     ReportSummaryItem,
-    is_summary_eligible,
 )
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
@@ -243,7 +242,6 @@ def report(
             ),
         )
         for finding in findings
-        if is_summary_eligible(finding.criticality)
     )
     return InvestigationReport(
         id=REPORT_ID,

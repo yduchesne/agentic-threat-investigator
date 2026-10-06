@@ -90,15 +90,6 @@ CRITICALITY_RANK: dict[FindingCriticality, int] = {
 }
 """Deterministic sort rank: smaller rank is more material."""
 
-SUMMARY_CRITICALITIES: frozenset[FindingCriticality] = frozenset(
-    {
-        FindingCriticality.CRITICAL,
-        FindingCriticality.HIGH,
-        FindingCriticality.MEDIUM,
-    }
-)
-"""Criticality values eligible for the final report Summary projection."""
-
 
 def criticality_rank(criticality: FindingCriticality) -> int:
     """Return the deterministic materiality rank (0 is most material)."""

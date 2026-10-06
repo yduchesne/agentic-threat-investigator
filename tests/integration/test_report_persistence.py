@@ -38,7 +38,6 @@ from agentic_threat_investigator.domain.report import (
     InvestigationReport,
     ReportFindingSnapshot,
     ReportSummaryItem,
-    is_summary_eligible,
 )
 from agentic_threat_investigator.infrastructure.persistence.postgresql.database import (
     PostgresUnitOfWork,
@@ -126,7 +125,6 @@ def report_candidate(
             ),
         )
         for finding in findings
-        if is_summary_eligible(finding.criticality)
     )
     return InvestigationReport(
         investigation_id=investigation_id,

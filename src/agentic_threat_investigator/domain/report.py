@@ -28,7 +28,7 @@ Related contracts exist by design:
 
 The application sorts findings criticality-first (tie-broken by the stable
 Assessment ordinal), assigns contiguous reader-facing numbers, derives the
-Summary projection from the Summary-eligible findings, and snapshots the
+Summary projection from the same canonical findings, and snapshots the
 persisted Investigation lifecycle for deterministic later rendering.
 """
 
@@ -52,7 +52,6 @@ from agentic_threat_investigator.domain.analyst import (
 )
 from agentic_threat_investigator.domain.assessment import (
     CRITICALITY_RANK,
-    SUMMARY_CRITICALITIES,
     AnalyticalFinding,
     Assessment,
     AssessmentConfidence,
@@ -539,8 +538,3 @@ def criticality_first_ordering(
     indexed = list(enumerate(findings, start=1))
     indexed.sort(key=lambda item: (CRITICALITY_RANK[item[1].criticality], item[0]))
     return tuple(indexed)
-
-
-def is_summary_eligible(criticality: FindingCriticality) -> bool:
-    """Return whether a finding of this criticality appears in the Summary."""
-    return criticality in SUMMARY_CRITICALITIES

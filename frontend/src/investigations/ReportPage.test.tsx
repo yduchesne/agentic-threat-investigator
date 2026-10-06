@@ -153,6 +153,18 @@ describe("Full Report route", () => {
             },
           ],
         },
+        {
+          report_finding_number: 2,
+          assessment_finding_ordinal: 2,
+          text: "Persisted summary two.",
+          support: [
+            {
+              kind: "assessment_finding",
+              assessment_id: "30000000-0000-4000-8000-000000000001",
+              finding_ordinal: 2,
+            },
+          ],
+        },
       ],
       findings: [
         {
@@ -202,7 +214,7 @@ describe("Full Report route", () => {
     expect(
       await screen.findByText(/Finding 1: Persisted summary one\./),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Finding 2:/)).toBeNull();
+    expect(screen.getByText(/Finding 2: Persisted summary two\./)).toBeInTheDocument();
     expect(screen.queryByText(/Assessment 1/)).toBeNull();
     // Details renders the persisted title and description for both findings.
     expect(

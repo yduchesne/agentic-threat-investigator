@@ -129,11 +129,6 @@ function SummarySection({
               })}
             </Typography>
           ))}
-          {report.summary.length < report.findings.length ? (
-            <Typography component="li" variant="body2" sx={{ listStyle: "none", ml: -3 }}>
-              {t("summary.additional")}
-            </Typography>
-          ) : null}
         </Stack>
       ) : null}
     </Box>

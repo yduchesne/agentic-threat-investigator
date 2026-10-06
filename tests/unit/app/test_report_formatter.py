@@ -108,19 +108,20 @@ def _report() -> InvestigationReport:
         confidence=AssessmentConfidence.HIGH,
         criticality=FindingCriticality.HIGH,
         title="Canonical report title",
-        summary=(
+        summary=tuple(
             ReportSummaryItem(
-                report_finding_number=1,
-                assessment_finding_ordinal=1,
-                text="Summary sentence 1.",
+                report_finding_number=finding.report_finding_number,
+                assessment_finding_ordinal=finding.assessment_finding_ordinal,
+                text=finding.summary,
                 support=(
                     AssessmentFindingRef(
                         kind="assessment_finding",
                         assessment_id=assessment_id,
-                        finding_ordinal=1,
+                        finding_ordinal=finding.assessment_finding_ordinal,
                     ),
                 ),
-            ),
+            )
+            for finding in findings
         ),
         findings=findings,
         research_context=(
@@ -153,13 +154,6 @@ def test_details_body_uses_persisted_description() -> None:
     assert "Finding statement 2." not in rendered
 
 
-def test_summary_uses_persisted_summary() -> None:
-    """The Summary renders the persisted finding summary."""
-    rendered = format_investigation_report_markdown(_report())
-    assert "- Finding 1: Summary sentence 1." in rendered
-    assert "Summary sentence 2." not in rendered
-
-
 def test_repeated_render_byte_identical() -> None:
     """Rendering the same report twice is byte-identical."""
     report = _report()
@@ -188,43 +182,17 @@ def test_section_order_deterministic() -> None:
 
 
 def test_summary_and_details_share_numbers() -> None:
-    """The Summary uses the same finding numbers as Details."""
+    """The Summary contains every finding with the same Detail numbers."""
     rendered = format_investigation_report_markdown(_report())
     assert "- Finding 1: Summary sentence 1." in rendered
+    assert "- Finding 2: Summary sentence 2." in rendered
     assert "#### Finding 1 — Short factual title 1" in rendered
     assert "#### Finding 2 — Short factual title 2" in rendered
 
 
-def test_additional_findings_note_present_when_excluded() -> None:
-    """The additional-findings note appears iff a finding is excluded."""
+def test_summary_complete_no_additional_note() -> None:
+    """A complete Summary never renders an additional-findings note."""
     rendered = format_investigation_report_markdown(_report())
-    assert "Additional findings are detailed below." in rendered
-
-
-def test_additional_findings_note_absent_when_none_excluded() -> None:
-    """A report with no excluded findings omits the note."""
-    report = _report().model_copy(
-        update={
-            "findings": (_finding(1, 1, FindingCriticality.HIGH),),
-            "summary": (),
-        }
-    )
-    summary = (
-        ReportSummaryItem(
-            report_finding_number=1,
-            assessment_finding_ordinal=1,
-            text="Summary sentence 1.",
-            support=(
-                AssessmentFindingRef(
-                    kind="assessment_finding",
-                    assessment_id=report.assessment_id,
-                    finding_ordinal=1,
-                ),
-            ),
-        ),
-    )
-    report = report.model_copy(update={"summary": summary})
-    rendered = format_investigation_report_markdown(report)
     assert "Additional findings are detailed below." not in rendered
 
 

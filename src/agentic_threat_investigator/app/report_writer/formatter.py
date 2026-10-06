@@ -44,8 +44,6 @@ _MARKDOWN_ESCAPES = {
     "|": "\\|",
 }
 
-_ADDITIONAL_FINDINGS_NOTE = "Additional findings are detailed below."
-
 
 def escape_markdown_text(value: str) -> str:
     """Deterministically escape Markdown metacharacters in untrusted text.
@@ -188,9 +186,6 @@ def format_investigation_report_markdown(report: InvestigationReport) -> str:
                 f"- Finding {item.report_finding_number}: "
                 f"{escape_markdown_text(item.text)}"
             )
-        if len(report.summary) < len(report.findings):
-            sections.append("")
-            sections.append(_ADDITIONAL_FINDINGS_NOTE)
     sections.append("")
 
     sections.append("## Status")

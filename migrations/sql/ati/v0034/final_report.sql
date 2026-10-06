@@ -12,7 +12,7 @@
 --     (``started_at``/``ended_at``/``outcome_status``/``stop_reason``), and
 --     ``ati.append_investigation_report`` requires the canonical ordered
 --     finding set (criticality-first, contiguous reader numbers), one
---     summary-eligible projection item per eligible finding, and the exact
+--     Summary projection item per canonical finding, and the exact
 --     lifecycle snapshot.
 --
 -- Historical compatibility is explicit and never derives criticality from
@@ -497,7 +497,6 @@ SET summary = COALESCE(
                  ORDER BY (f->>'report_finding_number')::bigint
                )
         FROM jsonb_array_elements(r.findings) AS f
-        WHERE f->>'criticality' IN ('critical', 'high', 'medium')
       ),
       '[]'::jsonb
     );
@@ -808,13 +807,12 @@ BEGIN
       USING ERRCODE = 'U23A5';
   END IF;
 
-  -- Summary closure: exactly one item per summary-eligible finding, matching
+  -- Summary closure: exactly one item per canonical finding, matching
   -- the finding's reader number, ordinal, and Summary sentence, with exactly
   -- one typed support reference to that same finding.
   IF (SELECT count(*) FROM staging_report_summary)
-     <> (SELECT count(*) FROM staging_report_finding
-         WHERE criticality IN ('critical', 'high', 'medium')) THEN
-    RAISE EXCEPTION 'report summary must contain exactly the eligible findings'
+     <> (SELECT count(*) FROM staging_report_finding) THEN
+    RAISE EXCEPTION 'report summary must contain exactly the canonical findings'
       USING ERRCODE = 'U23A5';
   END IF;
   IF EXISTS (
@@ -823,7 +821,6 @@ BEGIN
     WHERE f.ordinal IS NULL
        OR s.report_number <> f.report_number
        OR s.statement <> f.summary
-       OR f.criticality NOT IN ('critical', 'high', 'medium')
   ) THEN
     RAISE EXCEPTION 'report summary item does not match its canonical finding'
       USING ERRCODE = 'U23A5';

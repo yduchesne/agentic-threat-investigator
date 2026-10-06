@@ -362,8 +362,8 @@ def test_zero_findings_criticality_is_informational() -> None:
     assert report.summary == ()
 
 
-def test_ordering_numbering_and_summary_threshold() -> None:
-    """Findings order criticality-first and low/informational leave Summary."""
+def test_ordering_numbering_and_summary_completeness() -> None:
+    """Findings order criticality-first and Summary contains every finding."""
     world = World(
         criticalities=(
             FindingCriticality.HIGH,
@@ -376,10 +376,10 @@ def test_ordering_numbering_and_summary_threshold() -> None:
     report = build_investigation_report(world.input(), world.output())
     assert [f.assessment_finding_ordinal for f in report.findings] == [3, 1, 5, 4, 2]
     assert [f.report_finding_number for f in report.findings] == [1, 2, 3, 4, 5]
-    assert [item.report_finding_number for item in report.summary] == [1, 2, 3]
+    assert [item.report_finding_number for item in report.summary] == [1, 2, 3, 4, 5]
     assert all(
         item.assessment_finding_ordinal == f.assessment_finding_ordinal
-        for item, f in zip(report.summary, report.findings, strict=False)
+        for item, f in zip(report.summary, report.findings, strict=True)
     )
 
 

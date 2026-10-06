@@ -21,7 +21,7 @@ persistence:
 - finding closure (every Assessment finding appears exactly once, snapshots
   match the authoritative finding exactly, numbering is contiguous, and the
   order is canonical);
-- Summary closure (exactly the critical/high/medium findings in order, text
+- Summary closure (exactly the canonical findings in order, text
   equal to the canonical presentation sentence, exactly one typed
   Assessment-finding support reference each);
 - Verdict/confidence/criticality authority (overall criticality is the
@@ -59,7 +59,6 @@ from agentic_threat_investigator.domain.report import (
     ReportWriterInput,
     ReportWriterOutput,
     criticality_first_ordering,
-    is_summary_eligible,
 )
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
@@ -102,7 +101,7 @@ def build_investigation_report(
     finding, and research-context selections; every other field is copied or
     derived from the authoritative input snapshot. Findings are ordered and
     numbered deterministically; the Summary is the deterministic
-    Summary-eligible projection of the same canonical finding set.
+    Summary projection of the same canonical finding set.
     """
     assessment_id = report_input.assessment.id
     if assessment_id is None:  # pragma: no cover - loaded inputs carry it
@@ -148,7 +147,6 @@ def build_investigation_report(
             ),
         )
         for finding in findings
-        if is_summary_eligible(finding.criticality)
     )
 
     research_context = tuple(
@@ -361,18 +359,14 @@ class ReportProvenanceValidator:
     def _validate_summary_closure(
         report: InvestigationReport, report_input: ReportWriterInput
     ) -> None:
-        """Require the Summary to be the exact eligible canonical projection."""
+        """Require the Summary to be the exact canonical finding projection."""
         findings_by_ordinal = {
             finding.assessment_finding_ordinal: finding for finding in report.findings
         }
-        expected = [
-            finding
-            for finding in report.findings
-            if is_summary_eligible(finding.criticality)
-        ]
+        expected = list(report.findings)
         if len(report.summary) != len(expected):
             raise ReportProvenanceError(
-                "report summary must contain exactly the summary-eligible findings"
+                "report summary must contain exactly the canonical findings"
             )
         assessment_id = report_input.assessment.id
         for item, finding in zip(report.summary, expected, strict=True):

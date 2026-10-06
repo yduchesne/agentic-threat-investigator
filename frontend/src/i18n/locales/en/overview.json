@@ -23,7 +23,6 @@
   "finding.confidence": "Confidence:",
   "summary.title": "Summary",
   "summary.item": "Finding {{number}}: {{text}}",
-  "summary.additional": "Additional findings are detailed below.",
   "status.title": "Status",
   "status.criticality": "Criticality:",
   "status.confidence": "Confidence:",

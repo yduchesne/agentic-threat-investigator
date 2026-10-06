@@ -34,7 +34,6 @@ from agentic_threat_investigator.domain.report import (
     ReportSummaryItem,
     ReportWriterOutput,
     criticality_first_ordering,
-    is_summary_eligible,
 )
 from agentic_threat_investigator.domain.research import ResearchCitation
 
@@ -347,12 +346,3 @@ def test_criticality_first_ordering() -> None:
     )
     ordered = criticality_first_ordering(findings)
     assert [ordinal for ordinal, _ in ordered] == [3, 1, 5, 4, 2]
-
-
-def test_summary_eligibility_threshold() -> None:
-    """Only critical/high/medium are Summary-eligible."""
-    assert is_summary_eligible(FindingCriticality.CRITICAL)
-    assert is_summary_eligible(FindingCriticality.HIGH)
-    assert is_summary_eligible(FindingCriticality.MEDIUM)
-    assert not is_summary_eligible(FindingCriticality.LOW)
-    assert not is_summary_eligible(FindingCriticality.INFORMATIONAL)

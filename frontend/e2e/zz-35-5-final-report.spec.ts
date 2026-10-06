@@ -99,12 +99,14 @@ test.describe("PR 35-5 canonical Final Report", () => {
     await expect(
       page.getByText(/Finding 1: Generated summary for canonical finding 1\./),
     ).toBeVisible();
-    // Finding 2 (low) is excluded from the Summary; the conditional note
-    // appears.
-    expect(await page.getByText(/Finding 2:/).count()).toBe(0);
+    // The Summary now contains every canonical finding (including the LOW
+    // finding 2); there is no conditional additional-findings note.
     await expect(
-      page.getByText("Additional findings are detailed below."),
+      page.getByText(/Finding 2: Generated summary for canonical finding 2\./),
     ).toBeVisible();
+    expect(
+      await page.getByText("Additional findings are detailed below.").count(),
+    ).toBe(0);
     expect(await page.getByText(/Assessment 1/).count()).toBe(0);
 
     // Status replaces Lifecycle.
