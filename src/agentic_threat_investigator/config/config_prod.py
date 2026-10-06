@@ -11,5 +11,9 @@ CONFIG: dict[str, Any] = {
     # CORS origin with the externally visible values.
     "session_cookie_secure": True,
     "public_base_url": "http://localhost:8000",
+    # V07-01: the server-rendered web adapter's exact browser origin. It is
+    # served by the same FastAPI process as /api/v1; operators must replace
+    # both this and public_base_url with the externally visible values.
+    "web_base_url": "http://localhost:8000",
     "api_cors_origins": ["http://localhost:8080"],
 }

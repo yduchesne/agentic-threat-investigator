@@ -66,6 +66,11 @@ services:
       # origin (http://localhost:8080) served by the frontend, not the API
       # container port.
       ATI_PUBLIC_BASE_URL: ${ATI_PUBLIC_BASE_URL:-http://localhost:8080}
+      # V07-01: the exact browser origin of the server-rendered web adapter.
+      # The web routes are served by this same FastAPI process, so the
+      # browser reaches them through the API host port; both exact origins
+      # share one session/CSRF authority while React and web coexist.
+      ATI_WEB_BASE_URL: ${ATI_WEB_BASE_URL:-http://localhost:${ATI_API_HOST_PORT:-8000}}
       # PR 29C: OTLP export. ATI processes export only when the master switch
       # is on; the endpoint (unset or blank) defaults to the in-network
       # Collector. Set ATI_OBSERVABILITY_ENABLED=false for offline/fail-open.

@@ -13,6 +13,16 @@ authors = [{ name = "Agentic Threat Investigator contributors" }]
 dependencies = [
   "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
+  # Server-rendered HTML presentation adapter (V07-01). Jinja2 is a direct
+  # dependency of the ``web/`` package (Starlette's Jinja2Templates seams do
+  # not make it a hard runtime requirement of the API). Autoescaping is
+  # configured explicitly by the web composition.
+  "jinja2>=3.1,<4",
+  # Starlette form parsing (``request.form()`` / FastAPI ``Form``) requires
+  # python-multipart at runtime. The web login/logout forms parse form
+  # bodies, so it is declared explicitly rather than relying on a
+  # transitive dev-tooling import.
+  "python-multipart>=0.0.20,<1",
   "httpx>=0.27,<1",
   "pydantic-settings>=2.6,<3",
   "psycopg[binary]>=3.2,<4",

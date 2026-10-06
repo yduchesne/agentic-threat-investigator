@@ -434,13 +434,29 @@ Playwright remains required for actual analyst journeys and browser semantics, i
 - report navigation;
 - responsive/keyboard behavior where browser semantics matter.
 
-The authoritative harness remains:
+### Dual E2E harness lifecycle
+
+V07-1 explicitly changes the transitional harness contract. During
+V07-1..V07-6 there are two real-stack browser harnesses:
 
 ```text
-./scripts/e2e.sh
+V07-1..V07-6:
+  scripts/e2e.sh      -> React regression harness (existing frontend/)
+  scripts/e2e-web.sh  -> new server-rendered web acceptance harness
+
+V07-7 (cutover):
+  React removed
+  the proven web harness becomes canonical scripts/e2e.sh
 ```
 
-unless a V07 PR explicitly changes and documents that contract.
+Both harnesses use the same isolation principles (unique Compose project,
+throwaway PostgreSQL volume, generated bootstrap credentials, random high
+host ports, fake operating mode, scoped cleanup). The new-web suite is
+owned by `web-e2e/` (its own minimal Playwright package/config), not by
+`frontend/`, so it survives the eventual React deletion. React E2E is
+regression evidence only and cannot substitute for new-web acceptance; the
+new-web harness cannot substitute for React regression while React still
+ships. The two are consolidated only in V07-7, after React is removed.
 
 Direct lower-level Playwright invocation may be diagnostic; it must not silently replace the repository-prescribed acceptance topology.
 
@@ -502,7 +518,7 @@ Every PR requires its own detailed execution plan based on fresh `main` and `doc
 
 ---
 
-## PR V07-1 — Server-rendered web foundation and parallel runtime
+## PR V07-1 — Server-rendered web foundation and parallel runtime [DONE]
 
 ### Objective
 

@@ -60,6 +60,33 @@ def api_client(settings: Settings | None = None) -> TestClient:
     return TestClient(create_app(settings or api_settings()))
 
 
+def web_settings(
+    *,
+    public_base_url: str = "http://react.test",
+    web_base_url: str = "http://web.test",
+) -> Settings:
+    """Return real-database settings with two explicit browser origins."""
+    return api_settings().model_copy(
+        update={"public_base_url": public_base_url, "web_base_url": web_base_url}
+    )
+
+
+def web_client(settings: Settings | None = None) -> TestClient:
+    """Return a non-redirect-following client over the real web adapter."""
+    return TestClient(create_app(settings or web_settings()), follow_redirects=False)
+
+
+def web_login_form(client: TestClient, *, password: str) -> dict[str, str]:
+    """Return the login form payload armed with the client CSRF cookie."""
+    token = client.cookies.get("ati_csrf", "")
+    return {
+        "username": "alice",
+        "password": password,
+        "csrf_token": token,
+        "next": "/",
+    }
+
+
 async def seed_user(
     session_factory: Any,
     *,

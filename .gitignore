@@ -210,6 +210,11 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 
+# V07-01 server-rendered web acceptance suite (durable web-e2e ownership)
+web-e2e/node_modules/
+web-e2e/test-results/
+web-e2e/playwright-report/
+
 # Locally acquired third-party dataset artifacts
 data/
 out/

@@ -110,6 +110,37 @@ Agents interpret evidence and make typed recommendations within explicit contrac
 
 FastAPI request/response DTOs and REST routes. API DTOs are separate from domain and ORM models.
 
+### Web (server-rendered presentation adapter, V07-01)
+
+`src/agentic_threat_investigator/web/` is ATI's human-facing HTML
+presentation adapter. It is a **peer** of `api/`, not a second application
+layer: web routes call the same in-process `AuthenticationService`,
+application/query services, and repositories, and never call ATI's own REST
+API over HTTP merely to reuse functionality. The adapter owns HTML routing,
+Jinja templates, typed web view models, the full-page-versus-HTMX-fragment
+representation convention, web forms, browser redirects, and ATI-owned
+static CSS/vendored assets under `/web-static/`. It never owns domain
+policy, investigation orchestration, authorization policy, persistence, or
+provider logic.
+
+During the V07 migration the JSON API (`/api/v1`) and the server-rendered
+web adapter are composed into the **same FastAPI process**, so both share one
+lifespan, one database, and one session/CSRF authority. The React frontend
+remains supported and behaviorally unchanged (`frontend/`, service
+`frontend`) until the V07-7 cutover; `api/` and `web/` are intentionally
+parallel presentation adapters and `web/` is their permanent name.
+
+Browser-origin configuration is explicit and bounded. `public_base_url` is
+the React SPA browser origin and `web_base_url` is the server-rendered web
+origin; `Settings.csrf_allowed_origins` is their exact, deduplicated set and
+is used for CSRF Origin/Referer validation. There is no wildcard
+credentialed origin. Ordinary HTML forms carry the same double-submit CSRF
+proof in a hidden `csrf_token` field (the API keeps `X-CSRF-Token`); HTMX
+requests are ordinary HTTP requests and receive identical authentication,
+authorization, and CSRF treatment. `HX-Request` selects representation only
+and is never an authorization signal. Jinja autoescaping is mandatory; the
+session token is never rendered into HTML or exposed to JavaScript.
+
 ### Frontend
 
 React/TypeScript analyst workbench consuming the stable `/api/v1` contract.

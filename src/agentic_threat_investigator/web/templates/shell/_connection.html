@@ -1,0 +1,23 @@
+{# SPDX-License-Identifier: AGPL-3.0-only #}
+<section id="ati-connection" class="ati-card ati-connection"
+         aria-labelledby="ati-connection-heading">
+  <h2 id="ati-connection-heading">Connection</h2>
+  <dl class="ati-facts">
+    <dt>Signed in as</dt>
+    <dd>{{ view.username }}</dd>
+    <dt>Role</dt>
+    <dd>{{ view.role }}</dd>
+    <dt>Operating mode</dt>
+    <dd>{{ view.operating_mode }}</dd>
+  </dl>
+  <p class="ati-muted">
+    Server render
+    <span data-ati-render-id="{{ view.render_id }}">{{ view.render_id }}</span>
+  </p>
+  <p>
+    <a class="ati-button" href="/partials/connection"
+       hx-get="/partials/connection"
+       hx-target="#ati-connection"
+       hx-swap="outerHTML">Refresh connection</a>
+  </p>
+</section>

@@ -5,7 +5,7 @@ import hashlib
 import secrets
 from abc import ABC, abstractmethod
 from collections import OrderedDict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
@@ -171,19 +171,36 @@ def validate_csrf(
     request_token: str | None,
     origin: str | None,
     referer: str | None,
-    expected_origin: str,
+    expected_origin: str | Iterable[str],
 ) -> None:
-    """Validate double-submit CSRF tokens and same-origin metadata."""
+    """Validate double-submit CSRF tokens and same-origin metadata.
+
+    ``expected_origin`` accepts either one configured origin or an exact
+    bounded collection of approved origins. The parallel React and
+    server-rendered browser frontends (V07-01) are separate exact origins
+    over the same session authority, so the approved collection is compared
+    by normalized origin; a third-party origin never matches. A string is
+    still accepted so the single-origin API contract remains unchanged.
+    """
     if (
         not cookie_token
         or not request_token
         or not secrets.compare_digest(cookie_token, request_token)
     ):
         raise CsrfError("invalid csrf token")
+    candidates: tuple[str, ...] = (
+        (expected_origin,)
+        if isinstance(expected_origin, str)
+        else tuple(expected_origin)
+    )
+    expected = {
+        normalized
+        for candidate in candidates
+        if (normalized := _normalized_origin(candidate)) is not None
+    }
     supplied = origin or referer
-    expected = _normalized_origin(expected_origin)
     supplied_origin = _normalized_origin(supplied) if supplied else None
-    if expected is None or supplied_origin is None or supplied_origin != expected:
+    if not expected or supplied_origin is None or supplied_origin not in expected:
         raise CsrfError("invalid request origin")
 
 

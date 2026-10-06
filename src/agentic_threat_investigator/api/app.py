@@ -39,6 +39,7 @@ from agentic_threat_investigator.api.routes import (
 )
 from agentic_threat_investigator.config import Settings
 from agentic_threat_investigator.infrastructure.api_composition import ApiComposition
+from agentic_threat_investigator.web.composition import install_web
 
 LOGGER = logging.getLogger(__name__)
 
@@ -206,4 +207,8 @@ def create_app(settings: Settings) -> FastAPI:
 
     application.add_api_route("/health/live", live, methods=["GET"], tags=["health"])
     application.add_api_route("/health/ready", ready, methods=["GET"], tags=["health"])
+    # Compose the server-rendered HTML presentation adapter into the same
+    # process (V07-01). Its HTML error handlers are registered after the API
+    # handlers so ``/api/v1`` errors keep their stable JSON envelopes.
+    install_web(application, settings)
     return application
