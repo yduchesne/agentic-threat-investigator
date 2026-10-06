@@ -108,14 +108,18 @@ async function createInvestigation(
   return investigationId ?? "";
 }
 
-/** Open the GEOINT tab and wait for its authoritative surface (idempotent:
- * never re-clicks an already-active GEOINT tab — PR 31F-8 G4 deep links). */
-async function openGeoint(page: Page): Promise<void> {
-  if (!page.url().includes("/geoint")) {
-    await page.getByRole("tab", { name: "Geographic context" }).click();
+/** Open the GEOINT TABLE presentation (idempotent: never re-clicks an
+ * already-active sub-tab). */
+async function openGeointTable(page: Page): Promise<void> {
+  if (!/\/geoint\/table$/.test(page.url())) {
+    if (!page.url().includes("/geoint")) {
+      await page.getByRole("tab", { name: "GEOINT" }).click();
+    }
+    await page.getByRole("tab", { name: "TABLE" }).click();
   }
+  await expect(page).toHaveURL(/\/geoint\/table$/);
   await expect(
-    page.getByRole("heading", { name: "Geographic context" }),
+    page.getByRole("heading", { name: "GEOINT" }),
   ).toBeVisible({ timeout: 30_000 });
   await expect(
     page.getByText(
@@ -187,7 +191,7 @@ test.describe("PR 26E real-stack GEOINT matrix (routed, PR 31F-8)", () => {
     // succeed without creating duplicate GeoResolution work or canonical
     // observations (GEOINT seeding idempotency corrective PR).
     seedGeoint(investigationId, "entity_history");
-    await openGeoint(page);
+    await openGeointTable(page);
 
     // The bounded summary shows two observations across two Locations.
     await expect(topLocationsTable(page)).toBeVisible({ timeout: 30_000 });
@@ -276,7 +280,7 @@ test.describe("PR 26E real-stack GEOINT matrix (routed, PR 31F-8)", () => {
       "PR 26E same-location neutrality",
     );
     seedGeoint(investigationId, "same_location");
-    await openGeoint(page);
+    await openGeointTable(page);
 
     // Seattle groups exactly two distinct Entities.
     await exploreLocation(page, "Seattle");
@@ -323,7 +327,7 @@ test.describe("PR 26E real-stack GEOINT matrix (routed, PR 31F-8)", () => {
       "PR 26E containment",
     );
     seedGeoint(investigationId, "containment");
-    await openGeoint(page);
+    await openGeointTable(page);
 
     // Washington groups the admin-precision Entity exactly.
     await exploreLocation(page, "Washington");
@@ -387,16 +391,16 @@ test.describe("PR 26E real-stack GEOINT matrix (routed, PR 31F-8)", () => {
     // I1's surface is reached as a direct deep link (no prior navigation
     // to A inside this session): the seeded summary shows only Seattle.
     await page.goto(`/investigations/${investigationA}/geoint`);
-    await openGeoint(page);
+    await openGeointTable(page);
     // The already-selected GEOINT tab stays inert-safe: activating it
     // (keyboard) neither navigates nor stalls the page (native-pointer
     // stability; the prior architecture's same-URL workbench re-entry was a
     // wedge class).
-    const activeTab = page.getByRole("tab", { name: "Geographic context" });
+    const activeTab = page.getByRole("tab", { name: "GEOINT" });
     await activeTab.focus();
     await page.keyboard.press("Enter");
     await expect(
-      page.getByRole("heading", { name: "Geographic context" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible({ timeout: 30_000 });
     await expect(topLocationsTable(page)).toBeVisible({ timeout: 30_000 });
     // I1's summary shows only Seattle: the Dallas/Later observation belongs
@@ -434,14 +438,13 @@ test.describe("PR 26E real-stack GEOINT matrix (routed, PR 31F-8)", () => {
       "PR 26E non-mappable",
     );
     seedGeoint(investigationId, "non_mappable");
-    await openGeoint(page);
+    await openGeointTable(page);
 
     // No marker exists: EdgeLand has no representative coordinates.
     await expect(topLocationsTable(page)).toBeVisible({ timeout: 30_000 });
     await expect(topLocationsTable(page).getByText("EdgeLand")).toBeVisible();
     expect(await page.locator(".leaflet-marker-icon").count()).toBe(0);
     await expect(topLocationsTable(page).getByText("Not plotted")).toBeVisible();
-    await expect(page.getByText(/no plottable coordinates/i)).toBeVisible();
 
     // The row stays actionable through the routed workflow.
     await exploreLocation(page, "EdgeLand");
@@ -480,7 +483,7 @@ test.describe("PR 26E real-stack GEOINT matrix (routed, PR 31F-8)", () => {
       "PR 26E routed stability",
     );
     seedGeoint(investigationId, "entity_history");
-    await openGeoint(page);
+    await openGeointTable(page);
 
     // Location surface (routed link).
     await exploreLocation(page, "Seattle");
@@ -523,7 +526,7 @@ test.describe("PR 26E real-stack GEOINT matrix (routed, PR 31F-8)", () => {
     await expect(page).toHaveURL(/\/geoint\/locations\/[0-9a-f-]+\/entities$/);
     await page.goBack();
     await expect(
-      page.getByRole("heading", { name: "Geographic context" }),
+      page.getByRole("heading", { name: "GEOINT" }),
     ).toBeVisible();
     expect(page.getByText("FAKE DATA")).toBeVisible();
     expect(consoleErrors).toEqual([]);

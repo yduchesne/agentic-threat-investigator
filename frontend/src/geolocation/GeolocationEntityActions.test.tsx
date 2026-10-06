@@ -85,8 +85,8 @@ function geolocationsHandler(
 
 async function renderMap(handlers: ReturnType<typeof http.get>[]) {
   setHttpHandlers(...AUTH, workspace(), ...handlers);
-  const { router } = renderAtPath(`/investigations/${INVESTIGATION_ID}/map`);
-  await screen.findByRole("tab", { name: "Map" });
+  const { router } = renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint/map`);
+  await screen.findByRole("tab", { name: "MAP" });
   await waitFor(() =>
     expect(screen.queryByText("Loading geolocation context…")).not.toBeInTheDocument(),
   );

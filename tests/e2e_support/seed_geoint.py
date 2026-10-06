@@ -196,6 +196,14 @@ class GeointFixture:
     retrieval_hours: int
 
 
+# Persisted GEOLOCATION fact vocabulary shared by the PR 25A projection and
+# the PR 26C claim extractor. Production ``GEOLOCATION`` Evidence (DB-IP City
+# Lite) always carries a provider, and the PR 25A projection fails closed on
+# evidence that omits it. The E2E fixture therefore includes the exact
+# provider fact so the same deterministic evidence is valid for BOTH the
+# MAP (PR 25A) and TABLE (PR 26D) presentations of one Investigation.
+_SEED_PROVIDER = "urn:ati:source:dbip_city_lite"
+
 # Documentation-reserved IP ranges only (RFC 5737 documentation block
 # 192.0.2.0/24 and RFC 5737 TEST-NET), never routable production
 # addresses. City facts resolve to Seattle/Dallas, an administrative fact
@@ -207,21 +215,25 @@ SEATTLE_FIXTURE = {
     "region": "Washington",
     "city": "Seattle",
     "precision": "city",
+    "provider": _SEED_PROVIDER,
 }
 DALLAS_FIXTURE = {
     "country_code": "US",
     "region": "Texas",
     "city": "Dallas",
     "precision": "city",
+    "provider": _SEED_PROVIDER,
 }
 WASHINGTON_FIXTURE = {
     "country_code": "US",
     "region": "Washington",
     "precision": "region",
+    "provider": _SEED_PROVIDER,
 }
 EDGELAND_FIXTURE = {
     "country_code": "ZZ",
     "precision": "country",
+    "provider": _SEED_PROVIDER,
 }
 
 

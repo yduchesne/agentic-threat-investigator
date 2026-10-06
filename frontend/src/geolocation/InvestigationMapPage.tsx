@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Investigation Map route page (PR 25B §15-§20, §32, §36, §40).
+// Investigation Map route page (PR 25B §15-§20, §32, §36, §40; PR 35-2).
 //
-// The route owns the Investigation ID, the geolocation query state, the
+// PR 35-2 mounts this page as the GEOINT MAP presentation
+// (``/investigations/:id/geoint/map``); the legacy ``/map`` URL is a
+// ``replace`` redirect. The route owns the Investigation ID, the geolocation query state, the
 // pure map-model partition, the persistent approximation disclaimer, the
 // Leaflet map, and the always-available non-map representation. It never
 // calls raw fetch, never parses generic Evidence, never performs a
@@ -35,6 +37,7 @@ import { EmptyState, LoadingState } from "../components/AsyncState";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { useEvidenceDetail } from "../evidence/evidence-queries";
 import { EvidenceDetail } from "../evidence/EvidenceDetail";
+import { GeointViewTabs } from "../geoint/GeointViewTabs";
 import { GeolocationList } from "./GeolocationList";
 import { InvestigationMap } from "./InvestigationMap";
 import { buildGeolocationMapModel } from "./geolocation-map-model";
@@ -46,6 +49,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
 /** The Investigation Map route. */
 export function InvestigationMapPage(): ReactElement {
   const { t } = useTranslation("geolocation");
+  const { t: tGeoint } = useTranslation("geoint");
   const { t: tEvidence } = useTranslation("evidence");
   const { t: tCommon } = useTranslation("common");
   const { investigationId = "" } = useParams();
@@ -93,8 +97,9 @@ export function InvestigationMapPage(): ReactElement {
     <Box>
       <Box>
         <Typography variant="h2" sx={{ mb: 0.25 }}>
-          {t("title")}
+          {tGeoint("workspace.title")}
         </Typography>
+        <GeointViewTabs investigationId={investigationId} />
         <Typography variant="caption" component="div" role="note">
           {t("intro")}
         </Typography>

@@ -32,6 +32,7 @@
 - [CI quality gate](#ci-quality-gate)
 - [Frontend quality](#frontend-quality)
 - [PR 35-1 UI correctness testing](#pr-35-1-ui-correctness-testing)
+- [PR 35-2 GEOINT UI consolidation testing](#pr-35-2-geoint-ui-consolidation-testing)
 - [PR 26 GEOINT testing strategy](#pr-26-geoint-testing-strategy)
 - [Definition of done](#definition-of-done)
 - [Configuration tests](#configuration-tests)
@@ -4817,9 +4818,11 @@ mocked. Coverage:
   `apiGet`; caller AbortSignal cancellation reaches the fetch; query key
   contains the Investigation ID (distinct per Investigation); one bounded
   fetch with no polling; errors remain typed `ApiError`;
-- **route page states** (`InvestigationMapPage.test.tsx`, B-U01..B-U17):
-  Map is a primary route-owned tab (Overview | Evidence | Relationships |
-  Map | Research | Timeline) selected on the route; translated loading
+- **route page states** (`InvestigationMapPage.test.tsx`, B-U01..B-U17;
+  PR 35-2): the consolidated primary navigation (Overview | Evidence |
+  Graph | GEOINT | Research | Timeline) selects GEOINT on
+  `/geoint/map`, and the active MAP sub-tab is inert while TABLE remains a
+  semantic link; translated loading
   state; API failure + Retry with no fallback; honest empty state with no
   invented marker; one/multiple mappable items reach the map and the
   non-map list; unlocated-only state; mixed state with explicit counts;
@@ -4844,7 +4847,7 @@ mocked. Coverage:
   Close returning to the intact Map view) through the shared
   DetailDrawer/EvidenceDetail PR 24C surface;
 - **accessibility** (`InvestigationMapPage.test.tsx`, B-A11Y01..B-A11Y08):
-  translated heading; visible disclaimer; labeled keyboard-reachable
+  translated GEOINT heading; visible disclaimer; labeled keyboard-reachable
   non-map table; native Evidence buttons; no hover-only information;
   unlocated items inspectable without the map; labeled map region; tile
   attribution present.
@@ -5869,6 +5872,97 @@ No canonical closure fixture directly inserts derived geographic truth
 production worker completion), `FakeLlmClient` is the only model fake, no
 live network/geocoder/LLM is required, and no PR 27 generic
 evaluator/release framework is introduced.
+
+## PR 35-2 GEOINT UI consolidation testing
+
+PR 35-2 consolidates ATI's two geographic Investigation surfaces into one
+first-class **GEOINT** capability with exactly two URL-owned presentation
+sub-views, **MAP** and **TABLE**. It is a frontend
+information-architecture/presentation change: no API, migration, stored
+function, provider, domain, or Evidence-scanning substitute is introduced,
+and the existing bounded IP-geolocation projection and canonical GEOINT
+summary are preserved without being silently unified.
+
+### Route and sub-tab contracts
+
+`frontend/src/app/routes.test.tsx` (`U05`/`U06`) and
+`frontend/src/geoint/GeointViewTabs.test.tsx` pin the canonical topology:
+
+- `/investigations/:id/geoint/map` is the MAP presentation;
+- `/investigations/:id/geoint/table` is the TABLE presentation;
+- `/investigations/:id/geoint` deterministically `replace`-redirects to
+  `/geoint/map`;
+- the legacy `/investigations/:id/map` deterministically
+  `replace`-redirects to `/geoint/map` (never a second live Map);
+- the primary navigation exposes exactly Overview, Evidence, Graph,
+  GEOINT, Research, Timeline, and GEOINT stays selected on both
+  presentation routes and every routed GEOINT resource descendant;
+- the active MAP/TABLE sub-tab is inert (no same-URL navigation) while the
+  inactive destination is a semantic link inside the accessible `GEOINT
+  view` navigation region.
+
+The routed GEOINT Entity/Location/Observation surfaces remain unchanged and
+reachable (`/geoint/entities/:entityId`,
+`/geoint/locations/:locationId/entities|observations`,
+`/geoint/observations/:observationId`); the route-derived breadcrumb root
+and the contextual `Back` fallback resolve to the TABLE analytical origin.
+
+### MAP preservation
+
+`frontend/src/geolocation/InvestigationMapPage.test.tsx`
+(`B-U01..B-U17`, `B-P01..B-P06`, `B-A11Y01..B-A11Y08`) continues to pin the
+bounded `useInvestigationGeolocations` query, `buildGeolocationMapModel`,
+the Leaflet `InvestigationMap`, the always-available `GeolocationList`,
+approximation/truncation messaging, provider/precision labels, distinct
+observed/retrieved timestamps, hostile-value escaping, the `FAKE DATA`
+marker, and the exact persisted `evidence_id` provenance — now under the
+consolidated GEOINT heading and MAP sub-tab. No third map implementation
+exists.
+
+### TABLE behavior
+
+`frontend/src/geoint/GeointPage.test.tsx` (`U01..U05`, `U12..U17`) pins the
+TABLE presentation: the bounded `useGeointSummary` statistics, precision
+counts, the Top Locations `AnalystTable` with canonical labels/types and
+typed Explore actions, the truncation warning, the persistent
+semantics/no-inference messaging, the honest empty state, and the honest
+`Not plotted` status for coordinate-less rows. TABLE renders **no**
+Leaflet map, map container, marker, or tile layer.
+
+### Real-stack browser acceptance
+
+The focused PR 35-2 journey runs against `./scripts/e2e.sh` (production
+frontend -> production API -> production PostgreSQL -> deterministic Fake
+World) with `retries=0` in Chromium and Firefox:
+
+```text
+open completed Investigation
+ -> primary navigation has GEOINT and no separate Map/Geographic context
+ -> GEOINT -> canonical MAP route, MAP selected and geographic content rendered
+ -> TABLE -> canonical TABLE route, bounded summary + Top Locations rendered
+ -> TABLE Explore Location -> routed GEOINT resource -> Back to TABLE origin
+ -> MAP -> exact Evidence -> Back to MAP origin
+```
+
+It also proves the legacy `/map` redirect, TABLE deep-link/refresh,
+contextual Back from the TABLE drill-down, contextual Back from MAP
+Evidence, and a 10-cycle `MAP -> TABLE -> MAP` Chromium stability loop
+asserting correct URL/selection, no post-quiescence URL churn, no product
+console/page error, and no input/main-thread wedge (bounded timeouts only,
+no `force`, sleeps, reloads, or retries). The existing GEOINT
+(`zz-geoint.spec.ts`, `zz-31f8-stress.spec.ts`) and geolocation
+(`zz-geolocation.spec.ts`, `zz-geolocation-workflow.spec.ts`) workflows
+are updated to the consolidated GEOINT MAP/TABLE selectors and continue to
+run through the same authoritative harness.
+
+The focused journey seeds both bounded projections on one Investigation.
+The harness-only GEOINT seeder (`tests/e2e_support/seed_geoint.py`) now
+carries the production `provider` fact in its synthetic `GEOLOCATION`
+evidence: the PR 25A projection fails closed (by design) on persisted
+GEOLOCATION evidence that omits it, so the fixture must match the real
+DB-IP City Lite fact vocabulary to be valid for both the MAP and TABLE
+presentations. This is test-infrastructure compatibility only; no
+production DTO, provider, or schema changed.
 
 ## PR 35-1 UI correctness testing
 

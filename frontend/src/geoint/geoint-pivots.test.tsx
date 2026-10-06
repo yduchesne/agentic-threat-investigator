@@ -159,10 +159,11 @@ describe("GEOINT routed resource navigation (PV10..PV13, PV17, PV18)", () => {
     });
     const segments = within(nav).getAllByRole("listitem").map((li) => li.textContent ?? "");
     expect(segments.join(" / ")).toContain("Geographic context");
-    // The root breadcrumb is a semantic link to the canonical GEOINT route.
+    // The root breadcrumb is a semantic link to the canonical GEOINT
+    // TABLE presentation (the analytical origin of routed resources).
     expect(
       within(nav).getByRole("link", { name: "Geographic context" }),
-    ).toHaveAttribute("href", `${BASE}/geoint`);
+    ).toHaveAttribute("href", `${BASE}/geoint/table`);
     // The current segment uses the bounded compact identity/presentation
     // label, never the raw full Entity UUID.
     expect(segments.join(" / ")).not.toContain(ENTITY_ID);

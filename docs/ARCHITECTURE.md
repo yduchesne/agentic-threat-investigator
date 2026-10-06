@@ -2236,14 +2236,14 @@ PR 25 does not require PostGIS. PR 26B introduces PostGIS for canonical geograph
 
 The Investigation Map is a pure presentation surface over the bounded PR 25A projection (`frontend/src/geolocation/`):
 
-- one first-class `/investigations/:id/map` workspace route/tab consumes `GET /api/v1/investigations/{id}/geolocations` through the centralized API client and TanStack Query (Investigation-scoped key, no polling, no cursor/limit, no Evidence reconstruction);
+- one first-class GEOINT MAP presentation route (`/investigations/:id/geoint/map`, the default destination of `/investigations/:id/geoint`; the legacy `/investigations/:id/map` URL is a deterministic `replace` redirect) consumes `GET /api/v1/investigations/{id}/geolocations` through the centralized API client and TanStack Query (Investigation-scoped key, no polling, no cursor/limit, no Evidence reconstruction);
 - Leaflet + react-leaflet are presentation only: one neutral marker per mappable returned item, conservative deterministic viewport (fixed zoom 8 for one point, capped `fitBounds` for many), locally bundled Leaflet CSS and inlined marker assets, standard credential-free OSM raster tiles with visible attribution defined in one `map-config.ts` module;
 - the map never reinterprets generic Evidence facts, never performs a geolocation lookup, never geocodes, never manufactures/clamps/centroid-substitutes missing coordinates, and derives no geographic relationship, risk, attribution, or maliciousness — markers carry no risk/confidence/severity coloring and no accuracy radius is fabricated;
 - coordinate-less (null/null) and defensively malformed items never reach Leaflet and remain fully visible in an always-available non-map table of every returned item; mixed and truncated states are stated honestly, and the server-owned bound is never bypassed;
 - exact Evidence provenance is retained: marker popups and non-map rows both open the shared PR 31F-6 list/detail Evidence surface through the exact persisted PR 25A `evidence_id` (no lookup by IP, no list scan, no History substitution);
 - a persistent visible disclaimer states that IP geolocation is approximate network-address context and does not establish the physical location of an attacker, user, or device; observed/retrieved timestamps stay distinct.
 
-There is no map-time geolocation lookup, no spatial query, no PostGIS, no clustering/heat map/polygon, no cross-Investigation map, no historical movement, and no map state persisted in the URL, localStorage, or sessionStorage (the Map route's URL state is only the route itself).
+There is no map-time geolocation lookup, no spatial query, no PostGIS, no clustering/heat map/polygon, no cross-Investigation map, no historical movement, and no map state persisted in the URL, localStorage, or sessionStorage (the MAP presentation route's URL state is only the route itself; under PR 35-2 GEOINT MAP/TABLE selection is route-owned).
 
 ## Map analyst workflow and E2E seeding (PR 25C)
 

@@ -1,5 +1,9 @@
 {
  "title": "Geographic context",
+ "workspace.title": "GEOINT",
+ "view.aria": "GEOINT view",
+ "view.map": "MAP",
+ "view.table": "TABLE",
  "breadcrumbs.aria": "Geographic context navigation",
  "resources.entityUnknown": "Entity geographic context",
  "resources.locationUnknown": "Canonical Location",

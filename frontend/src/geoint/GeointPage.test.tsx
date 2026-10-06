@@ -1,10 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// GEOINT workspace route tests (PR 26E §15 U01..U05, U08..U13).
+// GEOINT TABLE presentation tests (PR 26E §15 U01..U05, U08..U13;
+// PR 35-2 §D U13..U17).
+//
+// TABLE is the non-map GEOINT presentation: bounded summary, precision
+// counts, Top Locations analyst table with typed Explore actions, and the
+// persistent semantic/non-inference messaging. It must never embed a
+// Leaflet map.
 
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   authMeSuccess,
@@ -18,46 +24,47 @@ import {
 import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
 
-vi.mock("react-leaflet", () => import("../test/react-leaflet-mock"));
-
 useHttp();
 
 const INVESTIGATION_ID = "20000000-0000-4000-8000-000000000001";
 const AUTH = [authMeSuccess, runtimeFake];
 
-function workspace(status: "completed" = "completed") {
+function workspace() {
   return investigationDetailHandler(
-    buildInvestigation({ id: INVESTIGATION_ID, status }),
+    buildInvestigation({ id: INVESTIGATION_ID, status: "completed" }),
   );
 }
 
-async function renderGeoint(handlers: ReturnType<typeof geointSummaryHandler>[]) {
+async function renderTable(handlers: ReturnType<typeof geointSummaryHandler>[]) {
   setHttpHandlers(...AUTH, workspace(), ...handlers);
-  renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint`);
-  await screen.findByRole("heading", { name: "Geographic context" });
+  renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint/table`);
+  await screen.findByRole("heading", { name: "GEOINT" });
 }
 
-describe("GEOINT workspace (U01..U05)", () => {
-  it("U04: the GEOINT tab is a first-class workspace tab active on the route", async () => {
+describe("GEOINT TABLE (U01..U05, U13..U17)", () => {
+  it("U04/U08: TABLE is the selected GEOINT sub-tab on the route", async () => {
     setHttpHandlers(
       ...AUTH,
       workspace(),
       geointSummaryHandler(buildGeointSummary()),
     );
-    renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint`);
-    await screen.findByRole("heading", { name: "Geographic context" });
-    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
-    expect(tabs).toContain("Geographic context");
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "Geographic context" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      ),
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint/table`);
+    await screen.findByRole("heading", { name: "GEOINT" });
+    const primary = screen.getByRole("tab", { name: "GEOINT" });
+    expect(primary).toHaveAttribute("aria-selected", "true");
+    // The active TABLE sub-tab is inert; MAP remains a semantic link.
+    const tableTab = screen.getByRole("tab", { name: "TABLE" });
+    expect(tableTab).toHaveAttribute("aria-selected", "true");
+    expect(tableTab.closest("a")).toBeNull();
+    const mapTab = screen.getByRole("tab", { name: "MAP" });
+    expect(mapTab.closest("a")).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/geoint/map`,
     );
   });
 
   it("U01: an empty summary renders the honest empty workspace, never a map", async () => {
-    await renderGeoint([
+    await renderTable([
       geointSummaryHandler(buildGeointSummary({ observation_count: 0 })),
     ]);
     await screen.findByText("No geographic observations");
@@ -67,7 +74,7 @@ describe("GEOINT workspace (U01..U05)", () => {
   });
 
   it("U02: a truncated summary is visible", async () => {
-    await renderGeoint([
+    await renderTable([
       geointSummaryHandler(buildGeointSummary({ truncated: true })),
     ]);
     await screen.findByText("Server-bounded summary");
@@ -75,7 +82,7 @@ describe("GEOINT workspace (U01..U05)", () => {
   });
 
   it("the persistent semantic disclaimer is rendered verbatim", async () => {
-    await renderGeoint([geointSummaryHandler(buildGeointSummary())]);
+    await renderTable([geointSummaryHandler(buildGeointSummary())]);
     expect(
       screen.getByText(
         /do not establish a cyber relationship, common ownership, coordination, targeting, or attribution/i,
@@ -106,15 +113,15 @@ describe("GEOINT workspace (U01..U05)", () => {
         return jsonResponse(buildGeointSummary());
       }),
     );
-    renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint`);
+    renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint/table`);
     await screen.findByRole("button", { name: "Retry" });
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await screen.findByRole("heading", { name: "Geographic context" });
+    await screen.findByRole("heading", { name: "GEOINT" });
     await screen.findByText("Bounded summary");
   });
 
-  it("U02b: the bounded summary numbers are exact and visible", async () => {
-    await renderGeoint([
+  it("U02b/U13: the bounded summary numbers are exact and visible", async () => {
+    await renderTable([
       geointSummaryHandler(
         buildGeointSummary({
           entity_count_with_location: 3,
@@ -129,17 +136,9 @@ describe("GEOINT workspace (U01..U05)", () => {
     expect(screen.getByText("4")).toBeVisible();
     expect(screen.getByText("5")).toBeVisible();
   });
-});
 
-describe("map + top-location table (U08..U13)", () => {
-  it("U08/U09: plottable top Locations render neutral markers with the table intact", async () => {
+  it("U14: Top Locations keep canonical labels/types/counts; non-mappable rows stay", async () => {
     const summary = buildGeointSummary();
-    await renderGeoint([geointSummaryHandler(summary)]);
-    await screen.findByText("Top Locations");
-    const markers = screen.getAllByTestId("ati-marker");
-    expect(markers).toHaveLength(2);
-    // One unmappable top location (EdgeLand, no coordinates) stays in the
-    // table without a marker.
     const withNonMappable = buildGeointSummary({
       top_locations: [
         ...summary.top_locations,
@@ -159,28 +158,64 @@ describe("map + top-location table (U08..U13)", () => {
         },
       ],
     });
-    cleanup();
-    const { http } = await import("msw");
-    setHttpHandlers(
-      ...AUTH,
-      workspace(),
-      http.get("*/api/v1/investigations/:id/geoint/summary", () =>
-        jsonResponse(withNonMappable)),
-    );
-    renderAtPath(`/investigations/${INVESTIGATION_ID}/geoint`);
-    await screen.findByText("Top Locations");
-    await screen.findByText("EdgeLand");
-    expect(await screen.findAllByTestId("ati-marker")).toHaveLength(2);
-    // Mixed notice is visible and the table row remains actionable.
-    expect(screen.getByText(/no plottable coordinates/i)).toBeVisible();
+    await renderTable([geointSummaryHandler(withNonMappable)]);
     const table = screen.getByRole("table", {
       name: "Top canonical Locations in this Investigation",
     });
     expect(within(table).getByText("EdgeLand")).toBeVisible();
+    // The honest unplottable status remains visible without a map.
     expect(within(table).getByText("Not plotted")).toBeVisible();
+    expect(table.getAttribute("aria-label")).toBe(
+      "Top canonical Locations in this Investigation",
+    );
   });
 
-  it("U11: same-coordinate top Locations stay individually actionable", async () => {
+  it("U15: TABLE never embeds a Leaflet map or tiles", async () => {
+    await renderTable([geointSummaryHandler(buildGeointSummary())]);
+    await screen.findByText("Top Locations");
+    expect(document.querySelector(".leaflet-marker-icon")).toBeNull();
+    expect(screen.queryAllByTestId("ati-map-container")).toHaveLength(0);
+    expect(screen.queryAllByTestId("ati-marker")).toHaveLength(0);
+    expect(screen.queryAllByTestId("ati-tile-layer")).toHaveLength(0);
+  });
+
+  it("U16: each top Location offers typed Explore actions", async () => {
+    const summary = buildGeointSummary();
+    await renderTable([geointSummaryHandler(summary)]);
+    const table = screen.getByRole("table", {
+      name: "Top canonical Locations in this Investigation",
+    });
+    const triggers = within(table).getAllByRole("button", { name: /Explore/ });
+    expect(triggers.length).toBeGreaterThan(0);
+    await userEvent.click(triggers[0]);
+    const menu = screen.getByTestId("pivot-action-bar");
+    expect(within(menu).getByTestId("pivot-action-geointLocationEntities")).toBeVisible();
+    expect(within(menu).getByTestId("pivot-action-geointLocationObservations")).toBeVisible();
+  });
+
+  it("U17: the no-inference warning is visible", async () => {
+    await renderTable([geointSummaryHandler(buildGeointSummary())]);
+    expect(
+      screen.getByText(
+        /does not imply that the observed Entities are related, share ownership or infrastructure, coordinate, target the same victim, or are attributed to the same actor/i,
+      ),
+    ).toBeVisible();
+  });
+
+  it("U12: no risk styling or concentration language exists", async () => {
+    await renderTable([geointSummaryHandler(buildGeointSummary())]);
+    for (const forbidden of [
+      "hotspot",
+      "threat concentration",
+      "risk",
+      "malicious",
+      "coordinated",
+    ]) {
+      expect(screen.queryByText(forbidden, { exact: false })).toBeNull();
+    }
+  });
+
+  it("same-coordinate top Locations stay individually actionable", async () => {
     const summary = buildGeointSummary({
       top_locations: [
         {
@@ -213,47 +248,12 @@ describe("map + top-location table (U08..U13)", () => {
         },
       ],
     });
-    await renderGeoint([geointSummaryHandler(summary)]);
-    const markers = await screen.findAllByTestId("ati-marker");
-    expect(markers).toHaveLength(2);
-    // Each marker carries its own stable key (identity, never coordinates).
-    expect(markers[0].getAttribute("data-title")).toBe("Seattle");
-    expect(markers[1].getAttribute("data-title")).toBe("Sibling town");
-    expect(markers[0].getAttribute("data-alt")).not.toBe(markers[1].getAttribute("data-alt"));
-  });
-
-  it("U12: no risk styling or concentration language exists", async () => {
-    await renderGeoint([geointSummaryHandler(buildGeointSummary())]);
-    for (const forbidden of [
-      "hotspot",
-      "threat concentration",
-      "risk",
-      "malicious",
-      "coordinated",
-    ]) {
-      expect(screen.queryByText(forbidden, { exact: false })).toBeNull();
-    }
-  });
-
-  it("U03: each top Location offers typed Explore actions", async () => {
-    const summary = buildGeointSummary();
-    await renderGeoint([geointSummaryHandler(summary)]);
+    await renderTable([geointSummaryHandler(summary)]);
     const table = screen.getByRole("table", {
       name: "Top canonical Locations in this Investigation",
     });
-    const triggers = within(table).getAllByRole("button", { name: /Explore/ });
-    expect(triggers.length).toBeGreaterThan(0);
-    await userEvent.click(triggers[0]);
-    const menu = screen.getByTestId("pivot-action-bar");
-    expect(within(menu).getByTestId("pivot-action-geointLocationEntities")).toBeVisible();
-    expect(within(menu).getByTestId("pivot-action-geointLocationObservations")).toBeVisible();
-  });
-
-  it("U13: OSM attribution is present on the tile layer", async () => {
-    const summary = buildGeointSummary();
-    await renderGeoint([geointSummaryHandler(summary)]);
-    const tiles = await screen.findAllByTestId("ati-tile-layer");
-    expect(tiles.length).toBeGreaterThan(0);
-    expect(tiles[0].getAttribute("data-attribution")).toContain("OpenStreetMap");
+    expect(within(table).getByText("Seattle")).toBeVisible();
+    expect(within(table).getByText("Sibling town")).toBeVisible();
+    expect(within(table).getAllByRole("button", { name: /Explore/ })).toHaveLength(2);
   });
 });

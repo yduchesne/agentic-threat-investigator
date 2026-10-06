@@ -19,7 +19,6 @@ const WORKSPACE_TABS = [
   { path: "overview", key: "overview" },
   { path: "evidence", key: "evidence" },
   { path: "relationships", key: "relationships" },
-  { path: "map", key: "map" },
   { path: "geoint", key: "geoint" },
   { path: "research", key: "research" },
   { path: "timeline", key: "timeline" },
@@ -39,22 +38,26 @@ function selectedTab(pathname: string, base: string): number | false {
   if (normalized === "relationships" || normalized.startsWith("relationships/")) {
     return 2;
   }
-  if (normalized === "map") {
+  // PR 35-2: the legacy `/map` URL is a transient redirect to GEOINT MAP;
+  // it still selects GEOINT while the redirect settles, and every
+  // `/geoint...` presentation/resource surface selects GEOINT.
+  if (
+    normalized === "map" ||
+    normalized === "geoint" ||
+    normalized.startsWith("geoint/")
+  ) {
     return 3;
   }
-  if (normalized === "geoint" || normalized.startsWith("geoint/")) {
+  if (normalized === "research" || normalized.startsWith("research/")) {
     return 4;
   }
-  if (normalized === "research" || normalized.startsWith("research/")) {
-    return 5;
-  }
   if (normalized === "timeline") {
-    return 6;
+    return 5;
   }
   return false;
 }
 
-/** Route links for Overview/Evidence/Relationships/Map/Research/Timeline. */
+/** Route links for Overview/Evidence/Graph/GEOINT/Research/Timeline. */
 export function InvestigationTabs({
   investigationId,
 }: InvestigationTabsProps): ReactElement {

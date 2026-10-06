@@ -14,7 +14,10 @@
 //     -> /investigations/:id/relationships/observations
 //     -> /investigations/:id/relationships/evolution   (24E; entity_id
 //        query param required, view=evolution|graph)
-//     -> /investigations/:id/map                Investigation Map (25B)
+//     -> /investigations/:id/map                legacy redirect -> GEOINT MAP
+//     -> /investigations/:id/geoint             canonical redirect -> GEOINT MAP
+//     -> /investigations/:id/geoint/map         GEOINT MAP presentation (35-2)
+//     -> /investigations/:id/geoint/table       GEOINT TABLE presentation (35-2)
 //     -> /investigations/:id/research
 //     -> /investigations/:id/timeline
 //     -> /investigations/:id/history           secondary (24C)
@@ -25,7 +28,7 @@
 
 import type { ReactElement } from "react";
 import type { RouteObject } from "react-router";
-import { Navigate } from "react-router";
+import { Navigate, useParams } from "react-router";
 
 import { LoginRoute } from "../auth/LoginPage";
 import { RequireAuth } from "../auth/RequireAuth";
@@ -56,6 +59,25 @@ import { TimelinePage } from "../timeline/TimelinePage";
 /** Redirects the authenticated `/` route to the Investigations module. */
 function RootHome(): ReactElement {
   return <Navigate to="/investigations" replace />;
+}
+
+/**
+ * PR 35-2: legacy `/map` keeps working as a declarative ``replace``
+ * redirect to the canonical GEOINT MAP presentation. `/map` is never a
+ * second live Map implementation.
+ */
+function LegacyMapRedirect(): ReactElement {
+  const { investigationId = "" } = useParams();
+  return <Navigate to={`/investigations/${investigationId}/geoint/map`} replace />;
+}
+
+/**
+ * PR 35-2: `/geoint` deterministically enters the default GEOINT MAP
+ * presentation with an explicit ``replace`` redirect (no history entry).
+ */
+function GeointIndexRedirect(): ReactElement {
+  const { investigationId = "" } = useParams();
+  return <Navigate to={`/investigations/${investigationId}/geoint/map`} replace />;
 }
 
 /** Build the shared route table used by Browser and Memory routers. */
@@ -112,8 +134,15 @@ export function createAppRoutes(): RouteObject[] {
                   Component: RelationshipEvolutionPage,
                 },
                 { path: "research", Component: ResearchPage },
-                { path: "map", Component: InvestigationMapPage },
-                { path: "geoint", Component: GeointPage },
+                // PR 35-2: legacy Map URL redirects to canonical GEOINT MAP.
+                { path: "map", Component: LegacyMapRedirect },
+                // PR 35-2: `/geoint` canonicalizes to the default MAP view.
+                { path: "geoint", Component: GeointIndexRedirect },
+                // PR 35-2: the two GEOINT presentation sub-views. These
+                // static children never shadow the routed GEOINT resources
+                // below (distinct second path segment).
+                { path: "geoint/map", Component: InvestigationMapPage },
+                { path: "geoint/table", Component: GeointPage },
                 // PR 31F-8: GEOINT resources mount as explicit routed
                 // surfaces (canonical IDs as path identity).
                 {

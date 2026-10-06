@@ -1,14 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// GEOINT workspace route page (PR 26E §4-§6, §15).
+// GEOINT TABLE presentation (PR 26E §4-§6, §15; PR 35-2 §D/§Step 11-13).
 //
-// First-class Investigation-scoped GEOINT tab: the persistent semantic
-// disclaimer, the bounded PR 26D summary, the canonical neutral map over
-// the currently loaded top Locations, and an always-available non-map
-// table with typed Explore actions. The map plots only the returned
-// bounded top Locations (never all pages, never cached state); when no
-// observation or no plottable coordinate exists the honest empty state is
-// rendered — never an empty world map.
+// Under the PR 35-2 information architecture, GEOINT is one first-class
+// Investigation capability and this page is its non-map TABLE
+// presentation: the persistent semantic disclaimer, the bounded PR 26D
+// summary, the precision counts, and the always-available Top Locations
+// analyst table with typed Explore actions. The MAP presentation owns the
+// routed map; TABLE never embeds a second map.
 //
 // Top Locations are exact scoped observation groups, never
 // hotspots/threat concentration; no risk coloring exists anywhere.
@@ -16,7 +15,7 @@
 import { Alert, Box, Paper, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
 
 import type { Column } from "../analyst-table/types";
 import { AnalystTable } from "../analyst-table/AnalystTable";
@@ -28,38 +27,11 @@ import {
   locationEntitiesAction,
   locationObservationsAction,
 } from "../pivots/pivot-capabilities";
-import type {
-  GeointSummary,
-  GeointTopLocation,
-} from "../api/schema-types";
-import { GeointMap, type GeointMapPoint } from "./GeointMap";
-import { buildLocationMapModel, locationCanonicalLabel } from "./geoint-model";
+import type { GeointTopLocation } from "../api/schema-types";
+import { GeointViewTabs } from "./GeointViewTabs";
+import { locationCanonicalLabel } from "./geoint-model";
 import { locationTypeKey } from "./geoint-labels";
 import { useGeointSummary } from "./geoint-queries";
-
-/** Build one neutral map point per returned top Location. */
-function topLocationPoints(
-  t: (key: string, params?: Record<string, unknown>) => string,
-  topLocations: readonly GeointTopLocation[],
-): GeointMapPoint[] {
-  const points: GeointMapPoint[] = [];
-  for (const top of topLocations) {
-    const location = top.location;
-    const name = locationCanonicalLabel(location) ?? location.location_id;
-    points.push({
-      key: location.location_id,
-      lat: location.latitude ?? NaN,
-      lng: location.longitude ?? NaN,
-      title: name,
-      locationType: location.location_type,
-      locationId: location.location_id,
-      context: t("mixed.entitiesContext", {
-        count: String(top.scoped_entity_count),
-      }),
-    });
-  }
-  return points;
-}
 
 /** The top-Location table columns (Step 5). */
 function topLocationColumns(
@@ -145,19 +117,12 @@ function SummaryStat({
   );
 }
 
-/** The first-class GEOINT workspace route. */
+/** The GEOINT TABLE presentation for one Investigation. */
 export function GeointPage(): ReactElement {
   const { t } = useTranslation("geoint");
   const { investigationId = "" } = useParams();
-  const navigate = useNavigate();
   const { summary, isLoading, isError, error, refetch } =
     useGeointSummary(investigationId);
-
-  // PR 31F-8: exact Evidence from the map popup navigates to the routed
-  // Evidence detail surface; the map itself never hosts a local detail.
-  const openEvidence = (evidenceId: string): void => {
-    navigate(`/investigations/${investigationId}/evidence/${evidenceId}`);
-  };
 
   if (isLoading && summary === null) {
     return <LoadingState label={t("loading")} />;
@@ -175,15 +140,13 @@ export function GeointPage(): ReactElement {
     return <LoadingState label={t("loading")} />;
   }
 
-  const model = buildLocationMapModel(summary.top_locations.map((top) => top.location));
-  const points = topLocationPoints(t, summary.top_locations);
-
   return (
     <Box>
       <Box>
         <Typography variant="h2" sx={{ mb: 0.25 }}>
-          {t("title")}
+          {t("workspace.title")}
         </Typography>
+        <GeointViewTabs investigationId={investigationId} />
         <Typography variant="caption" component="div" role="note">
           {t("intro")}
         </Typography>
@@ -261,33 +224,6 @@ export function GeointPage(): ReactElement {
             </Box>
           </Box>
 
-          {model.mappableCount > 0 ? (
-            <>
-              {model.totalCount > model.mappableCount ? (
-                <Typography variant="body2" role="note" sx={{ mt: 1 }}>
-                  {t("mixed.notice", {
-                    count: String(model.totalCount - model.mappableCount),
-                    total: String(model.totalCount),
-                  })}
-                </Typography>
-              ) : null}
-              <Box sx={{ mt: 1 }}>
-                <GeointMap
-                  investigationId={investigationId}
-                  points={points}
-                  onViewEvidence={openEvidence}
-                />
-              </Box>
-            </>
-          ) : (
-            <Box sx={{ mt: 1 }}>
-              <EmptyState
-                title={t("unplottable.title")}
-                message={t("unplottable.message")}
-              />
-            </Box>
-          )}
-
           {summary.top_locations.length > 0 ? (
             <Box sx={{ mt: 2 }}>
               <Typography variant="h3" sx={{ mb: 1 }}>
@@ -320,16 +256,13 @@ export function GeointPage(): ReactElement {
             </Box>
           ) : null}
 
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="body2" role="note">
-                {t("summary.noInference")}
-              </Typography>
-            </Box>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" role="note">
+              {t("summary.noInference")}
+            </Typography>
+          </Box>
         </Box>
       )}
     </Box>
   );
 }
-
-/** Type guard for the summary shape used by the columns. */
-export type { GeointSummary };
