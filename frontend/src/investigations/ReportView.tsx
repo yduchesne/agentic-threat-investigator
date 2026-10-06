@@ -32,6 +32,7 @@ import { stopReasonLabelKey } from "./investigation-stop-reason";
 import { statusLabelKey } from "./investigation-status";
 import type { SupportPresentationLookup } from "./support-presentations-queries";
 import { SupportReference } from "./FindingList";
+import { REPORT_TYPOGRAPHY } from "./report-typography";
 
 /** Stable, deterministic fragment identifiers for the Final Report. */
 export const REPORT_ANCHORS = {
@@ -110,7 +111,9 @@ function SummarySection({
   const { t } = useTranslation("overview");
   return (
     <Box component="section" id={REPORT_ANCHORS.summary}>
-      <Typography variant="h2">{t("summary.title")}</Typography>
+      <Typography variant="h2" sx={REPORT_TYPOGRAPHY.h2}>
+        {t("summary.title")}
+      </Typography>
       {report.summary.length > 0 ? (
         <Stack component="ul" sx={{ m: 0, pl: 3, gap: 0.25 }}>
           {report.summary.map((item: ReportSummaryItem) => (
@@ -138,7 +141,9 @@ function StatusSection({ report }: { report: Report }): ReactElement {
       : tInvestigations(statusLabelKey(report.outcome_status));
   return (
     <Box component="section" id={REPORT_ANCHORS.status}>
-      <Typography variant="h2">{t("status.title")}</Typography>
+      <Typography variant="h2" sx={REPORT_TYPOGRAPHY.h2}>
+        {t("status.title")}
+      </Typography>
       <Stack component="ul" sx={{ m: 0, pl: 3, gap: 0.25 }}>
         <Typography component="li" variant="body2">
           {t("status.criticality")} {criticalityText(t, report.criticality)}
@@ -185,7 +190,9 @@ function ContentsSection({ report }: { report: Report }): ReactElement {
   const hasNextSteps = report.recommended_next_steps.length > 0;
   return (
     <Box component="nav" id={REPORT_ANCHORS.contents} aria-label={t("contents.title")}>
-      <Typography variant="h2">{t("contents.title")}</Typography>
+      <Typography variant="h2" sx={REPORT_TYPOGRAPHY.h2}>
+        {t("contents.title")}
+      </Typography>
       <Stack component="ul" sx={{ m: 0, pl: 3, gap: 0.25 }}>
         <li>
           <a href={`#${REPORT_ANCHORS.status}`}>{t("status.title")}</a>
@@ -258,13 +265,16 @@ function FindingSupport({
     <>
       {evidence.length > 0 ? (
         <Box sx={{ mt: 1 }}>
-          <Typography variant="h4">{t("support.evidence")}</Typography>
+          <Typography variant="h5" sx={REPORT_TYPOGRAPHY.h5}>
+            {t("support.evidence")}
+          </Typography>
           <Stack component="ul" sx={{ listStyle: "none", m: 0, p: 0, gap: 0.25 }}>
             {evidence.map((support, index) => (
               <SupportReference
                 key={`e-${index}`}
                 support={support}
                 presentation={presentation}
+                presentationMode="report"
               />
             ))}
           </Stack>
@@ -272,13 +282,16 @@ function FindingSupport({
       ) : null}
       {relationships.length > 0 ? (
         <Box sx={{ mt: 1 }}>
-          <Typography variant="h4">{t("support.graphAnalysis")}</Typography>
+          <Typography variant="h5" sx={REPORT_TYPOGRAPHY.h5}>
+            {t("support.graphAnalysis")}
+          </Typography>
           <Stack component="ul" sx={{ listStyle: "none", m: 0, p: 0, gap: 0.25 }}>
             {relationships.map((support, index) => (
               <SupportReference
                 key={`r-${index}`}
                 support={support}
                 presentation={presentation}
+                presentationMode="report"
               />
             ))}
           </Stack>
@@ -308,19 +321,19 @@ function ReportFindingItem({
         p: 1.5,
       })}
     >
-      <Typography variant="h3">
+      <Typography variant="h4" sx={REPORT_TYPOGRAPHY.h4}>
         {t("finding.heading", {
           number: finding.report_finding_number,
           title: finding.title,
         })}
       </Typography>
-      <Typography variant="body2" sx={{ mt: 0.5 }}>
+      <Typography variant="body2" sx={{ mt: 0.5, ...REPORT_TYPOGRAPHY.metadata }}>
         {t("finding.criticality")} {criticalityText(t, finding.criticality)}
       </Typography>
-      <Typography variant="body2">
+      <Typography variant="body2" sx={REPORT_TYPOGRAPHY.metadata}>
         {t("finding.confidence")} {confidenceText(t, finding.confidence)}
       </Typography>
-      <Typography variant="body1" sx={{ mt: 0.75 }}>
+      <Typography variant="body1" sx={{ mt: 0.75, ...REPORT_TYPOGRAPHY.body }}>
         {finding.description}
       </Typography>
       <FindingSupport finding={finding} presentation={presentation} />
@@ -343,7 +356,9 @@ function OptionalSection({
   }
   return (
     <Box component="section" id={id}>
-      <Typography variant="h3">{title}</Typography>
+      <Typography variant="h3" sx={REPORT_TYPOGRAPHY.h3}>
+        {title}
+      </Typography>
       <Stack component="ul" sx={{ m: 0, pl: 3, gap: 0.25 }}>
         {items.map((item, index) => (
           <Typography key={index} component="li" variant="body2">
@@ -364,7 +379,9 @@ function ResearchContext({ report }: { report: Report }): ReactElement | null {
   }
   return (
     <Box component="section" id={REPORT_ANCHORS.research}>
-      <Typography variant="h3">{t("research.title")}</Typography>
+      <Typography variant="h3" sx={REPORT_TYPOGRAPHY.h3}>
+        {t("research.title")}
+      </Typography>
       <Typography variant="caption" sx={{ display: "block" }}>
         {t("research.intro")}
       </Typography>
@@ -422,15 +439,21 @@ export function ReportContent({
   return (
     <Stack spacing={2.5}>
       <Box>
-        <Typography variant="h1">{report.title}</Typography>
+        <Typography variant="h1" sx={REPORT_TYPOGRAPHY.h1}>
+          {report.title}
+        </Typography>
       </Box>
       <StatusSection report={report} />
       <SummarySection report={report} />
       <ContentsSection report={report} />
       <Box component="section" id={REPORT_ANCHORS.details}>
-        <Typography variant="h2">{t("details.title")}</Typography>
+        <Typography variant="h2" sx={REPORT_TYPOGRAPHY.h2}>
+          {t("details.title")}
+        </Typography>
         <Box component="section" id={REPORT_ANCHORS.findings} sx={{ mt: 1 }}>
-          <Typography variant="h3">{t("findings.title")}</Typography>
+          <Typography variant="h3" sx={REPORT_TYPOGRAPHY.h3}>
+            {t("findings.title")}
+          </Typography>
           <Stack spacing={1.5} sx={{ mt: 1 }}>
             {report.findings.map((finding) => (
               <ReportFindingItem

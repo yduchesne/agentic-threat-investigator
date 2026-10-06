@@ -56,7 +56,6 @@ export function ResourceDetailView({
         component="span"
         sx={{ color: "primary.main", fontSize: "0.875rem", lineHeight: 1.2 }}
       >
-        <Box component="span" aria-hidden="true">{"< "}</Box>
         <MuiLink
           component="button"
           type="button"
@@ -126,7 +125,6 @@ export function RouteDetailView({
         component="span"
         sx={{ color: "primary.main", fontSize: "0.875rem", lineHeight: 1.2 }}
       >
-        <Box component="span" aria-hidden="true">{"< "}</Box>
         <MuiLink
           component={RouterLink}
           to={backTo}

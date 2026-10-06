@@ -108,6 +108,27 @@ test.describe("PR 35-5 canonical Final Report", () => {
     });
     expect(headingOrder).toBe("status-first");
 
+    // Coherent nested semantic heading hierarchy:
+    // Details h2 -> Findings h3 -> Finding h4 -> direct support h5.
+    await expect(
+      page.locator("#details").getByRole("heading", { level: 2 }),
+    ).toBeVisible();
+    await expect(
+      page.locator("#findings").getByRole("heading", { level: 3 }),
+    ).toBeVisible();
+    await expect(
+      page.locator("#finding-1").getByRole("heading", { level: 4 }),
+    ).toBeVisible();
+    await expect(
+      page.locator("#finding-2").getByRole("heading", { level: 4 }),
+    ).toBeVisible();
+    await expect(
+      page.locator("#finding-1").getByRole("heading", { level: 5 }),
+    ).toHaveCount(1);
+    await expect(
+      page.locator("#finding-2").getByRole("heading", { level: 5 }),
+    ).toHaveCount(1);
+
     // Summary retains every canonical Finding with deterministic numbering.
     await expect(
       page.getByText(/Finding 1: Generated summary for canonical finding 1\./),
@@ -131,12 +152,24 @@ test.describe("PR 35-5 canonical Final Report", () => {
       page.getByText(/Generated reader-facing description for canonical finding 2\./),
     ).toBeVisible();
 
-    // Direct support subsections; no Corroboration wrapper and no
+    // Direct support subsections at level 5; no Corroboration wrapper and no
     // relationship-observation report heading.
-    await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Graph Analysis" }),
+      page.getByRole("heading", { name: "Evidence", level: 5 }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Graph Analysis", level: 5 }),
+    ).toBeVisible();
+    for (const level of [1, 2, 3, 4] as const) {
+      expect(
+        await page.getByRole("heading", { name: "Evidence", level }).count(),
+      ).toBe(0);
+      expect(
+        await page
+          .getByRole("heading", { name: "Graph Analysis", level })
+          .count(),
+      ).toBe(0);
+    }
     expect(await page.getByText("Corroboration").count()).toBe(0);
     expect(
       await page.getByRole("heading", { name: "Relationship observation" }).count(),
