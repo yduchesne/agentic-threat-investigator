@@ -166,6 +166,7 @@ export function buildAssessment(
         disposition: "supporting",
         statement: "Threat-intelligence and reputation sources associate the root indicator with known malicious delivery infrastructure.",
         confidence: "high",
+        criticality: "high",
         support: [{ kind: "evidence", evidence_id: EVIDENCE_ID }],
       },
     ],
@@ -187,10 +188,13 @@ export function buildReport(overrides: Partial<Report> = {}): Report {
     assessment_id: assessmentId,
     verdict: "malicious",
     confidence: "high",
+    criticality: "high",
     title: "ATI deterministic investigation report",
-    executive_summary: [
+    summary: [
       {
-        text: "The investigation concluded that the root indicator participates in malicious delivery infrastructure with high confidence.",
+        report_finding_number: 1,
+        assessment_finding_ordinal: 1,
+        text: "The root indicator participates in malicious delivery infrastructure.",
         support: [
           {
             kind: "assessment_finding",
@@ -203,10 +207,15 @@ export function buildReport(overrides: Partial<Report> = {}): Report {
     findings: [
       {
         assessment_finding_ordinal: 1,
+        report_finding_number: 1,
+        criticality: "high",
+        title: "Root indicator linked to malicious delivery infrastructure",
         category: "reputation",
         disposition: "supporting",
         statement: "Threat-intelligence and reputation sources associate the root indicator with known malicious delivery infrastructure.",
         confidence: "high",
+        summary: "The root indicator participates in malicious delivery infrastructure.",
+        description: "Threat-intelligence observations associate the root indicator with known malicious delivery infrastructure.",
         support: [{ kind: "evidence", evidence_id: EVIDENCE_ID }],
       },
     ],
@@ -217,6 +226,10 @@ export function buildReport(overrides: Partial<Report> = {}): Report {
     limitations: ["Report caveats are copied from the current Assessment."],
     unresolved_questions: [],
     recommended_next_steps: ["Monitor the resolved delivery infrastructure."],
+    started_at: "2026-06-01T10:00:00Z",
+    ended_at: "2026-06-01T10:06:00Z",
+    outcome_status: "completed",
+    stop_reason: null,
     created_at: "2026-06-01T10:06:00Z",
     version: 1,
     ...overrides,

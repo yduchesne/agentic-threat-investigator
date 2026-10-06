@@ -38,6 +38,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -63,7 +64,8 @@ from agentic_threat_investigator.domain.investigation_timeline import (
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
-    ReportNarrativeStatement,
+    ReportFindingSnapshot,
+    ReportSummaryItem,
 )
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
@@ -270,6 +272,7 @@ def test_u12_assessment_mapping_preserves_structured_findings() -> None:
         disposition=FindingDisposition.SUPPORTING,
         statement="blocklisted by two sources",
         confidence=AssessmentConfidence.HIGH,
+        criticality=FindingCriticality.HIGH,
         support=(support,),
     )
     assessment = Assessment(
@@ -294,27 +297,51 @@ def test_u12_assessment_mapping_preserves_structured_findings() -> None:
 
 
 def test_u13_report_mapping_preserves_structured_snapshots() -> None:
-    """Report mapping preserves narrative statements and snapshots."""
-    ref = AssessmentFindingRef(assessment_id=uuid4(), finding_ordinal=1)
-    statement = ReportNarrativeStatement(text="malicious", support=(ref,))
+    """Report mapping preserves the finding-centric Summary and snapshots."""
+    assessment_id = uuid4()
+    ref = AssessmentFindingRef(assessment_id=assessment_id, finding_ordinal=1)
+    finding = ReportFindingSnapshot(
+        assessment_finding_ordinal=1,
+        report_finding_number=1,
+        criticality=FindingCriticality.HIGH,
+        title="Short factual title",
+        category=FindingCategory.REPUTATION,
+        disposition=FindingDisposition.SUPPORTING,
+        statement="malicious",
+        confidence=AssessmentConfidence.HIGH,
+        summary="malicious",
+        description="Deterministic description.",
+        support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
+    )
+    summary_item = ReportSummaryItem(
+        report_finding_number=1,
+        assessment_finding_ordinal=1,
+        text="malicious",
+        support=(ref,),
+    )
     report = InvestigationReport(
         id=uuid4(),
         investigation_id=uuid4(),
-        assessment_id=ref.assessment_id,
+        assessment_id=assessment_id,
         verdict=Verdict.MALICIOUS,
         confidence=AssessmentConfidence.HIGH,
+        criticality=FindingCriticality.HIGH,
         title="Investigation report",
-        executive_summary=(statement,),
+        summary=(summary_item,),
+        findings=(finding,),
+        outcome_status=InvestigationStatus.COMPLETED,
         version=1,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     from agentic_threat_investigator.api.dto.report import AssessmentFindingRefResponse
 
     response = to_report_response(report)
-    assert response.executive_summary[0].text == "malicious"
-    support = response.executive_summary[0].support[0]
+    assert response.summary[0].text == "malicious"
+    support = response.summary[0].support[0]
     assert isinstance(support, AssessmentFindingRefResponse)
     assert support.assessment_id == ref.assessment_id
+    assert response.findings[0].criticality is FindingCriticality.HIGH
+    assert response.criticality is FindingCriticality.HIGH
 
 
 def test_u14_timeline_mapping_excludes_hidden_reasoning() -> None:

@@ -35,7 +35,6 @@ from agentic_threat_investigator.domain.relationships import (
 from agentic_threat_investigator.domain.report import (
     AssessmentFindingRef,
     InvestigationReport,
-    ResearchClaimRef,
 )
 from agentic_threat_investigator.domain.research import ResearchResult
 from agentic_threat_investigator.evaluation.coordinator import CoordinatorActionRecord
@@ -374,26 +373,14 @@ class InvestigationEvaluator:
                 failures.append(InvestigationFailureCode.INVALID_REPORT_REFERENCE)
                 return
         assessment_finding_count = len(assessment.findings)
-        for statement in report.executive_summary:
-            for ref in statement.support:
-                if isinstance(ref, AssessmentFindingRef):
-                    if (
-                        ref.assessment_id != assessment.id
-                        or ref.finding_ordinal > assessment_finding_count
-                    ):
-                        failures.append(
-                            InvestigationFailureCode.INVALID_REPORT_REFERENCE
-                        )
-                        return
-                elif isinstance(ref, ResearchClaimRef):
-                    result = results_by_id.get(ref.research_result_id)
-                    if result is None or not any(
-                        claim.id == ref.research_claim_id for claim in result.claims
-                    ):
-                        failures.append(
-                            InvestigationFailureCode.INVALID_REPORT_REFERENCE
-                        )
-                        return
+        for item in report.summary:
+            for ref in item.support:
+                if isinstance(ref, AssessmentFindingRef) and (
+                    ref.assessment_id != assessment.id
+                    or ref.finding_ordinal > assessment_finding_count
+                ):
+                    failures.append(InvestigationFailureCode.INVALID_REPORT_REFERENCE)
+                    return
 
     @staticmethod
     def _trajectory_failures(

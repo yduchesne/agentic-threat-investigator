@@ -150,7 +150,7 @@ test.describe("PR 31F-6 raw-pointer list/detail Evidence journey", () => {
       await assertResponsive(page, `c${cycle}-bar-collapsed`);
 
       // RAW Back to Evidence restores the bounded list.
-      await rawPointer(page, page.getByRole("button", { name: "Back to Evidence" }), `c${cycle}-back`);
+      await rawPointer(page, page.getByRole("button", { name: "< Back" }), `c${cycle}-back`);
       await expect(table).toBeVisible({ timeout: 30_000 });
       await assertHealthy(page, table, `c${cycle}-list-returned`);
       await expect(page.getByText(F02_ROOT_DOMAIN).first()).toBeVisible({ timeout: 30_000 });
@@ -161,7 +161,7 @@ test.describe("PR 31F-6 raw-pointer list/detail Evidence journey", () => {
       await rawPointer(page, view, `c${cycle}-view-again`);
       await expect(detailHeading).toBeVisible({ timeout: 30_000 });
       await assertResponsive(page, `c${cycle}-final`);
-      await rawPointer(page, page.getByRole("button", { name: "Back to Evidence" }), `c${cycle}-back-again`);
+      await rawPointer(page, page.getByRole("button", { name: "< Back" }), `c${cycle}-back-again`);
       await expect(table).toBeVisible({ timeout: 30_000 });
       await assertResponsive(page, `c${cycle}-final-back`);
     }

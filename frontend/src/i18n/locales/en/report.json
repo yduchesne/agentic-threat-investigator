@@ -1,7 +1,6 @@
 {
-  "title": "Report",
+  "title": "Final Report",
   "none": "This investigation has no persisted Report.",
-  "backToOverview": "Back to Overview",
   "loading": "Loading report…",
   "loadError": "Unable to load the Report",
   "meta.createdAt": "Created:",

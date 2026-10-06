@@ -104,7 +104,7 @@ describe("InvestigationMapPage states (B-U01..B-U17)", () => {
     await renderMap([geolocationsHandler(collection())]);
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
     expect(tabs).toEqual([
-      "Overview",
+      "REPORT",
       "Evidence",
       "Graph",
       "GEOINT",

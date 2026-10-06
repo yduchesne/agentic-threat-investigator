@@ -110,7 +110,7 @@ test.describe("PR 31F-8 routed cross-resource navigation acceptance", () => {
         page.getByRole("heading", { name: "Relationship details" }),
       ).toBeVisible({ timeout: 30_000 });
       await assertResponsive(page, `c${cycle}-detail`);
-      await page.getByRole("button", { name: "Back to Relationships" }).click();
+      await page.getByRole("button", { name: "< Back" }).click();
       await expect(relationshipsTable).toBeVisible({ timeout: 30_000 });
       await assertResponsive(page, `c${cycle}-back`);
 
@@ -161,7 +161,7 @@ test.describe("PR 31F-8 routed cross-resource navigation acceptance", () => {
       await assertResponsive(page, `c${cycle}-back-detail`);
       // The semantic Back control closes the detail (the Relationships tab
       // is inert while the detail route is active).
-      await page.getByRole("button", { name: "Back to Relationships" }).click();
+      await page.getByRole("button", { name: "< Back" }).click();
       await expect(relationshipsTable).toBeVisible({ timeout: 30_000 });
       await assertResponsive(page, `c${cycle}-detail-closed`);
 

@@ -25,6 +25,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -50,6 +51,7 @@ def decision_factory(**overrides: object) -> EvidenceAnalystDecision:
                 disposition=FindingDisposition.SUPPORTING,
                 statement="The domain resolves to the address.",
                 confidence=AssessmentConfidence.MEDIUM,
+                criticality=FindingCriticality.MEDIUM,
                 support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
             ),
         ),

@@ -10,7 +10,7 @@
  "location.entities.title": "Entities at this location",
  "location.observations.title": "Observations at this location",
  "detail.observation.title": "Geographic observation",
- "detail.observation.backToContext": "Back to Geographic context",
+ "detail.observation.backToContext": "< Back",
  "intro": "Evidence-backed canonical geographic context for this Investigation.",
  "loading": "Loading geographic context…",
  "error.title": "Unable to load geographic context",

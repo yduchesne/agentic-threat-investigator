@@ -44,12 +44,10 @@ from agentic_threat_investigator.api.dto.relationship import (
 )
 from agentic_threat_investigator.api.dto.report import (
     AssessmentFindingRefResponse,
-    NarrativeStatementResponse,
     ReportFindingResponse,
     ReportResearchClaimResponse,
     ReportResponse,
-    ReportSourceRefResponse,
-    ResearchClaimRefResponse,
+    ReportSummaryItemResponse,
 )
 from agentic_threat_investigator.api.dto.research import (
     ResearchCitationResponse,
@@ -102,13 +100,10 @@ from agentic_threat_investigator.domain.investigation_timeline import (
     InvestigationTimelineEvent,
 )
 from agentic_threat_investigator.domain.report import (
-    AssessmentFindingRef,
     InvestigationReport,
     ReportFindingSnapshot,
-    ReportNarrativeStatement,
     ReportResearchClaimSnapshot,
-    ReportSourceRef,
-    ResearchClaimRef,
+    ReportSummaryItem,
 )
 from agentic_threat_investigator.domain.research import (
     ResearchCitation,
@@ -490,6 +485,7 @@ def to_finding_response(finding: AnalyticalFinding) -> FindingResponse:
         disposition=finding.disposition,
         statement=finding.statement,
         confidence=finding.confidence,
+        criticality=finding.criticality,
         support=tuple(to_finding_support_response(item) for item in finding.support),
     )
 
@@ -518,28 +514,19 @@ def to_assessment_response(assessment: Assessment) -> AssessmentResponse:
     )
 
 
-def _report_source_ref(ref: ReportSourceRef) -> ReportSourceRefResponse:
-    """Map one report narrative source reference."""
-    if isinstance(ref, AssessmentFindingRef):
-        return AssessmentFindingRefResponse(
-            assessment_id=ref.assessment_id,
-            finding_ordinal=ref.finding_ordinal,
-        )
-    if isinstance(ref, ResearchClaimRef):
-        return ResearchClaimRefResponse(
-            research_result_id=ref.research_result_id,
-            research_claim_id=ref.research_claim_id,
-        )
-    raise TypeError("unknown report source reference type")
-
-
-def _narrative_statement(
-    statement: ReportNarrativeStatement,
-) -> NarrativeStatementResponse:
-    """Map one narrative statement with its typed support."""
-    return NarrativeStatementResponse(
-        text=statement.text,
-        support=tuple(_report_source_ref(ref) for ref in statement.support),
+def _summary_item(item: ReportSummaryItem) -> ReportSummaryItemResponse:
+    """Map one finding-centric Summary projection item."""
+    return ReportSummaryItemResponse(
+        report_finding_number=item.report_finding_number,
+        assessment_finding_ordinal=item.assessment_finding_ordinal,
+        text=item.text,
+        support=tuple(
+            AssessmentFindingRefResponse(
+                assessment_id=ref.assessment_id,
+                finding_ordinal=ref.finding_ordinal,
+            )
+            for ref in item.support
+        ),
     )
 
 
@@ -547,10 +534,15 @@ def _report_finding(finding: ReportFindingSnapshot) -> ReportFindingResponse:
     """Map one report finding snapshot."""
     return ReportFindingResponse(
         assessment_finding_ordinal=finding.assessment_finding_ordinal,
+        report_finding_number=finding.report_finding_number,
+        criticality=finding.criticality,
+        title=finding.title,
         category=finding.category,
         disposition=finding.disposition,
         statement=finding.statement,
         confidence=finding.confidence,
+        summary=finding.summary,
+        description=finding.description,
         support=tuple(to_finding_support_response(item) for item in finding.support),
     )
 
@@ -581,10 +573,9 @@ def to_report_response(report: InvestigationReport) -> ReportResponse:
         assessment_id=report.assessment_id,
         verdict=report.verdict,
         confidence=report.confidence,
+        criticality=report.criticality,
         title=report.title,
-        executive_summary=tuple(
-            _narrative_statement(statement) for statement in report.executive_summary
-        ),
+        summary=tuple(_summary_item(item) for item in report.summary),
         findings=tuple(_report_finding(finding) for finding in report.findings),
         research_context=tuple(
             _report_research_claim(snapshot) for snapshot in report.research_context
@@ -592,6 +583,10 @@ def to_report_response(report: InvestigationReport) -> ReportResponse:
         limitations=report.limitations,
         unresolved_questions=report.unresolved_questions,
         recommended_next_steps=report.recommended_next_steps,
+        started_at=report.started_at,
+        ended_at=report.ended_at,
+        outcome_status=report.outcome_status,
+        stop_reason=report.stop_reason,
         source_evidence_ids=report.source_evidence_ids,
         source_relationship_observation_ids=report.source_relationship_observation_ids,
         source_research_result_ids=report.source_research_result_ids,

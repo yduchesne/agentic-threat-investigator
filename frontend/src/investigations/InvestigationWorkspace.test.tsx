@@ -36,7 +36,7 @@ const AUTH = [authMeSuccess, runtimeFake];
 const INVESTIGATION_ID = "20000000-0000-4000-8000-000000000001";
 
 describe("Investigation workspace routes", () => {
-  it("redirects /investigations/:id to the Overview (U43)", async () => {
+  it("redirects /investigations/:id to the REPORT surface (U43)", async () => {
     setHttpHandlers(
       ...AUTH,
       investigationLifecycleHandler([
@@ -44,13 +44,13 @@ describe("Investigation workspace routes", () => {
       ]),
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}`);
-    // The index route redirected to the Overview surface: wait for the
-    // substantive Overview content (stable after the redirect), then the
-    // now-active Overview tab (PR 31F-8: the active tab is inert).
+    // The index route redirected to the REPORT surface: wait for the
+    // bounded in-progress content, then the now-active REPORT tab
+    // (PR 31F-8: the active tab is inert).
     expect(
       await screen.findByText("Investigation in progress"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "REPORT" })).toBeInTheDocument();
   });
 
   it("exposes exactly the consolidated primary tabs (PR 35-2 U01)", async () => {
@@ -64,7 +64,7 @@ describe("Investigation workspace routes", () => {
     await screen.findByText("Investigation in progress");
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
     expect(tabs).toEqual([
-      "Overview",
+      "REPORT",
       "Evidence",
       "Graph",
       "GEOINT",
@@ -464,7 +464,7 @@ describe("Investigation workspace More navigation + legacy pivot policy (PR 31F-
     );
     // The normal Investigation shell is mounted and usable.
     expect(
-      await screen.findByRole("tab", { name: "Overview" }),
+      await screen.findByRole("tab", { name: "REPORT" }),
     ).toBeInTheDocument();
   });
 });

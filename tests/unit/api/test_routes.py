@@ -27,6 +27,7 @@ from agentic_threat_investigator.app.query.relationships import (
 from agentic_threat_investigator.domain.assessment import (
     Assessment,
     AssessmentConfidence,
+    FindingCriticality,
     Verdict,
 )
 from agentic_threat_investigator.domain.entities import EntityType
@@ -449,7 +450,9 @@ def test_r13_current_report_uses_durable_pointer_service() -> None:
         assessment_id=uuid4(),
         verdict=Verdict.SUSPICIOUS,
         confidence=AssessmentConfidence.MEDIUM,
+        criticality=FindingCriticality.LOW,
         title="Report",
+        outcome_status=InvestigationStatus.COMPLETED,
         version=2,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
@@ -472,7 +475,9 @@ def test_r14_report_markdown_is_deterministic_and_pure() -> None:
         assessment_id=uuid4(),
         verdict=Verdict.MALICIOUS,
         confidence=AssessmentConfidence.HIGH,
+        criticality=FindingCriticality.HIGH,
         title="Malicious infrastructure",
+        outcome_status=InvestigationStatus.COMPLETED,
         version=1,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
@@ -489,7 +494,8 @@ def test_r14_report_markdown_is_deterministic_and_pure() -> None:
     assert first.status_code == 200
     assert first.headers["content-type"].startswith("text/markdown")
     assert "# Malicious infrastructure" in first.text
-    assert "Verdict: **malicious**" in first.text
+    assert "## Summary" in first.text
+    assert "- Criticality: **high**" in first.text
     assert first.content == second.content
 
 

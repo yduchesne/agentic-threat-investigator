@@ -26,7 +26,6 @@ from agentic_threat_investigator.domain.assessment import (
 from agentic_threat_investigator.domain.entities import EntityType
 from agentic_threat_investigator.domain.evidence import EvidenceType
 from agentic_threat_investigator.domain.report import (
-    ReportNarrativeStatement,
     ReportResearchClaimSnapshot,
 )
 from agentic_threat_investigator.evaluation.analyst.models import (
@@ -220,12 +219,20 @@ class TestExistingEvaluatorAuthority:
         scenario = corpus_scenario(S01)
         resolution = scenario_resolution(scenario)
         canonical = canonical_report(scenario, resolution)
-        support = canonical.executive_summary[0].support
+        item = canonical.summary[0]
         report = canonical.model_copy(
             update={
-                "executive_summary": (
-                    ReportNarrativeStatement(text="unrelated prose", support=support),
-                )
+                "summary": (item.model_copy(update={"text": "unrelated prose"}),),
+                "findings": tuple(
+                    finding.model_copy(
+                        update={
+                            "title": "unrelated prose",
+                            "summary": "unrelated prose",
+                            "description": "unrelated prose",
+                        }
+                    )
+                    for finding in canonical.findings
+                ),
             }
         )
         adapter = _adapter((scenario,))
@@ -304,18 +311,7 @@ class TestFailureExplanationAndMetrics:
         scenario = corpus_scenario(S01)
         resolution = scenario_resolution(scenario)
         one = canonical_report(scenario, resolution)
-        support = one.executive_summary[0].support
-        two = one.model_copy(
-            update={
-                "executive_summary": (
-                    one.executive_summary[0],
-                    ReportNarrativeStatement(
-                        text="malicious indicator with high confidence",
-                        support=support,
-                    ),
-                )
-            }
-        )
+        two = one.model_copy(update={"summary": (one.summary[0], one.summary[0])})
         adapter = _adapter((scenario,))
         first = await _evaluate(
             adapter,

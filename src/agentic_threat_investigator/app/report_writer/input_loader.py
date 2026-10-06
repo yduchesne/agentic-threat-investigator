@@ -195,6 +195,10 @@ class ReportWriterInputLoader:
             evidence=evidence_items,
             relationship_observations=observation_items,
             research_results=research_results,
+            investigation_status=investigation.status,
+            started_at=investigation.started_at,
+            completed_at=investigation.completed_at,
+            stop_reason=investigation.stop_reason,
         )
         serialized = report_input.model_dump_json().encode("utf-8")
         if len(serialized) > self._max_serialized_input_bytes:

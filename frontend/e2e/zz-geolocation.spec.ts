@@ -161,7 +161,7 @@ test.describe("PR 25B real-stack Investigation Map", () => {
     await expect(page.getByText("Geolocation", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("urn:ati:source:dbip_city_lite").first()).toBeVisible();
     // Return safely to the Map.
-    await activate(page, page.getByRole("button", { name: "Back to Evidence" }));
+    await activate(page, page.getByRole("button", { name: "< Back" }));
     await expect(page.getByRole("heading", { name: "Evidence" })).not.toBeVisible();
     await expect(
       page.getByRole("heading", { name: "GEOINT" }),

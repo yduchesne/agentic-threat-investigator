@@ -19,6 +19,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -181,6 +182,7 @@ def finding(
         disposition=disposition,
         statement="Unit-test finding.",
         confidence=confidence,
+        criticality=FindingCriticality.MEDIUM,
         support=support,
     )
 

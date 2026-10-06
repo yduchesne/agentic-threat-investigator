@@ -126,7 +126,7 @@ test.describe("PR 24C real-stack analyst browsing", () => {
       .first()
       .dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Evidence details" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Back to Evidence" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "< Back" })).toBeVisible();
     await expect(page.getByText("Observed at").first()).toBeVisible();
     await expect(page.getByText("Retrieved at").first()).toBeVisible();
     await page.goto(evidenceUrl);
@@ -191,12 +191,12 @@ test.describe("PR 24C real-stack analyst browsing", () => {
     // Escape/backdrop close path and no fixed overlay layer.
     await page.getByRole("button", { name: /^View / }).first().dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Timeline details" })).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("button", { name: "Back to Timeline" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Timeline details" })).not.toBeVisible({ timeout: 20_000 });
     await expect(page).toHaveURL(/event_type=evidence_persisted/);
     await page.getByRole("button", { name: /^View / }).first().dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Timeline details" })).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("button", { name: "Back to Timeline" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Timeline details" })).not.toBeVisible({ timeout: 20_000 });
     await page.getByRole("button", { name: /^View / }).first().dispatchEvent("click");
     const timelineHeading = page.getByRole("heading", { name: "Timeline details" });
@@ -206,7 +206,7 @@ test.describe("PR 24C real-stack analyst browsing", () => {
       getComputedStyle(node as HTMLElement).position,
     );
     expect(inspectorPosition).not.toBe("fixed");
-    await page.getByRole("button", { name: "Back to Timeline" }).dispatchEvent("click");
+    await page.getByRole("button", { name: "< Back" }).dispatchEvent("click");
     await expect(page.getByRole("heading", { name: "Timeline details" })).not.toBeVisible({ timeout: 20_000 });
     await expect(page).toHaveURL(/event_type=evidence_persisted/);
 

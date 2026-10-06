@@ -750,6 +750,20 @@ but the following are hard invariants:
 6. the final human-readable document is a deterministic rendering of
    this structured model.
 
+The canonical Final Report (PR 35-5) is one ordered finding set derived
+from the current Assessment. Each canonical finding appears exactly once,
+ordered criticality-first and numbered contiguously by the application.
+For every canonical finding the Report Writer authors three bounded,
+provenance-constrained presentation fields — `title`, `summary`, and
+`description` — which are persisted in the immutable report version and
+never regenerated on read, render, export, deep-link, or history view.
+The application owns finding existence, order, numbering, category,
+disposition, confidence, support, Status, and the table of contents; the
+Report Writer never selects, orders, or renumbers findings and never
+changes analytical metadata. `AnalyticalFinding.statement` remains the
+authoritative analytical statement and is distinct from the reader-facing
+`description`.
+
 ### Deterministic rendered representations
 
 Markdown, HTML, and plain-text reports are derived representations, not

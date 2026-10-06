@@ -25,37 +25,61 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
 from agentic_threat_investigator.domain.audit import AuditEvent
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 from agentic_threat_investigator.domain.report import (
+    AssessmentFindingRef,
     InvestigationReport,
     ReportFindingSnapshot,
-    ReportNarrativeStatement,
+    ReportSummaryItem,
 )
 
 
 def _report() -> InvestigationReport:
     """Build one canonical report candidate."""
     evidence_id = uuid4()
+    assessment_id = uuid4()
+    finding = ReportFindingSnapshot(
+        assessment_finding_ordinal=1,
+        report_finding_number=1,
+        criticality=FindingCriticality.HIGH,
+        title="Reputation evidence indicates malicious activity.",
+        category=FindingCategory.REPUTATION,
+        disposition=FindingDisposition.SUPPORTING,
+        statement="Reputation evidence indicates malicious activity.",
+        confidence=AssessmentConfidence.HIGH,
+        summary="Reputation evidence indicates malicious activity.",
+        description="Deterministic description.",
+        support=(EvidenceSupport(kind="evidence", evidence_id=evidence_id),),
+    )
     return InvestigationReport(
         investigation_id=uuid4(),
-        assessment_id=uuid4(),
+        assessment_id=assessment_id,
         verdict=Verdict.MALICIOUS,
         confidence=AssessmentConfidence.HIGH,
+        criticality=FindingCriticality.HIGH,
         title="Canonical report title",
-        findings=(
-            ReportFindingSnapshot(
+        summary=(
+            ReportSummaryItem(
+                report_finding_number=1,
                 assessment_finding_ordinal=1,
-                category=FindingCategory.REPUTATION,
-                disposition=FindingDisposition.SUPPORTING,
-                statement="Reputation evidence indicates malicious activity.",
-                confidence=AssessmentConfidence.HIGH,
-                support=(EvidenceSupport(kind="evidence", evidence_id=evidence_id),),
+                text=finding.summary,
+                support=(
+                    AssessmentFindingRef(
+                        kind="assessment_finding",
+                        assessment_id=assessment_id,
+                        finding_ordinal=1,
+                    ),
+                ),
             ),
         ),
+        findings=(finding,),
         limitations=("a limitation",),
+        outcome_status=InvestigationStatus.COMPLETED,
         source_evidence_ids=(evidence_id,),
     )
 
@@ -246,7 +270,7 @@ async def test_pointer_failure_rolls_back_report() -> None:
 async def test_oversized_collection_rejected_before_uow() -> None:
     """Oversized candidate collections fail before any UnitOfWork entry."""
     service, reports, investigations, audit, uow = _harness()
-    report = _report().model_copy(update={"executive_summary": _summary(101)})
+    report = _report().model_copy(update={"summary": _summary(101)})
     # Reject via the shared bound checker with a small configured limit.
     service = InvestigationReportPersistenceService(lambda: uow, batch_size=100)
     with pytest.raises(ReportCollectionLimitExceededError):
@@ -254,15 +278,21 @@ async def test_oversized_collection_rejected_before_uow() -> None:
     assert reports.appended == []
 
 
-def _summary(count: int) -> tuple[ReportNarrativeStatement, ...]:
-    """Build many narrative statements for the bound test."""
-
-    from agentic_threat_investigator.domain.report import AssessmentFindingRef
-
-    ref = AssessmentFindingRef(
-        kind="assessment_finding", assessment_id=uuid4(), finding_ordinal=1
-    )
+def _summary(count: int) -> tuple[ReportSummaryItem, ...]:
+    """Build many Summary projection items for the bound test."""
+    assessment_id = uuid4()
     return tuple(
-        ReportNarrativeStatement(text=f"statement {i}", support=(ref,))
+        ReportSummaryItem(
+            report_finding_number=i + 1,
+            assessment_finding_ordinal=i + 1,
+            text=f"statement {i}",
+            support=(
+                AssessmentFindingRef(
+                    kind="assessment_finding",
+                    assessment_id=assessment_id,
+                    finding_ordinal=i + 1,
+                ),
+            ),
+        )
         for i in range(count)
     )

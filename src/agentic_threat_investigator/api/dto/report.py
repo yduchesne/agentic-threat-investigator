@@ -1,22 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Public Report DTOs.
 
-The structured report DTO mirrors the persisted report resource explicitly;
-GET never regenerates a report and never invokes an LLM.
+The structured report DTO mirrors the persisted Final Report resource
+explicitly; GET never regenerates a report and never invokes an LLM.
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
+from agentic_threat_investigator.domain.investigation import InvestigationStatus
 
 from .assessment import FindingSupportResponse
 from .research import ResearchCitationResponse
@@ -32,41 +34,32 @@ class AssessmentFindingRefResponse(BaseModel):
     finding_ordinal: int
 
 
-class ResearchClaimRefResponse(BaseModel):
-    """Typed reference to one persisted ResearchClaim of a supplied result."""
+class ReportSummaryItemResponse(BaseModel):
+    """One finding-centric Summary projection item."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    kind: Literal["research_claim"] = "research_claim"
-    research_result_id: UUID
-    research_claim_id: UUID
-
-
-ReportSourceRefResponse = Annotated[
-    AssessmentFindingRefResponse | ResearchClaimRefResponse,
-    Field(discriminator="kind"),
-]
-
-
-class NarrativeStatementResponse(BaseModel):
-    """One model-authored narrative statement with explicit typed support."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
+    report_finding_number: int
+    assessment_finding_ordinal: int
     text: str
-    support: tuple[ReportSourceRefResponse, ...]
+    support: tuple[AssessmentFindingRefResponse, ...]
 
 
 class ReportFindingResponse(BaseModel):
-    """Application-copied snapshot of one authoritative Assessment finding."""
+    """Application-copied snapshot of one canonical Assessment finding."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     assessment_finding_ordinal: int
+    report_finding_number: int
+    criticality: FindingCriticality
+    title: str
     category: FindingCategory
     disposition: FindingDisposition
     statement: str
     confidence: AssessmentConfidence
+    summary: str
+    description: str
     support: tuple[FindingSupportResponse, ...]
 
 
@@ -93,13 +86,18 @@ class ReportResponse(BaseModel):
     assessment_id: UUID
     verdict: Verdict
     confidence: AssessmentConfidence
+    criticality: FindingCriticality
     title: str
-    executive_summary: tuple[NarrativeStatementResponse, ...]
+    summary: tuple[ReportSummaryItemResponse, ...]
     findings: tuple[ReportFindingResponse, ...]
     research_context: tuple[ReportResearchClaimResponse, ...]
     limitations: tuple[str, ...]
     unresolved_questions: tuple[str, ...]
     recommended_next_steps: tuple[str, ...]
+    started_at: datetime | None
+    ended_at: datetime | None
+    outcome_status: InvestigationStatus
+    stop_reason: str | None
     source_evidence_ids: tuple[UUID, ...]
     source_relationship_observation_ids: tuple[UUID, ...]
     source_research_result_ids: tuple[UUID, ...]

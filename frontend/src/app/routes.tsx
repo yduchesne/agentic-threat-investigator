@@ -7,8 +7,8 @@
 //   /investigations    real cursor-based list (24B)
 //   /investigations/new                       create form (24B)
 //   /investigations/:id                        workspace (24B)
-//     -> /investigations/:id/overview          substantive Overview
-//     -> /investigations/:id/overview/report   full persisted Report
+//     -> /investigations/:id/overview          canonical REPORT surface (PR 35-5)
+//     -> /investigations/:id/overview/report   compat replace -> /overview
 //     -> /investigations/:id/evidence          analyst tables (24C)
 //     -> /investigations/:id/relationships
 //     -> /investigations/:id/relationships/observations
@@ -107,6 +107,8 @@ export function createAppRoutes(): RouteObject[] {
                   Component: WorkspaceIndexRedirect,
                 },
                 { path: "overview", Component: OverviewPage },
+                // PR 35-5 amendment: the legacy report URL is a bounded
+                // ``replace`` redirect to the canonical REPORT surface.
                 { path: "overview/report", Component: ReportPage },
                 { path: "evidence", Component: EvidencePage },
                 // PR 31F-8: exact Evidence detail is a routed surface.

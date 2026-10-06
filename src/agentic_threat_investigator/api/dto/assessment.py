@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     Verdict,
 )
@@ -39,6 +40,7 @@ class FindingResponse(BaseModel):
     disposition: FindingDisposition
     statement: str
     confidence: AssessmentConfidence
+    criticality: FindingCriticality
     support: tuple[FindingSupportResponse, ...]
 
 

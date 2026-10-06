@@ -32,7 +32,6 @@ from agentic_threat_investigator.domain.assessment import (
 )
 from agentic_threat_investigator.domain.immutable_json import thaw_json
 from agentic_threat_investigator.domain.report import (
-    AssessmentFindingRef,
     InvestigationReport,
 )
 from agentic_threat_investigator.telemetry.decorators import (
@@ -87,64 +86,48 @@ def raise_report_write_error(
     raise error
 
 
-def _narrative_rows(
+def _summary_rows(
     report: InvestigationReport,
-) -> tuple[
-    list[tuple[int, str]],
-    list[tuple[int, int, str, UUID | None, int | None, UUID | None, UUID | None]],
-]:
-    """Serialize executive-summary statements and their flat support rows."""
-    narrative: list[tuple[int, str]] = []
-    support: list[
-        tuple[int, int, str, UUID | None, int | None, UUID | None, UUID | None]
-    ] = []
-    for ordinal, statement in enumerate(report.executive_summary, start=1):
-        narrative.append((ordinal, statement.text))
-        for support_ordinal, ref in enumerate(statement.support, start=1):
-            if isinstance(ref, AssessmentFindingRef):
-                support.append(
-                    (
-                        ordinal,
-                        support_ordinal,
-                        ref.kind,
-                        ref.assessment_id,
-                        ref.finding_ordinal,
-                        None,
-                        None,
-                    )
-                )
-            else:
-                support.append(
-                    (
-                        ordinal,
-                        support_ordinal,
-                        ref.kind,
-                        None,
-                        None,
-                        ref.research_result_id,
-                        ref.research_claim_id,
-                    )
-                )
-    return narrative, support
+) -> list[tuple[int, int, int, str, UUID, int]]:
+    """Serialize the finding-centric Summary projection rows."""
+    rows: list[tuple[int, int, int, str, UUID, int]] = []
+    for ordinal, item in enumerate(report.summary, start=1):
+        ref = item.support[0]
+        rows.append(
+            (
+                ordinal,
+                item.report_finding_number,
+                item.assessment_finding_ordinal,
+                item.text,
+                ref.assessment_id,
+                ref.finding_ordinal,
+            )
+        )
+    return rows
 
 
 def _finding_rows(
     report: InvestigationReport,
 ) -> tuple[
-    list[tuple[int, str, str, str, str]],
+    list[tuple[int, int, str, str, str, str, str, str, str, str]],
     list[tuple[int, int, str, UUID | None, UUID | None]],
 ]:
     """Serialize finding snapshots and their flat support rows."""
-    findings: list[tuple[int, str, str, str, str]] = []
+    findings: list[tuple[int, int, str, str, str, str, str, str, str, str]] = []
     support: list[tuple[int, int, str, UUID | None, UUID | None]] = []
     for finding in report.findings:
         findings.append(
             (
                 finding.assessment_finding_ordinal,
+                finding.report_finding_number,
+                finding.criticality.value,
+                finding.title,
                 finding.category.value,
                 finding.disposition.value,
                 finding.statement,
                 finding.confidence.value,
+                finding.summary,
+                finding.description,
             )
         )
         for support_ordinal, item in enumerate(finding.support, start=1):
@@ -204,13 +187,18 @@ def _report_from_row(row: InvestigationReportRow) -> InvestigationReport:
             "assessment_id": row.assessment_id,
             "verdict": row.verdict,
             "confidence": row.confidence,
+            "criticality": row.criticality,
             "title": row.title,
-            "executive_summary": thaw_json(row.executive_summary),
+            "summary": thaw_json(row.summary),
             "findings": thaw_json(row.findings),
             "research_context": thaw_json(row.research_context),
             "limitations": tuple(row.limitations),
             "unresolved_questions": tuple(row.unresolved_questions),
             "recommended_next_steps": tuple(row.recommended_next_steps),
+            "started_at": row.started_at,
+            "ended_at": row.ended_at,
+            "outcome_status": row.outcome_status,
+            "stop_reason": row.stop_reason,
             "source_evidence_ids": tuple(row.source_evidence_ids),
             "source_relationship_observation_ids": tuple(
                 row.source_relationship_observation_ids
@@ -259,7 +247,7 @@ class PostgresInvestigationReportRepository(InvestigationReportRepository):
         # and execution.
         enforce_report_collection_bounds(report, self._batch_size)
         report_id = report.id or uuid4()
-        narrative, narrative_support = _narrative_rows(report)
+        summary = _summary_rows(report)
         findings, finding_support = _finding_rows(report)
         research = _research_rows(report)
         try:
@@ -268,10 +256,10 @@ class PostgresInvestigationReportRepository(InvestigationReportRepository):
                     SELECT id, version, created_at
                     FROM ati.append_investigation_report(
                         :id, :investigation_id, :assessment_id,
-                        :verdict, :confidence, :title,
-                        :executive_summary, :narrative_support,
-                        :findings, :finding_support, :research_context,
+                        :verdict, :confidence, :criticality, :title,
+                        :summary, :findings, :finding_support, :research_context,
                         :limitations, :unresolved, :next_steps,
+                        :started_at, :ended_at, :outcome_status, :stop_reason,
                         :source_evidence_ids, :source_observation_ids,
                         :source_research_ids, :actor_id, :request_id)
                 """),
@@ -281,15 +269,19 @@ class PostgresInvestigationReportRepository(InvestigationReportRepository):
                     "assessment_id": report.assessment_id,
                     "verdict": report.verdict.value,
                     "confidence": report.confidence.value,
+                    "criticality": report.criticality.value,
                     "title": report.title,
-                    "executive_summary": narrative,
-                    "narrative_support": narrative_support,
+                    "summary": summary,
                     "findings": findings,
                     "finding_support": finding_support,
                     "research_context": research,
                     "limitations": list(report.limitations),
                     "unresolved": list(report.unresolved_questions),
                     "next_steps": list(report.recommended_next_steps),
+                    "started_at": report.started_at,
+                    "ended_at": report.ended_at,
+                    "outcome_status": report.outcome_status.value,
+                    "stop_reason": report.stop_reason,
                     "source_evidence_ids": list(report.source_evidence_ids),
                     "source_observation_ids": list(
                         report.source_relationship_observation_ids

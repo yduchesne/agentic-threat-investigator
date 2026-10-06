@@ -74,10 +74,15 @@ function reportWithEvidenceSupport(): Report {
     findings: [
       {
         assessment_finding_ordinal: 1,
+        report_finding_number: 1,
+        criticality: "high",
+        title: "Root indicator linked to malicious delivery infrastructure",
         category: "reputation",
         disposition: "supporting",
         statement: REPORT_STATEMENT,
         confidence: "high",
+        summary: "The root indicator participates in malicious delivery infrastructure.",
+        description: REPORT_STATEMENT,
         support: [{ kind: "evidence", evidence_id: EVIDENCE_ID }],
       },
     ],
@@ -90,10 +95,15 @@ function reportWithObservationSupport(): Report {
     findings: [
       {
         assessment_finding_ordinal: 1,
+        report_finding_number: 1,
+        criticality: "high",
+        title: "Root indicator reported by independent sources",
         category: "reputation",
         disposition: "supporting",
         statement: "Reported by two independent observation sources.",
         confidence: "high",
+        summary: "Independent observation sources report the root indicator.",
+        description: "Reported by two independent observation sources.",
         support: [
           { kind: "relationship_observation", relationship_observation_id: OBSERVATION_ID },
         ],
@@ -208,8 +218,8 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
   it("Evidence support navigates to the exact scoped Evidence route", async () => {
     const capture = { reports: 0, assessments: 0 };
     setHttpHandlers(...baseOverviewHandlers(reportWithEvidenceSupport(), capture));
-    const { router } = renderAtPath(`${BASE}/overview`);
-    await screen.findByText("Supports");
+    const { router } = renderAtPath(`${BASE}/overview/report`);
+    await screen.findByRole("heading", { name: "Status" });
     await screen.findByText(REPORT_STATEMENT);
 
     await userEvent.click(screen.getByTestId("pivot-action-evidenceExact"));
@@ -233,7 +243,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     const capture = { reports: 0, assessments: 0 };
     const observationDetail = { requests: [] as string[] };
     setHttpHandlers(...baseOverviewHandlers(reportWithObservationSupport(), capture, observationDetail));
-    const { router } = renderAtPath(`${BASE}/overview`);
+    const { router } = renderAtPath(`${BASE}/overview/report`);
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
@@ -284,7 +294,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
         () => errorResponse(404, "relationship_not_found"),
       ),
     );
-    const { router } = renderAtPath(`${BASE}/overview`);
+    const { router } = renderAtPath(`${BASE}/overview/report`);
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
@@ -305,7 +315,7 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     const capture = { reports: 0, assessments: 0 };
     const observationDetail = { requests: [] as string[] };
     setHttpHandlers(...baseOverviewHandlers(reportWithObservationSupport(), capture, observationDetail));
-    const { router } = renderAtPath(`${BASE}/overview`);
+    const { router } = renderAtPath(`${BASE}/overview/report`);
     await screen.findByText("Reported by two independent observation sources.");
 
     await userEvent.click(
@@ -347,8 +357,8 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     );
     await screen.findByRole("heading", { name: "Relationship observation detail" });
 
-    // Browser Back walks the entry: the Overview surface returns and the
-    // Report support reference stays visible.
+    // Browser Back walks the entry: the canonical REPORT surface returns and
+    // the Report support reference stays visible.
     await router.navigate(-1);
     await screen.findByText("Reported by two independent observation sources.");
     expect(router.state.location.pathname).toBe(`${BASE}/overview`);
@@ -380,16 +390,21 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
       findings: [
         {
           assessment_finding_ordinal: 1,
+          report_finding_number: 1,
+          criticality: "medium",
+          title: "Reference without usable identity",
           category: "reputation",
           disposition: "supporting",
           statement: "Reference without usable identity.",
           confidence: "medium",
+          summary: "A reference without a usable identity was recorded.",
+          description: "Reference without usable identity.",
           support: [{ kind: "evidence", evidence_id: null }],
         },
       ],
     });
     setHttpHandlers(...baseOverviewHandlers(withoutIdentity, capture));
-    renderAtPath(`${BASE}/overview`);
+    renderAtPath(`${BASE}/overview/report`);
     await screen.findByText("Reference without usable identity.");
     // The unknown reference renders as text only; no action exists.
     expect(screen.queryAllByTestId("pivot-action-evidenceExact")).toHaveLength(0);
@@ -416,8 +431,8 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
       http.get("*/api/v1/investigations/:id/evidence", () =>
         jsonResponse({ items: [evidenceFixture()], next_cursor: null })),
     );
-    const { router } = renderAtPath(`${BASE}/overview`);
-    await screen.findByText("Supports");
+    const { router } = renderAtPath(`${BASE}/overview/report`);
+    await screen.findByRole("heading", { name: "Status" });
     await userEvent.click(screen.getByTestId("pivot-action-evidenceExact"));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`${BASE}/evidence/${EVIDENCE_ID}`);
@@ -426,6 +441,6 @@ describe("Report/Assessment provenance navigation (PR 31F-8 routed)", () => {
     // The current Report/Assessment queries were fetched exactly once each;
     // navigation neither mutates nor refetches the artifacts.
     expect(current.reports).toBe(1);
-    expect(current.assessments).toBe(1);
+    expect(current.assessments).toBe(0);
   });
 });

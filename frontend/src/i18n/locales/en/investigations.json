@@ -73,7 +73,7 @@
   "stopReasons.replanLimitReached": "Replan limit reached",
   "stopReasons.fatalError": "Fatal error",
   "tabs.label": "Investigation workspace",
-  "tabs.overview": "Overview",
+  "tabs.overview": "REPORT",
   "tabs.evidence": "Evidence",
   "tabs.relationships": "Graph",
   "tabs.geoint": "GEOINT",

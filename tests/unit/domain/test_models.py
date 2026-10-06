@@ -14,6 +14,7 @@ from agentic_threat_investigator.domain.assessment import (
     AssessmentConfidence,
     EvidenceSupport,
     FindingCategory,
+    FindingCriticality,
     FindingDisposition,
     RelationshipSupport,
     Verdict,
@@ -226,6 +227,7 @@ def test_finding_requires_nonblank_statement_and_support() -> None:
         disposition=FindingDisposition.SUPPORTING,
         statement="Reputation sources flag the domain.",
         confidence=AssessmentConfidence.HIGH,
+        criticality=FindingCriticality.MEDIUM,
         support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
     )
 
@@ -238,6 +240,7 @@ def test_finding_requires_nonblank_statement_and_support() -> None:
             disposition=FindingDisposition.SUPPORTING,
             statement="   ",
             confidence=AssessmentConfidence.HIGH,
+            criticality=FindingCriticality.MEDIUM,
             support=(EvidenceSupport(kind="evidence", evidence_id=uuid4()),),
         )
     with pytest.raises(ValidationError, match="at least one support"):
@@ -246,6 +249,7 @@ def test_finding_requires_nonblank_statement_and_support() -> None:
             disposition=FindingDisposition.SUPPORTING,
             statement="No support here.",
             confidence=AssessmentConfidence.HIGH,
+            criticality=FindingCriticality.MEDIUM,
             support=(),
         )
 
@@ -260,6 +264,7 @@ def test_finding_rejects_duplicate_support() -> None:
             disposition=FindingDisposition.SUPPORTING,
             statement="One evidence cannot be cited twice.",
             confidence=AssessmentConfidence.HIGH,
+            criticality=FindingCriticality.MEDIUM,
             support=(
                 EvidenceSupport(kind="evidence", evidence_id=evidence_id),
                 EvidenceSupport(kind="evidence", evidence_id=evidence_id),
