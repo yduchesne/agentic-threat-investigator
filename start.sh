@@ -151,6 +151,20 @@ GRAFANA_PORT=$(get_env ATI_GRAFANA_HOST_PORT 3000)
 PROMETHEUS_PORT=$(get_env ATI_PROMETHEUS_HOST_PORT 9090)
 JAEGER_PORT=$(get_env ATI_JAEGER_HOST_PORT 16686)
 
+# Canonical reference geography (docs/DEPLOYMENT.md "Canonical reference
+# geography"). start.sh is the local demo/manual bootstrap, so it loads the
+# repository's tracked synthetic ATI Geography Corpus through the production
+# importer so GEOINT resolution works without a manual post-start step.
+# ATI_GEOGRAPHY_CORPUS may point at an operator-built corpus
+# (ati-geography-build output); no upstream geography is downloaded or built
+# here.
+GEOGRAPHY_CORPUS=$(get_env ATI_GEOGRAPHY_CORPUS "${ROOT_DIR}/tests/fixtures/geoint/corpus_small.jsonl")
+case "$GEOGRAPHY_CORPUS" in
+  /*) ;;
+  *) GEOGRAPHY_CORPUS="${ROOT_DIR}/${GEOGRAPHY_CORPUS}" ;;
+esac
+GEOGRAPHY_IMPORT_TIMEOUT=300
+
 # Image used as the disposable in-network HTTP probe for services that have
 # no published host port and no shell inside their pinned image (the
 # Collector and Loki are distroless). Grafana is part of this stack, so its
@@ -655,6 +669,44 @@ health_check_one_shot() {
   return 1
 }
 
+# ensure_canonical_geography: load the canonical reference geography the
+# GEOINT resolver needs, after migrations and before start.sh reports
+# success. The installed production importer runs inside a running ATI
+# application container, where ati-geography-import is on PATH and
+# ATI_DATABASE_URL uses the Compose network; the corpus is copied into that
+# container so no Compose/bind-mount change is needed. Identical re-import is
+# a true no-op (reference-ingestion semantics). Failure or timeout is a
+# startup failure: start.sh must not report success without reference
+# geography.
+ensure_canonical_geography() {
+  local service="worker" cid rc=0
+  cid=$(cid_for "$service")
+  if [[ -z "$cid" || "$(container_state "$service")" != "running" ]]; then
+    err "reference geography import needs the running '$service' container (state: $(container_state "$service"))"
+    return 1
+  fi
+  if [[ ! -f "$GEOGRAPHY_CORPUS" ]]; then
+    err "canonical geography corpus not found: $GEOGRAPHY_CORPUS"
+    err "set ATI_GEOGRAPHY_CORPUS to a local ATI Geography Corpus NDJSON file"
+    return 1
+  fi
+  step "loading canonical reference geography via ati-geography-import"
+  note "corpus: $GEOGRAPHY_CORPUS (bounded to ${GEOGRAPHY_IMPORT_TIMEOUT}s; identical re-import is a no-op)"
+  if ! podman cp "$GEOGRAPHY_CORPUS" "$cid:/tmp/ati-geography-corpus.ndjson" >/dev/null 2>&1; then
+    err "could not copy the geography corpus into the '$service' container"
+    return 1
+  fi
+  run_with_timeout "$GEOGRAPHY_IMPORT_TIMEOUT" podman exec "$cid" \
+    ati-geography-import /tmp/ati-geography-corpus.ndjson || rc=$?
+  podman exec "$cid" rm -f /tmp/ati-geography-corpus.ndjson >/dev/null 2>&1 || true
+  if [[ "$rc" -ne 0 ]]; then
+    err "canonical reference geography import failed (exit ${rc}); see importer output above"
+    return 1
+  fi
+  ok "canonical reference geography loaded"
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Teardown (used by --teardown in start.sh and by stop.sh --teardown)
 # ---------------------------------------------------------------------------
@@ -867,6 +919,13 @@ for service in "${DAEMON_SERVICES[@]}"; do
     exit 1
   fi
 done
+
+# Canonical reference geography must be present before start.sh reports
+# success: the GEOINT resolver cannot resolve cities/coordinates without it.
+if ! ensure_canonical_geography; then
+  err "startup failed: canonical reference geography is required for GEOINT"
+  exit 1
+fi
 
 print_summary || exit 1
 
