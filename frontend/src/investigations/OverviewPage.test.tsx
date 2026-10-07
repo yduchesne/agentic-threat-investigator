@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { Report, ReportFinding } from "../api/schema-types";
+import type { Report, ReportFinding, ReportResearchClaim } from "../api/schema-types";
 import {
   EVIDENCE_ID,
   OBSERVATION_ID,
@@ -365,5 +365,153 @@ describe("REPORT workspace surface", () => {
     );
     renderAtPath(`/investigations/${INVESTIGATION_ID}/overview`);
     expect(await screen.findByText("No conclusion is available")).toBeInTheDocument();
+  });
+});
+
+/** One persisted research claim with an encoded citation title (PR 38-10). */
+function encodedResearchClaim(): ReportResearchClaim {
+  return {
+    research_result_id: "60000000-0000-4000-8000-000000000001",
+    research_claim_id: "60000000-0000-4000-8000-000000000002",
+    subject_entity_id: "40000000-0000-4000-8000-000000000101",
+    claim_text: "Context &#39;claim&#39; &amp; detail",
+    citation_ids: ["60000000-0000-4000-8000-000000000003"],
+    citations: [
+      {
+        chunk_sequence: 0,
+        citation_id: "60000000-0000-4000-8000-000000000003",
+        document_id: "60000000-0000-4000-8000-000000000004",
+        document_type: "report",
+        published_at: null,
+        similarity_score: null,
+        source_id: "source",
+        source_record_id: "record",
+        source_url: null,
+        text: "citation text",
+        title: "Title &amp; &quot;quoted&quot;",
+      },
+    ],
+  };
+}
+
+describe("Final Report HTML entity decoding (PR 38-10 R-C01..R-C15)", () => {
+  function encodedReport(overrides: Partial<Report> = {}): Report {
+    return twoFindingReport({
+      title: "Report &amp; &#39;title&#39;",
+      summary: [
+        {
+          report_finding_number: 1,
+          assessment_finding_ordinal: 1,
+          text: "Summary &amp; &#39;quoted&#39;",
+          support: [
+            {
+              kind: "assessment_finding",
+              assessment_id: ASSESSMENT_ID,
+              finding_ordinal: 1,
+            },
+          ],
+        },
+      ],
+      findings: [
+        finding(1, {
+          title: "Finding &amp; &#39;title&#39;",
+          description:
+            "C&amp;C (threat_type botnet_cc, described as &#39;C&amp;C server&#39;)",
+        }),
+      ],
+      research_context: [encodedResearchClaim()],
+      limitations: ["Limit &amp; &#39;one&#39;"],
+      unresolved_questions: ["Question &amp; &#39;two&#39;"],
+      recommended_next_steps: ["Step &amp; &#39;three&#39;"],
+      ...overrides,
+    });
+  }
+
+  it("R-C01/R-C02/R-C03: decodes the observed C&C regression and encoded quotes", async () => {
+    renderReport(encodedReport());
+    expect(
+      await screen.findByText(
+        "C&C (threat_type botnet_cc, described as 'C&C server')",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/&amp;|&#39;/)).toBeNull();
+  });
+
+  it("R-C04/R-C05: encoded markup stays literal text and creates no element", async () => {
+    renderReport(
+      encodedReport({
+        findings: [
+          finding(1, {
+            description:
+              "&lt;script&gt;alert(1)&lt;/script&gt; &lt;img src=x onerror=alert(2)&gt;",
+          }),
+        ],
+      }),
+    );
+    expect(
+      await screen.findByText(/<script>alert\(1\)<\/script>/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/<img src=x onerror=alert\(2\)>/)).toBeInTheDocument();
+    const findingElement = document.querySelector("#finding-1") as HTMLElement;
+    expect(findingElement.querySelector("script")).toBeNull();
+    expect(findingElement.querySelector("img")).toBeNull();
+  });
+
+  it("R-C06: double-encoded content is decoded exactly one layer", async () => {
+    renderReport(
+      encodedReport({
+        findings: [finding(1, { description: "&amp;lt;script&amp;gt;" })],
+      }),
+    );
+    expect(await screen.findByText("&lt;script&gt;")).toBeInTheDocument();
+    expect(
+      (document.querySelector("#finding-1") as HTMLElement).querySelector("script"),
+    ).toBeNull();
+  });
+
+  it("R-C07/R-C08: ordinary ampersands and Unicode are unchanged", async () => {
+    renderReport(
+      encodedReport({
+        findings: [finding(1, { description: "AT&T café — 日本語" })],
+      }),
+    );
+    expect(await screen.findByText("AT&T café — 日本語")).toBeInTheDocument();
+  });
+
+  it("R-C09/R-C10/R-C11: title, summary and finding prose are decoded safely", async () => {
+    renderReport(encodedReport());
+    await screen.findByRole("heading", { name: "Status" });
+    expect(
+      screen.getByRole("heading", { name: "Report & 'title'" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Finding 1: Summary & 'quoted'/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/Finding 1 — Finding & 'title'/).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("R-C12: research claim and citation title prose are decoded", async () => {
+    renderReport(encodedReport());
+    expect(
+      await screen.findByText("Context 'claim' & detail"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Title & "quoted"/)).toBeInTheDocument();
+  });
+
+  it("R-C13: optional sections are decoded", async () => {
+    renderReport(encodedReport());
+    await screen.findByRole("heading", { name: "Status" });
+    expect(await screen.findByText("Limit & 'one'")).toBeInTheDocument();
+    expect(screen.getByText("Question & 'two'")).toBeInTheDocument();
+    expect(screen.getByText("Step & 'three'")).toBeInTheDocument();
+  });
+
+  it("R-C14: stable finding anchors are independent of the decoded title", async () => {
+    renderReport(encodedReport());
+    await screen.findByRole("heading", { name: "Status" });
+    expect(document.querySelector('a[href="#finding-1"]')).not.toBeNull();
+    expect(document.querySelector("#finding-1")).not.toBeNull();
   });
 });

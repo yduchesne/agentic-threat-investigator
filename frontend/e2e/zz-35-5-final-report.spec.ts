@@ -152,6 +152,19 @@ test.describe("PR 35-5 canonical Final Report", () => {
       page.getByText(/Generated reader-facing description for canonical finding 2\./),
     ).toBeVisible();
 
+    // PR 38-10: persisted report prose decodes exactly one HTML-entity layer
+    // and is still rendered through React's escaped-text boundary.
+    await expect(
+      page
+        .getByText("C&C (threat_type botnet_cc, described as 'C&C server')")
+        .first(),
+    ).toBeVisible();
+    // Encoded markup stays literal visible text and creates no element.
+    await expect(
+      page.getByText("<script>alert(1)</script>").first(),
+    ).toBeVisible();
+    expect(await page.locator("#finding-1 script").count()).toBe(0);
+
     // Direct support subsections at level 5; no Corroboration wrapper and no
     // relationship-observation report heading.
     await expect(

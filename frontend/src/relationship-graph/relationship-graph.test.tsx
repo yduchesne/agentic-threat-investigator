@@ -28,7 +28,6 @@ import {
   errorResponse,
   graphNeighborhoodHandler,
   graphNeighborhoodNetworkErrorHandler,
-  graphRelationshipsHandler,
   investigationDetailHandler,
   jsonResponse,
   resourceListRecorder,
@@ -201,11 +200,13 @@ describe("Relationship Graph workspace (PR 31C API)", () => {
       "href",
       `/investigations/${INVESTIGATION_ID}/relationships?selected=${RELATIONSHIP}`,
     );
-    expect(screen.getByRole("link", { name: "Open Relationships table for focal entity" }))
-      .toHaveAttribute(
-        "href",
-        `/investigations/${INVESTIGATION_ID}/relationships?entity_id=${FOCAL}`,
-      );
+    // PR 38-10: the redundant graph-local focal Relationships-table link is
+    // gone; normal Relationships navigation remains elsewhere.
+    expect(
+      screen.queryByRole("link", {
+        name: "Open Relationships table for focal entity",
+      }),
+    ).toBeNull();
   });
 
   it("G31D-U05: selecting a node exposes canonical ID, type, value and display name", async () => {
@@ -1493,46 +1494,50 @@ describe("PR 35-8 focal Explore (graph context menu)", () => {
     expect(clampContextMenuPosition(50, 50, 100, 100)).toEqual({ x: 0, y: 50 });
   });
 
-  it("U34/U35: Open Relationships table for focal entity drills down and Back restores the exact graph origin", async () => {
-    setHttpHandlers(
-      authMeSuccess,
-      runtimeFake,
-      investigationDetailHandler(
-        completedInvestigationFixture({ id: INVESTIGATION_ID }),
-      ),
-      graphNeighborhoodHandler({
-        neighborhood: neighbors().neighborhood,
-        recorder: resourceListRecorder(),
-      }),
-      graphRelationshipsHandler({ pages: [[]], recorder: resourceListRecorder() }),
-    );
-    const { router } = renderAtPath(
-      graphEntry("graph_scope=known&direction=source"),
-    );
+  it("G-C01: the graph surface has no redundant focal Relationships-table link", async () => {
+    renderGraph();
     await screen.findByRole("table", { name: "Relationship list (this page)" });
-    await userEventLib.click(
-      screen.getByRole("link", {
+    expect(
+      screen.queryByRole("link", {
         name: "Open Relationships table for focal entity",
       }),
-    );
+    ).toBeNull();
+  });
+
+  it("G-C02: the initial root layout is directed top-to-bottom", async () => {
+    renderGraph();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    const focal = nodePosition(FOCAL);
+    const counterparty = nodePosition(B);
+    // The canonical FOCAL -> B edge is laid out downward.
+    expect(focal.y).toBeLessThan(counterparty.y);
+    expect(Number.isFinite(focal.x)).toBe(true);
+    expect(Number.isFinite(counterparty.y)).toBe(true);
+  });
+
+  it("G-C10/G-C11: Fit graph to view lives in the controls and never moves nodes", async () => {
+    renderGraph();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    const before = nodePosition(FOCAL);
+    const beforeB = nodePosition(B);
+    const fit = screen.getByRole("button", { name: "Fit graph to view" });
+    // The action shares the existing bottom-left React Flow controls panel.
+    expect(fit.closest(".react-flow__controls")).not.toBeNull();
+    fireEvent.click(fit);
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe(
-        `/investigations/${INVESTIGATION_ID}/relationships`,
-      );
+      expect(nodePosition(FOCAL)).toEqual(before);
+      expect(nodePosition(B)).toEqual(beforeB);
     });
-    expect(router.state.location.search).toBe(`?entity_id=${FOCAL}`);
-    // The focal Relationships table offers the contextual Back.
-    const back = await screen.findByRole("button", { name: "< Back" });
-    await userEventLib.click(back);
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe(
-        `/investigations/${INVESTIGATION_ID}/relationships/evolution`,
-      );
-    });
-    // The exact graph origin (view + graph filters + focal) is restored.
-    expect(router.state.location.search).toContain("view=graph");
-    expect(router.state.location.search).toContain("graph_scope=known");
-    expect(router.state.location.search).toContain("direction=source");
-    expect(router.state.location.search).toContain(`entity_id=${FOCAL}`);
+  });
+
+  it("G-C04/G-C06: node selection does not re-layout the graph", async () => {
+    renderGraph();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    const before = nodePosition(FOCAL);
+    const beforeB = nodePosition(B);
+    selectNode(FOCAL);
+    await screen.findByText("Entity: Update Package Service");
+    expect(nodePosition(FOCAL)).toEqual(before);
+    expect(nodePosition(B)).toEqual(beforeB);
   });
 });
