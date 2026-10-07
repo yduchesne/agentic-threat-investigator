@@ -6502,3 +6502,36 @@ lifecycle or the per-item short-transaction split:
   multi-worker claims; the existing claimant/version/lease conflict matrix
   (G26C-P13..P18) and vertical slices remain authoritative for stale/
   expired completion authority.
+
+## PR 38-9: batch-ingestion observability and LLM usage/accounting
+
+Deterministic offline coverage:
+
+- `tests/unit/app/test_batch_ingestion_telemetry.py` (BI1..BI10): one logical
+  `ati.batch_ingestion.ingest` span + duration per `IngestionService.ingest()`,
+  execution/failure/no-op counters, committed outcomes only, truthful partial
+  success, cancellation propagation, bounded `ati.source`, disabled-telemetry
+  behavior, and no Kafka/Evidence counter pollution.
+- `tests/unit/app/test_llm_usage.py` (LU-U01..U20): authoritative usage
+  normalization, unknown-stays-unknown, exact `Decimal` pricing, scope
+  validation, bounded model labels, durable append, and fail-open accounting.
+- `tests/unit/observability/test_grafana_dashboards.py`: the dashboard
+  inventory is now **ten** dashboards including `ati-llm-usage` / **LLM
+  Usage**; the batch-ingestion panels are registered on Datasource &
+  Ingestion; and the frozen PromQL inventory / ATI series allowlist were
+  extended deliberately. Privacy/cardinality assertions are unchanged.
+
+Real-PostgreSQL coverage:
+
+- `tests/integration/test_llm_usage_repository.py` (LU-P01..P11): the
+  production `ati.append_llm_usage` stored function through
+  `PostgresLlmUsageRepository` inside the real `PostgresUnitOfWork`:
+  append-once, invocation-identity idempotency, conflicting-replay rejection,
+  multiple scopes, unknown fields as NULL, non-negative constraints, currency
+  and pricing-identity requirements, no prompt/output columns, and no
+  update/delete function (append-only).
+
+Authoritative real-stack acceptance remains
+`scripts/observability-integration.sh`: batch metrics/spans and LLM usage
+metrics must reach Prometheus/Jaeger through the production seams; acceptance
+is never satisfied by direct feature-counter emission.

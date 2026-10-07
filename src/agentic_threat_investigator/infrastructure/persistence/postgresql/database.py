@@ -67,6 +67,7 @@ from .investigation_job_repositories import (
     PostgresInvestigationJobRepository,
 )
 from .investigation_repositories import PostgresInvestigationRepository
+from .llm_usage_repositories import PostgresLlmUsageRepository
 from .rag_repositories import (
     PostgresDocumentChunkRepository,
     PostgresDocumentRepository,
@@ -147,6 +148,7 @@ class PostgresUnitOfWork(UnitOfWork):
         self.datasource_logs = cast(PostgresDatasourceLogRepository, None)
         self.evidence_batches = cast(PostgresEvidenceBatchRepository, None)
         self.datasource_checkpoints = cast(PostgresDatasourceCheckpointRepository, None)
+        self.llm_usage = cast(PostgresLlmUsageRepository, None)
 
     async def __aenter__(self) -> Self:
         if self.session is not None:
@@ -205,6 +207,7 @@ class PostgresUnitOfWork(UnitOfWork):
         self.datasource_checkpoints = PostgresDatasourceCheckpointRepository(
             self.session
         )
+        self.llm_usage = PostgresLlmUsageRepository(self.session)
         return self
 
     async def __aexit__(
@@ -294,6 +297,7 @@ class PostgresUnitOfWork(UnitOfWork):
             self.geo_resolutions = cast(PostgresGeoResolutionRepository, None)
             self.datasource_logs = cast(PostgresDatasourceLogRepository, None)
             self.evidence_batches = cast(PostgresEvidenceBatchRepository, None)
+            self.llm_usage = cast(PostgresLlmUsageRepository, None)
 
     async def commit(self) -> None:
         """Commit the current transaction while retaining the active session."""

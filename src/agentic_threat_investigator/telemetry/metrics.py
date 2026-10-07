@@ -112,6 +112,19 @@ class Metrics:
     LLM_INVOKE_FAILURES = "ati.llm.invoke.failures"
     REPORT_GENERATE_FAILURES = "ati.report.generate.failures"
     EMBEDDING_INVOKE_FAILURES = "ati.embedding.invoke.failures"
+    BATCH_INGESTION_EXECUTIONS = "ati.batch_ingestion.executions"
+    BATCH_INGESTION_FAILURES = "ati.batch_ingestion.failures"
+    BATCH_INGESTION_NOOP = "ati.batch_ingestion.noop"
+    BATCH_INGESTION_RECORDS_INSERTED = "ati.batch_ingestion.records.inserted"
+    BATCH_INGESTION_RECORDS_UPDATED = "ati.batch_ingestion.records.updated"
+    BATCH_INGESTION_RECORDS_UNCHANGED = "ati.batch_ingestion.records.unchanged"
+    LLM_CALLS = "ati.llm.calls"
+    LLM_TOKENS_INPUT = "ati.llm.tokens.input"
+    LLM_TOKENS_OUTPUT = "ati.llm.tokens.output"
+    LLM_TOKENS_CACHED = "ati.llm.tokens.cached"
+    LLM_TOKENS_REASONING = "ati.llm.tokens.reasoning"
+    LLM_TOKENS_TOTAL = "ati.llm.tokens.total"
+    LLM_COST = "ati.llm.cost"
 
 
 class DurationMetrics:
@@ -142,6 +155,8 @@ class DurationMetrics:
     LLM_INVOKE = "ati.llm.invoke.duration"
     REPORT_GENERATE = "ati.report.generate.duration"
     EMBEDDING_INVOKE = "ati.embedding.invoke.duration"
+    BATCH_INGESTION = "ati.batch_ingestion.duration"
+    BATCH_INGESTION_RECORDS = "ati.batch_ingestion.records"
 
 
 COUNTER_SPECS: tuple[CounterSpec, ...] = (
@@ -299,6 +314,71 @@ COUNTER_SPECS: tuple[CounterSpec, ...] = (
         Metrics.EMBEDDING_INVOKE_FAILURES,
         "{operation}",
         "Network-backed embedding requests that failed",
+    ),
+    CounterSpec(
+        Metrics.BATCH_INGESTION_EXECUTIONS,
+        "{operation}",
+        "Batch ingestion executions for one artifact",
+    ),
+    CounterSpec(
+        Metrics.BATCH_INGESTION_FAILURES,
+        "{operation}",
+        "Batch ingestion executions that failed",
+    ),
+    CounterSpec(
+        Metrics.BATCH_INGESTION_NOOP,
+        "{operation}",
+        "Batch ingestion executions that were a completed-checkpoint no-op",
+    ),
+    CounterSpec(
+        Metrics.BATCH_INGESTION_RECORDS_INSERTED,
+        "{item}",
+        "Source records authoritatively inserted by batch ingestion",
+    ),
+    CounterSpec(
+        Metrics.BATCH_INGESTION_RECORDS_UPDATED,
+        "{item}",
+        "Source records authoritatively updated by batch ingestion",
+    ),
+    CounterSpec(
+        Metrics.BATCH_INGESTION_RECORDS_UNCHANGED,
+        "{item}",
+        "Source records authoritatively unchanged by batch ingestion",
+    ),
+    CounterSpec(
+        Metrics.LLM_CALLS,
+        "{operation}",
+        "Actual LLM model attempts with authoritative usage",
+    ),
+    CounterSpec(
+        Metrics.LLM_TOKENS_INPUT,
+        "{token}",
+        "Authoritative input tokens consumed by LLM attempts",
+    ),
+    CounterSpec(
+        Metrics.LLM_TOKENS_OUTPUT,
+        "{token}",
+        "Authoritative output tokens produced by LLM attempts",
+    ),
+    CounterSpec(
+        Metrics.LLM_TOKENS_CACHED,
+        "{token}",
+        "Authoritative cached-input tokens reported by LLM attempts",
+    ),
+    CounterSpec(
+        Metrics.LLM_TOKENS_REASONING,
+        "{token}",
+        "Authoritative reasoning tokens reported by LLM attempts",
+    ),
+    CounterSpec(
+        Metrics.LLM_TOKENS_TOTAL,
+        "{token}",
+        "Authoritative total tokens reported by LLM attempts",
+    ),
+    CounterSpec(
+        Metrics.LLM_COST,
+        "{cost}",
+        "Known monetary LLM cost computed from versioned pricing",
     ),
 )
 

@@ -1,0 +1,793 @@
+{
+  "uid": "ati-llm-usage",
+  "title": "LLM Usage",
+  "tags": [
+    "ati",
+    "observability"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": [
+    {
+      "from": "now-30m",
+      "to": "now",
+      "name": "last 30 minutes"
+    },
+    {
+      "from": "now-1h",
+      "to": "now",
+      "name": "last 1 hour"
+    },
+    {
+      "from": "now-6h",
+      "to": "now",
+      "name": "last 6 hours"
+    },
+    {
+      "from": "now-24h",
+      "to": "now",
+      "name": "last 24 hours"
+    }
+  ],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "ATI System Overview",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-system-overview"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Agents & LLM",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-agents-llm"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "type": "text",
+      "mode": "markdown",
+      "content": "## LLM Usage\nAggregate LLM consumption and accounting from ATI's authoritative usage ledger.\n\n- This dashboard reports aggregate LLM consumption/accounting.\n- **Agents & LLM** remains the execution/latency/failure dashboard.\n- Missing usage means **unavailable/unknown**, not zero.\n- Monetary values are **known cost** computed from versioned pricing, not a provider invoice.\n- Prompts, outputs, and hidden chain-of-thought are never shown.\n",
+      "title": ""
+    },
+    {
+      "id": 2,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 5
+      },
+      "title": "LLM calls",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(ati_llm_calls_total)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "calls",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 5
+      },
+      "title": "Input tokens",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(ati_llm_tokens_input_total)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "input",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 5
+      },
+      "title": "Output tokens",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(ati_llm_tokens_output_total)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "output",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 5
+      },
+      "title": "Total tokens",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(ati_llm_tokens_total_total)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "total",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 9
+      },
+      "title": "Cached tokens",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(ati_llm_tokens_cached_total)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "cached",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 9
+      },
+      "title": "Reasoning tokens",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(ati_llm_tokens_reasoning_total)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "reasoning",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "title": "Total known cost",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(ati_llm_cost_total)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "known cost",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "title": "Token usage over time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_input_total[5m]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "input",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_output_total[5m]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "output",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_cached_total[5m]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "cached",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_reasoning_total[5m]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "reasoning",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_total_total[5m]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "authoritative total",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 18
+      },
+      "title": "Calls by scope",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_calls_total[1h])) by (ati_llm_scope)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "{{ati_llm_scope}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 18
+      },
+      "title": "Total tokens by scope",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_total_total[1h])) by (ati_llm_scope)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "{{ati_llm_scope}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 18
+      },
+      "title": "Known cost by scope",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_cost_total[1h])) by (ati_llm_scope)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "{{ati_llm_scope}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 23
+      },
+      "title": "Calls by provider/model",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_calls_total[1h])) by (ati_llm_provider, ati_llm_model)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "{{ati_llm_provider}}/{{ati_llm_model}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 23
+      },
+      "title": "Total tokens by provider/model",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_total_total[1h])) by (ati_llm_provider, ati_llm_model)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "{{ati_llm_provider}}/{{ati_llm_model}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 23
+      },
+      "title": "Known cost by provider/model",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_cost_total[1h])) by (ati_llm_provider, ati_llm_model)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "{{ati_llm_provider}}/{{ati_llm_model}}",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "title": "Known cost over time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_cost_total[5m]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "known cost",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "title": "Known cost over selected range",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(ati_llm_cost_total)",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "known cost",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "title": "Output tokens per call",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_output_total[1h])) / sum(increase(ati_llm_calls_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "output/call",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "title": "Total tokens per call",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_tokens_total_total[1h])) / sum(increase(ati_llm_calls_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "total/call",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "title": "Known cost per call",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_llm_cost_total[1h])) / sum(increase(ati_llm_calls_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "cost/call",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    }
+  ]
+}

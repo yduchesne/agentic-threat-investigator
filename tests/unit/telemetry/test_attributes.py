@@ -29,6 +29,10 @@ class TestAttributeAllowlist:
             "ati.kafka.consumer_group": "evidence-persistence",
             "ati.provider": "urn:ati:source:threatfox",
             "ati.agent": "research_agent",
+            "ati.source": "mitre_attack",
+            "ati.llm.scope": "urn:ati:llm:usage:investigations:scope:report_analyst",
+            "ati.llm.provider": "openai",
+            "ati.llm.model": "gpt-4o-mini",
         }
         assert validate_bounded_attributes(attrs) == attrs
 
@@ -46,6 +50,10 @@ class TestAttributeAllowlist:
             "ati.kafka.consumer_group",
             "ati.provider",
             "ati.agent",
+            "ati.source",
+            "ati.llm.scope",
+            "ati.llm.provider",
+            "ati.llm.model",
         } == METRIC_ATTRIBUTE_ALLOWLIST
         for key in METRIC_ATTRIBUTE_ALLOWLIST:
             assert key.startswith("ati.")

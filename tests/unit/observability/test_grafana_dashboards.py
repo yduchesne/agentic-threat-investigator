@@ -50,6 +50,7 @@ DASHBOARD_UID_TO_TITLE = {
     "ati-agents-llm": "Agents & LLM",
     "ati-geo-resolution": "GEO Resolution",
     "ati-investigations-reports": "Investigations & Reports",
+    "ati-llm-usage": "LLM Usage",
 }
 
 DETAIL_UID = frozenset(DASHBOARD_UID_TO_TITLE) - {"ati-system-overview"}
@@ -64,6 +65,8 @@ REQUIRED_CHILD_LINKS = {
     "ati-investigations-reports": ("ati-agents-llm",),
     "ati-datasource-ingestion": ("ati-kafka-redpanda", "ati-persistence-repository"),
     "ati-persistence-repository": ("ati-postgresql",),
+    "ati-agents-llm": ("ati-llm-usage",),
+    "ati-llm-usage": ("ati-agents-llm",),
 }
 
 # Dashboards that carry a developer-only Jaeger UI navigation link
@@ -113,6 +116,21 @@ ALLOWED_ATI_SERIES = frozenset(
         "ati_kafka_publish_failures_total",
         "ati_llm_invoke_duration_seconds_bucket",
         "ati_llm_invoke_failures_total",
+        "ati_batch_ingestion_duration_seconds_bucket",
+        "ati_batch_ingestion_executions_total",
+        "ati_batch_ingestion_failures_total",
+        "ati_batch_ingestion_noop_total",
+        "ati_batch_ingestion_records_bucket",
+        "ati_batch_ingestion_records_inserted_total",
+        "ati_batch_ingestion_records_unchanged_total",
+        "ati_batch_ingestion_records_updated_total",
+        "ati_llm_calls_total",
+        "ati_llm_cost_total",
+        "ati_llm_tokens_cached_total",
+        "ati_llm_tokens_input_total",
+        "ati_llm_tokens_output_total",
+        "ati_llm_tokens_reasoning_total",
+        "ati_llm_tokens_total_total",
         "ati_postgres_repository_duration_seconds_bucket",
         "ati_postgres_repository_failures_total",
         "ati_postgres_transaction_operation_duration_seconds_bucket",
@@ -288,10 +306,10 @@ def test_graf_c01_compose_mounts_dashboards_read_only() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_graf_c02_exactly_nine_dashboard_files() -> None:
-    """GRAF-C02 exactly nine version-controlled dashboard JSON files."""
+def test_graf_c02_exactly_ten_dashboard_files() -> None:
+    """GRAF-C02 exactly ten version-controlled dashboard JSON files."""
     files = sorted(_DASHBOARDS_DIR.glob("*.json"))
-    assert len(files) == 9
+    assert len(files) == 10
     assert {f.name for f in files} == {
         "ati-system-overview.json",
         "ati-api-http.json",
@@ -302,6 +320,7 @@ def test_graf_c02_exactly_nine_dashboard_files() -> None:
         "ati-agents-llm.json",
         "ati-geo-resolution.json",
         "ati-investigations-reports.json",
+        "ati-llm-usage.json",
     }
 
 
@@ -311,11 +330,11 @@ def test_graf_c03_all_dashboard_files_parse() -> None:
         json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_graf_c04_uids_exact_nine_and_unique() -> None:
+def test_graf_c04_uids_exact_ten_and_unique() -> None:
     """GRAF-C04 the nine stable UIDs, exactly once each."""
     dashboards = _load_dashboards()
     uids = [dash["uid"] for dash in dashboards]
-    assert len(uids) == len(set(uids)) == 9
+    assert len(uids) == len(set(uids)) == 10
     assert set(uids) == set(DASHBOARD_UID_TO_TITLE)
 
 
@@ -722,6 +741,8 @@ def test_no_application_and_infrastructure_mixing() -> None:
 # changing PromQL text.
 PROMQL_INVENTORY: tuple[str, ...] = (
     "histogram_quantile(0.5, sum(ati_agent_invoke_duration_seconds_bucket) by (le, ati_agent))",
+    "histogram_quantile(0.5, sum(ati_batch_ingestion_duration_seconds_bucket) by (le, ati_source))",
+    "histogram_quantile(0.5, sum(ati_batch_ingestion_records_bucket) by (le, ati_source))",
     "histogram_quantile(0.5, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
     "histogram_quantile(0.5, sum(ati_evidence_consume_duration_seconds_bucket) by (le))",
     "histogram_quantile(0.5, sum(ati_evidence_persist_duration_seconds_bucket) by (le))",
@@ -740,6 +761,8 @@ PROMQL_INVENTORY: tuple[str, ...] = (
     "histogram_quantile(0.5, sum(redpanda_kafka_request_latency_seconds_bucket) by (le))",
     "histogram_quantile(0.95, sum(ati_agent_invoke_duration_seconds_bucket) by (le))",
     "histogram_quantile(0.95, sum(ati_agent_invoke_duration_seconds_bucket) by (le, ati_agent))",
+    "histogram_quantile(0.95, sum(ati_batch_ingestion_duration_seconds_bucket) by (le, ati_source))",
+    "histogram_quantile(0.95, sum(ati_batch_ingestion_records_bucket) by (le, ati_source))",
     "histogram_quantile(0.95, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
     "histogram_quantile(0.95, sum(ati_datasource_convert_duration_seconds_bucket) by (le, ati_outcome))",
     "histogram_quantile(0.95, sum(ati_datasource_convert_items_bucket) by (le))",
@@ -774,6 +797,7 @@ PROMQL_INVENTORY: tuple[str, ...] = (
     "histogram_quantile(0.95, sum(redpanda_kafka_handler_latency_seconds_bucket) by (le))",
     "histogram_quantile(0.95, sum(redpanda_kafka_request_latency_seconds_bucket) by (le))",
     "histogram_quantile(0.99, sum(ati_agent_invoke_duration_seconds_bucket) by (le, ati_agent))",
+    "histogram_quantile(0.99, sum(ati_batch_ingestion_duration_seconds_bucket) by (le, ati_source))",
     "histogram_quantile(0.99, sum(ati_datasource_acquire_duration_seconds_bucket) by (le, ati_outcome))",
     "histogram_quantile(0.99, sum(ati_geo_resolve_duration_seconds_bucket) by (le, ati_outcome))",
     "histogram_quantile(0.99, sum(ati_investigation_execute_duration_seconds_bucket) by (le))",
@@ -878,12 +902,41 @@ PROMQL_INVENTORY: tuple[str, ...] = (
     "sum(ati_agent_invoke_failures_total) by (ati_agent)",
     "sum(ati_datasource_convert_items_count)",
     "sum(ati_geo_resolve_resolved_total) / (sum(ati_geo_resolve_resolved_total) + sum(ati_geo_resolve_unresolvable_total) + sum(ati_geo_resolve_failed_total))",
+    "sum(ati_llm_calls_total)",
+    "sum(ati_llm_cost_total)",
+    "sum(ati_llm_cost_total)",
+    "sum(ati_llm_tokens_cached_total)",
+    "sum(ati_llm_tokens_input_total)",
+    "sum(ati_llm_tokens_output_total)",
+    "sum(ati_llm_tokens_reasoning_total)",
+    "sum(ati_llm_tokens_total_total)",
     "sum(ati_postgres_repository_failures_total) by (ati_postgres_repository, ati_postgres_operation)",
     "sum(http_server_active_requests) by (http_method)",
     "sum(http_server_duration_milliseconds_count) by (http_method)",
     "sum(http_server_duration_milliseconds_count) by (http_method, http_target)",
     "sum(http_server_duration_milliseconds_count) by (http_status_code)",
     'sum(http_server_duration_milliseconds_count{http_status_code=~"5.."})',
+    "sum(increase(ati_batch_ingestion_executions_total[1h]))",
+    "sum(increase(ati_batch_ingestion_failures_total[1h]))",
+    "sum(increase(ati_batch_ingestion_noop_total[1h]))",
+    "sum(increase(ati_batch_ingestion_records_inserted_total[1h]))",
+    "sum(increase(ati_batch_ingestion_records_unchanged_total[1h]))",
+    "sum(increase(ati_batch_ingestion_records_updated_total[1h]))",
+    "sum(increase(ati_llm_calls_total[1h])) by (ati_llm_provider, ati_llm_model)",
+    "sum(increase(ati_llm_calls_total[1h])) by (ati_llm_scope)",
+    "sum(increase(ati_llm_cost_total[1h])) / sum(increase(ati_llm_calls_total[1h]))",
+    "sum(increase(ati_llm_cost_total[1h])) by (ati_llm_provider, ati_llm_model)",
+    "sum(increase(ati_llm_cost_total[1h])) by (ati_llm_scope)",
+    "sum(increase(ati_llm_cost_total[5m]))",
+    "sum(increase(ati_llm_tokens_cached_total[5m]))",
+    "sum(increase(ati_llm_tokens_input_total[5m]))",
+    "sum(increase(ati_llm_tokens_output_total[1h])) / sum(increase(ati_llm_calls_total[1h]))",
+    "sum(increase(ati_llm_tokens_output_total[5m]))",
+    "sum(increase(ati_llm_tokens_reasoning_total[5m]))",
+    "sum(increase(ati_llm_tokens_total_total[1h])) / sum(increase(ati_llm_calls_total[1h]))",
+    "sum(increase(ati_llm_tokens_total_total[1h])) by (ati_llm_provider, ati_llm_model)",
+    "sum(increase(ati_llm_tokens_total_total[1h])) by (ati_llm_scope)",
+    "sum(increase(ati_llm_tokens_total_total[5m]))",
     "sum(pg_database_size_bytes) by (datname)",
     "sum(pg_exporter_last_scrape_error)",
     "sum(pg_exporter_last_scrape_error)",
@@ -1179,10 +1232,10 @@ def test_graf_f15_jaeger_uses_verified_navigation_contract() -> None:
             ), uid
 
 
-def test_graf_f16_exactly_nine_dashboards_stable_identity() -> None:
-    """GRAF-F16 exactly nine dashboards with the exact UID/title mapping."""
+def test_graf_f16_exactly_ten_dashboards_stable_identity() -> None:
+    """GRAF-F16 exactly ten dashboards with the exact UID/title mapping."""
     dashboards = _load_dashboards()
-    assert len(dashboards) == 9
+    assert len(dashboards) == 10
     by_uid = {dash["uid"]: dash["title"] for dash in dashboards}
     assert by_uid == DASHBOARD_UID_TO_TITLE
 
@@ -1196,7 +1249,7 @@ def test_graf_f17_provisioning_unchanged_canonical_read_only_dir() -> None:
     assert providers[0]["options"]["path"] == "/etc/grafana/dashboards"
 
     files = sorted(_DASHBOARDS_DIR.glob("*.json"))
-    assert len(files) == 9
+    assert len(files) == 10
 
     compose = yaml.safe_load(_COMPOSE_OBSERVABILITY.read_text(encoding="utf-8"))
     assert isinstance(compose, dict)

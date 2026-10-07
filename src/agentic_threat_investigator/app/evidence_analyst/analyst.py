@@ -31,7 +31,7 @@ no model call.
 from __future__ import annotations
 
 import asyncio
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from agentic_threat_investigator.app.analysis_result import EvidenceAnalysisResult
 from agentic_threat_investigator.app.assessment_persistence import (
@@ -53,6 +53,8 @@ from agentic_threat_investigator.app.evidence_analyst.prompts import (
     build_evidence_analyst_prompts,
 )
 from agentic_threat_investigator.app.llm import LlmClient, LlmError, LlmErrorCode
+from agentic_threat_investigator.app.llm_usage import LlmUsage, LlmUsageScope
+from agentic_threat_investigator.app.llm_usage_service import LlmUsageService
 from agentic_threat_investigator.domain.analyst import (
     EvidenceAnalystDecision,
     EvidenceAnalystInput,
@@ -102,12 +104,15 @@ class EvidenceAnalyst:
         assessment_persistence: AssessmentPersistenceService,
         llm_accounting: LlmAccountingService,
         max_structured_output_attempts: int = 2,
+        llm_usage: LlmUsageService | None = None,
     ) -> None:
         """Bind the loader, LLM client, persistence seam, and accounting.
 
         ``max_structured_output_attempts`` is hard-limited to the approved
         range 1..2 (one initial attempt plus at most one schema repair), even
         when the service is constructed directly without ``Settings``.
+        ``llm_usage`` is the optional token/cost accounting sink; call-budget
+        semantics are unaffected by it.
         """
         if not 1 <= max_structured_output_attempts <= 2:
             raise ValueError("max_structured_output_attempts must be in the range 1..2")
@@ -116,6 +121,7 @@ class EvidenceAnalyst:
         self._assessment_persistence = assessment_persistence
         self._llm_accounting = llm_accounting
         self._max_structured_output_attempts = max_structured_output_attempts
+        self._llm_usage = llm_usage
 
     async def analyze(
         self,
@@ -228,13 +234,16 @@ class EvidenceAnalyst:
             latest_version = await self._llm_accounting.reserve_call(
                 investigation_id, expected_version=latest_version
             )
+            invocation_id = uuid4()
             try:
-                decision = await self._llm_client.generate_structured(
+                result = await self._llm_client.generate_structured_with_usage(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     response_model=EvidenceAnalystDecision,
                     operation_name=OPERATION_EVIDENCE_ANALYSIS,
                 )
+                decision = result.output
+                await self._record_usage(investigation_id, invocation_id, result.usage)
                 geoint_validator.validate(decision)
             except asyncio.CancelledError:
                 # Cooperative cancellation propagates unchanged; the handler
@@ -262,6 +271,23 @@ class EvidenceAnalyst:
             return decision, latest_version
         raise LlmError(  # pragma: no cover - the loop always returns or raises
             LlmErrorCode.INVALID_STRUCTURED_OUTPUT, retryable=False
+        )
+
+    async def _record_usage(
+        self,
+        investigation_id: UUID,
+        invocation_id: UUID,
+        usage: LlmUsage | None,
+    ) -> None:
+        """Account one authoritative model attempt when usage is present."""
+        if self._llm_usage is None or usage is None:
+            return
+        await self._llm_usage.record_usage(
+            investigation_id=investigation_id,
+            scope_urn=LlmUsageScope.EVIDENCE_ANALYST.value,
+            operation_name=OPERATION_EVIDENCE_ANALYSIS,
+            invocation_id=invocation_id,
+            usage=usage,
         )
 
     async def _persist_decision_result(

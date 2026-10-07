@@ -589,6 +589,18 @@
       "asDropdown": false,
       "icon": "external link",
       "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "LLM Usage",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-llm-usage"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
       "keepTime": false,
       "tags": [],
       "targetBlank": false,

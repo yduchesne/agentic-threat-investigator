@@ -25,6 +25,7 @@ from agentic_threat_investigator.app.evidence_analyst.accounting import (
     LlmAccountingService,
 )
 from agentic_threat_investigator.app.llm import LlmClient
+from agentic_threat_investigator.app.llm_usage_service import LlmUsageService
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.report_writer.input_loader import (
     ReportWriterInputLoader,
@@ -47,6 +48,7 @@ def build_report_writer(
     max_research_claims: int = 100,
     max_input_bytes: int = 262_144,
     max_structured_output_attempts: int = 2,
+    llm_usage: LlmUsageService | None = None,
 ) -> ReportWriter:
     """Assemble a fully wired ReportWriter from its production seams.
 
@@ -71,4 +73,5 @@ def build_report_writer(
         ),
         llm_accounting=LlmAccountingService(uow_factory),
         max_structured_output_attempts=max_structured_output_attempts,
+        llm_usage=llm_usage,
     )

@@ -25,6 +25,7 @@ schema failure — loose prose is never tolerated.
 from __future__ import annotations
 
 import re as _re
+from collections.abc import Sequence
 from uuid import UUID
 
 from agentic_threat_investigator.app.evidence_analyst.prompts import (
@@ -34,8 +35,10 @@ from agentic_threat_investigator.app.llm import (
     LlmClient,
     LlmError,
     LlmErrorCode,
+    LlmInvocationResult,
     ResponseT,
 )
+from agentic_threat_investigator.app.llm_usage import LlmUsage
 from agentic_threat_investigator.app.report_writer.prompts import (
     OPERATION_REPORT_WRITING,
 )
@@ -120,10 +123,45 @@ class DeterministicLlmClient(LlmClient):
     response model.
     """
 
-    def __init__(self) -> None:
-        """Initialize the analysis round counter."""
+    def __init__(self, usage_script: Sequence[LlmUsage] | None = None) -> None:
+        """Initialize the analysis round counter and optional scripted usage.
+
+        ``usage_script`` supplies explicitly scripted authoritative usage per
+        actual attempt for real-backend acceptance; the client never invents
+        token counts. When the script is exhausted (or absent), usage is
+        unknown (``None``).
+        """
         self._evidence_rounds = 0
         self.calls: list[tuple[str, str]] = []
+        self._usage_script = list(usage_script) if usage_script else []
+        self._usage_index = 0
+
+    async def generate_structured_with_usage(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[ResponseT],
+        operation_name: str,
+    ) -> LlmInvocationResult[ResponseT]:
+        """Return one output plus explicitly scripted usage, if any."""
+        output = await self.generate_structured(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            operation_name=operation_name,
+        )
+        return LlmInvocationResult(output=output, usage=self._next_usage())
+
+    def _next_usage(self) -> LlmUsage | None:
+        """Return the next scripted usage value without inventing token counts."""
+        if not self._usage_script:
+            return None
+        index = self._usage_index
+        self._usage_index += 1
+        if index < len(self._usage_script):
+            return self._usage_script[index]
+        return None
 
     async def generate_structured(
         self,

@@ -31,12 +31,14 @@ final report and never authored by the model.
 from __future__ import annotations
 
 import asyncio
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from agentic_threat_investigator.app.evidence_analyst.accounting import (
     LlmAccountingService,
 )
 from agentic_threat_investigator.app.llm import LlmClient, LlmError, LlmErrorCode
+from agentic_threat_investigator.app.llm_usage import LlmUsage, LlmUsageScope
+from agentic_threat_investigator.app.llm_usage_service import LlmUsageService
 from agentic_threat_investigator.app.report_writer.input_loader import (
     ReportWriterInputLoader,
 )
@@ -91,6 +93,7 @@ class ReportWriter:
         report_persistence: InvestigationReportPersistenceService,
         llm_accounting: LlmAccountingService,
         max_structured_output_attempts: int = 2,
+        llm_usage: LlmUsageService | None = None,
     ) -> None:
         """Bind the loader, LLM client, persistence seam, and accounting.
 
@@ -105,6 +108,7 @@ class ReportWriter:
         self._report_persistence = report_persistence
         self._llm_accounting = llm_accounting
         self._max_structured_output_attempts = max_structured_output_attempts
+        self._llm_usage = llm_usage
 
     @telemetry_operation(
         span_name=SpanNames.REPORT_GENERATE,
@@ -173,13 +177,16 @@ class ReportWriter:
             latest_version = await self._llm_accounting.reserve_call(
                 investigation_id, expected_version=latest_version
             )
+            invocation_id = uuid4()
             try:
-                output = await self._llm_client.generate_structured(
+                result = await self._llm_client.generate_structured_with_usage(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     response_model=ReportWriterOutput,
                     operation_name=OPERATION_REPORT_WRITING,
                 )
+                output = result.output
+                await self._record_usage(investigation_id, invocation_id, result.usage)
             except asyncio.CancelledError:
                 # Cooperative cancellation propagates unchanged; the handler
                 # only prevents the LlmError mapping below from catching it.
@@ -199,4 +206,21 @@ class ReportWriter:
             return output, latest_version
         raise LlmError(  # pragma: no cover - the loop always returns or raises
             LlmErrorCode.INVALID_STRUCTURED_OUTPUT, retryable=False
+        )
+
+    async def _record_usage(
+        self,
+        investigation_id: UUID,
+        invocation_id: UUID,
+        usage: LlmUsage | None,
+    ) -> None:
+        """Account one authoritative model attempt when usage is present."""
+        if self._llm_usage is None or usage is None:
+            return
+        await self._llm_usage.record_usage(
+            investigation_id=investigation_id,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name=OPERATION_REPORT_WRITING,
+            invocation_id=invocation_id,
+            usage=usage,
         )

@@ -39,6 +39,7 @@ class SpanNames:
     REPORT_GENERATE = "ati.report.generate"
     PROVIDER_EXECUTE = "ati.provider.execute"
     EMBEDDING_INVOKE = "ati.embedding.invoke"
+    BATCH_INGESTION_INGEST = "ati.batch_ingestion.ingest"
     POSTGRES_REPOSITORY = "ati.postgres.repository"
     POSTGRES_UOW = "ati.postgres.uow"
     KAFKA_PUBLISH = "ati.kafka.publish"
@@ -60,6 +61,7 @@ CANONICAL_SPAN_NAMES: frozenset[str] = frozenset(
         SpanNames.REPORT_GENERATE,
         SpanNames.PROVIDER_EXECUTE,
         SpanNames.EMBEDDING_INVOKE,
+        SpanNames.BATCH_INGESTION_INGEST,
         SpanNames.POSTGRES_REPOSITORY,
         SpanNames.POSTGRES_UOW,
         SpanNames.KAFKA_PUBLISH,

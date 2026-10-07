@@ -3,9 +3,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
+
+from opentelemetry.metrics import Counter
+from opentelemetry.trace import Status, StatusCode
 
 from agentic_threat_investigator.app.persistence.repositories import (
     BatchOutcome,
@@ -22,8 +27,46 @@ from agentic_threat_investigator.app.sources import (
     SourceBatch,
     SourceCapability,
 )
+from agentic_threat_investigator.domain.identifiers import SourceId
+from agentic_threat_investigator.telemetry.attributes import (
+    AttributeKeys,
+    validate_bounded_attributes,
+)
+from agentic_threat_investigator.telemetry.metrics import (
+    DURATION_UNIT,
+    DurationMetrics,
+    Metrics,
+    get_counter,
+    get_histogram,
+)
+from agentic_threat_investigator.telemetry.tracing import SpanNames, get_tracer
 
 LOGGER = logging.getLogger(__name__)
+
+#: Bounded workload-size histogram unit for batch ingestion (``{item}``).
+BATCH_ITEM_UNIT = "{item}"
+
+#: Explicit finite mapper from a source identity to a bounded telemetry label.
+#: Unknown sources collapse to ``other`` so arbitrary URNs can never become
+#: metric dimensions.
+_BOUNDED_SOURCE_LABELS: dict[str, str] = {
+    SourceId.MITRE_ATTACK.value: "mitre_attack",
+    SourceId.CISA_KEV.value: "cisa_kev",
+    SourceId.MISP.value: "misp",
+    SourceId.OPENCTI.value: "opencti",
+    SourceId.IPINFO_LITE.value: "ipinfo_lite",
+    SourceId.RDAP.value: "rdap",
+    SourceId.GOOGLE_PUBLIC_DNS.value: "google_public_dns",
+    SourceId.DBIP_CITY_LITE.value: "dbip_city_lite",
+    SourceId.ABUSEIPDB.value: "abuseipdb",
+    SourceId.THREATFOX.value: "threatfox",
+    SourceId.URLHAUS.value: "urlhaus",
+}
+
+
+def bounded_source_label(source_id: str) -> str:
+    """Map a source identity to a bounded telemetry label (unknown -> other)."""
+    return _BOUNDED_SOURCE_LABELS.get(source_id, "other")
 
 
 class IngestionConflictError(RuntimeError):
@@ -61,6 +104,104 @@ class IngestionService:
         artifact: ArtifactReference,
         *,
         restart: bool = False,
+    ) -> IngestionSummary:
+        """Ingest an artifact and emit one logical batch-ingestion observation.
+
+        One call produces exactly one ``ati.batch_ingestion.ingest`` span and
+        one duration sample. Record-outcome counters are incremented only from
+        authoritative committed batch results: a completed checkpoint reports
+        a successful no-op, and an early committed batch followed by a later
+        failure still preserves the committed outcomes while reporting the
+        overall execution failure.
+        """
+        source_label = bounded_source_label(source.source_id)
+        attributes = validate_bounded_attributes({AttributeKeys.SOURCE: source_label})
+        executions = get_counter(Metrics.BATCH_INGESTION_EXECUTIONS)
+        failures = get_counter(Metrics.BATCH_INGESTION_FAILURES)
+        noop = get_counter(Metrics.BATCH_INGESTION_NOOP)
+        inserted = get_counter(Metrics.BATCH_INGESTION_RECORDS_INSERTED)
+        updated = get_counter(Metrics.BATCH_INGESTION_RECORDS_UPDATED)
+        unchanged = get_counter(Metrics.BATCH_INGESTION_RECORDS_UNCHANGED)
+        duration = get_histogram(DurationMetrics.BATCH_INGESTION, unit=DURATION_UNIT)
+        workload = get_histogram(
+            DurationMetrics.BATCH_INGESTION_RECORDS, unit=BATCH_ITEM_UNIT
+        )
+        committed: list[SourceRecordBatchResult] = []
+        start = time.perf_counter()
+        with get_tracer().start_as_current_span(
+            SpanNames.BATCH_INGESTION_INGEST, attributes=attributes
+        ) as span:
+            try:
+                summary = await self._run(
+                    source, artifact, restart=restart, committed=committed
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR))
+                self._record_outcomes(
+                    committed, inserted, updated, unchanged, attributes
+                )
+                executions.add(1, attributes)
+                failures.add(1, attributes)
+                duration.record(
+                    time.perf_counter() - start,
+                    attributes={**attributes, AttributeKeys.OUTCOME: "error"},
+                )
+                workload.record(len(committed), attributes)
+                raise
+            executions.add(1, attributes)
+            if summary.complete and not summary.results:
+                noop.add(1, attributes)
+                workload.record(0, attributes)
+                duration.record(
+                    time.perf_counter() - start,
+                    attributes={**attributes, AttributeKeys.OUTCOME: "noop"},
+                )
+            else:
+                self._record_outcomes(
+                    list(summary.results), inserted, updated, unchanged, attributes
+                )
+                workload.record(len(summary.results), attributes)
+                duration.record(
+                    time.perf_counter() - start,
+                    attributes={**attributes, AttributeKeys.OUTCOME: "success"},
+                )
+            return summary
+
+    @staticmethod
+    def _record_outcomes(
+        results: list[SourceRecordBatchResult],
+        inserted: Counter,
+        updated: Counter,
+        unchanged: Counter,
+        attributes: dict[str, str],
+    ) -> None:
+        """Increment committed source-record outcome counters once."""
+        inserted_count = sum(
+            result.outcome is BatchOutcome.INSERTED for result in results
+        )
+        updated_count = sum(
+            result.outcome is BatchOutcome.UPDATED for result in results
+        )
+        unchanged_count = sum(
+            result.outcome is BatchOutcome.UNCHANGED for result in results
+        )
+        if inserted_count:
+            inserted.add(inserted_count, attributes)
+        if updated_count:
+            updated.add(updated_count, attributes)
+        if unchanged_count:
+            unchanged.add(unchanged_count, attributes)
+
+    async def _run(
+        self,
+        source: BatchSource,
+        artifact: ArtifactReference,
+        *,
+        restart: bool,
+        committed: list[SourceRecordBatchResult],
     ) -> IngestionSummary:
         """Ingest an artifact, committing each source batch with its checkpoint."""
         self._validate_source_artifact(source, artifact)
@@ -123,6 +264,7 @@ class IngestionService:
                     )
                 )
             all_results.extend(mapped)
+            committed.extend(mapped)
             checkpoint, complete = batch.checkpoint, batch.complete
             LOGGER.info(
                 "source ingestion batch committed",

@@ -73,6 +73,7 @@ from agentic_threat_investigator.app.investigation_worker import (
     InvestigationJobWorker,
 )
 from agentic_threat_investigator.app.llm import LlmClient
+from agentic_threat_investigator.app.llm_usage_service import LlmUsageService
 from agentic_threat_investigator.app.orchestration.research import (
     ResearchAgentResearchExecutor,
 )
@@ -253,12 +254,24 @@ def _compose_embedding(settings: Settings) -> EmbeddingClient:
     )
 
 
+def _compose_llm_usage(
+    settings: Settings, uow_factory: Callable[[], PostgresUnitOfWork]
+) -> LlmUsageService:
+    """Compose the durable LLM usage/accounting service for the worker."""
+    if settings.llm_driver is LlmDriver.DETERMINISTIC:
+        provider, model = "deterministic", "deterministic"
+    else:
+        provider, model = "openai", settings.llm_model
+    return LlmUsageService(uow_factory, provider=provider, model=model)
+
+
 def _compose_evaluation_analyst(
     *,
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     uow_factory: Callable[[], PostgresUnitOfWork],
     llm: LlmClient,
+    llm_usage: LlmUsageService | None = None,
 ) -> EvidenceAnalyst:
     """Compose the production Evidence Analyst for a benchmark process.
 
@@ -282,6 +295,7 @@ def _compose_evaluation_analyst(
         ),
         llm_accounting=LlmAccountingService(uow_factory),
         max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+        llm_usage=llm_usage,
     )
 
 
@@ -307,11 +321,13 @@ def _compose_runner(
     the measured production trajectory (40).
     """
     recursion_limit = 120 if settings.llm_driver is LlmDriver.DETERMINISTIC else 40
+    llm_usage = _compose_llm_usage(settings, uow_factory)
     analyst = _compose_evaluation_analyst(
         settings=settings,
         session_factory=session_factory,
         uow_factory=uow_factory,
         llm=llm,
+        llm_usage=llm_usage,
     )
     research_agent = build_research_agent(
         uow_factory=uow_factory,
@@ -319,6 +335,7 @@ def _compose_runner(
         embedding_client=_compose_embedding(settings),
         llm_client=llm,
         max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+        llm_usage=llm_usage,
     )
     return LocalInvestigationRunner(
         uow_factory=uow_factory,
@@ -767,6 +784,7 @@ def worker_main(argv: list[str] | None = None) -> int:
                 max_research_claims=settings.report_writer_max_research_claims,
                 max_input_bytes=settings.report_writer_max_input_bytes,
                 max_structured_output_attempts=settings.llm_max_structured_output_attempts,
+                llm_usage=_compose_llm_usage(settings, uow_factory),
             )
             worker = InvestigationJobWorker(uow_factory=uow_factory, runner=runner)
             while True:

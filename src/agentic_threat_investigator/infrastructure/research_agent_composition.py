@@ -28,6 +28,7 @@ from agentic_threat_investigator.app.evidence_analyst.accounting import (
     LlmAccountingService,
 )
 from agentic_threat_investigator.app.llm import LlmClient
+from agentic_threat_investigator.app.llm_usage_service import LlmUsageService
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.research_agent.agent import ResearchAgent
 from agentic_threat_investigator.app.research_persistence import (
@@ -45,6 +46,7 @@ def build_research_agent(
     embedding_client: EmbeddingClient,
     llm_client: LlmClient,
     max_structured_output_attempts: int = 2,
+    llm_usage: LlmUsageService | None = None,
 ) -> ResearchAgent:
     """Assemble a fully wired ResearchAgent from its production seams.
 
@@ -61,4 +63,5 @@ def build_research_agent(
         result_persistence=ResearchResultPersistenceService(uow_factory),
         llm_accounting=LlmAccountingService(uow_factory),
         max_structured_output_attempts=max_structured_output_attempts,
+        llm_usage=llm_usage,
     )
