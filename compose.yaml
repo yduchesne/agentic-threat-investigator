@@ -8,10 +8,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-ati}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      # ATI publishes the standard PostgreSQL host port by default; the
-      # no-prefix/no-offset host-port contract applies to every ATI-owned
-      # entry point (AGENTS.md). A local collision is a conflict to report,
-      # not a reason to remap the default.
+      # ATI publishes the standard PostgreSQL host port by default. An optional
+      # ATI_PORT_PREFIX (resolved by ./start.sh, see AGENTS.md) namespaces every
+      # host-published port; container ports never change. A local collision is
+      # a conflict to report, not a reason to remap the default.
       - "${ATI_POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - "${ATI_DATA_DIR:?Set ATI_DATA_DIR in .env}/postgres/data:/var/lib/postgresql"
@@ -68,7 +68,8 @@ services:
       # and the Vite dev proxy both expose the API through the same-origin
       # /api path, so CSRF Origin validation must recognize the browser
       # origin (http://localhost:8080) served by the frontend, not the API
-      # container port.
+      # container port. ``./start.sh`` derives it from the effective frontend
+      # host port when unset.
       ATI_PUBLIC_BASE_URL: ${ATI_PUBLIC_BASE_URL:-http://localhost:8080}
       # V07-01: the exact browser origin of the server-rendered web adapter.
       # The web routes are served by this same FastAPI process, so the
@@ -79,8 +80,9 @@ services:
       # flat default: the pinned compose provider (podman-compose 1.0.6)
       # does not expand a nested ``${ATI_API_HOST_PORT:-8000}`` inside a
       # ``${ATI_WEB_BASE_URL:-...}`` default and would pass the literal
-      # string through, crashing the API at startup. When changing
-      # ``ATI_API_HOST_PORT``, set ``ATI_WEB_BASE_URL`` to the matching
+      # string through, crashing the API at startup. ``./start.sh`` derives
+      # this origin from the effective API host port when it is left unset;
+      # raw Compose users must set ``ATI_WEB_BASE_URL`` to the matching
       # externally visible origin (see .env.example and docs/DEPLOYMENT.md).
       ATI_WEB_BASE_URL: ${ATI_WEB_BASE_URL:-http://localhost:8000}
       # PR 29C: OTLP export. ATI processes export only when the master switch
