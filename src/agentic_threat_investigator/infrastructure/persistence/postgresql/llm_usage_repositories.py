@@ -18,6 +18,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_threat_investigator.app.persistence.repositories import (
+    LlmUsageAppendResult,
     LlmUsageConflictError,
     LlmUsageRecord,
     LlmUsageRepository,
@@ -36,7 +37,7 @@ _APPEND_SQL = (
     "invocation_id, provider, model, input_tokens, output_tokens, "
     "cached_tokens, reasoning_tokens, total_tokens, input_cost, output_cost, "
     "cached_cost, reasoning_cost, total_cost, currency, pricing_id, "
-    "pricing_version, occurred_at "
+    "pricing_version, occurred_at, created "
     "FROM ati.append_llm_usage("
     ":p_investigation_id, :p_scope_urn, :p_operation_name, :p_invocation_id, "
     ":p_provider, :p_model, :p_input_tokens, :p_output_tokens, "
@@ -56,8 +57,12 @@ class PostgresLlmUsageRepository(LlmUsageRepository):
     @postgres_repository_operation(
         repository="PostgresLlmUsageRepository", operation="append"
     )
-    async def append(self, record: LlmUsageRecord) -> LlmUsageRecord:
-        """Append one usage event idempotently by invocation identity."""
+    async def append(self, record: LlmUsageRecord) -> LlmUsageAppendResult:
+        """Append one usage event and report whether it was newly created.
+
+        The stored function atomically distinguishes a new invocation from an
+        exact replay; the adapter maps that disposition without a second query.
+        """
         try:
             result = await self._session.execute(
                 text(_APPEND_SQL),
@@ -90,7 +95,7 @@ class PostgresLlmUsageRepository(LlmUsageRepository):
         row = result.mappings().first()
         if row is None:
             raise LlmUsageConflictError(record.invocation_id)
-        return LlmUsageRecord(
+        stored = LlmUsageRecord(
             scope_urn=row["scope_urn"],
             operation_name=row["operation_name"],
             invocation_id=row["invocation_id"],
@@ -113,6 +118,7 @@ class PostgresLlmUsageRepository(LlmUsageRepository):
             pricing_version=row["pricing_version"],
             llm_usage_id=row["llm_usage_id"],
         )
+        return LlmUsageAppendResult(record=stored, created=bool(row["created"]))
 
     @staticmethod
     def _raise_from_dbapi(error: BaseException, invocation_id: UUID) -> None:

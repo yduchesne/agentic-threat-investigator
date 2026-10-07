@@ -9,6 +9,8 @@ append, and the explicit fail-open accounting policy.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -30,6 +32,8 @@ from agentic_threat_investigator.app.llm_usage import (
 )
 from agentic_threat_investigator.app.llm_usage_service import LlmUsageService
 from agentic_threat_investigator.app.persistence.repositories import (
+    LlmUsageAppendResult,
+    LlmUsageConflictError,
     LlmUsageRecord,
     LlmUsageRepository,
     UnitOfWork,
@@ -38,20 +42,36 @@ from agentic_threat_investigator.infrastructure.llm.langchain_client import (
     _extract_usage_metadata,
 )
 from agentic_threat_investigator.telemetry.metrics import Metrics
-from tests.support.otel import counter_value, metrics_by_name
+from tests.support.otel import counter_value, metric_data_points, metrics_by_name
 
 _NOW = datetime(2026, 5, 1, tzinfo=UTC)
 
 
 class _FakeLlmUsageRepository(LlmUsageRepository):
-    """In-memory append-only usage repository recording appended rows."""
+    """In-memory usage repository with explicit append dispositions.
 
-    def __init__(self) -> None:
+    ``dispositions`` controls each ``append`` result: ``True`` records a new
+    row, ``False`` models an exact replay, and an exception instance is raised
+    from ``append``. Once the script is exhausted, appends default to newly
+    created. Unit tests control disposition explicitly so application-service
+    semantics are isolated from PostgreSQL semantics.
+    """
+
+    def __init__(self, dispositions: Sequence[bool | BaseException] = ()) -> None:
         self.records: list[LlmUsageRecord] = []
+        self._dispositions = list(dispositions)
 
-    async def append(self, record: LlmUsageRecord) -> LlmUsageRecord:
-        self.records.append(record)
-        return record
+    async def append(self, record: LlmUsageRecord) -> LlmUsageAppendResult:
+        disposition: bool | BaseException = (
+            self._dispositions.pop(0) if self._dispositions else True
+        )
+        if isinstance(disposition, BaseException):
+            raise disposition
+        if disposition:
+            self.records.append(record)
+            return LlmUsageAppendResult(record=record, created=True)
+        existing = self.records[-1] if self.records else record
+        return LlmUsageAppendResult(record=existing, created=False)
 
 
 class _FakeUnitOfWork(UnitOfWork):
@@ -73,12 +93,36 @@ class _FakeUnitOfWork(UnitOfWork):
         return None
 
 
-def _service(repository: LlmUsageRepository) -> LlmUsageService:
+def _service(
+    repository: LlmUsageRepository,
+    pricing: PricingCatalog = DEFAULT_PRICING_CATALOG,
+) -> LlmUsageService:
     return LlmUsageService(
         lambda: _FakeUnitOfWork(repository),
         provider="openai",
         model="gpt-4o-mini",
+        pricing_catalog=pricing,
     )
+
+
+_USAGE_METRICS = (
+    Metrics.LLM_CALLS,
+    Metrics.LLM_TOKENS_INPUT,
+    Metrics.LLM_TOKENS_OUTPUT,
+    Metrics.LLM_TOKENS_CACHED,
+    Metrics.LLM_TOKENS_REASONING,
+    Metrics.LLM_TOKENS_TOTAL,
+    Metrics.LLM_COST,
+)
+
+
+def _usage_counters(telemetry: SimpleNamespace) -> dict[str, int]:
+    """Return the recorded aggregate usage counters (missing means zero)."""
+    recorded = metrics_by_name(telemetry.reader)
+    return {
+        metric: counter_value(recorded[metric]) if metric in recorded else 0
+        for metric in _USAGE_METRICS
+    }
 
 
 class TestLlmUsageModel:
@@ -263,7 +307,7 @@ class TestLlmUsageService:
         """A ledger append failure is fail-open and never raises (LU-U19)."""
 
         class _FailingRepository(LlmUsageRepository):
-            async def append(self, record: LlmUsageRecord) -> LlmUsageRecord:
+            async def append(self, record: LlmUsageRecord) -> LlmUsageAppendResult:
                 raise RuntimeError("database unavailable")
 
         offset = await _service(_FailingRepository()).record_usage(
@@ -290,3 +334,214 @@ class TestLlmUsageService:
                 occurred_at=_NOW,
             )
         assert repository.records == []
+
+
+class TestMetricAcceptance:
+    """A1..A9: aggregate metrics follow durable acceptance (PR 38-9 Amd #1)."""
+
+    @pytest.mark.asyncio
+    async def test_a1_new_event_emits_once(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """A new durable event emits each applicable counter once (A1)."""
+        repository = _FakeLlmUsageRepository([True])
+        record = await _service(repository).record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name="urn:ati:llm:report_writing",
+            invocation_id=uuid4(),
+            usage=LlmUsage(input_tokens=100, output_tokens=20, total_tokens=120),
+            occurred_at=_NOW,
+        )
+        assert record is not None
+        counters = _usage_counters(in_memory_persistence_telemetry)
+        assert counters[Metrics.LLM_CALLS] == 1
+        assert counters[Metrics.LLM_TOKENS_INPUT] == 100
+        assert counters[Metrics.LLM_TOKENS_OUTPUT] == 20
+        assert counters[Metrics.LLM_TOKENS_TOTAL] == 120
+        cost_points = metric_data_points(
+            metrics_by_name(in_memory_persistence_telemetry.reader)[Metrics.LLM_COST]
+        )
+        assert float(cost_points[0].value) > 0
+
+    @pytest.mark.asyncio
+    async def test_a2_exact_replay_emits_nothing(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """An exact replay emits no aggregate usage metrics (A2)."""
+        repository = _FakeLlmUsageRepository([False])
+        record = await _service(repository).record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name="urn:ati:llm:report_writing",
+            invocation_id=uuid4(),
+            usage=LlmUsage(input_tokens=100, output_tokens=20, total_tokens=120),
+            occurred_at=_NOW,
+        )
+        assert record is not None
+        assert all(
+            value == 0
+            for value in _usage_counters(in_memory_persistence_telemetry).values()
+        )
+
+    @pytest.mark.asyncio
+    async def test_a3_first_then_replay_counts_once(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """First event plus exact replay yields exactly one contribution (A3)."""
+        invocation_id = uuid4()
+        usage = LlmUsage(input_tokens=100, output_tokens=20, total_tokens=120)
+        repository = _FakeLlmUsageRepository([True, False])
+        first = await _service(repository).record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.EVIDENCE_ANALYST.value,
+            operation_name="urn:ati:llm:evidence_analysis",
+            invocation_id=invocation_id,
+            usage=usage,
+            occurred_at=_NOW,
+        )
+        second = await _service(repository).record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.EVIDENCE_ANALYST.value,
+            operation_name="urn:ati:llm:evidence_analysis",
+            invocation_id=invocation_id,
+            usage=usage,
+            occurred_at=_NOW,
+        )
+        assert first is not None and second is not None
+        counters = _usage_counters(in_memory_persistence_telemetry)
+        assert counters[Metrics.LLM_CALLS] == 1
+        assert counters[Metrics.LLM_TOKENS_INPUT] == 100
+        assert counters[Metrics.LLM_TOKENS_OUTPUT] == 20
+        assert counters[Metrics.LLM_TOKENS_TOTAL] == 120
+
+    @pytest.mark.asyncio
+    async def test_a4_conflicting_replay_emits_nothing(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """A conflicting replay emits no aggregate usage metrics (A4)."""
+        repository = _FakeLlmUsageRepository([LlmUsageConflictError(uuid4())])
+        result = await _service(repository).record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name="urn:ati:llm:report_writing",
+            invocation_id=uuid4(),
+            usage=LlmUsage(input_tokens=100, total_tokens=100),
+            occurred_at=_NOW,
+        )
+        assert result is None
+        assert all(
+            value == 0
+            for value in _usage_counters(in_memory_persistence_telemetry).values()
+        )
+
+    @pytest.mark.asyncio
+    async def test_a5_persistence_failure_emits_nothing(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """A persistence failure is fail-open with no metric emission (A5)."""
+        repository = _FakeLlmUsageRepository([RuntimeError("database unavailable")])
+        result = await _service(repository).record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name="urn:ati:llm:report_writing",
+            invocation_id=uuid4(),
+            usage=LlmUsage(input_tokens=100),
+            occurred_at=_NOW,
+        )
+        assert result is None
+        assert all(
+            value == 0
+            for value in _usage_counters(in_memory_persistence_telemetry).values()
+        )
+
+    @pytest.mark.asyncio
+    async def test_a6_cancellation_propagates_without_metrics(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """Cancellation during append propagates and emits nothing (A6)."""
+        repository = _FakeLlmUsageRepository([asyncio.CancelledError()])
+        with pytest.raises(asyncio.CancelledError):
+            await _service(repository).record_usage(
+                investigation_id=None,
+                scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+                operation_name="urn:ati:llm:report_writing",
+                invocation_id=uuid4(),
+                usage=LlmUsage(input_tokens=100),
+                occurred_at=_NOW,
+            )
+        assert all(
+            value == 0
+            for value in _usage_counters(in_memory_persistence_telemetry).values()
+        )
+
+    @pytest.mark.asyncio
+    async def test_a7_unknown_fields_are_absent(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """Only authoritative fields emit; unknown fields stay absent (A7)."""
+        repository = _FakeLlmUsageRepository([True])
+        await _service(repository).record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name="urn:ati:llm:report_writing",
+            invocation_id=uuid4(),
+            usage=LlmUsage(input_tokens=10),
+            occurred_at=_NOW,
+        )
+        counters = _usage_counters(in_memory_persistence_telemetry)
+        assert counters[Metrics.LLM_CALLS] == 1
+        assert counters[Metrics.LLM_TOKENS_INPUT] == 10
+        assert counters[Metrics.LLM_TOKENS_OUTPUT] == 0
+        assert counters[Metrics.LLM_TOKENS_CACHED] == 0
+        assert counters[Metrics.LLM_TOKENS_REASONING] == 0
+        assert counters[Metrics.LLM_TOKENS_TOTAL] == 0
+
+    @pytest.mark.asyncio
+    async def test_a8_unknown_pricing_has_no_cost_counter(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """Unknown pricing emits token metrics but no fabricated cost (A8)."""
+        repository = _FakeLlmUsageRepository([True])
+        await _service(repository, PricingCatalog()).record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name="urn:ati:llm:report_writing",
+            invocation_id=uuid4(),
+            usage=LlmUsage(input_tokens=100, total_tokens=100),
+            occurred_at=_NOW,
+        )
+        counters = _usage_counters(in_memory_persistence_telemetry)
+        assert counters[Metrics.LLM_CALLS] == 1
+        assert counters[Metrics.LLM_TOKENS_INPUT] == 100
+        assert counters[Metrics.LLM_COST] == 0
+
+    @pytest.mark.asyncio
+    async def test_a9_replay_does_not_fabricate_zero_counts(
+        self, in_memory_persistence_telemetry: SimpleNamespace
+    ) -> None:
+        """A replay of zero/unknown fields adds no increments (A9)."""
+        invocation_id = uuid4()
+        repository = _FakeLlmUsageRepository([True, False])
+        service = _service(repository)
+        await service.record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name="urn:ati:llm:report_writing",
+            invocation_id=invocation_id,
+            usage=LlmUsage(input_tokens=0),
+            occurred_at=_NOW,
+        )
+        await service.record_usage(
+            investigation_id=None,
+            scope_urn=LlmUsageScope.REPORT_ANALYST.value,
+            operation_name="urn:ati:llm:report_writing",
+            invocation_id=invocation_id,
+            usage=LlmUsage(input_tokens=0),
+            occurred_at=_NOW,
+        )
+        counters = _usage_counters(in_memory_persistence_telemetry)
+        assert counters[Metrics.LLM_CALLS] == 1
+        assert counters[Metrics.LLM_TOKENS_INPUT] == 0
+        assert counters[Metrics.LLM_TOKENS_TOTAL] == 0
+        assert counters[Metrics.LLM_COST] == 0

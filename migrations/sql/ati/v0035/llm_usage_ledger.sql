@@ -117,9 +117,9 @@ RETURNS TABLE(
   reasoning_tokens bigint, total_tokens bigint, input_cost numeric,
   output_cost numeric, cached_cost numeric, reasoning_cost numeric,
   total_cost numeric, currency text, pricing_id text, pricing_version text,
-  occurred_at timestamptz, created_at timestamptz)
+  occurred_at timestamptz, created_at timestamptz, created boolean)
 LANGUAGE plpgsql AS $$
-DECLARE v_row ati.llm_usage%ROWTYPE; v_conflict boolean;
+DECLARE v_row ati.llm_usage%ROWTYPE; v_conflict boolean; v_created boolean;
 BEGIN
   IF p_scope_urn IS NULL OR p_scope_urn <> btrim(p_scope_urn)
      OR p_scope_urn !~ '^urn:ati:llm:usage:[a-z0-9:_-]+$'
@@ -191,6 +191,11 @@ BEGIN
       RAISE EXCEPTION 'llm usage invocation conflict'
         USING ERRCODE = 'U38A2';
     END IF;
+    -- Exact replay: the invocation is already durably accounted.
+    v_created := FALSE;
+  ELSE
+    -- The INSERT atomically accepted a new invocation event.
+    v_created := TRUE;
   END IF;
 
   llm_usage_id := v_row.llm_usage_id;
@@ -215,5 +220,6 @@ BEGIN
   pricing_version := v_row.pricing_version;
   occurred_at := v_row.occurred_at;
   created_at := v_row.created_at;
+  created := v_created;
   RETURN NEXT;
 END $$;

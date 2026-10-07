@@ -1138,6 +1138,21 @@ class LlmUsageRecord:
             raise ValueError("pricing identity is required for ATI-computed cost")
 
 
+@dataclass(frozen=True)
+class LlmUsageAppendResult:
+    """Authoritative disposition of one ``append`` call (PR 38-9 Amd #1).
+
+    ``created`` is true only when the stored function atomically inserted a
+    new ledger row for the invocation identity. An exact replay returns the
+    existing ``record`` with ``created=False``. A conflicting replay is a
+    material failure and is raised as :class:`LlmUsageConflictError`, never
+    represented as ``created=False``.
+    """
+
+    record: LlmUsageRecord
+    created: bool
+
+
 class LlmUsageConflictError(RuntimeError):
     """Raised when one invocation identity replays with different accounting."""
 
@@ -1157,8 +1172,13 @@ class LlmUsageRepository(ABC):  # pragma: no cover
     """
 
     @abstractmethod
-    async def append(self, record: LlmUsageRecord) -> LlmUsageRecord:
-        """Append one usage event in the caller's transaction."""
+    async def append(self, record: LlmUsageRecord) -> LlmUsageAppendResult:
+        """Append one usage event in the caller's transaction.
+
+        Returns the durable record and whether it was newly created. An exact
+        replay returns the existing row with ``created=False``; a conflicting
+        replay raises :class:`LlmUsageConflictError`.
+        """
 
 
 @dataclass(frozen=True)

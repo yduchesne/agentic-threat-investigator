@@ -1723,11 +1723,14 @@ runtime.
 ### Durable append-only ledger
 
 The `ati.llm_usage` table is append-only and records one event per actual
-attempt that produced authoritative usage. `invocation_id` is the deterministic
-idempotency identity (an exact replay returns the existing row; a replay with
-different accounting fails closed). Investigation identity is stored durably
-but is never a Prometheus label. There is deliberately no prompt, output,
-Evidence, credential, or raw provider payload column.
+attempt that produced authoritative usage. `invocation_id` controls durable
+idempotency: `ati.append_llm_usage(...)` atomically distinguishes a newly
+inserted invocation (`created = true`) from an exact replay of an existing row
+(`created = false`). An exact replay returns the existing row; a replay with
+different accounting fails closed with `LlmUsageConflictError`. Investigation
+identity is stored durably but is never a Prometheus label. There is
+deliberately no prompt, output, Evidence, credential, or raw provider payload
+column.
 
 Retry/repair policy: each actual attempt is a separate event. A failed attempt
 that reported no authoritative usage appends no row; the call-budget and
@@ -1762,6 +1765,25 @@ Permitted dimensions are `ati.operation`, `ati.llm.scope`, `ati.llm.provider`,
 tenant/user identifiers, arbitrary prompt versions, and raw provider errors. A
 missing usage field never emits a fabricated zero increment.
 
+These counters describe **newly accepted durable usage events**. Aggregate
+`ati.llm.calls`, token, and known-cost counters increment only when
+`ati.append_llm_usage(...)` reports `created = true`:
+
+- an exact replay (`created = false`) contributes nothing to any aggregate
+  usage/cost counter;
+- a conflicting replay contributes nothing and fails closed at the repository
+  boundary;
+- if durable accounting cannot establish acceptance (for example PostgreSQL is
+  unavailable), the investigation remains fail-open but no aggregate
+  accounting metric is emitted for that event — ATI does not report usage its
+  ledger cannot substantiate.
+
+These are accounting/usage aggregates, not a substitute for the existing
+Agents & LLM execution/latency/failure telemetry. PostgreSQL and OpenTelemetry
+are not placed in a distributed transaction; crash-consistent exactly-once
+dual-write delivery (reconciliation after a process crash between the
+PostgreSQL commit and the OTel emission) is outside PR 38-9.
+
 ### Content exclusions and optional backends
 
 Prompts, model outputs, Evidence/document content, raw provider payloads,
@@ -1771,7 +1793,16 @@ observability backends; they are never ATI's authoritative accounting truth.
 
 ### Authoritative real-stack acceptance
 
-Batch and LLM usage telemetry is accepted through
-`scripts/observability-integration.sh`, which exercises the real Collector /
-Prometheus / Jaeger / Loki topology through production seams. Synthetic direct
-counter emission is not feature evidence.
+Batch ingestion telemetry and the existing execution/failure telemetry are
+accepted through `scripts/observability-integration.sh`, which exercises the
+real Collector / Prometheus / Jaeger / Loki topology through production seams.
+Synthetic direct counter emission is not feature evidence.
+
+**Documented limitation (PR 38-9 Amendment #1):** the PR 34 harness topology
+does not include PostgreSQL, so it cannot prove the durable-ledger-to-metric
+replay-idempotency path end to end. The amendment does not redesign that
+topology and does not emit synthetic `ati.llm.*` counters from the diagnostic
+generator. That vertical slice is a deferred acceptance item requiring a
+separately planned observability-integration topology enhancement; the
+PostgreSQL-backed idempotency contract is instead proven by deterministic unit
+tests and real-PostgreSQL repository integration tests.

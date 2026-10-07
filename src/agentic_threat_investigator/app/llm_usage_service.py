@@ -3,14 +3,17 @@
 
 One actual model attempt produces exactly one normalized :class:`LlmUsage`
 event. This service consumes that single event: it computes known cost from
-explicit versioned pricing, emits bounded aggregate usage metrics, and appends
-one append-only durable ledger row in a short UnitOfWork that never spans LLM
-I/O. Missing usage/cost stays unknown; zero is never fabricated.
+explicit versioned pricing, appends one append-only durable ledger row in a
+short UnitOfWork that never spans LLM I/O, and emits bounded aggregate usage
+metrics only when the durable append authoritatively accepts a **new** event.
+Missing usage/cost stays unknown; zero is never fabricated.
 
-Durable-accounting failure policy: metric emission happens from the normalized
-event independent of persistence, and a ledger append failure is fail-open
-(logged safely) so an observability/accounting outage never fails an
-investigation. The exact policy is tested.
+Durable-accounting failure policy: accounting correctness takes precedence
+over best-effort metric completeness. If the durable append cannot establish
+that the event is newly accepted (an exact replay, a conflict, or a
+persistence failure), no aggregate usage/cost counter is emitted, while the
+investigation continues under the existing fail-open policy. The exact policy
+is tested.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from agentic_threat_investigator.app.llm_pricing import (
 )
 from agentic_threat_investigator.app.llm_usage import LlmUsage, validate_scope_urn
 from agentic_threat_investigator.app.persistence.repositories import (
+    LlmUsageAppendResult,
     LlmUsageRecord,
     UnitOfWork,
 )
@@ -72,16 +76,17 @@ class LlmUsageService:
     ) -> LlmUsageRecord | None:
         """Account one successful, authoritative model attempt.
 
-        Emits bounded usage metrics from the normalized event and appends one
-        append-only ledger row in a short transaction. Returns the durable
-        record, or ``None`` when the fail-open append failed.
+        Appends the append-only ledger row in a short transaction first, then
+        emits bounded usage metrics only when the durable append reports a
+        newly created event. Returns the durable record for a new or exact
+        replay, or ``None`` when the fail-open append failed. An exact replay
+        emits no additional aggregate metrics; a conflict emits none.
         """
         validate_scope_urn(scope_urn)
         if not operation_name.strip():
             raise ValueError("operation_name must not be blank")
         occurred = occurred_at if occurred_at is not None else datetime.now(UTC)
         cost = self._known_cost(usage, occurred)
-        self._emit_metrics(scope_urn, operation_name, usage, cost)
         record = LlmUsageRecord(
             scope_urn=scope_urn,
             operation_name=operation_name,
@@ -104,9 +109,14 @@ class LlmUsageService:
             pricing_id=cost.pricing_id if cost else None,
             pricing_version=cost.pricing_version if cost else None,
         )
-        return await self._append(record)
+        append_result = await self._append(record)
+        if append_result is None:
+            return None
+        if append_result.created:
+            self._emit_metrics(scope_urn, operation_name, usage, cost)
+        return append_result.record
 
-    async def _append(self, record: LlmUsageRecord) -> LlmUsageRecord | None:
+    async def _append(self, record: LlmUsageRecord) -> LlmUsageAppendResult | None:
         """Append the ledger row fail-open in a short transaction."""
         try:
             async with self._uow_factory() as uow:
