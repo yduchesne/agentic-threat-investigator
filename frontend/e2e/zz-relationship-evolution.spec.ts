@@ -68,12 +68,69 @@ async function nodeOffsetInCanvas(
   canvas: Locator,
   node: Locator,
 ): Promise<{ x: number; y: number }> {
-  const nodeBox = await node.boundingBox();
-  const canvasBox = await canvas.boundingBox();
-  return {
-    x: Math.round((nodeBox?.x ?? 0) - (canvasBox?.x ?? 0)),
-    y: Math.round((nodeBox?.y ?? 0) - (canvasBox?.y ?? 0)),
-  };
+  // Measure the node box and the canvas box in ONE browser evaluation. Two
+  // sequential Playwright bounding-box reads can straddle an in-flow
+  // mutation (for example the expansion-in-flight Alert shifting the canvas
+  // on screen) and manufacture the exact ~56 px phantom drift this helper
+  // exists to avoid. The atomic read returns the same canvas-relative flow
+  // offset while removing that measurement race.
+  const testId = (await node.getAttribute("data-testid")) ?? "";
+  return canvas.evaluate((canvasElement, id) => {
+    const nodeElement = canvasElement.querySelector(`[data-testid="${id}"]`);
+    if (nodeElement === null) {
+      return { x: 0, y: 0 };
+    }
+    const nodeBox = nodeElement.getBoundingClientRect();
+    const canvasBox = canvasElement.getBoundingClientRect();
+    return {
+      x: Math.round(nodeBox.x - canvasBox.x),
+      y: Math.round(nodeBox.y - canvasBox.y),
+    };
+  }, testId);
+}
+
+/**
+ * Click one canvas edge by canonical Relationship identity with a real
+ * pointer click on verified path geometry (PR 38-10b).
+ *
+ * React Flow renders a wide invisible interaction path per edge, so a later
+ * parallel/overlapping edge can cover an earlier edge's group bounding-box
+ * center — the deterministic interception that made a bare
+ * ``.react-flow__edge.first().click()`` unreliable. The edge is selected by
+ * canonical Relationship ID (never DOM ordering), a point is taken from
+ * that edge's own SVG path, and the point is only used when the element
+ * actually reported at that coordinate belongs to the same edge. The click
+ * itself is an ordinary pointer press at that verified coordinate.
+ */
+async function clickCanvasEdgeByRelationship(
+  page: Page,
+  canvas: Locator,
+  relationshipId: string,
+): Promise<void> {
+  const edge = canvas.locator(`[data-id="e:${relationshipId}"]`);
+  await expect(edge).toBeVisible({ timeout: 20_000 });
+  const point = await edge.evaluate((edgeElement) => {
+    const path = edgeElement.querySelector(".react-flow__edge-path");
+    if (!(path instanceof SVGPathElement)) {
+      return null;
+    }
+    const matrix = path.getScreenCTM();
+    if (matrix === null) {
+      return null;
+    }
+    const total = path.getTotalLength();
+    for (let index = 1; index < 10; index += 1) {
+      const local = path.getPointAtLength((total * index) / 10);
+      const screen = local.matrixTransform(matrix);
+      const top = document.elementFromPoint(screen.x, screen.y);
+      if (top !== null && edgeElement.contains(top)) {
+        return { x: screen.x, y: screen.y };
+      }
+    }
+    return null;
+  });
+  expect(point).not.toBeNull();
+  await page.mouse.click(point?.x ?? 0, point?.y ?? 0);
 }
 
 test.describe("PR 24E real-stack relationship evolution and graph", () => {
@@ -446,9 +503,23 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
         provenanceEvidenceRequests.push(url);
       }
     });
-    const expandedCanvasEdge = graphCanvas.locator(".react-flow__edge").first();
-    await expect(expandedCanvasEdge).toBeVisible({ timeout: 20_000 });
-    await expandedCanvasEdge.click();
+    // Select the first canonical Relationship discovered from the
+    // accessible graph list (never `.first()` DOM ordering) and open it with
+    // a real pointer click on verified canvas path geometry.
+    const provenanceRelationshipId = new URL(
+      (await graphList
+        .getByRole("row")
+        .nth(1)
+        .getByRole("link", { name: "Details", exact: true })
+        .getAttribute("href")) ?? "",
+      "http://localhost",
+    ).searchParams.get("selected");
+    expect(provenanceRelationshipId).toMatch(/^[0-9a-f-]{36}$/);
+    await clickCanvasEdgeByRelationship(
+      page,
+      graphCanvas,
+      provenanceRelationshipId as string,
+    );
     const edgeSelectionPanel = page.getByText(/^Relationship: /).first().locator("xpath=..");
     await expect(
       edgeSelectionPanel.getByRole("button", { name: "Provenance" }),

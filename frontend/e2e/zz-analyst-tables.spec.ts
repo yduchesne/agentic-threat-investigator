@@ -132,9 +132,12 @@ test.describe("PR 24C real-stack analyst browsing", () => {
     await page.goto(evidenceUrl);
     await expect(page.getByRole("heading", { name: "Evidence details" })).not.toBeVisible({ timeout: 10_000 });
 
-    // Relationships: stable edges with analyst labels. PR 31F-5 journey 4:
-    // source/target cells lead with value/type, never the compact UUID.
-    await page.getByRole("tab", { name: "Relationships" }).click();
+    // Relationships: stable edges with analyst labels. The workspace
+    // navigation exposes a distinct Graph tab, so the table/detail/
+    // observations slice reaches the first-class Relationships route
+    // directly. PR 31F-5 journey 4: source/target cells lead with
+    // value/type, never the compact UUID.
+    await page.goto(`${base}/relationships`);
     await expect(
       page.getByRole("heading", { name: "Relationships" }),
     ).toBeVisible();
@@ -147,21 +150,21 @@ test.describe("PR 24C real-stack analyst browsing", () => {
       .getByRole("button", { name: /View / })
       .first()
       .dispatchEvent("click");
-    await expect(page.getByRole("heading", { name: "Relationships details" })).toBeVisible();
-    await expect(page.getByText(/Observations \(first page\)/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Relationship details" })).toBeVisible();
+    await expect(page.getByText("Recent relationship history")).toBeVisible();
     await expect(page.getByText("Observed at").first()).toBeVisible();
     await expect(page.getByText("Retrieved at").first()).toBeVisible();
-    await expect(page.getByText("View all observations").first()).toBeVisible();
+    await expect(page.getByText("View all history").first()).toBeVisible();
 
     // First-class observations route with the relationship filter preset
     // (the in-detail link is proven by component tests; closing the
     // selection through its URL then deep-linking exercises addressability).
     await page.goto(`${base}/relationships`);
-    await expect(page.getByRole("heading", { name: "Relationships details" })).not.toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "Relationship details" })).not.toBeVisible({ timeout: 10_000 });
     await page.goto(`${base}/relationships/observations`);
     await expect(page).toHaveURL(/\/relationships\/observations/);
     await expect(
-      page.getByRole("heading", { name: "Relationship observations" }),
+      page.getByRole("heading", { name: "Relationship history" }),
     ).toBeVisible();
     await expect(page.getByText("Observed at", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Retrieved at", { exact: true }).first()).toBeVisible();
