@@ -158,13 +158,62 @@ PostgreSQL is published on its standard host port `5432` by default:
 ATI_POSTGRES_HOST_PORT=5432
 ```
 
-ATI owns its standard host ports and does not prefix, offset, or otherwise
-remap them to avoid collisions with other locally running applications. If
-the standard host port is already occupied, treat it as a local-environment
-conflict and resolve that conflict explicitly (stop/adjust the other
-listener) rather than silently selecting an alternate port. The isolated
-integration/E2E harnesses override the host port per run as part of their
-throwaway topology.
+### Local host-port prefix (`ATI_PORT_PREFIX`)
+
+ATI's canonical local launcher (`./start.sh`) optionally namespaces every
+host-published service under `ATI_PORT_PREFIX`, exactly one digit `1..5`:
+
+```text
+derived_host_port = ATI_PORT_PREFIX * 10000 + (default_host_port % 10000)
+```
+
+For `ATI_PORT_PREFIX=5`:
+
+```text
+PostgreSQL                 5432 -> 55432
+Redpanda external Kafka    9092 -> 59092
+API / server-rendered web  8000 -> 58000
+React frontend             8080 -> 58080
+Grafana                    3000 -> 53000
+Prometheus                 9090 -> 59090
+Jaeger UI                 16686 -> 56686
+```
+
+The numeric rule (not string concatenation) keeps five-digit defaults valid:
+Jaeger is `56686`, never `516686`.
+
+Precedence for every host-published service:
+
+```text
+non-empty explicit ATI_<SERVICE>_HOST_PORT -> use it unchanged (never prefixed)
+else non-empty ATI_PORT_PREFIX             -> prefix * 10000 + (default % 10000)
+else                                       -> standard default port
+```
+
+Set `ATI_PORT_PREFIX` in the normal repository `.env`; `./start.sh` resolves
+it before invoking Compose, so it must not be exported manually. Raw
+`podman-compose -f compose.yaml ...` supports explicit `ATI_*_HOST_PORT`
+values but does not derive the prefix itself.
+
+Prefixing is host-side only: container ports, Compose-network DNS/service
+discovery, and in-container endpoints never change. Published ports are
+container-creation state, so `./start.sh` recreates affected containers when
+the resolved mappings change (images and persistent data are preserved); a
+plain restart cannot change a published port. An invalid prefix or host port
+fails before any Compose mutation, and a port collision surfaces as a bind
+failure rather than an automatically selected alternate port.
+
+When `ATI_PUBLIC_BASE_URL` / `ATI_WEB_BASE_URL` are unset, `./start.sh`
+derives them from the effective frontend and API host ports (for prefix 5,
+`http://localhost:58080` and `http://localhost:58000`). Explicit values
+remain authoritative.
+
+If a standard host port is already occupied without a prefix, treat it as a
+local-environment conflict and resolve that conflict explicitly (stop/adjust
+the other listener) rather than silently selecting an alternate port. The
+isolated integration/E2E harnesses override the host port per run as part of
+their throwaway topology and are unaffected by (and take precedence over) the
+prefix.
 
 ## Canonical reference geography (PR 26B / PR 26B-2)
 
@@ -473,8 +522,11 @@ Host-port variables:    ATI_API_HOST_PORT, ATI_FRONTEND_HOST_PORT
 Both exact origins share one session/CSRF authority (the same `ati_session`
 and `ati_csrf` cookies). Set `ATI_WEB_BASE_URL` to the externally visible
 web origin whenever `ATI_API_HOST_PORT` changes; a mismatch causes the
-exact-origin CSRF check to reject web form/HTMX mutations. There is no
-wildcard credentialed origin and no second authentication authority. During
+exact-origin CSRF check to reject web form/HTMX mutations. When the origins
+are left unset, `./start.sh` derives them from the effective frontend/API
+host ports (including prefix-derived ones); explicit values are preserved.
+There is no wildcard credentialed origin and no second authentication
+authority. During
 the V07-1..V07-6 migration the real-stack browser harness is split:
 `scripts/e2e.sh` remains the React regression harness and
 `scripts/e2e-web.sh` is the server-rendered web acceptance harness; they are
@@ -891,6 +943,11 @@ ATI_OBSERVABILITY_ENABLED=true \
 podman-compose -f compose.yaml -f compose.observability.yaml up -d
 ```
 
+Raw Compose honours explicit `ATI_*_HOST_PORT` values. When relying on
+`ATI_PORT_PREFIX`, use `./start.sh`, which resolves and exports the effective
+ports before invoking Compose (the pinned provider cannot do the arithmetic
+itself).
+
 `docker compose` users run the same two-file form with `docker compose`.
 Core ATI services never depend on observability services; the Collector may
 be absent and ATI still starts. OTLP export activates when
@@ -902,7 +959,8 @@ services, so the explicit variable is optional. Set
 with no remote export.
 
 Local developer UIs (host-port overridable via `ATI_GRAFANA_HOST_PORT`,
-`ATI_PROMETHEUS_HOST_PORT`, `ATI_JAEGER_HOST_PORT`):
+`ATI_PROMETHEUS_HOST_PORT`, `ATI_JAEGER_HOST_PORT`, or namespace-derivable
+via `ATI_PORT_PREFIX=5`):
 
 ```text
 Grafana    http://localhost:3000    (ATI_GRAFANA_HOST_PORT, default 3000)

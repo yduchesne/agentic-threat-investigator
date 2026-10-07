@@ -106,15 +106,46 @@ Additionally:
 
 ## Local Podman host-port contract
 
-ATI owns the standard host ports for its local Podman services. ATI does **not** use an application-specific host-port prefix.
+By default ATI publishes each local Podman service on that service's standard
+host port. For example, PostgreSQL container port `5432` maps to host port
+`5432`.
 
-- When an ATI container service is published to the host, map it to that service's standard host port. For example, PostgreSQL container port `5432` maps to host port `5432`.
-- Do not prefix, offset, or otherwise remap ATI host ports to avoid collisions with other locally running applications.
-- Do not silently choose an alternate or dynamically allocated host port when the standard ATI host port is occupied. Treat the collision as a local-environment conflict and report it clearly.
-- This contract applies to every ATI-owned Podman entry point and helper, including root scripts such as `integration-test.sh`, `start.sh`, and `stop.sh`, scripts under `scripts/`, Compose files, test harnesses, and future container-management scripts.
-- When modifying any Podman-related script or configuration, explicitly verify that all published ATI host ports continue to use their standard service ports.
-- Keep ATI-specific namespacing for container names, Compose project identity, networks, volumes, pods, and other Podman resources where applicable. The no-prefix rule applies to **host ports**, not to resource naming/isolation.
-- Prefer the canonical ATI port configuration over independently inventing mappings in individual scripts or test helpers.
+`ATI_PORT_PREFIX` optionally namespaces host-published ports. It is exactly
+one digit `1..5`:
+
+```text
+derived_host_port = ATI_PORT_PREFIX * 10000 + (default_host_port % 10000)
+```
+
+- Prefixing is host-side only. Container ports, Compose-network
+  DNS/service discovery, and all in-container endpoints never change.
+- An explicit non-empty `ATI_<SERVICE>_HOST_PORT` always wins and is never
+  prefixed again.
+- Absent/empty `ATI_PORT_PREFIX` is fully backward compatible: standard
+  default host ports are used.
+- Invalid values (`0`, negatives, multi-digit, whitespace-padded, nonnumeric,
+  or a resolved port outside `1..65535`) fail before any Compose mutation.
+- `./start.sh` is the canonical launcher: it resolves effective ports from
+  the normal repository `.env` (no manual export) before invoking Compose and
+  reconciles stale container port mappings without image rebuild or
+  destructive teardown. Raw `podman-compose` supports explicit
+  `ATI_*_HOST_PORT` values but does not derive the prefix itself.
+- Do not silently choose an alternate or dynamically allocated host port when
+  the standard ATI host port is occupied. Treat the collision as a
+  local-environment conflict and report it clearly.
+- This contract applies to every ATI-owned Podman entry point and helper,
+  including root scripts such as `integration-test.sh`, `start.sh`, and
+  `stop.sh`, scripts under `scripts/`, Compose files, test harnesses, and
+  future container-management scripts.
+- When modifying any Podman-related script or configuration, explicitly
+  verify that all published ATI host ports follow this contract.
+- Keep ATI-specific namespacing for container names, Compose project
+  identity, networks, volumes, pods, and other Podman resources where
+  applicable. The prefix rule applies to **host ports** only, not to resource
+  naming/isolation.
+- Prefer the canonical ATI port configuration
+  (`scripts/local-port-config.sh`) over independently inventing mappings in
+  individual scripts or test helpers.
 
 ## Configuration and batch-persistence invariants
 

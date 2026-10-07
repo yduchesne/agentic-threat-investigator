@@ -106,25 +106,12 @@ else
 fi
 COMPOSE_FILES=(-f compose.yaml -f compose.observability.yaml)
 
-# Resolve a value with the same precedence Compose itself uses: process
-# environment > .env > documented default. podman-compose 1.0.6 does not
-# honour COMPOSE_PROJECT_NAME from .env, so the default project name is
-# derived exactly the way podman-compose derives it (directory basename).
-get_env() {
-  local key="$1" default="${2:-}" value=""
-  if [[ -n "${!key:-}" ]]; then
-    printf '%s\n' "${!key}"
-    return 0
-  fi
-  if [[ -f .env ]]; then
-    value=$(sed -n "s/^${key}=//p" .env | tail -n 1)
-    if [[ -n "$value" ]]; then
-      printf '%s\n' "$value"
-      return 0
-    fi
-  fi
-  printf '%s\n' "$default"
-}
+# Shared, validated host-port resolution (PR 39-10): process environment
+# retains precedence over .env and explicit ATI_*_HOST_PORT values always
+# win. Sourced before any port is read so invalid configuration fails here,
+# before any Compose mutation.
+# shellcheck source=scripts/local-port-config.sh
+source "${ROOT_DIR}/scripts/local-port-config.sh"
 
 require_env() {
   local key="$1"
@@ -141,15 +128,21 @@ require_env POSTGRES_PASSWORD
 
 PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$ROOT_DIR")}"
 ATI_DATA_DIR=$(get_env ATI_DATA_DIR)
-# Host-published ports, matching compose.yaml / compose.observability.yaml
-# defaults. API port 8000 is fixed in compose.yaml.
-API_PORT=8000
-FRONTEND_PORT=$(get_env ATI_FRONTEND_HOST_PORT 8080)
-POSTGRES_PORT=$(get_env ATI_POSTGRES_HOST_PORT 5432)
-REDPANDA_PORT=$(get_env ATI_REDPANDA_HOST_PORT 9092)
-GRAFANA_PORT=$(get_env ATI_GRAFANA_HOST_PORT 3000)
-PROMETHEUS_PORT=$(get_env ATI_PROMETHEUS_HOST_PORT 9090)
-JAEGER_PORT=$(get_env ATI_JAEGER_HOST_PORT 16686)
+# Resolve and export the effective host-published ports before anything else
+# is computed. The exported values drive Compose publication, Redpanda's
+# OUTSIDE advertisement, the probes below, the endpoint summary, and the
+# default browser origins. Invalid input fails here, before Compose mutation.
+if ! resolve_local_ports; then
+  echo "error: invalid local host-port configuration; fix the values above and retry" >&2
+  exit 1
+fi
+API_PORT=$ATI_API_HOST_PORT
+FRONTEND_PORT=$ATI_FRONTEND_HOST_PORT
+POSTGRES_PORT=$ATI_POSTGRES_HOST_PORT
+REDPANDA_PORT=$ATI_REDPANDA_HOST_PORT
+GRAFANA_PORT=$ATI_GRAFANA_HOST_PORT
+PROMETHEUS_PORT=$ATI_PROMETHEUS_HOST_PORT
+JAEGER_PORT=$ATI_JAEGER_HOST_PORT
 
 # Canonical reference geography (docs/DEPLOYMENT.md "Canonical reference
 # geography"). start.sh is the local demo/manual bootstrap, so it loads the
@@ -299,6 +292,110 @@ resolve_compose_network() {
   [[ -n "$cid" ]] || return 1
   COMPOSE_NETWORK=$(podman inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$cid" | tr ' ' '\n' | grep -v '^$' | head -n 1)
   [[ -n "$COMPOSE_NETWORK" ]]
+}
+
+# ---------------------------------------------------------------------------
+# Published host-port reconciliation (PR 39-10)
+#
+# Published ports are container-creation state: changing them requires
+# recreating the container, not restarting it. Detection uses the existing
+# Podman discovery (a container's creation-time HostConfig.PortBindings) and
+# recreation removes only project containers, preserving images and every
+# persistent volume/bind mount.
+# ---------------------------------------------------------------------------
+
+# Container-side service ports for the host-published services. Kept in one
+# place so reconciliation and the health probes agree.
+declare -A PUBLISHED_CONTAINER_PORTS=(
+  [postgres]=5432
+  [redpanda]=9092
+  [api]=8000
+  [frontend]=80
+  [prometheus]=9090
+  [jaeger]=16686
+  [grafana]=3000
+)
+
+# effective_host_port <service>: the resolved host port for a host-published
+# service (POSTGRES_PORT, API_PORT, ...), set once at startup.
+effective_host_port() {
+  case "$1" in
+    postgres) printf '%s\n' "$POSTGRES_PORT" ;;
+    redpanda) printf '%s\n' "$REDPANDA_PORT" ;;
+    api) printf '%s\n' "$API_PORT" ;;
+    frontend) printf '%s\n' "$FRONTEND_PORT" ;;
+    prometheus) printf '%s\n' "$PROMETHEUS_PORT" ;;
+    jaeger) printf '%s\n' "$JAEGER_PORT" ;;
+    grafana) printf '%s\n' "$GRAFANA_PORT" ;;
+    *) return 1 ;;
+  esac
+}
+
+# container_published_host_port <cid> <container_port>: print the host port
+# the container was created with for a container port (empty when it
+# publishes no such port). HostConfig.PortBindings is creation state, so it
+# is authoritative even for a stopped container.
+container_published_host_port() {
+  local cid="$1" cport="$2"
+  podman inspect -f \
+    "{{range \$p, \$b := .HostConfig.PortBindings}}{{if eq \$p \"${cport}/tcp\"}}{{range \$x := \$b}}{{\$x.HostPort}}{{end}}{{end}}{{end}}" \
+    "$cid" 2>/dev/null || true
+}
+
+# port_mapping_matches <service> <desired_port>: 0 when the service's
+# existing container publishes exactly the desired host port. A missing
+# container returns nonzero (the create phase owns it).
+port_mapping_matches() {
+  local service="$1" desired="$2" cid cport actual
+  cid=$(cid_for "$service")
+  [[ -n "$cid" ]] || return 1
+  cport="${PUBLISHED_CONTAINER_PORTS[$service]}"
+  actual=$(container_published_host_port "$cid" "$cport")
+  [[ -n "$actual" && "$actual" == "$desired" ]]
+}
+
+# Container removal order for recreation: leaves first, because Podman
+# refuses to remove a container while a compose dependant still exists.
+RECREATE_REMOVE_ORDER=(
+  frontend api worker geo-resolver scheduler fake-data-bootstrap migrate
+  grafana prometheus postgres-exporter otel-collector jaeger loki redpanda
+  postgres
+)
+
+# remove_project_containers: remove every project container (used by port
+# reconciliation). Images and persistent data are never touched.
+remove_project_containers() {
+  local service cid
+  for service in "${RECREATE_REMOVE_ORDER[@]}"; do
+    cid=$(cid_for "$service") || true
+    if [[ -n "$cid" ]]; then
+      podman rm -f "$cid" >/dev/null 2>&1 || true
+      log "removed $service container; it will be recreated with the resolved host-port mappings"
+    fi
+  done
+}
+
+# reconcile_published_host_ports: when any existing container's published
+# host port differs from the resolved configuration, recreate the project
+# containers. Port-only changes therefore never rebuild an image and never
+# delete persistent data. A matching configuration is left untouched
+# (idempotent start).
+PORT_RECONCILIATION=0
+reconcile_published_host_ports() {
+  local service desired stale=0
+  for service in "${!PUBLISHED_CONTAINER_PORTS[@]}"; do
+    [[ -n "$(cid_for "$service")" ]] || continue
+    desired=$(effective_host_port "$service")
+    if ! port_mapping_matches "$service" "$desired"; then
+      warn "$service: container publishes a different host port than the resolved ${desired}; recreation required"
+      stale=1
+    fi
+  done
+  if ((stale)); then
+    step "recreating containers whose published host ports changed (images and data preserved)"
+    remove_project_containers
+    PORT_RECONCILIATION=1
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -841,6 +938,10 @@ fi
 
 ensure_data_dirs
 
+# Reconcile existing container port mappings with the resolved configuration
+# before deciding whether the create phase can be skipped.
+reconcile_published_host_ports
+
 EXPECTED_SERVICES=(postgres redpanda migrate fake-data-bootstrap api worker geo-resolver scheduler frontend otel-collector prometheus jaeger loki grafana postgres-exporter)
 
 containers_exist_for_all() {
@@ -855,7 +956,9 @@ if containers_exist_for_all; then
   log "all expected containers already exist; skipping the create phase"
 else
   EXISTING_CONTAINERS=$(podman ps -a --filter "label=io.podman.compose.project=${PROJECT_NAME}" --format '{{.ID}}' | sed '/^$/d' | wc -l)
-  if ((EXISTING_CONTAINERS == 0)); then
+  if ((PORT_RECONCILIATION)); then
+    note "Recreating containers from the resolved host-port configuration. Images and persistent data are preserved."
+  elif ((EXISTING_CONTAINERS == 0)); then
     note "Starting containers from a clean slate. This operation might take 3-5 minutes or longer: the first run also builds the backend, PostgreSQL, and frontend images (requires network access)."
   else
     note "Starting containers. This operation might take a while."
