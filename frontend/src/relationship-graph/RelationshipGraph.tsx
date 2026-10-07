@@ -240,7 +240,10 @@ function FitViewIcon(): ReactElement {
  * The same component performs one automatic fit after each new root
  * topology is committed: it waits until the React Flow store reflects the
  * expected root Entity set (``useNodes``/``useNodesInitialized``, never a
- * timer), then fits once per ``rootGraphKey``. Same-root expansion and
+ * timer), then fits once per root graph key. The key includes the model's
+ * canonical root Entity so the stale intermediate commit of a focal
+ * re-root (new graph key, previous root's model) cannot mark the correct
+ * root topology as already fitted and skip its fit. Same-root expansion and
  * ordinary interaction therefore never re-fit or re-layout.
  */
 function GraphControls({
@@ -496,11 +499,24 @@ export function RelationshipGraph({
 
   // Root context change -> deterministic radial reset; same context +
   // accumulated topology change -> in-place merge with position retention.
+  //
+  // The reset is keyed on BOTH the URL/filter root graph key and the model's
+  // canonical root Entity. A focal re-root commits the new root graph key
+  // one render before the expansion controller swaps in the new accumulated
+  // model (child effects run before parent effects), so keying on the graph
+  // key alone would reset positions from the previous root's model and then
+  // misclassify the correct model as same-root expansion growth, producing
+  // overlapping ring-placed nodes. Tracking the model root makes the stale
+  // intermediate commit reset again once the correct model arrives.
   const rootKeyRef = useRef<string | null>(null);
+  const rootEntityRef = useRef<string | null>(null);
   useEffect(() => {
     const key = rootGraphKey;
-    const rootChanged = rootKeyRef.current !== key;
+    const modelRoot = model.focal.entityId;
+    const rootChanged =
+      rootKeyRef.current !== key || rootEntityRef.current !== modelRoot;
     rootKeyRef.current = key;
+    rootEntityRef.current = modelRoot;
     const baseNodes = rootChanged ? decoratedInitialNodes : nodesRef.current;
     if (rootChanged) {
       setNodes(decoratedInitialNodes);
@@ -753,7 +769,7 @@ export function RelationshipGraph({
         >
           <Background />
           <GraphControls
-            rootGraphKey={rootGraphKey}
+            rootGraphKey={`${rootGraphKey}\u0000${model.focal.entityId}`}
             expectedEntityIds={expectedEntityIds}
           />
         </ReactFlow>

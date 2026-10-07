@@ -1540,4 +1540,107 @@ describe("PR 35-8 focal Explore (graph context menu)", () => {
     expect(nodePosition(FOCAL)).toEqual(before);
     expect(nodePosition(B)).toEqual(beforeB);
   });
+
+  it("G-C13: a focal re-root with the previous root's model converges to the deterministic root layout", async () => {
+    // The workspace commits a new focal root graph key one render before the
+    // expansion controller swaps in that root's accumulated model (child
+    // effects run before parent effects). The graph therefore observes
+    // (new key, previous root's model) and then (new key, new model). The
+    // second commit must reset to the deterministic Dagre layout for the new
+    // model; merging it as same-root expansion growth would overlap
+    // ring-placed counterparties with the root layout (PR 38-10b).
+    const E = uuidAt(205);
+    const focal = buildGraphNode({
+      entity_id: FOCAL,
+      entity_type: "domain",
+      value: "update-package.test",
+      display_name: "update-package.test",
+    });
+    const b = buildGraphNode({
+      entity_id: B,
+      entity_type: "ip_address",
+      value: "203.0.113.10",
+      display_name: "203.0.113.10",
+    });
+    const c = buildGraphNode({
+      entity_id: C,
+      entity_type: "url",
+      value: "https://c.example/payload",
+      display_name: "https://c.example/payload",
+    });
+    const d = buildGraphNode({
+      entity_id: D,
+      entity_type: "malware",
+      value: "d.example",
+      display_name: "d.example",
+    });
+    const e = buildGraphNode({
+      entity_id: E,
+      entity_type: "url",
+      value: "https://e.example/payload",
+      display_name: "https://e.example/payload",
+    });
+    const rootA = buildGraphNeighborhood({
+      nodes: [focal, b, c, d],
+      edges: [
+        buildGraphEdge({ source_entity_id: FOCAL, target_entity_id: B }),
+        buildGraphEdge({
+          relationship_id: uuidAt(22),
+          source_entity_id: FOCAL,
+          target_entity_id: C,
+        }),
+        buildGraphEdge({
+          relationship_id: uuidAt(23),
+          source_entity_id: FOCAL,
+          target_entity_id: D,
+        }),
+      ],
+    });
+    const rootB = buildGraphNeighborhood({
+      nodes: [b, focal, e],
+      edges: [
+        buildGraphEdge({
+          relationship_id: uuidAt(31),
+          source_entity_id: B,
+          target_entity_id: FOCAL,
+        }),
+        buildGraphEdge({
+          relationship_id: uuidAt(32),
+          source_entity_id: B,
+          target_entity_id: E,
+        }),
+      ],
+    });
+    setHttpHandlers(
+      authMeSuccess,
+      runtimeFake,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      http.get(
+        "*/api/v1/investigations/:id/graph/entities/:entityId/neighborhood",
+        ({ params: pathParams }) =>
+          jsonResponse(
+            String(pathParams.entityId) === B ? rootB : rootA,
+          ),
+      ),
+    );
+    const { router } = renderAtPath(graphEntry());
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    // Re-root to B, then back to A without unmounting.
+    await actAsync(() => router.navigate(graphEntry(`entity_id=${B}`)));
+    await waitFor(() => {
+      expect(renderedNodeCount()).toBe(3);
+    });
+    await actAsync(() => router.navigate(graphEntry(`entity_id=${FOCAL}`)));
+    await waitFor(() => {
+      expect(renderedNodeCount()).toBe(4);
+    });
+    // Deterministic Dagre root layout: every counterparty shares one rank.
+    const counterparties = [B, C, D].map((entityId) => nodePosition(entityId));
+    expect(counterparties[1].y).toBe(counterparties[0].y);
+    expect(counterparties[2].y).toBe(counterparties[0].y);
+    // Distinct x coordinates: no two counterparties overlap.
+    expect(new Set(counterparties.map((position) => position.x)).size).toBe(3);
+  });
 });
