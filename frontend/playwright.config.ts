@@ -50,8 +50,9 @@ export default defineConfig({
       // PR 31G: the graph-context lifecycle stress also runs in both engines.
       // PR 31H: the multi-hop depth journey + 20-cycle stress also runs in
       // both engines. PR 31I: the bounded path-finding journey + 20-cycle
-      // stress also runs in both engines. PR 31J: the temporal graph journey
-      // + 20-cycle stress also runs in both engines. PR 31K: the
+      // stress also runs in both engines. PR 38-8: the direct-range temporal
+      // graph journey + 20-cycle stress also runs in both engines (replacing
+      // the retired PR 31J frame journey). PR 31K: the
       // graph-driven investigation action journey + 20-cycle action-selection
       // stability also run in both engines.
       // PR 35-2: the consolidated GEOINT MAP/TABLE journey + stability
@@ -61,7 +62,7 @@ export default defineConfig({
       // PR 35-5: the canonical Final Report prose/navigation journey also
       // runs in Firefox.
       testMatch:
-        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop|zz-31i-path-finding|zz-31j-temporal-graph|zz-31k-graph-actions|zz-35-1-ui-correctness|zz-35-2-geoint-consolidation|zz-35-4-mandatory-geoint|zz-35-5-final-report)\.spec\.ts/,
+        /(zz-list-detail|zz-pointer-acceptance|zz-pivot-acceptance|zz-pr31f7-critical|zz-31f8-stress|zz-31g-graph-context|zz-31h-multihop|zz-31i-path-finding|zz-38-8-temporal-range|zz-31k-graph-actions|zz-35-1-ui-correctness|zz-35-2-geoint-consolidation|zz-35-4-mandatory-geoint|zz-35-5-final-report)\.spec\.ts/,
     },
   ],
 });

@@ -501,39 +501,41 @@ route/Graph remount, no detached-DOM/native-pointer wedge, no duplicate
 request storm, no stale cross-depth result, and no accumulating product
 console errors. The PR 31G lifecycle gate remains green.
 
-### Real-browser temporal graph acceptance (PR 31J)
+### Real-browser temporal graph acceptance (PR 38-8)
 
-`frontend/e2e/zz-31j-temporal-graph.spec.ts` runs the temporal graph journey
-in Chromium **and** Firefox at `workers=1` / `retries=0` through
-`scripts/e2e.sh` (the authoritative E2E/stability harness; a direct
-`npx playwright test` is not acceptance evidence): completed fake-world
-Investigation → Graph route → enable temporal exploration → Apply a bounded
-observed range with a supported frame count (canonical URL tuple, frame
-**1** committed) → frame-1/`Frame 1 of N` status with exact half-open
-bounds → next/previous frame navigation (URL + request bounds advance and
-retreat; Previous/Next disabled at the first/last frame, no wrapping) →
-refresh reconstructs the committed non-zero frame → browser Back/Forward
-follow committed frame history → Disable restores ordinary graph behavior
-and removes temporal-owned parameters. An empty frame renders
+`frontend/e2e/zz-38-8-temporal-range.spec.ts` runs the direct-range
+temporal graph journey in Chromium **and** Firefox at `workers=1` /
+`retries=0` through `scripts/e2e.sh` (the authoritative E2E/stability
+harness; a direct `npx playwright test` is not acceptance evidence):
+completed fake-world Investigation → Graph route → enable temporal
+exploration (neutral draft shows a blank start and an end DATE defaulting to
+the browser-local current calendar date with a blank end time) → Apply a
+date-only range normalizing both boundaries to local `00:00:00` → Apply a
+range with an explicit non-midnight time preserved exactly → the exact
+committed range changes the displayed topology → invalid drafts (missing
+start, equal, reversed) are rejected without silent repair or a committed
+request → refresh reconstructs the committed range → browser Back/Forward
+reconstruct the prior committed ranges → Disable removes temporal-owned
+parameters and restores ordinary graph behavior. An empty range renders
 observation-specific wording ("No matching relationship observations were
-recorded in this frame.") and can never present the prior frame's topology
-as its own; frame transitions reset stale expansion/path state through the
-same graph-context identity. Temporal semantics are frontend framing over
-the existing graph `observed_from`/`observed_to` contract only: PR 31J has
-no backend endpoint, DTO, stored function, migration, or index, and never
-infers a Relationship lifetime/start/end from observation gaps. Frames are
-half-open `[observed_from, observed_to)`; the shared boundary timestamp
-belongs to exactly one frame.
+recorded in this time range.") and can never present the prior range's
+topology as its own; a committed range change resets stale expansion/path
+state through the same graph-context identity. Temporal semantics are
+frontend framing over the existing graph `observed_from`/`observed_to`
+contract only: PR 38-8 has no backend endpoint, DTO, stored function,
+migration, or index, and never infers a Relationship lifetime/start/end from
+observation gaps. The range is half-open `[observed_from, observed_to)`; the
+upper bound is exclusive. There is no frame count, frame index,
+partitioning, or Previous/Next navigation.
 
-A PR-31J-specific **20-cycle same-page temporal stress**
-(`ATI_31J_STRESS_CYCLES=20`) re-enables temporal exploration each cycle,
-moves Next frame → verifies frame status/topology → Previous → verifies the
-deterministic empty first frame → Disable, and asserts the controls stay
-actionable, the URL stays canonical, no stale topology is presented, no
-reload/recovery is needed, and no product console error accumulates. The
-browser E2E stack uses `ATI_LLM_DRIVER=deterministic` (the offline
-production-compatible driver); Python `FakeLlmClient` is never injected into
-the browser stack.
+A PR-38-8-specific **20-cycle same-page temporal stress**
+(`ATI_38_8_STRESS_CYCLES=20`) re-enables temporal exploration each cycle,
+applies a provably empty range → applies a non-empty range → verifies the
+topology → Disable, and asserts the controls stay actionable, the URL stays
+canonical, no stale topology is presented, no reload/recovery is needed, and
+no product console error accumulates. The browser E2E stack uses
+`ATI_LLM_DRIVER=deterministic` (the offline production-compatible driver);
+Python `FakeLlmClient` is never injected into the browser stack.
 
 ### Real-browser graph-driven investigation action acceptance (PR 31K)
 
@@ -559,10 +561,11 @@ persistence. Python `FakeLlmClient` is never the browser E2E LLM boundary.
   normal resource/graph surfaces → heartbeat + clean product console.
 - **Path-mode precedence (K-E2E02):** PR 31I endpoint clicks inside path
   mode never open the action panel and never POST; exiting path mode restores
-  action selection. **Temporal compatibility (K-E2E03):** PR 31J temporal
+  action selection. **Temporal compatibility (K-E2E03):** PR 38-8 temporal
   mode is active, the action target is the canonical Entity (never temporal
-  metadata), and a frame transition that removes the node clears the stale
-  selection so it cannot be submitted. **Duplicate submission (K-E2E04):**
+  metadata), and a committed direct range that removes the node clears the
+  stale selection so it cannot be submitted. **Duplicate submission
+  (K-E2E04):**
   one semantic attempt → exactly one accepted durable command on the real
   stack.
 - **Stability:** a 20-cycle same-page action-selection stress
@@ -575,7 +578,7 @@ persistence. Python `FakeLlmClient` is never the browser E2E LLM boundary.
 
 Graph regression journeys for the interaction classes PR 31K touches
 (`zz-31f8-stress` PR 31F-8, `zz-31g-graph-context` PR 31G, `zz-31h-multihop`
-PR 31H, `zz-31i-path-finding` PR 31I, `zz-31j-temporal-graph` PR 31J) are
+PR 31H, `zz-31i-path-finding` PR 31I, `zz-38-8-temporal-range` PR 38-8) are
 re-run green in both engines as PR 31K regression evidence.
 
 ### Graph API route/DTO tests (PR 31C)
@@ -6128,7 +6131,7 @@ production DTO, provider, or schema changed.
 
 PR 35-1 fixes navigational, Evidence-presentation, temporal-input, and
 graph-depth defects without changing the Investigation, Evidence, Pivot,
-graph-traversal, or frame-based temporal architecture. Its testing is
+graph-traversal, or direct-range temporal architecture. Its testing is
 deterministic and offline at unit level and uses the authoritative
 `scripts/e2e.sh` real-stack topology for browser acceptance.
 
@@ -6183,10 +6186,10 @@ serialization, explicit time and seconds are preserved, malformed dates
 and partial times are rejected, impossible calendar dates are rejected,
 and a date-only range remains valid. `relationship-evolution.test.tsx`
 `FE31` proves the temporal conversion path commits local-midnight bounds
-with no false start-before-end error. The native `datetime-local` control
-cannot emit a date-only value, so the date-only behavior is asserted at the
-shared parser and temporal-conversion boundary rather than through a
-browser fill.
+with no false start-before-end error. The PR 38-8 temporal controls render
+separate date and optional-time fields, so date-only behavior is exercised
+both at the shared parser/conversion boundary and through the rendered
+controls (`GraphTemporalControls.test.tsx` `T-C04`).
 
 ### Graph HOPS depth propagation
 

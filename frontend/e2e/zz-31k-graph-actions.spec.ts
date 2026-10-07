@@ -14,10 +14,10 @@
 // persisted outputs visible through existing resource/graph surfaces.
 //
 // K-E2E02 re-proves PR 31I path-mode click precedence (no action POST in
-// path mode, action selectable again after exit). K-E2E03 re-proves PR 31J
+// path mode, action selectable again after exit). K-E2E03 re-proves PR 38-8
 // temporal compatibility: the action target is the canonical Entity (never
-// temporal metadata) and a frame transition that removes the node clears
-// the selection so a stale one cannot be submitted. K-E2E04 proves exactly
+// temporal metadata) and committing a direct range that removes the node
+// clears the selection so a stale one cannot be submitted. K-E2E04 proves exactly
 // one durable command per semantic attempt on the real stack. The
 // 20-cycle same-page stability scenario toggles selection/cancel and path
 // mode around the selection without submitting durable work, then performs
@@ -187,13 +187,18 @@ async function nodeEntityId(node: Locator): Promise<string> {
   return entityId ?? "";
 }
 
-/** Convert an ISO instant to the localized ``datetime-local`` input value. */
-function toLocalInput(iso: string): string {
+/** Convert an ISO instant to the browser-local calendar date (YYYY-MM-DD). */
+function toLocalDate(iso: string): string {
   const d = new Date(iso);
-  const pad = (n: number, width = 2): string => String(n).padStart(width, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours(),
-  )}:${pad(d.getMinutes())}`;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Convert an ISO instant to the browser-local wall-clock time (HH:MM). */
+function toLocalTime(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** The temporal controls group (single bounded region above the graph). */
@@ -201,14 +206,18 @@ function temporalGroup(page: Page): Locator {
   return page.getByRole("group", { name: "Temporal exploration" });
 }
 
-/** Enable temporal exploration with the committed PR 31J acceptance range. */
-async function applyTemporal(page: Page): Promise<void> {
+/** Enable temporal exploration with one committed PR 38-8 direct range. */
+async function applyTemporal(page: Page, fromIso: string, toIso: string, label: string): Promise<void> {
   const group = temporalGroup(page);
-  await click(page, group.getByRole("checkbox", { name: "Temporal exploration" }), "enable-temporal");
-  await group.getByLabel("Range start").fill(toLocalInput("2026-05-01T00:00:00Z"));
-  await group.getByLabel("Range end").fill(toLocalInput("2026-05-11T00:00:00Z"));
-  // Canonical default is 8 frames; no combobox interaction needed.
-  await click(page, group.getByRole("button", { name: "Apply temporal" }), "apply-temporal");
+  const checkbox = group.getByRole("checkbox", { name: "Temporal exploration" });
+  if (!(await checkbox.isChecked())) {
+    await click(page, checkbox, `${label}-enable-temporal`);
+  }
+  await group.getByLabel("Range start date").fill(toLocalDate(fromIso));
+  await group.getByLabel("Range start time").fill(toLocalTime(fromIso));
+  await group.getByLabel("Range end date").fill(toLocalDate(toIso));
+  await group.getByLabel("Range end time").fill(toLocalTime(toIso));
+  await click(page, group.getByRole("button", { name: "Apply temporal" }), `${label}-apply-temporal`);
 }
 
 test.describe("PR 31K graph-driven investigation actions (real stack)", () => {
@@ -330,19 +339,17 @@ test.describe("PR 31K graph-driven investigation actions (real stack)", () => {
     await awaitGraphInteractive(page);
     const actionPosts = trackCreatePosts(page);
 
-    // Commit frame 1 (provably empty for the F02 focal) then move to frame 2.
-    await applyTemporal(page);
+    // Commit the non-empty DNS direct range for the F02 focal.
+    await applyTemporal(page, "2026-05-02T00:00:00Z", "2026-05-03T00:00:00Z", "nonempty");
     await expect(page).toHaveURL(/graph_temporal=1/);
-    await click(page, page.getByRole("button", { name: "Next frame" }), "next-frame");
-    await expect(page).toHaveURL(/graph_time_frame=1/);
     const canvasNodes = page.locator(".react-flow__node");
     await expect(canvasNodes.nth(1)).toBeVisible({ timeout: 30_000 });
-    await heartbeat(page, "frame2-interactive");
+    await heartbeat(page, "nonempty-range-interactive");
 
     // Select a visible node: the action target is the canonical Entity.
     const counterparty = canvasNodes.nth(1);
     const entityId = await nodeEntityId(counterparty);
-    await click(page, counterparty, "select-in-frame2");
+    await click(page, counterparty, "select-in-range");
     const panel = actionPanel(page);
     await expect(panel).toBeVisible({ timeout: 20_000 });
     await expect(panel.getByText(`Canonical Entity ID: ${entityId}`)).toBeVisible({
@@ -354,10 +361,9 @@ test.describe("PR 31K graph-driven investigation actions (real stack)", () => {
     expect(objectiveValue).not.toContain("Frame");
     await heartbeat(page, "temporal-canonical-target");
 
-    // A frame transition that removes the node clears the selection; the
-    // stale selection cannot be submitted.
-    await click(page, page.getByRole("button", { name: "Previous frame" }), "previous-frame");
-    await expect(page).not.toHaveURL(/graph_time_frame=1/);
+    // Committing the provably empty range removes the node and clears the
+    // selection; the stale selection cannot be submitted.
+    await applyTemporal(page, "2026-05-01T00:00:00Z", "2026-05-02T00:00:00Z", "empty");
     await expect(actionPanel(page)).not.toBeVisible({ timeout: 20_000 });
     expect(actionPosts.posts).toHaveLength(0);
     await heartbeat(page, "stale-selection-cleared");

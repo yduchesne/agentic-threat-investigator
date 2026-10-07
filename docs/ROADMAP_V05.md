@@ -307,6 +307,14 @@ action is pulled into PR 31I.
 
 ## PR 31J — Temporal graph exploration [DONE]
 
+> **Superseded by PR 38-8.** The frame model described below is historical.
+> Current temporal graph exploration uses one direct observed-time range
+> (required start/end dates with optional times normalizing to local
+> midnight); it has no frame count, frame index, or Previous/Next
+> navigation. The graph `observed_from`/`observed_to` half-open contract is
+> unchanged. See `docs/TESTING.md` and
+> `frontend/e2e/zz-38-8-temporal-range.spec.ts`.
+
 Delivers bounded temporal exploration of the existing entity-centric Graph
 workspace using `RelationshipObservation.observed_at` only.
 
