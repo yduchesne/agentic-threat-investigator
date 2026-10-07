@@ -25,7 +25,9 @@ import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
 import {
   authMeSuccess,
+  buildGraphEdge,
   buildGraphNeighborhood,
+  buildGraphNode,
   buildObservation,
   completedInvestigationFixture,
   evolutionObservationsHandler,
@@ -319,6 +321,12 @@ describe("Relationship Evolution workspace", () => {
     const recorder = resourceListRecorder();
     setHttpHandlers(
       ...authHandlers(),
+      // The focal indicator's exact Entity read succeeds; only the
+      // observation query fails, so the bounded Retry surface is unambiguous.
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder,
+      }),
       relationshipObservationsNetworkErrorHandler,
     );
     renderAtPath(evolutionEntry(`entity_id=${FOCAL}&direction=source`));
@@ -836,5 +844,296 @@ describe("PR 31H HOPS depth propagation (PR 35-1 Part 6)", () => {
     expect(traversalRequests[1]).toBe("3");
     // H04: committed URL identity reflects the new depth.
     expect(router.state.location.search).toContain("graph_depth=3");
+  });
+});
+
+describe("PR 35-8 focal exploration", () => {
+  it("U21/U23: Explore re-roots History/Graph and clears stale transient graph state", async () => {
+    const graphRecorder = resourceListRecorder();
+    const obsRecorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder: graphRecorder,
+      }),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder: obsRecorder }),
+    );
+    const { router } = renderAtPath(
+      evolutionEntry(`entity_id=${FOCAL}&view=graph`),
+    );
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    // Select the focal node so a stale selection panel exists pre-Explore.
+    fireEvent.click(await screen.findByTestId(`rf__node-n:${FOCAL}`));
+    expect(await screen.findByText("Entity: update-package.test")).toBeInTheDocument();
+    // Right-click the counterparty and Explore it.
+    fireEvent.contextMenu(
+      document.querySelector(`[data-testid="rf__node-n:${COUNTERPARTY}"]`) as Element,
+    );
+    await userEvent.click(await screen.findByTestId("graph-explore-entity"));
+    await waitFor(() => {
+      expect(router.state.location.search).toContain(`entity_id=${COUNTERPARTY}`);
+    });
+    // The stale focal selection panel is cleared on the root change.
+    await waitFor(() => {
+      expect(screen.queryByText("Entity: update-package.test")).not.toBeInTheDocument();
+    });
+    // The re-root issued a fresh graph request rooted at the new focal.
+    expect(graphRecorder.requests.at(-1)?.params.entity_id).toBe(COUNTERPARTY);
+    // The History observation query follows the new focal Entity.
+    await userEvent.click(screen.getByRole("button", { name: "Evolution" }));
+    await waitFor(() => {
+      expect(obsRecorder.requests.at(-1)?.params.entity_id).toBe(COUNTERPARTY);
+    });
+  });
+
+  it("U25/U27: History shows the canonical focal value linked to Entity details", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder: resourceListRecorder(),
+      }),
+      evolutionObservationsHandler({ pages: [[obsA()]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    const value = await screen.findByTestId("focal-entity-value");
+    expect(value).toHaveTextContent("update-package.test");
+    expect(value).toHaveAttribute(
+      "href",
+      `/investigations/${INVESTIGATION_ID}/entities/${FOCAL}`,
+    );
+    expect(
+      document.querySelector('[data-ati-id="relationship.focal-entity"]'),
+    ).not.toBeNull();
+  });
+
+  it("U26: the Graph view shows the same canonical focal value", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder,
+      }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}&view=graph`));
+    const value = await screen.findByTestId("focal-entity-value");
+    expect(value).toHaveTextContent("update-package.test");
+  });
+
+  it("U28: zero history rows still shows the focal value from the exact read", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: buildGraphNeighborhood(),
+        recorder: resourceListRecorder(),
+      }),
+      evolutionObservationsHandler({ pages: [[]], recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}`));
+    expect(await screen.findByTestId("focal-entity-value")).toHaveTextContent(
+      "update-package.test",
+    );
+  });
+
+  it("U29: an empty graph still shows the focal value", async () => {
+    const recorder = resourceListRecorder();
+    const focalOnly = buildGraphNeighborhood({
+      nodes: [buildGraphNeighborhood().nodes[0]],
+      edges: [],
+    });
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({ neighborhood: focalOnly, recorder }),
+    );
+    renderAtPath(evolutionEntry(`entity_id=${FOCAL}&view=graph`));
+    expect(await screen.findByTestId("focal-entity-value")).toHaveTextContent(
+      "update-package.test",
+    );
+  });
+
+  it("U30: no valid focal Entity renders no fabricated indicator", async () => {
+    setHttpHandlers(...authHandlers());
+    renderAtPath(EVOLUTION_BASE);
+    expect(
+      await screen.findByText("Choose an entity to view relationship evolution."),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-ati-id="relationship.focal-entity"]'),
+    ).toBeNull();
+    expect(screen.queryByTestId("focal-entity-value")).not.toBeInTheDocument();
+  });
+});
+
+describe("PR 35-8 focal Explore Back navigation", () => {
+  const C_ENTITY = "40000000-0000-4000-8000-000000000103";
+
+  /** A three-node graph so A -> B -> C exploration can be exercised. */
+  function threeNodeNeighborhood() {
+    return buildGraphNeighborhood({
+      nodes: [
+        buildGraphNode({
+          entity_id: FOCAL,
+          entity_type: "domain",
+          value: "update-package.test",
+          display_name: "update-package.test",
+        }),
+        buildGraphNode({
+          entity_id: COUNTERPARTY,
+          entity_type: "ip_address",
+          value: "203.0.113.10",
+          display_name: "203.0.113.10",
+        }),
+        buildGraphNode({
+          entity_id: C_ENTITY,
+          entity_type: "url",
+          value: "https://evil.example/payload",
+          display_name: "https://evil.example/payload",
+        }),
+      ],
+      edges: [
+        buildGraphEdge({
+          source_entity_id: FOCAL,
+          target_entity_id: COUNTERPARTY,
+        }),
+        buildGraphEdge({
+          relationship_id: "40000000-0000-4000-8000-000000000022",
+          source_entity_id: FOCAL,
+          target_entity_id: C_ENTITY,
+        }),
+      ],
+    });
+  }
+
+  function renderExploration(extraParams = "", state?: unknown) {
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: threeNodeNeighborhood(),
+        recorder: resourceListRecorder(),
+      }),
+    );
+    return renderAtPath({
+      pathname: `${EVOLUTION_BASE}`,
+      search: `?entity_id=${FOCAL}&view=graph${extraParams}`,
+      ...(state === undefined ? {} : { state }),
+    });
+  }
+
+  async function explore(entityId: string): Promise<void> {
+    fireEvent.contextMenu(
+      document.querySelector(`[data-testid="rf__node-n:${entityId}"]`) as Element,
+    );
+    await userEvent.click(await screen.findByTestId("graph-explore-entity"));
+  }
+
+  function locationString(location: { pathname: string; search: string; hash: string }): string {
+    return `${location.pathname}${location.search}${location.hash}`;
+  }
+
+  it("N01/N02/N07/N08: Graph A -> Explore B stores the exact A Graph and B Back returns to it", async () => {
+    const { router } = renderExploration(
+      "&graph_scope=known&direction=source&graph_temporal=1&graph_time_start=2026-02-01T00:00:00Z&graph_time_end=2026-02-09T00:00:00Z",
+    );
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    const aLocation = locationString(router.state.location);
+    await explore(COUNTERPARTY);
+    await waitFor(() => {
+      expect(router.state.location.search).toContain(`entity_id=${COUNTERPARTY}`);
+    });
+    // N01: the URL focal is B and the Graph view is preserved.
+    const bLocation = locationString(router.state.location);
+    expect(new URLSearchParams(router.state.location.search).get("view")).toBe(
+      "graph",
+    );
+    // N02: B's Back target is the exact A Graph location (including filters
+    // and temporal state).
+    const back = await screen.findByRole("button", { name: "< Back" });
+    await userEvent.click(back);
+    await waitFor(() => {
+      expect(locationString(router.state.location)).toBe(aLocation);
+    });
+    // N07/N08: filters and temporal params are restored exactly.
+    const restored = new URLSearchParams(router.state.location.search);
+    expect(restored.get("graph_scope")).toBe("known");
+    expect(restored.get("direction")).toBe("source");
+    expect(restored.get("graph_temporal")).toBe("1");
+    expect(restored.get("graph_time_start")).toBe("2026-02-01T00:00:00Z");
+    expect(restored.get("graph_time_end")).toBe("2026-02-09T00:00:00Z");
+    // Sanity: B's location was not the A location.
+    expect(bLocation).not.toBe(aLocation);
+  });
+
+  it("N04/N05/N06: A -> B -> C unwinds C -> B -> A exactly", async () => {
+    const { router } = renderExploration();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    const aLocation = locationString(router.state.location);
+    await explore(COUNTERPARTY);
+    await waitFor(() => {
+      expect(router.state.location.search).toContain(`entity_id=${COUNTERPARTY}`);
+    });
+    const bLocation = locationString(router.state.location);
+    await explore(C_ENTITY);
+    await waitFor(() => {
+      expect(router.state.location.search).toContain(`entity_id=${C_ENTITY}`);
+    });
+    // N05: C Back -> exact B Graph.
+    await userEvent.click(await screen.findByRole("button", { name: "< Back" }));
+    await waitFor(() => {
+      expect(locationString(router.state.location)).toBe(bLocation);
+    });
+    // N06: B Back -> exact A Graph.
+    await userEvent.click(await screen.findByRole("button", { name: "< Back" }));
+    await waitFor(() => {
+      expect(locationString(router.state.location)).toBe(aLocation);
+    });
+  });
+
+  it("N03: Explore pushes A ahead of an older ancestor R, which remains after A", async () => {
+    const ancestor = `/investigations/${INVESTIGATION_ID}/evidence?source=rdap#top`;
+    setHttpHandlers(
+      ...authHandlers(),
+      graphNeighborhoodHandler({
+        neighborhood: threeNodeNeighborhood(),
+        recorder: resourceListRecorder(),
+      }),
+      http.get("*/api/v1/investigations/:id/evidence", () =>
+        jsonResponse({ items: [], next_cursor: null }),
+      ),
+    );
+    const { router } = renderAtPath({
+      pathname: `${EVOLUTION_BASE}`,
+      search: `?entity_id=${FOCAL}&view=graph`,
+      state: {
+        navigation: {
+          returns: [
+            {
+              pathname: `/investigations/${INVESTIGATION_ID}/evidence`,
+              search: "?source=rdap",
+              hash: "#top",
+            },
+          ],
+        },
+      },
+    });
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    const aLocation = locationString(router.state.location);
+    await explore(COUNTERPARTY);
+    await waitFor(() => {
+      expect(router.state.location.search).toContain(`entity_id=${COUNTERPARTY}`);
+    });
+    // First Back -> A (the immediately preceding Graph), not R.
+    await userEvent.click(await screen.findByRole("button", { name: "< Back" }));
+    await waitFor(() => {
+      expect(locationString(router.state.location)).toBe(aLocation);
+    });
+    // Second Back -> the older ancestor R, still preserved after A.
+    await userEvent.click(await screen.findByRole("button", { name: "< Back" }));
+    await waitFor(() => {
+      expect(locationString(router.state.location)).toBe(ancestor);
+    });
   });
 });

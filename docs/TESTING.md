@@ -34,6 +34,7 @@
 - [Server-rendered web presentation tests (V07-01)](#server-rendered-web-presentation-tests-v07-01)
 - [PR 35-1 UI correctness testing](#pr-35-1-ui-correctness-testing)
 - [PR 35-2 GEOINT UI consolidation testing](#pr-35-2-geoint-ui-consolidation-testing)
+- [PR 35-8 focal-Entity exploration testing](#pr-35-8-focal-entity-exploration-testing)
 - [PR 26 GEOINT testing strategy](#pr-26-geoint-testing-strategy)
 - [Definition of done](#definition-of-done)
 - [Configuration tests](#configuration-tests)
@@ -3948,6 +3949,25 @@ What is mocked versus real:
 TanStack Query itself is never mocked and the API client is never replaced
 with per-component fakes.
 
+### Selector and test-identity rule
+
+Tests must not use localized display strings as stable widget identity
+unless localization, wording, or accessible naming is the behavior under
+test. Prefer, in order:
+
+- a stable `data-ati-id` for a semantic surface (for example
+  `relationship.focal-entity` for the focal-Entity indicator);
+- a stable `data-testid` derived from the action key (for example
+  `graph-explore-entity`);
+- canonical route/query state (URL path + search parameters);
+- a semantic ARIA role scoped inside a stable container;
+- a canonical graph node identity (`rf__node-n:<uuid>`).
+
+An accessibility test may separately assert the localized accessible name;
+the same test must not also treat that English string as the only widget
+selector. This keeps tests stable across copy/localization changes and
+prevents a translation edit from silently rewiring an interaction test.
+
 ### Server-rendered web presentation tests (V07-01)
 
 The `web/` HTML presentation adapter is tested at four layers; none of them
@@ -5941,6 +5961,77 @@ No canonical closure fixture directly inserts derived geographic truth
 production worker completion), `FakeLlmClient` is the only model fake, no
 live network/geocoder/LLM is required, and no PR 27 generic
 evaluator/release framework is introduced.
+
+## PR 35-8 focal-Entity exploration testing
+
+PR 35-8 completes focal-Entity exploration in the existing Relationship
+History/Graph workspace. It is a frontend navigation/presentation change:
+no API, migration, stored function, provider, domain, or persistence
+behavior changes; the focal Entity read reuses the existing canonical
+graph-neighborhood projection, and Relationships keeps its existing
+server-side `entity_id` filter.
+
+### Focused frontend unit/component coverage
+
+- `src/relationship-evolution/relationship-evolution-url.test.ts` pins the
+  pure focal transition (`U01`-`U10`, `F12`): the new canonical `entity_id`,
+  preserved `view`/direction/type/source/time/graph/temporal context,
+  cleared cursor/`selected`/focal-relative counterparty filter, and the
+  malformed/same-focal no-op.
+- `src/relationship-graph/relationship-graph.test.tsx` pins the
+  pointer-adjacent right-click context menu (`C01`-`C14`) using the stable
+  `graph-explore-entity`/`graph.entity-context-menu` identities: browser
+  menu prevention, non-focal-only menu, out-of-flow positioning (no layout
+  shift), Escape/outside/root-change/unmount dismissal and listener cleanup,
+  retarget, left-click preservation, and pure position clamping. It also
+  pins the graph -> focal Relationships drill-down with exact contextual
+  Back (`U34`/`U35`).
+- `src/relationship-evolution/relationship-evolution.test.tsx` pins the
+  workspace re-root and focal indicator (`U21`, `U25`-`U30`) and the focal
+  Explore Back chain (`N01`-`N08`): Graph A -> Explore B stores the exact A
+  Graph and B Back returns to it; `A -> B -> C` unwinds `C -> B -> A`; an
+  older ancestor R survives after A; graph filters and temporal params are
+  restored exactly.
+- `src/analyst-table/return-to.test.ts` continues to pin the bounded
+  `pushNavigationReturn`/`resolveReturn` stack (depth bound, ancestor
+  retention, duplicate suppression) that focal Explore reuses.
+- `src/relationships/relationships.test.tsx` pins the focal Relationships
+  indicator and server filter (`U31`-`U33`).
+- `src/entities/entity-detail.test.tsx` pins the generic Entity details
+  surface and the nested contextual Back behaviour (`U36`-`U41`).
+
+### Real-stack browser acceptance
+
+The focused journey extends `frontend/e2e/zz-relationship-evolution.spec.ts`
+and runs against the authoritative `./scripts/e2e.sh` production topology
+with `--project=chromium --workers=1 --retries=0`:
+
+```text
+completed Investigation
+ -> Relationship History focal A (indicator identifies A by value)
+ -> Graph (capture exact A Graph URL)
+ -> right-click non-focal canonical vertex B
+ -> context menu opens without moving the canvas
+ -> Escape dismiss -> canvas still zooms
+ -> right-click -> outside dismiss -> right-click -> Explore
+ -> URL entity_id=B and view=graph preserved
+ -> indicator identifies B; graph re-request rooted at B
+ -> Back -> exact captured A Graph URL
+ -> re-Explore B
+ -> Open Relationships table for focal entity -> entity_id=B + Back
+ -> B Entity details -> Back -> focal Relationships B
+ -> Back -> exact Graph focal B context
+ -> Graph focal B -> Entity details -> Back -> exact Graph focal B
+ -> refresh -> focal B reconstructed from the URL
+```
+
+A `A -> B -> C` focal Back chain is covered at component/router level when
+deterministic fake-world topology cannot reliably supply a third vertex; the
+real-stack journey retains the A -> B exact-Back proof.
+
+New/modified selectors use stable `data-ati-id`/`data-testid` identities or
+canonical route/query state, never the localized `Explore`/`Focal entity`
+display strings alone (see *Selector and test-identity rule*).
 
 ## PR 35-2 GEOINT UI consolidation testing
 

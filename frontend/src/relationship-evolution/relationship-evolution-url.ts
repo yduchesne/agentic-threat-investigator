@@ -31,6 +31,7 @@ import {
   parseUuidParam,
 } from "../analyst-table/filters";
 import { parseCursorParam } from "../analyst-table/cursor-stack";
+import { SELECTED_PARAM } from "../analyst-table/url-params";
 import { RELATIONSHIP_DIRECTIONS } from "../relationships/relationships-filters";
 import { RELATIONSHIP_TYPES } from "../relationships/labels";
 import type { ObservationFilters } from "../relationships/relationships-filters";
@@ -147,6 +148,40 @@ export function emptyEvolutionFilters(entityId: string): RelationshipEvolutionFi
     observedFrom: undefined,
     observedTo: undefined,
   };
+}
+
+/**
+ * Change the URL-backed focal Entity (PR 35-8 Explore).
+ *
+ * A focal change is a lateral workspace transition: the new canonical Entity
+ * replaces ``entity_id``, the current ``view`` and every filter that keeps
+ * well-defined semantics relative to the new focal Entity are preserved, and
+ * the focal-relative transient observation state is cleared (opaque cursor,
+ * URL-addressable observation selection, and the focal-relative
+ * ``counterparty_entity_id`` which cannot be silently reinterpreted against a
+ * different focal Entity). ``direction`` and all other committed filters stay
+ * because they are user-selected modes with defined semantics relative to
+ * whichever focal Entity is current. A malformed candidate ID or a candidate
+ * equal to the current focal Entity is a no-op (the parameter set is returned
+ * unchanged, so the workspace never pushes a redundant location).
+ */
+export function setEvolutionFocalEntity(
+  params: URLSearchParams,
+  entityId: string,
+): URLSearchParams {
+  const next = new URLSearchParams(params);
+  const focal = parseUuidParam(entityId);
+  if (focal === undefined) {
+    return next;
+  }
+  if (parseUuidParam(params.get(ENTITY_PARAM)) === focal) {
+    return next;
+  }
+  next.set(ENTITY_PARAM, focal);
+  next.delete("cursor");
+  next.delete(SELECTED_PARAM);
+  next.delete("counterparty_entity_id");
+  return next;
 }
 
 /** Switch the workspace view, preserving entity/filter context. */

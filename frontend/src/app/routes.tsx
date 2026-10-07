@@ -41,6 +41,7 @@ import { OverviewPage } from "../investigations/OverviewPage";
 import { ReportPage } from "../investigations/ReportPage";
 import { EvidencePage } from "../evidence/EvidencePage";
 import { EvidenceDetailPage } from "../evidence/EvidenceDetailPage";
+import { EntityDetailPage } from "../entities/EntityDetailPage";
 import { HistoryPage } from "../history/HistoryPage";
 import { RelationshipsPage } from "../relationships/RelationshipsPage";
 import { RelationshipDetailPage } from "../relationships/RelationshipDetailPage";
@@ -117,6 +118,12 @@ export function createAppRoutes(): RouteObject[] {
                   Component: EvidenceDetailPage,
                 },
                 { path: "relationships", Component: RelationshipsPage },
+                // PR 35-8: canonical Investigation-scoped generic Entity
+                // details surface for the focal Entities.
+                {
+                  path: "entities/:entityId",
+                  Component: EntityDetailPage,
+                },
                 // PR 31F-8: exact Relationship detail is a routed surface.
                 {
                   path: "relationships/:relationshipId",

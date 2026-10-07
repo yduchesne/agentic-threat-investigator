@@ -15,9 +15,11 @@ import { renderAtPath } from "../test/render";
 import { setHttpHandlers, useHttp } from "../test/server";
 import {
   authMeSuccess,
+  buildGraphNeighborhood,
   buildObservation,
   buildRelationship,
   completedInvestigationFixture,
+  graphNeighborhoodHandler,
   investigationDetailHandler,
   jsonResponse,
   pagedResourceHandler,
@@ -376,5 +378,53 @@ describe("Relationship observations page", () => {
     renderAtPath(OBS_BASE);
     await screen.findByText("fake-dns");
     expect(screen.queryByRole("button", { name: "< Back" })).not.toBeInTheDocument();
+  });
+});
+
+describe("PR 35-8 focal Relationships indicator", () => {
+  const FOCAL = "40000000-0000-4000-8000-000000000101";
+
+  function entityReadHandler() {
+    return graphNeighborhoodHandler({
+      neighborhood: buildGraphNeighborhood(),
+      recorder: resourceListRecorder(),
+    });
+  }
+
+  it("U31/U32: entity_id filters the server request and shows the canonical focal value", async () => {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/relationships",
+        pages: [[relA()]],
+        recorder,
+      }),
+      entityReadHandler(),
+    );
+    renderAtPath(`${REL_BASE}?entity_id=${FOCAL}`);
+    const value = await screen.findByTestId("focal-entity-value");
+    expect(value).toHaveTextContent("update-package.test");
+    await waitFor(() => {
+      expect(recorder.requests.at(-1)?.params.entity_id).toBe(FOCAL);
+    });
+  });
+
+  it("U33: a source-only filter shows no focal indicator", async () => {
+    setHttpHandlers(
+      ...AUTH,
+      workspaceHandler(),
+      pagedResourceHandler({
+        path: "*/api/v1/investigations/:id/relationships",
+        pages: [[relA()]],
+        recorder: resourceListRecorder(),
+      }),
+    );
+    renderAtPath(`${REL_BASE}?source_entity_id=${FOCAL}`);
+    await screen.findByText("Resolves to");
+    expect(
+      document.querySelector('[data-ati-id="relationship.focal-entity"]'),
+    ).toBeNull();
   });
 });

@@ -529,6 +529,186 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(page).toHaveURL(/\/relationships\/evolution/);
     expect(new URL(page.url()).searchParams.get("entity_id")).toBe(entityParam);
 
+    // PR 35-8 amendment 1: right-click a canonical non-focal Entity vertex,
+    // Explore it through the pointer-adjacent context menu, prove the menu
+    // does not shift the canvas and leaves graph interaction intact, and
+    // prove Explore records the exact preceding Graph focal state as Back.
+    await page.getByRole("button", { name: "Graph" }).click();
+    await expect(page).toHaveURL(/view=graph/);
+    await expect(graphCanvas).toBeVisible({ timeout: 20_000 });
+    await expect(graphList).toBeVisible({ timeout: 20_000 });
+
+    const focalIndicator = page.locator(
+      '[data-ati-id="relationship.focal-entity"]',
+    );
+    await expect(focalIndicator).toBeVisible({ timeout: 20_000 });
+    const focalValueBefore = (
+      await page.getByTestId("focal-entity-value").innerText()
+    ).trim();
+    expect(focalValueBefore.length).toBeGreaterThan(0);
+    const focalAGraphUrl = page.url();
+
+    const focalExploreRequests: string[] = [];
+    page.on("request", (request) => {
+      const url = request.url();
+      if (url.includes("/api/v1/") && url.includes("/graph/entities/")) {
+        focalExploreRequests.push(url);
+      }
+    });
+
+    const firstNonFocal = graphCanvas.locator(".react-flow__node").nth(1);
+    await expect(firstNonFocal).toBeVisible({ timeout: 20_000 });
+    const exploreTargetTestId = await firstNonFocal.getAttribute("data-testid");
+    const exploreTargetEntityId = exploreTargetTestId?.replace("rf__node-n:", "");
+    expect(exploreTargetEntityId).toMatch(/^[0-9a-f-]{36}$/);
+    const exploreTarget = graphCanvas.locator(
+      `[data-testid="rf__node-n:${exploreTargetEntityId}"]`,
+    );
+    const exploreAction = page.getByTestId("graph-explore-entity");
+    const canvasBoxBeforeMenu = await graphCanvas.boundingBox();
+
+    // Escape dismissal, then prove the canvas still zooms.
+    await exploreTarget.click({ button: "right" });
+    await expect(exploreAction).toBeVisible({ timeout: 20_000 });
+    const canvasBoxWithMenu = await graphCanvas.boundingBox();
+    expect(
+      Math.abs((canvasBoxWithMenu?.x ?? 0) - (canvasBoxBeforeMenu?.x ?? 0)),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs((canvasBoxWithMenu?.y ?? 0) - (canvasBoxBeforeMenu?.y ?? 0)),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(
+        (canvasBoxWithMenu?.width ?? 0) - (canvasBoxBeforeMenu?.width ?? 0),
+      ),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(
+        (canvasBoxWithMenu?.height ?? 0) - (canvasBoxBeforeMenu?.height ?? 0),
+      ),
+    ).toBeLessThanOrEqual(1);
+    await page.keyboard.press("Escape");
+    await expect(exploreAction).not.toBeVisible();
+    await page.getByRole("button", { name: "Zoom In" }).click();
+
+    // Outside-pointer dismissal, then re-open and Explore.
+    await exploreTarget.click({ button: "right" });
+    await expect(exploreAction).toBeVisible({ timeout: 20_000 });
+    await graphList.click({ position: { x: 5, y: 5 } });
+    await expect(exploreAction).not.toBeVisible();
+    await exploreTarget.click({ button: "right" });
+    await expect(exploreAction).toBeVisible({ timeout: 20_000 });
+    await expect(exploreAction).toBeEnabled();
+    await exploreAction.click();
+
+    // The URL-backed focal Entity changed; the Graph view is preserved.
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("entity_id"))
+      .toBe(exploreTargetEntityId);
+    expect(new URL(page.url()).searchParams.get("view")).toBe("graph");
+    // The focal indicator now identifies the explored canonical Entity.
+    await expect
+      .poll(async () =>
+        (await page.getByTestId("focal-entity-value").innerText()).trim(),
+      )
+      .not.toBe(focalValueBefore);
+    // The re-rooted graph request targets the explored canonical Entity.
+    await expect
+      .poll(() =>
+        focalExploreRequests.some((candidate) => {
+          const pathname = new URL(candidate).pathname;
+          return (
+            pathname.endsWith(
+              `/graph/entities/${exploreTargetEntityId}/neighborhood`,
+            ) ||
+            pathname.endsWith(
+              `/graph/entities/${exploreTargetEntityId}/traversal`,
+            )
+          );
+        }),
+      )
+      .toBe(true);
+    // The transient context menu closed after Explore.
+    await expect(exploreAction).not.toBeVisible();
+
+    // PR 35-8 amendment 1: B's Back returns to the exact A Graph URL.
+    await page.getByRole("button", { name: "< Back" }).click();
+    await expect.poll(() => page.url()).toBe(focalAGraphUrl);
+    expect(new URL(page.url()).searchParams.get("view")).toBe("graph");
+    expect(new URL(page.url()).searchParams.get("entity_id")).not.toBe(
+      exploreTargetEntityId,
+    );
+    // Re-Explore the same Entity to continue the drill-down journey.
+    await exploreTarget.click({ button: "right" });
+    await expect(exploreAction).toBeVisible({ timeout: 20_000 });
+    await exploreAction.click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("entity_id"))
+      .toBe(exploreTargetEntityId);
+
+    // Graph -> focal Relationships table (exact server filter + contextual Back).
+    await page
+      .getByRole("link", { name: "Open Relationships table for focal entity" })
+      .click();
+    await expect(page).toHaveURL(/\/relationships\?entity_id=/);
+    expect(new URL(page.url()).searchParams.get("entity_id")).toBe(
+      exploreTargetEntityId,
+    );
+    // The Relationships table request is server-filtered by the new focal.
+    await expect
+      .poll(() =>
+        relationshipsListRequests.some(
+          (candidate) =>
+            new URL(candidate).searchParams.get("entity_id") ===
+            exploreTargetEntityId,
+        ),
+      )
+      .toBe(true);
+    await expect(
+      page.locator('[data-ati-id="relationship.focal-entity"]'),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "< Back" })).toBeVisible();
+
+    // Relationships -> Entity details -> Back -> focal Relationships.
+    await page.getByTestId("focal-entity-value").click();
+    await expect(page).toHaveURL(/\/entities\/[0-9a-f-]+$/);
+    await expect(
+      page.getByRole("heading", { name: "Entity details" }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Value", { exact: true })).toBeVisible();
+    await expect(page.getByText("Type", { exact: true })).toBeVisible();
+    await page.getByTestId("resource-route-detail-back").click();
+    await expect(page).toHaveURL(/\/relationships\?entity_id=/);
+    await expect(
+      page.locator('[data-ati-id="relationship.focal-entity"]'),
+    ).toBeVisible({ timeout: 20_000 });
+
+    // Back to the exact graph focal origin (view + filters + focal).
+    await page.getByRole("button", { name: "< Back" }).click();
+    await expect(page).toHaveURL(/\/relationships\/evolution/);
+    expect(new URL(page.url()).searchParams.get("view")).toBe("graph");
+    expect(new URL(page.url()).searchParams.get("entity_id")).toBe(
+      exploreTargetEntityId,
+    );
+
+    // Graph focal -> Entity details -> Back -> exact graph focal.
+    await page.getByTestId("focal-entity-value").click();
+    await expect(page).toHaveURL(/\/entities\/[0-9a-f-]+$/);
+    await page.getByTestId("resource-route-detail-back").click();
+    await expect(page).toHaveURL(/\/relationships\/evolution/);
+    expect(new URL(page.url()).searchParams.get("entity_id")).toBe(
+      exploreTargetEntityId,
+    );
+
+    // Refresh reconstructs the explored focal Entity from the URL alone.
+    await page.reload();
+    await expect(
+      page.locator('[data-ati-id="relationship.focal-entity"]'),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("entity_id"))
+      .toBe(exploreTargetEntityId);
+
     // FAKE DATA stays visible; console stays clean.
     await expect(page.getByText("FAKE DATA")).toBeVisible();
     expect(consoleErrors).toEqual([]);

@@ -9,10 +9,12 @@
 //
 // - ``validatedReturnTo`` (string) is retained for the login redirect seam.
 // - ``pushNavigationReturn`` records the current location as the immediate
-//   return target for a genuine drill-down (Report -> Evidence detail).
+//   return target for a genuine drill-down (Report -> Evidence detail) and
+//   for a contextual graph re-root (focal Explore pushes the exact prior
+//   Graph location).
 // - ``preserveNavigationContext`` keeps the existing context unchanged for
-//   sibling/subview transitions (EVOLUTION <-> GRAPH) or lateral focal
-//   changes.
+//   sibling/subview transitions (EVOLUTION <-> GRAPH). It is NOT used for a
+//   focal Explore, which is a contextual re-root and pushes a Back entry.
 // - ``resolveReturn`` pops exactly one level and yields the remaining
 //   context so the destination can continue the journey.
 //
@@ -218,7 +220,11 @@ export function pushNavigationReturn(
   };
 }
 
-/** Keep the existing context unchanged for a sibling/subview transition. */
+/**
+ * Keep the existing context unchanged for a sibling/subview transition
+ * (EVOLUTION <-> GRAPH). Not used for a focal Explore, which pushes the
+ * exact prior Graph location through :func:`pushNavigationReturn`.
+ */
 export function preserveNavigationContext(state: unknown): NavigationContext {
   return parseNavigationContext(state);
 }

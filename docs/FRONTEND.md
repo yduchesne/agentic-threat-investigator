@@ -259,6 +259,61 @@ represented in the graph workbench.
   expansion keeps working, and the Graph route/Investigation shell never
   remounts.
 
+### Focal-Entity exploration (PR 35-8)
+
+`entity_id` on the Relationship History/Graph route is the single
+URL-backed focal Entity. It is **not** the Investigation's triggering/root
+Entity: exploration may change focal identity without changing Investigation
+provenance or triggering Entities. There is no parallel client-side focal
+state and no second focal store.
+
+- **Explore vs Expand**: right-clicking a canonical non-focal Entity vertex
+  opens a lightweight, pointer-adjacent graph context menu whose *Explore*
+  command makes that Entity the new URL-backed focal Entity. The menu is
+  ordinary positioned content (no portal, backdrop, focus trap, body lock or
+  persistent pointer shield) that does not shift the canvas and dismisses on
+  Explore, Escape, outside pointer, retarget, root change or unmount. The
+  focal node offers no Explore menu. *Expand* stays a distinct, additive
+  topology operation (one-hop known/outgoing/incoming) that keeps the current
+  focal root. Ordinary left-click keeps its existing selection/path
+  semantics and never re-roots.
+- **One canonical lateral transition with a contextual Back**: the focal
+  change is a pure URL transition that sets the new canonical `entity_id`,
+  preserves `view`, direction, relationship type/source, observed range and
+  the graph/temporal context, and clears the focal-relative transient state
+  (opaque observation cursor, `selected` detail and the focal-relative
+  `counterparty_entity_id`, plus the browser-local observation back-stack).
+  Unlike sibling EVOLUTION <-> GRAPH navigation (which preserves context), a
+  focal Explore is a genuine contextual re-root: it pushes the **exact
+  preceding Graph location** onto the existing bounded NavigationContext
+  ahead of any older ancestors, so repeated exploration unwinds
+  `C -> B -> A` and `< Back` restores the exact prior pathname/search/hash,
+  including `view=graph`, focal ID, graph filters and temporal state.
+- **Whole-workspace re-root**: the new `entity_id` re-roots the observation
+  query, graph neighborhood/traversal, focal node styling/layout,
+  focal-relative edge direction/counterparty presentation, the focal
+  Relationships target and the focal indicator. Accumulated expansion, path
+  request/endpoints, selected node/edge, provenance panel and graph-action
+  selection are reset deterministically; refresh/share of the URL
+  reconstructs the explored focal Entity.
+- **Canonical focal presentation**: both the History and Graph views render
+  `Focal entity: <canonical value>` directly below the title, and the
+  Relationships table renders the same indicator when it is entered with
+  `entity_id`. The value comes from the exact Investigation-scoped canonical
+  Entity projection (the graph neighborhood focal node), never from a UUID,
+  never inferred from observation/relationship rows, and never fabricated.
+  The value is a link to the generic Entity details surface.
+- **Generic Entity details**: `/investigations/:id/entities/:entityId` is a
+  read-only Exact Entity surface (value, type and canonical copyable ID). It
+  is not the GEOINT Entity page and is not an Entity intelligence dashboard.
+- **Bounded contextual navigation reuses the existing stack**: the Graph's
+  *Open relationships table for focal entity* link and both focal value links
+  push the exact current location onto the existing bounded navigation
+  context, so `< Back` restores the exact originating graph/history or focal
+  Relationships state one level at a time. Entity details opened from a
+  direct URL fall back to the Investigation Relationships table filtered by
+  that Entity. No second Back stack or `history.back()` mechanism exists.
+
 ## GEOINT
 
 Geographic investigation is one first-class Investigation capability. It

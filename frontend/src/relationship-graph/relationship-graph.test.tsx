@@ -14,7 +14,7 @@
 
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEventLib from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { http } from "msw";
 
 import { renderAtPath } from "../test/render";
@@ -28,6 +28,7 @@ import {
   errorResponse,
   graphNeighborhoodHandler,
   graphNeighborhoodNetworkErrorHandler,
+  graphRelationshipsHandler,
   investigationDetailHandler,
   jsonResponse,
   resourceListRecorder,
@@ -35,7 +36,7 @@ import {
   uuidAt,
 } from "../test/handlers";
 import { entityTypeLabelKey } from "./relationship-graph-presentation";
-import { buildSlottedEdges, edgeId, graphCssVariables, nodeId, relationshipIdFromEdgeId, selectRenderableEdges } from "./RelationshipGraph";
+import { buildSlottedEdges, clampContextMenuPosition, edgeId, graphCssVariables, GRAPH_CONTEXT_MENU_HEIGHT, GRAPH_CONTEXT_MENU_WIDTH, nodeId, relationshipIdFromEdgeId, selectRenderableEdges } from "./RelationshipGraph";
 import { buildGraphModel } from "./relationship-graph-model";
 import type { RelationshipGraphEdge } from "./relationship-graph-model";
 import { ATI_THEMES } from "../app/theme";
@@ -1280,5 +1281,258 @@ describe("Relationship Graph endpoint invariant (PR 35-1 amendment 1 G1-G6)", ()
         (edge) => edge.relationshipId,
       ),
     ).toEqual([RELATIONSHIP]);
+  });
+});
+
+describe("PR 35-8 focal Explore (graph context menu)", () => {
+  function renderGraphWithRouter(
+    params: string = "",
+    neighborhood = neighbors().neighborhood,
+  ) {
+    const recorder = resourceListRecorder();
+    setHttpHandlers(
+      authMeSuccess,
+      runtimeFake,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      graphNeighborhoodHandler({ neighborhood, recorder }),
+    );
+    const { router, result } = renderAtPath(graphEntry(params));
+    return { recorder, router, result };
+  }
+
+  function nodeElement(entityId: string): Element {
+    const node = document.querySelector(
+      `[data-testid="rf__node-${nodeId(entityId)}"]`,
+    );
+    expect(node).not.toBeNull();
+    return node as Element;
+  }
+
+  function contextMenuElement(): HTMLElement {
+    const menu = document.querySelector(
+      '[data-ati-id="graph.entity-context-menu"]',
+    );
+    expect(menu).not.toBeNull();
+    return menu as HTMLElement;
+  }
+
+  /** A three-node neighborhood (focal FOCAL, counterparties B and C). */
+  function threeNeighbors() {
+    const focal = buildGraphNode({
+      entity_id: FOCAL,
+      entity_type: "domain",
+      value: "update-package.test",
+      display_name: "update-package.test",
+    });
+    const b = buildGraphNode({
+      entity_id: B,
+      entity_type: "ip_address",
+      value: "203.0.113.10",
+      display_name: "203.0.113.10",
+    });
+    const c = buildGraphNode({
+      entity_id: C,
+      entity_type: "url",
+      value: "https://evil.example/payload",
+      display_name: "https://evil.example/payload",
+    });
+    return buildGraphNeighborhood({
+      nodes: [focal, b, c],
+      edges: [
+        buildGraphEdge({ source_entity_id: FOCAL, target_entity_id: B }),
+        buildGraphEdge({
+          relationship_id: uuidAt(22),
+          source_entity_id: FOCAL,
+          target_entity_id: C,
+        }),
+      ],
+    });
+  }
+
+  it("C01/U11/U12: right-click a non-focal node opens the pointer-adjacent menu and Explore re-roots at that canonical Entity", async () => {
+    const { recorder, router } = renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    // C01/U14: the browser context menu is prevented for a handled node.
+    expect(fireEvent.contextMenu(nodeElement(B))).toBe(false);
+    const explore = await screen.findByTestId("graph-explore-entity");
+    expect(explore).toBeEnabled();
+    // C02: the menu is positioned content, out of document flow.
+    expect(contextMenuElement()).toHaveStyle({ position: "absolute" });
+    // Opening the menu never re-roots the graph.
+    expect(router.state.location.search).toContain(`entity_id=${FOCAL}`);
+    const requestsBefore = recorder.requests.length;
+    await userEventLib.click(explore);
+    await waitFor(() => {
+      expect(router.state.location.search).toContain(`entity_id=${B}`);
+    });
+    expect(router.state.location.search).toContain("view=graph");
+    // C04: exactly one re-root request for the explored Entity.
+    await waitFor(() => {
+      expect(recorder.requests.length).toBeGreaterThan(requestsBefore);
+    });
+    expect(recorder.requests.at(-1)?.params.entity_id).toBe(B);
+    // C05: the menu closes after Explore.
+    expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+  });
+
+  it("C02: the menu does not enter document flow and the canvas does not move", async () => {
+    renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    const node = nodeElement(B);
+    const before = node.getBoundingClientRect();
+    fireEvent.contextMenu(node);
+    const menu = contextMenuElement();
+    await screen.findByTestId("graph-explore-entity");
+    expect(menu).toHaveStyle({ position: "absolute" });
+    // The menu is positioned content inside the graph canvas container.
+    expect(menu.parentElement?.getAttribute("aria-label")).toBe(
+      "Relationship graph (one-hop)",
+    );
+    expect(node.getBoundingClientRect()).toEqual(before);
+  });
+
+  it("C03/U13: right-clicking the current focal node exposes no Explore menu", async () => {
+    renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(FOCAL));
+    expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+    expect(
+      document.querySelector('[data-ati-id="graph.entity-context-menu"]'),
+    ).toBeNull();
+  });
+
+  it("C06: Escape dismisses the menu", async () => {
+    renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(B));
+    await screen.findByTestId("graph-explore-entity");
+    await userEventLib.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+    });
+  });
+
+  it("C07: an outside pointer press dismisses the menu", async () => {
+    renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(B));
+    await screen.findByTestId("graph-explore-entity");
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => {
+      expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+    });
+  });
+
+  it("C08: right-clicking another eligible node retargets the menu", async () => {
+    renderGraphWithRouter("", threeNeighbors());
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(B));
+    await screen.findByTestId("graph-explore-entity");
+    expect(
+      within(contextMenuElement()).getByText("203.0.113.10"),
+    ).toBeInTheDocument();
+    fireEvent.contextMenu(nodeElement(C));
+    await waitFor(() => {
+      expect(
+        within(contextMenuElement()).getByText("https://evil.example/payload"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      within(contextMenuElement()).queryByText("203.0.113.10"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("C09: a root change closes the menu", async () => {
+    renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(B));
+    const explore = await screen.findByTestId("graph-explore-entity");
+    await userEventLib.click(explore);
+    await waitFor(() => {
+      expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+    });
+  });
+
+  it("C10: unmount removes the menu and its document listeners", async () => {
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+    const { result } = renderGraphWithRouter();
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    fireEvent.contextMenu(nodeElement(B));
+    await screen.findByTestId("graph-explore-entity");
+    result.unmount();
+    expect(
+      document.querySelector('[data-ati-id="graph.entity-context-menu"]'),
+    ).toBeNull();
+    expect(removeSpy).toHaveBeenCalledWith("keydown", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("mousedown", expect.any(Function));
+    removeSpy.mockRestore();
+  });
+
+  it("C11/U16: ordinary left-click selection is unchanged by the context menu", async () => {
+    renderGraphWithRouter();
+    const focalNode = await screen.findByTestId(`rf__node-${nodeId(FOCAL)}`);
+    fireEvent.click(focalNode);
+    expect(await screen.findByText("Entity: Update Package Service")).toBeInTheDocument();
+    // The right-click menu never opened as a side effect of selection.
+    expect(screen.queryByTestId("graph-explore-entity")).not.toBeInTheDocument();
+  });
+
+  it("C14: pointer-adjacent position clamps/flips inside the container", () => {
+    expect(clampContextMenuPosition(10, 10, 800, 600)).toEqual({ x: 10, y: 10 });
+    // Near the right/bottom edges the menu flips back to stay visible.
+    expect(clampContextMenuPosition(795, 595, 800, 600)).toEqual({
+      x: 800 - GRAPH_CONTEXT_MENU_WIDTH,
+      y: 600 - GRAPH_CONTEXT_MENU_HEIGHT,
+    });
+    // A pointer before the origin clamps to the container origin.
+    expect(clampContextMenuPosition(-20, -20, 400, 300)).toEqual({ x: 0, y: 0 });
+    // A container narrower than the menu clamps x to the origin; y still
+    // fits and is preserved (never negative and never undefined).
+    expect(clampContextMenuPosition(50, 50, 100, 100)).toEqual({ x: 0, y: 50 });
+  });
+
+  it("U34/U35: Open Relationships table for focal entity drills down and Back restores the exact graph origin", async () => {
+    setHttpHandlers(
+      authMeSuccess,
+      runtimeFake,
+      investigationDetailHandler(
+        completedInvestigationFixture({ id: INVESTIGATION_ID }),
+      ),
+      graphNeighborhoodHandler({
+        neighborhood: neighbors().neighborhood,
+        recorder: resourceListRecorder(),
+      }),
+      graphRelationshipsHandler({ pages: [[]], recorder: resourceListRecorder() }),
+    );
+    const { router } = renderAtPath(
+      graphEntry("graph_scope=known&direction=source"),
+    );
+    await screen.findByRole("table", { name: "Relationship list (this page)" });
+    await userEventLib.click(
+      screen.getByRole("link", {
+        name: "Open Relationships table for focal entity",
+      }),
+    );
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `/investigations/${INVESTIGATION_ID}/relationships`,
+      );
+    });
+    expect(router.state.location.search).toBe(`?entity_id=${FOCAL}`);
+    // The focal Relationships table offers the contextual Back.
+    const back = await screen.findByRole("button", { name: "< Back" });
+    await userEventLib.click(back);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `/investigations/${INVESTIGATION_ID}/relationships/evolution`,
+      );
+    });
+    // The exact graph origin (view + graph filters + focal) is restored.
+    expect(router.state.location.search).toContain("view=graph");
+    expect(router.state.location.search).toContain("graph_scope=known");
+    expect(router.state.location.search).toContain("direction=source");
+    expect(router.state.location.search).toContain(`entity_id=${FOCAL}`);
   });
 });
