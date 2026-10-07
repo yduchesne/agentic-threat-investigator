@@ -90,7 +90,7 @@ After final cutover, `web/` remains the permanent name of ATI's human-facing HTM
 20. **Feature parity is behavioral, not DOM parity.** The new UI need not reproduce React component structure.
 21. **React is removed only after the parity matrix and final acceptance gates pass.**
 22. **Do not redesign unrelated backend/domain architecture merely to facilitate the frontend migration.**
-23. **Current explicit host-port overrides remain valid.** The UI migration does not subsume a separate `ATI_PORT_PREFIX` feature.
+23. **V0.7 Podman work must use `ATI_PORT_PREFIX=5`.** The next V0.7 PR must introduce `ATI_PORT_PREFIX` support before subsequent V0.7 work relies on it. When `ATI_PORT_PREFIX` is absent or has an empty value, no prefix is applied and the existing/default host ports remain unchanged. Existing explicit host-port overrides remain valid and must continue to be supported.
 
 ---
 
@@ -371,9 +371,13 @@ Current main already supports explicit host-port variables such as:
 
 V07 may require a temporary host port for the new frontend while both implementations coexist.
 
-A proposed `ATI_PORT_PREFIX` feature is useful for running multiple complete ATI stacks on one host, but it is a separate infrastructure concern and should be delivered independently rather than hidden inside the UI migration.
+`ATI_PORT_PREFIX` is a required V0.7 development/runtime isolation mechanism. **The next V0.7 PR must introduce support for this environment variable before further V0.7 feature work proceeds.** For all V0.7 Podman/Compose development and acceptance work, set:
 
-V07 must continue to work with explicit host-port overrides whether or not `ATI_PORT_PREFIX` exists.
+```text
+ATI_PORT_PREFIX=5
+```
+
+The prefix applies to host-side published ports; it must not alter container ports or container-to-container service discovery. When `ATI_PORT_PREFIX` is absent or its value is empty, **no port prefix is assumed** and ATI retains its existing/default host-port behavior. Explicit host-port overrides remain supported and their precedence relative to the prefix must be defined and tested by the implementation PR.
 
 ---
 
@@ -531,6 +535,8 @@ A later detailed PR plan may split a row into finer acceptance cases. A capabili
 The expected implementation is **7 PRs**, with an allowed split to **8 PRs** if graph/temporal migration proves too large for one coding-agent PR.
 
 Every PR requires its own detailed execution plan based on fresh `main` and `docs/DETAILED_PR_PLAN_AUTHORING_GUIDE.md`.
+
+Before the next V0.7 feature PR proceeds, a prerequisite PR must implement the `ATI_PORT_PREFIX` contract defined in **Host-port configuration**. All subsequent V0.7 PR plans that start or deploy the Podman/Compose stack must explicitly set `ATI_PORT_PREFIX=5` in their prescribed commands and acceptance procedures.
 
 ---
 
@@ -956,9 +962,10 @@ Before each V07 PR:
 5. identify exact files and reusable abstractions;
 6. define unit/integration/E2E matrices, distinguishing new-web acceptance from any legacy React compatibility coverage;
 7. make `scripts/e2e-web.sh` the normal V07 browser gate and require full legacy `scripts/e2e.sh` only when the PR's actual change surface justifies it;
-8. define STOP conditions;
-9. define mandatory acceptance gates;
-10. classify every failing mandatory gate before completion.
+8. for any Podman/Compose execution, explicitly set `ATI_PORT_PREFIX=5`; do not rely on an ambient shell value or implicit default;
+9. define STOP conditions;
+10. define mandatory acceptance gates;
+11. classify every failing mandatory gate before completion.
 
 Do not implement a V07 PR directly from this roadmap when a detailed execution plan is required.
 
