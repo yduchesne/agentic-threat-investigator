@@ -18,7 +18,7 @@ import {
   buildGraphNode,
 } from "../test/handlers";
 import { buildGraphModel, nodeLabel } from "./relationship-graph-model";
-import { layoutSize, radialPositions } from "./relationship-graph-layout";
+import { layoutRelationshipGraph, layoutSize } from "./relationship-graph-layout";
 
 const FOCAL = "40000000-0000-4000-8000-000000000101";
 const B = "40000000-0000-4000-8000-000000000102";
@@ -259,20 +259,30 @@ describe("Relationship Graph presentation model", () => {
   });
 
   it("G31D-M12: identical identities always produce identical initial positions", () => {
-    // The deterministic radial layout depends only on the sorted identity
-    // set, never on server ordering or render state.
-    const first = radialPositions(FOCAL, [B, C]);
-    const second = radialPositions(FOCAL, [C, B]);
-    expect(first.focal).toEqual({ x: 0, y: 0 });
-    expect(second.focal).toEqual({ x: 0, y: 0 });
-    // Same identity always yields the same position (the map iteration
-    // order may follow the passed order; the component normalizes by
-    // sorting identities before positioning).
-    expect(first.counterparties.get(B)).toEqual(second.counterparties.get(B));
-    expect(first.counterparties.get(C)).toEqual(second.counterparties.get(C));
-    expect(first.counterparties.get(B)).not.toBeUndefined();
-    expect(first.counterparties.get(C)).not.toBeUndefined();
-    const size = layoutSize(8);
+    // The deterministic directed layout depends only on the canonical
+    // topology, never on server ordering or render state.
+    const nodes = [{ entityId: FOCAL }, { entityId: B }, { entityId: C }];
+    const edges = [
+      {
+        relationshipId: "40000000-0000-4000-8000-000000000021",
+        sourceEntityId: FOCAL,
+        targetEntityId: B,
+      },
+      {
+        relationshipId: "40000000-0000-4000-8000-000000000022",
+        sourceEntityId: B,
+        targetEntityId: C,
+      },
+    ];
+    const first = layoutRelationshipGraph(FOCAL, nodes, edges);
+    const second = layoutRelationshipGraph(FOCAL, [...nodes].reverse(), edges);
+    // Same identity always yields the same position, regardless of input
+    // order (the adapter sorts canonical identities before layout).
+    expect(first.get(B)).toEqual(second.get(B));
+    expect(first.get(C)).toEqual(second.get(C));
+    expect(first.get(B)).not.toBeUndefined();
+    expect(first.get(C)).not.toBeUndefined();
+    const size = layoutSize(first.values());
     expect(size.width).toBeGreaterThan(0);
     expect(size.height).toBeGreaterThan(0);
   });

@@ -214,7 +214,18 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(page.getByTestId("rf__controls")).toBeVisible();
     await expect(page.getByRole("button", { name: "Zoom In" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Zoom Out" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Fit View" })).toBeVisible();
+    // PR 38-10: the explicit, localized fit action replaces the built-in one.
+    await expect(
+      page.getByRole("button", { name: "Fit graph to view" }),
+    ).toBeVisible();
+    // The redundant graph-local focal Relationships-table link is gone.
+    expect(
+      await page
+        .getByRole("link", {
+          name: "Open Relationships table for focal entity",
+        })
+        .count(),
+    ).toBe(0);
 
     // Node/edge semantics from the graph API (G31D-E02/E03): the focal node
     // carries its exact value and a visible non-color Entity-type cue, and
@@ -254,6 +265,46 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       /\/api\/v1\/investigations\/[0-9a-f-]+\/graph\/entities\/[0-9a-f-]+\/neighborhood$/,
     );
     const graphRequestCount = graphNeighborhoodRequests.length;
+
+    // PR 38-10 Fit graph to view: the action lives in the existing controls,
+    // changes only viewport pan/zoom, never moves a node and never re-queries.
+    const fitControl = page
+      .getByTestId("rf__controls")
+      .getByRole("button", { name: "Fit graph to view" });
+    const nodeTransformBeforeFit = await canvasNode.evaluate(
+      (node) => node.style.transform,
+    );
+    // Pan and zoom away from a useful framing first.
+    await graphCanvas.hover();
+    await page.mouse.wheel(0, 800);
+    const panBox = await graphCanvas.boundingBox();
+    const panStartX = (panBox?.x ?? 0) + 120;
+    const panStartY = (panBox?.y ?? 0) + 120;
+    await page.mouse.move(panStartX, panStartY);
+    await page.mouse.down();
+    await page.mouse.move(panStartX + 220, panStartY + 160);
+    await page.mouse.up();
+    await fitControl.click();
+    await expect
+      .poll(async () => {
+        const box = await canvasNode.boundingBox();
+        const canvas = await graphCanvas.boundingBox();
+        if (box === null || canvas === null) {
+          return false;
+        }
+        return (
+          box.x >= canvas.x - 1 &&
+          box.y >= canvas.y - 1 &&
+          box.x + box.width <= canvas.x + canvas.width + 1 &&
+          box.y + box.height <= canvas.y + canvas.height + 1
+        );
+      })
+      .toBe(true);
+    // Node coordinates are unchanged and fit caused no graph request.
+    expect(await canvasNode.evaluate((node) => node.style.transform)).toBe(
+      nodeTransformBeforeFit,
+    );
+    expect(graphNeighborhoodRequests.length).toBe(graphRequestCount);
 
     // Select the focal node (G31D-E06): canonical Entity identity/value/type
     // appear in the selection detail, and no second graph request happens
@@ -565,6 +616,10 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       `[data-testid="rf__node-n:${exploreTargetEntityId}"]`,
     );
     const exploreAction = page.getByTestId("graph-explore-entity");
+    // The context-menu drift check compares viewport-relative canvas bounds.
+    // Scroll the target into view first so Playwright's own pre-click
+    // scroll-into-view cannot be mistaken for the menu shifting the canvas.
+    await exploreTarget.scrollIntoViewIfNeeded();
     const canvasBoxBeforeMenu = await graphCanvas.boundingBox();
 
     // Escape dismissal, then prove the canvas still zooms.
@@ -646,12 +701,21 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       .poll(() => new URL(page.url()).searchParams.get("entity_id"))
       .toBe(exploreTargetEntityId);
 
-    // Graph -> focal Relationships table (exact server filter + contextual Back).
+    // PR 38-10: the redundant graph-local focal Relationships-table link is
+    // gone; the supported graph -> Relationships path is the focal entity
+    // pivot (normal Relationships navigation remains elsewhere).
+    await expect(
+      page.getByRole("link", {
+        name: "Open Relationships table for focal entity",
+      }),
+    ).toHaveCount(0);
     await page
-      .getByRole("link", { name: "Open Relationships table for focal entity" })
+      .locator(`[data-testid="rf__node-n:${exploreTargetEntityId}"]`)
       .click();
-    await expect(page).toHaveURL(/\/relationships\?entity_id=/);
-    expect(new URL(page.url()).searchParams.get("entity_id")).toBe(
+    await page.getByRole("button", { name: /Pivot actions for/ }).click();
+    await page.getByRole("link", { name: "Relationships where source" }).click();
+    await expect(page).toHaveURL(/\/relationships\?.*source_entity_id=/);
+    expect(new URL(page.url()).searchParams.get("source_entity_id")).toBe(
       exploreTargetEntityId,
     );
     // The Relationships table request is server-filtered by the new focal.
@@ -659,29 +723,12 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       .poll(() =>
         relationshipsListRequests.some(
           (candidate) =>
-            new URL(candidate).searchParams.get("entity_id") ===
+            new URL(candidate).searchParams.get("source_entity_id") ===
             exploreTargetEntityId,
         ),
       )
       .toBe(true);
-    await expect(
-      page.locator('[data-ati-id="relationship.focal-entity"]'),
-    ).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("button", { name: "< Back" })).toBeVisible();
-
-    // Relationships -> Entity details -> Back -> focal Relationships.
-    await page.getByTestId("focal-entity-value").click();
-    await expect(page).toHaveURL(/\/entities\/[0-9a-f-]+$/);
-    await expect(
-      page.getByRole("heading", { name: "Entity details" }),
-    ).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("Value", { exact: true })).toBeVisible();
-    await expect(page.getByText("Type", { exact: true })).toBeVisible();
-    await page.getByTestId("resource-route-detail-back").click();
-    await expect(page).toHaveURL(/\/relationships\?entity_id=/);
-    await expect(
-      page.locator('[data-ati-id="relationship.focal-entity"]'),
-    ).toBeVisible({ timeout: 20_000 });
 
     // Back to the exact graph focal origin (view + filters + focal).
     await page.getByRole("button", { name: "< Back" }).click();

@@ -21,6 +21,7 @@ plain text (provenance display only, never a promise of browsing).
 
 from __future__ import annotations
 
+import html
 from datetime import datetime
 
 from agentic_threat_investigator.domain.assessment import (
@@ -56,6 +57,31 @@ def escape_markdown_text(value: str) -> str:
     for char in value:
         result.append(_MARKDOWN_ESCAPES.get(char, char))
     return "".join(result)
+
+
+def decode_report_text(value: str) -> str:
+    """Decode exactly one layer of HTML character references in report prose.
+
+    The persisted Final Report is plain text authored by the Report Writer.
+    It can legitimately contain HTML character references (for example
+    ``&amp;`` or ``&#39;``) inside otherwise plain prose, which would
+    otherwise render literally in the Markdown view. This normalizes a
+    single, non-recursive layer using the standard library's HTML5
+    character-reference table; the result is still ordinary text, never
+    parsed markup.
+    """
+    return html.unescape(value)
+
+
+def escape_report_markdown_text(value: str) -> str:
+    """Normalize report prose once, then escape Markdown metacharacters.
+
+    The order is deliberate and security-relevant: entity decoding happens
+    *before* Markdown escaping, so decoding can never invalidate the Markdown
+    safety contract. Only report prose passes through this helper; canonical
+    identifiers, enum values, and URNs keep plain :func:`escape_markdown_text`.
+    """
+    return escape_markdown_text(decode_report_text(value))
 
 
 def _localized(value: FindingCriticality | AssessmentConfidence) -> str:
@@ -112,7 +138,7 @@ def _render_status_lines(report: InvestigationReport) -> list[str]:
         lines.extend(timeline)
     if report.stop_reason:
         lines.append(
-            f"- Outcome / stop reason: {escape_markdown_text(report.stop_reason)}"
+            f"- Outcome / stop reason: {escape_report_markdown_text(report.stop_reason)}"
         )
     else:
         lines.append(
@@ -127,13 +153,13 @@ def _render_finding_markdown(report: InvestigationReport) -> list[str]:
     sections.append("### Findings")
     sections.append("")
     for finding in report.findings:
-        title = escape_markdown_text(finding.title)
+        title = escape_report_markdown_text(finding.title)
         sections.append(f"#### Finding {finding.report_finding_number} — {title}")
         sections.append("")
         sections.append(f"Criticality: **{_localized(finding.criticality)}**")
         sections.append(f"Confidence: **{_localized(finding.confidence)}**")
         sections.append("")
-        sections.append(escape_markdown_text(finding.description))
+        sections.append(escape_report_markdown_text(finding.description))
         sections.append("")
         evidence_supports = [
             support
@@ -175,7 +201,7 @@ def format_investigation_report_markdown(report: InvestigationReport) -> str:
     finding numbers are the same deterministic numbers used everywhere else.
     """
     sections: list[str] = []
-    sections.append(f"# {escape_markdown_text(report.title)}")
+    sections.append(f"# {escape_report_markdown_text(report.title)}")
     sections.append("")
 
     sections.append("## Summary")
@@ -184,7 +210,7 @@ def format_investigation_report_markdown(report: InvestigationReport) -> str:
         for item in report.summary:
             sections.append(
                 f"- Finding {item.report_finding_number}: "
-                f"{escape_markdown_text(item.text)}"
+                f"{escape_report_markdown_text(item.text)}"
             )
     sections.append("")
 
@@ -204,18 +230,18 @@ def format_investigation_report_markdown(report: InvestigationReport) -> str:
             sections.append(
                 f"- Claim `{snapshot.research_claim_id}` "
                 f"(result `{snapshot.research_result_id}`): "
-                f"{escape_markdown_text(snapshot.claim_text)}"
+                f"{escape_report_markdown_text(snapshot.claim_text)}"
             )
             for citation in snapshot.citations:
                 title = citation.title or citation.source_record_id
                 sections.append(
                     f"  - Citation `{citation.citation_id}`: "
-                    f"{escape_markdown_text(title)} "
+                    f"{escape_report_markdown_text(title)} "
                     f"(source {escape_markdown_text(citation.source_id)})"
                 )
                 if citation.source_url:
                     sections.append(
-                        f"    - URL: {escape_markdown_text(citation.source_url)}"
+                        f"    - URL: {escape_report_markdown_text(citation.source_url)}"
                     )
         sections.append("")
 
@@ -223,21 +249,21 @@ def format_investigation_report_markdown(report: InvestigationReport) -> str:
         sections.append("### Limitations")
         sections.append("")
         for limitation in report.limitations:
-            sections.append(f"- {escape_markdown_text(limitation)}")
+            sections.append(f"- {escape_report_markdown_text(limitation)}")
         sections.append("")
 
     if report.unresolved_questions:
         sections.append("### Unresolved Questions")
         sections.append("")
         for question in report.unresolved_questions:
-            sections.append(f"- {escape_markdown_text(question)}")
+            sections.append(f"- {escape_report_markdown_text(question)}")
         sections.append("")
 
     if report.recommended_next_steps:
         sections.append("### Recommended Next Steps")
         sections.append("")
         for step in report.recommended_next_steps:
-            sections.append(f"- {escape_markdown_text(step)}")
+            sections.append(f"- {escape_report_markdown_text(step)}")
         sections.append("")
 
     return "\n".join(sections).rstrip() + "\n"

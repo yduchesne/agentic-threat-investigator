@@ -8,7 +8,11 @@
 // Steps). The Summary and Details are deterministic projections of the same
 // canonical ordered finding set; the browser never sorts, filters, ranks, or
 // invents findings, criticality, numbers, or anchors. Every string renders as
-// escaped React text. `Graph Analysis` is only the report presentation label
+// escaped React text; model-authored report prose additionally passes through
+// one single-pass HTML character-reference normalization (``decodeReportText``)
+// so persisted encoded prose is shown as the intended plain text without ever
+// introducing trusted HTML. `Graph Analysis` is only the report presentation
+// label
 // for existing relationship-observation support; no domain/API type changes.
 //
 // Stable anchors are centralized here and never derived from model-authored
@@ -30,6 +34,7 @@ import { PivotMenu } from "../pivots/PivotMenu";
 import { researchSupportAction } from "../pivots/pivot-capabilities";
 import { stopReasonLabelKey } from "./investigation-stop-reason";
 import { statusLabelKey } from "./investigation-status";
+import { decodeReportText } from "./report-text";
 import type { SupportPresentationLookup } from "./support-presentations-queries";
 import { SupportReference } from "./FindingList";
 import { REPORT_TYPOGRAPHY } from "./report-typography";
@@ -120,7 +125,8 @@ function SummarySection({
             <Typography key={item.report_finding_number} component="li" variant="body1">
               {t("summary.item", {
                 number: item.report_finding_number,
-                text: item.text,
+                text: decodeReportText(item.text),
+                interpolation: { escapeValue: false },
               })}
             </Typography>
           ))}
@@ -211,7 +217,8 @@ function ContentsSection({ report }: { report: Report }): ReactElement {
                     <a href={`#${findingAnchor(finding.report_finding_number)}`}>
                       {t("finding.heading", {
                         number: finding.report_finding_number,
-                        title: finding.title,
+                        title: decodeReportText(finding.title),
+                        interpolation: { escapeValue: false },
                       })}
                     </a>
                   </li>
@@ -324,7 +331,8 @@ function ReportFindingItem({
       <Typography variant="h4" sx={REPORT_TYPOGRAPHY.h4}>
         {t("finding.heading", {
           number: finding.report_finding_number,
-          title: finding.title,
+          title: decodeReportText(finding.title),
+          interpolation: { escapeValue: false },
         })}
       </Typography>
       <Typography variant="body2" sx={{ mt: 0.5, ...REPORT_TYPOGRAPHY.metadata }}>
@@ -334,7 +342,7 @@ function ReportFindingItem({
         {t("finding.confidence")} {confidenceText(t, finding.confidence)}
       </Typography>
       <Typography variant="body1" sx={{ mt: 0.75, ...REPORT_TYPOGRAPHY.body }}>
-        {finding.description}
+        {decodeReportText(finding.description)}
       </Typography>
       <FindingSupport finding={finding} presentation={presentation} />
     </Box>
@@ -362,7 +370,7 @@ function OptionalSection({
       <Stack component="ul" sx={{ m: 0, pl: 3, gap: 0.25 }}>
         {items.map((item, index) => (
           <Typography key={index} component="li" variant="body2">
-            {item}
+            {decodeReportText(item)}
           </Typography>
         ))}
       </Stack>
@@ -396,12 +404,16 @@ function ResearchContext({ report }: { report: Report }): ReactElement | null {
               pl: 1.5,
             })}
           >
-            <Typography variant="body2">{claim.claim_text}</Typography>
+            <Typography variant="body2">{decodeReportText(claim.claim_text)}</Typography>
             {claim.citations.length > 0 ? (
               <Typography variant="caption" sx={{ display: "block", mt: 0.25 }}>
                 {claim.citations
                   .slice(0, MAX_RENDERED_CITATIONS)
-                  .map((citation) => citation.title ?? citation.source_id)
+                  .map((citation) =>
+                    citation.title !== null
+                      ? decodeReportText(citation.title)
+                      : citation.source_id,
+                  )
                   .join(" • ")}
               </Typography>
             ) : null}
@@ -440,7 +452,7 @@ export function ReportContent({
     <Stack spacing={2.5}>
       <Box>
         <Typography variant="h1" sx={REPORT_TYPOGRAPHY.h1}>
-          {report.title}
+          {decodeReportText(report.title)}
         </Typography>
       </Box>
       <StatusSection report={report} />

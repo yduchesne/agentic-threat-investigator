@@ -8,7 +8,9 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from agentic_threat_investigator.app.report_writer.formatter import (
+    decode_report_text,
     escape_markdown_text,
+    escape_report_markdown_text,
     format_duration,
     format_investigation_report_markdown,
 )
@@ -283,3 +285,74 @@ def test_escape_markdown_text_deterministic() -> None:
     assert escape_markdown_text("# heading *x*") == "\\# heading \\*x\\*"
     assert escape_markdown_text("\\") == "\\\\"
     assert escape_markdown_text("plain text") == "plain text"
+
+
+def test_decode_report_text_is_single_pass() -> None:
+    """HTML character references decode exactly one layer."""
+    assert decode_report_text("C&amp;C") == "C&C"
+    assert decode_report_text("&#39;C&amp;C server&#39;") == "'C&C server'"
+    assert decode_report_text("&amp;lt;script&amp;gt;") == "&lt;script&gt;"
+    assert decode_report_text("AT&T") == "AT&T"
+
+
+def test_escape_report_markdown_text_decodes_before_escaping() -> None:
+    """Entity decoding happens before Markdown escaping, never after."""
+    # Decoded markup is still Markdown-escaped, so it stays literal text.
+    assert escape_report_markdown_text("&lt;script&gt;") == "\\<script\\>"
+    assert escape_report_markdown_text("C&amp;C") == "C&C"
+    assert escape_report_markdown_text("&amp;lt;b&amp;gt;") == "&lt;b&gt;"
+
+
+def test_markdown_prose_decodes_entities_before_escaping() -> None:
+    """Persisted encoded prose renders as plain text in the Markdown view."""
+    report = _report().model_copy(
+        update={
+            "title": "C&amp;C &lt;script&gt;",
+            "limitations": ("a &amp; b",),
+            "research_context": (
+                ReportResearchClaimSnapshot(
+                    research_result_id=uuid4(),
+                    research_claim_id=uuid4(),
+                    subject_entity_id=uuid4(),
+                    claim_text="context &amp; &#39;claim&#39;",
+                    citation_ids=(_citation().citation_id,),
+                    citations=(_citation(title="Title &amp; &quot;quoted&quot;"),),
+                ),
+            ),
+            "findings": (
+                _finding(1, 1, FindingCriticality.HIGH).model_copy(
+                    update={
+                        "title": "Encoded &amp; title",
+                        "description": (
+                            "C&amp;C described as &#39;C&amp;C server&#39;"
+                        ),
+                    }
+                ),
+            ),
+            "summary": (
+                ReportSummaryItem(
+                    report_finding_number=1,
+                    assessment_finding_ordinal=1,
+                    text="Summary &amp; detail",
+                    support=(
+                        AssessmentFindingRef(
+                            kind="assessment_finding",
+                            assessment_id=uuid4(),
+                            finding_ordinal=1,
+                        ),
+                    ),
+                ),
+            ),
+        }
+    )
+    rendered = format_investigation_report_markdown(report)
+    assert "# C&C \\<script\\>" in rendered
+    assert "C&C described as 'C&C server'" in rendered
+    assert "Summary & detail" in rendered
+    assert "Encoded & title" in rendered
+    assert "context & 'claim'" in rendered
+    assert 'Title & "quoted"' in rendered
+    assert "- a & b" in rendered
+    # No encoded reference survives the Markdown presentation.
+    assert "&amp;" not in rendered
+    assert "&#39;" not in rendered

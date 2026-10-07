@@ -257,9 +257,16 @@ class DeterministicLlmClient(LlmClient):
                 assessment_finding_ordinal=ordinal,
                 title=f"Generated finding {ordinal} heading",
                 summary=f"Generated summary for canonical finding {ordinal}.",
+                # PR 38-10: the real Report Writer model can legitimately
+                # emit HTML character references in otherwise plain prose.
+                # The deterministic boundary reproduces that shape so the
+                # real-stack browser acceptance can prove one-layer decoding
+                # and safe escaped-text rendering.
                 description=(
                     f"Generated reader-facing description for canonical finding "
-                    f"{ordinal}."
+                    f"{ordinal}. C&amp;C (threat_type botnet_cc, described as "
+                    f"&#39;C&amp;C server&#39;) "
+                    f"&lt;script&gt;alert(1)&lt;/script&gt;"
                 ),
             )
             for ordinal in ordinals

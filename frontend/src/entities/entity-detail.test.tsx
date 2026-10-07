@@ -7,7 +7,7 @@
 // restores the exact originating workspace when reached from a focal
 // indicator, otherwise a safe canonical Investigation fallback.
 
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -111,7 +111,7 @@ describe("PR 35-8 generic Entity details", () => {
     expect(router.state.location.search).toBe(`?entity_id=${FOCAL}`);
   });
 
-  it("U39: graph -> table -> details unwinds one navigation level at a time", async () => {
+  it("U39: graph -> Relationships table -> Back unwinds one navigation level at a time", async () => {
     setHttpHandlers(
       ...authHandlers(),
       entityReadHandler(),
@@ -121,24 +121,28 @@ describe("PR 35-8 generic Entity details", () => {
       `${GRAPH_BASE}?entity_id=${FOCAL}&view=graph`,
     );
     await screen.findByRole("table", { name: "Relationship list (this page)" });
-    await userEvent.click(
-      screen.getByRole("link", {
+    // PR 38-10: the redundant graph-local focal Relationships-table link is
+    // gone; the supported path to the Relationships workspace is the focal
+    // entity pivot (normal Relationships navigation remains elsewhere).
+    expect(
+      screen.queryByRole("link", {
         name: "Open Relationships table for focal entity",
       }),
+    ).toBeNull();
+    fireEvent.click(await screen.findByTestId(`rf__node-n:${FOCAL}`));
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Pivot actions for update-package.test",
+      }),
+    );
+    await userEvent.click(
+      await screen.findByRole("link", { name: "Relationships where source" }),
     );
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(REL_BASE);
     });
-    await userEvent.click(await screen.findByTestId("focal-entity-value"));
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe(
-        `/investigations/${INVESTIGATION_ID}/entities/${FOCAL}`,
-      );
-    });
-    await userEvent.click(await screen.findByTestId("resource-route-detail-back"));
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe(REL_BASE);
-    });
+    expect(router.state.location.search).toContain(`source_entity_id=${FOCAL}`);
+    // The contextual Back unwinds exactly one level back to the graph.
     await userEvent.click(await screen.findByRole("button", { name: "< Back" }));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`${GRAPH_BASE}`);

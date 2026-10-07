@@ -19,12 +19,16 @@ import { Alert, Box, Button, Link, Tooltip, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import {
   Background,
+  ControlButton,
   Controls,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
+  useNodes,
+  useNodesInitialized,
   useNodesState,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeProps,
@@ -57,7 +61,7 @@ import type {
   RelationshipGraphNode,
 } from "./relationship-graph-model";
 import {
-  layeredPositions,
+  layoutRelationshipGraph,
   layoutSize,
   positionsForExpandedNodes,
   type GraphPosition,
@@ -202,6 +206,88 @@ export function clampContextMenuPosition(
   };
 }
 
+/** Fit padding shared by automatic and explicit graph framing (PR 38-10). */
+export const GRAPH_FIT_PADDING = 0.25;
+
+/** Minimal inline Fit-to-view glyph (decorative; the button is named). */
+function FitViewIcon(): ReactElement {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        fill="currentColor"
+        d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"
+      />
+    </svg>
+  );
+}
+
+/**
+ * The existing bottom-left React Flow controls plus ATI's explicit,
+ * localized Fit graph to view action (PR 38-10 Step 16).
+ *
+ * The built-in Fit View control does not expose a localizable per-button
+ * accessible name, so the same panel hosts a ``ControlButton`` that calls
+ * React Flow ``fitView`` with the shared padding policy. Fitting changes
+ * only viewport pan/zoom: it never invokes Dagre and never mutates node
+ * coordinates.
+ *
+ * The same component performs one automatic fit after each new root
+ * topology is committed: it waits until the React Flow store reflects the
+ * expected root Entity set (``useNodes``/``useNodesInitialized``, never a
+ * timer), then fits once per ``rootGraphKey``. Same-root expansion and
+ * ordinary interaction therefore never re-fit or re-layout.
+ */
+function GraphControls({
+  rootGraphKey,
+  expectedEntityIds,
+}: {
+  rootGraphKey: string;
+  expectedEntityIds: readonly string[];
+}): ReactElement {
+  const { t } = useTranslation("relationshipEvolution");
+  const { fitView } = useReactFlow();
+  const nodes = useNodes();
+  const nodesInitialized = useNodesInitialized();
+  const fittedRootKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!nodesInitialized || fittedRootKey.current === rootGraphKey) {
+      return;
+    }
+    // The root state change commits in two phases (new key, then nodes), so
+    // wait until the React Flow store actually carries this root's Entities
+    // before fitting; the controlled node set always matches the model.
+    const currentIds = new Set(nodes.map((node) => node.id));
+    const expectedIds = expectedEntityIds.map(nodeId);
+    if (
+      currentIds.size !== expectedIds.length ||
+      !expectedIds.every((id) => currentIds.has(id))
+    ) {
+      return;
+    }
+    fittedRootKey.current = rootGraphKey;
+    void fitView({ padding: GRAPH_FIT_PADDING });
+  }, [nodesInitialized, nodes, rootGraphKey, expectedEntityIds, fitView]);
+  return (
+    <Controls showFitView={false}>
+      <ControlButton
+        aria-label={t("graph.fitView")}
+        title={t("graph.fitView")}
+        onClick={() => {
+          void fitView({ padding: GRAPH_FIT_PADDING });
+        }}
+      >
+        <FitViewIcon />
+      </ControlButton>
+    </Controls>
+  );
+}
+
 export interface RelationshipGraphProps {
   investigationId: string;
   /** Root graph context key (investigation/focal/direction/type/depth); a
@@ -343,25 +429,22 @@ export function RelationshipGraph({
     };
   }, [contextMenuOpen]);
 
-  const counterpartyIds = useMemo(
-    () => model.nodes.filter((node) => node.entityId !== focalEntityId).map((node) => node.entityId),
-    [model.nodes, focalEntityId],
-  );
   const positions = useMemo(
-    () => layeredPositions(focalEntityId, model.nodes, model.edges),
+    () => layoutRelationshipGraph(focalEntityId, model.nodes, model.edges),
     [focalEntityId, model.nodes, model.edges],
   );
-  const size = useMemo(() => layoutSize(counterpartyIds.length), [counterpartyIds.length]);
+  const size = useMemo(() => layoutSize(positions.values()), [positions]);
+  const expectedEntityIds = useMemo(
+    () => model.nodes.map((node) => node.entityId),
+    [model.nodes],
+  );
 
   const initialNodes: Node<EvolutionNodeData>[] = useMemo(
     () =>
       model.nodes.map((node) => ({
         id: nodeId(node.entityId),
         type: "evolutionNode" as const,
-        position:
-          node.entityId === focalEntityId
-            ? positions.focal
-            : (positions.positions.get(node.entityId) ?? { x: 0, y: 0 }),
+        position: positions.get(node.entityId) ?? { x: 0, y: 0 },
         data: {
           entityValue: node.value,
           role: node.entityId === focalEntityId ? "focal" : "counterparty",
@@ -602,16 +685,6 @@ export function RelationshipGraph({
           {t("graph.expansion.truncated", { label: entry.label })}
         </Alert>
       ))}
-      <Box sx={{ mb: 1 }}>
-        <Link
-          component={RouterLink}
-          to={`/investigations/${investigationId}/relationships?entity_id=${focalEntityId}`}
-          state={drillDownState}
-          underline="hover"
-        >
-          {t("graph.openTable")}
-        </Link>
-      </Box>
       <Box
         ref={canvasContainerRef}
         sx={{
@@ -630,7 +703,7 @@ export function RelationshipGraph({
           edges={edges}
           nodeTypes={nodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.25 }}
+          fitViewOptions={{ padding: GRAPH_FIT_PADDING }}
           nodesDraggable
           nodesConnectable={false}
           elementsSelectable
@@ -679,7 +752,10 @@ export function RelationshipGraph({
           }}
         >
           <Background />
-          <Controls />
+          <GraphControls
+            rootGraphKey={rootGraphKey}
+            expectedEntityIds={expectedEntityIds}
+          />
         </ReactFlow>
         {contextNode !== null && contextMenu !== null ? (
           <Box
