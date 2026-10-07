@@ -89,6 +89,8 @@ run_quality_checks() {
   run_frontend_unit_tests
 }
 
+# --- BODY ---
+
 cd "$(dirname "${BASH_SOURCE[0]}")"
 command -v uv >/dev/null || { echo 'uv is required; run ./install.sh' >&2; exit 1; }
 
