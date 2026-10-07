@@ -5909,13 +5909,23 @@ server-side `entity_id` filter.
   preserved `view`/direction/type/source/time/graph/temporal context,
   cleared cursor/`selected`/focal-relative counterparty filter, and the
   malformed/same-focal no-op.
-- `src/relationship-graph/relationship-graph.test.tsx` pins the right-click
-  graph context action (`U11`-`U16`) using the stable
-  `graph-explore-entity` test identity, and the graph -> focal Relationships
-  drill-down with exact contextual Back (`U34`/`U35`).
+- `src/relationship-graph/relationship-graph.test.tsx` pins the
+  pointer-adjacent right-click context menu (`C01`-`C14`) using the stable
+  `graph-explore-entity`/`graph.entity-context-menu` identities: browser
+  menu prevention, non-focal-only menu, out-of-flow positioning (no layout
+  shift), Escape/outside/root-change/unmount dismissal and listener cleanup,
+  retarget, left-click preservation, and pure position clamping. It also
+  pins the graph -> focal Relationships drill-down with exact contextual
+  Back (`U34`/`U35`).
 - `src/relationship-evolution/relationship-evolution.test.tsx` pins the
-  workspace re-root (`U19`-`U24`) and the focal indicator (`U25`-`U30`)
-  across History and Graph, including zero-row and empty-graph states.
+  workspace re-root and focal indicator (`U21`, `U25`-`U30`) and the focal
+  Explore Back chain (`N01`-`N08`): Graph A -> Explore B stores the exact A
+  Graph and B Back returns to it; `A -> B -> C` unwinds `C -> B -> A`; an
+  older ancestor R survives after A; graph filters and temporal params are
+  restored exactly.
+- `src/analyst-table/return-to.test.ts` continues to pin the bounded
+  `pushNavigationReturn`/`resolveReturn` stack (depth bound, ancestor
+  retention, duplicate suppression) that focal Explore reuses.
 - `src/relationships/relationships.test.tsx` pins the focal Relationships
   indicator and server filter (`U31`-`U33`).
 - `src/entities/entity-detail.test.tsx` pins the generic Entity details
@@ -5930,15 +5940,25 @@ with `--project=chromium --workers=1 --retries=0`:
 ```text
 completed Investigation
  -> Relationship History focal A (indicator identifies A by value)
- -> Graph -> right-click non-focal canonical vertex B
- -> Explore -> URL entity_id=B and view=graph preserved
+ -> Graph (capture exact A Graph URL)
+ -> right-click non-focal canonical vertex B
+ -> context menu opens without moving the canvas
+ -> Escape dismiss -> canvas still zooms
+ -> right-click -> outside dismiss -> right-click -> Explore
+ -> URL entity_id=B and view=graph preserved
  -> indicator identifies B; graph re-request rooted at B
+ -> Back -> exact captured A Graph URL
+ -> re-Explore B
  -> Open Relationships table for focal entity -> entity_id=B + Back
  -> B Entity details -> Back -> focal Relationships B
  -> Back -> exact Graph focal B context
  -> Graph focal B -> Entity details -> Back -> exact Graph focal B
  -> refresh -> focal B reconstructed from the URL
 ```
+
+A `A -> B -> C` focal Back chain is covered at component/router level when
+deterministic fake-world topology cannot reliably supply a third vertex; the
+real-stack journey retains the A -> B exact-Back proof.
 
 New/modified selectors use stable `data-ati-id`/`data-testid` identities or
 canonical route/query state, never the localized `Explore`/`Focal entity`

@@ -597,15 +597,40 @@ export function RelationshipEvolutionWorkspace({
   };
 
   /**
-   * Commit a lateral workspace change (EVOLUTION <-> GRAPH or a focal
-   * Explore re-root) while retaining the transient navigation context, so
-   * the workspace Back returns to the original origin. Deferred past the
-   * native pointer event per the repository's established
-   * navigation-commit boundary; the destination's Back reads the context
-   * from the committed location state.
+   * Commit a sibling subview change (EVOLUTION <-> GRAPH) while retaining
+   * the transient navigation context, so the workspace Back returns to the
+   * original origin. This is a lateral transition that must NOT push a new
+   * Back level. Deferred past the native pointer event per the repository's
+   * established navigation-commit boundary; the destination's Back reads the
+   * context from the committed location state.
    */
   const commitView = (next: URLSearchParams): void => {
     const state = location.state;
+    window.setTimeout(
+      () => setSearchParams(next, { replace: false, state }),
+      0,
+    );
+  };
+
+  /**
+   * Commit a focal Explore re-root. Unlike a sibling EVOLUTION <-> GRAPH
+   * transition, a focal change is a genuine contextual re-root: push the
+   * exact current Graph location as the immediate Back target (retaining
+   * older ancestors) so repeated exploration unwinds C -> B -> A. Deferred
+   * past the native pointer event per the repository's established
+   * navigation-commit boundary.
+   */
+  const commitFocalExplore = (next: URLSearchParams): void => {
+    const state = navigationState(
+      pushNavigationReturn(
+        location.state,
+        internalLocationFromPath(
+          location.pathname,
+          location.search,
+          location.hash,
+        ),
+      ),
+    );
     window.setTimeout(
       () => setSearchParams(next, { replace: false, state }),
       0,
@@ -619,6 +644,8 @@ export function RelationshipEvolutionWorkspace({
    * happens). The observation back-stack is cleared because the focal
    * transition resets the opaque observation cursor, and the codec clears
    * the focal-relative transient observation state in the same transition.
+   * The exact preceding Graph location is pushed onto the bounded
+   * NavigationContext so ``< Back`` returns to it.
    */
   const exploreFocalEntity = (entityId: string): void => {
     if (filters === null) {
@@ -629,7 +656,7 @@ export function RelationshipEvolutionWorkspace({
       return;
     }
     setBackStack([]);
-    commitView(next);
+    commitFocalExplore(next);
   };
 
   function applyFilters(next: RelationshipEvolutionFilters): void {

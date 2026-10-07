@@ -142,8 +142,6 @@
   "graph.openTable": "Open Relationships table for focal entity",
   "graph.explore": "Explore",
   "graph.contextMenu.aria": "Entity actions",
-  "graph.contextMenu.heading": "Entity: {{label}}",
-  "graph.contextMenu.close": "Close",
   "graph.pivotAria": "Pivot actions for {{label}}",
   "graph.viewEvolution": "View relationship history",
   "graph.viewRelationship": "View relationship",

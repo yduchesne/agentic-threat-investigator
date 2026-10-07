@@ -529,9 +529,10 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
     await expect(page).toHaveURL(/\/relationships\/evolution/);
     expect(new URL(page.url()).searchParams.get("entity_id")).toBe(entityParam);
 
-    // PR 35-8 focal exploration: right-click a canonical non-focal Entity,
-    // Explore it, and verify every focal-dependent projection re-roots
-    // without mutating Investigation provenance.
+    // PR 35-8 amendment 1: right-click a canonical non-focal Entity vertex,
+    // Explore it through the pointer-adjacent context menu, prove the menu
+    // does not shift the canvas and leaves graph interaction intact, and
+    // prove Explore records the exact preceding Graph focal state as Back.
     await page.getByRole("button", { name: "Graph" }).click();
     await expect(page).toHaveURL(/view=graph/);
     await expect(graphCanvas).toBeVisible({ timeout: 20_000 });
@@ -545,6 +546,7 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       await page.getByTestId("focal-entity-value").innerText()
     ).trim();
     expect(focalValueBefore.length).toBeGreaterThan(0);
+    const focalAGraphUrl = page.url();
 
     const focalExploreRequests: string[] = [];
     page.on("request", (request) => {
@@ -554,13 +556,47 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
       }
     });
 
-    const exploreTarget = graphCanvas.locator(".react-flow__node").nth(1);
-    await expect(exploreTarget).toBeVisible({ timeout: 20_000 });
-    const exploreTargetTestId = await exploreTarget.getAttribute("data-testid");
+    const firstNonFocal = graphCanvas.locator(".react-flow__node").nth(1);
+    await expect(firstNonFocal).toBeVisible({ timeout: 20_000 });
+    const exploreTargetTestId = await firstNonFocal.getAttribute("data-testid");
     const exploreTargetEntityId = exploreTargetTestId?.replace("rf__node-n:", "");
     expect(exploreTargetEntityId).toMatch(/^[0-9a-f-]{36}$/);
-    await exploreTarget.click({ button: "right" });
+    const exploreTarget = graphCanvas.locator(
+      `[data-testid="rf__node-n:${exploreTargetEntityId}"]`,
+    );
     const exploreAction = page.getByTestId("graph-explore-entity");
+    const canvasBoxBeforeMenu = await graphCanvas.boundingBox();
+
+    // Escape dismissal, then prove the canvas still zooms.
+    await exploreTarget.click({ button: "right" });
+    await expect(exploreAction).toBeVisible({ timeout: 20_000 });
+    const canvasBoxWithMenu = await graphCanvas.boundingBox();
+    expect(
+      Math.abs((canvasBoxWithMenu?.x ?? 0) - (canvasBoxBeforeMenu?.x ?? 0)),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs((canvasBoxWithMenu?.y ?? 0) - (canvasBoxBeforeMenu?.y ?? 0)),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(
+        (canvasBoxWithMenu?.width ?? 0) - (canvasBoxBeforeMenu?.width ?? 0),
+      ),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(
+        (canvasBoxWithMenu?.height ?? 0) - (canvasBoxBeforeMenu?.height ?? 0),
+      ),
+    ).toBeLessThanOrEqual(1);
+    await page.keyboard.press("Escape");
+    await expect(exploreAction).not.toBeVisible();
+    await page.getByRole("button", { name: "Zoom In" }).click();
+
+    // Outside-pointer dismissal, then re-open and Explore.
+    await exploreTarget.click({ button: "right" });
+    await expect(exploreAction).toBeVisible({ timeout: 20_000 });
+    await graphList.click({ position: { x: 5, y: 5 } });
+    await expect(exploreAction).not.toBeVisible();
+    await exploreTarget.click({ button: "right" });
     await expect(exploreAction).toBeVisible({ timeout: 20_000 });
     await expect(exploreAction).toBeEnabled();
     await exploreAction.click();
@@ -592,8 +628,23 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
         }),
       )
       .toBe(true);
-    // The transient context surface closed after Explore.
+    // The transient context menu closed after Explore.
     await expect(exploreAction).not.toBeVisible();
+
+    // PR 35-8 amendment 1: B's Back returns to the exact A Graph URL.
+    await page.getByRole("button", { name: "< Back" }).click();
+    await expect.poll(() => page.url()).toBe(focalAGraphUrl);
+    expect(new URL(page.url()).searchParams.get("view")).toBe("graph");
+    expect(new URL(page.url()).searchParams.get("entity_id")).not.toBe(
+      exploreTargetEntityId,
+    );
+    // Re-Explore the same Entity to continue the drill-down journey.
+    await exploreTarget.click({ button: "right" });
+    await expect(exploreAction).toBeVisible({ timeout: 20_000 });
+    await exploreAction.click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("entity_id"))
+      .toBe(exploreTargetEntityId);
 
     // Graph -> focal Relationships table (exact server filter + contextual Back).
     await page

@@ -164,6 +164,44 @@ function EvolutionGraphNode({ data }: NodeProps): ReactElement {
   );
 }
 
+/** Estimated rendered size of the graph right-click context menu (clamp). */
+export const GRAPH_CONTEXT_MENU_WIDTH = 200;
+export const GRAPH_CONTEXT_MENU_HEIGHT = 44;
+
+/** One open graph right-click context menu: canonical ID + pointer offset. */
+export interface GraphContextMenuState {
+  /** Canonical Entity ID of the right-clicked non-focal node. */
+  entityId: string;
+  /** Pointer x relative to the graph container's top-left corner. */
+  x: number;
+  /** Pointer y relative to the graph container's top-left corner. */
+  y: number;
+}
+
+/**
+ * Clamp a pointer-adjacent menu position inside the graph container.
+ *
+ * The menu is positioned out of document flow at the pointer; this pure
+ * helper keeps it fully visible by flipping back from the container's
+ * right/bottom edges without ever moving the canvas. Exported so the edge
+ * behaviour is unit-testable without a layout engine.
+ */
+export function clampContextMenuPosition(
+  x: number,
+  y: number,
+  containerWidth: number,
+  containerHeight: number,
+  menuWidth: number = GRAPH_CONTEXT_MENU_WIDTH,
+  menuHeight: number = GRAPH_CONTEXT_MENU_HEIGHT,
+): { x: number; y: number } {
+  const maxX = Math.max(0, containerWidth - menuWidth);
+  const maxY = Math.max(0, containerHeight - menuHeight);
+  return {
+    x: Math.min(Math.max(0, x), maxX),
+    y: Math.min(Math.max(0, y), maxY),
+  };
+}
+
 export interface RelationshipGraphProps {
   investigationId: string;
   /** Root graph context key (investigation/focal/direction/type/depth); a
@@ -255,21 +293,55 @@ export function RelationshipGraph({
   const [provenanceRelationshipId, setProvenanceRelationshipId] = useState<
     string | null
   >(null);
-  // PR 35-8: the bounded in-flow right-click context-action surface. It is
-  // local presentation state only (no global popup, no document listener)
-  // and closes on dismissal, after Explore, or when the graph root changes.
-  const [contextEntityId, setContextEntityId] = useState<string | null>(null);
+  // PR 35-8 amendment 1: the lightweight pointer-adjacent right-click context
+  // menu. It owns only the canonical Entity ID and the pointer position
+  // relative to the graph container. It is ordinary positioned content (no
+  // portal, backdrop, focus trap, body lock or persistent pointer shield) and
+  // closes deterministically on Explore, Escape, outside pointer, retarget,
+  // root change or unmount.
+  const [contextMenu, setContextMenu] = useState<GraphContextMenuState | null>(
+    null,
+  );
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     setProvenanceRelationshipId(null);
   }, [selection]);
   // A root semantic change (focal Explore re-roots the graph) clears stale
-  // selection, provenance and context-action state so no prior-root detail
+  // selection, provenance and context-menu state so no prior-root detail
   // survives the transition.
   useEffect(() => {
     setSelection(null);
     setProvenanceRelationshipId(null);
-    setContextEntityId(null);
+    setContextMenu(null);
   }, [rootGraphKey]);
+  // The menu registers a document key/pointer listener ONLY while it is open
+  // and removes it deterministically on close/unmount. The listeners never
+  // prevent default or stop propagation, so they can never intercept graph
+  // pan/zoom/drag/click input after the menu closes.
+  const contextMenuOpen = contextMenu !== null;
+  useEffect(() => {
+    if (!contextMenuOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setContextMenu(null);
+      }
+    };
+    const onMouseDown = (event: MouseEvent): void => {
+      if (contextMenuRef.current?.contains(event.target as globalThis.Node)) {
+        return;
+      }
+      setContextMenu(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onMouseDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onMouseDown);
+    };
+  }, [contextMenuOpen]);
 
   const counterpartyIds = useMemo(
     () => model.nodes.filter((node) => node.entityId !== focalEntityId).map((node) => node.entityId),
@@ -471,11 +543,11 @@ export function RelationshipGraph({
     return id === null ? null : (nodeById.get(id) ?? null);
   }, [selection, nodeById]);
 
-  // The canonical node backing the right-click context surface; a stale or
-  // non-canonical Entity ID resolves to null and suppresses the surface.
+  // The canonical node backing the right-click context menu; a stale or
+  // non-canonical Entity ID resolves to null and suppresses the menu.
   const contextNode = useMemo(
-    () => (contextEntityId === null ? null : nodeById.get(contextEntityId) ?? null),
-    [contextEntityId, nodeById],
+    () => (contextMenu === null ? null : nodeById.get(contextMenu.entityId) ?? null),
+    [contextMenu, nodeById],
   );
 
   const truncatedEntities = useMemo(() => {
@@ -540,57 +612,15 @@ export function RelationshipGraph({
           {t("graph.openTable")}
         </Link>
       </Box>
-      {contextNode !== null ? (
-        <Box
-          data-ati-id="graph.entity-context-actions"
-          role="group"
-          aria-label={t("graph.contextMenu.aria")}
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            flexWrap: "wrap",
-            mb: 1,
-            p: 1,
-            border: 1,
-            borderColor: "divider",
-            borderRadius: 1,
-          }}
-        >
-          <Typography variant="subtitle2" component="span">
-            {t("graph.contextMenu.heading", { label: contextNode.label })}
-          </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            data-testid="graph-explore-entity"
-            disabled={
-              contextNode.entityId === focalEntityId || onExploreEntity === undefined
-            }
-            onClick={() => {
-              if (onExploreEntity === undefined) {
-                return;
-              }
-              onExploreEntity(contextNode.entityId);
-              setContextEntityId(null);
-            }}
-            sx={{ textTransform: "none" }}
-          >
-            {t("graph.explore")}
-          </Button>
-          <Button
-            size="small"
-            variant="text"
-            data-testid="graph-context-close"
-            onClick={() => setContextEntityId(null)}
-            sx={{ textTransform: "none" }}
-          >
-            {t("graph.contextMenu.close")}
-          </Button>
-        </Box>
-      ) : null}
       <Box
-        sx={{ height: size.height, border: 1, borderColor: "divider", borderRadius: 1 }}
+        ref={canvasContainerRef}
+        sx={{
+          position: "relative",
+          height: size.height,
+          border: 1,
+          borderColor: "divider",
+          borderRadius: 1,
+        }}
         style={graphFlowStyle}
         aria-label={t("graph.canvasLabel")}
         role="group"
@@ -632,12 +662,66 @@ export function RelationshipGraph({
             if (entityId === null || !nodeById.has(entityId)) {
               return;
             }
-            setContextEntityId(entityId);
+            // The focal node offers no Explore; do not open a menu for it.
+            if (entityId === focalEntityId || onExploreEntity === undefined) {
+              return;
+            }
+            const bounds = canvasContainerRef.current?.getBoundingClientRect();
+            const rawX = bounds === undefined ? event.clientX : event.clientX - bounds.left;
+            const rawY = bounds === undefined ? event.clientY : event.clientY - bounds.top;
+            const position = clampContextMenuPosition(
+              rawX,
+              rawY,
+              bounds?.width ?? Number.POSITIVE_INFINITY,
+              bounds?.height ?? Number.POSITIVE_INFINITY,
+            );
+            setContextMenu({ entityId, x: position.x, y: position.y });
           }}
         >
           <Background />
           <Controls />
         </ReactFlow>
+        {contextNode !== null && contextMenu !== null ? (
+          <Box
+            ref={contextMenuRef}
+            data-ati-id="graph.entity-context-menu"
+            role="group"
+            aria-label={t("graph.contextMenu.aria")}
+            onMouseDown={(event) => event.stopPropagation()}
+            sx={{
+              position: "absolute",
+              left: contextMenu.x,
+              top: contextMenu.y,
+              zIndex: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 0.5,
+              p: 0.5,
+              border: 1,
+              borderColor: "divider",
+              borderRadius: 1,
+              bgcolor: "background.paper",
+              boxShadow: 3,
+            }}
+          >
+            <Typography variant="caption" component="span" sx={{ px: 0.5 }}>
+              {contextNode.label}
+            </Typography>
+            <Button
+              size="small"
+              variant="text"
+              data-testid="graph-explore-entity"
+              onClick={() => {
+                const target = contextMenu.entityId;
+                setContextMenu(null);
+                onExploreEntity?.(target);
+              }}
+              sx={{ textTransform: "none" }}
+            >
+              {t("graph.explore")}
+            </Button>
+          </Box>
+        ) : null}
       </Box>
 
       {selectedNode !== null ? (

@@ -268,19 +268,27 @@ provenance or triggering Entities. There is no parallel client-side focal
 state and no second focal store.
 
 - **Explore vs Expand**: right-clicking a canonical non-focal Entity vertex
-  opens a bounded in-flow context-action surface whose *Explore* command
-  makes that Entity the new URL-backed focal Entity. *Expand* stays a
-  distinct, additive topology operation (one-hop known/outgoing/incoming)
-  that keeps the current focal root. Ordinary left-click keeps its existing
-  selection/path semantics and never re-roots.
-- **One canonical lateral transition**: the focal change is a pure URL
-  transition that sets the new canonical `entity_id`, preserves `view`,
-  direction, relationship type/source, observed range and the graph/temporal
-  context, and clears the focal-relative transient state (opaque observation
-  cursor, `selected` detail and the focal-relative `counterparty_entity_id`,
-  plus the browser-local observation back-stack). Because it is a lateral
-  workspace transition it preserves the existing bounded navigation context
-  rather than pushing a drill-down return.
+  opens a lightweight, pointer-adjacent graph context menu whose *Explore*
+  command makes that Entity the new URL-backed focal Entity. The menu is
+  ordinary positioned content (no portal, backdrop, focus trap, body lock or
+  persistent pointer shield) that does not shift the canvas and dismisses on
+  Explore, Escape, outside pointer, retarget, root change or unmount. The
+  focal node offers no Explore menu. *Expand* stays a distinct, additive
+  topology operation (one-hop known/outgoing/incoming) that keeps the current
+  focal root. Ordinary left-click keeps its existing selection/path
+  semantics and never re-roots.
+- **One canonical lateral transition with a contextual Back**: the focal
+  change is a pure URL transition that sets the new canonical `entity_id`,
+  preserves `view`, direction, relationship type/source, observed range and
+  the graph/temporal context, and clears the focal-relative transient state
+  (opaque observation cursor, `selected` detail and the focal-relative
+  `counterparty_entity_id`, plus the browser-local observation back-stack).
+  Unlike sibling EVOLUTION <-> GRAPH navigation (which preserves context), a
+  focal Explore is a genuine contextual re-root: it pushes the **exact
+  preceding Graph location** onto the existing bounded NavigationContext
+  ahead of any older ancestors, so repeated exploration unwinds
+  `C -> B -> A` and `< Back` restores the exact prior pathname/search/hash,
+  including `view=graph`, focal ID, graph filters and temporal state.
 - **Whole-workspace re-root**: the new `entity_id` re-roots the observation
   query, graph neighborhood/traversal, focal node styling/layout,
   focal-relative edge direction/counterparty presentation, the focal
