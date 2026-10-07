@@ -313,3 +313,26 @@ def test_service_wiring_accepts_unit_of_work_factories() -> None:
 
     assert service.session_lifetime == timedelta(hours=8)
     assert service.idle_timeout is None
+
+
+def test_csrf_accepts_an_exact_approved_origin_collection() -> None:
+    """Two exact browser origins over one authority are both accepted."""
+    approved = ["http://react.test", "http://web.test"]
+    validate_csrf("t", "t", "http://react.test", None, approved)
+    validate_csrf("t", "t", "http://web.test", None, approved)
+    validate_csrf("t", "t", None, "http://web.test/login", approved)
+
+
+def test_csrf_rejects_an_origin_outside_the_approved_collection() -> None:
+    """A third-party origin never matches the bounded approved collection."""
+    approved = ["http://react.test", "http://web.test"]
+    with pytest.raises(CsrfError, match="invalid request origin"):
+        validate_csrf("t", "t", "http://evil.test", None, approved)
+
+
+def test_csrf_rejects_an_empty_or_malformed_origin_collection() -> None:
+    """An empty or fully malformed collection fails closed."""
+    with pytest.raises(CsrfError, match="invalid request origin"):
+        validate_csrf("t", "t", "http://host", None, [])
+    with pytest.raises(CsrfError, match="invalid request origin"):
+        validate_csrf("t", "t", "http://host", None, ["//bad"])

@@ -31,6 +31,7 @@
 - [No quality-gate bypass](#no-quality-gate-bypass)
 - [CI quality gate](#ci-quality-gate)
 - [Frontend quality](#frontend-quality)
+- [Server-rendered web presentation tests (V07-01)](#server-rendered-web-presentation-tests-v07-01)
 - [PR 35-1 UI correctness testing](#pr-35-1-ui-correctness-testing)
 - [PR 35-2 GEOINT UI consolidation testing](#pr-35-2-geoint-ui-consolidation-testing)
 - [PR 35-8 focal-Entity exploration testing](#pr-35-8-focal-entity-exploration-testing)
@@ -3966,6 +3967,74 @@ An accessibility test may separately assert the localized accessible name;
 the same test must not also treat that English string as the only widget
 selector. This keeps tests stable across copy/localization changes and
 prevents a translation edit from silently rewiring an interaction test.
+
+### Server-rendered web presentation tests (V07-01)
+
+The `web/` HTML presentation adapter is tested at four layers; none of them
+substitutes for another.
+
+- **View-model / Jinja rendering unit tests** (`tests/unit/web/`): typed web
+  view models, Jinja autoescape (malicious user text is escaped), the
+  centralized full-page-versus-HTMX-fragment convention, HTML error
+  presentation, and the form-compatible CSRF helper. These are fast and
+  database-free.
+- **Web route contract unit tests** (`tests/unit/web/`): web login/logout
+  cookie semantics, HTML 404/403/503 presentation, API errors remaining JSON,
+  and the exact approved-origin CSRF behavior. They use the same
+  presentation-neutral fakes as the API route tests.
+- **FastAPI + Jinja + PostgreSQL integration tests**
+  (`tests/integration/test_api_web.py`, marker `integration`): the real
+  application stack — real `AuthenticationService`, real session
+  persistence, real DB — proves login/shell/fragment/logout, exact-origin
+  rejection, and that a web login authenticates the same session the JSON
+  API uses.
+- **Real-stack browser acceptance** (`scripts/e2e-web.sh`, durable suite in
+  `web-e2e/`): Playwright against the real stack. Critical acceptance runs
+  with `workers=1`, `retries=0`, and covers Chromium and Firefox.
+
+HTMX fragments are tested server-side (same view model, bounded fragment,
+no duplicate full document) so that browser tests are reserved for genuine
+browser semantics (HTMX swap, refresh/session persistence, logout
+navigation).
+
+#### Dual E2E harness lifecycle (V07-01..V07-07)
+
+During the migration the repository has two real-stack browser harnesses:
+
+```text
+V07-1..V07-6:
+  scripts/e2e.sh      -> React regression harness (existing frontend/)
+  scripts/e2e-web.sh  -> new server-rendered web acceptance harness
+
+V07-7 (cutover):
+  React removed
+  the proven web harness becomes canonical scripts/e2e.sh
+```
+
+`scripts/e2e-web.sh` follows the same isolation principles as
+`scripts/e2e.sh` (unique Compose project, throwaway PostgreSQL volume,
+generated bootstrap credentials, random high host ports, fake operating
+mode, scoped cleanup) and additionally proves the two exact browser origins
+run concurrently against one backend. Its Playwright suite is owned by
+`web-e2e/` (not `frontend/`) so it survives the eventual React deletion.
+React E2E (`scripts/e2e.sh`) is regression evidence only and cannot
+substitute for web acceptance, and vice versa.
+
+The V07-1 acceptance matrix is:
+
+| E2E | Browser | Required |
+|---|---|---:|
+| New web login → shell → HTMX → refresh → logout | Chromium | **Yes** |
+| Same new-web journey | Firefox | **Yes** |
+| Targeted legacy React auth/origin compatibility | Chromium | **Yes** |
+| Targeted legacy React auth/origin compatibility | Firefox | No |
+| Full legacy `scripts/e2e.sh` suite | — | **No** |
+
+The two new-web rows are covered by `./scripts/e2e-web.sh` (which runs both
+projects). The targeted legacy React row is covered by
+`./scripts/e2e.sh auth.spec.ts --project=chromium --workers=1 --retries=0`,
+which exercises React login, session restore after reload, CSRF-protected
+logout, and SPA navigation through Nginx against the same real stack.
 
 ### Browser E2E (PR 24A)
 

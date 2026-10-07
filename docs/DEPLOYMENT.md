@@ -14,6 +14,7 @@
 - [Geographic resolver (PR 26C)](#geographic-resolver-pr-26c)
 - [Scheduler](#scheduler)
 - [Frontend development](#frontend-development)
+- [Server-rendered web adapter and parallel browser origins (V07-01)](#server-rendered-web-adapter-and-parallel-browser-origins-v07-01)
 - [Configuration](#configuration)
 - [Networking](#networking)
 - [Health](#health)
@@ -40,8 +41,8 @@ Containers are disposable. Durable data is not.
 Host
  |
  +-- Compose
- |    +-- ati-frontend
- |    +-- ati-api
+ |    +-- ati-frontend          # React SPA origin
+ |    +-- ati-api               # JSON /api/v1 + server-rendered web/ UI
  |    +-- ati-worker
  |    +-- ati-geo-resolver        # PR 26C
  |    +-- ati-migrate (one-shot)
@@ -313,11 +314,13 @@ Investigation execution must survive API container restart because it is not tie
 
 Operational requirements for the delivered API:
 
-- allowed frontend origins: set `api_cors_origins` to the exact frontend
-  origin(s); the wildcard is rejected while cookies are used;
+- allowed frontend origins: set `api_cors_origins` to the exact React
+  frontend origin(s); the wildcard is rejected while cookies are used;
 - the session cookie is `Secure` in the production profile and
-  `SameSite=Lax`; the public origin must match `public_base_url` (CSRF
-  Origin/Referer validation uses it);
+  `SameSite=Lax`; the React public origin must match `public_base_url` and
+  the server-rendered web origin must match `web_base_url` (CSRF
+  Origin/Referer validation uses the exact `csrf_allowed_origins` set built
+  from both);
 - HTTP requests carry `Idempotency-Key` on `POST /api/v1/investigations`;
   only SHA-256 key digests are stored;
 - idempotency records and exhausted job rows have no v0.1 cleanup
@@ -440,6 +443,36 @@ npm run api:check       # fail when the committed generated types are stale
 npm run test:e2e        # Playwright (requires the E2E stack; see scripts/e2e.sh)
 ./scripts/e2e.sh        # repository real-stack browser E2E harness
 ```
+
+### Server-rendered web adapter and parallel browser origins (V07-01)
+
+The FastAPI process (`ati-api`, host port `ATI_API_HOST_PORT`, default
+`8000`) serves both the machine-facing JSON boundary (`/api/v1`) and ATI's
+server-rendered HTML presentation adapter
+(`src/agentic_threat_investigator/web/`). The React `frontend` service
+(host port `ATI_FRONTEND_HOST_PORT`, default `8080`) continues to run in
+parallel; no separate web container, database, or backend exists.
+
+Transitional browser origins:
+
+```text
+React browser origin:   ATI_PUBLIC_BASE_URL  (default http://localhost:8080)
+New web browser origin: ATI_WEB_BASE_URL     (default http://localhost:8000)
+API origin seen by React: the Nginx-proxied same-origin /api path
+API/web process:        the single ati-api FastAPI process
+CSRF allowed origins:   public_base_url + web_base_url (Settings.csrf_allowed_origins)
+Host-port variables:    ATI_API_HOST_PORT, ATI_FRONTEND_HOST_PORT
+```
+
+Both exact origins share one session/CSRF authority (the same `ati_session`
+and `ati_csrf` cookies). Set `ATI_WEB_BASE_URL` to the externally visible
+web origin whenever `ATI_API_HOST_PORT` changes; a mismatch causes the
+exact-origin CSRF check to reject web form/HTMX mutations. There is no
+wildcard credentialed origin and no second authentication authority. During
+the V07-1..V07-6 migration the real-stack browser harness is split:
+`scripts/e2e.sh` remains the React regression harness and
+`scripts/e2e-web.sh` is the server-rendered web acceptance harness; they are
+consolidated only at the V07-7 cutover.
 
 ### OpenStreetMap tiles and Referrer-Policy (PR 35-6)
 

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+{# SPDX-License-Identifier: AGPL-3.0-only #}
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="same-origin">
+    <title>{% block title %}{{ title | default("Agentic Threat Investigator") }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ static_prefix }}/css/ati.css">
+    <script src="{{ htmx_script_url }}" defer></script>
+  </head>
+  <body>
+    <a class="ati-skip-link" href="#ati-main">Skip to main content</a>
+    <header class="ati-header">
+      <span class="ati-brand">Agentic Threat Investigator</span>
+      {% block header %}{% endblock %}
+    </header>
+    <main id="ati-main" class="ati-main" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="ati-footer">
+      <span>Server-rendered web presentation adapter (transitional)</span>
+    </footer>
+  </body>
+</html>
