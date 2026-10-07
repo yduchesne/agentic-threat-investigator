@@ -1,70 +1,126 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Graph temporal controls (PR 31J).
+// Graph temporal-range controls (PR 38-8, simplifying PR 31J).
 //
 // Presentation-focused temporal toolbar for the Graph workspace. The
-// committed temporal tuple's ONLY authority is the route URL (refresh and
-// Back/Forward reproduce the same frame); this component owns no state
+// committed temporal range's ONLY authority is the route URL (refresh and
+// Back/Forward reproduce the same range); this component owns no state
 // beyond the browser-local draft passed in, exactly like GraphFilters.
 // Draft edits never issue graph requests before Apply; Apply commits the
-// validated tuple in one URL transition starting at frame 0; Disable
-// removes the temporal-owned URL parameters; Previous/Next change only the
-// committed frame index through the existing codec (no wrapping, no local
-// frame state). When temporal mode is active the component renders an
-// analyst-facing frame banner whose wording is strictly observational
-// (``observed_at`` within the half-open frame) and never implies a
-// Relationship lifetime.
+// validated range in one URL transition; Disable removes the temporal-owned
+// URL parameters.
 //
-// Half-open semantics: every frame is ``[observed_from, observed_to)``; the
-// upper bound is exclusive, and an observation at a shared boundary
-// timestamp belongs to exactly one frame.
+// The draft represents each boundary as a required local DATE plus an
+// OPTIONAL local TIME. A blank time is interpreted as local midnight
+// (``00:00:00``) when the draft is normalized, never as end-of-day/current
+// time, and never by forcing a ``datetime-local`` control to display
+// midnight. A neutral, uncommitted draft defaults its end DATE to the
+// browser user's local current calendar date and leaves its end time blank.
+//
+// Half-open semantics: the committed range is
+// ``[observed_from, observed_to)``; the upper bound is exclusive, and an
+// observation at the upper-bound timestamp is never included. The wording
+// stays observational: it constrains ``observed_at`` within the range and
+// never implies a Relationship lifetime.
 
-import {
-  Box,
-  Button,
-  Checkbox,
-  FormControl,
-  FormControlLabel,
-  InputLabel,
-  MenuItem,
-  Select,
-  TextField,
-  Tooltip,
-  Typography,
-} from "@mui/material";
+import { Box, Button, Checkbox, FormControlLabel, TextField, Typography } from "@mui/material";
 import type { ReactElement } from "react";
 import type { TFunction } from "i18next";
 
 import { isoToLocalDateTimeValue, localDateTimeToIso } from "../analyst-table/filters";
 import {
-  GRAPH_TEMPORAL_FRAME_COUNTS,
   graphTemporalActive,
-  graphTemporalFrameAt,
   type GraphTemporalContext,
-  type GraphTemporalFrameCount,
 } from "./graph-temporal";
 
 /** One browser-local temporal draft (never committed before Apply). */
 export interface GraphTemporalDraft {
   /** Whether temporal exploration is enabled in the draft. */
   temporal: boolean;
-  /** Draft overall range start (``datetime-local`` wall-clock value). */
-  rangeStart: string;
-  /** Draft overall range end (``datetime-local`` wall-clock value). */
-  rangeEnd: string;
-  /** Draft frame count (exactly 4/8/12/24). */
-  frameCount: GraphTemporalFrameCount;
+  /** Draft range start local calendar date (``YYYY-MM-DD``; required). */
+  startDate: string;
+  /** Draft range start local wall-clock time (blank = local midnight). */
+  startTime: string;
+  /** Draft range end local calendar date (``YYYY-MM-DD``; required). */
+  endDate: string;
+  /** Draft range end local wall-clock time (blank = local midnight). */
+  endTime: string;
 }
 
-/** Build a draft from the committed temporal tuple (URL resync/init). */
+/**
+ * The browser user's local current calendar date as ``YYYY-MM-DD``.
+ *
+ * Derived from local calendar fields (never a UTC ``toISOString`` slice) so
+ * a timezone boundary cannot produce tomorrow/yesterday relative to the
+ * user's calendar. ``now`` is injectable so tests never depend on the wall
+ * clock.
+ */
+export function localToday(now: Date = new Date()): string {
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * Normalize one local date + optional local time to the app ISO UTC instant.
+ *
+ * A blank time means local ``00:00:00``. Malformed dates/times and impossible
+ * calendar dates normalize to absence (never appended ``Z`` directly).
+ */
+export function graphTemporalBoundaryToIso(
+  date: string,
+  time: string,
+): string | undefined {
+  if (date === "") {
+    return undefined;
+  }
+  const normalizedTime = time === "" ? "00:00" : time;
+  return localDateTimeToIso(`${date}T${normalizedTime}`);
+}
+
+/**
+ * Split one committed ISO instant back into local date and time parts.
+ *
+ * A committed midnight instant renders as ``00:00``; the codec cannot
+ * distinguish an explicit midnight from a blank time and deliberately does
+ * not persist that distinction (both have identical semantics).
+ */
+function localDateAndTime(iso: string | undefined): { date: string; time: string } {
+  const local = isoToLocalDateTimeValue(iso);
+  if (local === "") {
+    return { date: "", time: "" };
+  }
+  const [date, time] = local.split("T");
+  return { date: date ?? "", time: time ?? "" };
+}
+
+/**
+ * Build a draft from the committed temporal tuple (URL resync/init).
+ *
+ * An active tuple reconstructs both boundaries. A neutral, uncommitted tuple
+ * leaves the start boundary blank and defaults the end DATE to the browser
+ * user's local current calendar date with a blank end time.
+ */
 export function graphTemporalDraftFromCommitted(
   context: GraphTemporalContext,
+  now: Date = new Date(),
 ): GraphTemporalDraft {
+  if (!graphTemporalActive(context)) {
+    return {
+      temporal: false,
+      startDate: "",
+      startTime: "",
+      endDate: localToday(now),
+      endTime: "",
+    };
+  }
+  const start = localDateAndTime(context.rangeStart);
+  const end = localDateAndTime(context.rangeEnd);
   return {
-    temporal: context.temporal,
-    rangeStart: isoToLocalDateTimeValue(context.rangeStart),
-    rangeEnd: isoToLocalDateTimeValue(context.rangeEnd),
-    frameCount: context.frameCount,
+    temporal: true,
+    startDate: start.date,
+    startTime: start.time,
+    endDate: end.date,
+    endTime: end.time,
   };
 }
 
@@ -72,16 +128,13 @@ export function graphTemporalDraftFromCommitted(
  * Convert one VALIDATED draft to the committed temporal tuple.
  *
  * Only called after ``graphTemporalDraftError`` passes; defensively still
- * fails closed (mode off) if the validated range cannot round-trip. A new
- * Apply ALWAYS starts at the first frame (frameIndex 0) per PR 31J B4 — a
- * stale frame index from a previous range/count configuration is never
- * retained.
+ * fails closed (mode off) if the validated range cannot round-trip.
  */
 export function graphTemporalDraftToCommitted(
   draft: GraphTemporalDraft,
 ): GraphTemporalContext {
-  const rangeStart = localDateTimeToIso(draft.rangeStart);
-  const rangeEnd = localDateTimeToIso(draft.rangeEnd);
+  const rangeStart = graphTemporalBoundaryToIso(draft.startDate, draft.startTime);
+  const rangeEnd = graphTemporalBoundaryToIso(draft.endDate, draft.endTime);
   const valid =
     draft.temporal &&
     rangeStart !== undefined &&
@@ -91,18 +144,16 @@ export function graphTemporalDraftToCommitted(
     temporal: valid,
     rangeStart: valid ? rangeStart : undefined,
     rangeEnd: valid ? rangeEnd : undefined,
-    frameCount: draft.frameCount,
-    frameIndex: 0,
   };
 }
 
 /**
- * Validate one draft for Apply (PR 31J B3).
+ * Validate one draft for Apply.
  *
- * Rejects when a ranged draft misses either bound, carries a malformed
- * timestamp, has ``start >= end``, or selects a frame count outside
- * 4/8/12/24. A reversed/empty range is NEVER silently repaired. A disabled
- * draft is always committable (it commits ordinary mode off).
+ * Rejects a missing start date, a missing end date, a malformed date or
+ * optional time, and a normalized ``start >= end``. A blank time is valid
+ * and means local midnight. A reversed/equal range is NEVER silently
+ * repaired. A disabled draft is always committable (it commits mode off).
  */
 export function graphTemporalDraftError(
   t: TFunction,
@@ -111,25 +162,19 @@ export function graphTemporalDraftError(
   if (!draft.temporal) {
     return null;
   }
-  if (draft.rangeStart === "" && draft.rangeEnd === "") {
-    return t("graph.temporal.error.range");
+  if (draft.startDate === "") {
+    return t("graph.temporal.error.startDate");
   }
-  if (draft.rangeStart === "") {
-    return t("graph.temporal.error.rangeStart");
+  if (draft.endDate === "") {
+    return t("graph.temporal.error.endDate");
   }
-  if (draft.rangeEnd === "") {
-    return t("graph.temporal.error.rangeEnd");
-  }
-  const rangeStart = localDateTimeToIso(draft.rangeStart);
-  const rangeEnd = localDateTimeToIso(draft.rangeEnd);
+  const rangeStart = graphTemporalBoundaryToIso(draft.startDate, draft.startTime);
+  const rangeEnd = graphTemporalBoundaryToIso(draft.endDate, draft.endTime);
   if (rangeStart === undefined || rangeEnd === undefined) {
-    return t("graph.temporal.error.range");
+    return t("graph.temporal.error.invalid");
   }
   if (rangeStart >= rangeEnd) {
     return t("graph.temporal.error.range");
-  }
-  if (!(GRAPH_TEMPORAL_FRAME_COUNTS as readonly number[]).includes(draft.frameCount)) {
-    return t("graph.temporal.error.frames");
   }
   return null;
 }
@@ -142,16 +187,10 @@ export interface GraphTemporalControlsProps {
   draft: GraphTemporalDraft;
   /** Localized draft validation error, or null when commit-able. */
   error: string | null;
-  /** ``Previous`` availability for the committed frame. */
-  canPrevious: boolean;
-  /** ``Next`` availability for the committed frame. */
-  canNext: boolean;
   onSetDraft: (draft: GraphTemporalDraft) => void;
   onApply: () => void;
   /** Disable temporal mode and restore ordinary graph behavior. */
   onDisable: () => void;
-  onPrevious: () => void;
-  onNext: () => void;
 }
 
 /** The compact temporal exploration toolbar for the Graph workspace. */
@@ -160,19 +199,15 @@ export function GraphTemporalControls({
   committed,
   draft,
   error,
-  canPrevious,
-  canNext,
   onSetDraft,
   onApply,
   onDisable,
-  onPrevious,
-  onNext,
 }: GraphTemporalControlsProps): ReactElement {
   const set = (patch: Partial<GraphTemporalDraft>): void => {
     onSetDraft({ ...draft, ...patch });
   };
   const active = graphTemporalActive(committed);
-  const frame = active ? graphTemporalFrameAt(committed) : undefined;
+  const disabled = !draft.temporal;
   return (
     <Box
       role="group"
@@ -203,44 +238,40 @@ export function GraphTemporalControls({
         />
         <TextField
           size="small"
-          type="datetime-local"
+          type="date"
           slotProps={{ inputLabel: { shrink: true } }}
-          label={t("graph.temporal.rangeStart")}
-          disabled={!draft.temporal}
-          value={draft.rangeStart}
-          onChange={(event) => set({ rangeStart: event.target.value })}
+          label={t("graph.temporal.startDate")}
+          disabled={disabled}
+          value={draft.startDate}
+          onChange={(event) => set({ startDate: event.target.value })}
         />
         <TextField
           size="small"
-          type="datetime-local"
+          type="time"
           slotProps={{ inputLabel: { shrink: true } }}
-          label={t("graph.temporal.rangeEnd")}
-          disabled={!draft.temporal}
-          value={draft.rangeEnd}
-          onChange={(event) => set({ rangeEnd: event.target.value })}
+          label={t("graph.temporal.startTime")}
+          disabled={disabled}
+          value={draft.startTime}
+          onChange={(event) => set({ startTime: event.target.value })}
         />
-        <Tooltip title={t("graph.temporal.framesTooltip")}>
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel id="graph-temporal-frames-label">
-            {t("graph.temporal.frames")}
-          </InputLabel>
-          <Select
-            labelId="graph-temporal-frames-label"
-            label={t("graph.temporal.frames")}
-            disabled={!draft.temporal}
-            value={String(draft.frameCount)}
-            onChange={(event) =>
-              set({ frameCount: parseInt(event.target.value, 10) as GraphTemporalFrameCount })
-            }
-          >
-            {GRAPH_TEMPORAL_FRAME_COUNTS.map((count) => (
-              <MenuItem key={count} value={String(count)}>
-                {String(count)}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        </Tooltip>
+        <TextField
+          size="small"
+          type="date"
+          slotProps={{ inputLabel: { shrink: true } }}
+          label={t("graph.temporal.endDate")}
+          disabled={disabled}
+          value={draft.endDate}
+          onChange={(event) => set({ endDate: event.target.value })}
+        />
+        <TextField
+          size="small"
+          type="time"
+          slotProps={{ inputLabel: { shrink: true } }}
+          label={t("graph.temporal.endTime")}
+          disabled={disabled}
+          value={draft.endTime}
+          onChange={(event) => set({ endTime: event.target.value })}
+        />
         <Button size="small" variant="contained" onClick={onApply} sx={{ textTransform: "none" }}>
           {t("graph.temporal.apply")}
         </Button>
@@ -253,26 +284,6 @@ export function GraphTemporalControls({
         >
           {t("graph.temporal.disable")}
         </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          disabled={!canPrevious}
-          onClick={onPrevious}
-          aria-label={t("graph.temporal.previous")}
-          sx={{ textTransform: "none" }}
-        >
-          {t("graph.temporal.previous")}
-        </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          disabled={!canNext}
-          onClick={onNext}
-          aria-label={t("graph.temporal.next")}
-          sx={{ textTransform: "none" }}
-        >
-          {t("graph.temporal.next")}
-        </Button>
       </Box>
       {error !== null ? (
         <Typography
@@ -282,26 +293,6 @@ export function GraphTemporalControls({
           sx={{ display: "block", mb: 0.5 }}
         >
           {error}
-        </Typography>
-      ) : null}
-      {active && frame !== undefined ? (
-        <Typography
-          variant="caption"
-          component="div"
-          role="status"
-          aria-label={t("graph.temporal.status", {
-            current: String(committed.frameIndex + 1),
-            total: String(committed.frameCount),
-            from: frame.observedFrom ?? "",
-            to: frame.observedTo ?? "",
-          })}
-        >
-          {t("graph.temporal.status", {
-            current: String(committed.frameIndex + 1),
-            total: String(committed.frameCount),
-            from: frame.observedFrom ?? "",
-            to: frame.observedTo ?? "",
-          })}
         </Typography>
       ) : null}
     </Box>

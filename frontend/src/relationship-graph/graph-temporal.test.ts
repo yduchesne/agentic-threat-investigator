@@ -3,19 +3,15 @@
 import { describe, expect, it } from "vitest";
 import { emptyGraphContext } from "./graph-context-url";
 import {
+  GRAPH_TEMPORAL_OBSOLETE_PARAMS,
+  GRAPH_TEMPORAL_PARAMS,
   applyGraphTemporal,
   emptyGraphTemporalContext,
   graphTemporalActive,
   graphTemporalEffectiveBounds,
   graphTemporalEqual,
-  graphTemporalFrameAt,
-  graphTemporalFrames,
-  graphTemporalHasNext,
-  graphTemporalHasPrevious,
   graphTemporalKey,
   parseGraphTemporal,
-  parseGraphTemporalFrameCount,
-  shiftGraphTemporalFrame,
 } from "./graph-temporal";
 
 function ps(query: string): URLSearchParams {
@@ -25,143 +21,178 @@ function ps(query: string): URLSearchParams {
 const START = "2026-02-01T00:00:00Z";
 const END = "2026-02-09T00:00:00Z";
 
-describe("PR 31J graph temporal frame model", () => {
-  it("FE01: absent params are mode off, default 8 frames, frame 0", () => {
+describe("PR 38-8 graph temporal direct range model", () => {
+  it("T-U01: empty context is inactive with no bounds", () => {
     const temporal = parseGraphTemporal(ps(""));
+    expect(temporal).toEqual({
+      temporal: false,
+      rangeStart: undefined,
+      rangeEnd: undefined,
+    });
+    expect(graphTemporalActive(temporal)).toBe(false);
+    expect(emptyGraphTemporalContext()).toEqual({
+      temporal: false,
+      rangeStart: undefined,
+      rangeEnd: undefined,
+    });
+  });
+
+  it("T-U02: a valid committed range is active", () => {
+    const temporal = parseGraphTemporal(
+      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
+    );
+    expect(temporal.temporal).toBe(true);
+    expect(temporal.rangeStart).toBe(START);
+    expect(temporal.rangeEnd).toBe(END);
+    expect(graphTemporalActive(temporal)).toBe(true);
+  });
+
+  it("T-U03: a missing start fails the tuple closed", () => {
+    const temporal = parseGraphTemporal(
+      ps(`graph_temporal=1&graph_time_end=${END}`),
+    );
     expect(temporal.temporal).toBe(false);
-    expect(temporal.frameCount).toBe(8);
-    expect(temporal.frameIndex).toBe(0);
     expect(temporal.rangeStart).toBeUndefined();
     expect(temporal.rangeEnd).toBeUndefined();
+  });
+
+  it("T-U04: a missing end fails the tuple closed", () => {
+    const temporal = parseGraphTemporal(
+      ps(`graph_temporal=1&graph_time_start=${START}`),
+    );
+    expect(temporal.temporal).toBe(false);
+    expect(temporal.rangeStart).toBeUndefined();
+    expect(temporal.rangeEnd).toBeUndefined();
+  });
+
+  it("T-U05: a malformed start fails the tuple closed", () => {
+    const temporal = parseGraphTemporal(
+      ps("graph_temporal=1&graph_time_start=not-a-time&graph_time_end=" + END),
+    );
     expect(graphTemporalActive(temporal)).toBe(false);
-    expect(emptyGraphTemporalContext().frameCount).toBe(8);
   });
 
-  it("FE02: graph_time_frames=12 parses and empty URL canonicalizes to 8", () => {
-    expect(parseGraphTemporal(ps("graph_time_frames=12")).frameCount).toBe(12);
-    expect(parseGraphTemporal(ps("graph_time_frames=bogus")).frameCount).toBe(8);
-    expect(parseGraphTemporal(ps("graph_time_frames=99")).frameCount).toBe(8);
-    expect(parseGraphTemporalFrameCount(undefined)).toBe(8);
-  });
-
-  it("FE03: an active temporal tuple requires the switch AND a valid range", () => {
-    const active = parseGraphTemporal(
-      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
+  it("T-U06: a malformed end fails the tuple closed", () => {
+    const temporal = parseGraphTemporal(
+      ps("graph_temporal=1&graph_time_start=" + START + "&graph_time_end=2026-13-99"),
     );
-    expect(active.temporal).toBe(true);
-    expect(graphTemporalActive(active)).toBe(true);
-    expect(
-      graphTemporalActive(
-        parseGraphTemporal(ps("graph_temporal=1")),
-      ),
-    ).toBe(false);
-    expect(
-      graphTemporalActive(
-        parseGraphTemporal(ps(`graph_temporal=1&graph_time_start=${END}&graph_time_end=${START}`)),
-      ),
-    ).toBe(false);
+    expect(graphTemporalActive(temporal)).toBe(false);
   });
 
-  it("FE04: eight frames evenly partition the committed range half-open intervals", () => {
+  it("T-U07: equal bounds fail the tuple closed", () => {
+    const temporal = parseGraphTemporal(
+      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${START}`),
+    );
+    expect(graphTemporalActive(temporal)).toBe(false);
+  });
+
+  it("T-U08: reversed bounds fail the tuple closed", () => {
+    const temporal = parseGraphTemporal(
+      ps(`graph_temporal=1&graph_time_start=${END}&graph_time_end=${START}`),
+    );
+    expect(graphTemporalActive(temporal)).toBe(false);
+  });
+
+  it("T-U09: active effective bounds are the exact committed start/end", () => {
+    const context = {
+      ...emptyGraphContext(),
+      observedFrom: "2000-01-01T00:00:00Z",
+      observedTo: "2099-01-01T00:00:00Z",
+    };
     const temporal = parseGraphTemporal(
       ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
     );
-    const frames = graphTemporalFrames(temporal);
-    expect(frames).toHaveLength(8);
-    expect(frames[0]!.observedFrom).toBe(START);
-    expect(frames[7]!.observedTo).toBe(END);
-    // Each frame is exactly one day wide over an eight-day range.
-    for (const frame of frames) {
-      const from = Date.parse(frame.observedFrom!);
-      const to = Date.parse(frame.observedTo!);
-      expect(to - from).toBe(24 * 60 * 60 * 1000);
-    }
-    // Half-open: adjacent frames share no boundary observation.
-    expect(frames[1]!.observedFrom).toBe("2026-02-02T00:00:00Z");
-    expect(frames[0]!.observedTo).toBe("2026-02-02T00:00:00Z");
-    expect(frames[0]!.observedTo).toBe(frames[1]!.observedFrom);
+    const bounds = graphTemporalEffectiveBounds(context, temporal);
+    expect(bounds.observedFrom).toBe(START);
+    expect(bounds.observedTo).toBe(END);
   });
 
-  it("FE05: frame navigation clamps to the committed index space", () => {
-    const base = parseGraphTemporal(
-      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
+  it("T-U10: inactive temporal state passes ordinary graph bounds through", () => {
+    const context = {
+      ...emptyGraphContext(),
+      observedFrom: "2000-01-01T00:00:00Z",
+      observedTo: "2099-01-01T00:00:00Z",
+    };
+    const bounds = graphTemporalEffectiveBounds(
+      context,
+      emptyGraphTemporalContext(),
     );
-    const next = shiftGraphTemporalFrame(base, 1);
-    expect(next.frameIndex).toBe(1);
-    expect(graphTemporalHasPrevious(base)).toBe(false);
-    expect(graphTemporalHasNext(base)).toBe(true);
-    // Jump to the committed LAST frame (index 7 of 8) through Prev/Next
-    // steps and prove clamping in both directions.
-    let last = base;
-    for (let step = 0; step < 7; step += 1) {
-      last = shiftGraphTemporalFrame(last, 1);
-    }
-    expect(last.frameIndex).toBe(7);
-    expect(graphTemporalHasNext(last)).toBe(false);
-    expect(shiftGraphTemporalFrame(last, 1).frameIndex).toBe(7);
-    expect(shiftGraphTemporalFrame(last, -1).frameIndex).toBe(6);
-    // Previous before the FIRST frame stays clamped at frame 0.
-    expect(shiftGraphTemporalFrame(base, -1).frameIndex).toBe(0);
-    expect(graphTemporalHasPrevious(base)).toBe(false);
-    // Frame identity changes per frame; stale frames never satisfy each other.
-    expect(graphTemporalKey(base)).not.toBe(graphTemporalKey(next));
+    expect(bounds.observedFrom).toBe("2000-01-01T00:00:00Z");
+    expect(bounds.observedTo).toBe("2099-01-01T00:00:00Z");
   });
 
-  it("FE06: malformed range or out-of-range index fails the tuple closed", () => {
-    expect(
-      graphTemporalFrameAt(parseGraphTemporal(ps("graph_temporal=1"))),
-    ).toBeUndefined();
-    const outOfRange = parseGraphTemporal(
-      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}&graph_time_frame=40`),
-    );
-    expect(outOfRange.frameIndex).toBe(0);
-    expect(graphTemporalFrameAt(outOfRange)!.frameIndex).toBe(0);
-    // 24-frame mode is a valid count.
-    const twentyFour = parseGraphTemporal(
-      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}&graph_time_frames=24&graph_time_frame=23`),
-    );
-    expect(twentyFour.frameCount).toBe(24);
-    expect(graphTemporalFrameAt(twentyFour)!.frameIndex).toBe(23);
-  });
-
-  it("FE07: URL round-trip preserves unrelated params and drops owned ones when off", () => {
-    const temporal = parseGraphTemporal(
-      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}&graph_time_frames=4&graph_scope=known&cursor=abc`),
-    );
-    const applied = applyGraphTemporal(ps("cursor=abc"), temporal);
-    expect(applied.get("graph_temporal")).toBe("1");
-    expect(applied.get("graph_time_start")).toBe(START);
-    expect(applied.get("graph_time_end")).toBe(END);
-    expect(applied.get("graph_time_frames")).toBe("4");
-    expect(applied.get("cursor")).toBe("abc");
-    const reparsed = parseGraphTemporal(applied);
-    expect(graphTemporalEqual(reparsed, temporal)).toBe(true);
-    expect(
-      applyGraphTemporal(applied, emptyGraphTemporalContext()).get("graph_temporal"),
-    ).toBeNull();
-  });
-
-  it("FE08: canonical URL omits default frame count and first frame index", () => {
+  it("T-U11: Apply writes only the switch and both instants", () => {
     const temporal = parseGraphTemporal(
       ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
     );
     const applied = applyGraphTemporal(ps(""), temporal);
-    expect(applied.get("graph_time_frames")).toBeNull();
-    expect(applied.get("graph_time_frame")).toBeNull();
     expect(applied.get("graph_temporal")).toBe("1");
+    expect(applied.get("graph_time_start")).toBe(START);
+    expect(applied.get("graph_time_end")).toBe(END);
+    expect([...applied.keys()].sort()).toEqual([
+      "graph_temporal",
+      "graph_time_end",
+      "graph_time_start",
+    ]);
   });
 
-  it("FE09: effective bounds override GraphContext observed bounds per frame", () => {
-    const context = { ...emptyGraphContext(), observedFrom: "2000-01-01T00:00:00Z", observedTo: "2099-01-01T00:00:00Z" };
+  it("T-U12: Disable removes every temporal-owned parameter", () => {
+    const applied = applyGraphTemporal(
+      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
+      emptyGraphTemporalContext(),
+    );
+    expect(applied.get("graph_temporal")).toBeNull();
+    expect(applied.get("graph_time_start")).toBeNull();
+    expect(applied.get("graph_time_end")).toBeNull();
+  });
+
+  it("T-U13: unrelated URL parameters are preserved on Apply and Disable", () => {
     const temporal = parseGraphTemporal(
       ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
     );
-    const frameBounds = graphTemporalEffectiveBounds(context, temporal);
-    expect(frameBounds.observedFrom).toBe(START);
-    expect(frameBounds.observedTo).toBe("2026-02-02T00:00:00Z");
-    // Mode off passes the ordinary committed bounds through untouched.
-    const passthrough = graphTemporalEffectiveBounds(context, emptyGraphTemporalContext());
-    expect(passthrough.observedFrom).toBe("2000-01-01T00:00:00Z");
-    expect(passthrough.observedTo).toBe("2099-01-01T00:00:00Z");
+    const applied = applyGraphTemporal(ps("cursor=abc&graph_scope=known"), temporal);
+    expect(applied.get("cursor")).toBe("abc");
+    expect(applied.get("graph_scope")).toBe("known");
+    const disabled = applyGraphTemporal(applied, emptyGraphTemporalContext());
+    expect(disabled.get("cursor")).toBe("abc");
+    expect(disabled.get("graph_scope")).toBe("known");
+  });
+
+  it("T-U14: obsolete frame params are inert and stripped on canonical rewrite", () => {
+    const obsolete = `graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}&graph_time_frames=24&graph_time_frame=7`;
+    const parsed = parseGraphTemporal(ps(obsolete));
+    expect(parsed.rangeStart).toBe(START);
+    expect(parsed.rangeEnd).toBe(END);
+    const rewritten = applyGraphTemporal(ps(obsolete), parsed);
+    expect(rewritten.get("graph_time_frames")).toBeNull();
+    expect(rewritten.get("graph_time_frame")).toBeNull();
+    // A legacy frame-only URL never activates temporal mode.
+    expect(
+      graphTemporalActive(parseGraphTemporal(ps("graph_time_frames=12&graph_time_frame=3"))),
+    ).toBe(false);
+  });
+
+  it("T-U15: the temporal key changes when the committed range changes", () => {
+    const base = parseGraphTemporal(
+      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
+    );
+    const other = parseGraphTemporal(
+      ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=2026-02-10T00:00:00Z`),
+    );
+    expect(graphTemporalKey(base)).not.toBe(graphTemporalKey(other));
+    expect(graphTemporalEqual(base, other)).toBe(false);
+    expect(graphTemporalEqual(base, base)).toBe(true);
+  });
+
+  it("T-U16: only the canonical temporal parameter set remains owned", () => {
+    expect([...GRAPH_TEMPORAL_PARAMS]).toEqual([
+      "graph_temporal",
+      "graph_time_start",
+      "graph_time_end",
+    ]);
+    expect([...GRAPH_TEMPORAL_OBSOLETE_PARAMS]).toEqual([
+      "graph_time_frames",
+      "graph_time_frame",
+    ]);
   });
 });

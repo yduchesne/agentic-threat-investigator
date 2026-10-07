@@ -152,13 +152,19 @@ compatibility verification.
 
 PostgreSQL has a health check.
 
-Development may expose PostgreSQL on a configurable non-default host port, for example:
+PostgreSQL is published on its standard host port `5432` by default:
 
 ```text
-ATI_POSTGRES_HOST_PORT=54320
+ATI_POSTGRES_HOST_PORT=5432
 ```
 
-to avoid collisions with host PostgreSQL.
+ATI owns its standard host ports and does not prefix, offset, or otherwise
+remap them to avoid collisions with other locally running applications. If
+the standard host port is already occupied, treat it as a local-environment
+conflict and resolve that conflict explicitly (stop/adjust the other
+listener) rather than silently selecting an alternate port. The isolated
+integration/E2E harnesses override the host port per run as part of their
+throwaway topology.
 
 ## Canonical reference geography (PR 26B / PR 26B-2)
 

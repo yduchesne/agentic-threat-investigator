@@ -98,11 +98,8 @@ import {
   emptyGraphTemporalContext,
   graphTemporalActive,
   graphTemporalEffectiveBounds,
-  graphTemporalHasNext,
-  graphTemporalHasPrevious,
   graphTemporalKey,
   parseGraphTemporal,
-  shiftGraphTemporalFrame,
   type GraphTemporalContext,
 } from "../relationship-graph/graph-temporal";
 import {
@@ -188,16 +185,16 @@ export function RelationshipEvolutionWorkspace({
   // PR 31G: the committed graph context (scope + filters) is URL-backed and
   // independent of the Evolution observation filters.
   const graphContext = parseGraphContext(searchParams);
-  // PR 31J: the committed temporal tuple (observed range partitioned into
-  // 4/8/12/24 half-open frames) is equally URL-backed; the active frame
-  // overrides ONLY ``graphContext.observedFrom/observedTo`` per request.
+  // PR 38-8: the committed temporal DIRECT range (start + end observed
+  // instants; no frames) is equally URL-backed; the active range overrides
+  // ONLY ``graphContext.observedFrom/observedTo`` per request.
   const graphTemporal = parseGraphTemporal(searchParams);
-  // PR 31J A2: ONE effective request context per commit — the active frame's
-  // half-open bounds override the ordinary committed observed bounds while
-  // scope/entity type/relationship type/source/depth stay authoritative.
-  // Every graph operation below consumes this same effective context, so
-  // root topology, explicit expansion and path finding can never run against
-  // different observed ranges.
+  // PR 38-8: ONE effective request context per commit — the committed
+  // range's half-open bounds override the ordinary committed observed bounds
+  // while scope/entity type/relationship type/source/depth stay
+  // authoritative. Every graph operation below consumes this same effective
+  // context, so root topology, explicit expansion and path finding can never
+  // run against different observed ranges.
   const effectiveGraphContext = useMemo(
     () => ({
       ...graphContext,
@@ -302,7 +299,7 @@ export function RelationshipEvolutionWorkspace({
   // one canonical graph Entity for the bounded investigation action. It is
   // browser-local workbench state (never URL-backed, never persisted), it is
   // cleared when path mode is entered and when the committed graph context
-  // (including an active temporal frame) changes, so a stale selection can
+  // (including an active temporal range) changes, so a stale selection can
   // never be submitted against a topology that no longer represents it.
   const [pathMode, setPathMode] = useState(false);
   const [pathEndpoints, setPathEndpoints] = useState<{
@@ -339,9 +336,10 @@ export function RelationshipEvolutionWorkspace({
   // state deterministically: the displayed path result is cleared and both
   // endpoint selections are cleared (the simple option the PR 31I plan
   // explicitly allows), so a stale prior-context result can never render.
-  // PR 31J A4: the effective context (active-frame bounds) participates in
-  // this identity, so a frame transition is a real semantic graph-context
-  // transition for the path workbench and expansion/key identity. PR 35-8:
+  // PR 38-8: the effective context (active-range bounds) participates in
+  // this identity, so a committed range change is a real semantic
+  // graph-context transition for the path workbench and expansion/key
+  // identity. PR 35-8:
   // a focal Explore is a root semantic change even though the graph context
   // itself is unchanged, so the focal Entity is part of this reset identity.
   const committedGraphKey = graphContextKey(effectiveGraphContext);
@@ -562,12 +560,11 @@ export function RelationshipEvolutionWorkspace({
     committedKey: graphContextKey(graphContext),
   });
 
-  // PR 31J B4/B5/C2: the temporal form owns ONE browser-local draft; Apply
-  // commits the validated tuple in one URL transition (always starting at
-  // frame 0), Disable removes the temporal-owned parameters, and Previous/
-  // Next change only the committed frame index through the same URL codec.
-  // Frame navigation therefore goes through browser Back/Forward normally
-  // and never keeps a second committed temporal store.
+  // PR 38-8: the temporal form owns ONE browser-local date + optional-time
+  // draft; Apply commits the validated direct range in one URL transition,
+  // Disable removes the temporal-owned parameters, and browser Back/Forward
+  // navigate committed ranges normally. There is no second committed
+  // temporal store and no frame index to navigate.
   const graphTemporalForm = useFilterForm<GraphTemporalContext, GraphTemporalDraft>({
     committed: graphTemporal,
     buildDraft: graphTemporalDraftFromCommitted,
@@ -578,19 +575,6 @@ export function RelationshipEvolutionWorkspace({
     emptyDraft: graphTemporalDraftFromCommitted(emptyGraphTemporalContext()),
     committedKey: graphTemporalKey(graphTemporal),
   });
-
-  const previousGraphTemporalFrame = (): void => {
-    if (!graphTemporalHasPrevious(graphTemporal)) {
-      return;
-    }
-    commit(applyGraphTemporal(searchParams, shiftGraphTemporalFrame(graphTemporal, -1)));
-  };
-  const nextGraphTemporalFrame = (): void => {
-    if (!graphTemporalHasNext(graphTemporal)) {
-      return;
-    }
-    commit(applyGraphTemporal(searchParams, shiftGraphTemporalFrame(graphTemporal, 1)));
-  };
 
   const commit = (next: URLSearchParams): void => {
     setSearchParams(next, { replace: false });
@@ -850,13 +834,9 @@ export function RelationshipEvolutionWorkspace({
               committed={graphTemporal}
               draft={graphTemporalForm.draft}
               error={graphTemporalForm.error}
-              canPrevious={graphTemporalHasPrevious(graphTemporal)}
-              canNext={graphTemporalHasNext(graphTemporal)}
               onSetDraft={graphTemporalForm.setDraft}
               onApply={graphTemporalForm.apply}
               onDisable={graphTemporalForm.clear}
-              onPrevious={previousGraphTemporalFrame}
-              onNext={nextGraphTemporalFrame}
             />
             <GraphPathModeToolbar {...pathPanelProps} />
             <GraphPathStatus {...pathPanelProps} />

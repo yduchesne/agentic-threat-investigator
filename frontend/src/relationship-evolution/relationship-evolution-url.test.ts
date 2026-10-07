@@ -95,21 +95,19 @@ describe("setEvolutionFocalEntity (PR 35-8)", () => {
     expect(next.get("graph_depth")).toBe("2");
   });
 
-  it("U09: temporal context is preserved", () => {
+  it("U09: the committed temporal direct range is preserved", () => {
     const next = setEvolutionFocalEntity(
       params({
         entity_id: A,
         graph_temporal: "1",
         graph_time_start: "2026-02-01T00:00:00Z",
         graph_time_end: "2026-02-09T00:00:00Z",
-        graph_time_frame: "3",
       }),
       B,
     );
     expect(next.get("graph_temporal")).toBe("1");
     expect(next.get("graph_time_start")).toBe("2026-02-01T00:00:00Z");
     expect(next.get("graph_time_end")).toBe("2026-02-09T00:00:00Z");
-    expect(next.get("graph_time_frame")).toBe("3");
   });
 
   it("U10: exploring the current focal Entity is a no-op", () => {

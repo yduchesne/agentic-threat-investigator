@@ -287,7 +287,7 @@ describe("PR 31K graph actions workspace", () => {
     expect(router.state.location.search).toContain("view=graph");
   });
 
-  it("K-FE13/K-FE20: temporal frame transitions clear a stale action selection", async () => {
+  it("K-FE13/K-FE20: a committed temporal range change clears a stale action selection", async () => {
     const recorder = resourceListRecorder();
     setHttpHandlers(
       ...authHandlers(),
@@ -304,16 +304,34 @@ describe("PR 31K graph actions workspace", () => {
     await screen.findByRole("table", { name: "Relationship list (this page)" });
     clickNode(FOCAL);
     await screen.findByRole("region", { name: "Start investigation" });
-    await userEvent.click(screen.getByRole("button", { name: "Next frame" }));
+    // Commit a different direct range through the existing temporal form.
+    fireEvent.change(screen.getByLabelText("Range start date"), {
+      target: { value: "2026-02-02" },
+    });
+    fireEvent.change(screen.getByLabelText(/Range start time/), {
+      target: { value: "" },
+    });
+    fireEvent.change(screen.getByLabelText("Range end date"), {
+      target: { value: "2026-02-03" },
+    });
+    fireEvent.change(screen.getByLabelText(/Range end time/), {
+      target: { value: "" },
+    });
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "Temporal exploration" })).getByRole(
+        "button",
+        { name: "Apply temporal" },
+      ),
+    );
     await waitFor(() =>
-      expect(router.state.location.search).toContain("graph_time_frame=1"),
+      expect(router.state.location.search).toContain("graph_time_start=2026-02-02"),
     );
     await waitFor(() =>
       expect(
         screen.queryByRole("region", { name: "Start investigation" }),
       ).not.toBeInTheDocument(),
     );
-    // The selection cannot be submitted against the new frame.
+    // The selection cannot be submitted against the new range.
     expect(
       screen.queryByRole("button", { name: "Start investigation" }),
     ).not.toBeInTheDocument();
