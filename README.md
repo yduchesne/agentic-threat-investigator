@@ -1,42 +1,126 @@
-# Agentic Threat Investigator
+# ATI 
 
-ATI is an open-source, analyst-oriented threat investigation system that uses
+ATI stands for _Agentic Threat Investigator_.
+
+<p align="center">
+  <img src="docs/img/ATILogo-400x400.png" alt="ATI logo">
+</p>
+
+It is an open-source, analyst-oriented threat investigation system that uses
 bounded agentic workflows to turn security data into evidence-backed
-investigations and reports. An analyst starts with one or more indicators such
-as a domain, IP address, or URL. ATI gathers applicable infrastructure and
-threat-intelligence data, preserves what the sources actually returned as
-provenance-bearing Evidence, discovers related entities and relationships, and
-uses those observations to decide what is worth investigating next.
+investigations and reports. 
 
-The investigation is agentic rather than a fixed sequence of lookups. A
-Coordinator plans and replans bounded work as evidence arrives. Specialized
-collection components obtain infrastructure and threat-intelligence data;
-threat research retrieves relevant context from curated research sources; an
-Evidence Analyst assesses the accumulated evidence; and a Report Writer turns
-the structured result into an analyst-facing report. Autonomous pivots are
-constrained by deterministic policy, explicit budgets, and the entities
-actually discovered during the investigation.
+<p align="center">
+  <img src="docs/img/graph-exploration.png" alt="ATI logo">
+</p>
 
-ATI can ingest and normalize data such as DNS observations, domain
-registration data, IP and network information, ASNs and organizations,
-reputation and threat-intelligence observations, malware associations, and
-approximate geospatial context. These source observations become typed
-Evidence and relationships rather than an undifferentiated collection of API
-responses. Curated threat-research material is handled separately through RAG:
-it provides context for what ATI observed, but does not establish live IOC
-facts by itself.
+## References
 
-The result is an investigation that an analyst can inspect from the original
-indicator through the evidence, discovered infrastructure, relationships,
-research context, assessment, and final report. Material analytical claims are
-designed to remain traceable to their supporting evidence or cited research.
-ATI is therefore not just an IOC lookup aggregator: its defining behavior is
-evidence-driven investigation, bounded autonomous pivoting, and
-provenance-backed analysis.
+For more in-depth information, beyond this page:
 
-See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product specification and
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the authoritative
-architecture description.
+- [Core Concepts](docs/manual/CORE_CONCEPTS.md): Presents core concepts such as `Entity`, `Evidence`, etc.
+- [Architecture](docs/manual/AGENTIC.md): Describes the architecture of the system.
+-  And other the other documents under [docs/manual](docs/manual). 
+
+> The documentation under [docs/manual](docs/manual) is AI-non grata and human-maintained. AI is leveraged for excerpts and diagrams.
+
+## Features
+
+The following sub-sections describe the current feature set.
+
+### AI-Driven Workflow
+
+- **AI-Driven Autonomous Threat Investigation**: Investigates domains, IP addresses, URLs, and related indicators by automatically gathering relevant intelligence, following useful leads, and adapting the investigation as new information is discovered.
+- **Automated Investigative Pivoting**: Automatically follows relevant domains, IP addresses, infrastructure, malware, and other entities discovered during an investigation, leveraging ATI's knowledge graph.
+- **Bounded Autonomous Investigation**: Keeps automated investigations under control through explicit limits on investigation depth, data-source queries, discovered entities, replanning, and AI usage.
+- **Adaptive Investigation Planning**: Continuously determines whether to gather additional intelligence, investigate a newly discovered entity, perform contextual research, analyze the available evidence, or conclude the investigation.
+
+### Data Sources
+
+- **Support for Heterogeneous Intelligence Data Sources**: Currently collects intelligence from Google Public DNS, RDAP, IPinfo Lite, DB-IP City Lite, AbuseIPDB, ThreatFox, and URLhaus, covering DNS, registration, network ownership, geolocation, reputation, malware, and IOC intelligence.
+- **Threat Intel Data Source Interoperability**: Integrates common and standard protocols as well as infrastructure (STIX, TAXII, MISP, OpenCTI), allowing external CTI information to be normalized into ATI's investigation model.
+
+### Knowledge Graph
+
+- **Entity Discovery**: Automatically identifies domains, IP addresses, URLs, network prefixes, ASNs, organizations, malware, vulnerabilities, ATT&CK techniques, and other relevant objects contained in collected intelligence.
+- **Relationship Discovery**: Automatically identifies evidence-supported relationships such as domain-to-IP resolution, infrastructure associations, network ownership, and indicator-to-malware associations.
+- **Infrastructure Profiling and Correlation**: Builds a consolidated picture of the interconnected domains, addresses, networks, ASNs, organizations, registration information, reputation, and geographic context associated with an indicator.
+- **RAG with Curated Threat Research Sources**: Uses sources such as MITRE ATT&CK and CISA Known Exploited Vulnerabilities as RAG to provide established cybersecurity context for entities and behaviors encountered during investigations.
+- **RAG with Knowledge Graph**: Normalizes heterogeneous threat intelligence into a knowledge graph, allowing human and AI-driven analysis across providers.
+
+### Historical Data
+
+- **Provenance and History**: Preserves the source, observation time, retrieval time, and supporting facts behind intelligence so analysts can determine exactly where an investigative conclusion came from. Evidence and relationship history provide a temporal context to investigations.
+- **Historical Investigation Analysis**: Preserves investigation, entity, relationship, assessment, and report history so analysts can revisit previous states instead of seeing only the latest result.
+
+### Graph Visualization
+
+- **Interactive Investigation Graph**: Visualizes entities and their relationships as an explorable graph, giving analysts a structural view of the infrastructure and intelligence discovered during an investigation and supporting multi-hop graph exploration.
+- **Temporal Graph Exploration**: Lets analysts view the investigation graph at different points in time to understand how infrastructure and relationships evolved rather than seeing only their latest state.
+
+### GEOINT
+
+Enriches IP addresses with approximate geographic context to help analysts understand the geographic distribution of infrastructure and provides an interactive, map-driven pivoting.
+
+### Reporting
+
+- **Cited Threat Research**: Associates research conclusions with the source material used to produce them so analysts can inspect the basis of generated contextual information.
+- **Evidence-Based Maliciousness Assessment**: Produces a structured `benign`, `suspicious`, `malicious`, or `inconclusive` assessment with an explicit confidence level based on the investigation's accumulated evidence.
+- **AI-Driven Report Conclusions**: Autonomously identifies both supporting and challenging evidence; unresolved questions; limitations; areas of uncertainty; recommended next steps.
+- **Human-Readable Intelligence Presentation**: Presents entities, relationships, sources, and analytical concepts using analyst-friendly labels while retaining technical identifiers where they are useful for inspection.
+- **Deep Investigation Drill-Down**: Allows analysts to move from high-level findings into entities, relationships, observations, evidence, research, and historical records without losing investigation context.
+
+### Observability
+
+- **AI and Investigation Observability**: Provides operational visibility into investigation execution, intelligence collection, AI activity, failures, latency, and resource consumption for administrators operating ATI.
+- **Operational Dashboards**: Uses an OpenTelemetry-compliant stack to provide ready-made dashboards for monitoring investigation activity, intelligence ingestion, system health, AI usage, and processing performance.
+
+### Development, Testing and Demo
+ 
+- **Reproducible Investigation Environment**: Includes a deterministic synthetic intelligence world that lets users safely explore ATI's full investigative workflow without obtaining accounts or API keys for external intelligence providers.
+- **Production Intelligence Mode**: Can switch from the synthetic environment to real intelligence sources without changing the analyst investigation workflow.
+- **Behavioral AI Evaluation**: Evaluates AI-assisted investigation behavior against curated cybersecurity scenarios rather than relying solely on generic model benchmarks.
+- **End-to-End Investigation Evaluation**: Tests whether complete investigations discover the expected evidence and relationships, perform appropriate pivots and research, reach defensible assessments, generate suitable reports, and stay within resource limits.
+- **AI Regression Detection**: Provides repeatable evaluation scenarios for detecting behavioral changes when models, prompts, investigation logic, or other AI-related components change.
+- **LangSmith Evaluation and Experiment Tracking**: Can publish evaluation datasets, experiment results, and reproducibility metadata to LangSmith for comparing AI configurations and tracking investigation-quality regressions over time.
+- **Deterministic Testing Mode**: Supports repeatable investigations and AI behavior for development and validation, making failures reproducible rather than dependent on changing external intelligence or nondeterministic model responses.
+
+## Visuals
+
+This section contains visual excerpts providing an overview of ATI's functionality.
+
+### Knowledge Graph Exploration
+
+<p align="center">
+  <img src="docs/img/graph-exploration.png" alt="Graph Exploration">
+  <p/>
+</p>
+
+### AI-Driven Reporting  
+
+<p align="center">
+  <img src="docs/img/investigation-report.png" alt="Investigation Reportest">
+  <p/>
+  <img src="docs/img/investigation-report-guidance.png" alt="Investigation Report Conclusions">
+  <p/>
+  <img src="docs/img/agentic-findings-rag-graph-analysis.png" alt="Knowledge Graph-Enriched Analysis">
+</p>  
+
+### GEOINT
+
+<p align="center">
+  <img src="docs/img/geoint-map.png" alt="ATI logo">
+</p>
+
+### Historical/Temporal Pivoting
+
+<p align="center">
+  <img src="docs/img/relationship-history-timeline.png" alt="ATI logo">
+  <p/>
+  <img src="docs/img/temporal-search-history-list.png" alt="ATI logo">
+  <p/>
+  <img src="docs/img/temporal-search-widgets.png" alt="ATI logo">
+</p>
 
 ## How ATI works
 
@@ -383,6 +467,8 @@ specification. Detailed behavior, invariants, implementation status, and
 version-specific scope live in the project documentation and roadmaps.
 
 ## Authoritative documentation
+
+The documentation directly under [docs](docs.md) is mostly AI-maintained, serving as an AI memory for the project.
 
 - [`docs/PRODUCT.md`](docs/PRODUCT.md) — product purpose, use cases, scope,
   and principles.
