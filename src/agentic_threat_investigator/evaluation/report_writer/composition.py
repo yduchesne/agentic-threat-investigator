@@ -25,7 +25,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from agentic_threat_investigator.app.llm import LlmClient, ResponseT
+from agentic_threat_investigator.app.llm import (
+    LlmClient,
+    LlmInvocationResult,
+    ResponseT,
+)
 from agentic_threat_investigator.app.persistence.repositories import UnitOfWork
 from agentic_threat_investigator.app.report_writer.writer import ReportWriter
 from agentic_threat_investigator.infrastructure.report_writer_composition import (
@@ -56,8 +60,25 @@ class CountingLlmClient(LlmClient):
         operation_name: str,
     ) -> ResponseT:
         """Record one attempt and delegate unchanged (errors propagate as-is)."""
+        result = await self.generate_structured_with_usage(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            operation_name=operation_name,
+        )
+        return result.output
+
+    async def generate_structured_with_usage(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[ResponseT],
+        operation_name: str,
+    ) -> LlmInvocationResult[ResponseT]:
+        """Record one attempt and delegate usage unchanged."""
         self.calls += 1
-        return await self._delegate.generate_structured(
+        return await self._delegate.generate_structured_with_usage(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=response_model,

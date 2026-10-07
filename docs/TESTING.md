@@ -6502,3 +6502,52 @@ lifecycle or the per-item short-transaction split:
   multi-worker claims; the existing claimant/version/lease conflict matrix
   (G26C-P13..P18) and vertical slices remain authoritative for stale/
   expired completion authority.
+
+## PR 38-9: batch-ingestion observability and LLM usage/accounting
+
+Deterministic offline coverage:
+
+- `tests/unit/app/test_batch_ingestion_telemetry.py` (BI1..BI10): one logical
+  `ati.batch_ingestion.ingest` span + duration per `IngestionService.ingest()`,
+  execution/failure/no-op counters, committed outcomes only, truthful partial
+  success, cancellation propagation, bounded `ati.source`, disabled-telemetry
+  behavior, and no Kafka/Evidence counter pollution.
+- `tests/unit/app/test_llm_usage.py` (LU-U01..U20 plus amendment A1..A9):
+  authoritative usage normalization, unknown-stays-unknown, exact `Decimal`
+  pricing, scope validation, bounded model labels, durable append, fail-open
+  accounting, and **accepted-event metric semantics** — a new durable event
+  contributes once, an exact replay contributes nothing, a conflict contributes
+  nothing, and a persistence failure leaves every usage/cost counter unchanged.
+- `tests/unit/observability/test_grafana_dashboards.py`: the dashboard
+  inventory is now **ten** dashboards including `ati-llm-usage` / **LLM
+  Usage**; the batch-ingestion panels are registered on Datasource &
+  Ingestion; and the frozen PromQL inventory / ATI series allowlist were
+  extended deliberately. Privacy/cardinality assertions are unchanged.
+
+Real-PostgreSQL coverage:
+
+- `tests/integration/test_llm_usage_repository.py` (LU-P01..P11 plus amendment
+  P1..P6 and the service+repository seam): the production
+  `ati.append_llm_usage` stored function through `PostgresLlmUsageRepository`
+  inside the real `PostgresUnitOfWork`: a new invitation returns
+  `created=True`, an exact replay returns the same `llm_usage_id` with
+  `created=False`, and a replay changing tokens, cost/pricing, or `occurred_at`
+  raises `LlmUsageConflictError` with the row unchanged. The service seam test
+  proves one row and one aggregate contribution after a new event plus exact
+  replay.
+
+Replay-idempotency evidence is layered:
+
+- deterministic unit evidence: in-memory OTel counters prove final totals after
+  replay/conflict (`ati.llm.calls` and every token/cost counter);
+- real PostgreSQL repository evidence: the stored function's atomic
+  insert-vs-replay disposition and conflict behavior;
+- unresolved real-backend observability topology limitation: the PR 34
+  `scripts/observability-integration.sh` harness has no PostgreSQL and cannot
+  prove the durable-ledger-to-metric path without a separately planned topology
+  expansion. It is **regression/delivery evidence only**, not feature
+  acceptance for ledger-backed replay idempotency.
+
+Authoritative real-stack acceptance remains
+`scripts/observability-integration.sh` for the telemetry it can exercise; it
+must never be satisfied by direct feature-counter emission.

@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from types import TracebackType
 from typing import Self
@@ -1049,6 +1050,134 @@ class DatasourceCheckpointRepository(ABC):  # pragma: no cover
         idempotent no-op that returns the existing row unchanged. The
         caller's UnitOfWork remains the commit/rollback boundary and no
         repository method may commit on its own.
+        """
+
+
+@dataclass(frozen=True)
+class LlmUsageRecord:
+    """One append-only LLM usage/accounting event (PR 38-9).
+
+    Exactly one record is appended per actual model attempt when the provider
+    reported authoritative usage. ``invocation_id`` is the deterministic
+    idempotency identity; ``investigation_id`` is the optional owning
+    investigation context; ``scope_urn`` is the controlled semantic usage
+    category; ``pricing_id``/``pricing_version`` immutably identify the price
+    used to compute any ATI-known cost. Token and cost fields are optional:
+    ``None`` means unknown, never zero. No prompt, output, Evidence, or raw
+    provider payload is representable here.
+    """
+
+    scope_urn: str
+    operation_name: str
+    invocation_id: UUID
+    provider: str
+    model: str
+    occurred_at: datetime
+    investigation_id: UUID | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    total_tokens: int | None = None
+    input_cost: Decimal | None = None
+    output_cost: Decimal | None = None
+    cached_cost: Decimal | None = None
+    reasoning_cost: Decimal | None = None
+    total_cost: Decimal | None = None
+    currency: str | None = None
+    pricing_id: str | None = None
+    pricing_version: str | None = None
+    llm_usage_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        """Reject unbounded, negative, or inconsistent accounting values."""
+        from agentic_threat_investigator.app.llm_usage import validate_scope_urn
+
+        validate_scope_urn(self.scope_urn)
+        if not self.operation_name.strip() or len(self.operation_name) > 200:
+            raise ValueError("operation_name must be bounded and non-blank")
+        if not self.provider.strip() or not self.model.strip():
+            raise ValueError("provider and model must be non-blank")
+        if self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None:
+            raise ValueError("occurred_at must be timezone-aware")
+        for field_name in (
+            "input_tokens",
+            "output_tokens",
+            "cached_tokens",
+            "reasoning_tokens",
+            "total_tokens",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (isinstance(value, bool) or value < 0):
+                raise ValueError(f"{field_name} must be non-negative or None")
+        has_cost = any(
+            getattr(self, field_name) is not None
+            for field_name in (
+                "input_cost",
+                "output_cost",
+                "cached_cost",
+                "reasoning_cost",
+                "total_cost",
+            )
+        )
+        for field_name in (
+            "input_cost",
+            "output_cost",
+            "cached_cost",
+            "reasoning_cost",
+            "total_cost",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and value < 0:
+                raise ValueError(f"{field_name} must be non-negative or None")
+        if has_cost and not self.currency:
+            raise ValueError("currency is required when a cost is present")
+        if self.total_cost is not None and (
+            not self.pricing_id or not self.pricing_version
+        ):
+            raise ValueError("pricing identity is required for ATI-computed cost")
+
+
+@dataclass(frozen=True)
+class LlmUsageAppendResult:
+    """Authoritative disposition of one ``append`` call (PR 38-9 Amd #1).
+
+    ``created`` is true only when the stored function atomically inserted a
+    new ledger row for the invocation identity. An exact replay returns the
+    existing ``record`` with ``created=False``. A conflicting replay is a
+    material failure and is raised as :class:`LlmUsageConflictError`, never
+    represented as ``created=False``.
+    """
+
+    record: LlmUsageRecord
+    created: bool
+
+
+class LlmUsageConflictError(RuntimeError):
+    """Raised when one invocation identity replays with different accounting."""
+
+    def __init__(self, invocation_id: UUID) -> None:
+        """Record the conflicting invocation identity."""
+        super().__init__(f"llm usage invocation conflict: {invocation_id}")
+        self.invocation_id = invocation_id
+
+
+class LlmUsageRepository(ABC):  # pragma: no cover
+    """Append-only repository for durable LLM usage accounting.
+
+    The database owns invocation-identity idempotency; an exact replay of one
+    invocation returns the existing row unchanged, while a replay with
+    different accounting fails closed. There is deliberately no update or
+    delete operation.
+    """
+
+    @abstractmethod
+    async def append(self, record: LlmUsageRecord) -> LlmUsageAppendResult:
+        """Append one usage event in the caller's transaction.
+
+        Returns the durable record and whether it was newly created. An exact
+        replay returns the existing row with ``created=False``; a conflicting
+        replay raises :class:`LlmUsageConflictError`.
         """
 
 
@@ -2303,6 +2432,7 @@ class UnitOfWork(ABC):  # pragma: no cover
     datasource_logs: DatasourceLogRepository
     evidence_batches: EvidenceBatchRepository
     datasource_checkpoints: DatasourceCheckpointRepository
+    llm_usage: LlmUsageRepository
 
     @abstractmethod
     async def __aenter__(self) -> Self:

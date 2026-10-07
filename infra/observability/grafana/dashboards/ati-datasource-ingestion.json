@@ -666,6 +666,342 @@
       "showLabels": true,
       "sortOrder": "Descending",
       "dataFormat": "properties"
+    },
+    {
+      "id": 100,
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "type": "text",
+      "mode": "markdown",
+      "content": "## Batch ingestion\nProduction `BatchSource` -> `IngestionService` source-record ingestion. This is distinct from the Distributed Evidence flow (Kafka -> Evidence persistence).",
+      "title": ""
+    },
+    {
+      "id": 101,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 31
+      },
+      "title": "Batch executions",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_batch_ingestion_executions_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "executions",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 31
+      },
+      "title": "Batch failures",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_batch_ingestion_failures_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "failures",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 31
+      },
+      "title": "Batch no-ops (completed checkpoint)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_batch_ingestion_noop_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "no-ops",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 31
+      },
+      "title": "Batch inserted records",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_batch_ingestion_records_inserted_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "inserted",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 35
+      },
+      "title": "Batch updated records",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_batch_ingestion_records_updated_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "updated",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 35
+      },
+      "title": "Batch unchanged records",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "sum(increase(ati_batch_ingestion_records_unchanged_total[1h]))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "unchanged",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 107,
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "title": "Batch ingestion duration p50/p95/p99 (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(ati_batch_ingestion_duration_seconds_bucket) by (le, ati_source))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(ati_batch_ingestion_duration_seconds_bucket) by (le, ati_source))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(ati_batch_ingestion_duration_seconds_bucket) by (le, ati_source))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "p99",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
+    },
+    {
+      "id": 108,
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
+      "title": "Batch workload size (records) p50/p95",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ati-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(ati_batch_ingestion_records_bucket) by (le, ati_source))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "p50",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ati-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(ati_batch_ingestion_records_bucket) by (le, ati_source))",
+          "instant": false,
+          "format": 0,
+          "hideEmpty": false,
+          "legendFormat": "p95",
+          "limit": 0,
+          "logQuery": "",
+          "queryType": "",
+          "queryshowhelp": false,
+          "useLastPointInGraph": false
+        }
+      ]
     }
   ],
   "links": [

@@ -1114,6 +1114,18 @@
       "tooltip": "",
       "type": "link",
       "url": "/d/ati-investigations-reports"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "LLM Usage",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/ati-llm-usage"
     }
   ]
 }

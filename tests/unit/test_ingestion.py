@@ -155,7 +155,7 @@ class _Source(BatchSource):
         batches: list[SourceBatch],
         state: _State,
         *,
-        failure: Exception | None = None,
+        failure: BaseException | None = None,
     ) -> None:
         """Support the test init   behavior."""
         self.emitted = batches

@@ -35,6 +35,8 @@ from agentic_threat_investigator.app.evidence_analyst.accounting import (
     LlmAccountingService,
 )
 from agentic_threat_investigator.app.llm import LlmClient, LlmError, LlmErrorCode
+from agentic_threat_investigator.app.llm_usage import LlmUsage, LlmUsageScope
+from agentic_threat_investigator.app.llm_usage_service import LlmUsageService
 from agentic_threat_investigator.app.research import (
     ResearchRetrievalError,
     ResearchRetriever,
@@ -117,6 +119,7 @@ class ResearchAgent:
         max_structured_output_attempts: int = 2,
         clock: Callable[[], datetime] | None = None,
         id_factory: Callable[[], UUID] | None = None,
+        llm_usage: LlmUsageService | None = None,
     ) -> None:
         """Bind the retriever, LLM client, persistence, and accounting seams.
 
@@ -133,6 +136,7 @@ class ResearchAgent:
         self._max_structured_output_attempts = max_structured_output_attempts
         self._clock = clock if clock is not None else (lambda: datetime.now(UTC))
         self._id_factory = id_factory if id_factory is not None else uuid4
+        self._llm_usage = llm_usage
 
     @telemetry_operation(
         span_name=SpanNames.AGENT_INVOKE,
@@ -187,12 +191,17 @@ class ResearchAgent:
             latest_version = await self._llm_accounting.reserve_call(
                 request.investigation_id, expected_version=latest_version
             )
+            invocation_id = uuid4()
             try:
-                decision = await self._llm_client.generate_structured(
+                result = await self._llm_client.generate_structured_with_usage(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     response_model=ResearchAgentDecision,
                     operation_name=OPERATION_RESEARCH_SYNTHESIS,
+                )
+                decision = result.output
+                await self._record_usage(
+                    request.investigation_id, invocation_id, result.usage
                 )
             except asyncio.CancelledError:
                 # Cooperative cancellation propagates unchanged; the handler
@@ -212,6 +221,23 @@ class ResearchAgent:
             return decision
         raise LlmError(  # pragma: no cover - the loop always returns or raises
             LlmErrorCode.INVALID_STRUCTURED_OUTPUT, retryable=False
+        )
+
+    async def _record_usage(
+        self,
+        investigation_id: UUID,
+        invocation_id: UUID,
+        usage: LlmUsage | None,
+    ) -> None:
+        """Account one authoritative model attempt when usage is present."""
+        if self._llm_usage is None or usage is None:
+            return
+        await self._llm_usage.record_usage(
+            investigation_id=investigation_id,
+            scope_urn=LlmUsageScope.RESEARCH_AGENT.value,
+            operation_name=OPERATION_RESEARCH_SYNTHESIS,
+            invocation_id=invocation_id,
+            usage=usage,
         )
 
     async def _persist_empty_result(

@@ -49,6 +49,7 @@ class TestSpanVocabulary:
             "ati.kafka.publish",
             "ati.kafka.poll",
             "ati.kafka.commit",
+            "ati.batch_ingestion.ingest",
         } == CANONICAL_SPAN_NAMES
 
     def test_span_names_are_lowercase_semantic_identifiers(self) -> None:
@@ -78,6 +79,7 @@ class TestSpanVocabulary:
             SpanNames.KAFKA_PUBLISH,
             SpanNames.KAFKA_POLL,
             SpanNames.KAFKA_COMMIT,
+            SpanNames.BATCH_INGESTION_INGEST,
         }
         assert attrs == CANONICAL_SPAN_NAMES
 
@@ -145,6 +147,19 @@ class TestMetricVocabulary:
             "ati.llm.invoke.failures",
             "ati.report.generate.failures",
             "ati.embedding.invoke.failures",
+            "ati.batch_ingestion.executions",
+            "ati.batch_ingestion.failures",
+            "ati.batch_ingestion.noop",
+            "ati.batch_ingestion.records.inserted",
+            "ati.batch_ingestion.records.updated",
+            "ati.batch_ingestion.records.unchanged",
+            "ati.llm.calls",
+            "ati.llm.tokens.input",
+            "ati.llm.tokens.output",
+            "ati.llm.tokens.cached",
+            "ati.llm.tokens.reasoning",
+            "ati.llm.tokens.total",
+            "ati.llm.cost",
         }
 
     def test_canonical_metric_units(self) -> None:
@@ -224,6 +239,7 @@ class TestMetricVocabulary:
             DurationMetrics.LLM_INVOKE,
             DurationMetrics.REPORT_GENERATE,
             DurationMetrics.EMBEDDING_INVOKE,
+            DurationMetrics.BATCH_INGESTION,
         ):
             assert name.endswith(".duration")
 

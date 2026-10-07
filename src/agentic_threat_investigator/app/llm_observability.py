@@ -20,7 +20,11 @@ from dataclasses import dataclass
 
 from opentelemetry.trace import Status, StatusCode
 
-from agentic_threat_investigator.app.llm import LlmClient, ResponseT
+from agentic_threat_investigator.app.llm import (
+    LlmClient,
+    LlmInvocationResult,
+    ResponseT,
+)
 from agentic_threat_investigator.telemetry.attributes import (
     AttributeKeys,
     validate_bounded_attributes,
@@ -172,6 +176,28 @@ class ObservedLlmClient(LlmClient):
         safe metadata only. Cancellation propagates without telemetry and the
         delegate's typed ``LlmError`` is re-raised unchanged.
         """
+        result = await self.generate_structured_with_usage(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            operation_name=operation_name,
+        )
+        return result.output
+
+    async def generate_structured_with_usage(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[ResponseT],
+        operation_name: str,
+    ) -> LlmInvocationResult[ResponseT]:
+        """Generate one output and its authoritative usage through the wrapper.
+
+        Identical observation semantics to :meth:`generate_structured`; the
+        delegate's normalized usage is returned unchanged so durable
+        accounting and usage metrics consume exactly one parsed event.
+        """
         if not operation_name.strip():
             raise ValueError("operation_name must not be blank")
         observation = LlmObservation(
@@ -203,7 +229,7 @@ class ObservedLlmClient(LlmClient):
                     logger.debug("LLM observability could not start observation")
                     observe_cm = nullcontext()
                 with observe_cm:
-                    result = await self._delegate.generate_structured(
+                    result = await self._delegate.generate_structured_with_usage(
                         system_prompt=system_prompt,
                         user_prompt=user_prompt,
                         response_model=response_model,

@@ -52,8 +52,10 @@ from agentic_threat_investigator.app.llm import (
     LlmClient,
     LlmError,
     LlmErrorCode,
+    LlmInvocationResult,
     ResponseT,
 )
+from agentic_threat_investigator.app.llm_usage import LlmUsage
 
 # Metadata keys permitted in the local runnable configuration. Only
 # non-content keys may ever be emitted; prompts, Evidence facts, model
@@ -61,6 +63,46 @@ from agentic_threat_investigator.app.llm import (
 # is derived exclusively from the per-call ``operation_name`` argument so it
 # can never become stale constructor state.
 _TRACE_METADATA_KEYS = ("investigation_id",)
+
+
+def _metadata_int(metadata: Mapping[str, object], key: str) -> int | None:
+    """Return a non-negative integer metadata value, or ``None`` when absent."""
+    value = metadata.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 0 else None
+
+
+def _extract_usage_metadata(raw_message: object) -> LlmUsage | None:
+    """Normalize framework-reported usage metadata into ATI ``LlmUsage``.
+
+    Only values actually reported by the framework are captured; absent fields
+    remain ``None`` (unknown). Cached/reasoning tokens are read only from the
+    framework's explicit detail maps and are never inferred. The raw message
+    object never escapes this adapter, and ``None`` means no authoritative
+    usage was reported.
+    """
+    metadata = getattr(raw_message, "usage_metadata", None)
+    if not isinstance(metadata, Mapping):
+        return None
+    input_details = metadata.get("input_token_details")
+    output_details = metadata.get("output_token_details")
+    usage = LlmUsage(
+        input_tokens=_metadata_int(metadata, "input_tokens"),
+        output_tokens=_metadata_int(metadata, "output_tokens"),
+        total_tokens=_metadata_int(metadata, "total_tokens"),
+        cached_tokens=(
+            _metadata_int(input_details, "cache_read")
+            if isinstance(input_details, Mapping)
+            else None
+        ),
+        reasoning_tokens=(
+            _metadata_int(output_details, "reasoning")
+            if isinstance(output_details, Mapping)
+            else None
+        ),
+    )
+    return usage if usage.has_any else None
 
 
 class LangChainLlmClient(LlmClient):
@@ -105,6 +147,28 @@ class LangChainLlmClient(LlmClient):
     ) -> ResponseT:
         """Return one validated instance of ``response_model``.
 
+        Compatibility wrapper around :meth:`generate_structured_with_usage`
+        that discards the normalized usage; one call still performs exactly
+        one model attempt.
+        """
+        result = await self.generate_structured_with_usage(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            operation_name=operation_name,
+        )
+        return result.output
+
+    async def generate_structured_with_usage(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[ResponseT],
+        operation_name: str,
+    ) -> LlmInvocationResult[ResponseT]:
+        """Return one validated instance plus any authoritative provider usage.
+
         ``operation_name`` must be non-blank and becomes the ``operation``
         metadata field; it is derived from this argument only. The framework's
         structured-output runnable is created and invoked inside one protected
@@ -112,6 +176,11 @@ class LangChainLlmClient(LlmClient):
         exception can escape the ``LlmError`` taxonomy. A returned object that
         is not the expected Pydantic type, or any schema/parse failure, is
         mapped to ``INVALID_STRUCTURED_OUTPUT`` rather than being trusted.
+
+        Provider/framework usage metadata is normalized once into the
+        ATI-owned :class:`LlmUsage`; when the provider reports nothing
+        authoritative, ``usage`` is ``None``. Token counts are never
+        estimated and no raw provider object escapes this adapter.
         """
         if not operation_name.strip():
             raise ValueError("operation_name must not be blank")
@@ -133,11 +202,13 @@ class LangChainLlmClient(LlmClient):
             # nested items, which native structured outputs reject (400)
             # on OpenAI-compatible providers, while function calling is
             # rejected by neither OpenAI nor OpenRouter-compatible vendors.
+            # ``include_raw=True`` surfaces only the framework usage metadata;
+            # the raw message never escapes this adapter.
             with tracing_context(enabled=False):
                 runnable = self._chat_model.with_structured_output(
-                    response_model, method="function_calling"
+                    response_model, method="function_calling", include_raw=True
                 )
-                result = await runnable.ainvoke(
+                raw_result = await runnable.ainvoke(
                     [
                         SystemMessage(content=system_prompt),
                         HumanMessage(content=user_prompt),
@@ -176,6 +247,28 @@ class LangChainLlmClient(LlmClient):
             # provider category; nothing provider-specific escapes this seam.
             raise LlmError(LlmErrorCode.PROVIDER_FAILURE, retryable=False) from None
 
-        if not isinstance(result, response_model):
+        parsed, raw_message = self._split_structured_result(raw_result, response_model)
+        if not isinstance(parsed, response_model):
             raise LlmError(LlmErrorCode.INVALID_STRUCTURED_OUTPUT, retryable=True)
-        return result
+        return LlmInvocationResult(
+            output=parsed, usage=_extract_usage_metadata(raw_message)
+        )
+
+    @staticmethod
+    def _split_structured_result(
+        raw_result: object, response_model: type[ResponseT]
+    ) -> tuple[object, object]:
+        """Split an ``include_raw=True`` result without trusting provider objects.
+
+        Real LangChain returns ``{"raw": ..., "parsed": ..., "parsing_error":
+        ...}``; deterministic fakes may return the parsed model directly. A
+        non-null parsing error is mapped to the bounded invalid-output error.
+        """
+        del response_model  # reserved for future schema-specific diagnostics
+        if isinstance(raw_result, Mapping) and "parsed" in raw_result:
+            if raw_result.get("parsing_error") is not None:
+                raise LlmError(
+                    LlmErrorCode.INVALID_STRUCTURED_OUTPUT, retryable=True
+                ) from None
+            return raw_result.get("parsed"), raw_result.get("raw")
+        return raw_result, None

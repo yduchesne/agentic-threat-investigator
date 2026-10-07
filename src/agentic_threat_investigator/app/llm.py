@@ -17,13 +17,30 @@ cancellation is never swallowed by error mapping.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from enum import Enum
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 
+from agentic_threat_investigator.app.llm_usage import LlmUsage
+
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 """Type variable bound to ATI Pydantic output models."""
+
+
+@dataclass(frozen=True)
+class LlmInvocationResult(Generic[ResponseT]):
+    """One actual model attempt: validated output plus authoritative usage.
+
+    ``output`` is always the exact requested ATI Pydantic model. ``usage`` is
+    the normalized provider-reported usage, or ``None`` when the provider
+    reported nothing authoritative. Provider SDK response objects never
+    appear here.
+    """
+
+    output: ResponseT
+    usage: LlmUsage | None = None
 
 
 class LlmErrorCode(str, Enum):
@@ -89,3 +106,27 @@ class LlmClient(ABC):
         provider/framework failures to ``LlmError`` categories with bounded,
         safe messages and propagate cancellation unchanged.
         """
+
+    async def generate_structured_with_usage(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[ResponseT],
+        operation_name: str,
+    ) -> LlmInvocationResult[ResponseT]:
+        """Return the validated output plus authoritative usage for one attempt.
+
+        The default implementation delegates to ``generate_structured`` and
+        reports unknown usage (``None``), preserving compatibility for every
+        existing implementation. Adapters that can surface provider-reported
+        usage metadata override this method; exactly one call performs one
+        actual model attempt.
+        """
+        output = await self.generate_structured(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            operation_name=operation_name,
+        )
+        return LlmInvocationResult(output=output, usage=None)

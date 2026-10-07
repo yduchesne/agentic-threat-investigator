@@ -115,7 +115,9 @@ def in_memory_persistence_telemetry(
     import agentic_threat_investigator.app.evidence_consumer as _ec
     import agentic_threat_investigator.app.evidence_conversion as _conversion
     import agentic_threat_investigator.app.geoint.worker as _geo_worker
+    import agentic_threat_investigator.app.ingestion as _ingestion
     import agentic_threat_investigator.app.llm_observability as _llm_obs
+    import agentic_threat_investigator.app.llm_usage_service as _llm_usage_service
     import agentic_threat_investigator.app.orchestration.provider_executor as _pe
     import agentic_threat_investigator.app.orchestration.runner as _runner
     import agentic_threat_investigator.app.report_writer.writer as _rwriter
@@ -135,7 +137,9 @@ def in_memory_persistence_telemetry(
         _ebp,
         _ec,
         _conversion,
+        _ingestion,
         _llm_obs,
+        _llm_usage_service,
         _ds_provider,
         _geo_worker,
         _pe,

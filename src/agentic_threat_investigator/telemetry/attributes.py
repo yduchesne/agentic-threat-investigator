@@ -35,6 +35,10 @@ class AttributeKeys:
     KAFKA_CONSUMER_GROUP = "ati.kafka.consumer_group"
     PROVIDER = "ati.provider"
     AGENT = "ati.agent"
+    SOURCE = "ati.source"
+    LLM_SCOPE = "ati.llm.scope"
+    LLM_PROVIDER = "ati.llm.provider"
+    LLM_MODEL = "ati.llm.model"
 
 
 METRIC_ATTRIBUTE_ALLOWLIST: frozenset[str] = frozenset(
@@ -50,6 +54,10 @@ METRIC_ATTRIBUTE_ALLOWLIST: frozenset[str] = frozenset(
         AttributeKeys.KAFKA_CONSUMER_GROUP,
         AttributeKeys.PROVIDER,
         AttributeKeys.AGENT,
+        AttributeKeys.SOURCE,
+        AttributeKeys.LLM_SCOPE,
+        AttributeKeys.LLM_PROVIDER,
+        AttributeKeys.LLM_MODEL,
     }
 )
 """The complete set of bounded keys permitted on telemetry attributes."""

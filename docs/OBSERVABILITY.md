@@ -1640,3 +1640,169 @@ trace export failure
 ```
 
 Observability outages do not cause investigation `FAILED`.
+
+## Batch-ingestion observability (PR 38-9)
+
+ATI has two distinct ingestion paths and their telemetry is deliberately
+separated:
+
+```text
+BatchSource -> IngestionService -> source_record/checkpoint   (batch ingestion)
+Datasource/producer -> Kafka -> Evidence consumer -> PostgreSQL (Evidence flow)
+```
+
+The production `IngestionService.ingest()` is the batch instrumentation seam
+(never `FakeDataBootstrap`, never Kafka). One call produces exactly one
+`ati.batch_ingestion.ingest` span and one duration sample. The canonical
+instruments are:
+
+```text
+ati.batch_ingestion.executions
+ati.batch_ingestion.failures
+ati.batch_ingestion.noop
+ati.batch_ingestion.records.inserted
+ati.batch_ingestion.records.updated
+ati.batch_ingestion.records.unchanged
+ati.batch_ingestion.duration
+ati.batch_ingestion.records
+```
+
+Rules:
+
+- record-outcome counters increment only from authoritative committed batch
+  results; PostgreSQL is never re-queried for telemetry;
+- a completed checkpoint is a successful no-op (executions + noop, workload 0);
+- if an early batch commits and a later batch fails, the committed outcomes are
+  preserved while the overall execution is reported as a failure;
+- the only batch dimension is the bounded `ati.source` label from an explicit
+  finite mapper (MITRE ATT&CK -> `mitre_attack`, unknown -> `other`); arbitrary
+  source URNs never become labels.
+
+## LLM usage and accounting (PR 38-9)
+
+**Agents & LLM** (`ati-agents-llm`) remains the execution/latency/failure
+dashboard. The new **LLM Usage** dashboard (`ati-llm-usage`, dashboard #10)
+owns consumption/accounting. They must not be merged.
+
+### One actual attempt = one usage event
+
+One actual `LlmClient.generate_structured()` model attempt is the atomic usage
+event. Bounded schema repair/retry calls are separate actual attempts and are
+individually accounted. Adapters normalize only usage metadata the
+provider/framework actually reported into the ATI-owned `LlmUsage` model:
+
+```text
+input_tokens, output_tokens, cached_tokens, reasoning_tokens, total_tokens
+```
+
+Absent fields remain unknown (`None`). ATI never estimates token counts and
+never infers cached/reasoning tokens. Provider SDK response objects never
+escape infrastructure.
+
+### Call-budget accounting vs token/cost accounting
+
+`llm_calls_used` remains the Investigation-wide call-budget counter reserved
+by `LlmAccountingService` before each attempt. Token/cost accounting is a
+separate append-only ledger and never redefines call-budget enforcement. No
+database transaction is ever held across LLM I/O.
+
+### Usage scope URNs
+
+Usage is attributed to a controlled scope namespace at the call site, for
+example:
+
+```text
+urn:ati:llm:usage:investigations:scope:evidence_analyst
+urn:ati:llm:usage:investigations:scope:research_agent
+urn:ati:llm:usage:investigations:scope:report_analyst
+```
+
+Scopes are mapped deliberately; they are never generated from class names at
+runtime.
+
+### Durable append-only ledger
+
+The `ati.llm_usage` table is append-only and records one event per actual
+attempt that produced authoritative usage. `invocation_id` controls durable
+idempotency: `ati.append_llm_usage(...)` atomically distinguishes a newly
+inserted invocation (`created = true`) from an exact replay of an existing row
+(`created = false`). An exact replay returns the existing row; a replay with
+different accounting fails closed with `LlmUsageConflictError`. Investigation
+identity is stored durably but is never a Prometheus label. There is
+deliberately no prompt, output, Evidence, credential, or raw provider payload
+column.
+
+Retry/repair policy: each actual attempt is a separate event. A failed attempt
+that reported no authoritative usage appends no row; the call-budget and
+`ati.llm.invoke.failures` still record it.
+
+### Versioned pricing and known cost
+
+Cost is computed only from authoritative usage and an explicit, code-controlled
+versioned price entry using `Decimal`/`NUMERIC`. Unknown pricing yields unknown
+cost, never zero. `pricing_id`/`pricing_version` are persisted so historical
+cost does not change when the catalog changes. Monetary dashboard values are
+**known cost**, not a provider invoice. Cached/reasoning tokens are never
+assumed to be billed like ordinary tokens.
+
+### LLM usage metrics
+
+Canonical aggregate counters (bounded dimensions only):
+
+```text
+ati.llm.calls
+ati.llm.tokens.input
+ati.llm.tokens.output
+ati.llm.tokens.cached
+ati.llm.tokens.reasoning
+ati.llm.tokens.total
+ati.llm.cost
+```
+
+Permitted dimensions are `ati.operation`, `ati.llm.scope`, `ati.llm.provider`,
+`ati.llm.model` (bounded; unknown models collapse to `other`), and
+`ati.outcome`. Forbidden labels include investigation/invocation/request/
+tenant/user identifiers, arbitrary prompt versions, and raw provider errors. A
+missing usage field never emits a fabricated zero increment.
+
+These counters describe **newly accepted durable usage events**. Aggregate
+`ati.llm.calls`, token, and known-cost counters increment only when
+`ati.append_llm_usage(...)` reports `created = true`:
+
+- an exact replay (`created = false`) contributes nothing to any aggregate
+  usage/cost counter;
+- a conflicting replay contributes nothing and fails closed at the repository
+  boundary;
+- if durable accounting cannot establish acceptance (for example PostgreSQL is
+  unavailable), the investigation remains fail-open but no aggregate
+  accounting metric is emitted for that event — ATI does not report usage its
+  ledger cannot substantiate.
+
+These are accounting/usage aggregates, not a substitute for the existing
+Agents & LLM execution/latency/failure telemetry. PostgreSQL and OpenTelemetry
+are not placed in a distributed transaction; crash-consistent exactly-once
+dual-write delivery (reconciliation after a process crash between the
+PostgreSQL commit and the OTel emission) is outside PR 38-9.
+
+### Content exclusions and optional backends
+
+Prompts, model outputs, Evidence/document content, raw provider payloads,
+hidden chain-of-thought, credentials, cookies, and auth headers are never
+captured in telemetry or the ledger. LangSmith/Langfuse remain optional
+observability backends; they are never ATI's authoritative accounting truth.
+
+### Authoritative real-stack acceptance
+
+Batch ingestion telemetry and the existing execution/failure telemetry are
+accepted through `scripts/observability-integration.sh`, which exercises the
+real Collector / Prometheus / Jaeger / Loki topology through production seams.
+Synthetic direct counter emission is not feature evidence.
+
+**Documented limitation (PR 38-9 Amendment #1):** the PR 34 harness topology
+does not include PostgreSQL, so it cannot prove the durable-ledger-to-metric
+replay-idempotency path end to end. The amendment does not redesign that
+topology and does not emit synthetic `ati.llm.*` counters from the diagnostic
+generator. That vertical slice is a deferred acceptance item requiring a
+separately planned observability-integration topology enhancement; the
+PostgreSQL-backed idempotency contract is instead proven by deterministic unit
+tests and real-PostgreSQL repository integration tests.
