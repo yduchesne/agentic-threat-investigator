@@ -49,12 +49,12 @@ jobs:
           POSTGRES_DB: ati-eval
           POSTGRES_USER: ati
           POSTGRES_PASSWORD: ati-integration-test-only
-          ATI_POSTGRES_HOST_PORT: '5432'
+          ATI_POSTGRES_HOST_PORT: '54321'
         run: podman-compose -f compose.yaml up -d postgres
       - name: Wait for PostgreSQL readiness (run only)
         if: inputs.operation == 'run'
         env:
-          DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:5432/ati-eval
+          DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:54321/ati-eval
         run: |
           uv run python - <<'PY'
           import os
@@ -76,7 +76,7 @@ jobs:
       - name: Apply migrations (run only)
         if: inputs.operation == 'run'
         env:
-          DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:5432/ati-eval
+          DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:54321/ati-eval
         run: uv run alembic upgrade head
       - name: Validate dataset locally
         run: uv run ati-eval validate "${{ inputs.dataset }}"
@@ -96,7 +96,7 @@ jobs:
           # Writable object-store root for the deterministic research corpus
           # bootstrap performed inside the benchmark seams (never /var/lib/ati).
           ATI_DATA_DIR: ${{ github.workspace }}/ati-data
-          ATI_DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:5432/ati-eval
+          ATI_DATABASE_URL: postgresql+psycopg://ati:ati-integration-test-only@127.0.0.1:54321/ati-eval
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           ATI_OPENAI_API_KEY: ${{ secrets.ATI_OPENAI_API_KEY }}
         run: uv run ati-eval run "${{ inputs.dataset }}" --langsmith
