@@ -90,12 +90,12 @@ async function click(page: Page, loc: Locator, label: string): Promise<void> {
   await heartbeat(page, label);
 }
 
-/** Track every graph neighborhood request URL for the lifetime. */
+/** Track every graph-entity request URL (neighborhood + traversal). */
 function trackGraphTraffic(page: Page): { requests: string[] } {
   const requests: string[] = [];
   page.on("request", (request) => {
     const url = request.url();
-    if (url.includes("/graph/entities/") && url.includes("/neighborhood")) {
+    if (url.includes("/graph/entities/")) {
       requests.push(url);
     }
   });
@@ -276,6 +276,18 @@ test.describe("PR 38-8 direct-range temporal graph exploration (real stack)", ()
     await expect(temporalGroup(page).getByLabel("Range start date")).toBeVisible();
     await heartbeat(page, "no-upper-date-controls");
 
+    // Requirement 3 (PR 38-10): with Temporal exploration off and no legacy
+    // bounds, every graph request is unbounded by observation time.
+    await expect
+      .poll(() => graphTraffic.requests.length, { timeout: 30_000 })
+      .toBeGreaterThan(0);
+    expect(
+      graphTraffic.requests.every(
+        (url) => !new URL(url).searchParams.has("observed_from"),
+      ),
+    ).toBe(true);
+    await heartbeat(page, "temporal-off-unbounded");
+
     // E01: enabling temporal presents a neutral draft with a blank start and
     // a blank end TIME defaulting the end DATE to browser-local today, and
     // no Time frames or Previous/Next frame controls exist.
@@ -422,6 +434,17 @@ test.describe("PR 38-8 direct-range temporal graph exploration (real stack)", ()
     await expect(emptyMessage).not.toBeVisible({ timeout: 30_000 });
     await heartbeat(page, "forward-reconstructs");
 
+    // Requirement 8 (PR 38-10): editing temporal inputs without Apply never
+    // changes the committed range, the URL, or the issued requests.
+    const urlBeforeDraftOnly = page.url();
+    const requestsBeforeDraftOnly = graphTraffic.requests.length;
+    await group.getByLabel("Range start date").fill("2026-05-04");
+    await group.getByLabel("Range end date").fill("2026-05-06");
+    await heartbeat(page, "draft-edits-without-apply");
+    expect(page.url()).toBe(urlBeforeDraftOnly);
+    expect(graphTraffic.requests.length).toBe(requestsBeforeDraftOnly);
+    await expectCommittedRange(page, RANGE_B_FROM, RANGE_B_TO);
+
     // E08: switching from a non-empty range to an empty range never leaves
     // the prior topology presented as current.
     await expect(graphList.locator("tbody tr").first()).toBeVisible({ timeout: 30_000 });
@@ -444,6 +467,126 @@ test.describe("PR 38-8 direct-range temporal graph exploration (real stack)", ()
     await expect(graphList).toBeVisible({ timeout: 30_000 });
     await expect(canvasNodes.first()).toBeVisible({ timeout: 30_000 });
     await heartbeat(page, "ordinary-restored");
+
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test("PR 38-10 requirement 6: depth, expansion and re-root preserve the committed range", async ({
+    page,
+  }) => {
+    const consoleErrors = trackConsoleErrors(page);
+    const graphTraffic = trackGraphTraffic(page);
+    await login(page);
+    const investigationId = await completeF02Investigation(page);
+    await openGraphWorkspace(page, `/investigations/${investigationId}`);
+    const graphList = page.getByRole("table", { name: "Relationship list (this page)" });
+    const canvasNodes = page.locator(".react-flow__node");
+    await expect(graphList).toBeVisible({ timeout: 30_000 });
+
+    // Commit a non-empty observed range for the F02 focal entity.
+    await applyExplicitRange(page, RANGE_B_FROM, RANGE_B_TO, "req6-apply-range");
+    await expectCommittedRange(page, RANGE_B_FROM, RANGE_B_TO);
+
+    // Depth change (1 hop -> 2 hops) keeps the committed range and the
+    // traversal request is bounded by it.
+    await click(page, page.getByRole("button", { name: "2 hops" }), "req6-depth-draft");
+    await click(
+      page,
+      page.getByRole("button", { name: "Apply", exact: true }),
+      "req6-depth-apply",
+    );
+    await expect(page).toHaveURL(/graph_depth=2/);
+    await expectCommittedRange(page, RANGE_B_FROM, RANGE_B_TO);
+    await expect
+      .poll(
+        () =>
+          graphTraffic.requests.some((url) => {
+            const candidate = new URL(url);
+            return (
+              candidate.pathname.endsWith("/traversal") &&
+              candidate.searchParams.get("observed_from") === RANGE_B_FROM &&
+              candidate.searchParams.get("observed_to") === RANGE_B_TO
+            );
+          }),
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    await heartbeat(page, "req6-depth-preserves-range");
+
+    // Revert to the one-hop neighborhood before expansion.
+    await click(page, page.getByRole("button", { name: "1 hop" }), "req6-depth1-draft");
+    await click(
+      page,
+      page.getByRole("button", { name: "Apply", exact: true }),
+      "req6-depth1-apply",
+    );
+    await expect(page).not.toHaveURL(/graph_depth=/);
+    await expectCommittedRange(page, RANGE_B_FROM, RANGE_B_TO);
+    await expect(canvasNodes.first()).toBeVisible({ timeout: 30_000 });
+
+    // Explicit expansion inherits the committed range.
+    const requestsBeforeExpansion = graphTraffic.requests.length;
+    await click(page, canvasNodes.first(), "req6-node-select");
+    await expect(page.getByText(/Entity:/)).toBeVisible({ timeout: 20_000 });
+    await click(
+      page,
+      page.getByRole("button", { name: /Pivot actions/ }).first(),
+      "req6-pivot-open",
+    );
+    await click(
+      page,
+      page.getByRole("button", { name: "Expand known relationships" }).first(),
+      "req6-expand",
+    );
+    await expect
+      .poll(() => graphTraffic.requests.length, { timeout: 30_000 })
+      .toBeGreaterThan(requestsBeforeExpansion);
+    const expansionRequests = graphTraffic.requests.slice(requestsBeforeExpansion);
+    expect(
+      expansionRequests.every((url) => {
+        const candidate = new URL(url);
+        return (
+          candidate.searchParams.get("observed_from") === RANGE_B_FROM &&
+          candidate.searchParams.get("observed_to") === RANGE_B_TO
+        );
+      }),
+    ).toBe(true);
+    await heartbeat(page, "req6-expansion-preserves-range");
+
+    // Re-rooting onto a non-focal canonical Entity keeps the committed range
+    // and the new focal's request is bounded by it.
+    const nonFocal = canvasNodes.nth(1);
+    await expect(nonFocal).toBeVisible({ timeout: 30_000 });
+    const testId = (await nonFocal.getAttribute("data-testid")) ?? "";
+    const targetEntityId = testId.replace("rf__node-n:", "");
+    expect(targetEntityId).toMatch(/^[0-9a-f-]{36}$/);
+    const requestsBeforeReroot = graphTraffic.requests.length;
+    await nonFocal.scrollIntoViewIfNeeded();
+    await nonFocal.click({ button: "right" });
+    const exploreAction = page.getByTestId("graph-explore-entity");
+    await expect(exploreAction).toBeVisible({ timeout: 20_000 });
+    await click(page, exploreAction, "req6-explore");
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("entity_id"))
+      .toBe(targetEntityId);
+    await expectCommittedRange(page, RANGE_B_FROM, RANGE_B_TO);
+    await expect
+      .poll(() => graphTraffic.requests.length, { timeout: 30_000 })
+      .toBeGreaterThan(requestsBeforeReroot);
+    const rerootRequests = graphTraffic.requests.slice(requestsBeforeReroot);
+    expect(
+      rerootRequests.some((url) => {
+        const candidate = new URL(url);
+        return (
+          candidate.pathname.endsWith(
+            `/graph/entities/${targetEntityId}/neighborhood`,
+          ) &&
+          candidate.searchParams.get("observed_from") === RANGE_B_FROM &&
+          candidate.searchParams.get("observed_to") === RANGE_B_TO
+        );
+      }),
+    ).toBe(true);
+    await heartbeat(page, "req6-reroot-preserves-range");
 
     expect(consoleErrors).toEqual([]);
   });
