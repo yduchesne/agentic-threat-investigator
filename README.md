@@ -1,4 +1,4 @@
-# ATI 
+# ATI
 
 ATI stands for _Agentic Threat Investigator_.
 
@@ -8,11 +8,45 @@ ATI stands for _Agentic Threat Investigator_.
 
 It is an open-source, analyst-oriented threat investigation system that uses
 bounded agentic workflows to turn security data into evidence-backed
-investigations and reports. 
+investigations and reports.
 
 <p align="center">
   <img src="docs/img/graph-exploration.png" alt="ATI logo">
 </p>
+
+## Table of Contents
+
+- [References](#references)
+- [Features](#features)
+  - [AI-Driven Workflow](#ai-driven-workflow)
+  - [Data Sources](#data-sources)
+  - [Knowledge Graph](#knowledge-graph)
+  - [Historical Data](#historical-data)
+  - [Graph Visualization](#graph-visualization)
+  - [GEOINT](#geoint)
+  - [Reporting](#reporting)
+  - [Observability](#observability)
+  - [Development, Testing and Demo](#development-testing-and-demo)
+- [Visuals](#visuals)
+  - [Knowledge Graph Exploration](#knowledge-graph-exploration)
+  - [AI-Driven Reporting](#ai-driven-reporting)
+  - [GEOINT](#geoint-1)
+  - [Historical/Temporal Pivoting](#historicaltemporal-pivoting)
+- [How ATI works](#how-ati-works)
+- [Architecture at a glance](#architecture-at-a-glance)
+- [Getting Started](#getting-started)
+  - [1. Install the prerequisites](#1-install-the-prerequisites)
+  - [2. Create your local configuration](#2-create-your-local-configuration)
+  - [3. Configure a real LLM](#3-configure-a-real-llm)
+  - [4. Optional LangSmith observability](#4-optional-langsmith-observability)
+  - [5. Start ATI](#5-start-ati)
+  - [6. Stop or remove the local environment](#6-stop-or-remove-the-local-environment)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Validation](#validation)
+- [Project status](#project-status)
+- [Authoritative documentation](#authoritative-documentation)
+- [License](#license)
 
 ## References
 
@@ -20,7 +54,7 @@ For more in-depth information, beyond this page:
 
 - [Core Concepts](docs/manual/CORE_CONCEPTS.md): Presents core concepts such as `Entity`, `Evidence`, etc.
 - [Architecture](docs/manual/AGENTIC.md): Describes the architecture of the system.
--  And other the other documents under [docs/manual](docs/manual). 
+-  And other the other documents under [docs/manual](docs/manual).
 
 > The documentation under [docs/manual](docs/manual) is AI-non grata and human-maintained. AI is leveraged for excerpts and diagrams.
 
@@ -76,7 +110,7 @@ Enriches IP addresses with approximate geographic context to help analysts under
 - **Operational Dashboards**: Uses an OpenTelemetry-compliant stack to provide ready-made dashboards for monitoring investigation activity, intelligence ingestion, system health, AI usage, and processing performance.
 
 ### Development, Testing and Demo
- 
+
 - **Reproducible Investigation Environment**: Includes a deterministic synthetic intelligence world that lets users safely explore ATI's full investigative workflow without obtaining accounts or API keys for external intelligence providers.
 - **Production Intelligence Mode**: Can switch from the synthetic environment to real intelligence sources without changing the analyst investigation workflow.
 - **Behavioral AI Evaluation**: Evaluates AI-assisted investigation behavior against curated cybersecurity scenarios rather than relying solely on generic model benchmarks.
@@ -96,7 +130,7 @@ This section contains visual excerpts providing an overview of ATI's functionali
   <p/>
 </p>
 
-### AI-Driven Reporting  
+### AI-Driven Reporting
 
 <p align="center">
   <img src="docs/img/investigation-report.png" alt="Investigation Reportest">
@@ -104,7 +138,7 @@ This section contains visual excerpts providing an overview of ATI's functionali
   <img src="docs/img/investigation-report-guidance.png" alt="Investigation Report Conclusions">
   <p/>
   <img src="docs/img/agentic-findings-rag-graph-analysis.png" alt="Knowledge Graph-Enriched Analysis">
-</p>  
+</p>
 
 ### GEOINT
 
