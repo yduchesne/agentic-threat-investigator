@@ -1,13 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Graph context/filter toolbar (PR 31G Part 7).
+// Graph context/filter toolbar (PR 31G Part 7; PR 38-10).
 //
 // The committed graph context has exactly one authority: the Graph route
 // URL. Drafts are browser-local until Apply/Clear, which perform exactly one
-// route commit; text/date edits never issue a graph request before Apply.
-// Apply commits the verified draft, Clear restores Investigation scope with
-// no optional filters, and external navigation resyncs the draft from the
+// route commit; text edits never issue a graph request before Apply. Apply
+// commits the verified draft, Clear restores Investigation scope with no
+// optional filters, and external navigation resyncs the draft from the
 // committed URL without a write-back effect loop.
+//
+// PR 38-10: the redundant upper-toolbar Observed from/to inputs are gone.
+// Temporal exploration (``GraphTemporalControls``) is the sole authority for
+// graph observation-time bounds, so this toolbar never carries an observed
+// interval and ordinary Apply/Clear can neither reintroduce nor erase one.
 
 import {
   Box,
@@ -29,7 +34,6 @@ import type {
   GraphScopeName,
   RelationshipTypeName,
 } from "../api/schema-types";
-import { localDateTimeToIso } from "../analyst-table/filters";
 import { RELATIONSHIP_TYPES } from "../relationships/labels";
 import {
   GRAPH_DEPTHS,
@@ -46,8 +50,6 @@ export interface GraphDraft {
   entityType: EntityTypeName | "";
   relationshipType: RelationshipTypeName | "";
   source: string;
-  observedFrom: string;
-  observedTo: string;
 }
 
 /** Build a draft from the committed graph context. */
@@ -58,12 +60,16 @@ export function graphDraftFromCommitted(context: GraphContext): GraphDraft {
     entityType: context.entityType ?? "",
     relationshipType: context.relationshipType ?? "",
     source: context.source ?? "",
-    observedFrom: context.observedFrom ?? "",
-    observedTo: context.observedTo ?? "",
   };
 }
 
-/** Convert one validated draft to the committed graph context. */
+/**
+ * Convert one validated draft to the committed graph context.
+ *
+ * Observation-time bounds are deliberately absent: Temporal exploration is
+ * the sole authority for graph observed bounds, so an ordinary Apply/Clear
+ * can never reintroduce (or erase) them.
+ */
 export function graphDraftToCommitted(draft: GraphDraft): GraphContext {
   return {
     scope: draft.scope,
@@ -72,21 +78,20 @@ export function graphDraftToCommitted(draft: GraphDraft): GraphContext {
     relationshipType:
       draft.relationshipType === "" ? undefined : draft.relationshipType,
     source: nonBlank(draft.source),
-    observedFrom: localDateTimeToIso(draft.observedFrom),
-    observedTo: localDateTimeToIso(draft.observedTo),
+    observedFrom: undefined,
+    observedTo: undefined,
   };
 }
 
-/** One translated draft validation error, or null when commit-able. */
-export function graphDraftError(
-  t: TFunction,
-  draft: GraphDraft,
-): string | null {
-  for (const value of [draft.observedFrom, draft.observedTo]) {
-    if (value !== "" && localDateTimeToIso(value) === undefined) {
-      return t("graph.filters.time.invalid");
-    }
-  }
+/**
+ * One ordinary graph-filter draft validation error, or null when commit-able.
+ *
+ * The ordinary graph filters have no invalid state now that observed-time
+ * bounds belong solely to Temporal exploration, so this is always null. It is
+ * retained as the form's validation seam.
+ */
+export function graphDraftError(draft: GraphDraft): string | null {
+  void draft;
   return null;
 }
 
@@ -242,24 +247,6 @@ export function GraphFilters({
           label={t("graph.filters.source.label")}
           value={draft.source}
           onChange={(event) => set({ source: event.target.value })}
-          onKeyDown={enter}
-        />
-        <TextField
-          size="small"
-          type="datetime-local"
-          slotProps={{ inputLabel: { shrink: true } }}
-          label={t("graph.filters.observedFrom.label")}
-          value={draft.observedFrom}
-          onChange={(event) => set({ observedFrom: event.target.value })}
-          onKeyDown={enter}
-        />
-        <TextField
-          size="small"
-          type="datetime-local"
-          slotProps={{ inputLabel: { shrink: true } }}
-          label={t("graph.filters.observedTo.label")}
-          value={draft.observedTo}
-          onChange={(event) => set({ observedTo: event.target.value })}
           onKeyDown={enter}
         />
         <Button size="small" variant="contained" onClick={onApply} sx={{ textTransform: "none" }}>

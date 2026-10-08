@@ -258,6 +258,33 @@ test.describe("PR 24E real-stack relationship evolution and graph", () => {
         observationRequests.push(url);
       }
     });
+
+    // Requirement 11 (PR 38-10): the Evolution view's own independent
+    // observation-date filters still apply, reach the exact server query,
+    // and clear without touching the graph context.
+    const observationRequestsBeforeRange = observationRequests.length;
+    await page.getByLabel("Observed from").fill("2026-01-01T00:00");
+    await page.getByLabel("Observed to").fill("2026-01-02T00:00");
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect
+      .poll(() => observationRequests.length, { timeout: 30_000 })
+      .toBeGreaterThan(observationRequestsBeforeRange);
+    const rangedObservationRequest = observationRequests.at(-1) ?? "";
+    expect(
+      new URL(rangedObservationRequest).searchParams.get("observed_from"),
+    ).not.toBeNull();
+    expect(
+      new URL(rangedObservationRequest).searchParams.get("observed_to"),
+    ).not.toBeNull();
+    await expect(page).toHaveURL(/observed_from=/);
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    await expect(page).not.toHaveURL(/observed_from=/);
+
+    // The Evolution date-filter requests above are intentionally scoped to
+    // this pre-Graph phase; reset the recorder so the later
+    // "Graph issues no observation requests" assertion remains exact.
+    observationRequests.length = 0;
+
     await page.getByRole("button", { name: "Graph" }).click();
     await expect(page).toHaveURL(/view=graph/);
     const graphCanvas = page.getByRole("group", {
