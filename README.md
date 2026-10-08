@@ -10,6 +10,8 @@ It is an open-source, analyst-oriented threat investigation system that uses
 bounded agentic workflows to turn security data into evidence-backed
 investigations and reports.
 
+> ATI is still in development. A demo environment is provided to run it locally and explore its functionality. Scroll down to the _Getting Started_ section for the details.
+
 <p align="center">
   <img src="docs/img/graph-exploration.png" alt="ATI logo">
 </p>
