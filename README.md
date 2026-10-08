@@ -6,15 +6,35 @@ ATI stands for _Agentic Threat Investigator_.
   <img src="docs/img/ATILogo-400x400.png" alt="ATI logo">
 </p>
 
-It is an open-source, analyst-oriented threat investigation system that uses
-bounded agentic workflows to turn security data into evidence-backed
-investigations and reports.
+## Rationale
 
-> ATI is still in development. A demo environment is provided to run it locally and explore its functionality. Scroll down to the _Getting Started_ section for the details.
+Cybersecurity analysts face an overwhelming volume of threat intelligence distributed across heterogeneous sources. Investigating a suspicious domain, IP address, or other indicator often requires manually querying multiple services, correlating fragmented information, following relationships, evaluating conflicting evidence, and assembling defensible conclusions.
 
 <p align="center">
   <img src="docs/img/graph-exploration.png" alt="ATI logo">
 </p>
+
+Rather than treating an LLM as an all-knowing security analyst, ATI combines deterministic software engineering with AI-driven reasoning. Autonomous agents gather intelligence, discover relationships, pursue investigative leads, and assess findings within explicitly defined operational boundaries.
+
+ATI is built around several principles:
+
+- **Evidence over speculation:** Findings are grounded in collected intelligence, with traceable provenance.
+- **Autonomy with control:** Agents can plan, investigate, and pivot dynamically, but operate within defined execution budgets, policies, and stopping criteria.
+- **Connected intelligence:** Heterogeneous data is normalized into a knowledge graph, enabling correlation, contextual research, and exploration across sources and time.
+- **Explainable outcomes:** Analysts can inspect the evidence, relationships, historical observations, and research supporting investigative conclusions.
+
+ATI's objective is not to replace human judgment, but to **reduce repetitive investigative work, uncover meaningful connections, and help analysts reach better-supported conclusions faster**.
+
+ATI also serves as a practical demonstration of how agentic AI can be engineered into reliable, maintainable, secure, and operationally controlled software systems. Software quality is a foundational design principle, supported by an extensive automated testing infrastructure comprising __8,695 test cases__: 
+
+- 6,605 backend unit tests (enforced by an 85% coverage threshold);
+- 1,096 backend integration tests;
+- 937 frontend unit/component tests; 
+- and 57 Playwright end-to-end (browser-to-backend) tests. 
+
+Changes are validated through automated quality and integration gates, strict linting and static analysis, deterministic AI evaluations, and security checks. CI enforces the applicable quality, integration, and security checks, while browser-to-backend testing is performed separately using Playwright.
+
+> ATI is still in development. A demo environment is provided to run it locally and explore its functionality. Scroll down to the _Getting Started_ section for the details.
 
 ## Table of Contents
 
