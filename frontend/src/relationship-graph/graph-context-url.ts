@@ -14,8 +14,18 @@
 //   graph_entity_type=<EntityType>
 //   graph_relationship_type=<RelationshipType>
 //   graph_source=<exact RelationshipObservation source>
-//   graph_observed_from=<ISO>&graph_observed_to=<ISO>
 //   graph_depth=2|3                              (absent/1 = depth 1)
+//
+// The retired upper-toolbar ``graph_observed_from``/``graph_observed_to``
+// parameters are NO LONGER ordinary graph-filter state. The Graph workspace
+// owns exactly one source of observation-time bounds: the Temporal
+// exploration tuple (``graph_temporal``/``graph_time_start``/
+// ``graph_time_end``). Legacy observed parameters are ignored on read and
+// stripped whenever this ordinary graph context is next written, so an old
+// bookmark can never sneak a hidden observation-time restriction into a
+// graph request. ``GraphContext.observedFrom``/``observedTo`` remain the
+// EFFECTIVE request bounds supplied only by active temporal mode (see
+// ``graph-temporal.ts``); the parser never populates them.
 //
 // Unrelated URL parameters are preserved; a malformed enum/timestamp value
 // is canonicalized away rather than sent to the API.
@@ -25,11 +35,7 @@ import type {
   GraphScopeName,
   RelationshipTypeName,
 } from "../api/schema-types";
-import {
-  applyFilterParams,
-  parseEnumParam,
-  parseTimestampParam,
-} from "../analyst-table/filters";
+import { applyFilterParams, parseEnumParam } from "../analyst-table/filters";
 import { RELATIONSHIP_TYPES } from "../relationships/labels";
 
 /** The exactly-two graph scopes (Investigation default). */
@@ -59,18 +65,37 @@ export const GRAPH_ENTITY_TYPES: readonly EntityTypeName[] = [
   "infrastructure",
 ];
 
-/** The graph-owned URL search parameters (all ``graph_*`` except none else). */
+/** The ordinary graph-owned URL search parameters (no observation bounds). */
 export const GRAPH_CONTEXT_PARAMS = [
   "graph_scope",
   "graph_entity_type",
   "graph_relationship_type",
   "graph_source",
-  "graph_observed_from",
-  "graph_observed_to",
   "graph_depth",
 ] as const;
 
-/** The committed graph context (Investigation + no filters + depth 1 = default). */
+/**
+ * The retired upper-toolbar graph observation-time parameters.
+ *
+ * PR 38-10 removed the redundant upper Graph observed-date inputs, so these
+ * are never read as graph state. They remain URL-context-owned (alongside
+ * the canonical keys) so the next ordinary graph-context OR temporal write
+ * strips them and an obsolete deep link can never carry a hidden bound.
+ */
+export const GRAPH_CONTEXT_OBSOLETE_PARAMS = [
+  "graph_observed_from",
+  "graph_observed_to",
+] as const;
+
+/**
+ * The committed graph context (Investigation + no filters + depth 1 = default).
+ *
+ * ``observedFrom``/``observedTo`` are the EFFECTIVE half-open observation
+ * bounds of one graph request. They are never parsed from the retired
+ * ordinary graph-filter observed parameters; the workspace fills them from
+ * active temporal mode only. On the ordinary (parsed) context they are always
+ * ``undefined``.
+ */
 export interface GraphContext {
   scope: GraphScopeName;
   entityType: EntityTypeName | undefined;
@@ -107,9 +132,11 @@ export function parseGraphDepth(value: string | null): GraphDepth {
 /**
  * Parse the committed graph context off one URL parameter set.
  *
- * An absent scope is Investigation; a malformed enum/timestamp value
- * canonicalizes to absence so it is never presented or sent as a valid API
- * value. Whitespace-only sources normalize to absence.
+ * An absent scope is Investigation; a malformed enum value canonicalizes to
+ * absence so it is never presented or sent as a valid API value.
+ * Whitespace-only sources normalize to absence. The retired
+ * ``graph_observed_from``/``graph_observed_to`` parameters are ignored: the
+ * effective observation bounds come exclusively from Temporal exploration.
  */
 export function parseGraphContext(params: URLSearchParams): GraphContext {
   return {
@@ -120,8 +147,8 @@ export function parseGraphContext(params: URLSearchParams): GraphContext {
       RELATIONSHIP_TYPES,
     ),
     source: nonBlank(params.get("graph_source")),
-    observedFrom: parseTimestampParam(params.get("graph_observed_from")),
-    observedTo: parseTimestampParam(params.get("graph_observed_to")),
+    observedFrom: undefined,
+    observedTo: undefined,
     depth: parseGraphDepth(params.get("graph_depth")),
   };
 }
@@ -131,31 +158,41 @@ export function parseGraphContext(params: URLSearchParams): GraphContext {
  *
  * The default Investigation scope is omitted for canonical URL minimalism
  * (parsing restores it); every absent optional filter removes its
- * parameter; all unrelated URL parameters are preserved.
+ * parameter; the retired graph observed parameters are always stripped; all
+ * unrelated URL parameters (including the canonical temporal tuple and
+ * Evolution's ``observed_from``/``observed_to``) are preserved.
+ *
+ * This function deliberately writes no observation bounds: effective graph
+ * bounds come exclusively from Temporal exploration.
  */
 export function applyGraphContext(
   params: URLSearchParams,
   context: GraphContext,
 ): URLSearchParams {
-  return applyFilterParams(params, GRAPH_CONTEXT_PARAMS, {
-    graph_scope: context.scope === "investigation" ? undefined : context.scope,
-    graph_entity_type: context.entityType,
-    graph_relationship_type: context.relationshipType,
-    graph_source: context.source,
-    graph_observed_from: context.observedFrom,
-    graph_observed_to: context.observedTo,
-    graph_depth: context.depth === 1 ? undefined : String(context.depth),
-  });
+  return applyFilterParams(
+    params,
+    [...GRAPH_CONTEXT_PARAMS, ...GRAPH_CONTEXT_OBSOLETE_PARAMS],
+    {
+      graph_scope: context.scope === "investigation" ? undefined : context.scope,
+      graph_entity_type: context.entityType,
+      graph_relationship_type: context.relationshipType,
+      graph_source: context.source,
+      graph_depth: context.depth === 1 ? undefined : String(context.depth),
+    },
+  );
 }
 
-/** Whether any optional graph filter beyond the scope is active. */
+/**
+ * Whether any optional ORDINARY graph filter beyond the scope is active.
+ *
+ * Observation-time bounds are excluded: they belong to Temporal exploration
+ * and never make an ordinary graph filter active.
+ */
 export function graphContextActive(context: GraphContext): boolean {
   return (
     context.entityType !== undefined ||
     context.relationshipType !== undefined ||
-    context.source !== undefined ||
-    context.observedFrom !== undefined ||
-    context.observedTo !== undefined
+    context.source !== undefined
   );
 }
 

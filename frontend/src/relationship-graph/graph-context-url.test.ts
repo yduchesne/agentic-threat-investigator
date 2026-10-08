@@ -79,12 +79,38 @@ describe("PR 31G graph context URL codec", () => {
     expect(context.source).toBe("rdap");
   });
 
-  it("FE06: an observed interval URL reconstructs", () => {
+  it("PR38-10 U02/FE06: a retired observed interval URL no longer constrains the graph", () => {
     const context = parseGraphContext(
       ps("graph_observed_from=2026-01-01T00:00:00Z&graph_observed_to=2026-02-01T00:00:00Z"),
     );
-    expect(context.observedFrom).toBe("2026-01-01T00:00:00Z");
-    expect(context.observedTo).toBe("2026-02-01T00:00:00Z");
+    // Legacy upper-toolbar bounds are inert; only Temporal exploration may
+    // supply effective observed bounds.
+    expect(context.observedFrom).toBeUndefined();
+    expect(context.observedTo).toBeUndefined();
+    expect(graphContextActive(context)).toBe(false);
+  });
+
+  it("PR38-10 U09: an ordinary Apply strips legacy graph observed keys only", () => {
+    const applied = applyGraphContext(
+      ps(
+        "graph_observed_from=2026-01-01T00:00:00Z&graph_observed_to=2026-02-01T00:00:00Z" +
+          "&observed_from=2026-03-01T00:00:00Z&observed_to=2026-04-01T00:00:00Z" +
+          "&graph_temporal=1&graph_time_start=2026-05-01T00:00:00Z&graph_time_end=2026-05-02T00:00:00Z" +
+          "&unrelated=keep",
+      ),
+      { ...emptyGraphContext(), scope: "known" },
+    );
+    // Retired graph-filter observed keys are removed...
+    expect(applied.get("graph_observed_from")).toBeNull();
+    expect(applied.get("graph_observed_to")).toBeNull();
+    // ...while Evolution's own keys and the temporal tuple are preserved.
+    expect(applied.get("observed_from")).toBe("2026-03-01T00:00:00Z");
+    expect(applied.get("observed_to")).toBe("2026-04-01T00:00:00Z");
+    expect(applied.get("graph_temporal")).toBe("1");
+    expect(applied.get("graph_time_start")).toBe("2026-05-01T00:00:00Z");
+    expect(applied.get("graph_time_end")).toBe("2026-05-02T00:00:00Z");
+    expect(applied.get("unrelated")).toBe("keep");
+    expect(applied.get("graph_scope")).toBe("known");
   });
 
   it("FE07: malformed enum/timestamp values canonicalize to absence", () => {
@@ -118,8 +144,8 @@ describe("PR 31G graph context URL codec", () => {
       entityType: "asn",
       relationshipType: KNOWN,
       source: "rdap",
-      observedFrom: "2026-01-01T00:00:00Z",
-      observedTo: "2026-02-01T00:00:00Z",
+      observedFrom: undefined,
+      observedTo: undefined,
       depth: 2,
     };
     const url = applyGraphContext(ps("unrelated=x"), context);

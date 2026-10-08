@@ -645,6 +645,90 @@ describe("PR 38-8 direct-range temporal graph workspace", () => {
     expect(recorder.requests.at(-1)?.params.scope).toBe("known");
   });
 
+  it("PR38-10 U13: the upper Graph toolbar has no observed-date inputs", async () => {
+    const { install } = temporalNeighborhoodHandler();
+    install();
+    renderAtPath(GRAPH_VIEW(""));
+    const group = await screen.findByRole("group", {
+      name: "Graph context and filters",
+    });
+    expect(within(group).queryByLabelText("Observed from")).not.toBeInTheDocument();
+    expect(within(group).queryByLabelText("Observed to")).not.toBeInTheDocument();
+    expect(within(group).queryByLabelText("Observation source")).toBeInTheDocument();
+    // The lower Temporal exploration section remains the sole date control.
+    await screen.findByRole("group", { name: "Temporal exploration" });
+    expect(
+      within(temporalGroup()).getByRole("checkbox", { name: "Temporal exploration" }),
+    ).toBeInTheDocument();
+  });
+
+  it("PR38-10 U02/B08: a stale legacy graph observed bookmark yields no graph bounds", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    renderAtPath(
+      GRAPH_VIEW(
+        "graph_observed_from=2000-01-01T00:00:00Z&graph_observed_to=2099-01-01T00:00:00Z",
+      ),
+    );
+    await waitFor(() => expect(recorder.requests.length).toBeGreaterThan(0));
+    const last = recorder.requests.at(-1);
+    expect(last?.params.observed_from).toBeUndefined();
+    expect(last?.params.observed_to).toBeUndefined();
+  });
+
+  it("PR38-10 U09: an ordinary Apply strips the legacy graph observed keys", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(
+      GRAPH_VIEW(
+        "graph_observed_from=2000-01-01T00:00:00Z&graph_observed_to=2099-01-01T00:00:00Z",
+      ),
+    );
+    await waitFor(() => expect(recorder.requests.length).toBeGreaterThan(0));
+    await userEvent.click(screen.getByRole("button", { name: /^Apply$/ }));
+    await waitFor(() =>
+      expect(router.state.location.search).not.toContain("graph_observed_from"),
+    );
+    expect(router.state.location.search).not.toContain("graph_observed_to");
+  });
+
+  it("PR38-10 U06: an ordinary graph filter Apply preserves the active temporal tuple", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(temporalUrl());
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    fireEvent.change(screen.getByLabelText("Observation source"), {
+      target: { value: "fake-dns" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: /^Apply$/ }));
+    await waitFor(() => expect(recorder.requests.length).toBe(2));
+    const last = recorder.requests.at(-1);
+    expect(last?.params.observed_from).toBe(RANGE_START);
+    expect(last?.params.observed_to).toBe(RANGE_END);
+    expect(last?.params.source).toBe("fake-dns");
+    expect(router.state.location.search).toContain("graph_temporal=1");
+    expect(router.state.location.search).toContain(
+      `graph_time_start=${encodeURIComponent(RANGE_START)}`,
+    );
+  });
+
+  it("PR38-10 U07: an ordinary graph filter Clear preserves the active temporal tuple", async () => {
+    const { recorder, install } = temporalNeighborhoodHandler();
+    install();
+    const { router } = renderAtPath(
+      `${GRAPH_VIEW("graph_source=fake-dns")}&graph_temporal=1&graph_time_start=${RANGE_START}&graph_time_end=${RANGE_END}`,
+    );
+    await waitFor(() => expect(recorder.requests.length).toBe(1));
+    await userEvent.click(screen.getByRole("button", { name: /^Clear$/ }));
+    await waitFor(() => expect(recorder.requests.length).toBe(2));
+    const last = recorder.requests.at(-1);
+    expect(last?.params.observed_from).toBe(RANGE_START);
+    expect(last?.params.observed_to).toBe(RANGE_END);
+    expect(last?.params.source).toBeUndefined();
+    expect(router.state.location.search).not.toContain("graph_source");
+    expect(router.state.location.search).toContain("graph_temporal=1");
+  });
+
   it("FE26: the same committed range reparses to the same request bounds", async () => {
     const { recorder, install } = temporalNeighborhoodHandler();
     install();

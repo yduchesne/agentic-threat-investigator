@@ -147,7 +147,12 @@ The Graph view distinguishes Investigation-supported topology from broader
 known topology and exposes bounded server-side filters. The committed graph
 context has exactly one authority: the Graph route URL search parameters
 (`graph_scope`, `graph_entity_type`, `graph_relationship_type`,
-`graph_source`, `graph_observed_from`, `graph_observed_to`). Draft edits live
+`graph_source`, `graph_depth`). Observation-time bounds are owned solely by
+the separate Temporal exploration tuple (`graph_temporal`,
+`graph_time_start`, `graph_time_end`); the retired upper-toolbar
+`graph_observed_from`/`graph_observed_to` parameters are ignored on read and
+stripped on the next ordinary or temporal Graph URL write, so temporal mode
+off is genuinely unbounded. Draft edits live
 in a transient local form and never issue a request before Apply; Apply and
 Clear each perform exactly one route commit, and refresh / browser
 Back/Forward reconstruct the same request from the URL. The routed Graph page
@@ -160,8 +165,9 @@ URL or the query key.
   shows broader globally known live Relationships around the
   Investigation-visible focal Entity.
 - **Server-side filters**: connected (counterparty) Entity type, canonical
-  Relationship type, exact `RelationshipObservation.source`, and half-open
-  `observed_at` bounds. Filtering happens server-side before bounding;
+  Relationship type, exact `RelationshipObservation.source`, and (from
+  Temporal exploration only) half-open `observed_at` bounds. Filtering
+  happens server-side before bounding;
   `truncated` stays truthful and the client never post-filters.
 - **Expansion inheritance and reset**: every one-hop expansion inherits the
   complete committed context; changing any scope/filter aborts stale

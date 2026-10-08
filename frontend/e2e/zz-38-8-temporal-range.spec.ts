@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 // Real-stack PR 38-8 direct observed-time range temporal graph exploration
-// (Chromium + Firefox).
+// (Chromium + Firefox); consolidated under PR 38-10.
 //
 // The routed Graph workspace is opened through the PR 31F-8 Investigation
 // shell; the analyst enables Temporal exploration, specifies one required
@@ -9,6 +9,11 @@
 // committed direct range constrains every neighborhood request through the
 // EXISTING graph ``observed_from``/``observed_to`` contract (no new backend,
 // no temporal DTO, no frame partition, no Relationship-lifetime inference).
+// PR 38-10 removed the redundant upper Graph toolbar observed-date inputs:
+// Temporal exploration is the SOLE authority for graph observation-time
+// bounds, so with temporal off the graph request carries no observed bounds
+// even for a legacy ``graph_observed_*`` bookmark, and the retired keys are
+// stripped on the next ordinary Graph write.
 // A blank time normalizes to local midnight; the neutral draft defaults the
 // end DATE to the browser-local current calendar date with a blank end time.
 // Apply commits canonical URL state (switch + both instants) in one
@@ -257,6 +262,20 @@ test.describe("PR 38-8 direct-range temporal graph exploration (real stack)", ()
     await expect(canvasNodes.first()).toBeVisible({ timeout: 30_000 });
     await heartbeat(page, "graph-interactive");
 
+    // B01/PR 38-10: the upper Graph filter toolbar carries no observed-date
+    // inputs; the lower Temporal exploration section is the sole date
+    // control and it is present.
+    const graphFiltersGroup = page.getByRole("group", {
+      name: "Graph context and filters",
+    });
+    await expect(graphFiltersGroup.getByLabel("Observed from")).toHaveCount(0);
+    await expect(graphFiltersGroup.getByLabel("Observed to")).toHaveCount(0);
+    await expect(
+      graphFiltersGroup.locator('input[type="datetime-local"]'),
+    ).toHaveCount(0);
+    await expect(temporalGroup(page).getByLabel("Range start date")).toBeVisible();
+    await heartbeat(page, "no-upper-date-controls");
+
     // E01: enabling temporal presents a neutral draft with a blank start and
     // a blank end TIME defaulting the end DATE to browser-local today, and
     // no Time frames or Previous/Next frame controls exist.
@@ -298,6 +317,28 @@ test.describe("PR 38-8 direct-range temporal graph exploration (real stack)", ()
     await expectCommittedRange(page, EXPLICIT_FROM, EXPLICIT_TO);
     await expectRequestBounds(graphTraffic, EXPLICIT_FROM, EXPLICIT_TO);
     await heartbeat(page, "explicit-time-preserved");
+
+    // B02/B05/PR 38-10: an ordinary Graph filter Apply/Clear only changes the
+    // ordinary filters; the committed temporal interval survives and every
+    // subsequent request stays bounded by it.
+    const ordinarySource = graphFiltersGroup.getByLabel("Observation source");
+    await ordinarySource.fill("rdap");
+    await click(
+      page,
+      graphFiltersGroup.getByRole("button", { name: "Apply", exact: true }),
+      "ordinary-apply-with-temporal",
+    );
+    await expect(page).toHaveURL(/graph_source=rdap/);
+    await expectCommittedRange(page, EXPLICIT_FROM, EXPLICIT_TO);
+    await expectRequestBounds(graphTraffic, EXPLICIT_FROM, EXPLICIT_TO);
+    await click(
+      page,
+      graphFiltersGroup.getByRole("button", { name: "Clear", exact: true }),
+      "ordinary-clear-with-temporal",
+    );
+    await expect(page).not.toHaveURL(/graph_source=/);
+    await expectCommittedRange(page, EXPLICIT_FROM, EXPLICIT_TO);
+    await heartbeat(page, "ordinary-filters-preserve-temporal");
 
     // E04: the exact committed range changes the displayed topology: range A
     // excludes the DNS observations, range B includes them.
@@ -404,6 +445,47 @@ test.describe("PR 38-8 direct-range temporal graph exploration (real stack)", ()
     await expect(canvasNodes.first()).toBeVisible({ timeout: 30_000 });
     await heartbeat(page, "ordinary-restored");
 
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test("B08/PR 38-10: a legacy upper-date bookmark never bounds the graph and is stripped on Apply", async ({
+    page,
+  }) => {
+    const consoleErrors = trackConsoleErrors(page);
+    const graphTraffic = trackGraphTraffic(page);
+    await login(page);
+    const investigationId = await completeF02Investigation(page);
+    const entityId = await openGraphWorkspace(
+      page,
+      `/investigations/${investigationId}`,
+    );
+
+    // A bookmark carrying the retired upper-toolbar observed bounds must not
+    // constrain the graph while temporal exploration is off.
+    await page.goto(
+      `/investigations/${investigationId}/relationships/evolution?entity_id=${entityId}` +
+        `&view=graph&graph_observed_from=2000-01-01T00:00:00Z&graph_observed_to=2099-01-01T00:00:00Z`,
+    );
+    const graphList = page.getByRole("table", { name: "Relationship list (this page)" });
+    await expect(graphList).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(() => graphTraffic.requests.length, { timeout: 30_000 })
+      .toBeGreaterThan(0);
+    const boundedRequests = graphTraffic.requests.filter((url) =>
+      new URL(url).searchParams.has("observed_from"),
+    );
+    expect(boundedRequests).toEqual([]);
+    await heartbeat(page, "legacy-bookmark-unbounded");
+
+    // The next ordinary Graph Apply strips the retired keys.
+    await click(
+      page,
+      page.getByRole("button", { name: "Apply", exact: true }),
+      "legacy-strip-apply",
+    );
+    await expect(page).not.toHaveURL(/graph_observed_from/);
+    await expect(page).not.toHaveURL(/graph_observed_to/);
+    await heartbeat(page, "legacy-keys-stripped");
     expect(consoleErrors).toEqual([]);
   });
 

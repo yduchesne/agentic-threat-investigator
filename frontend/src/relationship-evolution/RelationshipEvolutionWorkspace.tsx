@@ -185,20 +185,23 @@ export function RelationshipEvolutionWorkspace({
   // PR 31G: the committed graph context (scope + filters) is URL-backed and
   // independent of the Evolution observation filters.
   const graphContext = parseGraphContext(searchParams);
-  // PR 38-8: the committed temporal DIRECT range (start + end observed
-  // instants; no frames) is equally URL-backed; the active range overrides
-  // ONLY ``graphContext.observedFrom/observedTo`` per request.
+  // PR 38-8/PR 38-10: the committed temporal DIRECT range (start + end
+  // observed instants; no frames) is equally URL-backed, and it is the ONLY
+  // source of graph observation-time bounds. Temporal exploration is the
+  // sole authority, so a stale legacy ``graph_observed_*`` parameter can
+  // never constrain a request.
   const graphTemporal = parseGraphTemporal(searchParams);
-  // PR 38-8: ONE effective request context per commit — the committed
-  // range's half-open bounds override the ordinary committed observed bounds
-  // while scope/entity type/relationship type/source/depth stay
-  // authoritative. Every graph operation below consumes this same effective
-  // context, so root topology, explicit expansion and path finding can never
-  // run against different observed ranges.
+  // PR 38-8/PR 38-10: ONE effective request context per commit. Ordinary
+  // graph filters provide scope/entity type/relationship type/source/depth;
+  // the effective observed bounds come exclusively from active temporal
+  // mode (both ``undefined`` when temporal is off). Every graph operation
+  // below consumes this same effective context, so root topology, explicit
+  // expansion and path finding can never run against different observed
+  // ranges.
   const effectiveGraphContext = useMemo(
     () => ({
       ...graphContext,
-      ...graphTemporalEffectiveBounds(graphContext, graphTemporal),
+      ...graphTemporalEffectiveBounds(graphTemporal),
     }),
     [graphContext, graphTemporal],
   );
@@ -553,7 +556,7 @@ export function RelationshipEvolutionWorkspace({
     committed: graphContext,
     buildDraft: graphDraftFromCommitted,
     toFilters: graphDraftToCommitted,
-    validateDraft: (draft) => graphDraftError(t as never, draft),
+    validateDraft: graphDraftError,
     onApply: (next) => commit(applyGraphContext(searchParams, next)),
     onClear: () => commit(applyGraphContext(searchParams, emptyGraphContext())),
     emptyDraft: graphDraftFromCommitted(emptyGraphContext()),

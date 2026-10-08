@@ -1,17 +1,23 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// Graph temporal-range model + URL codec (PR 38-8, simplifying PR 31J).
+// Graph temporal-range model + URL codec (PR 38-8, simplifying PR 31J;
+// consolidated PR 38-10).
 //
 // Temporal graph exploration constrains one committed GraphContext to a
 // single deterministic half-open ``[observed_from, observed_to)``
 // observation window: the analyst supplies one start instant and one end
-// instant directly, and those bounds override
-// ``GraphContext.observedFrom``/``observedTo`` only for that one graph
-// request. The committed range is therefore its own committed identity —
-// ``graphContextKey`` (which already includes observed bounds) and
+// instant directly, and those bounds are the ONE AND ONLY source of
+// ``GraphContext.observedFrom``/``observedTo`` for a graph request. The
+// committed range is therefore its own committed identity —
+// ``graphContextKey`` (which includes observed bounds) and
 // ``graphTemporalKey`` both change per range, so a range change naturally
 // yields a fresh neighborhood/traversal/path request and resets graph
 // expansion with no extra machinery.
+//
+// With temporal mode OFF, the effective graph request has NO observation
+// bounds at all — even when a stale legacy ``graph_observed_*`` parameter is
+// still present in the URL. The retired upper Graph observed-date inputs can
+// never reintroduce a hidden bound.
 //
 // There is no temporal-frame concept: no frame count, no frame index, no
 // partitioning, no Previous/Next navigation. PR 31J's
@@ -35,11 +41,8 @@
 // matching the app format; no wall-clock and no ``Date.now()``. A range's
 // absence never infers a Relationship lifetime.
 
-import type { GraphContext } from "./graph-context-url";
-import {
-  applyFilterParams,
-  parseTimestampParam,
-} from "../analyst-table/filters";
+import { applyFilterParams, parseTimestampParam } from "../analyst-table/filters";
+import { GRAPH_CONTEXT_OBSOLETE_PARAMS } from "./graph-context-url";
 
 /** The graph-owned canonical temporal URL search parameters. */
 export const GRAPH_TEMPORAL_PARAMS = [
@@ -93,16 +96,17 @@ export function graphTemporalActive(context: GraphTemporalContext): boolean {
 /**
  * Derive the effective committed observed bounds for one graph request.
  *
- * With temporal mode active, the committed direct range OVERRIDES the
- * ordinary committed ``GraphContext`` observed bounds for that one request.
- * Otherwise the ordinary committed bounds pass through untouched.
+ * Temporal exploration is the ONLY authority for graph observation-time
+ * bounds. With temporal mode inactive the request is unbounded by observed
+ * time (``observedFrom``/``observedTo`` are both ``undefined``), regardless
+ * of any stale legacy graph-filter URL parameter; with temporal mode active
+ * the committed half-open range is returned verbatim.
  */
 export function graphTemporalEffectiveBounds(
-  context: GraphContext,
   temporal: GraphTemporalContext,
 ): { observedFrom: string | undefined; observedTo: string | undefined } {
   if (!graphTemporalActive(temporal)) {
-    return { observedFrom: context.observedFrom, observedTo: context.observedTo };
+    return { observedFrom: undefined, observedTo: undefined };
   }
   return { observedFrom: temporal.rangeStart, observedTo: temporal.rangeEnd };
 }
@@ -152,9 +156,10 @@ export function parseGraphTemporal(params: URLSearchParams): GraphTemporalContex
  *
  * With temporal mode active the switch and both normalized instants are
  * written; mode off removes every temporal-owned parameter (canonical
- * ordinary graph mode), including the retired PR 31J frame parameters so
- * obsolete deep links are cleaned up. All unrelated URL parameters are
- * preserved untouched.
+ * ordinary graph mode), including the retired PR 31J frame parameters and
+ * the retired upper-toolbar graph observed parameters so obsolete deep links
+ * are cleaned up. All unrelated URL parameters (including Evolution's
+ * ``observed_from``/``observed_to``) are preserved untouched.
  */
 export function applyGraphTemporal(
   params: URLSearchParams,
@@ -162,7 +167,11 @@ export function applyGraphTemporal(
 ): URLSearchParams {
   return applyFilterParams(
     params,
-    [...GRAPH_TEMPORAL_PARAMS, ...GRAPH_TEMPORAL_OBSOLETE_PARAMS],
+    [
+      ...GRAPH_TEMPORAL_PARAMS,
+      ...GRAPH_TEMPORAL_OBSOLETE_PARAMS,
+      ...GRAPH_CONTEXT_OBSOLETE_PARAMS,
+    ],
     {
       graph_temporal: temporal.temporal ? "1" : undefined,
       graph_time_start: temporal.temporal ? temporal.rangeStart : undefined,

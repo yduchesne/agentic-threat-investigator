@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Agentic Threat Investigator contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { emptyGraphContext } from "./graph-context-url";
 import {
   GRAPH_TEMPORAL_OBSOLETE_PARAMS,
   GRAPH_TEMPORAL_PARAMS,
@@ -94,31 +93,44 @@ describe("PR 38-8 graph temporal direct range model", () => {
   });
 
   it("T-U09: active effective bounds are the exact committed start/end", () => {
-    const context = {
-      ...emptyGraphContext(),
-      observedFrom: "2000-01-01T00:00:00Z",
-      observedTo: "2099-01-01T00:00:00Z",
-    };
     const temporal = parseGraphTemporal(
       ps(`graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}`),
     );
-    const bounds = graphTemporalEffectiveBounds(context, temporal);
+    const bounds = graphTemporalEffectiveBounds(temporal);
     expect(bounds.observedFrom).toBe(START);
     expect(bounds.observedTo).toBe(END);
   });
 
-  it("T-U10: inactive temporal state passes ordinary graph bounds through", () => {
-    const context = {
-      ...emptyGraphContext(),
-      observedFrom: "2000-01-01T00:00:00Z",
-      observedTo: "2099-01-01T00:00:00Z",
-    };
-    const bounds = graphTemporalEffectiveBounds(
-      context,
+  it("T-U10/PR38-10 U01: inactive temporal state yields no effective bounds", () => {
+    const bounds = graphTemporalEffectiveBounds(emptyGraphTemporalContext());
+    expect(bounds.observedFrom).toBeUndefined();
+    expect(bounds.observedTo).toBeUndefined();
+  });
+
+  it("PR38-10 U02/U08: inactive temporal state is unbounded even with a stale legacy context", () => {
+    // The legacy graph-filter observed parameters are inert; the effective
+    // bounds are derived solely from the temporal tuple.
+    const legacy = parseGraphTemporal(
+      ps(
+        `graph_observed_from=2000-01-01T00:00:00Z&graph_observed_to=2099-01-01T00:00:00Z`,
+      ),
+    );
+    expect(graphTemporalActive(legacy)).toBe(false);
+    const bounds = graphTemporalEffectiveBounds(legacy);
+    expect(bounds.observedFrom).toBeUndefined();
+    expect(bounds.observedTo).toBeUndefined();
+  });
+
+  it("PR38-10 U08: Disable strips stale legacy graph observed keys too", () => {
+    const disabled = applyGraphTemporal(
+      ps(
+        `graph_temporal=1&graph_time_start=${START}&graph_time_end=${END}` +
+          `&graph_observed_from=2000-01-01T00:00:00Z&graph_observed_to=2099-01-01T00:00:00Z`,
+      ),
       emptyGraphTemporalContext(),
     );
-    expect(bounds.observedFrom).toBe("2000-01-01T00:00:00Z");
-    expect(bounds.observedTo).toBe("2099-01-01T00:00:00Z");
+    expect(disabled.get("graph_observed_from")).toBeNull();
+    expect(disabled.get("graph_observed_to")).toBeNull();
   });
 
   it("T-U11: Apply writes only the switch and both instants", () => {
