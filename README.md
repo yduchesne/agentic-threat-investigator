@@ -149,11 +149,11 @@ This section contains visual excerpts providing an overview of ATI's functionali
 ### Historical/Temporal Pivoting
 
 <p align="center">
-  <img src="docs/img/relationship-history-timeline.png" alt="ATI logo">
+  <img src="docs/img/temporal-graph.png" alt="Temporal Graph Exploration">
   <p/>
-  <img src="docs/img/temporal-search-history-list.png" alt="ATI logo">
+  <img src="docs/img/relationship-history-timeline.png" alt="Relationship History">
   <p/>
-  <img src="docs/img/temporal-search-widgets.png" alt="ATI logo">
+  <img src="docs/img/temporal-search-history-list.png" alt="Graph History Details">
 </p>
 
 ## How ATI works
@@ -391,12 +391,20 @@ available at:
 http://localhost:8080/
 ```
 
-Sign in with the bootstrap administrator username and password from your
-`.env`, create an Investigation, and explore the generated evidence,
-relationships, graph, timeline, research, assessment, and report.
+The local stack runs ATI with a synthetic dataset (AKA: the "fake world" dataset). It provides a deterministic environment to experiment with, locally. 
 
-If you change backend, migration, or frontend source code and need to force
-the project images and containers to be rebuilt, use either form:
+> In fact, by default, the `start.sh` script starts ATI with the `fake` operating mode, which simulates the data sources, as well. No live calls are made in that mode, __except for LLM calls__. This allows testing the agentic flow while maintaining isolation otherwise.
+
+Next, sign in with the bootstrap administrator username and password from your
+`.env`, create an investigation (title it _Suspcious domain_ or something of the sort) and provide the following domain:
+
+```text
+update-package.test
+```
+
+Submit the investigation request - it is processed asynchronously and will take a few seconds to complete. When it has completed, explore the report, generated evidence, relationships, graph, timeline, research, assessment, etc.
+
+If you change backend, migration, or frontend source code and need to force the project images and containers to be rebuilt, use either form:
 
 ```bash
 ./start.sh -r
@@ -404,8 +412,7 @@ the project images and containers to be rebuilt, use either form:
 ./start.sh --rebuild
 ```
 
-Ordinary `./start.sh` is idempotent: when the stack is already healthy it
-leaves the running services in place.
+Ordinary `./start.sh` is idempotent: when the stack is already healthy it leaves the running services in place.
 
 ### 6. Stop or remove the local environment
 
@@ -502,7 +509,9 @@ version-specific scope live in the project documentation and roadmaps.
 
 ## Authoritative documentation
 
-The documentation directly under [docs](docs.md) is mostly AI-maintained, serving as an AI memory for the project.
+The documentation directly under [docs](docs) is mostly AI-maintained, serving as an AI memory for the project.
+
+> The documentation under the [docs/manual](docs/manual) directory, for its part, is human-maintained.
 
 - [`docs/PRODUCT.md`](docs/PRODUCT.md) — product purpose, use cases, scope,
   and principles.
