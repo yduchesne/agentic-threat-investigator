@@ -27,6 +27,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "langsmith" },
     { name = "maxminddb" },
+    { name = "mtmf-client" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-instrumentation-fastapi" },
@@ -70,6 +71,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.11,<2" },
     { name = "langsmith", specifier = ">=0.3.45,<0.12" },
     { name = "maxminddb", specifier = ">=2,<4" },
+    { name = "mtmf-client", git = "https://github.com/yduchesne/mtmf.git?subdirectory=packages%2Fmtmf-client&tag=v0.1.0a1" },
     { name = "opentelemetry-api", specifier = ">=1.37,<2" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.37,<2" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.57b0,<0.59" },
@@ -1318,6 +1320,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7d/42/6d02c19a01abd8d7ce817c321d2ee6af1a8e24d584dca619d1b6576a83bf/msgpack-1.2.2-cp314-cp314t-win32.whl", hash = "sha256:419a45c67a5c04213172a14b1864657e014665b77d7081b107a51707923dd39e", size = 71810, upload-time = "2026-08-27T10:03:10.498Z" },
     { url = "https://files.pythonhosted.org/packages/af/df/fda3a204415dab0a8c0db5461ef7205416ea52bd8581c5cafd361be07f3b/msgpack-1.2.2-cp314-cp314t-win_amd64.whl", hash = "sha256:935b1cfad9b908b0fa845010f4271df4c2f04e1cd26e3f18acd61a45f93c9e36", size = 78919, upload-time = "2026-08-27T10:03:12.016Z" },
     { url = "https://files.pythonhosted.org/packages/63/d4/4b4b0ef25a86deca91feaf7252ca885ba4f2ada40461379120122a04fe96/msgpack-1.2.2-cp314-cp314t-win_arm64.whl", hash = "sha256:11e8c421e117d1c36728b423d0402555cccbf0c6f53e288f0e75b6b12100d70f", size = 71925, upload-time = "2026-08-27T10:03:13.332Z" },
+]
+
+[[package]]
+name = "mtmf-api"
+version = "0.1.0a1"
+source = { git = "https://github.com/yduchesne/mtmf.git?subdirectory=packages%2Fmtmf-api&tag=v0.1.0a1#2de18c1503d1e2f1629e82d38552e669f46c89b8" }
+
+[[package]]
+name = "mtmf-client"
+version = "0.1.0a1"
+source = { git = "https://github.com/yduchesne/mtmf.git?subdirectory=packages%2Fmtmf-client&tag=v0.1.0a1#2de18c1503d1e2f1629e82d38552e669f46c89b8" }
+dependencies = [
+    { name = "httpx" },
+    { name = "mtmf-api" },
 ]
 
 [[package]]
