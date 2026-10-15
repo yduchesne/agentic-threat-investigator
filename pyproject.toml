@@ -11,6 +11,7 @@ requires-python = ">=3.14,<3.15"
 license = { text = "AGPL-3.0-only" }
 authors = [{ name = "Agentic Threat Investigator contributors" }]
 dependencies = [
+  "mtmf-client==0.1.0a1",
   "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
   # Server-rendered HTML presentation adapter (V07-01). Jinja2 is a direct
@@ -254,6 +255,12 @@ fail_under = 85
 exclude_dirs = []
 skips = ["B101"]
 
+[tool.uv.sources]
+mtmf-client = { git = "https://github.com/yduchesne/mtmf.git", tag = "v0.1.0a1", subdirectory = "packages/mtmf-client" }
+mtmf-api = { git = "https://github.com/yduchesne/mtmf.git", tag = "v0.1.0a1", subdirectory = "packages/mtmf-api" }
+# mtmf-client = { git = "https://github.com/yduchesne/mtmf.git", branch = "main", subdirectory = "packages/mtmf-client" }
+# mtmf-api = { git = "https://github.com/yduchesne/mtmf.git", branch = "main", subdirectory = "packages/mtmf-api" }
+
 [tool.uv]
 default-groups = ["dev"]
 # openai>=3 depends on the forked httpx2 package, which authlib prefers
@@ -272,6 +279,7 @@ constraint-dependencies = [
   "urllib3>=2.8,<3",
   "virtualenv>=21.7.13,<22",
 ]
+
 # Security gate (./build.sh --sec / pip-audit): the whole semgrep >= 1.157
 # line pins pyjwt[crypto]~=2.13.0, and pyjwt 2.13.x has no patched release
 # for the 12 CVE-2026-10226x/10227x set (fixes ship in 2.14.0/2.15.0).
